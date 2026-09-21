@@ -1,0 +1,5592 @@
+{
+  "version": 1,
+  "nodes": [
+    {
+      "source": "workflow-nodes/flow/decision.yaml",
+      "schemaVersion": 1,
+      "kind": "workflowNode",
+      "nodeType": "decision",
+      "category": {
+        "en": "Flow",
+        "nl": "Stroom"
+      },
+      "label": {
+        "en": "Decision",
+        "nl": "Keuze"
+      },
+      "description": {
+        "en": "Evaluates ordered conditions and follows the first matching branch.",
+        "nl": "Evalueert geordende condities en volgt het eerste passende pad."
+      },
+      "configFields": [
+        {
+          "key": "branches",
+          "valueType": "object",
+          "cardinality": {
+            "min": 0,
+            "max": "unbounded"
+          },
+          "defaultValue": [],
+          "semanticType": "branchDefinition",
+          "runtime": {
+            "aliases": [
+              "conditions"
+            ]
+          },
+          "label": {
+            "en": "Branches",
+            "nl": "Paden"
+          },
+          "item": {
+            "key": "branch",
+            "valueType": "object",
+            "children": [
+              {
+                "key": "id",
+                "valueType": "string",
+                "required": true,
+                "label": {
+                  "en": "Branch ID",
+                  "nl": "Pad-ID"
+                },
+                "schema": {
+                  "type": "string",
+                  "title": "Branch ID",
+                  "description": "Branch ID"
+                }
+              },
+              {
+                "key": "label",
+                "valueType": "string",
+                "required": false,
+                "label": {
+                  "en": "Label",
+                  "nl": "Label"
+                },
+                "schema": {
+                  "type": "string",
+                  "title": "Label",
+                  "description": "Label"
+                }
+              },
+              {
+                "key": "when",
+                "valueType": "object",
+                "required": true,
+                "semanticType": "condition",
+                "label": {
+                  "en": "Condition",
+                  "nl": "Conditie"
+                },
+                "schema": {
+                  "type": "object",
+                  "title": "Condition",
+                  "description": "Condition"
+                }
+              }
+            ],
+            "schema": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "title": "Branch ID",
+                  "description": "Branch ID"
+                },
+                "label": {
+                  "type": "string",
+                  "title": "Label",
+                  "description": "Label"
+                },
+                "when": {
+                  "type": "object",
+                  "title": "Condition",
+                  "description": "Condition"
+                }
+              },
+              "required": [
+                "id",
+                "when"
+              ],
+              "additionalProperties": false,
+              "title": "branch",
+              "description": "branch"
+            }
+          },
+          "schema": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "type": "object"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "title": "Branch ID",
+                      "description": "Branch ID"
+                    },
+                    "label": {
+                      "type": "string",
+                      "title": "Label",
+                      "description": "Label"
+                    },
+                    "when": {
+                      "type": "object",
+                      "title": "Condition",
+                      "description": "Condition"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "when"
+                  ],
+                  "additionalProperties": false,
+                  "title": "branch",
+                  "description": "branch"
+                }
+              ]
+            },
+            "minItems": 0,
+            "title": "Branches",
+            "description": "Branches",
+            "default": []
+          }
+        },
+        {
+          "key": "defaultEdgeId",
+          "valueType": "string",
+          "required": false,
+          "defaultValue": "default",
+          "label": {
+            "en": "Default branch",
+            "nl": "Standaardpad"
+          },
+          "description": {
+            "en": "Output handle used when no branch matches.",
+            "nl": "Output-handle dat wordt gebruikt wanneer geen pad past."
+          },
+          "schema": {
+            "type": "string",
+            "title": "Default branch",
+            "description": "Output handle used when no branch matches.",
+            "default": "default"
+          }
+        }
+      ],
+      "runtimeSupport": "EXECUTABLE"
+    },
+    {
+      "source": "workflow-nodes/flow/end.yaml",
+      "schemaVersion": 1,
+      "kind": "workflowNode",
+      "nodeType": "flow.end",
+      "category": {
+        "en": "Flow",
+        "nl": "Stroom"
+      },
+      "label": {
+        "en": "End",
+        "nl": "Einde"
+      },
+      "description": {
+        "en": "Completes the workflow and exposes its output.",
+        "nl": "Rondt de workflow af en stelt de uitvoer beschikbaar."
+      },
+      "configFields": [
+        {
+          "key": "fields",
+          "valueType": "object",
+          "semanticType": "fieldDefinition",
+          "cardinality": {
+            "min": 1,
+            "max": "unbounded"
+          },
+          "required": false,
+          "label": {
+            "en": "Output fields",
+            "nl": "Uitvoervelden"
+          },
+          "description": {
+            "en": "Define the public fields and values returned by this workflow.",
+            "nl": "Definieer de publieke velden en waarden die deze workflow retourneert."
+          },
+          "help": {
+            "en": "Each field uses the canonical compiler field contract. The authored runtime value lives in field.value.",
+            "nl": "Elk veld gebruikt het canonieke compiler-field contract. De authored waarde staat in field.value."
+          },
+          "authoring": {
+            "profile": "workflowOutputField"
+          },
+          "defaultValue": [
+            {
+              "key": "status",
+              "valueType": "string",
+              "semanticType": "string",
+              "cardinality": {
+                "min": 1,
+                "max": 1
+              },
+              "label": {
+                "en": "Status",
+                "nl": "Status"
+              },
+              "description": {
+                "en": "Public workflow status returned by this end node.",
+                "nl": "Publieke workflowstatus die deze eindnode retourneert."
+              },
+              "options": {
+                "type": "static",
+                "items": [
+                  {
+                    "value": "success",
+                    "label": {
+                      "en": "Successful",
+                      "nl": "Succesvol"
+                    }
+                  },
+                  {
+                    "value": "failure",
+                    "label": {
+                      "en": "Failed",
+                      "nl": "Mislukt"
+                    }
+                  }
+                ]
+              },
+              "value": "success",
+              "authoring": {
+                "profile": "workflowOutputField",
+                "pinned": true,
+                "locked": true,
+                "singleton": true,
+                "visibleProperties": [
+                  "value"
+                ]
+              }
+            }
+          ],
+          "schema": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/fieldDefinition"
+            },
+            "minItems": 1,
+            "title": "Output fields",
+            "description": "Define the public fields and values returned by this workflow. Each field uses the canonical compiler field contract. The authored runtime value lives in field.value.",
+            "default": [
+              {
+                "key": "status",
+                "valueType": "string",
+                "semanticType": "string",
+                "cardinality": {
+                  "min": 1,
+                  "max": 1
+                },
+                "label": {
+                  "en": "Status",
+                  "nl": "Status"
+                },
+                "description": {
+                  "en": "Public workflow status returned by this end node.",
+                  "nl": "Publieke workflowstatus die deze eindnode retourneert."
+                },
+                "options": {
+                  "type": "static",
+                  "items": [
+                    {
+                      "value": "success",
+                      "label": {
+                        "en": "Successful",
+                        "nl": "Succesvol"
+                      }
+                    },
+                    {
+                      "value": "failure",
+                      "label": {
+                        "en": "Failed",
+                        "nl": "Mislukt"
+                      }
+                    }
+                  ]
+                },
+                "value": "success",
+                "authoring": {
+                  "profile": "workflowOutputField",
+                  "pinned": true,
+                  "locked": true,
+                  "singleton": true,
+                  "visibleProperties": [
+                    "value"
+                  ]
+                }
+              }
+            ],
+            "$defs": {
+              "localizedText": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "en": {
+                    "type": "string"
+                  },
+                  "nl": {
+                    "type": "string"
+                  },
+                  "fr": {
+                    "type": "string"
+                  }
+                }
+              },
+              "validationRule": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "boolean"
+                      }
+                    ]
+                  },
+                  "message": {
+                    "$ref": "#/$defs/localizedText"
+                  }
+                }
+              },
+              "validation": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "required": {
+                    "oneOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "minLength": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "maxLength": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "minItems": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "min": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "max": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "pattern": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "format": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "custom": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "name"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "$ref": "#/$defs/localizedText"
+                        },
+                        "params": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "fieldOptions": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "static",
+                      "referentiedata",
+                      "remote",
+                      "dynamic",
+                      "entity"
+                    ]
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "value",
+                        "label"
+                      ],
+                      "properties": {
+                        "value": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "$ref": "#/$defs/localizedText"
+                        }
+                      }
+                    }
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "referentieGroep": {
+                    "type": "string"
+                  },
+                  "remoteUrl": {
+                    "type": "string"
+                  },
+                  "valueField": {
+                    "type": "string"
+                  },
+                  "labelField": {
+                    "type": "string"
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "type": {
+                          "const": "entity"
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "source"
+                      ],
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "valueField": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "items": false,
+                        "referentieGroep": false,
+                        "remoteUrl": false,
+                        "labelField": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "relationship": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "inverse": {
+                    "type": "string",
+                    "pattern": "^[a-z][A-Za-z0-9]*$"
+                  },
+                  "via": {
+                    "type": "string",
+                    "pattern": "^[a-z][A-Za-z0-9]*$"
+                  },
+                  "ownership": {
+                    "enum": [
+                      "owned",
+                      "reference"
+                    ]
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "belongsTo",
+                      "hasMany"
+                    ]
+                  },
+                  "entity": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+                  },
+                  "foreignKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "displayField": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "constraints": {
+                    "$ref": "#/$defs/relationshipConstraints"
+                  }
+                }
+              },
+              "constraintScalar": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "equalityConstraint": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "eq"
+                ],
+                "properties": {
+                  "eq": {
+                    "$ref": "#/$defs/constraintScalar"
+                  }
+                }
+              },
+              "relationshipAnyConstraint": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "any"
+                ],
+                "properties": {
+                  "any": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "pattern": "^[a-z][A-Za-z0-9]*$"
+                    },
+                    "additionalProperties": {
+                      "$ref": "#/$defs/equalityConstraint"
+                    }
+                  }
+                }
+              },
+              "relationshipConstraints": {
+                "type": "object",
+                "minProperties": 1,
+                "propertyNames": {
+                  "pattern": "^[a-z][A-Za-z0-9]*$"
+                },
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/equalityConstraint"
+                    },
+                    {
+                      "$ref": "#/$defs/relationshipAnyConstraint"
+                    }
+                  ]
+                }
+              },
+              "cardinality": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "single",
+                      "collection"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "min": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "max": {
+                        "oneOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          {
+                            "type": "string",
+                            "const": "unbounded"
+                          }
+                        ]
+                      }
+                    },
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "min": {}
+                        },
+                        "required": [
+                          "min"
+                        ]
+                      },
+                      {
+                        "properties": {
+                          "max": {}
+                        },
+                        "required": [
+                          "max"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fieldAuthoring": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "profile": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pinned": {
+                    "type": "boolean"
+                  },
+                  "locked": {
+                    "type": "boolean"
+                  },
+                  "singleton": {
+                    "type": "boolean"
+                  },
+                  "visibleProperties": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              },
+              "render": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "component"
+                ],
+                "properties": {
+                  "component": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "props": {
+                    "type": "object"
+                  }
+                }
+              },
+              "fieldDefinition": {
+                "type": "object",
+                "description": "The canonical closed FieldDefinition shape — what to $ref when a field is used as-is. unevaluatedProperties rather than additionalProperties because only the former sees an allOf branch beside it, which is what lets a use site extend the shape (connector configuration fields add `secret`) without the closure rejecting the addition.",
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/fieldDefinitionProperties"
+                  }
+                ],
+                "unevaluatedProperties": false
+              },
+              "fieldDefinitionProperties": {
+                "description": "The canonical FieldDefinition property set, left OPEN so a use site can extend it. Extend this one only alongside your own unevaluatedProperties: false — on its own it closes nothing.",
+                "type": "object",
+                "required": [
+                  "key"
+                ],
+                "anyOf": [
+                  {
+                    "properties": {
+                      "valueType": {}
+                    },
+                    "required": [
+                      "valueType"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "semanticType": {}
+                    },
+                    "required": [
+                      "semanticType"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "valueType": {
+                    "type": "string",
+                    "enum": [
+                      "string",
+                      "integer",
+                      "number",
+                      "boolean",
+                      "date",
+                      "datetime",
+                      "object"
+                    ]
+                  },
+                  "cardinality": {
+                    "$ref": "#/$defs/cardinality"
+                  },
+                  "entityValue": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "definitionField"
+                    ],
+                    "properties": {
+                      "definitionField": {
+                        "type": "string",
+                        "pattern": "^[a-z][A-Za-z0-9]*$"
+                      },
+                      "parameterBindings": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "allowedDefinitions": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Z][A-Za-z0-9]*$"
+                    }
+                  },
+                  "variables": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "whole",
+                      "template",
+                      "both"
+                    ],
+                    "default": "none"
+                  },
+                  "suggestions": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "minProperties": 1,
+                    "description": "Where the variable suggestions offered for this field come from. Mirrored onto the generated page field so the renderer can offer the right list; pairs with `variables`.",
+                    "properties": {
+                      "sourceField": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Key of a sibling field whose value determines the available suggestions."
+                      },
+                      "sourceKey": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Fixed suggestion-source key, when the list does not depend on a sibling field."
+                      }
+                    }
+                  },
+                  "sortable": {
+                    "type": "boolean"
+                  },
+                  "required": {
+                    "type": "boolean"
+                  },
+                  "readOnly": {
+                    "type": "boolean",
+                    "description": "Presentation only: render the field with its display component instead of its input component. Not an API contract — use `immutable` for that."
+                  },
+                  "immutable": {
+                    "type": "boolean",
+                    "description": "API contract: the field may be set when the record is created and is refused by every generated transport afterwards (REST 400; absent from the GraphQL update input and the MCP update schema). Use it for provenance links and other values that must not be re-pointed once written."
+                  },
+                  "writtenBy": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "description": "API contract: operation contract keys (e.g. `pentest.finding.review`) that are the only writers of this field. The field is absent from the generated create AND update schemas on every transport, and a caller sending it anyway is refused with a message naming these operations. Use it for fields that record that a process took place — a review signed off, a scope approved, a retest concluded — where the operation is the only place the preconditions are checked. Not to be confused with `readOnly`, which selects a display component and enforces nothing. A key no compiled operation answers to fails the build."
+                  },
+                  "deriveOnCreate": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "from",
+                      "transform",
+                      "onConflict"
+                    ],
+                    "properties": {
+                      "from": {
+                        "type": "string",
+                        "pattern": "^[a-z][A-Za-z0-9]*$",
+                        "description": "Sibling field whose submitted create value is the derivation source."
+                      },
+                      "transform": {
+                        "const": "slug",
+                        "description": "Generate a lowercase ASCII slug from the source value."
+                      },
+                      "onConflict": {
+                        "const": "suffix",
+                        "description": "Resolve a database uniqueness conflict as slug-2, slug-3, and so on."
+                      }
+                    },
+                    "description": "Persist this server-owned field once at create time. Generated create and update inputs omit it on every interface."
+                  },
+                  "label": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "description": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "placeholder": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "help": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "semanticType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "value": {},
+                  "defaultValue": {},
+                  "validation": {
+                    "$ref": "#/$defs/validation"
+                  },
+                  "relationship": {
+                    "$ref": "#/$defs/relationship"
+                  },
+                  "options": {
+                    "$ref": "#/$defs/fieldOptions"
+                  },
+                  "persisted": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "column": {
+                        "type": "string"
+                      },
+                      "storageClass": {
+                        "type": "string",
+                        "enum": [
+                          "core",
+                          "profile"
+                        ]
+                      }
+                    }
+                  },
+                  "render": {
+                    "$ref": "#/$defs/render"
+                  },
+                  "permissions": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "read": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "write": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "authorization": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "roles"
+                    ],
+                    "properties": {
+                      "roles": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "read": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "write": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "classification": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "sensitivity"
+                    ],
+                    "properties": {
+                      "sensitivity": {
+                        "type": "string",
+                        "enum": [
+                          "public",
+                          "internal",
+                          "confidential",
+                          "pii",
+                          "bsn"
+                        ]
+                      },
+                      "category": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "retention": {
+                    "type": "object"
+                  },
+                  "audit": {
+                    "type": "boolean"
+                  },
+                  "hints": {
+                    "type": "object"
+                  },
+                  "visibility": {
+                    "type": "object"
+                  },
+                  "computed": {
+                    "type": "object"
+                  },
+                  "runtime": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "aliases": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "workflowInspector": {
+                    "$ref": "#/$defs/workflowInspector"
+                  },
+                  "layoutFraction": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "localized": {
+                    "type": "boolean"
+                  },
+                  "shape": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/fieldDefinition"
+                    }
+                  },
+                  "authoring": {
+                    "$ref": "#/$defs/fieldAuthoring"
+                  },
+                  "children": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/fieldDefinition"
+                    }
+                  },
+                  "item": {
+                    "$ref": "#/$defs/fieldDefinition"
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "cardinality": {
+                          "type": "object",
+                          "properties": {
+                            "max": {
+                              "oneOf": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 2
+                                },
+                                {
+                                  "const": "unbounded"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "max"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "cardinality"
+                      ]
+                    },
+                    "then": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "item": {}
+                          },
+                          "required": [
+                            "item"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "shape": {}
+                          },
+                          "required": [
+                            "shape"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "semanticType": {}
+                          },
+                          "required": [
+                            "semanticType"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "relationship": {}
+                          },
+                          "required": [
+                            "relationship"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "sortable": {}
+                      },
+                      "required": [
+                        "sortable"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "cardinality": {}
+                      },
+                      "required": [
+                        "cardinality"
+                      ],
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "cardinality": {
+                              "const": "collection"
+                            }
+                          }
+                        },
+                        {
+                          "properties": {
+                            "cardinality": {
+                              "type": "object",
+                              "properties": {
+                                "max": {
+                                  "oneOf": [
+                                    {
+                                      "type": "integer",
+                                      "minimum": 2
+                                    },
+                                    {
+                                      "const": "unbounded"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "max"
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "description": "A fieldDefinition semantic value already supplies the complete recursive value contract; children and item would define a second, ambiguous shape.",
+                    "if": {
+                      "properties": {
+                        "semanticType": {
+                          "const": "fieldDefinition"
+                        }
+                      },
+                      "required": [
+                        "semanticType"
+                      ]
+                    },
+                    "then": {
+                      "not": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "children": {}
+                            },
+                            "required": [
+                              "children"
+                            ]
+                          },
+                          {
+                            "properties": {
+                              "item": {}
+                            },
+                            "required": [
+                              "item"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "semanticType": {
+                          "const": "fieldDefinition"
+                        },
+                        "authoring": {
+                          "type": "object",
+                          "properties": {
+                            "profile": {}
+                          },
+                          "required": [
+                            "profile"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "semanticType",
+                        "authoring"
+                      ]
+                    },
+                    "then": {
+                      "not": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "required": {}
+                            },
+                            "required": [
+                              "required"
+                            ]
+                          },
+                          {
+                            "properties": {
+                              "children": {}
+                            },
+                            "required": [
+                              "children"
+                            ]
+                          },
+                          {
+                            "properties": {
+                              "item": {}
+                            },
+                            "required": [
+                              "item"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              "workflowInspector": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "objectPresentation": {
+                    "type": "string",
+                    "enum": [
+                      "inlineChildren"
+                    ]
+                  },
+                  "displayMode": {
+                    "type": "string",
+                    "enum": [
+                      "hidden",
+                      "display",
+                      "readOnly"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "key": "output",
+          "valueType": "object",
+          "required": false,
+          "visibility": {
+            "conditions": [
+              {
+                "field": "__legacy_output_hidden__",
+                "operator": "eq",
+                "value": true
+              }
+            ]
+          },
+          "label": {
+            "en": "Output",
+            "nl": "Uitvoer"
+          },
+          "schema": {
+            "type": "object",
+            "title": "Output",
+            "description": "Output"
+          }
+        }
+      ],
+      "runtimeSupport": "EXECUTABLE"
+    },
+    {
+      "source": "workflow-nodes/flow/join.yaml",
+      "schemaVersion": 1,
+      "kind": "workflowNode",
+      "nodeType": "join",
+      "category": {
+        "en": "Flow",
+        "nl": "Stroom"
+      },
+      "label": {
+        "en": "Join",
+        "nl": "Samenvoegen"
+      },
+      "description": {
+        "en": "Releases split branches after the configured arrivals or timeout.",
+        "nl": "Laat vertakte paden verdergaan na de ingestelde aankomsten of timeout."
+      },
+      "configFields": [
+        {
+          "key": "waitMode",
+          "valueType": "string",
+          "required": true,
+          "defaultValue": "first_result",
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "first_result",
+                "label": {
+                  "en": "First result",
+                  "nl": "Eerste resultaat"
+                }
+              },
+              {
+                "value": "all",
+                "label": {
+                  "en": "All branches",
+                  "nl": "Alle takken"
+                }
+              },
+              {
+                "value": "n_of_m",
+                "label": {
+                  "en": "N of M branches",
+                  "nl": "N van M takken"
+                }
+              },
+              {
+                "value": "specific_nodes",
+                "label": {
+                  "en": "Specific branches",
+                  "nl": "Specifieke takken"
+                }
+              }
+            ]
+          },
+          "label": {
+            "en": "Wait for",
+            "nl": "Wacht op"
+          },
+          "schema": {
+            "type": "string",
+            "title": "Wait for",
+            "enum": [
+              "first_result",
+              "all",
+              "n_of_m",
+              "specific_nodes"
+            ],
+            "description": "Wait for Allowed values: first_result (First result), all (All branches), n_of_m (N of M branches), specific_nodes (Specific branches).",
+            "default": "first_result"
+          }
+        },
+        {
+          "key": "requiredCount",
+          "valueType": "integer",
+          "required": false,
+          "defaultValue": 1,
+          "validation": {
+            "min": 1
+          },
+          "label": {
+            "en": "Required branches",
+            "nl": "Aantal vereiste takken"
+          },
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "title": "Required branches",
+            "description": "Required branches",
+            "default": 1
+          }
+        },
+        {
+          "key": "expectedSourceNodeIds",
+          "valueType": "string",
+          "cardinality": {
+            "min": 0,
+            "max": "unbounded"
+          },
+          "defaultValue": [],
+          "semanticType": "workflowNodeReference",
+          "label": {
+            "en": "Wait for branches",
+            "nl": "Wacht op takken"
+          },
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 0,
+            "title": "Wait for branches",
+            "description": "Wait for branches",
+            "default": []
+          }
+        },
+        {
+          "key": "timeoutAmount",
+          "valueType": "integer",
+          "required": false,
+          "validation": {
+            "min": 0
+          },
+          "label": {
+            "en": "Timeout amount",
+            "nl": "Timeout aantal"
+          },
+          "schema": {
+            "type": "integer",
+            "minimum": 0,
+            "title": "Timeout amount",
+            "description": "Timeout amount"
+          }
+        },
+        {
+          "key": "timeoutUnit",
+          "valueType": "string",
+          "required": false,
+          "defaultValue": "minutes",
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "minutes",
+                "label": {
+                  "en": "Minutes",
+                  "nl": "Minuten"
+                }
+              },
+              {
+                "value": "hours",
+                "label": {
+                  "en": "Hours",
+                  "nl": "Uren"
+                }
+              },
+              {
+                "value": "days",
+                "label": {
+                  "en": "Days",
+                  "nl": "Dagen"
+                }
+              }
+            ]
+          },
+          "label": {
+            "en": "Timeout unit",
+            "nl": "Timeout eenheid"
+          },
+          "schema": {
+            "type": "string",
+            "title": "Timeout unit",
+            "enum": [
+              "minutes",
+              "hours",
+              "days"
+            ],
+            "description": "Timeout unit Allowed values: minutes (Minutes), hours (Hours), days (Days).",
+            "default": "minutes"
+          }
+        },
+        {
+          "key": "remainingBranches",
+          "valueType": "string",
+          "required": false,
+          "defaultValue": "abandon",
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "abandon",
+                "label": {
+                  "en": "Cancel",
+                  "nl": "Annuleren"
+                }
+              },
+              {
+                "value": "detach",
+                "label": {
+                  "en": "Detach",
+                  "nl": "Loslaten"
+                }
+              }
+            ]
+          },
+          "label": {
+            "en": "Remaining branches",
+            "nl": "Resterende takken"
+          },
+          "schema": {
+            "type": "string",
+            "title": "Remaining branches",
+            "enum": [
+              "abandon",
+              "detach"
+            ],
+            "description": "Remaining branches Allowed values: abandon (Cancel), detach (Detach).",
+            "default": "abandon"
+          }
+        }
+      ],
+      "runtimeSupport": "EXECUTABLE"
+    },
+    {
+      "source": "workflow-nodes/flow/split.yaml",
+      "schemaVersion": 1,
+      "kind": "workflowNode",
+      "nodeType": "split",
+      "category": {
+        "en": "Flow",
+        "nl": "Stroom"
+      },
+      "label": {
+        "en": "Split",
+        "nl": "Splitsing"
+      },
+      "description": {
+        "en": "Starts each authored outgoing branch in parallel or in authored order.",
+        "nl": "Start iedere vastgelegde uitgaande tak parallel of in vastgelegde volgorde."
+      },
+      "configFields": [
+        {
+          "key": "mode",
+          "valueType": "string",
+          "required": true,
+          "defaultValue": "parallel",
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "parallel",
+                "label": {
+                  "en": "Parallel",
+                  "nl": "Parallel"
+                }
+              },
+              {
+                "value": "sequential",
+                "label": {
+                  "en": "Sequential",
+                  "nl": "Sequentieel"
+                }
+              }
+            ]
+          },
+          "label": {
+            "en": "Execution mode",
+            "nl": "Uitvoermodus"
+          },
+          "schema": {
+            "type": "string",
+            "title": "Execution mode",
+            "enum": [
+              "parallel",
+              "sequential"
+            ],
+            "description": "Execution mode Allowed values: parallel (Parallel), sequential (Sequential).",
+            "default": "parallel"
+          }
+        }
+      ],
+      "runtimeSupport": "EXECUTABLE"
+    },
+    {
+      "source": "workflow-nodes/flow/timer.yaml",
+      "schemaVersion": 1,
+      "kind": "workflowNode",
+      "nodeType": "timer",
+      "category": {
+        "en": "Flow",
+        "nl": "Stroom"
+      },
+      "label": {
+        "nl": "Timer",
+        "en": "Timer"
+      },
+      "description": {
+        "nl": "Pauzeert de workflow tot een duur of moment is bereikt.",
+        "en": "Pauses the workflow until a duration or timestamp is reached."
+      },
+      "configFields": [
+        {
+          "key": "mode",
+          "valueType": "string",
+          "label": {
+            "nl": "Wachttype",
+            "en": "Wait type"
+          },
+          "description": {
+            "nl": "Kies of de timer wacht op een relatieve duur of op een vast moment.",
+            "en": "Choose whether the timer waits for a relative duration or a fixed moment."
+          },
+          "defaultValue": "duration",
+          "validation": {
+            "required": true
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "duration",
+                "label": {
+                  "nl": "Relatieve duur",
+                  "en": "Relative duration"
+                }
+              },
+              {
+                "value": "until",
+                "label": {
+                  "nl": "Vast moment",
+                  "en": "Fixed moment"
+                }
+              }
+            ]
+          },
+          "schema": {
+            "type": "string",
+            "title": "Wait type",
+            "enum": [
+              "duration",
+              "until"
+            ],
+            "description": "Choose whether the timer waits for a relative duration or a fixed moment. Allowed values: duration (Relative duration), until (Fixed moment).",
+            "default": "duration"
+          }
+        },
+        {
+          "key": "durationAmount",
+          "valueType": "integer",
+          "label": {
+            "nl": "Aantal",
+            "en": "Amount"
+          },
+          "description": {
+            "nl": "Hoeveel eenheden de timer moet wachten.",
+            "en": "How many units the timer should wait."
+          },
+          "defaultValue": 1,
+          "validation": {
+            "required": true,
+            "min": {
+              "value": 1,
+              "message": {
+                "nl": "Aantal moet minimaal 1 zijn.",
+                "en": "Amount must be at least 1."
+              }
+            }
+          },
+          "visibility": {
+            "logic": "and",
+            "conditions": [
+              {
+                "field": "mode",
+                "operator": "eq",
+                "value": "duration"
+              }
+            ]
+          },
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "title": "Amount",
+            "description": "How many units the timer should wait.",
+            "default": 1
+          }
+        },
+        {
+          "key": "durationUnit",
+          "valueType": "string",
+          "label": {
+            "nl": "Eenheid",
+            "en": "Unit"
+          },
+          "defaultValue": "days",
+          "validation": {
+            "required": true
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "minutes",
+                "label": {
+                  "nl": "Minuten",
+                  "en": "Minutes"
+                }
+              },
+              {
+                "value": "hours",
+                "label": {
+                  "nl": "Uren",
+                  "en": "Hours"
+                }
+              },
+              {
+                "value": "days",
+                "label": {
+                  "nl": "Dagen",
+                  "en": "Days"
+                }
+              }
+            ]
+          },
+          "visibility": {
+            "logic": "and",
+            "conditions": [
+              {
+                "field": "mode",
+                "operator": "eq",
+                "value": "duration"
+              }
+            ]
+          },
+          "schema": {
+            "type": "string",
+            "title": "Unit",
+            "enum": [
+              "minutes",
+              "hours",
+              "days"
+            ],
+            "description": "Unit Allowed values: minutes (Minutes), hours (Hours), days (Days).",
+            "default": "days"
+          }
+        },
+        {
+          "key": "untilAt",
+          "valueType": "datetime",
+          "label": {
+            "nl": "Wachten tot",
+            "en": "Wait until"
+          },
+          "description": {
+            "nl": "Exact moment waarop de workflow verder mag.",
+            "en": "Exact moment when the workflow may continue."
+          },
+          "validation": {
+            "required": true
+          },
+          "visibility": {
+            "logic": "and",
+            "conditions": [
+              {
+                "field": "mode",
+                "operator": "eq",
+                "value": "until"
+              }
+            ]
+          },
+          "schema": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Wait until",
+            "description": "Exact moment when the workflow may continue."
+          }
+        },
+        {
+          "key": "skipWeekends",
+          "valueType": "boolean",
+          "label": {
+            "nl": "Weekend overslaan",
+            "en": "Skip weekends"
+          },
+          "defaultValue": false,
+          "visibility": {
+            "logic": "and",
+            "conditions": [
+              {
+                "field": "mode",
+                "operator": "eq",
+                "value": "duration"
+              },
+              {
+                "field": "durationUnit",
+                "operator": "eq",
+                "value": "days"
+              }
+            ]
+          },
+          "schema": {
+            "type": "boolean",
+            "title": "Skip weekends",
+            "description": "Skip weekends",
+            "default": false
+          }
+        }
+      ],
+      "runtimeSupport": "EXECUTABLE"
+    },
+    {
+      "source": "workflow-nodes/flow/user-input.yaml",
+      "schemaVersion": 1,
+      "kind": "workflowNode",
+      "nodeType": "flow.userInput",
+      "category": {
+        "en": "Flow",
+        "nl": "Stroom"
+      },
+      "label": {
+        "en": "User input",
+        "nl": "Gebruikersinvoer"
+      },
+      "description": {
+        "en": "Shows a form to the user and waits for a choice.",
+        "nl": "Toont een formulier aan de gebruiker en wacht op een keuze."
+      },
+      "configFields": [
+        {
+          "key": "formFields",
+          "valueType": "object",
+          "cardinality": {
+            "min": 0,
+            "max": "unbounded"
+          },
+          "semanticType": "fieldDefinition",
+          "authoring": {
+            "profile": "workflowInputField"
+          },
+          "label": {
+            "en": "Form fields",
+            "nl": "Formuliervelden"
+          },
+          "description": {
+            "en": "Field definitions rendered in the waiting form and exposed as node output after submission.",
+            "nl": "Velddefinities voor het wachtende formulier die na indienen als node-uitvoer beschikbaar zijn."
+          },
+          "schema": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/fieldDefinition"
+            },
+            "minItems": 0,
+            "title": "Form fields",
+            "description": "Field definitions rendered in the waiting form and exposed as node output after submission.",
+            "$defs": {
+              "localizedText": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "en": {
+                    "type": "string"
+                  },
+                  "nl": {
+                    "type": "string"
+                  },
+                  "fr": {
+                    "type": "string"
+                  }
+                }
+              },
+              "validationRule": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "boolean"
+                      }
+                    ]
+                  },
+                  "message": {
+                    "$ref": "#/$defs/localizedText"
+                  }
+                }
+              },
+              "validation": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "required": {
+                    "oneOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "minLength": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "maxLength": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "minItems": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "min": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "max": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "pattern": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "format": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "custom": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "name"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "$ref": "#/$defs/localizedText"
+                        },
+                        "params": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "fieldOptions": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "static",
+                      "referentiedata",
+                      "remote",
+                      "dynamic",
+                      "entity"
+                    ]
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "value",
+                        "label"
+                      ],
+                      "properties": {
+                        "value": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "$ref": "#/$defs/localizedText"
+                        }
+                      }
+                    }
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "referentieGroep": {
+                    "type": "string"
+                  },
+                  "remoteUrl": {
+                    "type": "string"
+                  },
+                  "valueField": {
+                    "type": "string"
+                  },
+                  "labelField": {
+                    "type": "string"
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "type": {
+                          "const": "entity"
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "source"
+                      ],
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "valueField": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "items": false,
+                        "referentieGroep": false,
+                        "remoteUrl": false,
+                        "labelField": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "relationship": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "inverse": {
+                    "type": "string",
+                    "pattern": "^[a-z][A-Za-z0-9]*$"
+                  },
+                  "via": {
+                    "type": "string",
+                    "pattern": "^[a-z][A-Za-z0-9]*$"
+                  },
+                  "ownership": {
+                    "enum": [
+                      "owned",
+                      "reference"
+                    ]
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "belongsTo",
+                      "hasMany"
+                    ]
+                  },
+                  "entity": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+                  },
+                  "foreignKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "displayField": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "constraints": {
+                    "$ref": "#/$defs/relationshipConstraints"
+                  }
+                }
+              },
+              "constraintScalar": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "equalityConstraint": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "eq"
+                ],
+                "properties": {
+                  "eq": {
+                    "$ref": "#/$defs/constraintScalar"
+                  }
+                }
+              },
+              "relationshipAnyConstraint": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "any"
+                ],
+                "properties": {
+                  "any": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "pattern": "^[a-z][A-Za-z0-9]*$"
+                    },
+                    "additionalProperties": {
+                      "$ref": "#/$defs/equalityConstraint"
+                    }
+                  }
+                }
+              },
+              "relationshipConstraints": {
+                "type": "object",
+                "minProperties": 1,
+                "propertyNames": {
+                  "pattern": "^[a-z][A-Za-z0-9]*$"
+                },
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/equalityConstraint"
+                    },
+                    {
+                      "$ref": "#/$defs/relationshipAnyConstraint"
+                    }
+                  ]
+                }
+              },
+              "cardinality": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "single",
+                      "collection"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "min": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "max": {
+                        "oneOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          {
+                            "type": "string",
+                            "const": "unbounded"
+                          }
+                        ]
+                      }
+                    },
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "min": {}
+                        },
+                        "required": [
+                          "min"
+                        ]
+                      },
+                      {
+                        "properties": {
+                          "max": {}
+                        },
+                        "required": [
+                          "max"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fieldAuthoring": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "profile": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pinned": {
+                    "type": "boolean"
+                  },
+                  "locked": {
+                    "type": "boolean"
+                  },
+                  "singleton": {
+                    "type": "boolean"
+                  },
+                  "visibleProperties": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              },
+              "render": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "component"
+                ],
+                "properties": {
+                  "component": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "props": {
+                    "type": "object"
+                  }
+                }
+              },
+              "fieldDefinition": {
+                "type": "object",
+                "description": "The canonical closed FieldDefinition shape — what to $ref when a field is used as-is. unevaluatedProperties rather than additionalProperties because only the former sees an allOf branch beside it, which is what lets a use site extend the shape (connector configuration fields add `secret`) without the closure rejecting the addition.",
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/fieldDefinitionProperties"
+                  }
+                ],
+                "unevaluatedProperties": false
+              },
+              "fieldDefinitionProperties": {
+                "description": "The canonical FieldDefinition property set, left OPEN so a use site can extend it. Extend this one only alongside your own unevaluatedProperties: false — on its own it closes nothing.",
+                "type": "object",
+                "required": [
+                  "key"
+                ],
+                "anyOf": [
+                  {
+                    "properties": {
+                      "valueType": {}
+                    },
+                    "required": [
+                      "valueType"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "semanticType": {}
+                    },
+                    "required": [
+                      "semanticType"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "valueType": {
+                    "type": "string",
+                    "enum": [
+                      "string",
+                      "integer",
+                      "number",
+                      "boolean",
+                      "date",
+                      "datetime",
+                      "object"
+                    ]
+                  },
+                  "cardinality": {
+                    "$ref": "#/$defs/cardinality"
+                  },
+                  "entityValue": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "definitionField"
+                    ],
+                    "properties": {
+                      "definitionField": {
+                        "type": "string",
+                        "pattern": "^[a-z][A-Za-z0-9]*$"
+                      },
+                      "parameterBindings": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "allowedDefinitions": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Z][A-Za-z0-9]*$"
+                    }
+                  },
+                  "variables": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "whole",
+                      "template",
+                      "both"
+                    ],
+                    "default": "none"
+                  },
+                  "suggestions": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "minProperties": 1,
+                    "description": "Where the variable suggestions offered for this field come from. Mirrored onto the generated page field so the renderer can offer the right list; pairs with `variables`.",
+                    "properties": {
+                      "sourceField": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Key of a sibling field whose value determines the available suggestions."
+                      },
+                      "sourceKey": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Fixed suggestion-source key, when the list does not depend on a sibling field."
+                      }
+                    }
+                  },
+                  "sortable": {
+                    "type": "boolean"
+                  },
+                  "required": {
+                    "type": "boolean"
+                  },
+                  "readOnly": {
+                    "type": "boolean",
+                    "description": "Presentation only: render the field with its display component instead of its input component. Not an API contract — use `immutable` for that."
+                  },
+                  "immutable": {
+                    "type": "boolean",
+                    "description": "API contract: the field may be set when the record is created and is refused by every generated transport afterwards (REST 400; absent from the GraphQL update input and the MCP update schema). Use it for provenance links and other values that must not be re-pointed once written."
+                  },
+                  "writtenBy": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "description": "API contract: operation contract keys (e.g. `pentest.finding.review`) that are the only writers of this field. The field is absent from the generated create AND update schemas on every transport, and a caller sending it anyway is refused with a message naming these operations. Use it for fields that record that a process took place — a review signed off, a scope approved, a retest concluded — where the operation is the only place the preconditions are checked. Not to be confused with `readOnly`, which selects a display component and enforces nothing. A key no compiled operation answers to fails the build."
+                  },
+                  "deriveOnCreate": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "from",
+                      "transform",
+                      "onConflict"
+                    ],
+                    "properties": {
+                      "from": {
+                        "type": "string",
+                        "pattern": "^[a-z][A-Za-z0-9]*$",
+                        "description": "Sibling field whose submitted create value is the derivation source."
+                      },
+                      "transform": {
+                        "const": "slug",
+                        "description": "Generate a lowercase ASCII slug from the source value."
+                      },
+                      "onConflict": {
+                        "const": "suffix",
+                        "description": "Resolve a database uniqueness conflict as slug-2, slug-3, and so on."
+                      }
+                    },
+                    "description": "Persist this server-owned field once at create time. Generated create and update inputs omit it on every interface."
+                  },
+                  "label": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "description": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "placeholder": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "help": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "semanticType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "value": {},
+                  "defaultValue": {},
+                  "validation": {
+                    "$ref": "#/$defs/validation"
+                  },
+                  "relationship": {
+                    "$ref": "#/$defs/relationship"
+                  },
+                  "options": {
+                    "$ref": "#/$defs/fieldOptions"
+                  },
+                  "persisted": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "column": {
+                        "type": "string"
+                      },
+                      "storageClass": {
+                        "type": "string",
+                        "enum": [
+                          "core",
+                          "profile"
+                        ]
+                      }
+                    }
+                  },
+                  "render": {
+                    "$ref": "#/$defs/render"
+                  },
+                  "permissions": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "read": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "write": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "authorization": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "roles"
+                    ],
+                    "properties": {
+                      "roles": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "read": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "write": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "classification": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "sensitivity"
+                    ],
+                    "properties": {
+                      "sensitivity": {
+                        "type": "string",
+                        "enum": [
+                          "public",
+                          "internal",
+                          "confidential",
+                          "pii",
+                          "bsn"
+                        ]
+                      },
+                      "category": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "retention": {
+                    "type": "object"
+                  },
+                  "audit": {
+                    "type": "boolean"
+                  },
+                  "hints": {
+                    "type": "object"
+                  },
+                  "visibility": {
+                    "type": "object"
+                  },
+                  "computed": {
+                    "type": "object"
+                  },
+                  "runtime": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "aliases": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "workflowInspector": {
+                    "$ref": "#/$defs/workflowInspector"
+                  },
+                  "layoutFraction": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "localized": {
+                    "type": "boolean"
+                  },
+                  "shape": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/fieldDefinition"
+                    }
+                  },
+                  "authoring": {
+                    "$ref": "#/$defs/fieldAuthoring"
+                  },
+                  "children": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/fieldDefinition"
+                    }
+                  },
+                  "item": {
+                    "$ref": "#/$defs/fieldDefinition"
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "cardinality": {
+                          "type": "object",
+                          "properties": {
+                            "max": {
+                              "oneOf": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 2
+                                },
+                                {
+                                  "const": "unbounded"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "max"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "cardinality"
+                      ]
+                    },
+                    "then": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "item": {}
+                          },
+                          "required": [
+                            "item"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "shape": {}
+                          },
+                          "required": [
+                            "shape"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "semanticType": {}
+                          },
+                          "required": [
+                            "semanticType"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "relationship": {}
+                          },
+                          "required": [
+                            "relationship"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "sortable": {}
+                      },
+                      "required": [
+                        "sortable"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "cardinality": {}
+                      },
+                      "required": [
+                        "cardinality"
+                      ],
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "cardinality": {
+                              "const": "collection"
+                            }
+                          }
+                        },
+                        {
+                          "properties": {
+                            "cardinality": {
+                              "type": "object",
+                              "properties": {
+                                "max": {
+                                  "oneOf": [
+                                    {
+                                      "type": "integer",
+                                      "minimum": 2
+                                    },
+                                    {
+                                      "const": "unbounded"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "max"
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "description": "A fieldDefinition semantic value already supplies the complete recursive value contract; children and item would define a second, ambiguous shape.",
+                    "if": {
+                      "properties": {
+                        "semanticType": {
+                          "const": "fieldDefinition"
+                        }
+                      },
+                      "required": [
+                        "semanticType"
+                      ]
+                    },
+                    "then": {
+                      "not": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "children": {}
+                            },
+                            "required": [
+                              "children"
+                            ]
+                          },
+                          {
+                            "properties": {
+                              "item": {}
+                            },
+                            "required": [
+                              "item"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "semanticType": {
+                          "const": "fieldDefinition"
+                        },
+                        "authoring": {
+                          "type": "object",
+                          "properties": {
+                            "profile": {}
+                          },
+                          "required": [
+                            "profile"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "semanticType",
+                        "authoring"
+                      ]
+                    },
+                    "then": {
+                      "not": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "required": {}
+                            },
+                            "required": [
+                              "required"
+                            ]
+                          },
+                          {
+                            "properties": {
+                              "children": {}
+                            },
+                            "required": [
+                              "children"
+                            ]
+                          },
+                          {
+                            "properties": {
+                              "item": {}
+                            },
+                            "required": [
+                              "item"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              "workflowInspector": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "objectPresentation": {
+                    "type": "string",
+                    "enum": [
+                      "inlineChildren"
+                    ]
+                  },
+                  "displayMode": {
+                    "type": "string",
+                    "enum": [
+                      "hidden",
+                      "display",
+                      "readOnly"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "key": "actions",
+          "valueType": "object",
+          "cardinality": {
+            "min": 1,
+            "max": "unbounded"
+          },
+          "required": true,
+          "semanticType": "actionDefinition",
+          "label": {
+            "en": "Actions",
+            "nl": "Acties"
+          },
+          "description": {
+            "en": "Buttons that resume the workflow through output handle action:<key>.",
+            "nl": "Knoppen die de workflow hervatten via output-handle action:<key>."
+          },
+          "item": {
+            "key": "action",
+            "valueType": "object",
+            "children": [
+              {
+                "key": "key",
+                "valueType": "string",
+                "required": true,
+                "validation": {
+                  "pattern": "^[a-z][a-z0-9-]*$"
+                },
+                "label": {
+                  "en": "Key",
+                  "nl": "Sleutel"
+                },
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]*$",
+                  "title": "Key",
+                  "description": "Key"
+                }
+              },
+              {
+                "key": "label",
+                "valueType": "string",
+                "required": true,
+                "localized": true,
+                "label": {
+                  "en": "Button label",
+                  "nl": "Knop-label"
+                },
+                "schema": {
+                  "type": "string",
+                  "title": "Button label",
+                  "description": "Button label"
+                }
+              },
+              {
+                "key": "description",
+                "valueType": "string",
+                "required": false,
+                "localized": true,
+                "label": {
+                  "en": "Helper text",
+                  "nl": "Hulptekst"
+                },
+                "schema": {
+                  "type": "string",
+                  "title": "Helper text",
+                  "description": "Helper text"
+                }
+              },
+              {
+                "key": "icon",
+                "valueType": "string",
+                "required": false,
+                "label": {
+                  "en": "Icon",
+                  "nl": "Icoon"
+                },
+                "schema": {
+                  "type": "string",
+                  "title": "Icon",
+                  "description": "Icon"
+                }
+              },
+              {
+                "key": "tone",
+                "valueType": "string",
+                "required": false,
+                "defaultValue": "default",
+                "options": {
+                  "type": "static",
+                  "items": [
+                    {
+                      "value": "primary",
+                      "label": {
+                        "en": "Primary",
+                        "nl": "Primair"
+                      }
+                    },
+                    {
+                      "value": "default",
+                      "label": {
+                        "en": "Default",
+                        "nl": "Standaard"
+                      }
+                    },
+                    {
+                      "value": "destructive",
+                      "label": {
+                        "en": "Destructive",
+                        "nl": "Destructief"
+                      }
+                    }
+                  ]
+                },
+                "label": {
+                  "en": "Tone",
+                  "nl": "Uitstraling"
+                },
+                "schema": {
+                  "type": "string",
+                  "title": "Tone",
+                  "enum": [
+                    "primary",
+                    "default",
+                    "destructive"
+                  ],
+                  "description": "Tone Allowed values: primary (Primary), default (Default), destructive (Destructive).",
+                  "default": "default"
+                }
+              },
+              {
+                "key": "visibleWhen",
+                "valueType": "object",
+                "required": false,
+                "semanticType": "condition",
+                "label": {
+                  "en": "Visible when",
+                  "nl": "Zichtbaar wanneer"
+                },
+                "schema": {
+                  "type": "object",
+                  "title": "Visible when",
+                  "description": "Visible when"
+                }
+              },
+              {
+                "key": "disabledWhen",
+                "valueType": "object",
+                "required": false,
+                "semanticType": "condition",
+                "label": {
+                  "en": "Disabled when",
+                  "nl": "Uitgeschakeld wanneer"
+                },
+                "schema": {
+                  "type": "object",
+                  "title": "Disabled when",
+                  "description": "Disabled when"
+                }
+              },
+              {
+                "key": "disabledMessage",
+                "valueType": "string",
+                "required": false,
+                "localized": true,
+                "label": {
+                  "en": "Disabled explanation",
+                  "nl": "Uitleg bij uitgeschakeld"
+                },
+                "schema": {
+                  "type": "string",
+                  "title": "Disabled explanation",
+                  "description": "Disabled explanation"
+                }
+              }
+            ],
+            "schema": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]*$",
+                  "title": "Key",
+                  "description": "Key"
+                },
+                "label": {
+                  "type": "string",
+                  "title": "Button label",
+                  "description": "Button label"
+                },
+                "description": {
+                  "type": "string",
+                  "title": "Helper text",
+                  "description": "Helper text"
+                },
+                "icon": {
+                  "type": "string",
+                  "title": "Icon",
+                  "description": "Icon"
+                },
+                "tone": {
+                  "type": "string",
+                  "title": "Tone",
+                  "enum": [
+                    "primary",
+                    "default",
+                    "destructive"
+                  ],
+                  "description": "Tone Allowed values: primary (Primary), default (Default), destructive (Destructive).",
+                  "default": "default"
+                },
+                "visibleWhen": {
+                  "type": "object",
+                  "title": "Visible when",
+                  "description": "Visible when"
+                },
+                "disabledWhen": {
+                  "type": "object",
+                  "title": "Disabled when",
+                  "description": "Disabled when"
+                },
+                "disabledMessage": {
+                  "type": "string",
+                  "title": "Disabled explanation",
+                  "description": "Disabled explanation"
+                }
+              },
+              "required": [
+                "key",
+                "label"
+              ],
+              "additionalProperties": false,
+              "title": "action",
+              "description": "action"
+            }
+          },
+          "schema": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "type": "object"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]*$",
+                      "title": "Key",
+                      "description": "Key"
+                    },
+                    "label": {
+                      "type": "string",
+                      "title": "Button label",
+                      "description": "Button label"
+                    },
+                    "description": {
+                      "type": "string",
+                      "title": "Helper text",
+                      "description": "Helper text"
+                    },
+                    "icon": {
+                      "type": "string",
+                      "title": "Icon",
+                      "description": "Icon"
+                    },
+                    "tone": {
+                      "type": "string",
+                      "title": "Tone",
+                      "enum": [
+                        "primary",
+                        "default",
+                        "destructive"
+                      ],
+                      "description": "Tone Allowed values: primary (Primary), default (Default), destructive (Destructive).",
+                      "default": "default"
+                    },
+                    "visibleWhen": {
+                      "type": "object",
+                      "title": "Visible when",
+                      "description": "Visible when"
+                    },
+                    "disabledWhen": {
+                      "type": "object",
+                      "title": "Disabled when",
+                      "description": "Disabled when"
+                    },
+                    "disabledMessage": {
+                      "type": "string",
+                      "title": "Disabled explanation",
+                      "description": "Disabled explanation"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "label"
+                  ],
+                  "additionalProperties": false,
+                  "title": "action",
+                  "description": "action"
+                }
+              ]
+            },
+            "minItems": 1,
+            "title": "Actions",
+            "description": "Buttons that resume the workflow through output handle action:<key>."
+          }
+        },
+        {
+          "key": "timeout",
+          "valueType": "string",
+          "required": false,
+          "defaultValue": "",
+          "label": {
+            "en": "Timeout",
+            "nl": "Time-out"
+          },
+          "description": {
+            "en": "Optional functional wait timeout such as 24h or 7d; empty means wait indefinitely.",
+            "nl": "Optionele functionele wachttijd zoals 24h of 7d; leeg betekent onbeperkt wachten."
+          },
+          "placeholder": {
+            "en": "e.g. 24h, 7d",
+            "nl": "bijv. 24h, 7d"
+          },
+          "schema": {
+            "type": "string",
+            "title": "Timeout",
+            "description": "Optional functional wait timeout such as 24h or 7d; empty means wait indefinitely.",
+            "default": ""
+          }
+        }
+      ],
+      "runtimeSupport": "EXECUTABLE"
+    },
+    {
+      "source": "workflow-nodes/operations/execute.yaml",
+      "schemaVersion": 1,
+      "kind": "workflowNode",
+      "nodeType": "operation",
+      "category": {
+        "en": "Operations",
+        "nl": "Operaties"
+      },
+      "label": {
+        "en": "Execute operation",
+        "nl": "Operatie uitvoeren"
+      },
+      "description": {
+        "en": "Executes one canonical Operation through the host runtime and retries only retryable failures.",
+        "nl": "Voert één canonieke Operation uit via de hostruntime en probeert alleen herstelbare fouten opnieuw."
+      },
+      "configFields": [
+        {
+          "key": "operation",
+          "valueType": "string",
+          "required": true,
+          "semanticType": "operationReference",
+          "label": {
+            "en": "Operation",
+            "nl": "Operatie"
+          },
+          "schema": {
+            "type": "string",
+            "title": "Operation",
+            "description": "Operation"
+          }
+        },
+        {
+          "key": "input",
+          "valueType": "object",
+          "required": false,
+          "semanticType": "operationInput",
+          "label": {
+            "en": "Input",
+            "nl": "Invoer"
+          },
+          "schema": {
+            "type": "object",
+            "title": "Input",
+            "description": "Input"
+          }
+        },
+        {
+          "key": "maxAttempts",
+          "valueType": "integer",
+          "required": false,
+          "defaultValue": 5,
+          "validation": {
+            "min": 1,
+            "max": 20
+          },
+          "label": {
+            "en": "Maximum attempts",
+            "nl": "Maximum aantal pogingen"
+          },
+          "schema": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "title": "Maximum attempts",
+            "description": "Maximum attempts",
+            "default": 5
+          }
+        },
+        {
+          "key": "retryBackoff",
+          "valueType": "string",
+          "required": false,
+          "defaultValue": "PT5S",
+          "semanticType": "duration",
+          "label": {
+            "en": "Retry interval",
+            "nl": "Interval tussen pogingen"
+          },
+          "schema": {
+            "type": "string",
+            "title": "Retry interval",
+            "description": "Retry interval",
+            "default": "PT5S"
+          }
+        }
+      ],
+      "runtimeSupport": "EXECUTABLE"
+    },
+    {
+      "source": "workflow-nodes/triggers/manual.yaml",
+      "schemaVersion": 1,
+      "kind": "workflowNode",
+      "nodeType": "trigger.manual",
+      "category": {
+        "en": "Triggers",
+        "nl": "Triggers"
+      },
+      "label": {
+        "en": "Manual start",
+        "nl": "Handmatige start"
+      },
+      "description": {
+        "en": "Starts a published workflow with caller-supplied context.",
+        "nl": "Start een gepubliceerde workflow met door de aanroeper aangeleverde context."
+      },
+      "configFields": [],
+      "runtimeSupport": "EXECUTABLE"
+    },
+    {
+      "source": "workflow-nodes/triggers/schedule.yaml",
+      "schemaVersion": 1,
+      "kind": "workflowNode",
+      "nodeType": "triggerSchedule",
+      "category": {
+        "en": "Triggers",
+        "nl": "Triggers"
+      },
+      "label": {
+        "nl": "Planning",
+        "en": "Schedule"
+      },
+      "description": {
+        "nl": "Start de workflow automatisch volgens een schema.",
+        "en": "Starts the workflow automatically on a schedule."
+      },
+      "configFields": [
+        {
+          "key": "cron",
+          "valueType": "string",
+          "label": {
+            "nl": "Planning",
+            "en": "Schedule"
+          },
+          "description": {
+            "nl": "Kies wanneer deze workflow automatisch moet starten.",
+            "en": "Choose when this workflow should start automatically."
+          },
+          "help": {
+            "nl": "De technische planning wordt automatisch opgebouwd. Alleen bij een afwijkend schema hoef je zelf iets aan te passen.",
+            "en": "The technical schedule is generated automatically. Only edit it yourself for unusual schedules."
+          },
+          "validation": {
+            "required": true
+          },
+          "render": {
+            "component": "ScheduleTriggerBuilder"
+          },
+          "schema": {
+            "type": "string",
+            "title": "Schedule",
+            "description": "Choose when this workflow should start automatically. The technical schedule is generated automatically. Only edit it yourself for unusual schedules."
+          }
+        },
+        {
+          "key": "timezone",
+          "valueType": "string",
+          "label": {
+            "nl": "Lokale tijd",
+            "en": "Local time"
+          },
+          "description": {
+            "nl": "Hiermee bepalen we wat bijvoorbeeld 09:00 precies betekent.",
+            "en": "This determines what a time like 09:00 means exactly."
+          },
+          "help": {
+            "nl": "De planning bewaart cron samen met deze tijdzone; wijzigen verandert dus wanneer hetzelfde schema afgaat.",
+            "en": "The schedule stores cron together with this timezone, so changing it changes when the same expression fires."
+          },
+          "defaultValue": "Europe/Amsterdam",
+          "validation": {
+            "required": true
+          },
+          "options": {
+            "type": "remote",
+            "remoteUrl": "/api/workflow/designer/trigger-options/timezones"
+          },
+          "render": {
+            "component": "ReferenceSelect",
+            "props": {
+              "clearable": false
+            }
+          },
+          "schema": {
+            "type": "string",
+            "title": "Local time",
+            "description": "This determines what a time like 09:00 means exactly. The schedule stores cron together with this timezone, so changing it changes when the same expression fires.",
+            "default": "Europe/Amsterdam"
+          }
+        },
+        {
+          "key": "mappingParameters",
+          "valueType": "object",
+          "cardinality": {
+            "min": 0,
+            "max": "unbounded"
+          },
+          "semanticType": "fieldDefinition",
+          "label": {
+            "nl": "Startvariabelen",
+            "en": "Start variables"
+          },
+          "description": {
+            "nl": "Definieer welke velden deze planning als startvariabelen aan de workflow meegeeft.",
+            "en": "Define which fields this schedule passes into the workflow as start variables."
+          },
+          "help": {
+            "nl": "Deze velden worden beschikbaar onder de payload van de planningstrigger.",
+            "en": "These fields become available under the schedule trigger payload."
+          },
+          "defaultValue": [],
+          "authoring": {
+            "profile": "workflowStartVariable"
+          },
+          "schema": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/fieldDefinition"
+            },
+            "minItems": 0,
+            "title": "Start variables",
+            "description": "Define which fields this schedule passes into the workflow as start variables. These fields become available under the schedule trigger payload.",
+            "default": [],
+            "$defs": {
+              "localizedText": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "en": {
+                    "type": "string"
+                  },
+                  "nl": {
+                    "type": "string"
+                  },
+                  "fr": {
+                    "type": "string"
+                  }
+                }
+              },
+              "validationRule": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "boolean"
+                      }
+                    ]
+                  },
+                  "message": {
+                    "$ref": "#/$defs/localizedText"
+                  }
+                }
+              },
+              "validation": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "required": {
+                    "oneOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "minLength": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "maxLength": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "minItems": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "min": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "max": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "pattern": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "format": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "custom": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "name"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "$ref": "#/$defs/localizedText"
+                        },
+                        "params": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "fieldOptions": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "static",
+                      "referentiedata",
+                      "remote",
+                      "dynamic",
+                      "entity"
+                    ]
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "value",
+                        "label"
+                      ],
+                      "properties": {
+                        "value": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "$ref": "#/$defs/localizedText"
+                        }
+                      }
+                    }
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "referentieGroep": {
+                    "type": "string"
+                  },
+                  "remoteUrl": {
+                    "type": "string"
+                  },
+                  "valueField": {
+                    "type": "string"
+                  },
+                  "labelField": {
+                    "type": "string"
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "type": {
+                          "const": "entity"
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "source"
+                      ],
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "valueField": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "items": false,
+                        "referentieGroep": false,
+                        "remoteUrl": false,
+                        "labelField": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "relationship": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "inverse": {
+                    "type": "string",
+                    "pattern": "^[a-z][A-Za-z0-9]*$"
+                  },
+                  "via": {
+                    "type": "string",
+                    "pattern": "^[a-z][A-Za-z0-9]*$"
+                  },
+                  "ownership": {
+                    "enum": [
+                      "owned",
+                      "reference"
+                    ]
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "belongsTo",
+                      "hasMany"
+                    ]
+                  },
+                  "entity": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+                  },
+                  "foreignKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "displayField": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "constraints": {
+                    "$ref": "#/$defs/relationshipConstraints"
+                  }
+                }
+              },
+              "constraintScalar": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "equalityConstraint": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "eq"
+                ],
+                "properties": {
+                  "eq": {
+                    "$ref": "#/$defs/constraintScalar"
+                  }
+                }
+              },
+              "relationshipAnyConstraint": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "any"
+                ],
+                "properties": {
+                  "any": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "pattern": "^[a-z][A-Za-z0-9]*$"
+                    },
+                    "additionalProperties": {
+                      "$ref": "#/$defs/equalityConstraint"
+                    }
+                  }
+                }
+              },
+              "relationshipConstraints": {
+                "type": "object",
+                "minProperties": 1,
+                "propertyNames": {
+                  "pattern": "^[a-z][A-Za-z0-9]*$"
+                },
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/equalityConstraint"
+                    },
+                    {
+                      "$ref": "#/$defs/relationshipAnyConstraint"
+                    }
+                  ]
+                }
+              },
+              "cardinality": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "single",
+                      "collection"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "min": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "max": {
+                        "oneOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          {
+                            "type": "string",
+                            "const": "unbounded"
+                          }
+                        ]
+                      }
+                    },
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "min": {}
+                        },
+                        "required": [
+                          "min"
+                        ]
+                      },
+                      {
+                        "properties": {
+                          "max": {}
+                        },
+                        "required": [
+                          "max"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fieldAuthoring": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "profile": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pinned": {
+                    "type": "boolean"
+                  },
+                  "locked": {
+                    "type": "boolean"
+                  },
+                  "singleton": {
+                    "type": "boolean"
+                  },
+                  "visibleProperties": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              },
+              "render": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "component"
+                ],
+                "properties": {
+                  "component": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "props": {
+                    "type": "object"
+                  }
+                }
+              },
+              "fieldDefinition": {
+                "type": "object",
+                "description": "The canonical closed FieldDefinition shape — what to $ref when a field is used as-is. unevaluatedProperties rather than additionalProperties because only the former sees an allOf branch beside it, which is what lets a use site extend the shape (connector configuration fields add `secret`) without the closure rejecting the addition.",
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/fieldDefinitionProperties"
+                  }
+                ],
+                "unevaluatedProperties": false
+              },
+              "fieldDefinitionProperties": {
+                "description": "The canonical FieldDefinition property set, left OPEN so a use site can extend it. Extend this one only alongside your own unevaluatedProperties: false — on its own it closes nothing.",
+                "type": "object",
+                "required": [
+                  "key"
+                ],
+                "anyOf": [
+                  {
+                    "properties": {
+                      "valueType": {}
+                    },
+                    "required": [
+                      "valueType"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "semanticType": {}
+                    },
+                    "required": [
+                      "semanticType"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "valueType": {
+                    "type": "string",
+                    "enum": [
+                      "string",
+                      "integer",
+                      "number",
+                      "boolean",
+                      "date",
+                      "datetime",
+                      "object"
+                    ]
+                  },
+                  "cardinality": {
+                    "$ref": "#/$defs/cardinality"
+                  },
+                  "entityValue": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "definitionField"
+                    ],
+                    "properties": {
+                      "definitionField": {
+                        "type": "string",
+                        "pattern": "^[a-z][A-Za-z0-9]*$"
+                      },
+                      "parameterBindings": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "allowedDefinitions": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Z][A-Za-z0-9]*$"
+                    }
+                  },
+                  "variables": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "whole",
+                      "template",
+                      "both"
+                    ],
+                    "default": "none"
+                  },
+                  "suggestions": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "minProperties": 1,
+                    "description": "Where the variable suggestions offered for this field come from. Mirrored onto the generated page field so the renderer can offer the right list; pairs with `variables`.",
+                    "properties": {
+                      "sourceField": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Key of a sibling field whose value determines the available suggestions."
+                      },
+                      "sourceKey": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Fixed suggestion-source key, when the list does not depend on a sibling field."
+                      }
+                    }
+                  },
+                  "sortable": {
+                    "type": "boolean"
+                  },
+                  "required": {
+                    "type": "boolean"
+                  },
+                  "readOnly": {
+                    "type": "boolean",
+                    "description": "Presentation only: render the field with its display component instead of its input component. Not an API contract — use `immutable` for that."
+                  },
+                  "immutable": {
+                    "type": "boolean",
+                    "description": "API contract: the field may be set when the record is created and is refused by every generated transport afterwards (REST 400; absent from the GraphQL update input and the MCP update schema). Use it for provenance links and other values that must not be re-pointed once written."
+                  },
+                  "writtenBy": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "description": "API contract: operation contract keys (e.g. `pentest.finding.review`) that are the only writers of this field. The field is absent from the generated create AND update schemas on every transport, and a caller sending it anyway is refused with a message naming these operations. Use it for fields that record that a process took place — a review signed off, a scope approved, a retest concluded — where the operation is the only place the preconditions are checked. Not to be confused with `readOnly`, which selects a display component and enforces nothing. A key no compiled operation answers to fails the build."
+                  },
+                  "deriveOnCreate": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "from",
+                      "transform",
+                      "onConflict"
+                    ],
+                    "properties": {
+                      "from": {
+                        "type": "string",
+                        "pattern": "^[a-z][A-Za-z0-9]*$",
+                        "description": "Sibling field whose submitted create value is the derivation source."
+                      },
+                      "transform": {
+                        "const": "slug",
+                        "description": "Generate a lowercase ASCII slug from the source value."
+                      },
+                      "onConflict": {
+                        "const": "suffix",
+                        "description": "Resolve a database uniqueness conflict as slug-2, slug-3, and so on."
+                      }
+                    },
+                    "description": "Persist this server-owned field once at create time. Generated create and update inputs omit it on every interface."
+                  },
+                  "label": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "description": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "placeholder": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "help": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "semanticType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "value": {},
+                  "defaultValue": {},
+                  "validation": {
+                    "$ref": "#/$defs/validation"
+                  },
+                  "relationship": {
+                    "$ref": "#/$defs/relationship"
+                  },
+                  "options": {
+                    "$ref": "#/$defs/fieldOptions"
+                  },
+                  "persisted": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "column": {
+                        "type": "string"
+                      },
+                      "storageClass": {
+                        "type": "string",
+                        "enum": [
+                          "core",
+                          "profile"
+                        ]
+                      }
+                    }
+                  },
+                  "render": {
+                    "$ref": "#/$defs/render"
+                  },
+                  "permissions": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "read": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "write": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "authorization": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "roles"
+                    ],
+                    "properties": {
+                      "roles": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "read": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "write": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "classification": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "sensitivity"
+                    ],
+                    "properties": {
+                      "sensitivity": {
+                        "type": "string",
+                        "enum": [
+                          "public",
+                          "internal",
+                          "confidential",
+                          "pii",
+                          "bsn"
+                        ]
+                      },
+                      "category": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "retention": {
+                    "type": "object"
+                  },
+                  "audit": {
+                    "type": "boolean"
+                  },
+                  "hints": {
+                    "type": "object"
+                  },
+                  "visibility": {
+                    "type": "object"
+                  },
+                  "computed": {
+                    "type": "object"
+                  },
+                  "runtime": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "aliases": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "workflowInspector": {
+                    "$ref": "#/$defs/workflowInspector"
+                  },
+                  "layoutFraction": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "localized": {
+                    "type": "boolean"
+                  },
+                  "shape": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/fieldDefinition"
+                    }
+                  },
+                  "authoring": {
+                    "$ref": "#/$defs/fieldAuthoring"
+                  },
+                  "children": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/fieldDefinition"
+                    }
+                  },
+                  "item": {
+                    "$ref": "#/$defs/fieldDefinition"
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "cardinality": {
+                          "type": "object",
+                          "properties": {
+                            "max": {
+                              "oneOf": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 2
+                                },
+                                {
+                                  "const": "unbounded"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "max"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "cardinality"
+                      ]
+                    },
+                    "then": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "item": {}
+                          },
+                          "required": [
+                            "item"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "shape": {}
+                          },
+                          "required": [
+                            "shape"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "semanticType": {}
+                          },
+                          "required": [
+                            "semanticType"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "relationship": {}
+                          },
+                          "required": [
+                            "relationship"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "sortable": {}
+                      },
+                      "required": [
+                        "sortable"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "cardinality": {}
+                      },
+                      "required": [
+                        "cardinality"
+                      ],
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "cardinality": {
+                              "const": "collection"
+                            }
+                          }
+                        },
+                        {
+                          "properties": {
+                            "cardinality": {
+                              "type": "object",
+                              "properties": {
+                                "max": {
+                                  "oneOf": [
+                                    {
+                                      "type": "integer",
+                                      "minimum": 2
+                                    },
+                                    {
+                                      "const": "unbounded"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "max"
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "description": "A fieldDefinition semantic value already supplies the complete recursive value contract; children and item would define a second, ambiguous shape.",
+                    "if": {
+                      "properties": {
+                        "semanticType": {
+                          "const": "fieldDefinition"
+                        }
+                      },
+                      "required": [
+                        "semanticType"
+                      ]
+                    },
+                    "then": {
+                      "not": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "children": {}
+                            },
+                            "required": [
+                              "children"
+                            ]
+                          },
+                          {
+                            "properties": {
+                              "item": {}
+                            },
+                            "required": [
+                              "item"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "semanticType": {
+                          "const": "fieldDefinition"
+                        },
+                        "authoring": {
+                          "type": "object",
+                          "properties": {
+                            "profile": {}
+                          },
+                          "required": [
+                            "profile"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "semanticType",
+                        "authoring"
+                      ]
+                    },
+                    "then": {
+                      "not": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "required": {}
+                            },
+                            "required": [
+                              "required"
+                            ]
+                          },
+                          {
+                            "properties": {
+                              "children": {}
+                            },
+                            "required": [
+                              "children"
+                            ]
+                          },
+                          {
+                            "properties": {
+                              "item": {}
+                            },
+                            "required": [
+                              "item"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              "workflowInspector": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "objectPresentation": {
+                    "type": "string",
+                    "enum": [
+                      "inlineChildren"
+                    ]
+                  },
+                  "displayMode": {
+                    "type": "string",
+                    "enum": [
+                      "hidden",
+                      "display",
+                      "readOnly"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "runtimeSupport": "EXECUTABLE"
+    },
+    {
+      "source": "workflow-nodes/triggers/webhook.yaml",
+      "schemaVersion": 1,
+      "kind": "workflowNode",
+      "nodeType": "triggerWebhook",
+      "category": {
+        "en": "Triggers",
+        "nl": "Triggers"
+      },
+      "label": {
+        "nl": "Webhook",
+        "en": "Webhook"
+      },
+      "description": {
+        "nl": "Start de workflow via een ingelogde webhook-call.",
+        "en": "Starts the workflow from an authenticated webhook call."
+      },
+      "configFields": [
+        {
+          "key": "inputParameters",
+          "valueType": "object",
+          "cardinality": {
+            "min": 0,
+            "max": "unbounded"
+          },
+          "semanticType": "fieldDefinition",
+          "label": {
+            "nl": "Webhook payloadvelden",
+            "en": "Webhook payload fields"
+          },
+          "description": {
+            "nl": "Definieer welke payloadvelden dit webhook-event aan de workflow meegeeft.",
+            "en": "Define which payload fields this webhook event passes into the workflow."
+          },
+          "help": {
+            "nl": "Deze velden worden beschikbaar als payload op de webhook-trigger.",
+            "en": "These fields become available as payload on the webhook trigger."
+          },
+          "defaultValue": [],
+          "authoring": {
+            "profile": "workflowStartVariable"
+          },
+          "schema": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/fieldDefinition"
+            },
+            "minItems": 0,
+            "title": "Webhook payload fields",
+            "description": "Define which payload fields this webhook event passes into the workflow. These fields become available as payload on the webhook trigger.",
+            "default": [],
+            "$defs": {
+              "localizedText": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "en": {
+                    "type": "string"
+                  },
+                  "nl": {
+                    "type": "string"
+                  },
+                  "fr": {
+                    "type": "string"
+                  }
+                }
+              },
+              "validationRule": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "boolean"
+                      }
+                    ]
+                  },
+                  "message": {
+                    "$ref": "#/$defs/localizedText"
+                  }
+                }
+              },
+              "validation": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "required": {
+                    "oneOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "minLength": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "maxLength": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "minItems": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "min": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "max": {
+                    "oneOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "pattern": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/validationRule"
+                      }
+                    ]
+                  },
+                  "format": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "custom": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "name"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "message": {
+                          "$ref": "#/$defs/localizedText"
+                        },
+                        "params": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "fieldOptions": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "static",
+                      "referentiedata",
+                      "remote",
+                      "dynamic",
+                      "entity"
+                    ]
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "value",
+                        "label"
+                      ],
+                      "properties": {
+                        "value": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "$ref": "#/$defs/localizedText"
+                        }
+                      }
+                    }
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "referentieGroep": {
+                    "type": "string"
+                  },
+                  "remoteUrl": {
+                    "type": "string"
+                  },
+                  "valueField": {
+                    "type": "string"
+                  },
+                  "labelField": {
+                    "type": "string"
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "type": {
+                          "const": "entity"
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ]
+                    },
+                    "then": {
+                      "required": [
+                        "source"
+                      ],
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "valueField": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "items": false,
+                        "referentieGroep": false,
+                        "remoteUrl": false,
+                        "labelField": false
+                      }
+                    }
+                  }
+                ]
+              },
+              "relationship": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "inverse": {
+                    "type": "string",
+                    "pattern": "^[a-z][A-Za-z0-9]*$"
+                  },
+                  "via": {
+                    "type": "string",
+                    "pattern": "^[a-z][A-Za-z0-9]*$"
+                  },
+                  "ownership": {
+                    "enum": [
+                      "owned",
+                      "reference"
+                    ]
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "belongsTo",
+                      "hasMany"
+                    ]
+                  },
+                  "entity": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+                  },
+                  "foreignKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "displayField": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "constraints": {
+                    "$ref": "#/$defs/relationshipConstraints"
+                  }
+                }
+              },
+              "constraintScalar": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              },
+              "equalityConstraint": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "eq"
+                ],
+                "properties": {
+                  "eq": {
+                    "$ref": "#/$defs/constraintScalar"
+                  }
+                }
+              },
+              "relationshipAnyConstraint": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "any"
+                ],
+                "properties": {
+                  "any": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "propertyNames": {
+                      "pattern": "^[a-z][A-Za-z0-9]*$"
+                    },
+                    "additionalProperties": {
+                      "$ref": "#/$defs/equalityConstraint"
+                    }
+                  }
+                }
+              },
+              "relationshipConstraints": {
+                "type": "object",
+                "minProperties": 1,
+                "propertyNames": {
+                  "pattern": "^[a-z][A-Za-z0-9]*$"
+                },
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/equalityConstraint"
+                    },
+                    {
+                      "$ref": "#/$defs/relationshipAnyConstraint"
+                    }
+                  ]
+                }
+              },
+              "cardinality": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "single",
+                      "collection"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "min": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "max": {
+                        "oneOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          {
+                            "type": "string",
+                            "const": "unbounded"
+                          }
+                        ]
+                      }
+                    },
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "min": {}
+                        },
+                        "required": [
+                          "min"
+                        ]
+                      },
+                      {
+                        "properties": {
+                          "max": {}
+                        },
+                        "required": [
+                          "max"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "fieldAuthoring": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "profile": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pinned": {
+                    "type": "boolean"
+                  },
+                  "locked": {
+                    "type": "boolean"
+                  },
+                  "singleton": {
+                    "type": "boolean"
+                  },
+                  "visibleProperties": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              },
+              "render": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "component"
+                ],
+                "properties": {
+                  "component": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "props": {
+                    "type": "object"
+                  }
+                }
+              },
+              "fieldDefinition": {
+                "type": "object",
+                "description": "The canonical closed FieldDefinition shape — what to $ref when a field is used as-is. unevaluatedProperties rather than additionalProperties because only the former sees an allOf branch beside it, which is what lets a use site extend the shape (connector configuration fields add `secret`) without the closure rejecting the addition.",
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/fieldDefinitionProperties"
+                  }
+                ],
+                "unevaluatedProperties": false
+              },
+              "fieldDefinitionProperties": {
+                "description": "The canonical FieldDefinition property set, left OPEN so a use site can extend it. Extend this one only alongside your own unevaluatedProperties: false — on its own it closes nothing.",
+                "type": "object",
+                "required": [
+                  "key"
+                ],
+                "anyOf": [
+                  {
+                    "properties": {
+                      "valueType": {}
+                    },
+                    "required": [
+                      "valueType"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "semanticType": {}
+                    },
+                    "required": [
+                      "semanticType"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "valueType": {
+                    "type": "string",
+                    "enum": [
+                      "string",
+                      "integer",
+                      "number",
+                      "boolean",
+                      "date",
+                      "datetime",
+                      "object"
+                    ]
+                  },
+                  "cardinality": {
+                    "$ref": "#/$defs/cardinality"
+                  },
+                  "entityValue": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "definitionField"
+                    ],
+                    "properties": {
+                      "definitionField": {
+                        "type": "string",
+                        "pattern": "^[a-z][A-Za-z0-9]*$"
+                      },
+                      "parameterBindings": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "allowedDefinitions": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Z][A-Za-z0-9]*$"
+                    }
+                  },
+                  "variables": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "whole",
+                      "template",
+                      "both"
+                    ],
+                    "default": "none"
+                  },
+                  "suggestions": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "minProperties": 1,
+                    "description": "Where the variable suggestions offered for this field come from. Mirrored onto the generated page field so the renderer can offer the right list; pairs with `variables`.",
+                    "properties": {
+                      "sourceField": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Key of a sibling field whose value determines the available suggestions."
+                      },
+                      "sourceKey": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Fixed suggestion-source key, when the list does not depend on a sibling field."
+                      }
+                    }
+                  },
+                  "sortable": {
+                    "type": "boolean"
+                  },
+                  "required": {
+                    "type": "boolean"
+                  },
+                  "readOnly": {
+                    "type": "boolean",
+                    "description": "Presentation only: render the field with its display component instead of its input component. Not an API contract — use `immutable` for that."
+                  },
+                  "immutable": {
+                    "type": "boolean",
+                    "description": "API contract: the field may be set when the record is created and is refused by every generated transport afterwards (REST 400; absent from the GraphQL update input and the MCP update schema). Use it for provenance links and other values that must not be re-pointed once written."
+                  },
+                  "writtenBy": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "description": "API contract: operation contract keys (e.g. `pentest.finding.review`) that are the only writers of this field. The field is absent from the generated create AND update schemas on every transport, and a caller sending it anyway is refused with a message naming these operations. Use it for fields that record that a process took place — a review signed off, a scope approved, a retest concluded — where the operation is the only place the preconditions are checked. Not to be confused with `readOnly`, which selects a display component and enforces nothing. A key no compiled operation answers to fails the build."
+                  },
+                  "deriveOnCreate": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "from",
+                      "transform",
+                      "onConflict"
+                    ],
+                    "properties": {
+                      "from": {
+                        "type": "string",
+                        "pattern": "^[a-z][A-Za-z0-9]*$",
+                        "description": "Sibling field whose submitted create value is the derivation source."
+                      },
+                      "transform": {
+                        "const": "slug",
+                        "description": "Generate a lowercase ASCII slug from the source value."
+                      },
+                      "onConflict": {
+                        "const": "suffix",
+                        "description": "Resolve a database uniqueness conflict as slug-2, slug-3, and so on."
+                      }
+                    },
+                    "description": "Persist this server-owned field once at create time. Generated create and update inputs omit it on every interface."
+                  },
+                  "label": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "description": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "placeholder": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "help": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "semanticType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "currency": {
+                    "type": "string"
+                  },
+                  "value": {},
+                  "defaultValue": {},
+                  "validation": {
+                    "$ref": "#/$defs/validation"
+                  },
+                  "relationship": {
+                    "$ref": "#/$defs/relationship"
+                  },
+                  "options": {
+                    "$ref": "#/$defs/fieldOptions"
+                  },
+                  "persisted": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "column": {
+                        "type": "string"
+                      },
+                      "storageClass": {
+                        "type": "string",
+                        "enum": [
+                          "core",
+                          "profile"
+                        ]
+                      }
+                    }
+                  },
+                  "render": {
+                    "$ref": "#/$defs/render"
+                  },
+                  "permissions": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "read": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "write": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "authorization": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "roles"
+                    ],
+                    "properties": {
+                      "roles": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "read": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "write": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "classification": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "sensitivity"
+                    ],
+                    "properties": {
+                      "sensitivity": {
+                        "type": "string",
+                        "enum": [
+                          "public",
+                          "internal",
+                          "confidential",
+                          "pii",
+                          "bsn"
+                        ]
+                      },
+                      "category": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "retention": {
+                    "type": "object"
+                  },
+                  "audit": {
+                    "type": "boolean"
+                  },
+                  "hints": {
+                    "type": "object"
+                  },
+                  "visibility": {
+                    "type": "object"
+                  },
+                  "computed": {
+                    "type": "object"
+                  },
+                  "runtime": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "aliases": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "workflowInspector": {
+                    "$ref": "#/$defs/workflowInspector"
+                  },
+                  "layoutFraction": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "localized": {
+                    "type": "boolean"
+                  },
+                  "shape": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/fieldDefinition"
+                    }
+                  },
+                  "authoring": {
+                    "$ref": "#/$defs/fieldAuthoring"
+                  },
+                  "children": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/fieldDefinition"
+                    }
+                  },
+                  "item": {
+                    "$ref": "#/$defs/fieldDefinition"
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "cardinality": {
+                          "type": "object",
+                          "properties": {
+                            "max": {
+                              "oneOf": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 2
+                                },
+                                {
+                                  "const": "unbounded"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "max"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "cardinality"
+                      ]
+                    },
+                    "then": {
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "item": {}
+                          },
+                          "required": [
+                            "item"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "shape": {}
+                          },
+                          "required": [
+                            "shape"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "semanticType": {}
+                          },
+                          "required": [
+                            "semanticType"
+                          ]
+                        },
+                        {
+                          "properties": {
+                            "relationship": {}
+                          },
+                          "required": [
+                            "relationship"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "sortable": {}
+                      },
+                      "required": [
+                        "sortable"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "cardinality": {}
+                      },
+                      "required": [
+                        "cardinality"
+                      ],
+                      "anyOf": [
+                        {
+                          "properties": {
+                            "cardinality": {
+                              "const": "collection"
+                            }
+                          }
+                        },
+                        {
+                          "properties": {
+                            "cardinality": {
+                              "type": "object",
+                              "properties": {
+                                "max": {
+                                  "oneOf": [
+                                    {
+                                      "type": "integer",
+                                      "minimum": 2
+                                    },
+                                    {
+                                      "const": "unbounded"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "max"
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "description": "A fieldDefinition semantic value already supplies the complete recursive value contract; children and item would define a second, ambiguous shape.",
+                    "if": {
+                      "properties": {
+                        "semanticType": {
+                          "const": "fieldDefinition"
+                        }
+                      },
+                      "required": [
+                        "semanticType"
+                      ]
+                    },
+                    "then": {
+                      "not": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "children": {}
+                            },
+                            "required": [
+                              "children"
+                            ]
+                          },
+                          {
+                            "properties": {
+                              "item": {}
+                            },
+                            "required": [
+                              "item"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "semanticType": {
+                          "const": "fieldDefinition"
+                        },
+                        "authoring": {
+                          "type": "object",
+                          "properties": {
+                            "profile": {}
+                          },
+                          "required": [
+                            "profile"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "semanticType",
+                        "authoring"
+                      ]
+                    },
+                    "then": {
+                      "not": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "required": {}
+                            },
+                            "required": [
+                              "required"
+                            ]
+                          },
+                          {
+                            "properties": {
+                              "children": {}
+                            },
+                            "required": [
+                              "children"
+                            ]
+                          },
+                          {
+                            "properties": {
+                              "item": {}
+                            },
+                            "required": [
+                              "item"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              },
+              "workflowInspector": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "objectPresentation": {
+                    "type": "string",
+                    "enum": [
+                      "inlineChildren"
+                    ]
+                  },
+                  "displayMode": {
+                    "type": "string",
+                    "enum": [
+                      "hidden",
+                      "display",
+                      "readOnly"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "key": "idempotencyKeyExpr",
+          "valueType": "string",
+          "label": {
+            "nl": "Idempotency key expressie",
+            "en": "Idempotency key expression"
+          },
+          "description": {
+            "nl": "Optionele expressie om dubbele webhook-calls als dezelfde start te herkennen.",
+            "en": "Optional expression used to detect duplicate webhook calls as the same start."
+          },
+          "help": {
+            "nl": "Gebruik bijvoorbeeld {{trigger.payload.requestId}} als een extern systeem een stabiele sleutel meestuurt.",
+            "en": "Use something like {{trigger.payload.requestId}} when an external system sends a stable key."
+          },
+          "defaultValue": "",
+          "render": {
+            "component": "Input"
+          },
+          "schema": {
+            "type": "string",
+            "title": "Idempotency key expression",
+            "description": "Optional expression used to detect duplicate webhook calls as the same start. Use something like {{trigger.payload.requestId}} when an external system sends a stable key.",
+            "default": ""
+          }
+        },
+        {
+          "key": "path",
+          "valueType": "string",
+          "label": {
+            "nl": "Interne webhook-route",
+            "en": "Internal webhook route"
+          },
+          "description": {
+            "nl": "Intern API-pad dat webhook-starts voor deze workflowdefinitie ontvangt.",
+            "en": "Internal API path that receives webhook starts for this workflow definition."
+          },
+          "help": {
+            "nl": "De route is platform-owned en niet per workflow instelbaar.",
+            "en": "The route is platform-owned and is not configurable per workflow."
+          },
+          "defaultValue": "/api/workflow/triggers/webhook/:definitionId",
+          "readOnly": true,
+          "visibility": {
+            "conditions": [
+              {
+                "field": "__trigger_internal_hidden__",
+                "operator": "eq",
+                "value": true
+              }
+            ]
+          },
+          "render": {
+            "component": "Input"
+          },
+          "schema": {
+            "type": "string",
+            "title": "Internal webhook route",
+            "description": "Internal API path that receives webhook starts for this workflow definition. The route is platform-owned and is not configurable per workflow.",
+            "default": "/api/workflow/triggers/webhook/:definitionId"
+          }
+        },
+        {
+          "key": "method",
+          "valueType": "string",
+          "label": {
+            "nl": "Interne webhook-methode",
+            "en": "Internal webhook method"
+          },
+          "description": {
+            "nl": "HTTP-methode van het interne webhook-triggerendpoint.",
+            "en": "HTTP method of the internal webhook trigger endpoint."
+          },
+          "defaultValue": "POST",
+          "readOnly": true,
+          "visibility": {
+            "conditions": [
+              {
+                "field": "__trigger_internal_hidden__",
+                "operator": "eq",
+                "value": true
+              }
+            ]
+          },
+          "render": {
+            "component": "Input"
+          },
+          "schema": {
+            "type": "string",
+            "title": "Internal webhook method",
+            "description": "HTTP method of the internal webhook trigger endpoint.",
+            "default": "POST"
+          }
+        }
+      ],
+      "runtimeSupport": "EXECUTABLE"
+    }
+  ]
+}

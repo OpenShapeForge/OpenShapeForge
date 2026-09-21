@@ -571,7 +571,7 @@ export function onboardingGuideText(roles: readonly string[] | null | undefined)
       "   client before entering the values. Then verify with test_connection.",
       "b. then your own personal sign-in (connections), c. then preferences.",
       "To add an employee or colleague, run invite_employee {email, role}. It creates their",
-      "admission and reports what happened: a new Keycloak organization member receives an",
+      "admission and reports what happened: someone not yet in the Keycloak organization receives an",
       "invitation e-mail; an existing member receives no redundant mail and can sign in again;",
       "an existing pending invitation is reused without being resent. The selected role is",
       "applied automatically when they sign in. list_invitations shows who is still pending;",

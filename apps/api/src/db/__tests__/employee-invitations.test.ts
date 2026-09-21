@@ -19,6 +19,7 @@ import {
   revokeInvitation,
 } from "../../auth/employee-invitations.js";
 import type { KeycloakOrganizationMembersClient } from "../../control/keycloak-organization-members.js";
+import { KeycloakAdminError } from "../../control/keycloak-organization-admin.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -90,11 +91,23 @@ function sessionFor(tenantId: string, roles: string[]) {
  */
 function fakeKeycloak(): KeycloakOrganizationMembersClient & {
   calls: Array<{ organizationId: string; email: string }>;
-  pending: Array<{ id: string; organizationId: string; email: string }>;
+  pending: Array<{
+    id: string;
+    organizationId: string;
+    email: string;
+    status?: string;
+    expiresAt?: number | null;
+  }>;
   members: Set<string>;
 } {
   const calls: Array<{ organizationId: string; email: string }> = [];
-  const pending: Array<{ id: string; organizationId: string; email: string }> = [];
+  const pending: Array<{
+    id: string;
+    organizationId: string;
+    email: string;
+    status?: string;
+    expiresAt?: number | null;
+  }> = [];
   const members = new Set<string>();
   const memberKey = (organizationId: string, email: string) =>
     `${organizationId}:${email.trim().toLowerCase()}`;
@@ -104,14 +117,19 @@ function fakeKeycloak(): KeycloakOrganizationMembersClient & {
         row.organizationId === organizationId &&
         row.email.toLowerCase() === email.trim().toLowerCase(),
     );
-  const asInvitation = (row: { id: string; email: string }) => ({
+  const asInvitation = (row: {
+    id: string;
+    email: string;
+    status?: string;
+    expiresAt?: number | null;
+  }) => ({
     id: row.id,
     email: row.email,
     firstName: null,
     lastName: null,
-    status: "PENDING",
+    status: row.status ?? "PENDING",
     sentDate: null,
-    expiresAt: null,
+    expiresAt: row.expiresAt ?? null,
   });
   return {
     calls,
@@ -122,9 +140,13 @@ function fakeKeycloak(): KeycloakOrganizationMembersClient & {
     },
     async inviteUser(organizationId, input) {
       calls.push({ organizationId, email: input.email });
-      if (match(organizationId, input.email) >= 0) {
+      const existing = match(organizationId, input.email);
+      if (existing >= 0 && asInvitation(pending[existing]!).status === "PENDING" &&
+        (asInvitation(pending[existing]!).expiresAt === null ||
+          asInvitation(pending[existing]!).expiresAt! > Math.floor(Date.now() / 1000))) {
         throw new Error("User already has a pending invitation");
       }
+      if (existing >= 0) pending.splice(existing, 1);
       pending.push({ id: randomUUID(), organizationId, email: input.email });
     },
     async listInvitations(organizationId) {
@@ -294,6 +316,65 @@ describe("employee invitations", () => {
           delivery: "already_pending",
         });
         expect(keycloak.calls).toEqual([]);
+        expect(keycloak.pending).toHaveLength(1);
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "an expired Keycloak invitation is replaced instead of reported as reusable",
+    async () => {
+      await withScratchDb(async (appDb, adminDb) => {
+        await seedTenants(adminDb);
+        const keycloak = fakeKeycloak();
+        keycloak.pending.push({
+          id: randomUUID(),
+          organizationId: "kc-org-a",
+          email: "expired@example.com",
+          status: "EXPIRED",
+          expiresAt: Math.floor(Date.now() / 1000) - 1,
+        });
+
+        const admission = await inviteEmployee(
+          appDb,
+          sessionFor(tenantA, ADMIN_ROLES),
+          keycloak,
+          { email: "Expired@Example.com", role: "org_employee" },
+        );
+
+        expect(admission.delivery).toBe("sent");
+        expect(keycloak.calls).toHaveLength(1);
+        expect(keycloak.pending).toHaveLength(1);
+        expect(keycloak.pending[0]!.status).toBeUndefined();
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "a concurrent pending invitation after Keycloak's 409 is reused",
+    async () => {
+      await withScratchDb(async (appDb, adminDb) => {
+        await seedTenants(adminDb);
+        const keycloak = fakeKeycloak();
+        keycloak.inviteUser = async (organizationId, input) => {
+          keycloak.pending.push({ id: randomUUID(), organizationId, email: input.email });
+          throw new KeycloakAdminError(
+            "KEYCLOAK_ADMIN_REJECTED",
+            "User already has a pending invitation",
+            409,
+          );
+        };
+
+        const admission = await inviteEmployee(
+          appDb,
+          sessionFor(tenantA, ADMIN_ROLES),
+          keycloak,
+          { email: "Race@Example.com", role: "org_employee" },
+        );
+
+        expect(admission.delivery).toBe("already_pending");
         expect(keycloak.pending).toHaveLength(1);
       });
     },

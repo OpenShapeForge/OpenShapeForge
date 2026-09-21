@@ -5,6 +5,7 @@ import {
   INVITE_EMPLOYEE_TOOL,
   LIST_INVITATIONS_TOOL,
   REVOKE_INVITATION_TOOL,
+  publicEmployeeAdmission,
   sessionMayInviteEmployees,
 } from "./employee-invitation-tools.js";
 
@@ -51,5 +52,35 @@ describe("employeeInvitationToolsForSession", () => {
     expect(invite.title).toBe("Admit an employee");
     expect(invite.description).toContain("receives no redundant mail");
     expect(invite.description).toContain("reused without resending");
+  });
+
+  test("invite_employee reports each delivery outcome explicitly", () => {
+    const invitation = {
+      id: "invitation-1",
+      email: "person@example.com",
+      role: "org_employee" as const,
+      firstName: null,
+      lastName: null,
+      status: "pending" as const,
+      invitedBy: "admin-1",
+      invitedAt: "2026-09-21T15:29:26.812Z",
+      revokedAt: null,
+    };
+    expect(publicEmployeeAdmission({ ...invitation, delivery: "sent" })).toMatchObject({
+      admitted: true,
+      delivery: "sent",
+      reason: "invitation_sent",
+      nextStep: "The person must follow the invitation link and sign in.",
+    });
+    expect(publicEmployeeAdmission({ ...invitation, delivery: "not_required" })).toMatchObject({
+      delivery: "not_required",
+      reason: "existing_organization_member",
+      nextStep: "No e-mail was needed. The person can sign in again now.",
+    });
+    expect(publicEmployeeAdmission({ ...invitation, delivery: "already_pending" })).toMatchObject({
+      delivery: "already_pending",
+      reason: "existing_invitation",
+      nextStep: "The existing invitation remains valid; this operation did not resend it.",
+    });
   });
 });

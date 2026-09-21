@@ -80,7 +80,10 @@ import {
   KeycloakAdminError,
   type KeycloakAdminErrorCode,
 } from "../control/keycloak-organization-admin.js";
-import type { KeycloakOrganizationMembersClient } from "../control/keycloak-organization-members.js";
+import type {
+  KeycloakOrganizationInvitation,
+  KeycloakOrganizationMembersClient,
+} from "../control/keycloak-organization-members.js";
 
 export { IDENTITY_LINK_ADMIN_ROLE as EMPLOYEE_INVITATION_ADMIN_ROLE };
 
@@ -173,9 +176,10 @@ export type EmployeeAdmission = EmployeeInvitation & {
 };
 
 function isReusableInvitation(
-  invitation: Awaited<ReturnType<KeycloakOrganizationMembersClient["findPendingInvitationByEmail"]>>,
+  invitation: KeycloakOrganizationInvitation | null,
 ): boolean {
-  return invitation?.status?.toUpperCase() === "PENDING" &&
+  return invitation !== null &&
+    (invitation.status === null || invitation.status.toUpperCase() === "PENDING") &&
     (invitation.expiresAt === null || invitation.expiresAt > Math.floor(Date.now() / 1000));
 }
 
@@ -276,7 +280,8 @@ export function toInvitation(row: InvitationRow): EmployeeInvitation {
  * but still needs this local admission record: Keycloak membership alone does
  * not create an OSF Relation or identity link. A 409 is accepted only after a
  * fresh read proves that this exact address became a member or gained a live
- * pending invitation in a race; every other Keycloak failure remains fail-closed.
+ * pending invitation in a race. An expired listed invitation is withdrawn before
+ * replacement; every other Keycloak failure remains fail-closed.
  */
 export async function inviteEmployee(
   db: OpenShapeForgeDatabase,
@@ -304,28 +309,32 @@ export async function inviteEmployee(
     const existingMember = await keycloak.hasMemberByEmail(organizationId, email);
     if (existingMember) {
       delivery = "not_required";
-    } else if (isReusableInvitation(
-      await keycloak.findPendingInvitationByEmail(organizationId, email),
-    )) {
-      delivery = "already_pending";
     } else {
-      try {
-        await keycloak.inviteUser(organizationId, {
-          email,
-          firstName: input.firstName,
-          lastName: input.lastName,
-        });
-        delivery = "sent";
-      } catch (error) {
-        if (!(error instanceof KeycloakAdminError) || error.status !== 409) throw error;
-        if (await keycloak.hasMemberByEmail(organizationId, email)) {
-          delivery = "not_required";
-        } else if (isReusableInvitation(
-          await keycloak.findPendingInvitationByEmail(organizationId, email),
-        )) {
-          delivery = "already_pending";
-        } else {
-          throw error;
+      const existingInvitation = await keycloak.findPendingInvitationByEmail(organizationId, email);
+      if (isReusableInvitation(existingInvitation)) {
+        delivery = "already_pending";
+      } else {
+        if (existingInvitation) {
+          await keycloak.deleteInvitation(organizationId, existingInvitation.id);
+        }
+        try {
+          await keycloak.inviteUser(organizationId, {
+            email,
+            firstName: input.firstName,
+            lastName: input.lastName,
+          });
+          delivery = "sent";
+        } catch (error) {
+          if (!(error instanceof KeycloakAdminError) || error.status !== 409) throw error;
+          if (await keycloak.hasMemberByEmail(organizationId, email)) {
+            delivery = "not_required";
+          } else if (isReusableInvitation(
+            await keycloak.findPendingInvitationByEmail(organizationId, email),
+          )) {
+            delivery = "already_pending";
+          } else {
+            throw error;
+          }
         }
       }
     }

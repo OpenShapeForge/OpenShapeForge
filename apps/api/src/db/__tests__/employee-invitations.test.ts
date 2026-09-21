@@ -145,9 +145,14 @@ function fakeKeycloak(): KeycloakOrganizationMembersClient & {
         const invitation = asInvitation(pending[existing]!);
         if ((invitation.status === null || invitation.status === "PENDING") &&
           (invitation.expiresAt === null ||
-            invitation.expiresAt > Math.floor(Date.now() / 1000))) {
-          throw new Error("User already has a pending invitation");
+            invitation.expiresAt >= Math.floor(Date.now() / 1000))) {
+          throw new KeycloakAdminError(
+            "KEYCLOAK_ADMIN_REJECTED",
+            "User already has a pending invitation",
+            409,
+          );
         }
+        pending.splice(existing, 1);
       }
       pending.push({ id: randomUUID(), organizationId, email: input.email });
     },
@@ -304,6 +309,7 @@ describe("employee invitations", () => {
           id: randomUUID(),
           organizationId: "kc-org-a",
           email: "pending@example.com",
+          expiresAt: Math.floor(Date.now() / 1000) + 3600,
         });
 
         const admission = await inviteEmployee(
@@ -355,7 +361,7 @@ describe("employee invitations", () => {
   );
 
   test(
-    "a listed invitation without a status is reused as pending",
+    "a listed invitation without status or expiry lets Keycloak decide",
     async () => {
       await withScratchDb(async (appDb, adminDb) => {
         await seedTenants(adminDb);
@@ -375,7 +381,7 @@ describe("employee invitations", () => {
         );
 
         expect(admission.delivery).toBe("already_pending");
-        expect(keycloak.calls).toEqual([]);
+        expect(keycloak.calls).toHaveLength(1);
         expect(keycloak.pending).toHaveLength(1);
       });
     },

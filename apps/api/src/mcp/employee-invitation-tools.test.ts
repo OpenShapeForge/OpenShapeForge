@@ -80,7 +80,8 @@ describe("employeeInvitationToolsForSession", () => {
     expect(publicEmployeeAdmission({ ...invitation, delivery: "already_pending" })).toMatchObject({
       delivery: "already_pending",
       reason: "existing_invitation",
-      nextStep: "The existing invitation remains valid; this operation did not resend it.",
+      nextStep: "Keycloak retained the existing invitation; this operation did not resend it. " +
+        "Revoke and admit again if a fresh message is required.",
     });
   });
 });

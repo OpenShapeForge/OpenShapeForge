@@ -168,6 +168,10 @@ export type EmployeeInvitation = {
   revokedAt: string | null;
 };
 
+export type EmployeeAdmission = EmployeeInvitation & {
+  delivery: "sent" | "not_required" | "already_pending";
+};
+
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function requireAdmin(session: { roles?: readonly string[] | null | undefined }): void {
@@ -175,7 +179,7 @@ function requireAdmin(session: { roles?: readonly string[] | null | undefined })
     throw new HttpError(
       403,
       "FORBIDDEN",
-      `Inviting employees requires the ${IDENTITY_LINK_ADMIN_ROLE} role.`,
+      `Admitting employees requires the ${IDENTITY_LINK_ADMIN_ROLE} role.`,
     );
   }
 }
@@ -227,7 +231,7 @@ async function tenantOrganization(
     throw new HttpError(
       409,
       "TENANT_NOT_PROVISIONED",
-      "This tenant has no linked Keycloak Organization yet; it cannot invite members.",
+      "This tenant has no linked Keycloak Organization yet; it cannot admit members.",
     );
   }
   return { organizationId: row.keycloak_organization_id, realm: row.keycloak_realm };
@@ -272,7 +276,7 @@ export async function inviteEmployee(
   session: SessionInput & { relation?: { identityId: string } | null | undefined },
   keycloak: KeycloakOrganizationMembersClient,
   input: InviteEmployeeInput,
-): Promise<EmployeeInvitation> {
+): Promise<EmployeeAdmission> {
   requireAdmin(session);
   const email = normalisedEmail(input.email);
   if (!isEmployeeInvitationRole(input.role)) {
@@ -288,19 +292,30 @@ export async function inviteEmployee(
     tenantOrganization(trx, session.tenantId),
   );
 
+  let delivery: EmployeeAdmission["delivery"];
   try {
     const existingMember = await keycloak.hasMemberByEmail(organizationId, email);
-    if (!existingMember) {
+    if (existingMember) {
+      delivery = "not_required";
+    } else if (await keycloak.findPendingInvitationByEmail(organizationId, email)) {
+      delivery = "already_pending";
+    } else {
       try {
         await keycloak.inviteUser(organizationId, {
           email,
           firstName: input.firstName,
           lastName: input.lastName,
         });
+        delivery = "sent";
       } catch (error) {
-        const converged = error instanceof KeycloakAdminError && error.status === 409 &&
-          await keycloak.hasMemberByEmail(organizationId, email);
-        if (!converged) throw error;
+        if (!(error instanceof KeycloakAdminError) || error.status !== 409) throw error;
+        if (await keycloak.hasMemberByEmail(organizationId, email)) {
+          delivery = "not_required";
+        } else if (await keycloak.findPendingInvitationByEmail(organizationId, email)) {
+          delivery = "already_pending";
+        } else {
+          throw error;
+        }
       }
     }
   } catch (error) {
@@ -310,11 +325,14 @@ export async function inviteEmployee(
   const invitation = await withDbSession(db, session, (trx) =>
     recordEmployeeInvitation(trx, session.tenantId, actor, input, email),
   );
-  console.info(`[auth] ${actor} invited ${email} to tenant ${session.tenantId} as ${input.role}.`);
-  return invitation;
+  console.info(
+    `[auth] ${actor} admitted ${email} to tenant ${session.tenantId} as ${input.role}; ` +
+      `mail delivery: ${delivery}.`,
+  );
+  return { ...invitation, delivery };
 }
 
-/** Shared persistence after Keycloak confirms delivery; caller owns authorization. */
+/** Shared persistence after Keycloak confirms membership or an invitation; caller owns authorization. */
 export async function recordEmployeeInvitation(
   trx: Transaction<DB>, tenantId: string, actor: string, input: InviteEmployeeInput,
   email = normalisedEmail(input.email),

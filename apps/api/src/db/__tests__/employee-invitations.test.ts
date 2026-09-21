@@ -173,6 +173,7 @@ describe("employee invitations", () => {
           email: "Colleague@Example.com",
           role: "org_employee",
           status: "pending",
+          delivery: "sent",
         });
         // Keycloak was actually called, with this tenant's Organization id.
         expect(keycloak.calls).toEqual([
@@ -259,10 +260,41 @@ describe("employee invitations", () => {
           email: "Existing@Example.com",
           role: "org_admin",
           status: "pending",
+          delivery: "not_required",
         });
         expect(keycloak.calls).toEqual([]);
         expect(await listInvitations(appDb, sessionFor(tenantA, ADMIN_ROLES)))
           .toHaveLength(1);
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "an existing Keycloak invitation is reused without another e-mail",
+    async () => {
+      await withScratchDb(async (appDb, adminDb) => {
+        await seedTenants(adminDb);
+        const keycloak = fakeKeycloak();
+        keycloak.pending.push({
+          id: randomUUID(),
+          organizationId: "kc-org-a",
+          email: "pending@example.com",
+        });
+
+        const admission = await inviteEmployee(
+          appDb,
+          sessionFor(tenantA, ADMIN_ROLES),
+          keycloak,
+          { email: "Pending@Example.com", role: "org_employee" },
+        );
+
+        expect(admission).toMatchObject({
+          status: "pending",
+          delivery: "already_pending",
+        });
+        expect(keycloak.calls).toEqual([]);
+        expect(keycloak.pending).toHaveLength(1);
       });
     },
     TEST_TIMEOUT,

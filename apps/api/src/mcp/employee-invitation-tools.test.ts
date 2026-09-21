@@ -43,4 +43,13 @@ describe("employeeInvitationToolsForSession", () => {
     expect(schema.required).toEqual(["email", "role"]);
     expect(schema.properties.role.enum.sort()).toEqual(["org_admin", "org_employee"]);
   });
+
+  test("invite_employee describes admission and conditional delivery truthfully", () => {
+    const invite = employeeInvitationToolsForSession({
+      roles: ["Organization.All.ReadWrite"],
+    }).find((tool) => tool.name === INVITE_EMPLOYEE_TOOL)!;
+    expect(invite.title).toBe("Admit an employee");
+    expect(invite.description).toContain("receives no redundant mail");
+    expect(invite.description).toContain("reused without resending");
+  });
 });

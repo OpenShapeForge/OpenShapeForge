@@ -159,10 +159,10 @@ export function notInvited(session: SessionInput, claims: IdentityClaims): NotIn
   );
   return new NotInvitedError(
     claims.email
-      ? `${claims.email} has not been invited to this organization. Being able to sign in is ` +
-        "not enough on its own: an organization administrator invites you by e-mail " +
-        "(invite_employee), and you follow the link in that mail. Ask an administrator of " +
-        "this organization to invite this address, then sign in again."
+      ? `${claims.email} has not been admitted to this organization. Being able to sign in is ` +
+        "not enough on its own: ask an organization administrator to run invite_employee for " +
+        "this address. If an invitation e-mail is needed, follow its link; otherwise sign in " +
+        "again after the administrator confirms admission."
       : "This sign-in carries no e-mail address, so it cannot be matched to an invitation or " +
         "to anybody in this organization. An organization administrator has to link it " +
         "explicitly (link_identity) before it can be used here.",

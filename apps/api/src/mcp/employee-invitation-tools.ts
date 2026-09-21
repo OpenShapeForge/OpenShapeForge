@@ -146,7 +146,8 @@ export function publicEmployeeAdmission(admission: EmployeeAdmission): Record<st
       }
     : {
         reason: "existing_invitation",
-        nextStep: "The existing invitation remains valid; this operation did not resend it.",
+        nextStep: "Keycloak retained the existing invitation; this operation did not resend it. " +
+          "Revoke and admit again if a fresh message is required.",
       };
   return {
     admitted: true,

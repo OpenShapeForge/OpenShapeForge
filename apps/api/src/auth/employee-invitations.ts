@@ -178,9 +178,9 @@ export type EmployeeAdmission = EmployeeInvitation & {
 function isReusableInvitation(
   invitation: KeycloakOrganizationInvitation | null,
 ): boolean {
-  return invitation !== null &&
-    (invitation.status === null || invitation.status.toUpperCase() === "PENDING") &&
-    (invitation.expiresAt === null || invitation.expiresAt > Math.floor(Date.now() / 1000));
+  return invitation?.status?.toUpperCase() === "PENDING" &&
+    invitation.expiresAt !== null &&
+    invitation.expiresAt >= Math.floor(Date.now() / 1000);
 }
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -279,9 +279,8 @@ export function toInvitation(row: InvitationRow): EmployeeInvitation {
  * pre-selected role. An existing organization member needs no second e-mail,
  * but still needs this local admission record: Keycloak membership alone does
  * not create an OSF Relation or identity link. A 409 is accepted only after a
- * fresh read proves that this exact address became a member or gained a live
- * pending invitation in a race. An expired listed invitation is withdrawn before
- * replacement; every other Keycloak failure remains fail-closed.
+ * fresh read proves that this exact address became a member or retained a listed
+ * invitation in a race; every other Keycloak failure remains fail-closed.
  */
 export async function inviteEmployee(
   db: OpenShapeForgeDatabase,
@@ -314,9 +313,6 @@ export async function inviteEmployee(
       if (isReusableInvitation(existingInvitation)) {
         delivery = "already_pending";
       } else {
-        if (existingInvitation) {
-          await keycloak.deleteInvitation(organizationId, existingInvitation.id);
-        }
         try {
           await keycloak.inviteUser(organizationId, {
             email,
@@ -328,9 +324,7 @@ export async function inviteEmployee(
           if (!(error instanceof KeycloakAdminError) || error.status !== 409) throw error;
           if (await keycloak.hasMemberByEmail(organizationId, email)) {
             delivery = "not_required";
-          } else if (isReusableInvitation(
-            await keycloak.findPendingInvitationByEmail(organizationId, email),
-          )) {
+          } else if (await keycloak.findPendingInvitationByEmail(organizationId, email)) {
             delivery = "already_pending";
           } else {
             throw error;

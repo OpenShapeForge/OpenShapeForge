@@ -1,0 +1,106 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: DocumentTypeVersion
+title: Document type version
+description: An immutable published snapshot of one document type definition.
+language: en
+labels: { en: Document type version, nl: Documenttypeversie }
+pluralLabels: { en: Document type versions, nl: Documenttypeversies }
+domains: [cases, governance]
+displayTemplate: "{{versionNumber}}"
+indexes:
+  - { name: document_type_versions_tenant_number_uidx, fields: [tenantId, documentType, versionNumber], unique: true }
+authorization:
+  roles:
+    read: [CaseFile.All.Read, CaseFile.All.ReadWrite, DocumentTypes.All.Delete]
+    create: [CaseFile.All.ReadWrite]
+    update: [CaseFile.All.ReadWrite]
+    delete: [DocumentTypes.All.Delete]
+  rowAccess: { enabled: true, empty: public }
+fields:
+  - key: documentType
+    osfType: DocumentType
+    required: true
+    immutable: true
+    relationship:
+      inverse:
+        key: versions
+        label: { en: Versions, nl: Versies }
+        ownership: owned
+  - key: versionNumber
+    osfType: integer
+    required: true
+    immutable: true
+    validation: { min: 1 }
+    label: { en: Version, nl: Versie }
+    persisted: { column: version_number, storageClass: core }
+  - key: status
+    osfType: string
+    required: true
+    immutable: true
+    defaultValue: published
+    options: { type: static, items: [{ value: published, label: { en: Published, nl: Gepubliceerd } }] }
+    persisted: { column: status, storageClass: core }
+  - key: snapshot
+    osfType: object
+    required: true
+    immutable: true
+    label: { en: Frozen content, nl: Vastgelegde inhoud }
+    persisted: { column: snapshot, storageClass: core }
+  - key: contentHash
+    osfType: string
+    required: true
+    immutable: true
+    validation: { pattern: "^[a-f0-9]{64}$" }
+    label: { en: Content checksum, nl: Inhoudschecksum }
+    persisted: { column: content_hash, storageClass: core }
+  - key: publishedBy
+    osfType: string
+    required: true
+    immutable: true
+    validation: { format: uuid }
+    label: { en: Published by, nl: Gepubliceerd door }
+    persisted: { column: published_by, storageClass: core }
+  - key: publishedAt
+    osfType: datetime
+    required: true
+    immutable: true
+    label: { en: Published at, nl: Gepubliceerd op }
+    persisted: { column: published_at, storageClass: core }
+operations:
+  list:
+    name: { en: List document type versions, nl: Documenttypeversies tonen }
+    description: Read accessible immutable document type versions.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: { en: Read document type version, nl: Documenttypeversie ophalen }
+    description: Read one immutable document type version.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }
+  web:
+    views:
+      collection:
+        route: /document-type-versions
+        title: { en: Document type versions, nl: Documenttypeversies }
+        columns: [{ key: versionNumber }, { key: status }, { key: publishedAt }]
+        defaultSort: { key: versionNumber, direction: desc }
+      record:
+        routes: { read: "/document-type-versions/:id" }
+        title: "{{versionNumber}}"
+        layout:
+          tabs:
+            - id: version
+              label: { en: Published version, nl: Gepubliceerde versie }
+              groups:
+                - title: { en: Version, nl: Versie }
+                  fields: [documentType, versionNumber, status, publishedAt, publishedBy, contentHash]

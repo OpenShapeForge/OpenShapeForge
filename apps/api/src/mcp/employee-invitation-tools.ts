@@ -23,6 +23,7 @@ import {
   inviteEmployee,
   listInvitations,
   revokeInvitation,
+  type EmployeeAdmission,
   type EmployeeInvitation,
   type EmployeeInvitationRole,
 } from "../auth/employee-invitations.js";
@@ -40,7 +41,7 @@ const INVITE_EMPLOYEE: Tool = {
   title: "Admit an employee",
   description:
     "Admit an employee or colleague into this organization with a pre-selected role. " +
-    "A new Keycloak organization member receives an invitation e-mail. Someone who is " +
+    "A person not yet in the Keycloak organization receives an invitation e-mail. Someone who is " +
     "already a member receives no redundant mail and can sign in again immediately. An " +
     "existing pending invitation is reused without resending it. For organization administrators.",
   inputSchema: {
@@ -129,6 +130,29 @@ function publicInvitation(invitation: EmployeeInvitation): Record<string, unknow
     invitedBy: invitation.invitedBy,
     invitedAt: invitation.invitedAt,
     revokedAt: invitation.revokedAt,
+  };
+}
+
+export function publicEmployeeAdmission(admission: EmployeeAdmission): Record<string, unknown> {
+  const outcome = admission.delivery === "sent"
+    ? {
+        reason: "invitation_sent",
+        nextStep: "The person must follow the invitation link and sign in.",
+      }
+    : admission.delivery === "not_required"
+    ? {
+        reason: "existing_organization_member",
+        nextStep: "No e-mail was needed. The person can sign in again now.",
+      }
+    : {
+        reason: "existing_invitation",
+        nextStep: "The existing invitation remains valid; this operation did not resend it.",
+      };
+  return {
+    admitted: true,
+    delivery: admission.delivery,
+    ...outcome,
+    ...publicInvitation(admission),
   };
 }
 
@@ -249,26 +273,7 @@ export async function callEmployeeInvitationTool(
       lastName: stringArgument(args, "lastName", false),
       role: role as EmployeeInvitationRole,
     });
-    const outcome = admission.delivery === "sent"
-      ? {
-          reason: "new_organization_member",
-          nextStep: "The person must follow the invitation link and sign in.",
-        }
-      : admission.delivery === "not_required"
-      ? {
-          reason: "existing_organization_member",
-          nextStep: "No e-mail was needed. The person can sign in again now.",
-        }
-      : {
-          reason: "existing_invitation",
-          nextStep: "The existing invitation remains valid; this operation did not resend it.",
-        };
-    return succeeded({
-      admitted: true,
-      delivery: admission.delivery,
-      ...outcome,
-      ...publicInvitation(admission),
-    });
+    return succeeded(publicEmployeeAdmission(admission));
   } catch (error) {
     return failed(error);
   }

@@ -63,7 +63,6 @@ import {
   resolveControlSession,
   type ControlSessionContext,
 } from "../control/control-session.js";
-import { CONTROL_PLUGIN } from "../control/operations.js";
 import {
   buildPlatformSessionInfo,
   PLATFORM_SERVER_INFO,
@@ -75,7 +74,11 @@ import {
 import type { ControlPresentation } from "../control/runtime.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { headersFromFastify } from "../http/headers.js";
-import type { ModuleOperationSuccessResult, ModuleRuntimeContext } from "../modules/contract.js";
+import type {
+  ModuleOperationSuccessResult,
+  ModuleRuntimeContext,
+  RuntimeModule,
+} from "../modules/contract.js";
 import {
   bindOperationHandlers,
   type BoundOperation,
@@ -195,6 +198,8 @@ export type ControlMcpOptions = {
    * naming what is missing.
    */
   context: ModuleRuntimeContext;
+  /** Loaded runtime modules whose control Operations join the core control plane. */
+  modules: readonly RuntimeModule[];
   /** Injected by tests; defaults to the generated catalog. */
   operations?: readonly OperationContract[] | undefined;
 };
@@ -203,13 +208,26 @@ export type ControlMcpOptions = {
 type SessionTool = { tool: Tool; entry: BoundOperation };
 
 /**
- * The control Operations bound for this process. Only the core plugin's
- * entries are of interest here: `bindOperationHandlers` binds the core
- * Operations in every process, module or no module.
+ * The control Operations bound for this process. Core control Operations are
+ * always present; loaded runtime modules may add their own control Operations.
+ * Filtering by the declared authorization mode keeps tenant Operations off
+ * this platform-only surface.
  */
-function bindControlOperations(operations: readonly OperationContract[]): readonly BoundOperation[] {
-  return [...bindOperationHandlers([], operations, { pluginOperations: "absent" }).values()]
-    .filter(({ operation }) => operation.plugin === CONTROL_PLUGIN);
+function bindControlOperations(
+  modules: readonly RuntimeModule[],
+  operations: readonly OperationContract[],
+): readonly BoundOperation[] {
+  const controlPlugins = new Set(
+    operations
+      .filter((operation) => operation.auth.mode === "control")
+      .map((operation) => operation.plugin),
+  );
+  const relevantOperations = operations.filter(
+    (operation) => operation.auth.mode === "control" || controlPlugins.has(operation.plugin),
+  );
+  const relevantModules = modules.filter((module) => controlPlugins.has(module.name));
+  return [...bindOperationHandlers(relevantModules, relevantOperations).values()]
+    .filter(({ operation }) => operation.auth.mode === "control");
 }
 
 /**
@@ -389,6 +407,7 @@ export function __buildPlatformServerForTests(input: {
   context: ModuleRuntimeContext;
   session: ControlSessionContext;
   operations: readonly OperationContract[];
+  modules?: readonly RuntimeModule[];
   client?: McpClientInfo | null;
   log?: (error: unknown) => void;
 }): Server {
@@ -397,7 +416,7 @@ export function __buildPlatformServerForTests(input: {
     context: input.context,
     db: input.context.db,
     session: input.session,
-    bound: bindControlOperations(input.operations),
+    bound: bindControlOperations(input.modules ?? [], input.operations),
     client: input.client ?? null,
     log: input.log ?? (() => undefined),
   });
@@ -407,7 +426,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
   const { context } = options;
   const configResult = context.control?.config ?? { ok: false as const, missing: ["the control runtime"] };
   const controlIssuer = configResult.ok ? configResult.config.operator.issuer : undefined;
-  const bound = bindControlOperations(options.operations ?? listOperationContracts());
+  const bound = bindControlOperations(options.modules, options.operations ?? listOperationContracts());
 
   if (!configResult.ok) {
     app.log.warn(

@@ -18,6 +18,8 @@ import { controlSessionFor, type ControlSessionContext } from "../../control/con
 import type { ControlRuntime } from "../../control/runtime.js";
 import { controlOperationContracts } from "../../control/__tests__/control-operation-fixtures.js";
 import type { DB } from "../../generated/db/types.js";
+import type { RuntimeModule } from "../../modules/contract.js";
+import type { OperationContract } from "../../operations/runtime.js";
 import { PLATFORM_GUIDE, PLATFORM_SESSION_RESOURCE_URI } from "../../control/platform-tools.js";
 import { __buildPlatformServerForTests } from "../control-mcp-server.js";
 
@@ -46,11 +48,15 @@ const runtime: ControlRuntime = {
   operations: controlOperationContracts(),
 };
 
-async function connect(session: ControlSessionContext) {
+async function connect(
+  session: ControlSessionContext,
+  options: { operations?: readonly OperationContract[]; modules?: readonly RuntimeModule[] } = {},
+) {
   const server = __buildPlatformServerForTests({
     context: { db, control: runtime },
     session,
-    operations: controlOperationContracts(),
+    operations: options.operations ?? controlOperationContracts(),
+    modules: options.modules ?? [],
     client: { name: "Claude Code", version: "2.1.0", capabilities: [] },
   });
   const client = new Client({ name: "control-mcp-test", version: "1" }, { capabilities: {} });
@@ -114,6 +120,63 @@ describe("the control MCP tool list", () => {
       expect(names).not.toContain("list_catalog_entries");
       expect(names).not.toContain("publish_update_notice");
       expect(names).not.toContain("list_platform_audit");
+    } finally {
+      await close();
+    }
+  });
+
+  test("includes a loaded plugin's control Operation without exposing tenant Operations", async () => {
+    const base = contracts.find((contract) => contract.handler === "listTenants")!;
+    const pluginControl: OperationContract = {
+      ...base,
+      key: "example-admin.seed-tenant",
+      plugin: "example-admin",
+      title: "Seed tenant",
+      description: "Seeds one tenant.",
+      handler: "seedTenant",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: { slug: { type: "string" } },
+        required: ["slug"],
+      },
+      outputSchema: { type: "object", additionalProperties: true },
+      transports: {
+        ...base.transports,
+        rest: { method: "POST", path: "/api/example/tenants/:slug/seed", response: { status: 200, kind: "json" } },
+        mcp: { enabled: true, name: "seed_tenant" },
+        typescript: { enabled: true, functionName: "exampleAdminSeedTenant" },
+      },
+    };
+    const tenantOperation: OperationContract = {
+      ...pluginControl,
+      key: "example-admin.tenant-only",
+      handler: "tenantOnly",
+      auth: { mode: "session", roles: ["employee"] },
+      tenancy: { mode: "required" },
+      transports: { ...pluginControl.transports, mcp: { enabled: true, name: "tenant_only" } },
+    };
+    const module: RuntimeModule = {
+      name: "example-admin",
+      operationHandlers: {
+        seedTenant: async (input) => ({
+          value: { tenantSlug: (input as Record<string, unknown>).slug },
+          status: 200,
+        }),
+        tenantOnly: async () => ({ value: { exposed: true }, status: 200 }),
+      },
+    };
+    const { client, close } = await connect(
+      controlSessionFor(administrator, ["platform_admin"]),
+      { operations: [...contracts, pluginControl, tenantOperation], modules: [module] },
+    );
+    try {
+      const names = (await client.listTools()).tools.map((tool) => tool.name);
+      expect(names).toContain("seed_tenant");
+      expect(names).not.toContain("tenant_only");
+      const result = await client.callTool({ name: "seed_tenant", arguments: { slug: "acme" } });
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toEqual({ tenantSlug: "acme" });
     } finally {
       await close();
     }

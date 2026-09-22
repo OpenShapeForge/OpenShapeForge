@@ -608,7 +608,11 @@ export function createApiApp(options: {
     // The platform administrator MCP (`/api/control/mcp`): the control realm,
     // its own small server (mcp/control-mcp-server.ts) over the same bound
     // control Operations the REST routes below serve under /api/control/v1.
-    registerControlMcpServer(routes, { context: moduleContext, operations: operationContracts });
+    registerControlMcpServer(routes, {
+      context: moduleContext,
+      modules: initialised.loaded,
+      operations: operationContracts,
+    });
 
     for (const module of initialised.loaded) {
       module.restRoutes?.(routes, moduleContext);

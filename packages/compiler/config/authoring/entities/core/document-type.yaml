@@ -16,6 +16,11 @@ pluralLabels:
 domains:
   - cases
   - governance
+versioning:
+  strategy: publishedSnapshot
+  versionEntity: DocumentTypeVersion
+  versionsField: versions
+  snapshot: { ownedRelationships: recursive }
 indexes:
   - name: document_types_tenant_code_uidx
     fields: [ tenantId, code ]
@@ -161,7 +166,7 @@ interfaces:
         subtitle: "{{code}}"
         layout:
           context:
-            fields: [ defaultConfidentiality, requiresRegistration, allowsExternalPublication ]
+            fields: [ defaultConfidentiality, requiresRegistration, allowsExternalPublication, lifecycleStatus, publishedVersion ]
             relationships: []
           tabs:
             - id: overview
@@ -171,6 +176,9 @@ interfaces:
                   fields: [ code, name, description ]
                 - title: { en: Registration and access, nl: Registratie en toegang }
                   fields: [ defaultConfidentiality, requiresRegistration, allowsExternalPublication ]
+            - id: versions
+              label: { en: Version history, nl: Versiehistorie }
+              relationship: versions
         modes:
           create:
             title: { en: Create document type, nl: Documenttype aanmaken }

@@ -311,6 +311,17 @@
         "rows": 4
       }
     },
+    "markdown": {
+      "label": {
+        "en": "Markdown",
+        "nl": "Markdown"
+      },
+      "baseType": "string",
+      "render": {
+        "display": "TextDisplay",
+        "input": "MarkdownText"
+      }
+    },
     "email": {
       "label": {
         "en": "Email",
@@ -38260,8 +38271,8 @@
       },
       "shape": [
         {
-          "key": "text",
-          "osfType": "multilineText",
+          "key": "markdown",
+          "osfType": "markdown",
           "required": true,
           "variables": "template",
           "label": {

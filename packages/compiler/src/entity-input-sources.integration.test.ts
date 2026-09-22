@@ -146,7 +146,7 @@ test("canonical entity input sources reach every generated operation interface",
     // Real identity-less definitions author their materialized value shape
     // from ordinary entity fields. Outputs must expand just like inputs.
     for (const [name, selected, route] of [
-      ["TextBlock", ["text"], "/api/content-blocks/text/materialize"],
+      ["TextBlock", ["markdown"], "/api/content-blocks/text/materialize"],
       ["YouTubeEmbed", ["title", "url", "showControls"], "/api/content-blocks/video/materialize"],
     ] as const) {
       const key = `${name}.materialize`;

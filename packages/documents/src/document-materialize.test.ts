@@ -18,8 +18,8 @@ const carrier: RuntimeEntityValueCarrier = {
   valuesColumn: "values", definitionColumn: "definition_key",
   definitions: {
     TextBlock: {
-      entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "text", osfType: "string", baseType: "string", required: true }],
-      valueSchema: { type: "object", properties: { text: { type: "string", minLength: 1 } }, required: ["text"], additionalProperties: false },
+      entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true }],
+      valueSchema: { type: "object", properties: { markdown: { type: "string", minLength: 1 } }, required: ["markdown"], additionalProperties: false },
       references: [], materializeOperationId: "TextBlock.materialize",
     },
     IncludeBlock: {
@@ -61,9 +61,9 @@ function fixture(options: { templateVersionId?: string | null; parameters?: unkn
   const executions: { id: string; input: Record<string, unknown> }[] = [];
   const data = { firstText: "First {{local.name}}", secondText: "Second", frozenText: "FROZEN-TEMPLATE-TEXT", includedText: "Included {{local.name}}" };
   const documentBlocks = () => [
-    { id: ids.first, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 0, variant_id: null, origin: "template", template_block_id: ids.templateBlock, diverged: true, locked: false, definition_key: "TextBlock", definition_version: 1, values: { text: data.firstText }, include_version_id: null },
+    { id: ids.first, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 0, variant_id: null, origin: "template", template_block_id: ids.templateBlock, diverged: true, locked: false, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.firstText }, include_version_id: null },
     ...(options.withInclusion ? [{ id: ids.include, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 1, variant_id: null, origin: "local", template_block_id: null, diverged: false, locked: false, definition_key: "IncludeBlock", definition_version: 1, values: { parameters: {} }, include_version_id: ids.included }] : []),
-    { id: ids.second, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 2, variant_id: null, origin: "local", template_block_id: null, diverged: false, locked: false, definition_key: "TextBlock", definition_version: 1, values: { text: data.secondText }, include_version_id: null },
+    { id: ids.second, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 2, variant_id: null, origin: "local", template_block_id: null, diverged: false, locked: false, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.secondText }, include_version_id: null },
   ];
   const context = {
     transport: "operation",
@@ -87,7 +87,7 @@ function fixture(options: { templateVersionId?: string | null; parameters?: unkn
             // The pinned version is read raw under the document's authority; an inclusion's row is only locked here.
             if (!query.sql.startsWith("select template_id")) return { rows: [{ id: query.parameters[1] }] };
             expect(query.parameters[1]).toBe(ids.version);
-            const frozenBlock = { id: ids.templateBlock, tenant_id: ids.tenant, variant_id: ids.templateVariant, variant_id_position: 0, definition_key: "TextBlock", definition_version: 1, values: { text: data.frozenText } };
+            const frozenBlock = { id: ids.templateBlock, tenant_id: ids.tenant, variant_id: ids.templateVariant, variant_id_position: 0, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.frozenText } };
             return { rows: [{ template_id: ids.template, version_number: 3, snapshot: templateSnapshot(ids.template, ids.templateVariant, [frozenBlock]) }] };
           }
           if (query.sql.includes("from erp.document_variants")) {
@@ -108,11 +108,11 @@ function fixture(options: { templateVersionId?: string | null; parameters?: unkn
             reads.push(`${request.operation.entityName}:${request.input.id}`);
             const base = { id: request.input.id, tenantId: ids.tenant, updatedAt: "2026-01-01T00:00:00Z" };
             if (request.input.id === ids.version) {
-              const frozenBlock = { id: ids.templateBlock, tenant_id: ids.tenant, variant_id: ids.templateVariant, variant_id_position: 0, definition_key: "TextBlock", definition_version: 1, values: { text: data.frozenText } };
+              const frozenBlock = { id: ids.templateBlock, tenant_id: ids.tenant, variant_id: ids.templateVariant, variant_id_position: 0, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.frozenText } };
               return { data: { ...base, template: ids.template, versionNumber: 3, snapshot: templateSnapshot(ids.template, ids.templateVariant, [frozenBlock]) }, operations: [] };
             }
             if (request.input.id === ids.included) {
-              const includedBlock = { id: ids.includedBlock, tenant_id: ids.tenant, variant_id: ids.includedVariant, variant_id_position: 0, definition_key: "TextBlock", definition_version: 1, values: { text: data.includedText } };
+              const includedBlock = { id: ids.includedBlock, tenant_id: ids.tenant, variant_id: ids.includedVariant, variant_id_position: 0, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.includedText } };
               return { data: { ...base, template: ids.include, versionNumber: 1, snapshot: templateSnapshot(ids.include, ids.includedVariant, [includedBlock]) }, operations: [] };
             }
             return { data: null, operations: [] };
@@ -138,7 +138,7 @@ describe("contentBlockFromRow", () => {
     });
   });
   test("refuses a row owned by another variant, without a definition version, or of an unknown definition", () => {
-    const row = { id: ids.first, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, definition_key: "TextBlock", definition_version: 1, values: { text: "x" } };
+    const row = { id: ids.first, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, definition_key: "TextBlock", definition_version: 1, values: { markdown: "x" } };
     expect(() => contentBlockFromRow(row, { column: "document_variant_id", id: ids.second }, selection, "stored")).toThrow(/stored block belongs to another variant/);
     expect(() => contentBlockFromRow({ ...row, definition_version: null }, { column: "document_variant_id", id: ids.documentVariant }, selection, "stored")).toThrow(/no definition version/);
     expect(() => contentBlockFromRow({ ...row, definition_key: "Unknown" }, { column: "document_variant_id", id: ids.documentVariant }, selection)).toThrow();
@@ -162,8 +162,8 @@ describe("Document.materialize", () => {
     expect(snapshot.templates[0].version).toMatchObject({ id: ids.version, templateId: ids.template, versionNumber: 3 });
     expect(snapshot.templates[0].version.variants[0].id).toBe(ids.documentVariant);
     expect(snapshot.blocks.map((block: { id: string }) => block.id)).toEqual([ids.first, ids.second]);
-    expect(snapshot.blocks[0].values.text).toBe("First Ada");
-    expect(snapshot.blocks[1].values.text).toBe("Second");
+    expect(snapshot.blocks[0].values.markdown).toBe("First Ada");
+    expect(snapshot.blocks[1].values.markdown).toBe("Second");
     expect(JSON.stringify(snapshot)).not.toContain(f.data.frozenText);
     // The pinned version is the document's own: its read needs no TemplateVersion or Template role.
     expect(f.authorizations).toEqual([`Document:${ids.document}`]);
@@ -179,7 +179,7 @@ describe("Document.materialize", () => {
     const response = await materializeDocument(request, g.context);
     // The engine fills defaults before validation, so an absent row value only leaves the template default.
     expect(g.validated).toEqual([{ name: "Reader" }]);
-    expect((response as any).value.blocks[0].values.text).toBe("First Reader");
+    expect((response as any).value.blocks[0].values.markdown).toBe("First Reader");
   });
   test("resolves an included template version from its frozen snapshot while the root stays live", async () => {
     const f = fixture({ withInclusion: true });

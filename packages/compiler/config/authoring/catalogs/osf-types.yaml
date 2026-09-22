@@ -98,6 +98,13 @@ types:
     props:
       rows: 4
 
+  markdown:
+    label: { en: Markdown, nl: Markdown }
+    baseType: string
+    render:
+      display: TextDisplay
+      input: MarkdownText
+
   email:
     label: { en: Email, nl: E-mail }
     baseType: string

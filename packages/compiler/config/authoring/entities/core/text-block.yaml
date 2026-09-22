@@ -9,13 +9,13 @@ pluralLabels: { en: Texts, nl: Teksten }
 domains: [documents]
 # The Block placement supplies identity. This definition supplies its fields.
 baseEntity: false
-displayTemplate: "{{text}}"
+displayTemplate: "{{markdown}}"
 authorization:
   roles:
     read: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
 fields:
-  - key: text
-    osfType: multilineText
+  - key: markdown
+    osfType: markdown
     required: true
     variables: template
     label: { en: Text, nl: Tekst }
@@ -42,7 +42,7 @@ operations:
         properties:
           kind: { type: string, const: block }
           value:
-            x-osf-entityInput: { entity: TextBlock, fields: [text] }
+            x-osf-entityInput: { entity: TextBlock, fields: [markdown] }
     errors: []
     auth: { mode: session, roles: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite] }
     tenancy: { mode: required }

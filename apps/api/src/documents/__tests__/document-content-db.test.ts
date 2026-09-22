@@ -21,8 +21,8 @@ import {
   restricted, seedTemplate, tenant, variant, variantBlocks, variants,
 } from "./document-content-fixture.js";
 
-const shape = (blocks: { origin: string; template_block_id: string | null; diverged: boolean; text: string }[]) =>
-  blocks.map((block) => [block.origin, block.template_block_id, block.diverged, block.text]);
+const shape = (blocks: { origin: string; template_block_id: string | null; diverged: boolean; markdown: string }[]) =>
+  blocks.map((block) => [block.origin, block.template_block_id, block.diverged, block.markdown]);
 const binding = (action: "insert" | "update" | "remove" | "move") => ({ entityName: "DocumentVariant", field: "blocks", action });
 
 describe("document content against PostgreSQL", () => {
@@ -51,17 +51,17 @@ describe("document content against PostgreSQL", () => {
     // Local work through the owner-scoped collection Operations: edit the second block, insert a local block before it.
     const session = dbInput(editor);
     const version = async () => (await variant(documentId, "document", "nl")).updated_at;
-    const edited = await collections(restricted(), session, binding("update"), { id: nl.id, expectedVersion: await version(), childId: blocks[1]!.id, values: { values: { text: "Second, edited here" } } });
+    const edited = await collections(restricted(), session, binding("update"), { id: nl.id, expectedVersion: await version(), childId: blocks[1]!.id, values: { values: { markdown: "Second, edited here" } } });
     expect(edited.orderedIds).toEqual(blocks.map((block) => block.id));
-    const inserted = await collections(restricted(), session, binding("insert"), { id: nl.id, expectedVersion: await version(), beforeId: blocks[1]!.id, values: { definitionKey: "TextBlock", values: { text: "Local note" } } });
+    const inserted = await collections(restricted(), session, binding("insert"), { id: nl.id, expectedVersion: await version(), beforeId: blocks[1]!.id, values: { definitionKey: "TextBlock", values: { markdown: "Local note" } } });
     expect(inserted.orderedIds).toEqual([blocks[0]!.id, inserted.childId, blocks[1]!.id]);
     const untouched = (await variantBlocks(nl.id))[0]!.updated_at;
 
     // Template work: change the first block, append a locked third, then republish.
     const third = randomUUID();
-    await sql`update erp.blocks set "values" = ${jsonbLiteral({ text: "Hello again {{local.name}}" })} where id = ${ids.first}::uuid`.execute(privileged());
+    await sql`update erp.blocks set "values" = ${jsonbLiteral({ markdown: "Hello again {{local.name}}" })} where id = ${ids.first}::uuid`.execute(privileged());
     await sql`insert into erp.blocks (id, tenant_id, variant_id, variant_id_position, definition_key, "values", locked)
-      values (${third}::uuid, ${tenant}::uuid, ${ids.variant}::uuid, 2, 'TextBlock', ${jsonbLiteral({ text: "Third" })}, true)`.execute(privileged());
+      values (${third}::uuid, ${tenant}::uuid, ${ids.variant}::uuid, 2, 'TextBlock', ${jsonbLiteral({ markdown: "Third" })}, true)`.execute(privileged());
     const secondVersion = await publishTemplate(context, ids.template);
     expect(await document(documentId)).toMatchObject({ template_version_id: secondVersion, follow_error: null, lifecycle_status: "draft" });
     blocks = await variantBlocks(nl.id);
@@ -76,11 +76,11 @@ describe("document content against PostgreSQL", () => {
     expect(events.at(-1)).toMatchObject({ aggregateType: "document", eventType: "updated", payload: { table: "documents", operation: "updated" } });
 
     // A locked block refuses the owner-scoped update, move and remove; the others still work.
-    await fails(collections(restricted(), session, binding("update"), { id: nl.id, expectedVersion: await version(), childId: blocks[3]!.id, values: { values: { text: "Not allowed" } } }), "INVALID_STATE");
+    await fails(collections(restricted(), session, binding("update"), { id: nl.id, expectedVersion: await version(), childId: blocks[3]!.id, values: { values: { markdown: "Not allowed" } } }), "INVALID_STATE");
     await fails(collections(restricted(), session, binding("move"), { id: nl.id, expectedVersion: await version(), childId: blocks[3]!.id, beforeId: blocks[0]!.id }), "INVALID_STATE");
     await fails(collections(restricted(), session, binding("remove"), { id: nl.id, expectedVersion: await version(), childId: blocks[3]!.id }), "INVALID_STATE");
     await collections(restricted(), session, binding("move"), { id: nl.id, expectedVersion: await version(), childId: blocks[1]!.id, beforeId: blocks[0]!.id });
-    expect((await variantBlocks(nl.id)).map((block) => block.text)).toEqual(["Local note", "Hello again {{local.name}}", "Second, edited here", "Third"]);
+    expect((await variantBlocks(nl.id)).map((block) => block.markdown)).toEqual(["Local note", "Hello again {{local.name}}", "Second, edited here", "Third"]);
 
     // A republish without content changes is the same version again and leaves the untouched block's version alone.
     const before = (await variantBlocks(nl.id)).find((block) => block.template_block_id === ids.first)!.updated_at;
@@ -95,25 +95,25 @@ describe("document content against PostgreSQL", () => {
     const published = await publishDocument(context, documentId);
     expect(published).toMatchObject({ document_id: documentId, version_number: 1, status: "published", version_label: "snapshot-1" });
     expect(await document(documentId)).toMatchObject({ lifecycle_status: "published", published_version_id: published.id, latest_version: 1 });
-    const snapshot = published.snapshot as { entity: string; head: { row: { id: string }; children: Record<string, { row: { channel: string }; children: Record<string, { row: { values: { text: string } } }[]> }[]> } };
+    const snapshot = published.snapshot as { entity: string; head: { row: { id: string }; children: Record<string, { row: { channel: string }; children: Record<string, { row: { values: { markdown: string } } }[]> }[]> } };
     expect(snapshot.entity).toBe("Document");
     expect(snapshot.head.row.id).toBe(documentId);
     const frozen = snapshot.head.children.document_variants!.find((entry) => entry.row.channel === "document")!;
-    expect(frozen.children.blocks!.map((block) => block.row.values.text)).toEqual(["Local note", "Hello again {{local.name}}", "Second, edited here", "Third"]);
+    expect(frozen.children.blocks!.map((block) => block.row.values.markdown)).toEqual(["Local note", "Hello again {{local.name}}", "Second, edited here", "Third"]);
     const stored = (await sql<{ n: number }>`select count(*)::int as n from erp.document_versions where document_id = ${documentId}::uuid`.execute(privileged())).rows[0]!;
     expect(stored.n).toBe(3);
     // The head stays editable and a further republish moves it back to draft.
-    await sql`update erp.blocks set "values" = ${jsonbLiteral({ text: "Fourth" })} where id = ${third}::uuid`.execute(privileged());
+    await sql`update erp.blocks set "values" = ${jsonbLiteral({ markdown: "Fourth" })} where id = ${third}::uuid`.execute(privileged());
     await publishTemplate(context, ids.template);
     expect(await document(documentId)).toMatchObject({ lifecycle_status: "draft", published_version_id: published.id });
-    expect((await variantBlocks(nl.id)).at(-1)!.text).toBe("Fourth");
+    expect((await variantBlocks(nl.id)).at(-1)!.markdown).toBe("Fourth");
   }, 60_000);
 
   test("re-linking follows the same template; another template is refused with local blocks unless replaced", async () => {
     const { context, handlers } = platformFor(editor);
     const ids = await seedTemplate();
     const firstVersion = await publishTemplate(context, ids.template);
-    await sql`update erp.blocks set "values" = ${jsonbLiteral({ text: "Changed" })} where id = ${ids.first}::uuid`.execute(privileged());
+    await sql`update erp.blocks set "values" = ${jsonbLiteral({ markdown: "Changed" })} where id = ${ids.first}::uuid`.execute(privileged());
     const secondVersion = await publishTemplate(context, ids.template);
     const other = await seedTemplate();
     const otherVersion = await publishTemplate(context, other.template);
@@ -121,10 +121,10 @@ describe("document content against PostgreSQL", () => {
     // An older published version links too; the follow rule only moves documents forward on a republish.
     await linked(handlers, context, { id: documentId, templateVersionId: firstVersion });
     const nl = await variant(documentId, "document", "nl");
-    await collections(restricted(), dbInput(editor), binding("insert"), { id: nl.id, expectedVersion: nl.updated_at, values: { definitionKey: "TextBlock", values: { text: "Mine" } } });
+    await collections(restricted(), dbInput(editor), binding("insert"), { id: nl.id, expectedVersion: nl.updated_at, values: { definitionKey: "TextBlock", values: { markdown: "Mine" } } });
     // Same template, newer version: followed, the local block survives.
     await linked(handlers, context, { id: documentId, templateVersionId: secondVersion });
-    expect((await variantBlocks(nl.id)).map((block) => block.text)).toEqual(["Changed", "Second", "Mine"]);
+    expect((await variantBlocks(nl.id)).map((block) => block.markdown)).toEqual(["Changed", "Second", "Mine"]);
     // Another template: refused while local blocks exist, replaced on request.
     await fails(handlers.linkTemplate!({ id: documentId, templateVersionId: otherVersion }, context), "INVALID_STATE");
     expect((await document(documentId)).template_version_id).toBe(secondVersion);
@@ -144,7 +144,7 @@ describe("document content against PostgreSQL", () => {
     const firstVersion = await publishTemplate(context, ids.template);
     const [broken, fine] = [await createDocument(), await createDocument()].sort() as [string, string];
     for (const id of [broken, fine]) await linked(handlers, context, { id, templateVersionId: firstVersion, parameters: { name: "A" } });
-    await sql`update erp.blocks set "values" = ${jsonbLiteral({ text: "Changed" })} where id = ${ids.first}::uuid`.execute(privileged());
+    await sql`update erp.blocks set "values" = ${jsonbLiteral({ markdown: "Changed" })} where id = ${ids.first}::uuid`.execute(privileged());
     // Publish for real, through a transaction whose position update fails for the first document only.
     const platform = context.platform as unknown as { db: { withSession: <T>(session: unknown, work: (trx: unknown) => Promise<T>) => Promise<T> } };
     const inner = platform.db.withSession;
@@ -156,9 +156,9 @@ describe("document content against PostgreSQL", () => {
     const secondVersion = await publishTemplate(context, ids.template);
     expect(failures).toBe(2);
     expect(await document(broken)).toMatchObject({ template_version_id: firstVersion, follow_error: "The document could not follow the new template version." });
-    expect((await variantBlocks((await variant(broken, "document", "nl")).id))[0]!.text).toBe("Hello {{local.name}}");
+    expect((await variantBlocks((await variant(broken, "document", "nl")).id))[0]!.markdown).toBe("Hello {{local.name}}");
     expect(await document(fine)).toMatchObject({ template_version_id: secondVersion, follow_error: null });
-    expect((await variantBlocks((await variant(fine, "document", "nl")).id))[0]!.text).toBe("Changed");
+    expect((await variantBlocks((await variant(fine, "document", "nl")).id))[0]!.markdown).toBe("Changed");
   }, 60_000);
 
   test("a new template variant is added and a removed one is kept with a follow problem", async () => {
@@ -169,14 +169,14 @@ describe("document content against PostgreSQL", () => {
     await linked(handlers, context, { id: documentId, templateVersionId: firstVersion });
     const email = randomUUID();
     await sql`insert into erp.template_variants (id, tenant_id, template_id, channel, locale) values (${email}::uuid, ${tenant}::uuid, ${ids.template}::uuid, 'email', 'nl')`.execute(privileged());
-    await sql`insert into erp.blocks (id, tenant_id, variant_id, variant_id_position, definition_key, "values") values (${randomUUID()}::uuid, ${tenant}::uuid, ${email}::uuid, 0, 'TextBlock', ${jsonbLiteral({ text: "Mail" })})`.execute(privileged());
+    await sql`insert into erp.blocks (id, tenant_id, variant_id, variant_id_position, definition_key, "values") values (${randomUUID()}::uuid, ${tenant}::uuid, ${email}::uuid, 0, 'TextBlock', ${jsonbLiteral({ markdown: "Mail" })})`.execute(privileged());
     await publishTemplate(platformFor(publisher).context, ids.template);
     expect((await variants(documentId)).map((entry) => [entry.channel, entry.locale])).toEqual([["document", "nl"], ["email", "nl"]]);
-    expect((await variantBlocks((await variant(documentId, "email", "nl")).id)).map((block) => block.text)).toEqual(["Mail"]);
+    expect((await variantBlocks((await variant(documentId, "email", "nl")).id)).map((block) => block.markdown)).toEqual(["Mail"]);
     expect((await document(documentId)).follow_error).toBeNull();
     await sql`delete from erp.template_variants where id = ${ids.variant}::uuid`.execute(privileged());
     const thirdVersion = await publishTemplate(platformFor(publisher).context, ids.template);
     expect(await document(documentId)).toMatchObject({ template_version_id: thirdVersion, follow_error: "The template no longer has variant(s) document/nl; they were left as they are." });
-    expect((await variantBlocks((await variant(documentId, "document", "nl")).id)).map((block) => block.text)).toEqual(["Hello {{local.name}}", "Second"]);
+    expect((await variantBlocks((await variant(documentId, "document", "nl")).id)).map((block) => block.markdown)).toEqual(["Hello {{local.name}}", "Second"]);
   }, 60_000);
 });

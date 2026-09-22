@@ -13,8 +13,8 @@ const carrier: RuntimeEntityValueCarrier = {
   valuesColumn: "values", definitionColumn: "definition_key",
   definitions: {
     TextBlock: {
-      entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "text", osfType: "string", baseType: "string", required: true }],
-      valueSchema: { type: "object", properties: { text: { type: "string", minLength: 1 } }, required: ["text"], additionalProperties: false },
+      entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true }],
+      valueSchema: { type: "object", properties: { markdown: { type: "string", minLength: 1 } }, required: ["markdown"], additionalProperties: false },
       references: [], materializeOperationId: "TextBlock.materialize",
     },
     IncludeBlock: {
@@ -31,10 +31,10 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
   const executions: unknown[] = [];
   const reads: string[] = [];
   const queries: string[] = [];
-  const data = { text: "Hello {{local.name}} from {{chips.brand}}", chip: "Example", tenant: ids.tenant, unavailableOperation: false, disallowText: false,
+  const data = { markdown: "Hello {{local.name}} from {{chips.brand}}", chip: "Example", tenant: ids.tenant, unavailableOperation: false, disallowText: false,
     redactChip: false, missingRead: "", snapshotTemplate: ids.template, liveText: "LIVE-ROW-MUST-NOT-LEAK", variantLocale: "en", variantDefault: false };
   const compiledCarrier = structuredClone({ ...carrier, definitions: { ...carrier.definitions,
-    TextBlock: { ...carrier.definitions.TextBlock!, fields: [{ key: "text", osfType: "string", baseType: "string", required: true,
+    TextBlock: { ...carrier.definitions.TextBlock!, fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true,
       ...(blockDefault === undefined ? {} : { defaultValue: blockDefault }) },
       ...(withReference ? [{ key: "brand", osfType: "Chip", baseType: "string", required: true, relationship: { target: "Chip" } }] : [])],
       references: withReference ? [{ fieldKey: "brand", targetEntity: "Chip", column: "text_brand_id", schema: "erp", table: "chips", required: true,
@@ -43,7 +43,7 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
   } });
   const op = {
     id: "TextBlock.materialize", intent: "invoke", effects: { data: "read", external: "none" },
-    output: { kind: "json-schema", schema: { type: "object", properties: { value: { type: "object", properties: { text: { type: "string", title: "Text" } } } } } },
+    output: { kind: "json-schema", schema: { type: "object", properties: { value: { type: "object", properties: { markdown: { type: "string", title: "Text" } } } } } },
     input: { kind: "json-schema", schema: { type: "object", required: ["definitionKey", "values"], properties: { definitionKey: { const: "TextBlock" }, values: { type: "object" } } } },
   };
   const context = {
@@ -84,7 +84,7 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
             const entity = request.operation.entityName!;
             reads.push(entity);
             const base = { id: request.input.id, tenantId: data.tenant, updatedAt: "2026-01-01T00:00:00Z" };
-            const blockRow = { id: ids.block, tenant_id: data.tenant, variant_id: ids.variant, variant_id_position: 0, definition_key: "TextBlock", definition_version: 1, values: { text: data.text },
+            const blockRow = { id: ids.block, tenant_id: data.tenant, variant_id: ids.variant, variant_id_position: 0, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.markdown },
               ...(withReference ? (withBinding ? { text_brand_parameter: "brand", text_brand_id: null } : { text_brand_id: ids.chip, text_brand_parameter: null }) : {}) };
             const snapshot = { schemaVersion: 1, entity: "Template", head: { table: "templates",
               row: { id: data.snapshotTemplate, tenant_id: data.tenant, parameters: [{ key: "name", osfType: "string", defaultValue: "Reader" }] },
@@ -96,7 +96,7 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
               TemplateVersion: { ...base, template: ids.template, versionNumber: 1, snapshot },
               // Live rows drifted after publish; a materialization that shows them is a bug.
               TemplateVariant: { ...base, template: ids.template, channel: "document", locale: "en" },
-              Block: { ...base, variant: ids.variant, definitionKey: "TextBlock", definitionVersion: 1, values: { text: data.liveText } },
+              Block: { ...base, variant: ids.variant, definitionKey: "TextBlock", definitionVersion: 1, values: { markdown: data.liveText } },
               Chip: { ...base, key: "brand", value: data.redactChip ? null : data.chip },
             };
             return { data: records[entity], operations: [] };
@@ -129,18 +129,18 @@ describe("template materialization runtime adapter", () => {
     const f = fixture();
     const response = await materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context);
     expect("value" in response).toBe(true);
-    const snapshot = (response as { value: { blocks: Array<{ values: { text: string }; materialization: unknown }> } }).value;
-    expect(snapshot.blocks[0]!.values.text).toBe("Hello Reader from Example");
-    expect(snapshot.blocks[0]!.materialization).toEqual({ operationId: "TextBlock.materialize", result: { kind: "block", value: { text: "Hello Reader from Example" } } });
+    const snapshot = (response as { value: { blocks: Array<{ values: { markdown: string }; materialization: unknown }> } }).value;
+    expect(snapshot.blocks[0]!.values.markdown).toBe("Hello Reader from Example");
+    expect(snapshot.blocks[0]!.materialization).toEqual({ operationId: "TextBlock.materialize", result: { kind: "block", value: { markdown: "Hello Reader from Example" } } });
     expect(f.authorizations).toEqual([`TemplateVersion:${ids.version}`, `Template:${ids.template}`, `Chip:${ids.chip}`]);
     expect(f.calls[0]!.schema).toBe(f.carrier.definitions.TextBlock!.valueSchema);
     expect(f.reads).toEqual(["TemplateVersion", "Chip"]);
     expect(JSON.stringify(snapshot)).not.toContain(f.data.liveText);
     expect(f.queries.every(query => query.startsWith("select id from "))).toBe(true);
     expect(f.executions).toHaveLength(1);
-    expect((response as any).value.definitions.TextBlock.materializationSchema.properties.value.properties.text.title).toBe("Text");
+    expect((response as any).value.definitions.TextBlock.materializationSchema.properties.value.properties.markdown.title).toBe("Text");
     f.data.chip = "Changed";
-    expect(snapshot.blocks[0]!.values.text).toBe("Hello Reader from Example");
+    expect(snapshot.blocks[0]!.values.markdown).toBe("Hello Reader from Example");
   });
   test("does not return data when the block materialization Operation is missing", async () => {
     const f = fixture();
@@ -198,12 +198,12 @@ describe("template materialization runtime adapter", () => {
   });
   test("uses authorized logical reference IDs and preserves reference-field redaction in frozen sources", async () => {
     const f = fixture(undefined, true);
-    f.data.text = "Public caption";
+    f.data.markdown = "Public caption";
     f.data.chip = "confidential-reference-fixture";
     f.data.redactChip = true;
     const result = await materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context);
     const snapshot = (result as { value: { blocks: Array<{ values: unknown; references: Record<string, unknown> }> } }).value;
-    expect(snapshot.blocks[0]!.values).toEqual({ text: "Public caption" });
+    expect(snapshot.blocks[0]!.values).toEqual({ markdown: "Public caption" });
     expect(snapshot.blocks[0]!.references.brand).toMatchObject({ entity: "Chip", id: ids.chip, value: { value: null } });
     expect(JSON.stringify(snapshot)).not.toContain(f.data.chip);
     expect(f.queries.every(query => query.startsWith("select id from "))).toBe(true);

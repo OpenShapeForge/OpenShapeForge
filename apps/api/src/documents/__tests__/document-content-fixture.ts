@@ -156,8 +156,8 @@ export async function seedTemplate() {
   await sql`insert into erp.templates (id, tenant_id, key, name, parameters) values (${ids.template}::uuid, ${tenant}::uuid, ${`welcome-${ids.template.slice(0, 8)}`}, 'Welcome', ${jsonbLiteral(parameters)})`.execute(privileged());
   await sql`insert into erp.template_variants (id, tenant_id, template_id, channel, locale) values (${ids.variant}::uuid, ${tenant}::uuid, ${ids.template}::uuid, 'document', 'nl')`.execute(privileged());
   await sql`insert into erp.blocks (id, tenant_id, variant_id, variant_id_position, definition_key, "values") values
-    (${ids.first}::uuid, ${tenant}::uuid, ${ids.variant}::uuid, 0, 'TextBlock', ${jsonbLiteral({ text: "Hello {{local.name}}" })}),
-    (${ids.second}::uuid, ${tenant}::uuid, ${ids.variant}::uuid, 1, 'TextBlock', ${jsonbLiteral({ text: "Second" })})`.execute(privileged());
+    (${ids.first}::uuid, ${tenant}::uuid, ${ids.variant}::uuid, 0, 'TextBlock', ${jsonbLiteral({ markdown: "Hello {{local.name}}" })}),
+    (${ids.second}::uuid, ${tenant}::uuid, ${ids.variant}::uuid, 1, 'TextBlock', ${jsonbLiteral({ markdown: "Second" })})`.execute(privileged());
   return ids;
 }
 export async function publishTemplate(context: ModuleOperationContext, templateId: string) {
@@ -170,9 +170,9 @@ export async function createDocument() {
       ${jsonbLiteral({ title: "Welcome letter", documentType: "outgoing_mail", status: "draft", isExternal: false })},
       ${jsonbLiteral({ versionLabel: "0", status: "draft", isMajorVersion: false })})`.execute(trx)).rows[0]!.document_id);
 }
-export type VariantBlock = { id: string; origin: string; template_block_id: string | null; diverged: boolean; locked: boolean; text: string; updated_at: string };
+export type VariantBlock = { id: string; origin: string; template_block_id: string | null; diverged: boolean; locked: boolean; markdown: string; updated_at: string };
 export async function variantBlocks(variantId: string): Promise<VariantBlock[]> {
-  return (await sql<VariantBlock>`select id, origin, template_block_id, diverged, locked, "values"->>'text' as text, updated_at::text as updated_at
+  return (await sql<VariantBlock>`select id, origin, template_block_id, diverged, locked, "values"->>'markdown' as markdown, updated_at::text as updated_at
     from erp.blocks where document_variant_id = ${variantId}::uuid order by document_variant_id_position, id`.execute(privileged())).rows;
 }
 export type Variant = { id: string; channel: string; locale: string; updated_at: string };

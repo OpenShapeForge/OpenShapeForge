@@ -30,7 +30,7 @@ const tenantId = randomUUID();
 const ids = { template: randomUUID(), variant: randomUUID(), first: randomUUID(), second: randomUUID(), late: randomUUID() };
 const session = { tenantId, userId: randomUUID(), roles: ["Organization.All.ReadWrite"], groups: [], relationGroupIds: [], scope: "tenant" as const, credential: "bearer" as const };
 const nested = { template: randomUUID(), variant: randomUUID(), block: randomUUID(), outer: randomUUID(), outerVariant: randomUUID(), include: randomUUID(), outerText: randomUUID() };
-/** Input shapes as authored in entities/core/text-block.yaml and template-block.yaml. */
+/** Input shapes as authored in entities/core/markdown-block.yaml and template-block.yaml. */
 const operations: Record<string, unknown> = {
   "TextBlock.materialize": { id: "TextBlock.materialize", intent: "invoke", effects: { data: "read", external: "none" }, output: { kind: "json-schema", schema: { type: "object" } },
     input: { kind: "json-schema", schema: { type: "object", required: ["definitionKey", "values"], properties: { definitionKey: { const: "TextBlock" }, values: { type: "object" } } } } },
@@ -82,7 +82,7 @@ function context(): ModuleOperationContext {
 async function materialize(templateVersionId: string, parameters?: Record<string, unknown>) {
   const result = await documents.operationHandlers.materializeTemplate!({ templateVersionId, channel: "document", locale: "en", ...(parameters ? { parameters } : {}) }, context());
   if (!("value" in result)) throw new Error(`Materialization failed: ${JSON.stringify(result)}`);
-  return result.value as { blocks: { id: string; path: string[]; values: { text: string } }[]; compositionHash: string;
+  return result.value as { blocks: { id: string; path: string[]; values: { markdown: string } }[]; compositionHash: string;
     compositions: { path: string[]; definitionKey: string; templateReference: { entity: string; id: string } }[];
     templates: { path: string[]; parameters: Record<string, unknown>; version: { id: string; variants: { id: string; blocks: { id: string }[] }[] } }[] };
 }
@@ -91,9 +91,9 @@ async function publish(templateId = ids.template): Promise<string> {
   if (!("value" in result)) throw new Error(`Publish failed: ${JSON.stringify(result)}`);
   return String((result.value as { id: string }).id);
 }
-async function insertBlock(id: string, position: number, text: string, variantId = ids.variant) {
+async function insertBlock(id: string, position: number, markdown: string, variantId = ids.variant) {
   await sql`insert into erp.blocks (id, tenant_id, variant_id, variant_id_position, definition_key, definition_version, "values")
-    values (${id}::uuid, ${tenantId}::uuid, ${variantId}::uuid, ${position}, 'TextBlock', 1, ${jsonbLiteral({ text })})`.execute(privileged.db);
+    values (${id}::uuid, ${tenantId}::uuid, ${variantId}::uuid, ${position}, 'TextBlock', 1, ${jsonbLiteral({ markdown })})`.execute(privileged.db);
 }
 /** The reference lives in its generated column, exactly as the compiled carrier names it. */
 async function insertTemplateBlock(id: string, variantId: string, position: number, versionId: string) {
@@ -135,17 +135,17 @@ describe("TemplateVersion.materialize reads the frozen snapshot, not the live ta
     const versionId = await publish();
     const frozen = await materialize(versionId);
     expect(frozen.blocks.map((block) => block.id)).toEqual([ids.first, ids.second]);
-    expect(frozen.blocks.map((block) => block.values.text)).toEqual(["Hello Reader", "Second paragraph"]);
+    expect(frozen.blocks.map((block) => block.values.markdown)).toEqual(["Hello Reader", "Second paragraph"]);
 
     // Drift the live rows in every way an editor can: edit, delete, insert, reorder, change parameter defaults.
-    await sql`update erp.blocks set "values" = ${jsonbLiteral({ text: "MUTATED first" })}, variant_id_position = 5 where id = ${ids.first}::uuid`.execute(privileged.db);
+    await sql`update erp.blocks set "values" = ${jsonbLiteral({ markdown: "MUTATED first" })}, variant_id_position = 5 where id = ${ids.first}::uuid`.execute(privileged.db);
     await sql`delete from erp.blocks where id = ${ids.second}::uuid`.execute(privileged.db);
     await insertBlock(ids.late, 0, "MUTATED late insert");
     await sql`update erp.templates set parameters = ${jsonbLiteral([{ key: "name", osfType: "string", defaultValue: "MUTATED" }])} where id = ${ids.template}::uuid`.execute(privileged.db);
 
     const pinned = await materialize(versionId);
     expect(pinned.blocks.map((block) => block.id)).toEqual([ids.first, ids.second]);
-    expect(pinned.blocks.map((block) => block.values.text)).toEqual(["Hello Reader", "Second paragraph"]);
+    expect(pinned.blocks.map((block) => block.values.markdown)).toEqual(["Hello Reader", "Second paragraph"]);
     expect(pinned.templates[0]!.version.variants[0]!.blocks.map((block) => block.id)).toEqual([ids.first, ids.second]);
     expect(pinned.templates[0]!.parameters).toEqual({ name: "Reader" });
     expect(pinned.compositionHash).toBe(frozen.compositionHash);
@@ -160,7 +160,7 @@ describe("TemplateVersion.materialize reads the frozen snapshot, not the live ta
     const nextVersionId = await publish();
     expect(nextVersionId).not.toBe(versionId);
     const next = await materialize(nextVersionId);
-    expect(next.blocks.map((block) => block.values.text)).toEqual(["MUTATED late insert", "MUTATED first"]);
+    expect(next.blocks.map((block) => block.values.markdown)).toEqual(["MUTATED late insert", "MUTATED first"]);
     expect(next.templates[0]!.parameters).toEqual({ name: "MUTATED" });
     expect(next.compositionHash).not.toBe(pinned.compositionHash);
     expect((await materialize(versionId)).compositionHash).toBe(frozen.compositionHash);
@@ -175,7 +175,7 @@ describe("TemplateVersion.materialize reads the frozen snapshot, not the live ta
     await insertBlock(nested.outerText, 1, "After the inclusion", nested.outerVariant);
     const outerVersionId = await publish(nested.outer);
 
-    await sql`update erp.blocks set "values" = ${jsonbLiteral({ text: "MUTATED nested" })} where id = ${nested.block}::uuid`.execute(privileged.db);
+    await sql`update erp.blocks set "values" = ${jsonbLiteral({ markdown: "MUTATED nested" })} where id = ${nested.block}::uuid`.execute(privileged.db);
     await sql`delete from erp.blocks where id = ${nested.include}::uuid`.execute(privileged.db);
     await sql`update erp.templates set parameters = ${jsonbLiteral([{ key: "name", osfType: "string", defaultValue: "MUTATED" }])} where id = ${nested.template}::uuid`.execute(privileged.db);
 
@@ -183,7 +183,7 @@ describe("TemplateVersion.materialize reads the frozen snapshot, not the live ta
     expect(result.compositions).toHaveLength(1);
     expect(result.compositions[0]).toMatchObject({ path: [nested.include], definitionKey: "TemplateBlock", templateReference: { entity: "TemplateVersion", id: nestedVersionId } });
     expect(result.templates.map((entry) => [entry.path, entry.version.id, entry.parameters])).toEqual([[[], outerVersionId, { name: "Outer" }], [[nested.include], nestedVersionId, { name: "Inner" }]]);
-    expect(result.blocks.map((block) => [block.path, block.values.text])).toEqual([[[nested.include, nested.block], "Nested Inner"], [[nested.outerText], "After the inclusion"]]);
+    expect(result.blocks.map((block) => [block.path, block.values.markdown])).toEqual([[[nested.include, nested.block], "Nested Inner"], [[nested.outerText], "After the inclusion"]]);
     expect(JSON.stringify(result)).not.toContain("MUTATED");
     expect(authorizations.filter((entry) => /^(TemplateVariant|Block):/.test(entry))).toEqual([]);
   }, 60_000);

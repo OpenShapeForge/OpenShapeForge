@@ -77,10 +77,10 @@ describe("published-snapshot lifecycle against PostgreSQL", () => {
     expect(await document(documentId)).toMatchObject({ lifecycle_status: "published", template_version_id: second, follow_error: null });
 
     // A block change drafts it.
-    await sql`update erp.blocks set "values" = ${jsonbLiteral({ text: "Hello there {{local.name}}" })} where id = ${ids.first}::uuid`.execute(privileged());
+    await sql`update erp.blocks set "values" = ${jsonbLiteral({ markdown: "Hello there {{local.name}}" })} where id = ${ids.first}::uuid`.execute(privileged());
     const third = await publishTemplate(context, ids.template);
     expect(await document(documentId)).toMatchObject({ lifecycle_status: "draft", template_version_id: third });
-    expect((await variantBlocks((await variant(documentId, "document", "nl")).id))[0]!.text).toBe("Hello there {{local.name}}");
+    expect((await variantBlocks((await variant(documentId, "document", "nl")).id))[0]!.markdown).toBe("Hello there {{local.name}}");
   }, 60_000);
 
   test("the draft rule: a no-op update leaves a published head published; a field edit or an owned-collection change drafts it", async () => {
@@ -114,7 +114,7 @@ describe("published-snapshot lifecycle against PostgreSQL", () => {
     expect((await document(documentId)).lifecycle_status).toBe("published");
     const nl = await variant(documentId, "document", "nl");
     const version = async () => (await variant(documentId, "document", "nl")).updated_at;
-    const inserted = await collections(restricted(), session, documentBinding("insert"), { id: nl.id, expectedVersion: await version(), values: { definitionKey: "TextBlock", values: { text: "Local note" } } });
+    const inserted = await collections(restricted(), session, documentBinding("insert"), { id: nl.id, expectedVersion: await version(), values: { definitionKey: "TextBlock", values: { markdown: "Local note" } } });
     expect((await document(documentId)).lifecycle_status).toBe("draft");
 
     await sql`update erp.documents set lifecycle_status = 'published' where id = ${documentId}::uuid`.execute(privileged());
@@ -122,7 +122,7 @@ describe("published-snapshot lifecycle against PostgreSQL", () => {
     expect((await document(documentId)).lifecycle_status).toBe("draft");
 
     await sql`update erp.documents set lifecycle_status = 'published' where id = ${documentId}::uuid`.execute(privileged());
-    await collections(restricted(), session, documentBinding("update"), { id: nl.id, expectedVersion: await version(), childId: inserted.childId, values: { values: { text: "Local note, edited" } } });
+    await collections(restricted(), session, documentBinding("update"), { id: nl.id, expectedVersion: await version(), childId: inserted.childId, values: { values: { markdown: "Local note, edited" } } });
     expect((await document(documentId)).lifecycle_status).toBe("draft");
 
     // A move to the block's own place and an update with its stored values change nothing: no owner touch, no draft, no event.
@@ -131,7 +131,7 @@ describe("published-snapshot lifecycle against PostgreSQL", () => {
     const unchangedJournal = await journal();
     const stayed = await collections(restricted(), session, documentBinding("move"), { id: nl.id, expectedVersion: unchangedVersion, childId: inserted.childId, beforeId: inserted.orderedIds[0]! });
     expect(stayed.orderedIds[0]).toBe(inserted.childId);
-    await collections(restricted(), session, documentBinding("update"), { id: nl.id, expectedVersion: unchangedVersion, childId: inserted.childId, values: { values: { text: "Local note, edited" } } });
+    await collections(restricted(), session, documentBinding("update"), { id: nl.id, expectedVersion: unchangedVersion, childId: inserted.childId, values: { values: { markdown: "Local note, edited" } } });
     expect(await version()).toBe(unchangedVersion);
     expect((await document(documentId)).lifecycle_status).toBe("published");
     expect(await journal()).toBe(unchangedJournal);
@@ -143,14 +143,14 @@ describe("published-snapshot lifecycle against PostgreSQL", () => {
     // the first edit no longer publishes what the second edit changed.
     const afterFirst = (await document(documentId)).updated_at;
     const [template0] = await variantBlocks(nl.id);
-    await collections(restricted(), session, documentBinding("update"), { id: nl.id, expectedVersion: await version(), childId: template0!.id, values: { values: { text: "Second edit while draft" } } });
+    await collections(restricted(), session, documentBinding("update"), { id: nl.id, expectedVersion: await version(), childId: template0!.id, values: { values: { markdown: "Second edit while draft" } } });
     expect((await document(documentId)).updated_at).not.toBe(afterFirst);
 
     // The template's own collection Operations draft the template head the same way, through its variant.
     expect((await template(ids.template)).lifecycle_status).toBe("published");
     const templateVersion = (await sql<{ v: string }>`select updated_at::text as v from erp.template_variants where id = ${ids.variant}::uuid`.execute(privileged())).rows[0]!.v;
     const result = await collections(restricted(), session, { entityName: "TemplateVariant", field: "blocks", action: "insert" },
-      { id: ids.variant, expectedVersion: templateVersion, values: { definitionKey: "TextBlock", values: { text: "Third" } } });
+      { id: ids.variant, expectedVersion: templateVersion, values: { definitionKey: "TextBlock", values: { markdown: "Third" } } });
     expect(result.orderedIds).toHaveLength(3);
     expect((await template(ids.template)).lifecycle_status).toBe("draft");
   }, 60_000);
@@ -168,7 +168,7 @@ describe("published-snapshot lifecycle against PostgreSQL", () => {
     const blocks = tableName("Block");
 
     // The template block's row has variant_id set and document_variant_id null: only the Template is drafted.
-    await updateGeneratedEntity(restricted(), session, { table: blocks, id: ids.first, values: { values: { text: "Template edit" } } });
+    await updateGeneratedEntity(restricted(), session, { table: blocks, id: ids.first, values: { values: { markdown: "Template edit" } } });
     expect((await template(ids.template)).lifecycle_status).toBe("draft");
     expect((await document(documentId)).lifecycle_status).toBe("published");
 
@@ -176,13 +176,13 @@ describe("published-snapshot lifecycle against PostgreSQL", () => {
     // Operation only, which drafts the head (above); the generic create is refused before any row is written.
     await sql`update erp.templates set lifecycle_status = 'published' where id = ${ids.template}::uuid`.execute(privileged());
     const beforeCreate = await template(ids.template);
-    await fails(createGeneratedEntity(restricted(), session, { table: blocks, values: { variant: ids.variant, definitionKey: "TextBlock", values: { text: "Created generically" } } }), "RELATION_COLLECTION_MUTATION_UNSUPPORTED");
+    await fails(createGeneratedEntity(restricted(), session, { table: blocks, values: { variant: ids.variant, definitionKey: "TextBlock", values: { markdown: "Created generically" } } }), "RELATION_COLLECTION_MUTATION_UNSUPPORTED");
     expect(await template(ids.template)).toEqual(beforeCreate);
 
     // The document block's row has the other owner set: only the Document is drafted.
     await sql`update erp.templates set lifecycle_status = 'published' where id = ${ids.template}::uuid`.execute(privileged());
     const documentBlock = (await variantBlocks((await variant(documentId, "document", "nl")).id))[1]!;
-    await updateGeneratedEntity(restricted(), session, { table: blocks, id: documentBlock.id, values: { values: { text: "Document edit" } } });
+    await updateGeneratedEntity(restricted(), session, { table: blocks, id: documentBlock.id, values: { values: { markdown: "Document edit" } } });
     expect((await document(documentId)).lifecycle_status).toBe("draft");
     expect((await template(ids.template)).lifecycle_status).toBe("published");
   }, 60_000);
@@ -200,7 +200,7 @@ describe("published-snapshot lifecycle against PostgreSQL", () => {
     const { context } = platformFor(editor);
     const ids = await seedTemplate();
     await sql`create table if not exists erp.template_audit_log (id uuid primary key default gen_random_uuid(), tenant_id uuid not null, template_id uuid not null,
-      note text not null, foreign key (tenant_id, template_id) references erp.templates (tenant_id, id) on delete cascade)`.execute(privileged());
+      note markdown not null, foreign key (tenant_id, template_id) references erp.templates (tenant_id, id) on delete cascade)`.execute(privileged());
     await sql`insert into erp.template_audit_log (tenant_id, template_id, note) values (${tenant}::uuid, ${ids.template}::uuid, 'bookkeeping')`.execute(privileged());
     const version = await publishTemplate(context, ids.template);
     const snapshot = (await sql<{ snapshot: { head: { children: Record<string, unknown[]> } } }>`select snapshot from erp.template_versions where id = ${version}::uuid`.execute(privileged())).rows[0]!.snapshot;

@@ -187,6 +187,12 @@ interfaces:
       record:
         routes: { read: "/blocks/:id", create: /blocks/new }
         title: "{{definitionKey}}"
+        # TextBlock values may opt in through their canonical field metadata.
+        # Keep the reusable tenant values on the enclosing record view so every
+        # interface projection can resolve the same `{{chips.<key>}}` contract.
+        variableSources:
+          - key: chips
+            resolver: chips
         layout:
           tabs:
             - id: values

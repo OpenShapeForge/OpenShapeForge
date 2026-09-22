@@ -249,6 +249,47 @@ describe("web manifest projection", () => {
     expect(owned.entities.Parent!.relationships.children?.operations.create).toBeUndefined();
     expect(owned.entities.Parent!.relationships.children?.collection?.operations.create).toBeUndefined();
   });
+  test("a relationship placement narrows its embedded list and actions", () => {
+    const parentView = coreView();
+    parentView.detail!.groups.items.push({
+      id: "children",
+      label: text("Children"),
+      relationship: {
+        render: { component: "RelationshipPanel" },
+        name: "children",
+        overrides: {
+          columns: ["displayName", "status"],
+          filters: ["status"],
+          sortFields: ["displayName"],
+          pageSize: 10,
+          sort: { key: "displayName", direction: "desc" },
+          actions: [],
+        },
+      },
+    });
+    const parent = entity("Parent", "parent", [field("displayName"), field("children", { osfType: "Child", cardinality: "collection" })], parentView, [
+      { key: "children", fieldKey: "children", kind: "hasMany", target: "Child", foreignKey: "parent_id", inverse: "parentId", ownership: "reference", cardinality: "collection" },
+    ]);
+    const childView = coreView();
+    childView.list!.columns = [{ key: "displayName", sortable: true }, { key: "status", sortable: true }, { key: "role", sortable: true }];
+    const child = entity("Child", "child", [
+      field("displayName"), field("status"), field("role"),
+      field("parentId", { osfType: "Parent", relationship: { kind: "belongsTo", target: "Parent", fieldKey: "parentId", foreignKey: "parent_id" } }),
+    ], childView, [{ key: "parentId", fieldKey: "parentId", kind: "belongsTo", target: "Parent", foreignKey: "parent_id", ownership: "reference" }]);
+    child.contract.storage.columns.find((column) => column.field === "parentId")!.column = "parent_id";
+
+    const relationship = buildWebManifest([parent, child]).entities.Parent!.relationships.children!;
+    expect(relationship.operations.create).toBeUndefined();
+    expect(relationship.collection?.operations.create).toBeUndefined();
+    expect(relationship.collection?.columns.map(({ key }) => key)).toEqual(["displayName", "status"]);
+    expect(relationship.collection?.defaultSort).toEqual({ key: "displayName", direction: "desc" });
+    expect(relationship.operations.list?.input).toEqual({
+      kind: "collection-query",
+      filterFields: ["status", "parentId"],
+      sortFields: ["displayName"],
+      pagination: { kind: "cursor", defaultLimit: 10, maxLimit: 200 },
+    });
+  });
   test("a system-written reference key from the corpus is never create-writable and its collection offers no create", () => {
     // Comment.authorId is authored readOnly (attribution, not an input); the
     // derived Relation.comments collection therefore cannot pre-fill it.

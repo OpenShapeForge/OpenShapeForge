@@ -97,6 +97,9 @@ test("canonical entity input sources reach every generated operation interface",
     expect(object(directCreate.input).kind).toBe("json-schema");
     assertCanonicalDocumentInput(object(object(directCreate.input).schema));
     expect(JSON.stringify(directWeb)).not.toContain("x-osf-entityInput");
+    expect(directWeb.entities.Block!.views.record?.variableSources).toEqual([
+      { key: "chips", resolver: "chips" },
+    ]);
 
     const artifacts = await collectAllArtifacts(root);
     const parse = (path: string): JsonObject => {

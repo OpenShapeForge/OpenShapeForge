@@ -50,9 +50,15 @@ export type FieldEntry = string | FieldRef;
 
 export interface RelationshipOverrides {
   columns?: ListColumn[] | string[];
+  /** Filter fields exposed by this placement; must narrow the target list Operation. */
+  filters?: string[];
+  /** Sort fields exposed by this placement; must narrow the target list Operation. */
+  sortFields?: string[];
   fields?: FieldEntry[];
   pageSize?: number;
   sort?: { key: string; direction: "asc" | "desc" };
+  /** Relationship mutations exposed here; omission inherits every supported action. */
+  actions?: Array<"create" | "insert" | "move" | "update" | "remove">;
   title?: LocalizedText;
   emptyState?: LocalizedText;
   itemAction?: ItemAction;

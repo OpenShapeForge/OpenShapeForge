@@ -23,6 +23,7 @@ import type {
   CompiledFormVariant,
   CompiledViewContext,
   CompiledViewGroup,
+  CompiledRelationshipUsage,
   LocalizedText as CompiledLocalizedText,
   OperationCatalogDefinition,
 } from "./types.js";
@@ -621,6 +622,89 @@ function collectionCreateSupported(
   return referencing !== undefined && createWritableFieldKeys(target, all).has(referencing);
 }
 
+const relationshipActionKeys = ["create", "insert", "move", "update", "remove"] as const;
+
+function narrowRelationshipList(
+  operation: WebOperationRef,
+  usage: CompiledRelationshipUsage,
+  origin: string,
+  boundFilterField?: string,
+): WebOperationRef {
+  const input = operation.input;
+  if (operation.intent !== "list" || input?.kind !== "collection-query") {
+    throw new Error(`${origin}: related collection has no canonical list query contract.`);
+  }
+  const overrides = usage.overrides;
+  const narrow = (requested: readonly string[] | undefined, available: readonly string[], name: string): readonly string[] => {
+    if (!requested) return available;
+    const unsupported = requested.filter((key) => !available.includes(key));
+    if (unsupported.length) throw new Error(`${origin}: ${name} expands the target list Operation with ${unsupported.join(", ")}.`);
+    return [...requested];
+  };
+  const defaultLimit = overrides?.pageSize ?? input.pagination.defaultLimit;
+  if (!Number.isInteger(defaultLimit) || defaultLimit < 1 || defaultLimit > input.pagination.maxLimit) {
+    throw new Error(`${origin}: pageSize must be between 1 and ${input.pagination.maxLimit}.`);
+  }
+  const filterFields = narrow(overrides?.filters, input.filterFields, "filters");
+  return {
+    ...operation,
+    input: {
+      ...input,
+      filterFields: boundFilterField && !filterFields.includes(boundFilterField)
+        ? [...filterFields, boundFilterField]
+        : filterFields,
+      sortFields: narrow(overrides?.sortFields, input.sortFields, "sortFields"),
+      pagination: { ...input.pagination, defaultLimit },
+    },
+  };
+}
+
+function applyRelationshipUsage(
+  relationship: WebRelationshipProjection,
+  usage: CompiledRelationshipUsage | undefined,
+  target: ProjectableEntity | undefined,
+  origin: string,
+): WebRelationshipProjection {
+  if (!usage?.overrides || !relationship.collection || !relationship.operations.list || !target) return relationship;
+  const overrides = usage.overrides;
+  const list = narrowRelationshipList(relationship.operations.list, usage, origin, relationship.recordField);
+  const allowedActions = overrides.actions ? new Set(overrides.actions) : undefined;
+  const operations = { ...relationship.operations, list };
+  for (const key of relationshipActionKeys) {
+    if (allowedActions && !allowedActions.has(key)) delete operations[key];
+  }
+  const columnByKey = new Map(relationship.collection.columns.map((column) => [column.key, column]));
+  const fieldByKey = new Map(target.contract.model.fields.map((field) => [field.key, field]));
+  const columns = overrides.columns?.map((entry) => {
+    const key = typeof entry === "string" ? entry : entry.key;
+    const field = fieldByKey.get(key);
+    if (!field) throw new Error(`${origin}: column ${key} is not a field of ${target.contract.entity.name}.`);
+    return {
+      fieldId: `${target.contract.entity.name}.${key}`,
+      key,
+      label: localized(typeof entry === "string" ? columnByKey.get(key)?.label ?? field.label : entry.label ?? field.label, key),
+    };
+  }) ?? relationship.collection.columns;
+  const sortFields = list.input?.kind === "collection-query" ? list.input.sortFields : [];
+  const defaultSort = overrides.sort ?? relationship.collection.defaultSort;
+  if (defaultSort && !sortFields.includes(defaultSort.key)) {
+    throw new Error(`${origin}: default sort ${defaultSort.key} is not exposed by this placement.`);
+  }
+  const collectionOperations = { ...relationship.collection.operations, read: list };
+  if (!operations.create) delete collectionOperations.create;
+  return {
+    ...relationship,
+    operations,
+    collection: {
+      ...relationship.collection,
+      operations: collectionOperations,
+      columns,
+      ...(overrides.title ? { title: localized(overrides.title, relationship.collection.title.en) } : {}),
+      ...(defaultSort ? { defaultSort } : {}),
+    },
+  };
+}
+
 function projectEntity(
   source: ProjectableEntity,
   all: ReadonlyMap<string, ProjectableEntity>,
@@ -653,7 +737,7 @@ function projectEntity(
   // presentation are projected above; relationships add no implicit fields.
   const fields = Object.fromEntries(explicitFields);
 
-  const relationships = Object.fromEntries(contract.model.relationships.flatMap((relationship) => {
+  let relationships = Object.fromEntries(contract.model.relationships.flatMap((relationship) => {
     if (relationship.provider) return projectProviderRelationship(entityName, relationship, providers, fields);
     const target = all.get(relationship.target);
     if (!target || (!relationship.foreignKey && !relationship.via)) return [];
@@ -701,6 +785,16 @@ function projectEntity(
     };
     return [[relationship.key, projected]];
   }));
+
+  for (const tab of view?.detail?.groups.items ?? []) {
+    const usage = tab.relationship;
+    if (!usage?.name || !relationships[usage.name]) continue;
+    const target = all.get(relationships[usage.name]!.targetEntityId);
+    relationships = {
+      ...relationships,
+      [usage.name]: applyRelationshipUsage(relationships[usage.name]!, usage, target, `${entityName}.${tab.id}.${usage.name}`),
+    };
+  }
 
   const tabs: WebRecordTab[] = (view?.detail?.groups.items ?? []).flatMap((tab) => {
     const relationshipId = tab.relationship?.name;

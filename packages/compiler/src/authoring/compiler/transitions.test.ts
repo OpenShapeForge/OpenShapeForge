@@ -8,10 +8,22 @@ import { withStatusTransitions } from "./transitions.js";
 import { buildWebManifest } from "../web-manifest.js";
 import { collectAuthoredEntityPluginOperations } from "../../generate-operations.js";
 import { assertTransitionAgreements, assertTransitionReferencedPreconditions } from "./transitions-corpus.js";
+import { validateTransitionAuthorizationReferences } from "./authorization-validation.js";
+import { generateKeycloakRealmArtifacts } from "../generators/keycloak.js";
+import type { AuthorizationConfigFile } from "../types/authoring.js";
 
 const authoringDir = join(import.meta.dir, "../../../config/authoring");
 const milestone = loadEntity(authoringDir, "agreement-milestone");
 const catalogs = { componentCatalog: milestone.componentCatalog, osfTypes: milestone.osfTypes };
+const transitionAuthorizationConfig: AuthorizationConfigFile = {
+  schemaVersion: 2,
+  kind: "authorizationConfig",
+  realm: { name: "transition-role-test" },
+  keycloak: { entityRoleClient: "erp-provider" },
+  clientRoles: {
+    "erp-provider": ["Agreements.All.ReadWrite", "Finance.All.ReadWrite"],
+  },
+};
 
 function withStatus(patch: Record<string, unknown>, entityPatch: Record<string, unknown> = {}): CoreEntity {
   const base = milestone.coreEntity;
@@ -415,5 +427,54 @@ describe("status transition validation", () => {
     expect(definition.auth).toEqual({ mode: "session", roles: ["Finance.All.ReadWrite"] });
     expect(definition.confirmation).toEqual({ mode: "acknowledgement" });
     expect(entity.fields.find((field) => field.key === "status")!.writtenBy).toEqual(["AgreementMilestone.trigger"]);
+  });
+
+  test("a declared transition-specific role passes corpus authorization validation", () => {
+    const authored = withStatus({ transitions: { initial: "pending", rules: [
+      { ...rule, auth: { roles: ["Finance.All.ReadWrite"] } },
+    ] } }, formless);
+    const compiled = compile({ ...milestone, coreEntity: authored });
+
+    expect(compiled.pluginOperations![0]!.definition.auth).toEqual({
+      mode: "session",
+      roles: ["Finance.All.ReadWrite"],
+    });
+    expect(validateTransitionAuthorizationReferences(
+      [compiled],
+      transitionAuthorizationConfig,
+    ).errors).toEqual([]);
+  });
+
+  test("an omitted transition role inherits the entity update roles", () => {
+    const authored = withStatus({ transitions: { initial: "pending", rules: [rule] } }, formless);
+    const compiled = compile({ ...milestone, coreEntity: authored });
+
+    expect(compiled.pluginOperations![0]!.definition.auth).toEqual({
+      mode: "session",
+      roles: ["Agreements.All.ReadWrite"],
+    });
+    expect(validateTransitionAuthorizationReferences(
+      [compiled],
+      transitionAuthorizationConfig,
+    ).errors).toEqual([]);
+  });
+
+  test("an undeclared transition role is rejected before Keycloak can mint it", () => {
+    const authored = withStatus({ transitions: { initial: "pending", rules: [
+      { ...rule, auth: { roles: ["Finance.All.ReadWrtie"] } },
+    ] } }, formless);
+    const compiled = compile({ ...milestone, coreEntity: authored });
+
+    expect(validateTransitionAuthorizationReferences(
+      [compiled],
+      transitionAuthorizationConfig,
+    ).errors).toEqual([
+      '[AgreementMilestone] transition Operation "AgreementMilestone.trigger" references role "Finance.All.ReadWrtie", which is not declared in the applicable authorization contract. Declare the role before using it on a transition.',
+    ]);
+    expect(() => generateKeycloakRealmArtifacts(
+      [compiled],
+      transitionAuthorizationConfig,
+      "development",
+    )).toThrow(/Transition authorization validation failed.*Finance\.All\.ReadWrtie/s);
   });
 });

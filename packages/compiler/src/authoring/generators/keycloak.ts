@@ -53,6 +53,7 @@ import type {
   AuthorizationRealmConfig,
   AuthorizationRealmRole,
 } from "../types/authoring.js";
+import { validateTransitionAuthorizationReferences } from "../compiler/authorization-validation.js";
 import { KEYCLOAK_ROLE_SEGMENT_RENAMES, normalizeKeycloakRoleName } from "../role-names.js";
 import {
   buildPasskeyProfile,
@@ -1273,6 +1274,18 @@ export function generateKeycloakRealmArtifacts(
   // realm that stayed quiet about it.
   const entityRoleClient =
     authConfig.keycloak?.entityRoleClient ?? authConfig.keycloak?.client;
+
+  if (entityRoleClient) {
+    const transitionAuthorization = validateTransitionAuthorizationReferences(
+      contracts,
+      authConfig,
+    );
+    if (transitionAuthorization.errors.length > 0) {
+      throw new Error(
+        `Transition authorization validation failed:\n${transitionAuthorization.errors.join("\n")}`,
+      );
+    }
+  }
 
   const realmRolesDef = authConfig.realmRoles ?? authConfig.keycloak?.realmRoles ?? {};
 

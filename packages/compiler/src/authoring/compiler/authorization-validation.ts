@@ -31,6 +31,47 @@ export interface AuthorizationValidationResult {
 }
 
 /**
+ * Validate the roles carried by compiler-lowered transition Operations.
+ *
+ * Transition lowering is deliberately per-entity, while the declared role
+ * vocabulary is realm-wide. Keep this check at the corpus boundary where the
+ * compiled Operations and the applicable authorization contract are both
+ * available. In particular, do not let the Keycloak generator treat a typo as
+ * a new role merely because it occurs on an Operation.
+ */
+export function validateTransitionAuthorizationReferences(
+  contracts: CompiledEntityContract[],
+  authConfig: AuthorizationConfigFile,
+): AuthorizationValidationResult {
+  const errors: string[] = [];
+  const { clientRoles, realmRoles } = buildDeclaredRoleSet(authConfig);
+  const declared = new Set<string>([...clientRoles, ...realmRoles]);
+
+  for (const contract of contracts) {
+    for (const operation of contract.pluginOperations ?? []) {
+      if (
+        operation.definition.implementation.type !== "plugin" ||
+        operation.definition.implementation.plugin !== "osf-transitions" ||
+        operation.definition.auth.mode !== "session"
+      ) {
+        continue;
+      }
+      for (const role of operation.definition.auth.roles ?? []) {
+        if (!declared.has(role)) {
+          errors.push(
+            `[${contract.entity.name}] transition Operation "${operation.id}" ` +
+              `references role "${role}", which is not declared in the applicable ` +
+              `authorization contract. Declare the role before using it on a transition.`,
+          );
+        }
+      }
+    }
+  }
+
+  return { errors, warnings: [] };
+}
+
+/**
  * Build the set of role names that are valid to reference from an entity.
  * A role is valid if it appears under any client in `clientRoles` or as a
  * top-level realm role.

@@ -69,7 +69,10 @@ function fixture(options: { templateVersionId?: string | null; parameters?: unkn
     transport: "operation",
     session: { tenantId: ids.tenant, userId: ids.tenant, credential: "bearer", roles: ["CaseFile.All.Read"], groups: [], scope: "tenant" },
     platform: {
-      records: { async assertAccess(_session: unknown, request: { entityName: string; id: string }) { authorizations.push(`${request.entityName}:${request.id}`); } },
+      records: {
+        async assertAccess(_session: unknown, request: { entityName: string; id: string }) { authorizations.push(`${request.entityName}:${request.id}`); },
+        projectStoredFields(_session: unknown, request: { fields: Record<string, unknown> }) { return request.fields; },
+      },
       schemas: {
         entityValues: { get: () => carrier, collection: (entity: string) => ({ targetEntity: "Block", allowedDefinitions: entity === "DocumentVariant" ? ["TextBlock", "IncludeBlock"] : ["TextBlock", "IncludeBlock"] }) },
         fields: {

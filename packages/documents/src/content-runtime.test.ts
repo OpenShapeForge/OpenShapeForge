@@ -32,7 +32,7 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
   const reads: string[] = [];
   const queries: string[] = [];
   const data = { markdown: "Hello {{local.name}} from {{chips.brand}}", chip: "Example", tenant: ids.tenant, unavailableOperation: false, disallowText: false,
-    redactChip: false, missingRead: "", snapshotTemplate: ids.template, liveText: "LIVE-ROW-MUST-NOT-LEAK", variantLocale: "en", variantDefault: false };
+    redactChip: false, redactBlockValues: false, missingRead: "", snapshotTemplate: ids.template, liveText: "LIVE-ROW-MUST-NOT-LEAK", variantLocale: "en", variantDefault: false };
   const compiledCarrier = structuredClone({ ...carrier, definitions: { ...carrier.definitions,
     TextBlock: { ...carrier.definitions.TextBlock!, fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true,
       ...(blockDefault === undefined ? {} : { defaultValue: blockDefault }) },
@@ -50,9 +50,15 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
     transport: "operation",
     session: { tenantId: ids.tenant, userId: ids.tenant, credential: "bearer", roles: ["General.All.Read"], groups: [], scope: "tenant" },
     platform: {
-      records: { async assertAccess(_session: unknown, request: { entityName: string; id: string }) {
-        authorizations.push(`${request.entityName}:${request.id}`);
-      } },
+      records: {
+        async assertAccess(_session: unknown, request: { entityName: string; id: string }) {
+          authorizations.push(`${request.entityName}:${request.id}`);
+        },
+        projectStoredFields(_session: unknown, request: { entityName: string; fields: Record<string, unknown> }) {
+          if (request.entityName === "Block" && data.redactBlockValues) return { ...request.fields, values: null };
+          return request.fields;
+        },
+      },
       schemas: {
         entityValues: { get: () => compiledCarrier, collection: () => ({ targetEntity: "Block", allowedDefinitions: data.disallowText ? ["IncludeBlock"] : Object.keys(carrier.definitions) }) },
         fields: {
@@ -181,6 +187,19 @@ describe("template materialization runtime adapter", () => {
     expect(f.executions).toHaveLength(0);
     expect(JSON.stringify(failure)).not.toContain(f.data.chip);
     expect(JSON.stringify(f.calls)).not.toContain(f.data.chip);
+    expect(f.queries.every(query => query.startsWith("select id from "))).toBe(true);
+  });
+  test("never exposes classified block values from an immutable published snapshot", async () => {
+    const f = fixture();
+    f.data.markdown = "classification-fixture-frozen-value";
+    f.data.redactBlockValues = true;
+    let failure: unknown;
+    try {
+      await materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context);
+    } catch (error) { failure = error; }
+    expect(failure).toMatchObject({ operationError: { code: "MISSING_VARIABLE" } });
+    expect(JSON.stringify(failure)).not.toContain(f.data.markdown);
+    expect(f.executions).toHaveLength(0);
     expect(f.queries.every(query => query.startsWith("select id from "))).toBe(true);
   });
   test("fails closed without canonical source reads and rejects a mismatched tenant", async () => {

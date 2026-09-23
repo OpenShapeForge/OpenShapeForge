@@ -8,7 +8,7 @@ import type { Kysely, Transaction } from "kysely";
 import type { RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
 import type { RuntimeSettingsService } from "./settings.js";
 import type { RuntimeRecordAccessServices } from "./record-access.js";
-export type { RuntimeRecordAccessServices, RuntimeRecordAccessRequest, RuntimeRecordAccessIntent } from "./record-access.js";
+export type { RuntimeRecordAccessServices, RuntimeRecordAccessRequest, RuntimeRecordAccessIntent, RuntimeStoredFieldProjectionRequest } from "./record-access.js";
 export type { RuntimeSettingValue, RuntimeSettingsService } from "./settings.js";
 export type { RuntimeArtifactDescriptor, RuntimeArtifactStageInput, RuntimeArtifactOwner, RuntimeArtifactOwnerInput, RuntimeArtifactBindInput,
   RuntimeArtifactContents, RuntimeArtifactSessionContext, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";

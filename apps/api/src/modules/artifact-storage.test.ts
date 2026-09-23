@@ -58,6 +58,9 @@ function harness(options: { refuse?: boolean } = {}) {
   const access: { session: Session; request: RuntimeRecordAccessRequest }[] = [];
   const runtime = new ArtifactStorageRuntime<Session, Transaction>({
     records: {
+      projectStoredFields(_session, request) {
+        return request.fields;
+      },
       async assertAccess(session, request) {
         access.push({ session, request });
         if (options.refuse) throw operationFailure({ code: "FORBIDDEN", message: "Not authorized to access this record." });

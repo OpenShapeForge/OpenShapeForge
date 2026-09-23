@@ -48,6 +48,8 @@ export { seedKeycloakTokenPeople };
 process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ??=
   "openshapeforge-local-dev-context-secret";
 process.env.DATABASE_URL ??=
+  "postgres://openshapeforge_app:openshapeforge_app@localhost:5434/openshapeforge_dev";
+process.env.OPENSHAPEFORGE_MIGRATE_DATABASE_URL ??=
   "postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev";
 // The realm a trusted-context session's identity is issued by: the session
 // layer refuses a linkable session that names none (503), so the harness's

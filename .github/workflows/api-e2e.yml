@@ -146,11 +146,11 @@ jobs:
           KC_URL: http://127.0.0.1:8181
         run: bun scripts/keycloak-dev-password-login.ts openshapeforge openshapeforge-control
 
-      # The harness supplies DATABASE_URL and the internal-context secret
-      # itself; what is set here is exactly what a laptop exports to enable the
-      # Keycloak-backed flows (the recipe in control-provisioning.e2e.test.ts
-      # and apps/api/.env.example). Every value is a documented local-dev
-      # default. Realm-user passwords are deliberately NOT set: the harness
+      # Keep runtime and setup authority separate. The API must connect as the
+      # restricted app role so PostgreSQL RLS is exercised; only test
+      # setup/cleanup uses the migration owner. The remaining values are the
+      # same documented local defaults a laptop uses for the Keycloak-backed
+      # flows. Realm-user passwords are deliberately NOT set: the harness
       # falls back to the committed dev-realm literal, and this realm is the
       # one `bun run generate` just produced.
       #
@@ -164,6 +164,8 @@ jobs:
       # report is what makes a failure here diagnosable without a laptop.
       - name: Run the e2e suite and render the report
         env:
+          DATABASE_URL: postgres://openshapeforge_app:openshapeforge_app@localhost:5434/openshapeforge_dev
+          OPENSHAPEFORGE_MIGRATE_DATABASE_URL: postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev
           OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI: http://localhost:8181/realms/openshapeforge/protocol/openid-connect/certs
           OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER: http://localhost:8181/realms/openshapeforge
           OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE: erp-provider

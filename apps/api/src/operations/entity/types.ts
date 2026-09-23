@@ -245,6 +245,10 @@ export type EntityOperationContract = EntityOperationRef & {
     idempotency: { mode: "natural" | "keyed" | "none"; inputField?: string };
   };
   prerequisites?: readonly OperationPrerequisite[];
+  stamps?: readonly {
+    field: string;
+    source: "now" | "actorRelation" | "actorUserId";
+  }[];
   interaction: {
     confirmation: OperationConfirmation;
     secureInput?: {

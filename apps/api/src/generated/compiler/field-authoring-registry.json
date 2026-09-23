@@ -791,6 +791,10 @@
           "osfType": "string",
           "required": false,
           "readOnly": true,
+          "writtenBy": [
+            "Account.create",
+            "Account.update"
+          ],
           "label": {
             "en": "Keycloak subject",
             "nl": "Keycloak subject"
@@ -837,6 +841,10 @@
           "osfType": "datetime",
           "required": false,
           "readOnly": true,
+          "writtenBy": [
+            "Account.create",
+            "Account.update"
+          ],
           "label": {
             "en": "Last login",
             "nl": "Laatste login"
@@ -889,6 +897,10 @@
           "osfType": "datetime",
           "required": false,
           "readOnly": true,
+          "writtenBy": [
+            "Account.create",
+            "Account.update"
+          ],
           "label": {
             "en": "Password changed at",
             "nl": "Wachtwoord gewijzigd op"
@@ -2897,6 +2909,9 @@
         {
           "key": "invoiceId",
           "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "label": {
             "en": "Invoice",
             "nl": "Factuur"
@@ -3453,6 +3468,9 @@
           "key": "basisAmount",
           "required": false,
           "readOnly": true,
+          "writtenBy": [
+            "AgreementMilestone.create"
+          ],
           "immutable": true,
           "label": {
             "en": "Basis amount",
@@ -3473,6 +3491,9 @@
           "osfType": "number",
           "required": false,
           "readOnly": true,
+          "writtenBy": [
+            "AgreementMilestone.create"
+          ],
           "immutable": true,
           "label": {
             "en": "Percent of basis",
@@ -3495,6 +3516,9 @@
           "key": "amount",
           "required": true,
           "readOnly": true,
+          "writtenBy": [
+            "AgreementMilestone.create"
+          ],
           "immutable": true,
           "label": {
             "en": "Amount",
@@ -5063,6 +5087,7 @@
         {
           "key": "appointmentId",
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "Appointment",
             "nl": "Afspraak"
@@ -6311,6 +6336,7 @@
           "osfType": "string",
           "required": true,
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "File name",
             "nl": "Bestandsnaam"
@@ -6332,6 +6358,7 @@
           "osfType": "string",
           "required": true,
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "MIME type",
             "nl": "MIME-type"
@@ -6353,6 +6380,7 @@
           "osfType": "integer",
           "required": false,
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "Size (bytes)",
             "nl": "Grootte (bytes)"
@@ -6391,6 +6419,7 @@
           "osfType": "string",
           "required": false,
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "Checksum",
             "nl": "Checksum"
@@ -7700,6 +7729,9 @@
         {
           "key": "producedInvoiceId",
           "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "label": {
             "en": "Produced invoice",
             "nl": "Geproduceerde factuur"
@@ -9444,6 +9476,7 @@
           "osfType": "datetime",
           "required": false,
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "Closed at",
             "nl": "Gesloten op"
@@ -9519,6 +9552,7 @@
           "key": "aiSummary",
           "required": false,
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "AI summary",
             "nl": "AI-samenvatting"
@@ -10028,6 +10062,7 @@
           "key": "aiSummary",
           "required": false,
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "AI summary",
             "nl": "AI-samenvatting"
@@ -10885,6 +10920,7 @@
           "key": "processId",
           "required": true,
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "Case step ID",
             "nl": "Zaakstap-ID"
@@ -15251,6 +15287,9 @@
           "key": "currentVersionId",
           "required": false,
           "readOnly": true,
+          "writtenBy": [
+            "Document.materialize"
+          ],
           "immutable": true,
           "label": {
             "en": "Current version ID",
@@ -16011,6 +16050,9 @@
           "osfType": "string",
           "required": false,
           "readOnly": true,
+          "writtenBy": [
+            "Document.materialize"
+          ],
           "label": {
             "en": "File name",
             "nl": "Bestandsnaam"
@@ -16028,6 +16070,9 @@
           "osfType": "string",
           "required": false,
           "readOnly": true,
+          "writtenBy": [
+            "Document.materialize"
+          ],
           "immutable": true,
           "label": {
             "en": "Artifact",
@@ -16050,6 +16095,9 @@
           "osfType": "integer",
           "required": false,
           "readOnly": true,
+          "writtenBy": [
+            "Document.materialize"
+          ],
           "immutable": true,
           "label": {
             "en": "Artifact version",
@@ -16069,6 +16117,9 @@
           "osfType": "integer",
           "required": false,
           "readOnly": true,
+          "writtenBy": [
+            "Document.materialize"
+          ],
           "immutable": true,
           "label": {
             "en": "File size in bytes",
@@ -16088,6 +16139,9 @@
           "osfType": "string",
           "required": false,
           "readOnly": true,
+          "writtenBy": [
+            "Document.materialize"
+          ],
           "label": {
             "en": "MIME type",
             "nl": "MIME-type"
@@ -16105,6 +16159,9 @@
           "osfType": "fileStorageLocation",
           "required": false,
           "readOnly": true,
+          "writtenBy": [
+            "Document.materialize"
+          ],
           "immutable": true,
           "label": {
             "en": "File",
@@ -16123,6 +16180,9 @@
           "osfType": "string",
           "required": false,
           "readOnly": true,
+          "writtenBy": [
+            "Document.materialize"
+          ],
           "label": {
             "en": "Checksum",
             "nl": "Checksum"
@@ -16268,6 +16328,9 @@
           "key": "documentId",
           "required": true,
           "readOnly": true,
+          "writtenBy": [
+            "Document.materialize"
+          ],
           "immutable": true,
           "label": {
             "en": "Document ID",
@@ -19438,6 +19501,7 @@
         {
           "key": "bankStatementLineId",
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "Bank statement line",
             "nl": "Bankafschriftregel"
@@ -20725,6 +20789,7 @@
         {
           "key": "reversalOfId",
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "Reversal of",
             "nl": "Tegenboeking van"
@@ -25809,6 +25874,7 @@
         {
           "key": "invoicePaymentId",
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "Invoice payment",
             "nl": "Factuurbetaling"
@@ -27378,6 +27444,7 @@
           "osfType": "object",
           "required": false,
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "Required input",
             "nl": "Benodigde input"
@@ -30397,6 +30464,7 @@
           "osfType": "datetime",
           "required": false,
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "Closed at",
             "nl": "Gesloten op"
@@ -31669,6 +31737,7 @@
           "key": "relationGroupId",
           "required": false,
           "readOnly": true,
+          "writeSource": "caller",
           "immutable": true,
           "osfType": "RelationGroup",
           "label": {
@@ -33534,6 +33603,7 @@
           "osfType": "datetime",
           "required": false,
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "Completed at",
             "nl": "Afgerond op"
@@ -35043,6 +35113,7 @@
           "osfType": "datetime",
           "required": false,
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "Resolved at",
             "nl": "Opgelost op"
@@ -35061,6 +35132,7 @@
           "osfType": "datetime",
           "required": false,
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "Closed at",
             "nl": "Gesloten op"
@@ -36145,6 +36217,7 @@
           "osfType": "datetime",
           "required": false,
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "Completed at",
             "nl": "Afgerond op"
@@ -36747,6 +36820,7 @@
           "key": "caseStepId",
           "required": false,
           "readOnly": true,
+          "writeSource": "caller",
           "osfType": "ProcessStep",
           "label": {
             "en": "Case step ID",
@@ -36776,6 +36850,7 @@
           "osfType": "string",
           "required": false,
           "readOnly": true,
+          "writeSource": "caller",
           "label": {
             "en": "Case step action ID",
             "nl": "Zaakstapactie-ID"

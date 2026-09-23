@@ -97,6 +97,7 @@ fields:
     osfType: string
     required: false
     readOnly: true
+    writtenBy: [Document.materialize]
     label:
       en: File name
       nl: Bestandsnaam
@@ -109,6 +110,7 @@ fields:
     osfType: string
     required: false
     readOnly: true
+    writtenBy: [Document.materialize]
     immutable: true
     label:
       en: Artifact
@@ -125,6 +127,7 @@ fields:
     osfType: integer
     required: false
     readOnly: true
+    writtenBy: [Document.materialize]
     immutable: true
     label:
       en: Artifact version
@@ -139,6 +142,7 @@ fields:
     osfType: integer
     required: false
     readOnly: true
+    writtenBy: [Document.materialize]
     immutable: true
     label:
       en: File size in bytes
@@ -153,6 +157,7 @@ fields:
     osfType: string
     required: false
     readOnly: true
+    writtenBy: [Document.materialize]
     label:
       en: MIME type
       nl: MIME-type
@@ -165,6 +170,7 @@ fields:
     osfType: fileStorageLocation
     required: false
     readOnly: true
+    writtenBy: [Document.materialize]
     immutable: true
     label:
       en: File
@@ -178,6 +184,7 @@ fields:
     osfType: string
     required: false
     readOnly: true
+    writtenBy: [Document.materialize]
     label:
       en: Checksum
       nl: Checksum
@@ -256,6 +263,7 @@ fields:
   - key: documentId
     required: true
     readOnly: true
+    writtenBy: [Document.materialize]
     immutable: true
     label:
       en: Document ID

@@ -159,6 +159,7 @@ fields:
     osfType: datetime
     required: false
     readOnly: true
+    writeSource: caller
     label:
       en: Completed at
       nl: Afgerond op
@@ -569,6 +570,7 @@ fields:
   - key: caseStepId
     required: false
     readOnly: true
+    writeSource: caller
     osfType: ProcessStep
     label:
       en: Case step ID
@@ -592,6 +594,7 @@ fields:
     osfType: string
     required: false
     readOnly: true
+    writeSource: caller
     label:
       en: Case step action ID
       nl: Zaakstapactie-ID

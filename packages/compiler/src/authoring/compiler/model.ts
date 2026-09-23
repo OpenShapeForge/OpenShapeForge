@@ -50,6 +50,7 @@ export function resolveModelFields(
       osfType: field.osfType,
     };
     if (field.readOnly) compiled.readOnly = true;
+    if (field.writeSource) compiled.writeSource = field.writeSource;
     if (field.immutable) compiled.immutable = true;
     if (field.writtenBy && field.writtenBy.length > 0) compiled.writtenBy = [...field.writtenBy];
     if (field.deriveOnCreate) compiled.deriveOnCreate = { ...field.deriveOnCreate };

@@ -15,6 +15,7 @@ import {
   restEditLeaseOperationIdsForSession,
   secureInputInteractionError,
   tableForEntityOperation,
+  trustedOperationStampValues,
 } from "./runtime.js";
 
 const relation = getGeneratedCrudTables().find(
@@ -22,6 +23,27 @@ const relation = getGeneratedCrudTables().find(
 )!;
 
 describe("entity operation runtime", () => {
+  test("derives human attribution only from a confirmed tenant Relation", () => {
+    const operation = { key: "create", stamps: [{ field: "authorId", source: "actorRelation" as const }] };
+    expect(trustedOperationStampValues(operation, {
+      userId: "identity-user",
+      relation: { status: "linked", relationId: "relation-1", displayName: "Author" },
+    } as never)).toEqual({ authorId: "relation-1" });
+    expect(() => trustedOperationStampValues(operation, {
+      userId: "identity-user",
+      relation: { status: "pending_confirmation", relationId: null },
+    } as never)).toThrow("session is not linked");
+  });
+
+  test("keeps system identity attribution explicit instead of substituting a Relation", () => {
+    expect(trustedOperationStampValues({
+      key: "run",
+      stamps: [{ field: "actor", source: "actorUserId" }],
+    }, {
+      userId: "service-identity",
+      relation: { status: "linked", relationId: "human-relation" },
+    } as never)).toEqual({ actor: "service-identity" });
+  });
   test("custom offers require one role from every canonical role group", () => {
     const auth = {
       mode: "session" as const,

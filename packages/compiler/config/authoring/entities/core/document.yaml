@@ -259,6 +259,7 @@ fields:
   - key: currentVersionId
     required: false
     readOnly: true
+    writtenBy: [Document.materialize]
     immutable: true
     label:
       en: Current version ID

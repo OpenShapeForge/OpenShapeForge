@@ -179,3 +179,27 @@ export function normalizeWritableValues(
   }
   return values;
 }
+
+/**
+ * Add values which the canonical Operation, not its caller, owns. The
+ * compiler must have named that same Operation in the column's `writtenBy`
+ * contract; stale or forged runtime metadata therefore fails closed.
+ */
+export function addTrustedOperationValues(
+  table: GeneratedCrudTable,
+  values: ReturnType<typeof normalizeWritableValues>,
+  operation: string,
+  trusted: Readonly<Record<string, unknown>>,
+) {
+  for (const [field, value] of Object.entries(trusted)) {
+    const column = table.columns.find((candidate) => fieldNameForColumn(candidate) === field);
+    if (!column?.writtenBy?.some((writer) => writer.operation === operation)) {
+      throw generatedCrudError(
+        `Canonical Operation ${operation} cannot stamp ${field}; generated writer metadata is missing.`,
+        "INTERNAL_SERVER_ERROR",
+      );
+    }
+    values.set(column, value);
+  }
+  return values;
+}

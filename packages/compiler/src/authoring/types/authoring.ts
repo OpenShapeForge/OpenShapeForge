@@ -563,6 +563,18 @@ export type EntityOperationSecureInput = {
   message?: string;
 };
 
+/**
+ * A value owned by the canonical Operation rather than any of its interface
+ * payloads. `actorRelation` deliberately differs from `actorUserId`: a human
+ * attribution may require the tenant-confirmed Relation, while background and
+ * system actors must keep their explicit identity and can never masquerade as
+ * that Relation.
+ */
+export type EntityOperationStamp = {
+  field: string;
+  source: "now" | "actorRelation" | "actorUserId";
+};
+
 export interface EntityOperationDefinition {
   /** Stable canonical id for a plugin Operation; defaults to `<Entity>.<key>`. */
   id?: string;
@@ -570,6 +582,7 @@ export interface EntityOperationDefinition {
   description: string | LocalizedText;
   guidance?: { assistant?: string | LocalizedText };
   prerequisites?: OperationPrerequisite[];
+  stamps?: EntityOperationStamp[];
   implementation:
     | { type: "collection"; action: "insert" | "move" | "update" | "remove"; field: string }
     | {

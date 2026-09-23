@@ -154,6 +154,7 @@ function compileOperation(
           receipt: { ...prerequisite.receipt },
         })) }
       : {}),
+    ...(definition?.stamps ? { stamps: definition.stamps.map((stamp) => ({ ...stamp })) } : {}),
     authorization: {
       action,
       roles: [...source.authorization.roles[action]],

@@ -64,6 +64,7 @@ fields:
   # System-written by bank reconciliation (BankReconciliation is the authored match), not an input.
   - key: bankStatementLineId
     readOnly: true
+    writeSource: caller
     label:
       en: Bank statement line
       nl: Bankafschriftregel

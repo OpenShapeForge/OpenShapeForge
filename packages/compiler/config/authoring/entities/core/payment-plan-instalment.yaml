@@ -80,6 +80,7 @@ fields:
   # System-written by payment settlement: the payment that covered this instalment, not an input.
   - key: invoicePaymentId
     readOnly: true
+    writeSource: caller
     label:
       en: Invoice payment
       nl: Factuurbetaling

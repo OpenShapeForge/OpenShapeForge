@@ -37,6 +37,77 @@ import { resolveDerivedOnCreateBindings } from "./derive-on-create.js";
 import { withStatusTransitions } from "./transitions.js";
 import { pluginOperations, webOperationActions, webUi } from "../entity-model.js";
 
+/**
+ * Make trusted Operation stamps the field's writer contract before any input
+ * schemas are derived. This is what keeps the value out of REST, GraphQL, MCP
+ * and web payloads; the runtime later supplies it from the trusted session.
+ */
+function withOperationStamps(entity: import("../types.js").CoreEntity): import("../types.js").CoreEntity {
+  const fields = entity.fields.map((field) => ({ ...field }));
+  const byKey = new Map(fields.map((field) => [field.key, field]));
+  for (const [operationKey, operation] of Object.entries(entity.operations ?? {})) {
+    if (!operation.stamps?.length) continue;
+    if (operation.implementation.type !== "entity" ||
+        (operation.implementation.action !== "create" && operation.implementation.action !== "update")) {
+      throw new Error(`[${entity.entity}] Operation "${operationKey}" stamps require a canonical entity create or update implementation.`);
+    }
+    const operationId = operation.id ?? `${entity.entity}.${operationKey}`;
+    const seen = new Set<string>();
+    for (const stamp of operation.stamps) {
+      if (seen.has(stamp.field)) throw new Error(`[${entity.entity}] Operation "${operationKey}" stamps field "${stamp.field}" more than once.`);
+      seen.add(stamp.field);
+      const field = byKey.get(stamp.field);
+      if (!field?.persisted) throw new Error(`[${entity.entity}] Operation "${operationKey}" stamp field "${stamp.field}" must be persisted.`);
+      if (field.readOnly !== true) throw new Error(`[${entity.entity}] Operation "${operationKey}" stamp field "${stamp.field}" must be readOnly.`);
+      if (field.writeSource) throw new Error(`[${entity.entity}] Operation "${operationKey}" stamp field "${stamp.field}" cannot also declare writeSource: caller.`);
+      if (stamp.source === "actorRelation" && field.osfType !== "Relation") {
+        throw new Error(`[${entity.entity}] Operation "${operationKey}" actorRelation stamp field "${stamp.field}" must reference Relation.`);
+      }
+      if (stamp.source === "now" && field.baseType !== "datetime" && field.osfType !== "datetime") {
+        throw new Error(`[${entity.entity}] Operation "${operationKey}" now stamp field "${stamp.field}" must be datetime.`);
+      }
+      if (stamp.source === "actorUserId" && field.baseType !== "string" && field.osfType !== "string") {
+        throw new Error(`[${entity.entity}] Operation "${operationKey}" actorUserId stamp field "${stamp.field}" must be string.`);
+      }
+      field.writtenBy = [...new Set([...(field.writtenBy ?? []), operationId])];
+    }
+  }
+  return { ...entity, fields };
+}
+
+function isCompilerIntrinsicReadOnlyField(field: import("../types.js").Field): boolean {
+  const intrinsic = {
+    id: { column: "id", type: "uuid" },
+    tenantId: { column: "tenant_id", type: "uuid" },
+    createdAt: { column: "created_at", type: "datetime" },
+    updatedAt: { column: "updated_at", type: "datetime" },
+  } as const;
+  const expected = intrinsic[field.key as keyof typeof intrinsic];
+  const typeMatches = expected?.type === "uuid"
+    ? field.baseType === "string" && field.validation?.format === "uuid"
+    : field.baseType === expected?.type || field.osfType === expected?.type;
+  return expected !== undefined && field.persisted?.column === expected.column && typeMatches;
+}
+
+/** A persisted display-only field must still say who can legitimately write it. */
+function assertPersistedReadOnlyWriteSources(entity: import("../types.js").CoreEntity): void {
+  for (const field of entity.fields) {
+    if (!field.persisted || field.readOnly !== true) continue;
+    const intrinsic = isCompilerIntrinsicReadOnlyField(field) ||
+      field.computed !== undefined || field.deriveOnCreate !== undefined;
+    const canonicalWriter = (field.writtenBy?.length ?? 0) > 0;
+    if (!intrinsic && !canonicalWriter && field.writeSource !== "caller") {
+      throw new Error(
+        `[${entity.entity}] persisted readOnly field "${field.key}" has no legitimate write source; ` +
+          `declare writeSource: caller, a computed/derived source, or canonical Operation stamps/writtenBy.`,
+      );
+    }
+    if (field.writeSource === "caller" && canonicalWriter) {
+      throw new Error(`[${entity.entity}] field "${field.key}" cannot be both caller-written and writtenBy canonical Operations.`);
+    }
+  }
+}
+
 function withPublishedSnapshotVersioning(entity: import("../types.js").CoreEntity): import("../types.js").CoreEntity {
   const versioning = entity.versioning;
   if (!versioning) return entity;
@@ -156,10 +227,11 @@ export function validateTimelineIncludes(
 
 export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   const lowered = withStatusTransitions(
-    normalizeEntityFields(withPublishedSnapshotVersioning(artifacts.coreEntity), artifacts.osfTypes),
+    withOperationStamps(normalizeEntityFields(withPublishedSnapshotVersioning(artifacts.coreEntity), artifacts.osfTypes)),
     { componentCatalog: artifacts.componentCatalog, osfTypes: artifacts.osfTypes },
   );
   const transitions = lowered.transitions;
+  assertPersistedReadOnlyWriteSources(lowered.entity);
   const valueDefinition = lowered.entity.baseEntity === false && !lowered.entity.fields.some((field) => field.key === "id");
   artifacts = {
     ...artifacts,

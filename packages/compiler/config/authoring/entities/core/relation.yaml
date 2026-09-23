@@ -200,6 +200,7 @@ fields:
   - key: relationGroupId
     required: false
     readOnly: true
+    writeSource: caller
     immutable: true
     osfType: RelationGroup
     label:

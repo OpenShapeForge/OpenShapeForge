@@ -56,6 +56,8 @@ import { executeEntityPlugin } from "./plugin-executor.js";
 import { entityBusinessUnavailability } from "./availability.js";
 import { assertEntityValuesValid, assertOperationInputValid, type EntityValuesValidation } from "./input-validation.js";
 import { assertNoCallerElicitedOutput, assertNoOperationWrittenValues } from "./write-policy.js";
+import { sessionRelation } from "../../auth/identity-link.js";
+import { sql } from "kysely";
 
 const COLLECTION_OFFER_INTENTS: readonly GeneratedCrudExposureOperation[] = [
   "list",
@@ -167,6 +169,35 @@ function requireValues(input: EntityOperationInput | undefined): Record<string, 
     throw generatedCrudError("Entity operation requires values.", "BAD_USER_INPUT");
   }
   return input.values;
+}
+
+/** Values derived once in the shared Operation runtime, before any transport-specific adapter. */
+export function trustedOperationStampValues(
+  operation: Pick<EntityOperationContract, "key" | "stamps">,
+  session: DbSessionInput,
+): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
+  for (const stamp of operation.stamps ?? []) {
+    if (stamp.source === "now") {
+      values[stamp.field] = sql`now()`;
+      continue;
+    }
+    if (stamp.source === "actorUserId") {
+      if (!session.userId) throw generatedCrudError(`${operation.key} requires an authenticated actor identity.`, "FORBIDDEN");
+      values[stamp.field] = session.userId;
+      continue;
+    }
+    const relation = sessionRelation(session as Parameters<typeof sessionRelation>[0]);
+    if (!relation) {
+      throw operationFailure({
+        code: "FORBIDDEN",
+        message: `${operation.key} records the acting Relation, and this session is not linked to one.`,
+        retryable: false,
+      });
+    }
+    values[stamp.field] = relation.relationId;
+  }
+  return values;
 }
 
 /**
@@ -904,8 +935,15 @@ export async function executeEntityOperation(
         if (interactionError) return { intent: "create", error: interactionError };
         const data = blueprintId !== undefined
           ? await createFromBlueprint(db, session, table, blueprintId, values,
-              (merged) => assertEntityValuesValid(operation, table, merged, { partial: false }))
-          : await createGeneratedEntity(db, session, { table: table.name, values });
+              (merged) => assertEntityValuesValid(operation, table, merged, { partial: false }),
+              operation.stamps?.length
+                ? { operation: operation.id, values: trustedOperationStampValues(operation, session) }
+                : undefined)
+          : await createGeneratedEntity(db, session, {
+              table: table.name,
+              values,
+              ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
+            });
         return {
           intent: "create",
           data,
@@ -953,6 +991,7 @@ export async function executeEntityOperation(
           table: table.name,
           id: requireId(request.input),
           values,
+          ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
           ...(guard ? { guard } : {}),
         });
         return {

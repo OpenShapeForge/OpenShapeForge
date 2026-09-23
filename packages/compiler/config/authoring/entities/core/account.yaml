@@ -64,6 +64,8 @@ fields:
     osfType: string
     required: false
     readOnly: true
+    # Reserved for the canonical identity lifecycle replacing generic Account CRUD (#662).
+    writtenBy: [Account.create, Account.update]
     label:
       en: Keycloak subject
       nl: Keycloak subject
@@ -97,6 +99,8 @@ fields:
     osfType: datetime
     required: false
     readOnly: true
+    # Reserved for the canonical identity lifecycle replacing generic Account CRUD (#662).
+    writtenBy: [Account.create, Account.update]
     label:
       en: Last login
       nl: Laatste login
@@ -134,6 +138,8 @@ fields:
     osfType: datetime
     required: false
     readOnly: true
+    # Reserved for the canonical identity lifecycle replacing generic Account CRUD (#662).
+    writtenBy: [Account.create, Account.update]
     label:
       en: Password changed at
       nl: Wachtwoord gewijzigd op

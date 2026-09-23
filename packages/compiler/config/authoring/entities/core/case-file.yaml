@@ -162,6 +162,7 @@ fields:
   - key: aiSummary
     required: false
     readOnly: true
+    writeSource: caller
     label:
       en: AI summary
       nl: AI-samenvatting

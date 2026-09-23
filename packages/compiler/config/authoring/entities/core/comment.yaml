@@ -122,6 +122,9 @@ operations:
     implementation:
       type: entity
       action: create
+    stamps:
+      - field: authorId
+        source: actorRelation
     effects:
       data: write
       external: none

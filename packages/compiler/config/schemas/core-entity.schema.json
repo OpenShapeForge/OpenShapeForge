@@ -331,6 +331,22 @@
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/operationPrerequisiteV2" }
         },
+        "stamps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["field", "source"],
+            "properties": {
+              "field": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field" },
+              "source": {
+                "enum": ["now", "actorRelation", "actorUserId"],
+                "description": "Trusted server source. actorRelation requires the session's confirmed tenant Relation; actorUserId records the explicit session identity and never substitutes a Relation."
+              }
+            }
+          }
+        },
         "implementation": {
           "oneOf": [
             {
@@ -1594,6 +1610,10 @@
         },
         "readOnly": {
           "type": "boolean"
+        },
+        "writeSource": {
+          "const": "caller",
+          "description": "Explicitly declares that this persisted readOnly presentation field remains caller-written through generated create/update (or create only when immutable)."
         },
         "label": {
           "$ref": "#/$defs/localizedText"

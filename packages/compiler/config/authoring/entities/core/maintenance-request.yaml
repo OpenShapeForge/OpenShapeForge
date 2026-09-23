@@ -187,6 +187,9 @@ operations:
     implementation:
       type: entity
       action: create
+    stamps:
+      - field: reportedById
+        source: actorRelation
     effects:
       data: write
       external: none

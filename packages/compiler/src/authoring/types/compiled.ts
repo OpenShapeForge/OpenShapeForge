@@ -95,6 +95,8 @@ export interface CompiledField {
   required: boolean;
   /** Presentation only — picks the display component over the input one. */
   readOnly?: boolean;
+  /** Explicit authoring decision: readOnly is presentation-only; callers still write it. */
+  writeSource?: "caller";
   /**
    * API contract: settable at create, refused on update by every generated
    * transport. Reaches the runtime through the manifest column, the way
@@ -380,6 +382,8 @@ export type CompiledEntityOperation = OperationReference<EntityOperationIntent> 
   };
   guidance?: { assistant?: string | LocalizedText };
   prerequisites?: readonly OperationPrerequisite[];
+  /** Trusted values injected by the shared entity Operation runtime. */
+  stamps?: readonly import("./authoring.js").EntityOperationStamp[];
   input: EntityOperationInput;
   output: EntityOperationOutput;
   authorization: {

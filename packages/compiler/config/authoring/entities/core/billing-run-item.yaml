@@ -220,6 +220,7 @@ fields:
   # System-written by the billing run: the invoice it produced, not an input.
   - key: producedInvoiceId
     readOnly: true
+    writtenBy: [BillingRun.execute]
     label:
       en: Produced invoice
       nl: Geproduceerde factuur

@@ -36,6 +36,7 @@ import type {
 import {
   assertNoCallerElicitedOutput,
   assertNoOperationWrittenValues,
+  addTrustedOperationValues,
   normalizeWritableValues,
   writableColumnMap,
 } from "./write-policy.js";
@@ -177,6 +178,7 @@ export async function createGeneratedEntity(
   input: {
     table: string;
     values: Record<string, unknown>;
+    trusted?: { operation: string; values: Record<string, unknown> };
   },
 ): Promise<GeneratedEntityRow> {
   const table = readGeneratedCrudTable(input.table, "create", session);
@@ -186,6 +188,7 @@ export async function createGeneratedEntity(
   assertNoOperationWrittenValues(table, input.values);
   assertCreateRecordPermissions(table, session, input.values);
   const values = normalizeWritableValues(table, input.values, "create");
+  if (input.trusted) addTrustedOperationValues(table, values, input.trusted.operation, input.trusted.values);
   return insertGeneratedRow(db, session, table, values);
 }
 
@@ -311,6 +314,7 @@ export async function updateGeneratedEntity(
     table: string;
     id: string;
     values: Record<string, unknown>;
+    trusted?: { operation: string; values: Record<string, unknown> };
     guard?: {
       operation: ChallengeProtectedOperation & LeaseProtectedOperation;
       expectedVersion: string;
@@ -327,6 +331,7 @@ export async function updateGeneratedEntity(
   assertNoOperationWrittenValues(table, input.values);
   assertUpdateRecordPermissions(table, input.values);
   const values = normalizeWritableValues(table, input.values, "update");
+  if (input.trusted) addTrustedOperationValues(table, values, input.trusted.operation, input.trusted.values);
   return applyGeneratedRowUpdate(db, session, table, input.id, values, input.guard);
 }
 

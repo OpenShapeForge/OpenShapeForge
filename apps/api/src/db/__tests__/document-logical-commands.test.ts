@@ -460,6 +460,61 @@ describe("logical Document database commands", () => {
     expect(sqlState(accountFailure)).toBe("23503");
   });
 
+  test("the version write guard admits owner deletion without weakening direct-write protection", async () => {
+    const created = await createLogicalDocument(
+      sessionA,
+      { title: "Version trigger deletion", documentType: "quote", status: "draft" },
+      { versionLabel: "1.0", status: "draft" },
+    );
+    const authorizedSession: DbSessionInput = {
+      ...sessionA,
+      roles: ["CaseFile.All.ReadWrite", "Organization.All.ReadWrite"],
+    };
+
+    const directInsert = await rejection(withDbSession(restricted.db, authorizedSession, (trx) =>
+      sql`
+        insert into erp.document_versions (
+          tenant_id, document_id, version_label, status, is_major_version
+        ) values (
+          ${tenantA}::uuid, ${created.documentId}::uuid, 'forged', 'draft', false
+        )
+      `.execute(trx)));
+    expect((directInsert as Error).message).toContain("DocumentVersion is immutable");
+
+    const directUpdate = await rejection(withDbSession(restricted.db, authorizedSession, (trx) =>
+      sql`
+        update erp.document_versions set version_label = 'forged-update'
+        where id = ${created.documentVersionId}::uuid
+      `.execute(trx)));
+    expect((directUpdate as Error).message).toContain("permission denied");
+
+    const directDelete = await rejection(withDbSession(restricted.db, authorizedSession, (trx) =>
+      sql`delete from erp.document_versions where id = ${created.documentVersionId}::uuid`.execute(trx)));
+    expect((directDelete as Error).message).toContain("permission denied");
+
+    // The reserved snapshot namespace remains guarded on the privileged path;
+    // moving DELETE ahead of NEW must not bypass the INSERT/UPDATE branches.
+    const reservedUpdate = await rejection(sql`
+      update erp.document_versions set version_label = 'snapshot-99'
+      where id = ${created.documentVersionId}::uuid
+    `.execute(privileged.db));
+    expect((reservedUpdate as Error).message).toContain("prefix snapshot- is reserved");
+
+    // The document pointer is a separate referential guard. Once system
+    // cleanup detaches it, the table owner reaches the DELETE/OLD branch and
+    // the version is actually removed instead of failing on NEW.
+    await sql`
+      update erp.documents set current_version_id = null
+      where id = ${created.documentId}::uuid
+    `.execute(privileged.db);
+    const deleted = await sql<{ id: string }>`
+      delete from erp.document_versions
+      where id = ${created.documentVersionId}::uuid
+      returning id
+    `.execute(privileged.db);
+    expect(deleted.rows).toEqual([{ id: created.documentVersionId }]);
+  });
+
   test("a caller rollback removes both logical rows and their pointer", async () => {
     const title = `Forced rollback ${randomUUID()}`;
     const failure = await rejection(

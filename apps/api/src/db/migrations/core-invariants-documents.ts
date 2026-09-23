@@ -132,6 +132,16 @@ export async function applyDocumentAuthority(db: OpenShapeForgeDatabase): Promis
     set search_path = pg_catalog, pg_temp
     as $function$
     begin
+      -- DELETE has OLD only: branch before every NEW reference. The app role
+      -- remains unable to delete immutable versions directly, while the table
+      -- owner can perform system cleanup and cascades without dereferencing an
+      -- unassigned trigger record.
+      if tg_op = 'DELETE' then
+        if current_user = ${sql.lit(APP_ROLE)} then
+          raise exception 'DocumentVersion is immutable and may only be created through a document version command';
+        end if;
+        return old;
+      end if;
       if tg_op = 'INSERT' and app.publishing_entity() = 'Document'
         and new.${sql.ref(version.versionNumber)} is not null and new.${sql.ref(version.snapshot)} is not null and new.${sql.ref(version.contentHash)} is not null then
         new.${sql.ref(version.versionLabel)} := coalesce(new.${sql.ref(version.versionLabel)}, 'snapshot-' || new.${sql.ref(version.versionNumber)}::text);
@@ -143,9 +153,6 @@ export async function applyDocumentAuthority(db: OpenShapeForgeDatabase): Promis
       end if;
       if current_user = ${sql.lit(APP_ROLE)} then
         raise exception 'DocumentVersion is immutable and may only be created through a document version command';
-      end if;
-      if tg_op = 'DELETE' then
-        return old;
       end if;
       return new;
     end;

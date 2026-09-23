@@ -325,7 +325,9 @@ describe("explicit service credentials in host mode", () => {
     expect(lookups).toEqual([["host", "org-a"]]);
     expect(queries.some((q) => q.sql.includes("set_config('app.tenant_id'") && q.parameters.includes(TENANT_A))).toBe(true);
     expect(queries.some((q) => q.sql.includes("from platform.tenants") && q.parameters.includes(TENANT_A))).toBe(true);
-    expect(queries.some((q) => q.sql.includes("bypass_rls"))).toBe(false);
+    expect(queries.some((q) =>
+      q.sql.includes("set_config('app.bypass_rls', 'false', true)")
+    )).toBe(true);
     await db.destroy();
   });
 

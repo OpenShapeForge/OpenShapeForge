@@ -9,7 +9,12 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { ARTIFACT_UPLOAD_APP_URI } from "./artifact-upload.js";
 import { ORGANIZATION_PROFILE_RESOURCE } from "./organization-profile-tools.js";
-import { describeOnboarding, onboardingEnvironment, withOnboarding } from "./onboarding.js";
+import {
+  describeOnboarding,
+  onboardingEnvironment,
+  onboardingToolProjection,
+  withOnboarding,
+} from "./onboarding.js";
 import {
   ONBOARDING_STEP_RESOURCE_TEMPLATE,
   onboardingResourcesForSession,
@@ -22,6 +27,7 @@ import { ENTITY_CATALOG_URI } from "./server-instructions.js";
 import {
   JSON_MIME_TYPE,
   catalog,
+  catalogDerivedTools,
   entityForTable,
   projectedDerivedTools,
 } from "./catalog.js";
@@ -138,14 +144,24 @@ export function createSessionSurface(scope: ServerScope) {
     };
   };
   server.setRequestHandler(ListResourcesRequestSchema, listedResources);
+  const { runtimeProviderToolsForSession, listedTools } = createToolListing(scope);
   // ---- first-use onboarding (mcp/onboarding.ts): the checklist reads the
   // same per-session projections tools/list uses, and rides on whoami. ----
   const onboarding = onboardingEnvironment({
     db,
     session,
     tables,
-    derivedEntries: projectedDerivedTools,
-    projectedTools: () => derivedToolsForSession(db, session, tables, locale),
+    derivedEntries: catalogDerivedTools,
+    projectedTools: async () =>
+      onboardingToolProjection(
+        catalogDerivedTools,
+        await derivedToolsForSession(db, session, tables, locale),
+        (await runtimeProviderToolsForSession()).map(({ definition, tool }) => ({
+          name: tool.name,
+          entityName: definition.entityName,
+          entityId: definition.entityId,
+        })),
+      ),
     guideTools: () => guideToolsForSession(session),
     guidesCalled,
     // The administrator step reads the same contract the create tool and
@@ -225,8 +241,6 @@ export function createSessionSurface(scope: ServerScope) {
   server.setRequestHandler(ListPromptsRequestSchema, async () => ({
     prompts: [],
   }));
-
-  const { runtimeProviderToolsForSession, listedTools } = createToolListing(scope);
 
   return {
     listedResources,

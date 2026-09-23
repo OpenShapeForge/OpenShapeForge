@@ -18,6 +18,7 @@ import {
   ONBOARDING_VERSION,
   onboardingGuideText,
   onboardingIndex,
+  onboardingToolProjection,
   onboardingToolsForSession,
   providerNeedsPersonalSignIn,
   withOnboarding,
@@ -403,6 +404,7 @@ function tenantRows(overrides: Partial<Rows> = {}): Rows {
     "integration.adapters": [
       {
         id: GOOGLE,
+        key: "google-gmail",
         name: "Google Workspace",
         auth: { profile: "oauth2AuthorizationCode" },
         configurationFields: [
@@ -415,7 +417,7 @@ function tenantRows(overrides: Partial<Rows> = {}): Rows {
           },
         ],
       },
-      { id: SLACK, name: "Slack", auth: { profile: "apiKey", scheme: "bearer", tokenFrom: "token" } },
+      { id: SLACK, key: "slack", name: "Slack", auth: { profile: "apiKey", scheme: "bearer", tokenFrom: "token" } },
     ],
     "integration.connections": [
       {
@@ -461,6 +463,7 @@ function environment(input: {
   guides?: string[];
   guidesCalled?: string[];
   entries?: DerivedToolsCatalogEntry[];
+  projectedTools?: OnboardingEnvironment["projectedTools"];
 }) {
   const rows = input.rows ?? tenantRows();
   const memory = memoryStore(
@@ -471,12 +474,12 @@ function environment(input: {
   const env: OnboardingEnvironment = {
     session: input.session ?? session(),
     derivedEntries: input.entries ?? [SERVICE_ENTRY],
-    projectedTools: async () =>
+    projectedTools: input.projectedTools ?? (async () =>
       (rows["integration.services"] ?? []).map((row) => ({
         name: String(row.key).replace(/-/g, "_"),
         table: "integration.services",
         rowId: String(row.id),
-      })),
+      }))),
     rowsByFilter: async (table, filter, limit = 100) =>
       (rows[table] ?? [])
         .filter((row) => Object.entries(filter).every(([key, value]) => row[key] === value))
@@ -510,6 +513,9 @@ describe("the organization_connections step", () => {
   const google = (overrides: Partial<OrganizationConnectionFact> = {}): OrganizationConnectionFact => ({
     adapter: "Google",
     adapterId: "adapter-google",
+    connectionEntity: "Connection",
+    connectionKey: "google-gmail",
+    connectionName: "Google",
     createTool: "create_connection",
     adapterArgument: "adapterId",
     configured: false,
@@ -545,7 +551,7 @@ describe("the organization_connections step", () => {
     const todo = step(summary, "organization_connections");
     expect(todo.status).toBe("todo");
     expect(todo.howTo).toContain(
-      'Run create_connection { adapterId: "adapter-google", key, name } for Google.',
+      'Run create_connection { key: "google-gmail", name: "Google", adapterId: "adapter-google" } for Google.',
     );
     expect(todo.howTo).toContain(
       "The secure form asks for: OAuth client ID, OAuth client secret (secret).",
@@ -574,13 +580,44 @@ describe("the organization_connections step", () => {
     );
     expect(todo.howTo).toContain(
       "The Google connection is incomplete (missing: clientSecret); delete it and run " +
-        'create_connection { adapterId: "adapter-google", key, name } again.',
+        'create_connection { key: "google-gmail", name: "Google", adapterId: "adapter-google" } again.',
     );
     expect(todo.howTo).not.toContain("redirect URL");
   });
 });
 
 describe("gatherOnboardingFacts", () => {
+  it("keeps compatibility-backed runtime Services in both connection steps", async () => {
+    const compatibilityEntry: DerivedToolsCatalogEntry = {
+      ...SERVICE_ENTRY,
+      compatibility: {
+        plugin: "integration-runtime",
+        providerId: "integration-runtime",
+        connectOperation: "integration.service.connect",
+      },
+    };
+    const projected = onboardingToolProjection(
+      [compatibilityEntry],
+      [],
+      [
+        { name: "google_koppelen", entityName: "Service", entityId: "svc-google" },
+        { name: "unrelated", entityName: "Other", entityId: "svc-google" },
+      ],
+    );
+    expect(projected).toEqual([
+      { name: "google_koppelen", table: "integration.services", rowId: "svc-google" },
+    ]);
+
+    const { env } = environment({
+      session: session({ roles: ["org_admin", "integration_admin", "integration_user"] }),
+      entries: [compatibilityEntry],
+      projectedTools: async () => projected,
+    });
+    const summary = computeOnboarding(await gatherOnboardingFacts(env));
+    expect(step(summary, "organization_connections").status).toBe("todo");
+    expect(step(summary, "connections").status).toBe("todo");
+  });
+
   it("lists organization connections for an administrator only, judged by required values", async () => {
     const employee = environment({});
     expect((await gatherOnboardingFacts(employee.env)).organizationConnections).toBeNull();
@@ -591,6 +628,9 @@ describe("gatherOnboardingFacts", () => {
       {
         adapter: "Google Workspace",
         adapterId: GOOGLE,
+        connectionEntity: "Connection",
+        connectionKey: "google-gmail",
+        connectionName: "Google Workspace",
         createTool: "create_connection",
         adapterArgument: "adapterId",
         configured: false,
@@ -604,6 +644,9 @@ describe("gatherOnboardingFacts", () => {
       {
         adapter: "Slack",
         adapterId: SLACK,
+        connectionEntity: "Connection",
+        connectionKey: "slack",
+        connectionName: "Slack",
         createTool: "create_connection",
         adapterArgument: "adapterId",
         configured: true,

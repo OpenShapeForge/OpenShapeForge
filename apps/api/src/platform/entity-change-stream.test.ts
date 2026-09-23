@@ -24,7 +24,9 @@ let runtime: DatabaseRuntime;
 const app = Fastify({ logger: false });
 let origin: string;
 const previousSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+const previousIssuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
 const secret = "sse-synthetic-test-context-secret";
+const issuer = "https://identity.example.test/realms/sse-test";
 beforeAll(async () => {
   admin = new SQL(adminUrl, { max: 1 });
   await admin.unsafe(`create database "${database}"`);
@@ -34,6 +36,7 @@ beforeAll(async () => {
   url.username = "openshapeforge_app"; url.password = "openshapeforge_app";
   runtime = createDatabaseRuntime({ databaseUrl: url.toString(), maxConnections: 6 });
   process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = secret;
+  process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = issuer;
   registerEntityChangeStream(app, { db: runtime.db });
   origin = await app.listen({ port: 0, host: "127.0.0.1" });
 }, 90_000);
@@ -42,6 +45,8 @@ afterAll(async () => {
   await admin?.unsafe(`drop database if exists "${database}" with (force)`); await admin?.close();
   if (previousSecret === undefined) delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
   else process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = previousSecret;
+  if (previousIssuer === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+  else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = previousIssuer;
 });
 
 test("cursor syntax and frame encoding reject injection and preserve exact identifiers", () => {

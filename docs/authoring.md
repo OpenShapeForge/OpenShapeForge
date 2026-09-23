@@ -172,8 +172,13 @@ Notes on what the compiler does with this:
   update input) and MCP (absent from the update tool schema). It is the flag for
   a provenance link — `PaymentDetail.relationId` is authored with it, so a
   payment detail cannot be re-pointed at a different relation after the fact
-  (#177). A server-managed persisted field names every legitimate canonical
-  writer with `writtenBy: [Operation.id]`; generic create and update inputs
+  (#177). A persisted `readOnly` field that is intentionally supplied by a
+  caller declares `writeSource: caller`; this makes that otherwise-surprising
+  write path explicit without changing its create/update behavior. Computed,
+  derived, and compiler-owned intrinsic fields use their existing source
+  declarations instead. A server-managed persisted field names every
+  legitimate canonical writer with `writtenBy: [Operation.id]`; generic create
+  and update inputs
   then omit it, and the compiler verifies that every named writer exists and
   is reachable. `readOnly`, `immutable`, and `writtenBy` are independent
   declarations and must describe the field's real write lifecycle together.

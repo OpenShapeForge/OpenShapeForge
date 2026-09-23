@@ -8,6 +8,8 @@
  * (module `notes`, so the tables land in schema `notes`).
  */
 import { describe, expect, it } from "bun:test";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compileAuthoringBackendManifest } from "./backend-manifest.js";
 import type { CompiledEntityContract } from "./types/compiled.js";
@@ -21,6 +23,22 @@ const compile = (mutate: (contract: CompiledEntityContract) => void = () => {}, 
     generatedCrudAllowlist: entityAllowlist,
     onCandidate: ({ contract }) => mutate(contract),
   });
+
+function compileWithVersionedNoteYaml(transform: (yaml: string) => string) {
+  const directory = mkdtempSync(join(tmpdir(), "osf-versioning-guards-"));
+  try {
+    cpSync(fixtureDir, directory, { recursive: true });
+    const path = join(directory, "entities", "versioned-note.yaml");
+    writeFileSync(path, transform(readFileSync(path, "utf8")));
+    return compileAuthoringBackendManifest(directory, {
+      mode: "promote",
+      entityAllowlist: slugs,
+      generatedCrudAllowlist: slugs,
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
 
 describe("published-snapshot storage binding", () => {
   it("binds the head and version tables of a non-core module with the head foreign key", () => {
@@ -75,5 +93,32 @@ describe("published-snapshot storage binding", () => {
     });
     const head = manifest.tables.find((table) => table.source?.authoringEntityName === "VersionedNote")!;
     expect(head.source?.versioning?.storage.owned).toEqual([]);
+  });
+
+  it("refuses an authored Operation that collides with the compiler-owned publish Operation", () => {
+    expect(() => compileWithVersionedNoteYaml((yaml) => yaml.replace(
+      "operations:\n",
+      `operations:\n  publish:\n    name: Publish differently\n    description: An authored Operation must not replace versioning publication.\n    implementation: { type: plugin, plugin: example, handler: publishDifferently }\n    target: { scope: record, inputField: id }\n    input: { schema: { type: object, required: [id], properties: { id: { type: string, format: uuid } } } }\n    output: { schema: { type: object } }\n    errors: []\n    auth: { mode: session, roles: [Organization.All.ReadWrite] }\n    tenancy: { mode: required }\n    effects: { data: write, external: none }\n    reliability: { idempotency: { mode: none } }\n    confirmation: { mode: none }\n`,
+    ))).toThrow(
+      '[VersionedNote] versioning owns the canonical VersionedNote.publish Operation; authored operation "publish" collides with it.',
+    );
+  });
+
+  it("refuses an authored field that weakens a compiler-owned versioning field", () => {
+    expect(() => compileWithVersionedNoteYaml((yaml) => yaml.replace(
+      "fields:\n",
+      `fields:\n  - key: publishedVersionId\n    osfType: string\n    label: { en: Published version id, nl: Id van gepubliceerde versie }\n    persisted: { column: published_version_id, storageClass: core }\n`,
+    ))).toThrow(
+      '[VersionedNote] versioning reserves compiler-managed field "publishedVersionId"; remove the authored field.',
+    );
+  });
+
+  it("refuses even an exact authored duplicate of a compiler-managed versioning field", () => {
+    expect(() => compileWithVersionedNoteYaml((yaml) => yaml.replace(
+      "fields:\n",
+      `fields:\n  - key: publishedVersionId\n    osfType: string\n    readOnly: true\n    writtenBy: [VersionedNote.publish]\n    validation: { format: uuid }\n    label: { en: Published version id, nl: Id van gepubliceerde versie }\n    persisted: { column: published_version_id, storageClass: core }\n`,
+    ))).toThrow(
+      '[VersionedNote] versioning reserves compiler-managed field "publishedVersionId"; remove the authored field.',
+    );
   });
 });

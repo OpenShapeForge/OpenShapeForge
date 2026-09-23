@@ -41,7 +41,6 @@ function withPublishedSnapshotVersioning(entity: import("../types.js").CoreEntit
   const versioning = entity.versioning;
   if (!versioning) return entity;
   const publishOperation = `${entity.entity}.publish`;
-  const has = (key: string) => entity.fields.some((field) => field.key === key);
   const managedFields: import("../types.js").Field[] = [
     { key: "latestVersion", osfType: "integer", readOnly: true, writtenBy: [publishOperation], label: { en: "Latest version", nl: "Laatste versie" }, persisted: { column: "latest_version", storageClass: "core" } },
     { key: "latestVersionId", osfType: "string", readOnly: true, writtenBy: [publishOperation], validation: { format: "uuid" }, label: { en: "Latest version id", nl: "Id van laatste versie" }, persisted: { column: "latest_version_id", storageClass: "core" } },
@@ -49,6 +48,22 @@ function withPublishedSnapshotVersioning(entity: import("../types.js").CoreEntit
     { key: "publishedVersionId", osfType: "string", readOnly: true, writtenBy: [publishOperation], validation: { format: "uuid" }, label: { en: "Published version id", nl: "Id van gepubliceerde versie" }, persisted: { column: "published_version_id", storageClass: "core" } },
     { key: "lifecycleStatus", osfType: "string", required: true, readOnly: true, writtenBy: [publishOperation], defaultValue: "draft", label: { en: "Status", nl: "Status" }, options: { type: "static", items: [{ value: "draft", label: { en: "Draft", nl: "Concept" } }, { value: "published", label: { en: "Published", nl: "Gepubliceerd" } }] }, persisted: { column: "lifecycle_status", storageClass: "core" } },
   ];
+  const authoredPublish = Object.entries(entity.operations ?? {}).find(([key, operation]) =>
+    key === "publish" || operation.id === publishOperation);
+  if (authoredPublish) {
+    throw new Error(
+      `[${entity.entity}] versioning owns the canonical ${publishOperation} Operation; ` +
+        `authored operation "${authoredPublish[0]}" collides with it.`,
+    );
+  }
+  const managedKeys = new Set(managedFields.map((field) => field.key));
+  const authoredManagedField = entity.fields.find((field) => managedKeys.has(field.key));
+  if (authoredManagedField) {
+    throw new Error(
+      `[${entity.entity}] versioning reserves compiler-managed field "${authoredManagedField.key}"; ` +
+        "remove the authored field.",
+    );
+  }
   const publish = {
     id: publishOperation,
     name: { en: "Publish", nl: "Publiceren" },
@@ -71,7 +86,7 @@ function withPublishedSnapshotVersioning(entity: import("../types.js").CoreEntit
   const views = entity.interfaces?.web?.views;
   return {
     ...entity,
-    fields: [...entity.fields, ...managedFields.filter((field) => !has(field.key))],
+    fields: [...entity.fields, ...managedFields],
     operations: { ...(entity.operations ?? {}), publish },
     ...(views ? {
       interfaces: {

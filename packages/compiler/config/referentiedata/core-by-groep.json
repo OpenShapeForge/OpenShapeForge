@@ -449,29 +449,6 @@
       }
     }
   ],
-  "PREFERENCEOWNERSCOPE": [
-    {
-      "value": "account",
-      "label": {
-        "nl": "Account",
-        "en": "Account"
-      }
-    },
-    {
-      "value": "relation",
-      "label": {
-        "nl": "Relatie",
-        "en": "Relation"
-      }
-    },
-    {
-      "value": "tenant",
-      "label": {
-        "nl": "Tenant",
-        "en": "Tenant"
-      }
-    }
-  ],
   "NOTIFICATIETEMPLATESTATUS": [
     {
       "value": "draft",

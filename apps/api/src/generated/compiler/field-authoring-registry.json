@@ -972,19 +972,6 @@
           }
         },
         {
-          "key": "preferences",
-          "label": {
-            "en": "Preferences",
-            "nl": "Voorkeuren"
-          },
-          "osfType": "Preference",
-          "cardinality": "collection",
-          "relationship": {
-            "inverse": "accountId",
-            "ownership": "reference"
-          }
-        },
-        {
           "key": "supportIssues",
           "label": {
             "en": "Support issues",
@@ -26013,123 +26000,6 @@
         "display": "EntityReferenceDisplay"
       }
     },
-    "PersonalPreference": {
-      "kind": "entity",
-      "entity": "PersonalPreference",
-      "entityIdentity": true,
-      "baseType": "string",
-      "validation": {
-        "format": "uuid"
-      },
-      "label": {
-        "en": "Personal preference",
-        "nl": "Persoonlijke voorkeur"
-      },
-      "pluralLabel": {
-        "en": "Personal preferences",
-        "nl": "Persoonlijke voorkeuren"
-      },
-      "shape": [
-        {
-          "key": "ownerUserId",
-          "osfType": "string",
-          "required": true,
-          "immutable": true,
-          "validation": {
-            "format": "uuid"
-          },
-          "label": {
-            "en": "Owner",
-            "nl": "Eigenaar"
-          },
-          "persisted": {
-            "column": "owner_user_id",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "namespace",
-          "osfType": "string",
-          "required": true,
-          "immutable": true,
-          "validation": {
-            "minLength": 1,
-            "maxLength": 120
-          },
-          "label": {
-            "en": "Namespace",
-            "nl": "Naamruimte"
-          },
-          "persisted": {
-            "column": "namespace",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "key",
-          "osfType": "string",
-          "required": true,
-          "immutable": true,
-          "validation": {
-            "minLength": 1,
-            "maxLength": 120
-          },
-          "label": {
-            "en": "Key",
-            "nl": "Sleutel"
-          },
-          "persisted": {
-            "column": "key",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "value",
-          "osfType": "object",
-          "required": false,
-          "label": {
-            "en": "Value",
-            "nl": "Waarde"
-          },
-          "description": {
-            "en": "JSON storage; the canonical managed FieldDefinition determines and validates the actual value type.",
-            "nl": "JSON-opslag; de beheerde velddefinitie bepaalt en valideert het werkelijke waardetype."
-          },
-          "persisted": {
-            "column": "value",
-            "storageClass": "core"
-          }
-        }
-      ],
-      "render": {
-        "input": "EntityReferenceSelect",
-        "display": "EntityReferenceDisplay"
-      }
-    },
-    "personalPreferenceId": {
-      "kind": "entityId",
-      "entity": "PersonalPreference",
-      "baseType": "string",
-      "label": {
-        "en": "Personal preference",
-        "nl": "Persoonlijke voorkeur"
-      },
-      "validation": {
-        "format": "uuid"
-      },
-      "optionSource": {
-        "type": "entity",
-        "source": "PersonalPreference",
-        "valueField": "id"
-      },
-      "displayTemplate": "{{key}}",
-      "filterField": "key",
-      "icon": "file",
-      "render": {
-        "input": "EntityReferenceSelect",
-        "display": "EntityReferenceDisplay"
-      }
-    },
     "Point": {
       "kind": "entity",
       "entity": "Point",
@@ -26504,184 +26374,6 @@
       },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
-      "icon": "file",
-      "render": {
-        "input": "EntityReferenceSelect",
-        "display": "EntityReferenceDisplay"
-      }
-    },
-    "Preference": {
-      "kind": "entity",
-      "entity": "Preference",
-      "entityIdentity": true,
-      "baseType": "string",
-      "validation": {
-        "format": "uuid"
-      },
-      "label": {
-        "en": "Preference",
-        "nl": "Voorkeur"
-      },
-      "pluralLabel": {
-        "en": "Preferences",
-        "nl": "Voorkeuren"
-      },
-      "shape": [
-        {
-          "key": "ownerScope",
-          "required": true,
-          "label": {
-            "en": "Owner scope",
-            "nl": "Eigenaarsniveau"
-          },
-          "description": {
-            "en": "Scope that owns this preference, such as account, relation, or tenant.",
-            "nl": "Niveau dat eigenaar is van deze voorkeur, zoals account, relatie of tenant."
-          },
-          "defaultValue": "account",
-          "options": {
-            "type": "referentiedata",
-            "referentieGroep": "PREFERENCEOWNERSCOPE"
-          },
-          "persisted": {
-            "column": "owner_scope",
-            "storageClass": "core"
-          },
-          "osfType": "referenceDataCode"
-        },
-        {
-          "key": "namespace",
-          "osfType": "string",
-          "required": true,
-          "label": {
-            "en": "Namespace",
-            "nl": "Namespace"
-          },
-          "description": {
-            "en": "Functional namespace that groups related preferences, such as ui.workflow or messaging.defaults.",
-            "nl": "Functionele namespace die verwante voorkeuren groepeert, zoals ui.workflow of messaging.defaults."
-          },
-          "validation": {
-            "minLength": 1,
-            "maxLength": 120
-          },
-          "persisted": {
-            "column": "namespace",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "key",
-          "osfType": "string",
-          "required": true,
-          "label": {
-            "en": "Key",
-            "nl": "Sleutel"
-          },
-          "description": {
-            "en": "Stable preference key within the namespace.",
-            "nl": "Stabiele voorkeurssleutel binnen de namespace."
-          },
-          "validation": {
-            "minLength": 1,
-            "maxLength": 120
-          },
-          "persisted": {
-            "column": "key",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "valueJson",
-          "osfType": "object",
-          "required": false,
-          "label": {
-            "en": "Value",
-            "nl": "Waarde"
-          },
-          "description": {
-            "en": "Structured JSON value for this preference.",
-            "nl": "Gestructureerde JSON-waarde voor deze voorkeur."
-          },
-          "persisted": {
-            "column": "value_json",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "description",
-          "required": false,
-          "label": {
-            "en": "Description",
-            "nl": "Omschrijving"
-          },
-          "description": {
-            "en": "Optional explanation of what this preference controls.",
-            "nl": "Optionele uitleg van wat deze voorkeur regelt."
-          },
-          "validation": {
-            "maxLength": 500
-          },
-          "persisted": {
-            "column": "description",
-            "storageClass": "core"
-          },
-          "osfType": "multilineText"
-        },
-        {
-          "key": "accountId",
-          "label": {
-            "en": "Account",
-            "nl": "Account"
-          },
-          "persisted": {
-            "column": "account_id",
-            "storageClass": "core"
-          },
-          "osfType": "Account",
-          "relationship": {
-            "ownership": "reference"
-          }
-        },
-        {
-          "key": "relationId",
-          "label": {
-            "en": "Relation",
-            "nl": "Relatie"
-          },
-          "persisted": {
-            "column": "relation_id",
-            "storageClass": "core"
-          },
-          "osfType": "Relation",
-          "relationship": {
-            "ownership": "reference"
-          }
-        }
-      ],
-      "render": {
-        "input": "EntityReferenceSelect",
-        "display": "EntityReferenceDisplay"
-      }
-    },
-    "preferenceId": {
-      "kind": "entityId",
-      "entity": "Preference",
-      "baseType": "string",
-      "label": {
-        "en": "Preference",
-        "nl": "Voorkeur"
-      },
-      "validation": {
-        "format": "uuid"
-      },
-      "optionSource": {
-        "type": "entity",
-        "source": "Preference",
-        "valueField": "id"
-      },
-      "displayTemplate": "{{key}}",
-      "filterField": "key",
       "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
@@ -32455,19 +32147,6 @@
           }
         },
         {
-          "key": "preferences",
-          "label": {
-            "en": "Preferences",
-            "nl": "Voorkeuren"
-          },
-          "osfType": "Preference",
-          "cardinality": "collection",
-          "relationship": {
-            "inverse": "relationId",
-            "ownership": "reference"
-          }
-        },
-        {
           "key": "processRoles",
           "label": {
             "en": "Process roles",
@@ -37817,6 +37496,7 @@
           "key": "slug",
           "osfType": "string",
           "required": true,
+          "immutable": true,
           "label": {
             "en": "Slug",
             "nl": "Slug"
@@ -37839,6 +37519,7 @@
           "key": "name",
           "osfType": "string",
           "required": true,
+          "immutable": true,
           "label": {
             "en": "Name",
             "nl": "Naam"
@@ -37859,6 +37540,7 @@
         {
           "key": "status",
           "required": true,
+          "immutable": true,
           "label": {
             "en": "Status",
             "nl": "Status"
@@ -37886,6 +37568,7 @@
           "key": "tenantKind",
           "osfType": "string",
           "required": true,
+          "immutable": true,
           "label": {
             "en": "Tenant kind",
             "nl": "Tenantsoort"
@@ -37907,6 +37590,7 @@
         {
           "key": "description",
           "required": false,
+          "immutable": true,
           "label": {
             "en": "Description",
             "nl": "Omschrijving"
@@ -37928,6 +37612,7 @@
           "key": "avatarStorageLocation",
           "osfType": "string",
           "required": false,
+          "immutable": true,
           "label": {
             "en": "Avatar",
             "nl": "Avatar"
@@ -37948,6 +37633,7 @@
           "key": "externalCode",
           "osfType": "string",
           "required": false,
+          "immutable": true,
           "label": {
             "en": "External code",
             "nl": "Externe code"
@@ -40799,35 +40485,6 @@
             "nl": "Account",
             "en": "Account",
             "fr": "Compte"
-          }
-        },
-        {
-          "value": "tenant",
-          "label": {
-            "nl": "Tenant",
-            "en": "Tenant",
-            "fr": "Locataire"
-          }
-        }
-      ]
-    },
-    "PREFERENCEOWNERSCOPE": {
-      "description": "Kerncodetabel voor de eigenaarsscope van generieke preferences.",
-      "items": [
-        {
-          "value": "account",
-          "label": {
-            "nl": "Account",
-            "en": "Account",
-            "fr": "Compte"
-          }
-        },
-        {
-          "value": "relation",
-          "label": {
-            "nl": "Relatie",
-            "en": "Relation",
-            "fr": "Relation"
           }
         },
         {

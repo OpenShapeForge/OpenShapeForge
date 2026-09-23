@@ -184,16 +184,6 @@ groepen:
       - value: tenant
         label: { nl: Tenant, en: Tenant, fr: Locataire }
 
-  PREFERENCEOWNERSCOPE:
-    description: Kerncodetabel voor de eigenaarsscope van generieke preferences.
-    items:
-      - value: account
-        label: { nl: Account, en: Account, fr: Compte }
-      - value: relation
-        label: { nl: Relatie, en: Relation, fr: Relation }
-      - value: tenant
-        label: { nl: Tenant, en: Tenant, fr: Locataire }
-
   NOTIFICATIETEMPLATESTATUS:
     description: Kerncodetabel voor de levenscyclus van notificatietemplates.
     items:

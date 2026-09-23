@@ -177,7 +177,6 @@ export const DEFAULT_SETTINGS_PANEL_GROUPS: SettingsPanelGroup[] = [
       { label: "Beleidsregels", href: "/policies" },
       { label: "Globale variabelen", href: "/chips" },
       { label: "Communicatievoorkeuren", href: "/communication-preferences" },
-      { label: "Voorkeuren", href: "/preferences" },
       { label: "Labelregels", href: "/label-rules" },
     ],
   },

@@ -22,8 +22,10 @@
  * a claim that was reclaimed meanwhile stops before any effect, and a held
  * lock keeps `claimJobs` (`skip locked`) from handing the job out while it
  * runs. The outcome is settled inside that same transaction, so the handler's
- * writes and the outcome commit together; only a handler that throws is
- * settled apart, as a `retry`, after its transaction rolled back.
+ * writes and the outcome commit together. Once a handler starts, the generic
+ * worker cannot prove that a thrown error happened before an external effect,
+ * so an unclassified throw is settled apart as `outcome_unknown`. A handler
+ * that knows repetition is safe returns the explicit `retry` outcome instead.
  */
 import { sql, type Transaction } from "kysely";
 import type { RuntimeJobError, RuntimeJobOutcome } from "@openshapeforge/plugin-runtime";
@@ -148,9 +150,18 @@ export type JobRunResult =
   | { ran: false };
 
 /**
- * Run one claimed job to its settled outcome. Never throws: a handler that
- * throws is a `retry`, and a kind nobody handles is `dead` at once — retrying
- * it would only spend the attempt budget on a configuration problem.
+ * Run one claimed job to its settled outcome. A kind nobody handles is `dead`
+ * at once — retrying it would only spend the attempt budget on a configuration
+ * problem. Once the handler has started, an unclassified failure is
+ * `outcome_unknown`: the worker cannot know whether an external effect already
+ * happened. Handlers opt into automatic retry by returning `retry` explicitly.
+ *
+ * A handler's classified outcome is remembered outside its tenant transaction.
+ * If settling or committing that transaction fails, the worker records that
+ * same `retry`, `failed`, or `outcome_unknown` outcome in a fresh worker
+ * transaction. `done` is the sole exception: after a commit failure the worker
+ * cannot prove whether the handler's effects committed, so it becomes
+ * `outcome_unknown` and requires reconciliation.
  */
 export async function runClaimedJob(
   db: OpenShapeForgeDatabase,
@@ -172,12 +183,15 @@ export async function runClaimedJob(
       error: { code: "NO_HANDLER", message: `No active runtime module handles job kind "${job.kind}".` },
     });
   }
+  let handlerStarted = false;
+  let handlerSettlement: SettleJobInput | undefined;
   try {
     return await withDbSession(
       db,
       { tenantId: job.tenantId, userId: job.actorId, ...job.actorSession },
       async (trx): Promise<JobRunResult> => {
         if (!(await lockClaimedJob(trx, job))) return { ran: false };
+        handlerStarted = true;
         const outcome = await registered.handler(job.payload, {
           job: {
             id: job.id,
@@ -192,11 +206,30 @@ export async function runClaimedJob(
           log,
         });
         const settlement = settlementOf(job, outcome);
+        handlerSettlement = settlement;
         return { ran: true, settlement, result: await settleJob(trx, settlement) };
       },
     );
   } catch (error) {
-    return settleApart({ id: job.id, claimToken: job.claimToken, outcome: "retry", error: errorOf(error) });
+    if (handlerSettlement) {
+      if (handlerSettlement.outcome !== "done") return settleApart(handlerSettlement);
+      return settleApart({
+        id: job.id,
+        claimToken: job.claimToken,
+        outcome: "outcome_unknown",
+        error: {
+          code: "JOB_COMMIT_OUTCOME_UNKNOWN",
+          message: "The handler completed, but its transaction outcome could not be confirmed.",
+        },
+      });
+    }
+    const failure = errorOf(error);
+    return settleApart({
+      id: job.id,
+      claimToken: job.claimToken,
+      outcome: handlerStarted ? "outcome_unknown" : "retry",
+      error: failure,
+    });
   }
 }
 

@@ -550,7 +550,9 @@ export type RuntimeJobError = { message: string; code?: string; detail?: Record<
  * attempt bound is reached; `failed` is terminal without retry;
  * `outcome_unknown` says an external effect MAY have happened and must never
  * be repeated automatically — an operator decides. A handler that throws is
- * treated as `retry`; one that returns nothing is `done`.
+ * treated as `outcome_unknown`, because the generic worker cannot prove that
+ * it threw before an external effect. A handler that knows repetition is safe
+ * returns `retry` explicitly. A handler that returns nothing is `done`.
  */
 export type RuntimeJobOutcome =
   | { outcome: "done"; result?: Record<string, unknown> }

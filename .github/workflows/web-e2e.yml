@@ -142,6 +142,16 @@ jobs:
           KC_URL: http://127.0.0.1:8181
         run: bun scripts/keycloak-dev-password-login.ts openshapeforge
 
+      # A valid Keycloak login is deliberately not organization admission.
+      # Seed the browser identity explicitly, as the API transport suites do,
+      # so this test reaches the protected route without weakening that rule.
+      - name: Admit browser test identity
+        env:
+          OPENSHAPEFORGE_MIGRATE_DATABASE_URL: postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev
+          OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER: http://localhost:8181/realms/openshapeforge
+          OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE: erp-provider
+        run: bun scripts/seed-browser-e2e-identity.ts
+
       - name: Start the web app
         env:
           PORT: "3000"

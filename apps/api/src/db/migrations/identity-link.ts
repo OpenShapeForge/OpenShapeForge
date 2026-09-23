@@ -89,7 +89,10 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
     alter table platform.identity_relations force row level security;
 
     drop policy if exists identities_visibility on platform.identities;
-    create policy identities_visibility on platform.identities
+    drop policy if exists identities_insertable on platform.identities;
+    drop policy if exists identities_updatable on platform.identities;
+    drop policy if exists identities_deletable on platform.identities;
+    create policy identities_visibility on platform.identities for select
       using (
         app.bypass_rls()
         or subject = current_setting('app.user_id', true)
@@ -98,8 +101,23 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
            where ir.identity_id = identities.id
              and ir.tenant_id = app.current_tenant()
         )
+      );
+    create policy identities_insertable on platform.identities for insert
+      with check (
+        app.bypass_rls()
+        or subject = current_setting('app.user_id', true)
+      );
+    create policy identities_updatable on platform.identities for update
+      using (
+        app.bypass_rls()
+        or subject = current_setting('app.user_id', true)
       )
       with check (
+        app.bypass_rls()
+        or subject = current_setting('app.user_id', true)
+      );
+    create policy identities_deletable on platform.identities for delete
+      using (
         app.bypass_rls()
         or subject = current_setting('app.user_id', true)
       );
@@ -130,12 +148,54 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
       for each row execute function app.identity_relation_roles_guard();
 
     drop policy if exists identity_relations_tenant_isolation on platform.identity_relations;
-    create policy identity_relations_tenant_isolation on platform.identity_relations
+    drop policy if exists identity_relations_insertable on platform.identity_relations;
+    drop policy if exists identity_relations_updatable on platform.identity_relations;
+    drop policy if exists identity_relations_deletable on platform.identity_relations;
+    create policy identity_relations_tenant_isolation on platform.identity_relations for select
       using (
         app.bypass_rls()
         or tenant_id = app.current_tenant()
+      );
+    create policy identity_relations_insertable on platform.identity_relations for insert
+      with check (
+        app.bypass_rls()
+        or (
+          tenant_id = app.current_tenant()
+          and (
+            app.identity_subject(identity_id) = current_setting('app.user_id', true)
+            or ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
+              string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
+            )
+          )
+        )
+      );
+    create policy identity_relations_updatable on platform.identity_relations for update
+      using (
+        app.bypass_rls()
+        or (
+          tenant_id = app.current_tenant()
+          and (
+            app.identity_subject(identity_id) = current_setting('app.user_id', true)
+            or ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
+              string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
+            )
+          )
+        )
       )
       with check (
+        app.bypass_rls()
+        or (
+          tenant_id = app.current_tenant()
+          and (
+            app.identity_subject(identity_id) = current_setting('app.user_id', true)
+            or ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
+              string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
+            )
+          )
+        )
+      );
+    create policy identity_relations_deletable on platform.identity_relations for delete
+      using (
         app.bypass_rls()
         or (
           tenant_id = app.current_tenant()

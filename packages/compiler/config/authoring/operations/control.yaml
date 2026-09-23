@@ -670,7 +670,7 @@ operations:
           invitations:
             type: array
             x-osf-i18n: { title: { en: Invitations, nl: Uitnodigingen } }
-            items:
+            items: &tenantInvitationOutput
               type: object
               additionalProperties: false
               properties:
@@ -736,7 +736,7 @@ operations:
           slug: *id005
           invitationId: { type: string, pattern: '^[a-zA-Z0-9_-]{1,128}$', x-osf-i18n: { title: { en: Invitation ID, nl: Uitnodigings-ID } } }
         required: [slug, invitationId]
-    output: { schema: { type: object, additionalProperties: true } }
+    output: { schema: *tenantInvitationOutput }
     auth: { mode: control, roles: [platform_admin, platform-operator] }
     tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
     effects: { data: read, external: read }
@@ -1709,7 +1709,7 @@ operations:
           members:
             type: array
             x-osf-i18n: { title: { en: Members, nl: Leden } }
-            items:
+            items: &tenantMemberOutput
               type: object
               additionalProperties: false
               properties:
@@ -1745,7 +1745,7 @@ operations:
           slug: *id005
           memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
         required: [slug, memberId]
-    output: { schema: *id004 }
+    output: { schema: *tenantMemberOutput }
     auth: { mode: control, roles: [platform_admin, platform-operator] }
     tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
     effects: { data: read, external: read }
@@ -1857,7 +1857,7 @@ operations:
           credentials:
             type: array
             x-osf-i18n: { title: { en: Credentials, nl: Credentials } }
-            items:
+            items: &tenantCredentialOutput
               type: object
               additionalProperties: false
               properties:
@@ -1912,7 +1912,7 @@ operations:
           memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
           credentialId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Credential ID, nl: Credential-ID } } }
         required: [slug, memberId, credentialId]
-    output: { schema: *id004 }
+    output: { schema: *tenantCredentialOutput }
     auth: { mode: control, roles: [platform_admin, platform-operator] }
     tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
     effects: { data: read, external: read }

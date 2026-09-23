@@ -49,6 +49,7 @@ fields:
     osfType: string
     required: false
     readOnly: true
+    writeSource: caller
     label:
       en: Display only
       nl: Display only

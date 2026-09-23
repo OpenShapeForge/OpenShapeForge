@@ -510,6 +510,9 @@ describe("coreEntity properties the compiler implements", () => {
     // editor must not treat as free text.
     const isChoiceSite = (schema: Record<string, unknown>, path: string) => {
       if (path.includes("variableSources")) return false;
+      // A fixed enum is already a complete local choice list; x-osf-choice is
+      // only for choices an editor must resolve from entity or host metadata.
+      if (Array.isArray(schema.enum)) return false;
       if (schema.$ref === "#/$defs/fieldKey" || schema.$ref === "#/$defs/webRendererKeyV2") return true;
       // The last path element: an item of `actions` is `actions[]`, a map key is `<key>`.
       const name = path.match(/(?:^|[.>|])([^.>|]+)$/)?.[1] ?? "";

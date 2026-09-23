@@ -1258,8 +1258,16 @@
         },
         "relationship": {
           "oneOf": [
-            { "$ref": "#/$defs/fieldKey" },
-            { "$ref": "#/$defs/webRelationshipUsageV2" }
+            {
+              "$ref": "#/$defs/fieldKey",
+              "x-osf-choice": "relationship",
+              "x-osf-i18n": { "title": { "en": "Relationship", "nl": "Relatie" } }
+            },
+            {
+              "$ref": "#/$defs/webRelationshipUsageV2",
+              "x-osf-choice": "relationship",
+              "x-osf-i18n": { "title": { "en": "Relationship with overrides", "nl": "Relatie met aanpassingen" } }
+            }
           ],
           "x-osf-i18n": { "title": { "en": "Relationship", "nl": "Relatie" } },
           "x-osf-choice": "relationship"
@@ -1282,7 +1290,7 @@
       "additionalProperties": false,
       "required": ["name"],
       "properties": {
-        "name": { "$ref": "#/$defs/fieldKey" },
+        "name": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "relationship" },
         "overrides": {
           "type": "object",
           "additionalProperties": false,
@@ -1293,13 +1301,13 @@
               "uniqueItems": true,
               "items": {
                 "oneOf": [
-                  { "$ref": "#/$defs/fieldKey" },
+                  { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field" },
                   {
                     "type": "object",
                     "additionalProperties": false,
                     "required": ["key"],
                     "properties": {
-                      "key": { "$ref": "#/$defs/fieldKey" },
+                      "key": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field" },
                       "label": { "$ref": "#/$defs/localizedText" }
                     }
                   }
@@ -1309,12 +1317,12 @@
             "filters": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "$ref": "#/$defs/fieldKey" }
+              "items": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field" }
             },
             "sortFields": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "$ref": "#/$defs/fieldKey" }
+              "items": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "sortableField" }
             },
             "pageSize": { "type": "integer", "minimum": 1 },
             "sort": {
@@ -1322,7 +1330,7 @@
               "additionalProperties": false,
               "required": ["key", "direction"],
               "properties": {
-                "key": { "$ref": "#/$defs/fieldKey" },
+                "key": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "sortableField" },
                 "direction": { "type": "string", "enum": ["asc", "desc"] }
               }
             },

@@ -36,6 +36,11 @@ function withStatus(patch: Record<string, unknown>, entityPatch: Record<string, 
 }
 
 const formless = { interfaces: { ...milestone.coreEntity.interfaces, web: undefined } };
+const authorizationFixture = {
+  ...formless,
+  fields: milestone.coreEntity.fields.filter((field) =>
+    !["triggeredAt", "triggeredBy", "producedInvoiceId"].includes(field.key)),
+};
 /** The milestone with record-level permissions, the way an ACL-protected entity authors them. */
 const protectedEntity = (rules: unknown[]) => withStatus({ transitions: { initial: "pending", rules } }, {
   ...formless,
@@ -432,7 +437,7 @@ describe("status transition validation", () => {
   test("a declared transition-specific role passes corpus authorization validation", () => {
     const authored = withStatus({ transitions: { initial: "pending", rules: [
       { ...rule, auth: { roles: ["Finance.All.ReadWrite"] } },
-    ] } }, formless);
+    ] } }, authorizationFixture);
     const compiled = compile({ ...milestone, coreEntity: authored });
 
     expect(compiled.pluginOperations![0]!.definition.auth).toEqual({
@@ -446,7 +451,7 @@ describe("status transition validation", () => {
   });
 
   test("an omitted transition role inherits the entity update roles", () => {
-    const authored = withStatus({ transitions: { initial: "pending", rules: [rule] } }, formless);
+    const authored = withStatus({ transitions: { initial: "pending", rules: [rule] } }, authorizationFixture);
     const compiled = compile({ ...milestone, coreEntity: authored });
 
     expect(compiled.pluginOperations![0]!.definition.auth).toEqual({
@@ -462,7 +467,7 @@ describe("status transition validation", () => {
   test("an undeclared transition role is rejected before Keycloak can mint it", () => {
     const authored = withStatus({ transitions: { initial: "pending", rules: [
       { ...rule, auth: { roles: ["Finance.All.ReadWrtie"] } },
-    ] } }, formless);
+    ] } }, authorizationFixture);
     const compiled = compile({ ...milestone, coreEntity: authored });
 
     expect(validateTransitionAuthorizationReferences(

@@ -425,7 +425,7 @@ Regenerate with `bun run notices`. 510 packages.
 - License: **MIT** — https://github.com/pinojs/redact#readme
 - Author: Matteo Collina <hello@matteocollina.com>
 
-### @playwright/test@1.62.1
+### @playwright/test@1.63.0
 - License: **Apache-2.0** — https://playwright.dev
 - Author: Microsoft Corporation
 
@@ -1499,11 +1499,11 @@ Regenerate with `bun run notices`. 510 packages.
 - License: **MIT** — https://github.com/crouchcd/pkce-challenge#readme
 - Author: crouchcd
 
-### playwright@1.62.1
+### playwright@1.63.0
 - License: **Apache-2.0** — https://playwright.dev
 - Author: Microsoft Corporation
 
-### playwright-core@1.62.1
+### playwright-core@1.63.0
 - License: **Apache-2.0** — https://playwright.dev
 - Author: Microsoft Corporation
 
@@ -3508,7 +3508,7 @@ SOFTWARE.
 ```
 </details>
 
-<details><summary>@playwright/test@1.62.1, playwright@1.62.1, playwright-core@1.62.1</summary>
+<details><summary>@playwright/test@1.63.0, playwright@1.63.0, playwright-core@1.63.0</summary>
 
 ```
 Apache License
@@ -11463,4 +11463,3 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 </details>
-

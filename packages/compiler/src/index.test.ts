@@ -54,6 +54,71 @@ async function hostRoot(options: { web?: boolean; plugin?: string } = {}) {
 }
 
 describe("compiler host artifact assembly", () => {
+  test("rejects an Operation name claimed by a different compatibility bridge", async () => {
+    const plugin = "collision-plugin/index.ts";
+    const root = await hostRoot({ plugin });
+    await mkdir(join(root, "collision-plugin"), { recursive: true });
+    await writeFile(
+      join(root, plugin),
+      `const operation = (key, handler, path, mcp) => ({
+        key,
+        title: key,
+        description: key,
+        handler,
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        outputSchema: { type: "object", properties: {}, additionalProperties: false },
+        errors: [],
+        auth: { mode: "session", roles: ["Relations.All.Read"] },
+        tenancy: { mode: "required" },
+        idempotency: { mode: "none" },
+        effects: { data: "read", external: "none" },
+        transports: {
+          rest: { method: "POST", path, response: { kind: "json" } },
+          mcp,
+          graphql: { enabled: false, reason: "Not needed for this regression fixture." },
+          typescript: { enabled: false, reason: "Not needed for this regression fixture." },
+        },
+      });
+      export default {
+        name: "collision",
+        operations: [
+          operation(
+            "collision.inspect",
+            "inspect",
+            "/api/collision/inspect",
+            { enabled: false, reason: "Projected through the compatibility discovery tool." },
+          ),
+          operation(
+            "collision.conflict",
+            "conflict",
+            "/api/collision/conflict",
+            { enabled: true, name: "osf_internal_collision_collision_inspect" },
+          ),
+        ],
+        executionCompatibility: {
+          version: 1,
+          discovery: [{ operation: "collision.inspect", entity: "Relation" }],
+        },
+      };
+      `,
+    );
+    await writeFile(
+      join(root, "collision-plugin", "runtime.ts"),
+      `export default {
+        name: "collision",
+        operationHandlers: {
+          inspect: async () => ({}),
+          conflict: async () => ({}),
+        },
+      };
+      `,
+    );
+
+    await expect(collectAllArtifacts(root)).rejects.toThrow(
+      'Duplicate MCP tool name "osf_internal_collision_collision_inspect": claimed by both compatibility tool for Operation "collision.inspect" and canonical Operation "collision.conflict".',
+    );
+  }, 60_000);
+
   test("headless hosts receive exactly one deterministic empty API manifest", async () => {
     const root = await hostRoot();
     const first = await collectAllArtifacts(root);

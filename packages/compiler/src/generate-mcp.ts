@@ -1877,50 +1877,87 @@ export function buildMcpCatalog(
   // With authored name overrides in play, uniqueness is no longer guaranteed
   // by the prefix derivation — fail closed on any collision, since the runtime
   // dispatches on the name.
-  const seenNames = new Map<string, McpToolDefinition>();
+  type McpToolNameClaim = {
+    owner: string;
+    kind: "canonical-operation" | "compatibility" | "other";
+    plugin?: string;
+    operation?: string;
+  };
+  const seenNames = new Map<string, McpToolNameClaim>();
+  const claimsAreOneCompatibilityBridge = (
+    left: McpToolNameClaim,
+    right: McpToolNameClaim,
+  ): boolean =>
+    left.kind !== right.kind &&
+    [left.kind, right.kind].every((kind) =>
+      kind === "canonical-operation" || kind === "compatibility"
+    ) &&
+    left.plugin === right.plugin &&
+    left.operation === right.operation;
+  const claimName = (name: string, claim: McpToolNameClaim): void => {
+    const existing = seenNames.get(name);
+    if (existing && !claimsAreOneCompatibilityBridge(existing, claim)) {
+      throw new Error(
+        `Duplicate MCP tool name "${name}": claimed by both ${existing.owner} and ${claim.owner}. ` +
+          "Every tool in one MCP server must have a unique name.",
+      );
+    }
+    if (!existing) seenNames.set(name, claim);
+  };
   const reserveName = (
     name: string,
     entity: string,
     operation: string,
-    table: string,
+    compatibility?: { plugin: string; operation: string },
   ): void => {
-    const existing = seenNames.get(name);
-    if (existing) {
-      throw new Error(
-        `Duplicate MCP tool name "${name}": emitted for both ` +
-          `${existing.entity}.${existing.operation} and ${entity}.${operation}. ` +
-          `Adjust the authored mcp name override or toolPrefix so every tool name is unique.`,
-      );
-    }
-    seenNames.set(name, {
-      name,
-      operation: "get",
-      entity,
-      table,
-    } as McpToolDefinition);
+    claimName(name, compatibility
+      ? {
+          owner: `compatibility tool for Operation "${compatibility.operation}"`,
+          kind: "compatibility",
+          plugin: compatibility.plugin,
+          operation: compatibility.operation,
+        }
+      : { owner: `${entity}.${operation}`, kind: "other" });
   };
   for (const entry of derivedTools) {
-    for (const authored of [
-      entry.connect,
-      entry.dryRun,
-      entry.personalization?.set,
-    ]) {
-      if (!authored) continue;
-      reserveName(authored.name, entry.entity, "derived", entry.table);
+    if (entry.connect) {
+      reserveName(entry.connect.name, entry.entity, "derived connect",
+        entry.compatibility?.connectOperation
+          ? { plugin: entry.compatibility.plugin, operation: entry.compatibility.connectOperation }
+          : undefined);
+    }
+    if (entry.dryRun) {
+      reserveName(entry.dryRun.name, entry.entity, "derived dry-run",
+        entry.compatibility?.dryRunOperation
+          ? { plugin: entry.compatibility.plugin, operation: entry.compatibility.dryRunOperation }
+          : undefined);
+    }
+    if (entry.personalization) {
+      reserveName(entry.personalization.set.name, entry.entity, "derived personalization",
+        entry.compatibility?.setPreferenceOperation
+          ? { plugin: entry.compatibility.plugin, operation: entry.compatibility.setPreferenceOperation }
+          : undefined);
     }
   }
   for (const guide of guideTools) {
-    reserveName(guide.name, guide.entity, "guide", guide.table);
+    reserveName(guide.name, guide.entity, "guide");
   }
   for (const discovery of discoveryTools) {
-    reserveName(discovery.name, discovery.entity, "discovery", discovery.table);
+    reserveName(discovery.name, discovery.entity, "discovery", discovery.compatibility);
   }
   for (const test of testTools) {
-    reserveName(test.name, test.entity, "test", test.table);
+    reserveName(test.name, test.entity, "test", test.compatibility);
   }
   const generic = genericEntityNames(entities);
+  const claimedGenericNames = new Set<string>();
   for (const tool of tools) {
-    if (generic.has(tool.entity)) continue;
+    if (generic.has(tool.entity)) {
+      if (!claimedGenericNames.has(tool.name)) {
+        claimName(tool.name, { owner: `shared entity CRUD ${tool.operation}`, kind: "other" });
+        claimedGenericNames.add(tool.name);
+      }
+      continue;
+    }
     // The shared tools own the prefix: a dedicated tool named under it would
     // be merged into them by the runtime and escape the checks below.
     if (tool.name.startsWith(GENERIC_TOOL_NAME_PREFIX)) {
@@ -1930,16 +1967,13 @@ export function buildMcpCatalog(
           `toolPrefix or name override, or switch the entity to \`mcp: { tools: generic }\`.`,
       );
     }
-    const existing = seenNames.get(tool.name);
-    if (existing) {
-      throw new Error(
-        `Duplicate MCP tool name "${tool.name}": emitted for both ` +
-          `${existing.entity}.${existing.operation} and ${tool.entity}.${tool.operation}. ` +
-          `Adjust the authored mcp name override or toolPrefix so every dedicated tool ` +
-          `name is unique.`,
-      );
-    }
-    seenNames.set(tool.name, tool);
+    claimName(tool.name, { owner: `${tool.entity}.${tool.operation}`, kind: "other" });
+  }
+  if (generic.size > 0) {
+    claimName(GENERIC_DESCRIBE_TOOL_NAME, {
+      owner: "shared entity schema catalog",
+      kind: "other",
+    });
   }
 
   const dedicatedCount = tools.filter((tool) => !generic.has(tool.entity)).length;
@@ -1973,6 +2007,32 @@ export function buildMcpCatalog(
         idempotentHint: operation.idempotency.mode !== "none",
       },
     }));
+  for (const tool of operationTools) {
+    // Control Operations are advertised by a separate MCP server. Their
+    // namespace is audited before this catalog is built.
+    if (operationMcpServer(tool) === "control") continue;
+    claimName(tool.name, {
+      owner: `canonical Operation "${tool.key}"`,
+      kind: "canonical-operation",
+      plugin: tool.plugin,
+      operation: tool.key,
+    });
+  }
+  for (const tool of connectorTools) {
+    claimName(tool.name, { owner: `connector tool "${tool.name}"`, kind: "other" });
+  }
+  const editLeaseOperationIds = [
+    ...opted.flatMap((input) =>
+      Object.values(input.contract.entityOperations)
+        .filter((operation) => operation.concurrency?.editLease?.mode === "required")
+        .map((operation) => operation.id)),
+    ...operations
+      .filter((operation) => operation.transports.mcp.enabled && operation.concurrency?.editLease)
+      .map((operation) => operation.key),
+  ];
+  for (const tool of editLeaseToolDefinitions(editLeaseOperationIds)) {
+    claimName(tool.name, { owner: `shared edit-lease tool "${tool.name}"`, kind: "other" });
+  }
   // The projection decides how the TENANT server lists its Operations; the
   // control server lists its own dedicated tools regardless, so control
   // Operations are excluded from the count (see operationMcpServer).
@@ -1987,6 +2047,17 @@ export function buildMcpCatalog(
       requestedOperationToolProjection === "searchable"
       ? "searchable"
       : "dedicated";
+  if (operationToolProjection === "searchable" &&
+    operationTools.some((tool) => operationMcpServer(tool) === "tenant")) {
+    claimName(SEARCHABLE_OPERATION_TOOL_NAMES.search, {
+      owner: "shared searchable Operation catalog",
+      kind: "other",
+    });
+    claimName(SEARCHABLE_OPERATION_TOOL_NAMES.execute, {
+      owner: "shared searchable Operation executor",
+      kind: "other",
+    });
+  }
   assertAdvertisedToolBytes(
     advertisedToolSizes({
       tools,
@@ -1997,15 +2068,7 @@ export function buildMcpCatalog(
       guideTools,
       discoveryTools,
       testTools,
-      editLeaseOperationIds: [
-        ...opted.flatMap((input) =>
-          Object.values(input.contract.entityOperations)
-            .filter((operation) => operation.concurrency?.editLease?.mode === "required")
-            .map((operation) => operation.id)),
-        ...operations
-          .filter((operation) => operation.transports.mcp.enabled && operation.concurrency?.editLease)
-          .map((operation) => operation.key),
-      ],
+      editLeaseOperationIds,
       connectorTools,
       canonicalTexts: new Map(
         opted.flatMap((input) =>

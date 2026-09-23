@@ -23,6 +23,7 @@ import {
   type McpCatalogInput,
 } from "./generate-mcp.js";
 import type { CompiledPluginOperation } from "./generate-operations.js";
+import { collectJobOperations } from "./job-operations.js";
 
 const field = (
   overrides: Partial<CompiledField> & { key: string },
@@ -1166,6 +1167,30 @@ describe("buildMcpCatalog", () => {
       "example_list",
     ]);
     for (const entry of sizes) expect(entry.bytes).toBeGreaterThan(100);
+  });
+
+  it("rejects the reported guide name collision with jobs_list", () => {
+    const withCollidingGuide = input(
+      contract({
+        mcp: {
+          toolPrefix: "widget",
+          tools: "dedicated",
+          operations: { list: true, get: true, create: true, update: true, delete: true },
+          guide: {
+            name: "jobs_list",
+            description: "Explain widget maintenance.",
+            roles: ["Widgets.All.Read"],
+            content: "Use the widget operations.",
+          },
+        } as never,
+      }),
+    );
+
+    expect(() =>
+      buildMcpCatalog([withCollidingGuide], "test", {}, collectJobOperations())
+    ).toThrow(
+      'Duplicate MCP tool name "jobs_list": claimed by both Widget.guide and canonical Operation "jobs.list".',
+    );
   });
 
   it("measures the shape the runtime lists: write reminder, mirrored title, app link, localized text", () => {

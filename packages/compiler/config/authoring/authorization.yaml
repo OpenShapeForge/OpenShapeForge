@@ -225,6 +225,11 @@ keycloak:
 # and a host widens either list with an `authorizationPatch` (role lists union).
 clientRoleComposites:
   erp-provider:
+    Connectors.ExampleObjectStore.Write:
+      description: Invoke write operations on the Example Object Store connector
+      composites:
+        erp-provider:
+          - Connectors.ExampleObjectStore.Read
     org_admin:
       description: Organization administrator — invited or assigned per organization
       composites:
@@ -276,6 +281,7 @@ roleLabels:
 # Hand-authored client roles below complement roles derived from entity YAML.
 clientRoles:
   erp-provider:
+    - Connectors.ExampleObjectStore.Read
     - General.All.ReadWrite
     - General.All.Read
     - Templates.Read

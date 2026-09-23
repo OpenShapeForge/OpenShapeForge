@@ -132,7 +132,7 @@ describe("the example contract compiles into the catalog", () => {
 
 describe("MCP tools/list is resolved per session", () => {
   test("a read-only session sees the query tool and no mutation tool", async () => {
-    const { body } = await rpc(identity(["Connectors.All.Read"]), "tools/list");
+    const { body } = await rpc(identity(["Connectors.ExampleObjectStore.Read"]), "tools/list");
     const names = toolNames(body);
     expect(names).toContain(LIST_TOOL);
     expect(names).not.toContain(PUT_TOOL);
@@ -140,7 +140,7 @@ describe("MCP tools/list is resolved per session", () => {
 
   test("a writer sees both", async () => {
     const { body } = await rpc(
-      identity(["Connectors.All.Read", "Connectors.All.ReadWrite"]),
+      identity(["Connectors.ExampleObjectStore.Read", "Connectors.ExampleObjectStore.Write"]),
       "tools/list",
     );
     const names = toolNames(body);
@@ -157,7 +157,7 @@ describe("MCP tools/list is resolved per session", () => {
 
   test("the mutation tool is not hinted as safe to repeat without idempotency", async () => {
     const { body } = await rpc(
-      identity(["Connectors.All.Read", "Connectors.All.ReadWrite"]),
+      identity(["Connectors.ExampleObjectStore.Read", "Connectors.ExampleObjectStore.Write"]),
       "tools/list",
     );
     const put = (body.result?.tools ?? []).find(
@@ -169,7 +169,7 @@ describe("MCP tools/list is resolved per session", () => {
   });
 
   test("connector tools carry their own input schema, not a CRUD one", async () => {
-    const { body } = await rpc(identity(["Connectors.All.Read"]), "tools/list");
+    const { body } = await rpc(identity(["Connectors.ExampleObjectStore.Read"]), "tools/list");
     const list = (body.result?.tools ?? []).find(
       (tool: { name: string }) => tool.name === LIST_TOOL,
     );
@@ -184,7 +184,7 @@ describe("MCP tools/list is resolved per session", () => {
 describe("MCP tools/call cannot be used to enumerate connectors", () => {
   // An unauthorized tool and an unknown one must be indistinguishable.
   test("an unauthorized tool and an unknown tool answer identically", async () => {
-    const who = identity(["Connectors.All.Read"]);
+    const who = identity(["Connectors.ExampleObjectStore.Read"]);
     const unauthorized = await rpc(who, "tools/call", { name: PUT_TOOL, arguments: {} });
     const unknown = await rpc(who, "tools/call", { name: "no_such_tool", arguments: {} });
 
@@ -197,7 +197,7 @@ describe("MCP tools/call cannot be used to enumerate connectors", () => {
   });
 
   test("an authorized tool gets past authorization to a real refusal", async () => {
-    const { body } = await rpc(identity(["Connectors.All.Read"]), "tools/call", {
+    const { body } = await rpc(identity(["Connectors.ExampleObjectStore.Read"]), "tools/call", {
       name: LIST_TOOL,
       arguments: {},
     });

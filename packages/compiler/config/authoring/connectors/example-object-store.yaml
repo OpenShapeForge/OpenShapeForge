@@ -41,6 +41,11 @@ implementation:
 availability:
   entitlement: connector.example-object-store
 
+authorization:
+  roles:
+    read: Connectors.ExampleObjectStore.Read
+    write: Connectors.ExampleObjectStore.Write
+
 configuration:
   instances: multiple
   verify: false
@@ -82,9 +87,6 @@ operations:
     description:
       en: List objects under a prefix.
       nl: Toon objecten onder een prefix.
-    authorization:
-      roles:
-        invoke: [Connectors.All.Read]
     input:
       - key: prefix
         osfType: string
@@ -111,9 +113,6 @@ operations:
   - key: putObject
     kind: mutation
     label: { en: Store object, nl: Object opslaan }
-    authorization:
-      roles:
-        invoke: [Connectors.All.ReadWrite]
     input:
       - key: key
         osfType: string

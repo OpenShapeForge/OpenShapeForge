@@ -54,6 +54,8 @@ import type {
   AuthorizationRealmRole,
 } from "../types/authoring.js";
 import { validateTransitionAuthorizationReferences } from "../compiler/authorization-validation.js";
+import { validateConnectorAuthorizationReferences } from "../compiler/authorization-validation.js";
+import type { CompiledConnectorContract } from "../types/connector.js";
 import { KEYCLOAK_ROLE_SEGMENT_RENAMES, normalizeKeycloakRoleName } from "../role-names.js";
 import {
   buildPasskeyProfile,
@@ -1250,6 +1252,7 @@ export function generateKeycloakRealmArtifacts(
   // exercised by mutating global state is a rule that stops being tested.
   mode: RealmMode = resolveRealmMode(),
   operationCatalogs: readonly OperationCatalogDefinition[] = [],
+  connectors: readonly CompiledConnectorContract[] = [],
 ): KeycloakRealmArtifact[] {
   if (!authConfig) {
     return [];
@@ -1283,6 +1286,15 @@ export function generateKeycloakRealmArtifacts(
     if (transitionAuthorization.errors.length > 0) {
       throw new Error(
         `Transition authorization validation failed:\n${transitionAuthorization.errors.join("\n")}`,
+      );
+    }
+    const connectorAuthorization = validateConnectorAuthorizationReferences(
+      connectors,
+      authConfig,
+    );
+    if (connectorAuthorization.errors.length > 0) {
+      throw new Error(
+        `Connector authorization validation failed:\n${connectorAuthorization.errors.join("\n")}`,
       );
     }
   }
@@ -1565,6 +1577,7 @@ export function generateAllKeycloakRealmArtifacts(
   authConfigs: readonly (AuthorizationConfigFile | null | undefined)[],
   mode: RealmMode = resolveRealmMode(),
   operationCatalogs: readonly OperationCatalogDefinition[] = [],
+  connectors: readonly CompiledConnectorContract[] = [],
 ): KeycloakRealmArtifact[] {
   const artifacts: KeycloakRealmArtifact[] = [];
   const seenPaths = new Set<string>();
@@ -1575,6 +1588,7 @@ export function generateAllKeycloakRealmArtifacts(
       authConfig,
       mode,
       operationCatalogs,
+      connectors,
     )) {
       if (seenPaths.has(artifact.path)) {
         throw new Error(

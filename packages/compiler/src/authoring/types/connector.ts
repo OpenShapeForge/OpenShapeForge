@@ -242,8 +242,6 @@ export interface ConnectorOperation {
   kind: ConnectorOperationKind;
   label?: LocalizedText;
   description?: string | LocalizedText;
-  /** Per-operation role allow-list, enforced before the package is called. */
-  authorization?: { roles: { invoke: string[] } };
   input?: FieldDefinition[];
   output: ConnectorOperationOutput;
   reliability?: ConnectorReliability;
@@ -303,6 +301,8 @@ export interface ConnectorDefinition {
   capabilities: ConnectorCapabilityKey[];
   implementation: ConnectorImplementation;
   availability?: ConnectorAvailability;
+  /** Connector-specific invocation permissions; configuration access is separate. */
+  authorization: { roles: { read: string; write: string } };
   configuration?: ConnectorConfiguration;
   /** Absent means the package authenticates from its own config fields. */
   auth?: ConnectorOAuth;
@@ -368,6 +368,8 @@ export interface CompiledConnectorContract {
   capabilities: ConnectorCapabilityKey[];
   implementation: ConnectorImplementation;
   availability: { entitlement?: string };
+  /** Connector-specific invocation permissions; configuration access is separate. */
+  authorization: { roles: { read: string; write: string } };
   configuration: {
     instances: "single" | "multiple";
     verify: boolean;

@@ -41,6 +41,11 @@ implementation:
 availability:
   entitlement: connector.dynamics-finance
 
+authorization:
+  roles:
+    read: Connectors.DynamicsFinance.Read
+    write: Connectors.DynamicsFinance.Write
+
 configuration:
   instances: multiple
   # /data/$metadata is authenticated and returns the service document rather
@@ -118,9 +123,6 @@ operations:
     description:
       en: Read a Dynamics data entity, with OData select, filter and paging.
       nl: Lees een Dynamics-data-entiteit, met OData select, filter en paginering.
-    authorization:
-      roles:
-        invoke: [Connectors.All.Read]
     input:
       - key: entity
         osfType: string
@@ -177,9 +179,6 @@ operations:
   - key: createRecord
     kind: mutation
     label: { en: Create a record, nl: Record aanmaken }
-    authorization:
-      roles:
-        invoke: [Connectors.All.ReadWrite]
     input:
       - key: entity
         osfType: string

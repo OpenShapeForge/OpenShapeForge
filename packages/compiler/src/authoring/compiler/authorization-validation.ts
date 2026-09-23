@@ -24,6 +24,7 @@ import type {
   AuthorizationRealmRole,
 } from "../types/authoring.js";
 import type { CompiledEntityContract } from "../types/compiled.js";
+import type { CompiledConnectorContract } from "../types/connector.js";
 
 export interface AuthorizationValidationResult {
   errors: string[];
@@ -65,6 +66,49 @@ export function validateTransitionAuthorizationReferences(
           );
         }
       }
+    }
+  }
+
+  return { errors, warnings: [] };
+}
+
+/** Validate connector-specific invocation permissions against one tenant realm. */
+export function validateConnectorAuthorizationReferences(
+  connectors: readonly CompiledConnectorContract[],
+  authConfig: AuthorizationConfigFile,
+): AuthorizationValidationResult {
+  const errors: string[] = [];
+  const client = entityRoleClientId(authConfig);
+  const declared = buildDeclaredRoleSet(authConfig).perClient.get(client) ?? new Set<string>();
+  const owners = new Map<string, string>();
+
+  for (const connector of connectors) {
+    const { read, write } = connector.authorization.roles;
+    for (const [permission, role] of [["read", read], ["write", write]] as const) {
+      if (!declared.has(role)) {
+        errors.push(
+          `[${connector.connector}] authorization.roles.${permission} references "${role}", ` +
+            `which is not declared for client "${client}" in the applicable authorization contract.`,
+        );
+      }
+      const previous = owners.get(role);
+      if (previous && previous !== connector.connector) {
+        errors.push(
+          `Connector role "${role}" is shared by ${previous} and ${connector.connector}. ` +
+            "A connector-specific permission may authorize exactly one connector.",
+        );
+      } else {
+        owners.set(role, connector.connector);
+      }
+    }
+
+    const writeComposite = authConfig.clientRoleComposites?.[client]?.[write];
+    const included = writeComposite?.composites?.[client] ?? [];
+    if (!included.includes(read)) {
+      errors.push(
+        `[${connector.connector}] write role "${write}" must be a client-role composite ` +
+          `that includes its read role "${read}" on client "${client}".`,
+      );
     }
   }
 

@@ -54,6 +54,11 @@ implementation:
 availability:
   entitlement: connector.object-store   # absent ⇒ always available
 
+authorization:
+  roles:
+    read: Connectors.ExampleObjectStore.Read
+    write: Connectors.ExampleObjectStore.Write
+
 configuration:
   instances: multiple                 # single | multiple
   fields:                             # same field vocabulary as workflow nodes
@@ -66,7 +71,6 @@ network:
 operations:
   - key: listObjects
     kind: query                       # query | mutation
-    authorization: { roles: { invoke: [Connectors.All.Read] } }
     input:  [ { key: prefix, osfType: string } ]
     output: { cardinality: many, fields: [ { key: key, osfType: string, required: true } ] }
 

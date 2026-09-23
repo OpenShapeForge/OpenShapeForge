@@ -57,6 +57,12 @@ const CONTRACT: ConnectorContract = {
     license: { spdx: "LicenseRef-BatterAI-Commercial" },
   },
   availability: { entitlement: ENTITLEMENT },
+  authorization: {
+    roles: {
+      read: "Connectors.ExampleObjectStore.Read",
+      write: "Connectors.ExampleObjectStore.Write",
+    },
+  },
   configuration: {
     instances: "single",
     verify: false,

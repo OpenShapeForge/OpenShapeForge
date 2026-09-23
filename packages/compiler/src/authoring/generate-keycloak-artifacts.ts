@@ -18,6 +18,9 @@ import {
 } from "./loader.js";
 import { compile } from "./compiler/index.js";
 import { loadOperationCatalogs } from "./operation-catalog.js";
+import { listConnectorFiles, loadConnector } from "./connector-loader.js";
+import { buildConnector } from "./compiler/connector.js";
+import { loadOsfTypes } from "./loader.js";
 import {
   generateAllKeycloakRealmArtifacts,
   type KeycloakRealmArtifact,
@@ -105,10 +108,15 @@ export function generateAuthoringKeycloakArtifacts(
   const operationCatalogs = loadOperationCatalogs(authoringDir).map(
     ({ document }) => document,
   );
+  const osfTypes = loadOsfTypes(authoringDir);
+  const connectors = listConnectorFiles(authoringDir).map(({ slug, path }) =>
+    buildConnector(loadConnector(path, slug, path), slug, path, osfTypes)
+  );
   return generateAllKeycloakRealmArtifacts(
     contracts,
     authConfigs,
     undefined,
     operationCatalogs,
+    connectors,
   );
 }

@@ -48,6 +48,11 @@ implementation:
 availability:
   entitlement: connector.exact-online
 
+authorization:
+  roles:
+    read: Connectors.ExactOnline.Read
+    write: Connectors.ExactOnline.Write
+
 configuration:
   # Multiple: an organisation routinely holds several administrations, and each
   # is its own installation with its own division rather than a setting toggled
@@ -148,9 +153,6 @@ operations:
     description:
       en: Report the division the authorized user is currently working in.
       nl: Toon de administratie waarin de geautoriseerde gebruiker nu werkt.
-    authorization:
-      roles:
-        invoke: [Connectors.All.Read]
     input: []
     output:
       cardinality: one
@@ -175,9 +177,6 @@ operations:
     description:
       en: Read an Exact entity set, with OData select, filter and paging.
       nl: Lees een Exact-entiteitsset, met OData select, filter en paginering.
-    authorization:
-      roles:
-        invoke: [Connectors.All.Read]
     input:
       - key: endpoint
         osfType: string
@@ -252,9 +251,6 @@ operations:
     description:
       en: Post a new record to an Exact entity set.
       nl: Plaats een nieuw record in een Exact-entiteitsset.
-    authorization:
-      roles:
-        invoke: [Connectors.All.ReadWrite]
     input:
       - key: endpoint
         osfType: string

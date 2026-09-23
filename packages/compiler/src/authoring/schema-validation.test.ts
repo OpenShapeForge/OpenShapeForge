@@ -55,11 +55,16 @@ function connectorDefinition(
       provenance: "firstParty",
       license: { spdx: "LicenseRef-BatterAI-Commercial" },
     },
+    authorization: {
+      roles: {
+        read: "Connectors.ObjectStore.Read",
+        write: "Connectors.ObjectStore.Write",
+      },
+    },
     operations: [
       {
         key: "listObjects",
         kind: "query",
-        authorization: { roles: { invoke: ["Connectors.All.Read"] } },
         input: [{ key: "prefix", osfType: "string" }],
         output: { cardinality: "many", fields: [{ key: "key", osfType: "string" }] },
       },
@@ -289,6 +294,19 @@ describe("connector contracts are validated at LOAD, not only in the corpus gate
     expect(loadFromDisk(definition)).toThrow(/connector\.schema\.json/);
   });
 
+  it("requires connector-level permissions and rejects the retired per-operation shape", () => {
+    const missing = { ...connectorDefinition() } as Record<string, unknown>;
+    delete missing.authorization;
+    expect(loadFromDisk(missing)).toThrow(/authorization/);
+
+    const legacy = connectorDefinition() as unknown as Record<string, unknown>;
+    const operations = legacy.operations as Array<Record<string, unknown>>;
+    operations[0]!.authorization = {
+      roles: { invoke: ["Connectors.ExampleObjectStore.Read"] },
+    };
+    expect(loadFromDisk(legacy)).toThrow(/authorization/);
+  });
+
   it("names the offending path", () => {
     const definition = connectorDefinition({
       operations: [
@@ -321,7 +339,6 @@ describe("connector contracts are validated at LOAD, not only in the corpus gate
         {
           key: "list`Objects",
           kind: "query",
-          authorization: { roles: { invoke: ["Connectors.All.Read"] } },
           output: { cardinality: "many", fields: [{ key: "key", osfType: "string" }] },
         },
       ],
@@ -347,7 +364,6 @@ describe("schema and compiler agree", () => {
           {
             key: "listObjects",
             kind: "query",
-            authorization: { roles: { invoke: ["Connectors.All.Read"] } },
             output: { cardinality: "many", fields: [{ key: "key", osfType: "string" }] },
             reliability: { timeouts: { attemptMs: 10_000, totalMs: 30_000 } },
           },
@@ -361,7 +377,6 @@ describe("schema and compiler agree", () => {
           {
             key: "putObject",
             kind: "mutation",
-            authorization: { roles: { invoke: ["Connectors.All.ReadWrite"] } },
             input: [{ key: "requestId", osfType: "string" }],
             output: { cardinality: "one", fields: [{ key: "key", osfType: "string" }] },
             reliability: {

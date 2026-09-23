@@ -3,6 +3,36 @@
     "realm": {},
     "clients": {
       "erp-provider": {
+        "Connectors.AfasProfit.Write": [
+          {
+            "client": "erp-provider",
+            "role": "Connectors.AfasProfit.Read"
+          }
+        ],
+        "Connectors.DynamicsFinance.Write": [
+          {
+            "client": "erp-provider",
+            "role": "Connectors.DynamicsFinance.Read"
+          }
+        ],
+        "Connectors.ExactOnline.Write": [
+          {
+            "client": "erp-provider",
+            "role": "Connectors.ExactOnline.Read"
+          }
+        ],
+        "Connectors.ExampleObjectStore.Write": [
+          {
+            "client": "erp-provider",
+            "role": "Connectors.ExampleObjectStore.Read"
+          }
+        ],
+        "Connectors.Twinfield.Write": [
+          {
+            "client": "erp-provider",
+            "role": "Connectors.Twinfield.Read"
+          }
+        ],
         "org_admin": [
           {
             "client": "erp-provider",

@@ -163,6 +163,10 @@ export async function applyDbSession<TDatabase>(
     );
   }
 
+  // A tenant session is never a continuation of a system session. Clear the
+  // break-glass flag explicitly before any tenant-scoped lookup so a pooled
+  // connection cannot carry broader authority into an ordinary request.
+  await sql`select set_config('app.bypass_rls', 'false', true)`.execute(trx);
   await sql`select set_config('app.tenant_id', ${session.tenantId}, true)`.execute(trx);
   await sql`select set_config('app.user_id', ${session.userId}, true)`.execute(trx);
   await sql`select set_config('app.roles', ${session.roles.join(",")}, true)`.execute(trx);

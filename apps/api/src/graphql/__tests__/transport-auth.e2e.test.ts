@@ -160,7 +160,10 @@ describe("transport and authentication", () => {
       ? "UNAUTHENTICATED"
       : "AUTHENTICATION_UNAVAILABLE";
     expect(result.errors?.[0]?.extensions?.code).toBe(expected);
-    expect(result.data ?? null).toBeNull();
+    // A transport-level 503 may omit data, while a field-level 401 follows
+    // GraphQL null propagation and returns { field: null }. Neither may
+    // return an entity payload.
+    expect(Object.values(result.data ?? {}).every((value) => value === null)).toBe(true);
   });
 
   const writable = tablesWritableWith(keycloakToken, ["read", "create", "delete"]);

@@ -196,7 +196,14 @@ describe("transport and authentication", () => {
   // The identity comes from Keycloak rather than a synthetic trusted-context
   // header on purpose: the code path under test is the one that maps roles out
   // of a JWT, which trusted-context headers bypass entirely.
-  for (const table of rolelessToken ? tables.filter(isEntityBackedCreate).slice(0, 1) : []) {
+  const rolelessTables = rolelessToken
+    ? tables.filter(isEntityBackedCreate).slice(0, 1)
+    : [];
+  test.skipIf(!rolelessToken)("the roleless Keycloak token denial has an entity to exercise", () => {
+    expect(rolelessTables.length).toBeGreaterThan(0);
+  });
+
+  for (const table of rolelessTables) {
     const graphql = table.source!.graphql!;
     test(`a real Keycloak token with no realm roles is refused every operation (${graphql.typeName})`, async () => {
       const bearer = rolelessToken!;

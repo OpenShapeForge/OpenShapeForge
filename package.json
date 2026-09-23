@@ -69,6 +69,7 @@
     "test:web-transport": "bun test scripts/web-graphql-transport.test.ts scripts/web-api-live-transport.test.ts",
     "//test:web": "apps/web's own unit tests: pure renderer and library modules under bun test. Needs `bun run generate` first, because the renderer contract modules they import are generated.",
     "test:web": "bun test apps/web/src",
+    "test:browser": "bun run --cwd apps/web test:browser",
     "test:layout": "bun test packages/workflow-layout",
     "//test:connectors": "./connectors and not connectors: bun test treats a bare argument as a path SUBSTRING, so `bun test connectors` also sweeps apps/api/src/connectors and reports its pre-existing failures as this suite's.",
     "test:connectors": "bun test ./connectors",

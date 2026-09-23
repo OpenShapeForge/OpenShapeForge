@@ -592,6 +592,10 @@ for (const table of restTables) {
  * Skipped against a remote server: withClassifiedColumn arms the in-process
  * manifest, which a server behind E2E_API_URL does not share.
  */
+test("the REST classification suite has a redactable manifest column", () => {
+  expect(restTables.filter(redactableColumnFor).length).toBeGreaterThan(0);
+});
+
 for (const table of restTables) {
   const rest_ = table.source!.rest!;
   const base = `${REST_MOUNT_PATH}/${rest_.basePath}`;

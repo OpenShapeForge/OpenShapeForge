@@ -95,6 +95,7 @@ import {
   PROTECTED_RESOURCE_METADATA_PATH,
   requestOrigin,
 } from "./protected-resource-metadata.js";
+import { createRequestFreshContext } from "./stateful-session-authorization.js";
 
 /** The route this server mounts the control MCP on. */
 export const CONTROL_MCP_ROUTE_PATH = "/api/control/mcp";
@@ -328,7 +329,9 @@ function failedToolResult(error: unknown, log: (error: unknown) => void): CallTo
 function buildPlatformServer(input: {
   context: ModuleRuntimeContext;
   db: OpenShapeForgeDatabase;
-  session: ControlSessionContext;
+  session: () => ControlSessionContext;
+  /** Stable fail-closed view passed into Operation contexts. */
+  sessionView?: ControlSessionContext | undefined;
   bound: readonly BoundOperation[];
   /** What the client said at `initialize` (mcp/session-client.ts); null on a single shot. */
   client: McpClientInfo | null;
@@ -338,19 +341,12 @@ function buildPlatformServer(input: {
     capabilities: { tools: {}, resources: {} },
     instructions: PLATFORM_SERVER_INSTRUCTIONS,
   });
-  // Roles are pinned for the life of the session, so its tool list is too.
-  const tools = toolsForControlSession(input.bound, input.session);
-  const access = () => ({ tools: tools.length, resources: 1 });
+  const tools = () => toolsForControlSession(input.bound, input.session());
+  const access = () => ({ tools: tools().length, resources: 1 });
   const presentation: ControlPresentation = { client: input.client, access };
-  const { administrator } = input.session;
-  const catalog = {
-    db: input.db,
-    administrator,
-    provider: input.context.control?.provider,
-  };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: tools.map(({ tool }) => tool),
+    tools: tools().map(({ tool }) => tool),
   }));
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({
     resources: [PLATFORM_SESSION_RESOURCE],
@@ -359,10 +355,15 @@ function buildPlatformServer(input: {
     if (request.params.uri !== PLATFORM_SESSION_RESOURCE_URI) {
       throw new HttpError(404, "NOT_FOUND", `Unknown resource "${request.params.uri}".`);
     }
+    const session = input.session();
     const info = buildPlatformSessionInfo({
-      administrator,
-      roles: input.session.roles,
-      tenants: await listPlatformTenantsCount(catalog),
+      administrator: session.administrator,
+      roles: session.roles,
+      tenants: await listPlatformTenantsCount({
+        db: input.db,
+        administrator: session.administrator,
+        provider: input.context.control?.provider,
+      }),
       client: input.client,
       access: access(),
     });
@@ -379,7 +380,7 @@ function buildPlatformServer(input: {
   // Unknown names and Operations this session may not use get the same
   // refusal: NOT_FOUND, no hint of what exists.
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const match = tools.find(({ tool }) => tool.name === request.params.name);
+    const match = tools().find(({ tool }) => tool.name === request.params.name);
     if (!match) {
       return failedToolResult(
         new HttpError(404, "NOT_FOUND", `Unknown tool "${request.params.name}".`),
@@ -391,7 +392,7 @@ function buildPlatformServer(input: {
         ...input.context,
         db: input.db,
         control: { ...input.context.control!, presentation, log: input.log },
-        session: input.session,
+        session: input.sessionView ?? input.session(),
         transport: "mcp",
       });
       return toolResult(result);
@@ -410,12 +411,13 @@ export function __buildPlatformServerForTests(input: {
   modules?: readonly RuntimeModule[];
   client?: McpClientInfo | null;
   log?: (error: unknown) => void;
+  currentSession?: (() => ControlSessionContext) | undefined;
 }): Server {
   if (!input.context.db) throw new Error("The control MCP test seam needs a database.");
   return buildPlatformServer({
     context: input.context,
     db: input.context.db,
-    session: input.session,
+    session: input.currentSession ?? (() => input.session),
     bound: bindControlOperations(input.modules ?? [], input.operations),
     client: input.client ?? null,
     log: input.log ?? (() => undefined),
@@ -550,6 +552,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
       subject: string;
       issuer: string;
       lastSeenMs: number;
+      runWithSession: <T>(session: ControlSessionContext, work: () => Promise<T> | T) => Promise<T>;
     };
     const sessions = new Map<string, SessionEntry>();
     const SESSION_IDLE_LIMIT_MS = 30 * 60 * 1000;
@@ -592,13 +595,26 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
         }
         existing.lastSeenMs = Date.now();
         reply.hijack();
-        await existing.transport.handleRequest(request.raw, reply.raw, request.body);
+        await existing.runWithSession(session, () =>
+          existing.transport.handleRequest(request.raw, reply.raw, request.body));
         return;
       }
 
       if (request.method === "POST" && isInitializeBody(request.body)) {
         const client = clientInfoFromInitializeBody(request.body);
-        const server = buildPlatformServer({ context, db, session, bound, client, log });
+        const requestSession = createRequestFreshContext<ControlSessionContext>({
+          ...session,
+          roles: [],
+        });
+        const server = buildPlatformServer({
+          context,
+          db,
+          session: requestSession.current,
+          sessionView: requestSession.view,
+          bound,
+          client,
+          log,
+        });
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
@@ -608,6 +624,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
               subject: administrator.subject,
               issuer: administrator.issuer,
               lastSeenMs: Date.now(),
+              runWithSession: requestSession.run,
             });
           },
         });
@@ -615,13 +632,15 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
           if (transport.sessionId) sessions.delete(transport.sessionId);
         };
         reply.hijack();
-        await server.connect(transport as unknown as Parameters<Server["connect"]>[0]);
-        await transport.handleRequest(request.raw, reply.raw, request.body);
+        await requestSession.run(session, async () => {
+          await server.connect(transport as unknown as Parameters<Server["connect"]>[0]);
+          await transport.handleRequest(request.raw, reply.raw, request.body);
+        });
         return;
       }
 
       // Sessionless single shot, for probes and scripted proofs.
-      const server = buildPlatformServer({ context, db, session, bound, client: null, log });
+      const server = buildPlatformServer({ context, db, session: () => session, bound, client: null, log });
       const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
       reply.raw.on("close", () => {
         void transport.close();

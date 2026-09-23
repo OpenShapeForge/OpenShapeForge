@@ -4,10 +4,44 @@ import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import { createModuleSessionCapability } from "../../modules/platform.js";
 import type { StatefulMcpAuthorization } from "../stateful-session-authorization.js";
 import {
+  createRequestFreshContext,
   createStatefulMcpSessionContext,
   sameStatefulMcpAuthorization,
   withFreshRelationGroupMemberships,
 } from "../stateful-session-authorization.js";
+
+describe("createRequestFreshContext", () => {
+  it("isolates concurrent requests and drops authority retained after settlement", async () => {
+    const context = createRequestFreshContext({ roles: [] as string[] });
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    let releaseLate!: () => void;
+    const lateGate = new Promise<void>((resolve) => { releaseLate = resolve; });
+    const retained = context.view;
+    let lateRead!: Promise<readonly string[]>;
+
+    const first = context.run({ roles: ["first"] }, async () => {
+      lateRead = (async () => {
+        await lateGate;
+        return retained.roles;
+      })();
+      await firstGate;
+      return retained.roles;
+    });
+    const second = context.run({ roles: ["second"] }, async () => {
+      const observed = context.current().roles;
+      releaseFirst();
+      return observed;
+    });
+
+    expect(await first).toEqual(["first"]);
+    expect(await second).toEqual(["second"]);
+    releaseLate();
+    expect(await lateRead).toEqual([]);
+    expect(retained.roles).toEqual([]);
+    expect(context.current().roles).toEqual([]);
+  });
+});
 
 type TestAuthorization = StatefulMcpAuthorization & Pick<TrustedSessionContext, "roles" | "scope">;
 

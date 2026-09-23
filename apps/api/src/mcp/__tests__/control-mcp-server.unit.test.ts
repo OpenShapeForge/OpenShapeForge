@@ -50,7 +50,11 @@ const runtime: ControlRuntime = {
 
 async function connect(
   session: ControlSessionContext,
-  options: { operations?: readonly OperationContract[]; modules?: readonly RuntimeModule[] } = {},
+  options: {
+    operations?: readonly OperationContract[];
+    modules?: readonly RuntimeModule[];
+    currentSession?: () => ControlSessionContext;
+  } = {},
 ) {
   const server = __buildPlatformServerForTests({
     context: { db, control: runtime },
@@ -58,6 +62,7 @@ async function connect(
     operations: options.operations ?? controlOperationContracts(),
     modules: options.modules ?? [],
     client: { name: "Claude Code", version: "2.1.0", capabilities: [] },
+    currentSession: options.currentSession,
   });
   const client = new Client({ name: "control-mcp-test", version: "1" }, { capabilities: {} });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -74,6 +79,29 @@ const rolesOf = (handler: string) => {
 };
 
 describe("the control MCP tool list", () => {
+  test("uses the current request's roles without reinitializing the transport", async () => {
+    const established = controlSessionFor(administrator, ["platform_admin"]);
+    let current = established;
+    const { client, close } = await connect(established, { currentSession: () => current });
+    try {
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("list_catalog_entries");
+      current = controlSessionFor(administrator, ["platform-operator"]);
+      const refreshed = (await client.listTools()).tools.map((tool) => tool.name);
+      expect(refreshed).toContain("create_tenant");
+      expect(refreshed).not.toContain("list_catalog_entries");
+      const who = await client.callTool({ name: "whoami", arguments: {} });
+      expect(who.structuredContent).toMatchObject({ role: "Platform operator" });
+      const resource = await client.readResource({ uri: PLATFORM_SESSION_RESOURCE_URI });
+      expect(JSON.parse((resource.contents[0] as { text: string }).text))
+        .toMatchObject({ role: "Platform operator" });
+      const refused = await client.callTool({ name: "list_catalog_entries", arguments: {} });
+      expect(refused.isError).toBe(true);
+      expect(refused.structuredContent).toMatchObject({ error: { code: "NOT_FOUND" } });
+    } finally {
+      await close();
+    }
+  });
+
   test("a platform_admin-only session sees shared reads and administrator tools, with the confirmed field where declared", async () => {
     const { client, close } = await connect(controlSessionFor(administrator, ["platform_admin"]));
     try {

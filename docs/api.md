@@ -11,7 +11,7 @@ Endpoints (`src/roles/api.ts`):
 | Route | Purpose |
 | --- | --- |
 | `POST/GET /api/graphql` | GraphQL (GraphiQL enabled unless `NODE_ENV=production`) |
-| `/api/rest/v1/<basePath>[/:id]` | Generated REST (entities that opt in via the `rest:` block) |
+| `/api/rest/v1/<basePath>[/:id]` | Generated REST (entities that opt in via `interfaces.rest`) |
 | `GET /api/rest/openapi.json` | Generated OpenAPI 3.1 spec for the REST surface |
 | `GET /api/health`, `/api/ready`, `/api/metrics` | liveness, readiness, and metrics |
 
@@ -103,7 +103,7 @@ Engine semantics (`src/graphql/generated-crud.ts`):
 ## The generated REST surface
 
 `src/rest/generated-rest-routes.ts` is the REST counterpart of the GraphQL
-schema builder. Entities opt in per entity with a `rest:` block in their YAML
+schema builder. Entities opt in per entity with an `interfaces.rest` block in their YAML
 (see [authoring.md](authoring.md#rest-generated-rest-exposure)); the compiler
 bridges it to `source.rest` in the manifest, and every such table gets routes
 under `/api/rest/v1/<basePath>`:
@@ -350,14 +350,17 @@ no tenant.
   get, publish, retire, apply for one tenant, installation counts) and
   `src/control/platform-catalog.ts` calls it with the cross-tenant session,
   mapping tenant ids to slugs so no id reaches a client.
-- **Tenant and organisation tools** (`src/control/operations.ts`,
-  `platform-operator`; shared reads also allow `platform_admin`):
+- **Tenant, organisation, and identity tools** (`src/control/operations.ts`,
+  `platform-operator`):
   `list_tenants`, `get_tenant`, `create_tenant`, `update_tenant` (name and
   lifecycle state), `get_tenant_organization_tree`,
   `create_tenant_organization`, and `update_tenant_organization` (rename or
-  reparent). These delegate to the same audited control services as REST; the
-  MCP is not a generic Keycloak proxy and exposes no realm configuration,
-  credentials, tokens, or destructive tenant deletion.
+  reparent). Member, invitation, role, passkey-recovery, and credential
+  Operations expose the same bounded organization administration as REST.
+  Stable reads return only their closed, non-secret schemas. Sensitive
+  one-time material is created by explicit actions and delivered through its
+  secure handoff; tokens, credential material, and invitation links are never
+  returned by ordinary read Operations.
 - **Reconciliation tools:** both roles may inspect `get_reconciliation_report`;
   only `platform-operator` may invoke `reapply_reconciliation`. A tenant-bound re-apply may change only that
   tenant's Organization tree and audience scopes and never performs orphan
@@ -734,8 +737,9 @@ transport inherits them:
   parent, so one redacted field would null the whole row — and inside a
   non-null connection, the whole page. The column stays `NOT NULL` in Postgres
   and required on create; only reads may answer `null`.
-- No entity shipped in this repo declares a classification, so these controls
-  are inert here until an authoring layer adds one.
+- Shipped entities declare live classifications, including confidential
+  `Relation.notes`; these controls protect current data and are not merely an
+  extension hook.
 
 Entity-derived roles are appended to the `erp-provider` client during realm
 generation (deduplicated against the hand-authored role list, first wins);

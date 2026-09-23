@@ -11,15 +11,13 @@ Sub-compilers that turn `LoadedArtifacts` into a `CompiledEntityContract`. The o
 | `storage.ts` | `resolveStorageColumns()` — SQL columns from persisted core + profile fields |
 | `relationships.ts` | `resolveRelationships()` — aggregate relationships from core + profiles |
 | `graphql.ts` | `buildGraphQL()` — types, queries, mutations, filters |
-| `rest.ts` | `buildRest()` — opt-in REST exposure (base path + per-operation flags) |
+| `rest.ts` | `buildRest()` — `interfaces.rest` projection of canonical Operations |
+| `mcp.ts` | `buildMcp()` — `interfaces.mcp` projection of canonical Operations |
 | `views.ts` | `buildViews()` — multi-context list/detail/form/summary presentations |
 | `profiles.ts` | `buildProfiles()` — per-profile mappings, projections, field extensions |
 | `authorization.ts` | `buildAuthorization()` — roles, composite roles, field-level policies |
 | `entity-operations.ts` | `buildEntityOperations()` — canonical CRUD operation contracts shared by every interface |
-| `canonical/` | `buildCanonicalCompilerKernel()` — workflow-engine canonical kernel |
 | `helpers.ts` | `deriveTableName`, `pluralize`, `FIELD_TYPE_TO_SQL`, `FIELD_TYPE_TO_GQL` |
-
-`canonical/` has its own files (`bridge.ts`, `normalization.ts`, `path.ts`, `types.ts`, `index.ts`). It is the largest sub-compiler — treat as a sub-area, not a single file.
 
 ## Order in `compile()`
 
@@ -27,12 +25,12 @@ Sub-compilers that turn `LoadedArtifacts` into a `CompiledEntityContract`. The o
 2. `resolveModelFields(coreFields, componentCatalog, osfTypes)`
 3. `resolveRelationships(artifacts)`
 4. `buildGraphQL(coreEntity, profiles, relationships, componentCatalog, osfTypes)`
-5. `buildRest(coreEntity)` — order-independent; returns undefined unless the entity opts in via `rest:`
+5. `buildCrud(coreEntity)`, then `buildRest(coreEntity, crud)` and `buildMcp(coreEntity, crud)`
 6. `buildViews(coreEntity, profiles, componentCatalog, viewDefinition?)`
 7. `buildProfiles(profiles, mappings)`
 8. `buildAuthorization(coreEntity, profiles, modelFields)` — must run after model so it sees compiled classifications
-9. `buildEntityOperations({ entity, storage, model, crud, authorization })` — stable input/output/rights contracts for REST, MCP, web, and future interfaces
-10. `buildCanonicalCompilerKernel({ model, graphql, views })` — consumes earlier outputs, not raw artifacts
+9. `buildBlueprint(coreEntity, modelFields, columns)`
+10. `buildEntityOperations({ entity, coreEntity, crud, authorization, relationships })` and resolve derived-on-create bindings
 
 The result is assembled with table name, retention, hooks, permissions, and version metadata.
 
@@ -58,9 +56,6 @@ Most complex sub-compiler. Normalizes single- vs multi-context view shapes via `
 ### `entity-operations.ts`
 Compiles the common `crud:` upper bound into stable `${Entity}.${intent}` contracts. Transport generators may narrow exposure, but must reference these operation ids rather than reconstructing them. The generated operation catalog is the runtime authority; REST, MCP, web, and future interfaces are projections/adapters of it.
 
-### `canonical/`
-Transforms the compiler's own outputs (model, graphql, views) into a self-contained workflow-ready kernel: path-based field refs, condition expressions, form layouts. See `canonical/index.ts` for entry point.
-
 ## Adding a new sub-compiler
 
 1. Add module here, export the build function.
@@ -71,6 +66,6 @@ Transforms the compiler's own outputs (model, graphql, views) into a self-contai
 
 ## Pitfalls
 
-- Don't reorder `compile()` casually — `buildAuthorization` needs `modelFields`, and `buildCanonicalCompilerKernel` needs `model`/`graphql`/`views`.
+- Don't reorder `compile()` casually — `buildAuthorization` needs `modelFields`, and canonical entity Operations need CRUD, authorization, and relationships.
 - Profiles extend, don't fork. Generic provenance/lifecycle stays in core; sector taxonomy stays in profile fields.
 - `canonical` is a directory now, not the single ~1000-line file older docs may describe.

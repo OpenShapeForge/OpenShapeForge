@@ -164,15 +164,19 @@ Notes on what the compiler does with this:
 
 - **Only `persisted` fields produce columns.** A field without a `persisted`
   block is model/UI-only.
-- **`readOnly` is presentation; `immutable` is the contract.** `readOnly: true`
-  makes the renderer pick a field's display component over its input one and
-  says nothing about the API — every transport still accepts the field.
+- **`readOnly` is presentation; write provenance is the contract.**
+  `readOnly: true` makes the renderer pick a field's display component over
+  its input one and is never an authorization or integrity rule by itself.
   `immutable: true` is the API contract: the value is settable when the record
   is created and refused on update by REST (`400`), GraphQL (absent from the
   update input) and MCP (absent from the update tool schema). It is the flag for
   a provenance link — `PaymentDetail.relationId` is authored with it, so a
   payment detail cannot be re-pointed at a different relation after the fact
-  (#177). The two are independent: a field may be either, both, or neither.
+  (#177). A server-managed persisted field names every legitimate canonical
+  writer with `writtenBy: [Operation.id]`; generic create and update inputs
+  then omit it, and the compiler verifies that every named writer exists and
+  is reachable. `readOnly`, `immutable`, and `writtenBy` are independent
+  declarations and must describe the field's real write lifecycle together.
 - **A status field can be a state machine.** `transitions: { initial, rules }`
   on a field with static options compiles each rule into the Operation
   `<Entity>.<rule.key>` (REST, GraphQL, MCP and the web record actions), makes

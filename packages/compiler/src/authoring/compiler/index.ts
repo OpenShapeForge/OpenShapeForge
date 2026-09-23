@@ -5,7 +5,7 @@
  *
  * Pipeline position: called after the loader has assembled LoadedArtifacts from
  * YAML authoring files. Delegates to sub-compilers (model, storage, relationships,
- * graphql, views, profiles, canonical) and assembles their outputs into a single
+ * GraphQL, REST, MCP, views, profiles, authorization, and Operations) and assembles their outputs into a single
  * CompiledEntityContract.
  *
  * Input:  LoadedArtifacts — parsed core entity, profiles, mappings, catalogs.

@@ -12,28 +12,8 @@ enumerations, and AI hints the author already wrote.
 
 ## Opting in
 
-Per entity, in the entity YAML — the same fail-closed shape as `rest:`:
-
-```yaml
-mcp: true # every operation, prefix derived from the entity name
-```
-
-```yaml
-mcp:
-  enabled: true
-  toolPrefix: contact # default: entity name in snake_case
-  tools: dedicated # or `generic` — see "Tool surface"
-  operations:
-    delete: false # each flag defaults to true
-```
-
-Absent or `false` means no tools at all. An `mcp:` block on an entity that is
-not generated-CRUD enabled fails the build, exactly as `rest:` does — MCP tools
-delegate to the CRUD layer, so the authoring intent would otherwise evaporate
-silently.
-
-Strict-v2 entities keep this technical projection under `interfaces.mcp` and
-name canonical operations rather than CRUD action flags:
+Per entity, the technical projection lives under `interfaces.mcp` and names
+canonical Operations rather than defining a second behavior model:
 
 ```yaml
 interfaces:
@@ -43,10 +23,11 @@ interfaces:
       delete: false # the only authored entry: an interface-specific exclusion
 ```
 
-Declaring an interface projects every canonical Operation declared by the
-entity. Do not write `operations: all` (there is no such sentinel) and do not
-repeat the common list. The optional `operations` map contains only real
-interface-specific instructions or `false` exclusions.
+Absent `interfaces.mcp` means no entity tools. Declaring it projects every
+canonical Operation declared by the entity. Do not write `operations: all`
+(there is no such sentinel) and do not repeat the common list. The optional
+`operations` map contains only interface-specific instructions, an explicit
+tool name, or `false` exclusions.
 
 `tools` changes only how the projected operations are advertised. It does not
 define a new operation, permission, workflow, or product concept.
@@ -67,7 +48,8 @@ headers every other transport takes; an unauthenticated request is `401` before
 any dispatch.
 
 For ordinary configuration data (a `create_connection` for an Adapter, or any
-entity with `mcp.elicitOnCreate`), the runtime preserves this UX order:
+create Operation with a secure-input `interaction`), the runtime preserves
+this UX order:
 
 1. **In-client elicitation** — the secure form in place; values never touch
    the model.
@@ -238,8 +220,7 @@ and audit; both can inspect shared platform state. See
 
 ## Tool surface
 
-Two catalog styles, chosen per entity with either legacy `mcp.tools` or
-`interfaces.mcp.tools`:
+Two catalog styles are chosen per entity with `interfaces.mcp.tools`:
 
 - **`dedicated`** (default) — one tool per enabled operation:
   `relation_list`, `relation_get`, `relation_create`, `relation_update`,

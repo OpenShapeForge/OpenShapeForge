@@ -128,6 +128,34 @@ export function assertNoOperationWrittenValues(
   }
 }
 
+/**
+ * Plugin-backed Operations may accept fields they themselves own (for
+ * example AgreementMilestone.create accepts `amount` and freezes it). They
+ * must still refuse fields owned only by another Operation before generic
+ * JSON-schema validation turns that into an unhelpful unknown-property error.
+ */
+export function assertNoForeignOperationWrittenValues(
+  table: GeneratedCrudTable,
+  input: Record<string, unknown>,
+  operation: string,
+): void {
+  for (const column of table.columns) {
+    if (!isOperationWrittenColumn(column)) continue;
+    const field = fieldNameForColumn(column);
+    if (
+      (!Object.prototype.hasOwnProperty.call(input, field) &&
+        !Object.prototype.hasOwnProperty.call(input, column.name)) ||
+      column.writtenBy!.some((writer) => writer.operation === operation)
+    ) {
+      continue;
+    }
+    throw generatedCrudError(
+      operationWrittenRefusal(field, column.writtenBy!),
+      "BAD_USER_INPUT",
+    );
+  }
+}
+
 export function assertNoCallerElicitedOutput(
   table: GeneratedCrudTable,
   input: Record<string, unknown>,

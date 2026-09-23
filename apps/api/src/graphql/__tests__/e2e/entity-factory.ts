@@ -10,6 +10,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import {
   createGeneratedEntity,
+  getGeneratedEntity,
   getGeneratedCrudTables,
   isGeneratedCrudOperationEnabled,
   isOperationWrittenColumn,
@@ -279,6 +280,19 @@ export async function createRow(
     throw new Error(`FK dependency chain too deep while creating ${table.name}`);
   }
   const graphql = table.source?.graphql;
+  const createContract = operationContractFor(table, "create");
+  const needsRuntimeOwnedFixture =
+    createContract?.implementation?.type === "plugin" &&
+    table.columns.some(
+      (column) =>
+        column.required &&
+        isOperationWrittenColumn(column) &&
+        Object.prototype.hasOwnProperty.call(
+          createContract.inputSchema?.properties ?? {},
+          fieldName(column),
+        ) &&
+        !column.writtenBy?.some((writer) => writer.operation === createContract.id),
+    );
 
   // A tenant registry (CHECK (id = tenant_id)) has one write path,
   // provisioning, and the harness provisions each run's tenant row once
@@ -288,11 +302,46 @@ export async function createRow(
     return identity.tenantId;
   }
 
+  if (needsRuntimeOwnedFixture) {
+    const foreignWriters = new Set(
+      table.columns.flatMap((column) =>
+        column.required && isOperationWrittenColumn(column)
+          ? (column.writtenBy ?? []).map((writer) => writer.operation)
+          : [],
+      ),
+    );
+    for (const owner of eligibleTables) {
+      const ownerTargets = foreignKeyTargets(owner);
+      const ownerColumn = owner.columns.find(
+        (column) =>
+          ownerTargets.get(column.name) === table.name &&
+          isOperationWrittenColumn(column) &&
+          column.writtenBy?.some((writer) => foreignWriters.has(writer.operation)),
+      );
+      if (!ownerColumn) continue;
+      const ownerId = await createRow(owner, identity, {}, depth + 1);
+      const ownerRow = await getGeneratedEntity(getRuntime().db, identity, {
+        table: owner.name,
+        id: ownerId,
+      });
+      const ownedId = ownerRow?.[ownerColumn.name];
+      if (typeof ownedId === "string" && ownedId) return ownedId;
+    }
+    throw new Error(
+      `No owning aggregate fixture can create ${table.source?.authoringEntityName ?? table.name}.`,
+    );
+  }
+
   // A plugin-backed create has an input contract of its own, and its
   // database may refuse a direct insert outright (a document must be created
   // atomically with its first version), so the fixture goes through the
   // Operation like any client's would.
-  if (graphql && graphql.operations?.create !== false && !isEntityBackedCreate(table)) {
+  if (
+    graphql &&
+    graphql.operations?.create !== false &&
+    !isEntityBackedCreate(table) &&
+    !needsRuntimeOwnedFixture
+  ) {
     const input = await pluginCreateInput(table, identity, overrides, depth);
     const created = await gql(identity, createDoc(table), { input });
     const id = expectOperationData(table, created, graphql.createMutationName)?.id as string;
@@ -301,9 +350,19 @@ export async function createRow(
     return id;
   }
 
-  const input = await columnInput(table, identity, overrides, depth);
+  const input = await columnInput(
+    table,
+    identity,
+    overrides,
+    depth,
+    needsRuntimeOwnedFixture,
+  );
 
-  if (!graphql || graphql.operations?.create === false || !isGeneratedCrudOperationEnabled(table, "create")) {
+  if (
+    !graphql ||
+    graphql.operations?.create === false ||
+    !isGeneratedCrudOperationEnabled(table, "create")
+  ) {
     // A table without a caller-facing create (a template's versions are made
     // by its publish) is seeded through the runtime-owned path the engine's
     // own Operations use: the same validation, tenant column and journal
@@ -351,13 +410,14 @@ export async function columnInput(
   identity: Identity,
   overrides: Record<string, unknown> = {},
   depth = 0,
+  runtimeOwned = false,
 ): Promise<Record<string, unknown>> {
   const fkTargets = foreignKeyTargets(table);
   const input: Record<string, unknown> = {};
   const marker = nextMarker();
 
   for (const column of table.columns) {
-    if (!isMutableColumn(column)) continue;
+    if (!(runtimeOwned ? isWritableColumn(column, "create") : isMutableColumn(column))) continue;
     const field = fieldName(column);
     if (field in overrides) {
       input[field] = overrides[field];

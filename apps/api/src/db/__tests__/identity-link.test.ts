@@ -671,15 +671,21 @@ describe("identity ↔ Relation link", () => {
             relationId: erinsRelation,
           }),
         ).rejects.toMatchObject({ code: "FORBIDDEN" });
-        await expect(
-          withDbSession(appDb, employeeSignIn.session, (trx) =>
+        await withDbSession(appDb, employeeSignIn.session, (trx) =>
             sql`
               update platform.identity_relations
                  set status = 'linked', relation_id = ${erinsRelation}, linked_at = now(), linked_by = 'x'
                where identity_id = ${erinSignIn.state!.identityId} and tenant_id = ${tenantA}
             `.execute(trx),
-          ),
-        ).rejects.toThrow(/row-level security/);
+          );
+        // UPDATE's USING policy hides rows the caller cannot mutate; PostgreSQL
+        // reports zero affected rows rather than raising a WITH CHECK error.
+        const unchanged = await sql<{ status: string; relation_id: string | null }>`
+          select status, relation_id
+            from platform.identity_relations
+           where identity_id = ${erinSignIn.state!.identityId} and tenant_id = ${tenantA}
+        `.execute(adminDb);
+        expect(unchanged.rows[0]).toEqual({ status: "pending_confirmation", relation_id: null });
 
         // The administrator links Erin to her Relation.
         const linked = await callIdentityLinkTool(

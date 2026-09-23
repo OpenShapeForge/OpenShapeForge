@@ -63,8 +63,14 @@ afterAll(async () => {
 
 describe("database role contract", () => {
   test("the manifest declares the app, worker and definer roles", () => {
-    expect(DATABASE_ROLES.map((role) => role.key).sort()).toEqual(["app", "blueprintReader", "worker"]);
+    expect(DATABASE_ROLES.map((role) => role.key).sort()).toEqual([
+      "app",
+      "blueprintReader",
+      "identityResolver",
+      "worker",
+    ]);
     expect(databaseRole("blueprintReader")).toMatchObject({ login: false, migratorMember: true });
+    expect(databaseRole("identityResolver")).toMatchObject({ login: false, migratorMember: true });
     const rendered = renderProvisioningSql({ migratorRole: "some_migrator" });
     expect(rendered).toContain("create role openshapeforge_blueprint_reader nologin");
     expect(rendered).toContain(

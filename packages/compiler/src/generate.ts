@@ -31,6 +31,7 @@ const defaultSource = "packages/compiler/config/platform-schema.yaml";
 export const WORKER_DATABASE_ROLE = "openshapeforge_worker";
 export const APP_DATABASE_ROLE = "openshapeforge_app";
 export const BLUEPRINT_READER_DATABASE_ROLE = "openshapeforge_blueprint_reader";
+export const IDENTITY_RESOLVER_DATABASE_ROLE = "openshapeforge_identity_resolver";
 
 /**
  * One declared database role. Roles are cluster-wide objects, so the
@@ -40,7 +41,7 @@ export const BLUEPRINT_READER_DATABASE_ROLE = "openshapeforge_blueprint_reader";
  */
 export type DatabaseRoleContract = {
   /** Stable key hosts and the runtime address the role by. */
-  key: "app" | "worker" | "blueprintReader";
+  key: "app" | "worker" | "blueprintReader" | "identityResolver";
   name: string;
   /** Whether the role authenticates; the definer roles never do. */
   login: boolean;
@@ -57,6 +58,8 @@ export const DATABASE_ROLES: readonly DatabaseRoleContract[] = [
     purpose: "The background worker connection the workerAccess policies compare current_user against." },
   { key: "blueprintReader", name: BLUEPRINT_READER_DATABASE_ROLE, login: false, migratorMember: true,
     purpose: "Definer of the cross-tenant blueprint read function; owns nothing else." },
+  { key: "identityResolver", name: IDENTITY_RESOLVER_DATABASE_ROLE, login: false, migratorMember: true,
+    purpose: "Definer of the two identity-registry point lookups; owns nothing else." },
 ];
 
 export type GenerateArtifactsOptions = {

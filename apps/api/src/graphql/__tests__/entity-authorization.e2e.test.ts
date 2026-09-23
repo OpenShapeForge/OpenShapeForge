@@ -24,7 +24,6 @@
  * controls rather than acquiring a lease it must never be granted.
  */
 import { expect } from "bun:test";
-import { randomUUID } from "node:crypto";
 import {
   describe,
   eventsFor,
@@ -129,13 +128,10 @@ for (const table of tables) {
 
     test("forbidden mutations journal no entity events", async () => {
       const id = await createRow(table, tenantA);
+      const before = await eventsFor(tenantA, table, id);
       for (const attempt of denied(readOnly, id).slice(1)) await attempt;
       const events = await eventsFor(tenantA, table, id);
-      // A plugin-backed create journals nothing through the generic core (see
-      // entity-events); the point here is that the refusals added nothing.
-      expect(events.map((event) => event.eventType)).toEqual(
-        isEntityBackedCreate(table) ? ["created"] : [],
-      );
+      expect(events).toEqual(before);
     });
 
     test("each allow-listed create role grants the operation on its own (vocabulary union)", async () => {
@@ -144,7 +140,9 @@ for (const table of tables) {
       for (const role of createRoles) {
         const writer: Identity = {
           tenantId: tenantA.tenantId,
-          userId: randomUUID(),
+          // Admission is request-fresh and identity-bound. Reuse the admitted
+          // test subject while narrowing only its role vocabulary here.
+          userId: tenantA.userId,
           roles: [role],
         };
         // The parents a row references are provisioned by the all-roles

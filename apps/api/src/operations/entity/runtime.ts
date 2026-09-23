@@ -55,7 +55,11 @@ import { requireOperationPrerequisites } from "../prerequisite-receipts.js";
 import { executeEntityPlugin } from "./plugin-executor.js";
 import { entityBusinessUnavailability } from "./availability.js";
 import { assertEntityValuesValid, assertOperationInputValid, type EntityValuesValidation } from "./input-validation.js";
-import { assertNoCallerElicitedOutput, assertNoOperationWrittenValues } from "./write-policy.js";
+import {
+  assertNoCallerElicitedOutput,
+  assertNoForeignOperationWrittenValues,
+  assertNoOperationWrittenValues,
+} from "./write-policy.js";
 import { sessionRelation } from "../../auth/identity-link.js";
 import { sql } from "kysely";
 
@@ -818,7 +822,9 @@ export async function executeEntityOperation(
       // Operation to call, not as a property the authored input does not know.
       // Then the payload before prerequisites: an invalid request answers
       // VALIDATION, not a prerequisite it would only fail after.
-      if (operation.intent !== "delete") assertNoOperationWrittenValues(table, request.input ?? {});
+      if (operation.intent !== "delete") {
+        assertNoForeignOperationWrittenValues(table, request.input ?? {}, operation.id);
+      }
       assertOperationInputValid(operation, request.input ?? {});
       await requireOperationPrerequisites(db, session, operation);
       if (operation.intent === "delete") {

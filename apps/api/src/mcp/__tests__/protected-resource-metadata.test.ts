@@ -20,8 +20,10 @@ import {
 } from "../protected-resource-metadata.js";
 
 let app: ReturnType<typeof createApiApp>;
+const savedPublicOrigin = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
 
 beforeAll(async () => {
+  delete process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
   // Canonical operations bind to their runtime modules at boot, so the app
   // needs the generated registry's modules even for a discovery test.
   app = createApiApp({ cors: false, modules: await loadRuntimeModules() });
@@ -30,6 +32,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app?.close();
+  if (savedPublicOrigin === undefined) delete process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+  else process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = savedPublicOrigin;
 });
 
 describe("protected resource metadata", () => {

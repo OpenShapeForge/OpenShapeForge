@@ -85,11 +85,18 @@ export function assertDeclaredProperties(
 export function assertOperationWrittenFields(
   values: Record<string, unknown>,
   table: GeneratedTable | undefined,
+  allowedWriter?: string,
 ): void {
   for (const column of table?.columns ?? []) {
     if (!isOperationWrittenColumn(column)) continue;
     const field = fieldNameForColumn(column);
     if (!Object.prototype.hasOwnProperty.call(values, field)) continue;
+    if (
+      allowedWriter &&
+      column.writtenBy!.some((writer) => writer.operation === allowedWriter)
+    ) {
+      continue;
+    }
     throw new HttpError(
       400,
       "BAD_USER_INPUT",

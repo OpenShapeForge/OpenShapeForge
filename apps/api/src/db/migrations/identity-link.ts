@@ -2,7 +2,11 @@
 import { sql } from "kysely";
 import { IDENTITY_LINK_ADMIN_ROLE } from "../../auth/organization-roles.js";
 import type { OpenShapeForgeDatabase } from "../connection.js";
+import { databaseRole } from "../database-roles.js";
 import { ensureCheckConstraint } from "./sql-invariants.js";
+import { APP_ROLE } from "./app-role.js";
+
+const IDENTITY_RESOLVER_ROLE = databaseRole("identityResolver").name;
 
 /**
  * The invariants of the login ↔ party link that the manifest cannot express.
@@ -15,7 +19,7 @@ import { ensureCheckConstraint } from "./sql-invariants.js";
  *
  *   - the `lower(email)` lookup index (an expression index);
  *   - the status vocabulary and the columns each status requires, as checks;
- *   - `app.identity_subject()`, the point lookup the write policy needs;
+ *   - `app.identity_subject()`, the boolean subject predicate the write policy needs;
  *   - row-level security and the two bespoke policies;
  *   - the guard on `roles`: the organization-scoped grant may only be changed
  *     by a session holding Organization.All.ReadWrite or by the audited
@@ -31,7 +35,7 @@ import { ensureCheckConstraint } from "./sql-invariants.js";
  *     acting session to be the identity itself (the just-in-time path and
  *     confirm_my_link) or to hold Organization.All.ReadWrite (link_identity);
  *     the tools check the same thing, this is the defence in depth. The
- *     identity's subject is read through app.identity_subject() so the two
+ *     identity's subject is compared through app.identity_subject() so the two
  *     policies do not query each other (policy recursion).
  *   - identities has no tenant column. A session sees its OWN identity row
  *     (`subject = app.user_id`, compared as text: the subject is Keycloak's
@@ -62,26 +66,70 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
   });
 
   await sql`
-    -- The subject behind an identity id, for the write policy below. A
-    -- function-scoped bypass (the same shape as app.tenant_for_keycloak_
-    -- organization) rather than a subquery: the two tables' policies refer to
-    -- each other, and a subquery in each direction is a policy recursion
-    -- PostgreSQL refuses. A point lookup of one column, nothing else.
-    create or replace function app.identity_subject(identity uuid) returns text
-    language plpgsql volatile parallel unsafe
-    as $$
-    declare
-      previous_bypass text := current_setting('app.bypass_rls', true);
-      identity_subject text;
-    begin
-      perform set_config('app.bypass_rls', 'true', true);
-      identity_subject := (select i.subject from platform.identities i where i.id = identity);
-      perform set_config('app.bypass_rls', coalesce(previous_bypass, ''), true);
-      return identity_subject;
-    exception when others then
-      raise;
-    end
-    $$;
+    -- These two SECURITY DEFINER functions are deliberately point lookups.
+    -- Their non-login owner can SELECT only the named registry columns and is
+    -- admitted by role-specific read policies. No statement-local bypass GUC
+    -- is raised: a STABLE policy helper that observes such a temporary value
+    -- can otherwise reuse the true result for the rest of the caller's write statement.
+    grant usage on schema app, platform to ${sql.id(IDENTITY_RESOLVER_ROLE)};
+    grant select (id, keycloak_realm, keycloak_organization_id)
+      on platform.tenants to ${sql.id(IDENTITY_RESOLVER_ROLE)};
+    grant select (id, subject)
+      on platform.identities to ${sql.id(IDENTITY_RESOLVER_ROLE)};
+
+    drop policy if exists tenants_identity_resolution on platform.tenants;
+    create policy tenants_identity_resolution on platform.tenants for select
+      to ${sql.id(IDENTITY_RESOLVER_ROLE)} using (true);
+    drop policy if exists identities_identity_resolution on platform.identities;
+    create policy identities_identity_resolution on platform.identities for select
+      to ${sql.id(IDENTITY_RESOLVER_ROLE)} using (true);
+
+    create or replace function app.tenant_for_keycloak_organization(
+      realm text,
+      organization_id text
+    ) returns uuid
+    language sql stable security definer
+    set search_path = pg_catalog
+    as $fn$
+      select t.id
+        from platform.tenants t
+       where t.keycloak_realm = $1
+         and t.keycloak_organization_id = $2
+       limit 1
+    $fn$;
+
+    -- Older reruns may have the original text-returning helper underneath
+    -- these policies. Remove its dependants before changing the return type.
+    drop policy if exists identity_relations_insertable on platform.identity_relations;
+    drop policy if exists identity_relations_updatable on platform.identity_relations;
+    drop policy if exists identity_relations_deletable on platform.identity_relations;
+    drop function if exists app.identity_subject(uuid);
+
+    -- Keep the established function name, but expose only the predicate the
+    -- policies need. The app role cannot use an identity UUID as a global
+    -- subject-disclosure oracle.
+    create or replace function app.identity_subject(identity uuid) returns boolean
+    language sql stable security definer
+    set search_path = pg_catalog
+    as $fn$
+      select exists (
+        select 1
+          from platform.identities i
+         where i.id = $1
+           and i.subject = current_setting('app.user_id', true)
+      )
+    $fn$;
+
+    grant create on schema app to ${sql.id(IDENTITY_RESOLVER_ROLE)};
+    alter function app.tenant_for_keycloak_organization(text, text)
+      owner to ${sql.id(IDENTITY_RESOLVER_ROLE)};
+    alter function app.identity_subject(uuid)
+      owner to ${sql.id(IDENTITY_RESOLVER_ROLE)};
+    revoke create on schema app from ${sql.id(IDENTITY_RESOLVER_ROLE)};
+    revoke all on function app.tenant_for_keycloak_organization(text, text) from public;
+    revoke all on function app.identity_subject(uuid) from public;
+    grant execute on function app.tenant_for_keycloak_organization(text, text) to ${sql.id(APP_ROLE)};
+    grant execute on function app.identity_subject(uuid) to ${sql.id(APP_ROLE)};
 
     alter table platform.identities enable row level security;
     alter table platform.identities force row level security;
@@ -92,7 +140,7 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
     drop policy if exists identities_insertable on platform.identities;
     drop policy if exists identities_updatable on platform.identities;
     drop policy if exists identities_deletable on platform.identities;
-    create policy identities_visibility on platform.identities for select
+    create policy identities_visibility on platform.identities for select to ${sql.id(APP_ROLE)}
       using (
         app.bypass_rls()
         or subject = current_setting('app.user_id', true)
@@ -102,12 +150,12 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
              and ir.tenant_id = app.current_tenant()
         )
       );
-    create policy identities_insertable on platform.identities for insert
+    create policy identities_insertable on platform.identities for insert to ${sql.id(APP_ROLE)}
       with check (
         app.bypass_rls()
         or subject = current_setting('app.user_id', true)
       );
-    create policy identities_updatable on platform.identities for update
+    create policy identities_updatable on platform.identities for update to ${sql.id(APP_ROLE)}
       using (
         app.bypass_rls()
         or subject = current_setting('app.user_id', true)
@@ -116,7 +164,7 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
         app.bypass_rls()
         or subject = current_setting('app.user_id', true)
       );
-    create policy identities_deletable on platform.identities for delete
+    create policy identities_deletable on platform.identities for delete to ${sql.id(APP_ROLE)}
       using (
         app.bypass_rls()
         or subject = current_setting('app.user_id', true)
@@ -151,31 +199,31 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
     drop policy if exists identity_relations_insertable on platform.identity_relations;
     drop policy if exists identity_relations_updatable on platform.identity_relations;
     drop policy if exists identity_relations_deletable on platform.identity_relations;
-    create policy identity_relations_tenant_isolation on platform.identity_relations for select
+    create policy identity_relations_tenant_isolation on platform.identity_relations for select to ${sql.id(APP_ROLE)}
       using (
         app.bypass_rls()
         or tenant_id = app.current_tenant()
       );
-    create policy identity_relations_insertable on platform.identity_relations for insert
+    create policy identity_relations_insertable on platform.identity_relations for insert to ${sql.id(APP_ROLE)}
       with check (
         app.bypass_rls()
         or (
           tenant_id = app.current_tenant()
           and (
-            app.identity_subject(identity_id) = current_setting('app.user_id', true)
+            app.identity_subject(identity_id)
             or ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
               string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
             )
           )
         )
       );
-    create policy identity_relations_updatable on platform.identity_relations for update
+    create policy identity_relations_updatable on platform.identity_relations for update to ${sql.id(APP_ROLE)}
       using (
         app.bypass_rls()
         or (
           tenant_id = app.current_tenant()
           and (
-            app.identity_subject(identity_id) = current_setting('app.user_id', true)
+            app.identity_subject(identity_id)
             or ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
               string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
             )
@@ -187,20 +235,20 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
         or (
           tenant_id = app.current_tenant()
           and (
-            app.identity_subject(identity_id) = current_setting('app.user_id', true)
+            app.identity_subject(identity_id)
             or ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
               string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
             )
           )
         )
       );
-    create policy identity_relations_deletable on platform.identity_relations for delete
+    create policy identity_relations_deletable on platform.identity_relations for delete to ${sql.id(APP_ROLE)}
       using (
         app.bypass_rls()
         or (
           tenant_id = app.current_tenant()
           and (
-            app.identity_subject(identity_id) = current_setting('app.user_id', true)
+            app.identity_subject(identity_id)
             or ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
               string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
             )

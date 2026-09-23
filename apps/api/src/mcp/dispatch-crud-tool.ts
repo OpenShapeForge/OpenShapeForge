@@ -92,7 +92,11 @@ export async function crudToolCall(
           const modelFields = Object.fromEntries(
             Object.entries(modelArguments).filter(([key]) => !ENVELOPE_KEYS.has(key)),
           );
-          assertOperationWrittenFields(modelFields, table);
+          assertOperationWrittenFields(
+            modelFields,
+            table,
+            contract.implementation?.type === "plugin" ? contract.id : undefined,
+          );
           assertDeclaredProperties(match.inputSchema, modelFields, "field");
           assertEntityValuesValid(contract, table, modelFields, {
             partial: typeof modelArguments.blueprintId === "string",
@@ -301,17 +305,18 @@ export async function crudToolCall(
       // Before the advertised schema does: a `writtenBy` field is absent from
       // that schema, so ajv would call it an additional property and send the
       // caller hunting for a typo instead of naming the operation.
-      assertOperationWrittenFields(
-        match.operation === "update"
-          ? ((toValidate.values ?? {}) as Record<string, unknown>)
-          : toValidate,
-        table,
-      );
       const contract = match.operationId
         ? getEntityOperationContracts().find(
             (operation) => operation.id === match.operationId,
           )
         : undefined;
+      assertOperationWrittenFields(
+        match.operation === "update"
+          ? ((toValidate.values ?? {}) as Record<string, unknown>)
+          : toValidate,
+        table,
+        contract?.implementation?.type === "plugin" ? contract.id : undefined,
+      );
       const expectedVersionField = contract?.concurrency?.version?.field;
       // An entity create's or update's authored values are the runtime's to
       // judge, once, for every interface, so MCP gets the same VALIDATION +

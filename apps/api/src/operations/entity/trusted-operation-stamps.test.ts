@@ -5,6 +5,7 @@ import catalog from "../../generated/operations/catalog.json" with { type: "json
 import type { GeneratedCrudTable } from "./types.js";
 import {
   addTrustedOperationValues,
+  assertNoForeignOperationWrittenValues,
   assertNoOperationWrittenValues,
   normalizeWritableValues,
 } from "./write-policy.js";
@@ -27,6 +28,27 @@ test("canonical create owns attribution across every projected interface", () =>
     .toContainEqual(["authorId", "linked-relation"]);
   expect(() => addTrustedOperationValues(table, values, "Comment.update", { authorId: "forged" }))
     .toThrow("generated writer metadata is missing");
+});
+
+test("a plugin Operation may accept only the process fields it owns", () => {
+  const table = (manifest.tables as GeneratedCrudTable[]).find(
+    (candidate) => candidate.source?.authoringEntityName === "AgreementMilestone",
+  )!;
+
+  expect(() =>
+    assertNoForeignOperationWrittenValues(
+      table,
+      { amount: 7.5 },
+      "AgreementMilestone.create",
+    ),
+  ).not.toThrow();
+  expect(() =>
+    assertNoForeignOperationWrittenValues(
+      table,
+      { producedInvoiceId: "caller-choice" },
+      "AgreementMilestone.create",
+    ),
+  ).toThrow("AgreementMilestone.invoice");
 });
 
 test("Account IdP lifecycle fields are unavailable to generic create and update", () => {

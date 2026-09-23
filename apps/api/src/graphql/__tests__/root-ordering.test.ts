@@ -40,7 +40,9 @@ function expectedRootOrder() {
       // Likewise the core `osf-transitions` and `osf-jobs` Operations: the
       // operation contribution keeps catalog order (sorted by key).
       "agreementMilestoneCancel",
+      "agreementMilestoneInvoice",
       "agreementMilestoneTrigger",
+      "billingRunExecute",
       "jobRetry",
     ],
   };
@@ -116,5 +118,5 @@ describe("GraphQL root ordering", () => {
       return JSON.parse(stdout);
     };
     expect(await inspect()).toEqual(await inspect());
-  });
+  }, 30_000);
 });

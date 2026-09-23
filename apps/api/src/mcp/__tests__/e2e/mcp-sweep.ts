@@ -362,11 +362,10 @@ export async function buildCreateArgs(
   return args;
 }
 
-/**
- * A row for a foreign-key target: through MCP when the target's create is
- * MCP-projected (so the dependency is exercised on this transport too),
- * otherwise through the factory.
- */
+/** A supporting row for a foreign-key target, seeded through the shared
+ * factory. The test subject still crosses MCP; its prerequisites use their
+ * own canonical create path, which matters for plugin-managed entities such
+ * as a Document and its initial version. */
 export async function createForeignKeyTarget(
   target: string,
   identity: Identity,
@@ -376,15 +375,5 @@ export async function createForeignKeyTarget(
     (candidate) => candidate.name === target && candidate.source?.mcp?.operations.create,
   );
   if (!mcpTarget) throw new Error(`MCP FK target ${target} has no create operation`);
-  const dependency = await callTool(
-    identity,
-    toolNameFor(mcpTarget, "create"),
-    argsFor(mcpTarget, await createArgs(mcpTarget, identity, {}, depth)),
-  );
-  expect(toolError(dependency.body)).toBeUndefined();
-  const row = toolPayload(dependency.body);
-  expect(row?.id).toBeTruthy();
-  createdRows.push({ table: mcpTarget, id: row.id, identity });
-  return row.id;
+  return createRow(mcpTarget, identity, {}, depth);
 }
-

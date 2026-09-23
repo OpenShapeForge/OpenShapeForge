@@ -260,7 +260,7 @@ function buildExposure(
   const exposure = definition.exposure ?? {};
 
   // GraphQL is the native surface, as it is for entities; REST and MCP are
-  // opt-in, matching the per-entity `rest:` / `mcp:` blocks.
+  // opt-in, matching the per-entity interface projections.
   const graphql = exposure.graphql !== false;
 
   const restAuthored = exposure.rest;

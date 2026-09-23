@@ -23,7 +23,6 @@ import {
   catalog,
   catalogDerivedTools,
   catalogDiscoveryTools,
-  catalogGuideTools,
   catalogTestTools,
   entityForTable,
 } from "./catalog.js";
@@ -194,7 +193,6 @@ function reservedDerivedToolNames(): Set<string> {
         ? [candidate.personalization.set.name]
         : []),
     ]),
-    ...catalogGuideTools.map((tool) => tool.name),
     ...catalogDiscoveryTools.map((tool) => tool.name),
     ...catalogTestTools.map((tool) => tool.name),
   ]);

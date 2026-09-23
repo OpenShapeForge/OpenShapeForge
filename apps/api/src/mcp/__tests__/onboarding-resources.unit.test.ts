@@ -131,8 +131,6 @@ function environment(input: {
       (rows[table] ?? [])
         .filter((row) => Object.entries(filter).every(([key, value]) => row[key] === value))
         .slice(0, limit),
-    guideTools: () => [],
-    guidesCalled: new Set(),
     store: { async read() { return record; }, async complete() { return true; } },
     connectionContract: () => null,
     tenantConnection: async () => null,

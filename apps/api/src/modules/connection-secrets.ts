@@ -62,7 +62,7 @@ type JsonRecord = Record<string, unknown>;
 /**
  * The canonical vocabulary, read from the same generated catalog the MCP
  * execution path reads. Nothing here names a host's tables: which entity plays
- * "connection" and "adapter" is configuration (`mcp.derivedTools.execution`),
+ * "connection" and "adapter" is temporary plugin `executionCompatibility`,
  * exactly as it is for declarative execution.
  */
 type ExecutionShape = {

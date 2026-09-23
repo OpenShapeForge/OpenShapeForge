@@ -874,6 +874,24 @@ describe("coreEntity properties the compiler implements", () => {
     expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/tools/);
   });
 
+  it("rejects the removed parallel entity-level MCP contract", () => {
+    const base = coreEntity({
+      schemaVersion: 3,
+      operations: { list: v2Operation("list") },
+      interfaces: { mcp: {} },
+    });
+    expect(() => validator.validate({ ...base, mcp: { enabled: true } }, "legacy.yaml"))
+      .toThrow(/mcp|additional/);
+    expect(() => validator.validate({
+      ...base,
+      interfaces: { mcp: { toolPrefix: "legacy" } },
+    }, "legacy.yaml")).toThrow(/toolPrefix|additional/);
+    expect(() => validator.validate({
+      ...base,
+      interfaces: { mcp: { derivedTools: {} } },
+    }, "legacy.yaml")).toThrow(/derivedTools|additional/);
+  });
+
   it("accepts only the canonical server-issued, version-bound challenge shape", () => {
     const challenged = {
       ...v2Operation("delete"),

@@ -16,7 +16,6 @@ import {
   type OperationToolProjection,
   SERVER_INFO,
   catalog,
-  catalogGuideTools,
   catalogResources,
   generatedOperationToolProjection,
   hasDynamicModuleToolProjection,
@@ -94,7 +93,6 @@ function createServerScopePrologue(input: {
       module.mcp?.resources !== undefined ||
       module.mcp?.resourceTemplates !== undefined,
   );
-  const guidesCalled = new Set<string>();
   const tables = tableOverride ?? tablesByName();
   const server = new Server(SERVER_INFO, {
     capabilities: {
@@ -117,9 +115,6 @@ function createServerScopePrologue(input: {
       opening,
       hasConnectors: catalogDerivedTools.some((entry) => entry.connect),
       oauthCallbackUrl: oauthCallbackUrlForInstructions(),
-      guidesBeforeCreate: catalogGuideTools
-        .filter((guide) => guide.requireBeforeCreate)
-        .map((guide) => ({ name: guide.name, entity: guide.entity ?? null })),
       // The words this deployment uses for its records: the authored label
       // of every entity this session can reach, in the person's language.
       vocabulary: entitiesForSession(session, tables).map(({ entity }) => ({
@@ -219,7 +214,6 @@ function createServerScopePrologue(input: {
     searchableOperationToolNames,
     hasDynamicModuleTools,
     hasDynamicModuleResources,
-    guidesCalled,
     tables,
     server,
     hasArtifactStorage,

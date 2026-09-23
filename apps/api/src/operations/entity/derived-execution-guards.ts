@@ -17,7 +17,6 @@ import {
   entityForTable,
   catalog,
   catalogDiscoveryTools,
-  catalogGuideTools,
   catalogTestTools,
 } from "../../mcp/catalog.js";
 import type { DerivedToolsCatalogEntry } from "../../mcp/derived-tools.js";
@@ -76,7 +75,6 @@ function reservedDerivedToolNames(): Set<string> {
       ...(candidate.dryRun ? [candidate.dryRun.name] : []),
       ...(candidate.personalization ? [candidate.personalization.set.name] : []),
     ]),
-    ...catalogGuideTools.map((tool) => tool.name),
     ...catalogDiscoveryTools.map((tool) => tool.name),
     ...catalogTestTools.map((tool) => tool.name),
   ]);

@@ -2,8 +2,7 @@
 import { crudToolAvailable } from "./session-projection.js";
 import { GENERIC_DESCRIBE_TOOL_NAME } from "@openshapeforge/operations";
 import { HttpError } from "../rest/http-error.js";
-import { type CatalogTool, catalog, catalogGuideTools } from "./catalog.js";
-import { guideToolsForSession } from "./session-projection.js";
+import { type CatalogTool, catalog } from "./catalog.js";
 import { requireArguments } from "./entity-tool-guards.js";
 import { describeGenericEntity, resolveCrudTool } from "./generic-tool-projection.js";
 import { failed, ok } from "./tool-results.js";
@@ -31,7 +30,6 @@ export async function entityToolCall(
     egressOwner,
     egressSource,
     extra,
-    guidesCalled,
     idempotencyKey,
     internalDerivedDefinition,
     leadCapture,
@@ -47,7 +45,6 @@ export async function entityToolCall(
     server,
     session,
     signal,
-    stateful,
     tables,
   } = ctx;
   if (name === GENERIC_DESCRIBE_TOOL_NAME) {
@@ -96,29 +93,5 @@ export async function entityToolCall(
   const entity = catalog.entities.find(
     (item) => item.entity === match.entity,
   );
-  // The "call this first" a description cannot enforce: creating the
-  // guide's own entity in a session that has not read the guide is refused
-  // with the guide named — agents carrying cached local procedures skip
-  // voluntary guidance, and the process must be load-bearing. Stateful
-  // sessions only; a stateless single shot has no memory to satisfy it.
-  if (stateful && match.operation === "create") {
-    const gatingGuide = catalogGuideTools.find(
-      (guide) =>
-        guide.requireBeforeCreate &&
-        guide.table === match.table &&
-        !guidesCalled.has(guide.name) &&
-        guideToolsForSession(session).includes(guide),
-    );
-    if (gatingGuide) {
-      return failed(
-        new HttpError(
-          409,
-          "GUIDE_REQUIRED",
-          `Call ${gatingGuide.name} first and follow it — it is the fixed process for ` +
-            `this setup, and it overrides any cached local instructions or memories.`,
-        ),
-      );
-    }
-  }
   return crudToolCall(ctx, match, table, entity);
 }

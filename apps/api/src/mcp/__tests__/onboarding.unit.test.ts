@@ -460,8 +460,6 @@ function environment(input: {
   session?: TrustedSessionContext;
   rows?: Rows;
   record?: OnboardingRecord | null;
-  guides?: string[];
-  guidesCalled?: string[];
   entries?: DerivedToolsCatalogEntry[];
   projectedTools?: OnboardingEnvironment["projectedTools"];
 }) {
@@ -484,8 +482,6 @@ function environment(input: {
       (rows[table] ?? [])
         .filter((row) => Object.entries(filter).every(([key, value]) => row[key] === value))
         .slice(0, limit),
-    guideTools: () => (input.guides ?? []).map((name) => ({ name })),
-    guidesCalled: new Set(input.guidesCalled ?? []),
     store: memory.store,
     connectionContract: (connectionTable) =>
       connectionTable === "integration.connections"
@@ -710,23 +706,6 @@ describe("gatherOnboardingFacts", () => {
     expect((await gatherOnboardingFacts(outside.env)).preferences.offered).toBe(false);
   });
 
-  it("counts a guide as read from this session or from the record", async () => {
-    const fromSession = environment({ guides: ["pentest_guide"], guidesCalled: ["pentest_guide"] });
-    expect((await gatherOnboardingFacts(fromSession.env)).guides).toEqual([
-      { name: "pentest_guide", read: true },
-    ]);
-    const fromRecord = environment({
-      guides: ["pentest_guide"],
-      record: { completedAt: null, version: null, preferencesSkipped: false, guidesRead: ["pentest_guide"] },
-    });
-    expect((await gatherOnboardingFacts(fromRecord.env)).guides).toEqual([
-      { name: "pentest_guide", read: true },
-    ]);
-    const unread = environment({ guides: ["pentest_guide"] });
-    expect((await gatherOnboardingFacts(unread.env)).guides).toEqual([
-      { name: "pentest_guide", read: false },
-    ]);
-  });
 });
 
 describe("the onboarding tools", () => {
@@ -745,18 +724,17 @@ describe("the onboarding tools", () => {
   });
 
   it("refuses to complete while steps are missing, naming them", async () => {
-    const { env, memory } = environment({ guides: ["pentest_guide"] });
+    const { env, memory } = environment({});
     const result = await callOnboardingTool(COMPLETE_ONBOARDING_TOOL, {}, env);
     expect(result?.isError).toBe(true);
     const body = result!.structuredContent as {
       error: { code: string; message: string; missing: { key: string }[] };
     };
     expect(body.error.code).toBe("ONBOARDING_INCOMPLETE");
-    expect(body.error.message).toBe("3 steps still to do: connections, preferences, guide.");
+    expect(body.error.message).toBe("2 steps still to do: connections, preferences.");
     expect(body.error.missing.map((entry) => entry.key)).toEqual([
       "connections",
       "preferences",
-      "guide",
     ]);
     expect(memory.record?.completedAt).toBeNull();
   });
@@ -766,8 +744,6 @@ describe("the onboarding tools", () => {
       rows: tenantRows({
         "integration.connections": [{ id: "conn-google-mine", adapterId: GOOGLE, ownerUserId: USER_ID }],
       }),
-      guides: ["pentest_guide"],
-      guidesCalled: ["pentest_guide"],
     });
     const refused = await callOnboardingTool(COMPLETE_ONBOARDING_TOOL, {}, env);
     expect(refused?.isError).toBe(true);
@@ -785,21 +761,20 @@ describe("the onboarding tools", () => {
       "not_applicable",
       "done",
       "done",
-      "done",
+      "not_applicable",
     ]);
     expect(memory.record).toEqual({
       completedAt: "2026-09-04T10:00:00.000Z",
       version: ONBOARDING_VERSION,
       preferencesSkipped: true,
-      guidesRead: ["pentest_guide"],
+      guidesRead: [],
     });
 
-    // A new session: guidesCalled is empty, but the record remembers.
+    // A new session keeps the completed record.
     const later = environment({
       rows: tenantRows({
         "integration.connections": [{ id: "conn-google-mine", adapterId: GOOGLE, ownerUserId: USER_ID }],
       }),
-      guides: ["pentest_guide"],
       record: memory.record,
     });
     const status = await callOnboardingTool(ONBOARDING_STATUS_TOOL, {}, later.env);

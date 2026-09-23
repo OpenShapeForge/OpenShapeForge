@@ -475,7 +475,7 @@ export type TableSourceDefinition = {
     };
   };
   /**
-   * Opt-in generated MCP exposure for this table (entity YAML `mcp:` block).
+   * Opt-in generated MCP exposure for this table (`interfaces.mcp`).
    * Present only when the entity declared one AND the table is generated-CRUD
    * enabled — the backend manifest fails compilation on the mismatch, exactly
    * as it does for `rest`.

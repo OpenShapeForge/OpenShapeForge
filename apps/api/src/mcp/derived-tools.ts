@@ -2,8 +2,8 @@
 /**
  * Derived MCP tools — entity ROWS projected as tools at request time.
  *
- * The generated catalog's `derivedTools` entries (authored as
- * `mcp.derivedTools` on an entity) declare that each stored record of that
+ * The generated catalog's temporary `derivedTools` compatibility entries
+ * declare that each stored record of that
  * entity becomes one MCP tool for the configured audience roles: the tool is
  * named from the row's key field, described from its description field, and
  * typed from the canonical FieldDefinition collection stored in its

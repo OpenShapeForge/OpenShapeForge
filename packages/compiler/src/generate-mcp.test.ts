@@ -23,7 +23,6 @@ import {
   type McpCatalogInput,
 } from "./generate-mcp.js";
 import type { CompiledPluginOperation } from "./generate-operations.js";
-import { collectJobOperations } from "./job-operations.js";
 
 const field = (
   overrides: Partial<CompiledField> & { key: string },
@@ -1124,25 +1123,14 @@ describe("buildMcpCatalog", () => {
     expect(MAX_ADVERTISED_TOOL_BYTES).toBe(640 * 1024);
   });
 
-  it("measures the whole static listing: searchable pair, lease tools, derived helpers, guides, connectors", () => {
-    const withGuide = input(
-      contract({
-        mcp: {
-          toolPrefix: "widget",
-          tools: "dedicated",
-          operations: { list: true, get: true, create: false, update: false, delete: false },
-          guide: { name: "widget_guide", description: "How widgets work.", roles: ["Widgets.All.Read"], content: "..." },
-        } as never,
-      }),
-    );
+  it("measures the whole static listing: searchable pair, lease tools, compatibility-derived helpers, connectors", () => {
     const operations = Array.from({ length: MAX_DEDICATED_TOOLS + 1 }, (_unused, index) => staticOperation(index));
-    const catalog = buildMcpCatalog([withGuide], "test", {}, operations);
+    const catalog = buildMcpCatalog([], "test", {}, operations);
     const sizes = advertisedToolSizes({
       tools: catalog.tools,
       entities: catalog.entities,
       operationTools: catalog.operationTools,
       projection: catalog.operationToolProjection.mode,
-      guideTools: catalog.guideTools,
       derivedTools: [
         {
           entity: "Service", table: "erp.services", roles: [], keyField: "key", descriptionField: "description",
@@ -1159,38 +1147,12 @@ describe("buildMcpCatalog", () => {
       }],
     });
     expect(sizes.map((entry) => entry.name)).toEqual([
-      "widget_list", "widget_get",
       "osf_search_operations", "osf_execute_operation",
       "osf_acquire_edit_lease", "osf_renew_edit_lease", "osf_release_edit_lease",
       "connect_service", "dry_run",
-      "widget_guide",
       "example_list",
     ]);
     for (const entry of sizes) expect(entry.bytes).toBeGreaterThan(100);
-  });
-
-  it("rejects the reported guide name collision with jobs_list", () => {
-    const withCollidingGuide = input(
-      contract({
-        mcp: {
-          toolPrefix: "widget",
-          tools: "dedicated",
-          operations: { list: true, get: true, create: true, update: true, delete: true },
-          guide: {
-            name: "jobs_list",
-            description: "Explain widget maintenance.",
-            roles: ["Widgets.All.Read"],
-            content: "Use the widget operations.",
-          },
-        } as never,
-      }),
-    );
-
-    expect(() =>
-      buildMcpCatalog([withCollidingGuide], "test", {}, collectJobOperations())
-    ).toThrow(
-      'Duplicate MCP tool name "jobs_list": claimed by both Widget.guide and canonical Operation "jobs.list".',
-    );
   });
 
   it("measures the shape the runtime lists: write reminder, mirrored title, app link, localized text", () => {
@@ -1440,182 +1402,6 @@ describe("resource catalog", () => {
   });
 });
 
-describe("derived tools catalog", () => {
-  it("emits the derivedTools projection config for opted-in entities", () => {
-    const mcp = {
-      toolPrefix: "widget",
-      tools: "dedicated" as const,
-      operations: {
-        list: false,
-        get: true,
-        create: true,
-        update: true,
-        delete: true,
-      },
-      derivedTools: {
-        roles: ["viewer"],
-        keyField: "name",
-        descriptionField: "name",
-        inputFieldsField: "name",
-        outputFieldsField: "name",
-      },
-    };
-    const catalog = buildMcpCatalog([input(contract({ mcp }))], "test");
-    expect(catalog.derivedTools).toEqual([
-      {
-        entity: "Widget",
-        table: "erp.widgets",
-        roles: ["viewer"],
-        keyField: "name",
-        descriptionField: "name",
-        inputFieldsField: "name",
-        outputFieldsField: "name",
-      },
-    ]);
-    expect(buildMcpCatalog([input(contract())], "test").derivedTools).toEqual(
-      [],
-    );
-  });
-
-  it("resolves every execution entity to its own physical table", () => {
-    const related = (name: string): CompiledEntityContract => {
-      const value = contract({ name });
-      delete (value as { mcp?: unknown }).mcp;
-      return value;
-    };
-    const owner = contract({
-      name: "ServiceDefinition",
-      fields: [
-        field({ key: "name" }),
-        field({ key: "revision", baseType: "integer" }),
-        field({
-          key: "bindings",
-          osfType: "ServiceBinding",
-          cardinality: "collection",
-          relationship: {
-            kind: "hasMany",
-            ownership: "owned",
-            target: "ServiceBinding",
-            inverse: "serviceId",
-          },
-        }),
-      ],
-      relationships: [
-        {
-          key: "bindings",
-          kind: "hasMany",
-          target: "ServiceBinding",
-          ownership: "owned",
-          inverse: "serviceId",
-          foreignKey: "service_id",
-        },
-      ],
-      mcp: {
-        toolPrefix: "service",
-        tools: "dedicated",
-        operations: {
-          list: false,
-          get: true,
-          create: false,
-          update: false,
-          delete: false,
-        },
-        derivedTools: {
-          roles: ["viewer"],
-          keyField: "name",
-          descriptionField: "name",
-          inputFieldsField: "name",
-          versionField: "revision",
-          execution: {
-            bindingsRelation: "bindings",
-            operationRef: "operationId",
-            operationEntity: "ProviderOperation",
-            providerRef: "providerId",
-            providerEntity: "Provider",
-            connectionEntity: "ProviderConnection",
-            connectionProviderRef: "providerId",
-            connectionValuesField: "values",
-          },
-        },
-      },
-    });
-    const binding = contract({
-      name: "ServiceBinding",
-      fields: [
-        field({
-          key: "serviceId",
-          osfType: "ServiceDefinition",
-          relationship: {
-            kind: "belongsTo",
-            target: "ServiceDefinition",
-            foreignKey: "service_id",
-          },
-        }),
-        field({
-          key: "operationId",
-          osfType: "ProviderOperation",
-          relationship: {
-            kind: "belongsTo",
-            target: "ProviderOperation",
-            foreignKey: "operation_id",
-          },
-        }),
-        field({ key: "order", baseType: "integer", required: true }),
-        field({ key: "optional", baseType: "boolean" }),
-        field({ key: "when", baseType: "object" }),
-        field({ key: "inputMapping", baseType: "object", cardinality: "collection" }),
-        field({ key: "outputMapping", baseType: "object", cardinality: "collection" }),
-        field({ key: "forEach", baseType: "object" }),
-      ],
-      relationships: [
-        {
-          key: "serviceId",
-          kind: "belongsTo",
-          target: "ServiceDefinition",
-          ownership: "reference",
-          foreignKey: "service_id",
-        },
-        {
-          key: "operationId",
-          kind: "belongsTo",
-          target: "ProviderOperation",
-          ownership: "reference",
-          foreignKey: "operation_id",
-        },
-      ],
-    });
-    delete (binding as { mcp?: unknown }).mcp;
-
-    const catalog = buildMcpCatalog(
-      [
-        input(owner, "service", "services.definitions"),
-        input(binding, "binding", "services.bindings"),
-        input(related("ProviderOperation"), "operation", "services.operations"),
-        input(related("Provider"), "provider", "services.providers"),
-        input(
-          related("ProviderConnection"),
-          "connection",
-          "services.connections",
-        ),
-      ],
-      "test",
-    );
-
-    expect(catalog.derivedTools[0]).toMatchObject({
-      versionField: "revision",
-      execution: {
-        bindingsRelation: "bindings",
-        bindingsEntity: "ServiceBinding",
-        bindingsTable: "services.bindings",
-        parentRef: "serviceId",
-        operationTable: "services.operations",
-        providerTable: "services.providers",
-        connectionTable: "services.connections",
-      },
-    });
-  });
-});
-
 describe("elicitOnCreate catalog", () => {
   const source = contract({
     name: "Provider",
@@ -1716,76 +1502,6 @@ describe("elicitOnCreate catalog", () => {
         "test",
       ),
     ).toThrow(/has no field "missing"/);
-  });
-});
-
-describe("test tool catalog", () => {
-  it("emits testTools with a composed default description", () => {
-    const mcp = {
-      toolPrefix: "widget",
-      tools: "dedicated" as const,
-      operations: {
-        list: false,
-        get: true,
-        create: false,
-        update: false,
-        delete: false,
-      },
-      elicitOnCreate: {
-        sourceField: "adapterId",
-        sourceEntity: "Widget",
-        definitionsField: "name",
-        into: "name",
-      },
-      test: { name: "test_widget" },
-    };
-    const catalog = buildMcpCatalog(
-      [
-        input(
-          contract({
-            mcp,
-            fields: [field({ key: "adapterId" }), field({ key: "name" })],
-          }),
-        ),
-      ],
-      "test",
-    );
-    expect(catalog.testTools).toEqual([
-      {
-        name: "test_widget",
-        description: expect.stringContaining("Verify one Widget"),
-        entity: "Widget",
-        table: "erp.widgets",
-      },
-    ]);
-    expect(buildMcpCatalog([input(contract())], "test").testTools).toEqual([]);
-  });
-
-  it("refuses a test name colliding with a dedicated tool", () => {
-    const mcp = {
-      toolPrefix: "widget",
-      tools: "dedicated" as const,
-      operations: {
-        list: false,
-        get: true,
-        create: false,
-        update: false,
-        delete: false,
-      },
-      elicitOnCreate: {
-        sourceField: "name",
-        sourceEntity: "Widget",
-        definitionsField: "name",
-        into: "name",
-      },
-      test: { name: "widget_get" },
-    };
-    expect(() =>
-      buildMcpCatalog(
-        [input(contract({ mcp, fields: [field({ key: "name" })] }))],
-        "test",
-      ),
-    ).toThrow(/Duplicate MCP tool name "widget_get"/);
   });
 });
 

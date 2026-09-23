@@ -64,7 +64,7 @@ test("the Tenant registry row is provisioned, never created or deleted through a
 
   // MCP: the tool catalog carries one entry per entity operation
   // (osf_create/osf_get/... with an `entity`); Tenant contributes none at
-  // all — it has no mcp: block — so there is no create or delete to find.
+  // all - it has no interfaces.mcp - so there is no create or delete to find.
   const tools = JSON.parse(artifacts.groups.mcp.find(artifact => artifact.path.endsWith("tools.json"))!.contents);
   expect((tools.entities as Array<{ entity: string }>).some(entry => entry.entity === "Tenant")).toBe(false);
   const entityTools = (tools.tools as Array<{ name: string; entity?: string; operation?: string }>)

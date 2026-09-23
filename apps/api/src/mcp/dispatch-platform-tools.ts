@@ -12,12 +12,11 @@ import { callUpdateTool } from "./update-notices.js";
 import {
   catalog,
   catalogDiscoveryTools,
-  catalogGuideTools,
   catalogTestTools,
   entityForTable,
 } from "./catalog.js";
 import { serializeRow } from "./catalog-rows.js";
-import { guideToolsForSession, sessionMayInvoke } from "./session-projection.js";
+import { sessionMayInvoke } from "./session-projection.js";
 import { runtimeRowByFilter, runtimeRowsByFilter } from "./session-connections.js";
 import { type ToolResult, failed, ok } from "./tool-results.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -29,7 +28,7 @@ import type { DirectCallScope } from "./tool-dispatch.js";
 
 /**
  * The platform tools: identity link, organization profile, employee
- * invitations, first-use onboarding, update notices, guides, discovery and
+ * invitations, first-use onboarding, update notices, compatibility discovery and
  * connection tests.
  */
 export async function platformToolCall(
@@ -38,7 +37,6 @@ export async function platformToolCall(
   const {
     db,
     egressOwner,
-    guidesCalled,
     name,
     onboarding,
     request,
@@ -94,17 +92,6 @@ export async function platformToolCall(
   );
   if (updateOutcome) return updateOutcome as ToolResult;
   // ---- end update notices ----
-
-  const guideTool = catalogGuideTools.find((tool) => tool.name === name);
-  if (guideTool) {
-    if (!guideToolsForSession(session).includes(guideTool)) {
-      return failed(
-        new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`),
-      );
-    }
-    guidesCalled.add(guideTool.name);
-    return { content: [{ type: "text", text: guideTool.content }] };
-  }
 
   const discoveryTool = catalogDiscoveryTools.find(
     (tool) => tool.name === name,

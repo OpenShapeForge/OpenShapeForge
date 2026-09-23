@@ -31,7 +31,7 @@ import {
   entityForTable,
   projectedDerivedTools,
 } from "./catalog.js";
-import { guideToolsForSession, resourcesForSession } from "./session-projection.js";
+import { resourcesForSession } from "./session-projection.js";
 import { derivedToolsForSession } from "./derived-session-tools.js";
 import { entitiesForSession, entityResourceUri } from "./entity-resources.js";
 import {
@@ -63,7 +63,6 @@ export function createSessionSurface(scope: ServerScope) {
     coreResourceOwnership,
     db,
     editLeaseOperationIds,
-    guidesCalled,
     invocationContext,
     locale,
     modulePlatform,
@@ -162,8 +161,6 @@ export function createSessionSurface(scope: ServerScope) {
           entityId: definition.entityId,
         })),
       ),
-    guideTools: () => guideToolsForSession(session),
-    guidesCalled,
     // The administrator step reads the same contract the create tool and
     // the execution path use: which fields the form asks, which tool
     // creates the row, and the redirect URL an OAuth client must register.

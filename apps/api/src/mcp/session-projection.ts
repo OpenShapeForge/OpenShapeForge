@@ -2,7 +2,7 @@
 /**
  * What one session is SHOWN of the catalogue: which entity tools it may
  * invoke, which classified fields are withheld from its schemas, which
- * resources, guides, discovery and test tools it sees. Read-only over the
+ * resources and compatibility discovery/test tools it sees. Read-only over the
  * catalogue and the manifest; the CRUD core remains the enforcement on the
  * call path. Split out of catalog.ts.
  */
@@ -25,11 +25,8 @@ import { listConnectorContracts } from "../connectors/catalog.js";
 import { connectorMcpTools } from "../connectors/mcp-tools.js";
 import { SESSION_INFO_TOOL_NAME } from "./session-info.js";
 import {
-  type CatalogDiscoveryTool,
   type CatalogEntity,
-  type CatalogGuideTool,
   type CatalogResource,
-  type CatalogTestTool,
   type CatalogTool,
   type GeneratedTable,
   type McpOperation,
@@ -38,7 +35,6 @@ import {
   catalog,
   catalogDerivedTools,
   catalogDiscoveryTools,
-  catalogGuideTools,
   catalogResources,
   catalogTestTools,
   crudToolsNamed,
@@ -262,7 +258,6 @@ export function coreOwnsStaticToolName(
       ...(entry.dryRun ? [entry.dryRun.name] : []),
       ...(entry.personalization ? [entry.personalization.set.name] : []),
     ]),
-    ...catalogGuideTools.map((tool) => tool.name),
     ...catalogDiscoveryTools.map((tool) => tool.name),
     ...catalogTestTools.map((tool) => tool.name),
     ...connectorMcpTools(listConnectorContracts()).map((tool) => tool.name),
@@ -275,33 +270,4 @@ export function coreOwnsStaticToolName(
       ? [projection.search, projection.execute]
       : []),
   ].includes(name);
-}
-
-export function guideToolsForSession(session: DbSessionInput): CatalogGuideTool[] {
-  const granted = new Set(session.roles ?? []);
-  return catalogGuideTools.filter((tool) =>
-    tool.roles.some((role) => granted.has(role)),
-  );
-}
-
-/** Discovery follows the entity's read role, like the resource surface. */
-export function discoveryToolsForSession(
-  session: DbSessionInput,
-  tables: Map<string, GeneratedTable>,
-): CatalogDiscoveryTool[] {
-  return catalogDiscoveryTools.filter((tool) =>
-    !tool.compatibility &&
-    sessionMayInvoke(tables.get(tool.table), "get", session),
-  );
-}
-
-/** A test reads the row and exercises it; visibility follows the read role. */
-export function testToolsForSession(
-  session: DbSessionInput,
-  tables: Map<string, GeneratedTable>,
-): CatalogTestTool[] {
-  return catalogTestTools.filter((tool) =>
-    !tool.compatibility &&
-    sessionMayInvoke(tables.get(tool.table), "get", session),
-  );
 }

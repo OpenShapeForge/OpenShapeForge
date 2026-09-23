@@ -124,8 +124,8 @@ before authored effects leave no receipt, so corrected input may reuse the key.
 
 ### Derived-tool execution bindings
 
-A plugin that projects stored rows as MCP tools (`executionCompatibility`, or
-an entity `mcp.derivedTools.execution` block) names where the ordered binding
+A plugin that projects stored rows as MCP tools through its temporary
+`executionCompatibility` seam names where the ordered binding
 rows live with **`bindingsRelation`**: an owned `hasMany` collection on the
 owner. The compiler resolves the collection's target, checks that the target
 carries the execution vocabulary (`operationRef` as a `belongsTo` relationship

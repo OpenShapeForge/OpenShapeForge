@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * MCP tool-catalog generator for entities that opt into generated MCP exposure
- * (`mcp:` block in the entity YAML → `TableDefinition.source.mcp`).
+ * (`interfaces.mcp` in entity YAML -> `TableDefinition.source.mcp`).
  *
  * This is the one generator fed by the compiled CONTRACTS rather than the
  * manifest, and deliberately so. `manifest.json` carries storage columns —
@@ -31,13 +31,10 @@ import {
   compareCodeUnits,
   connectHelperTool,
   describeToolDefinition,
-  discoveryToolDefinition,
   dryRunHelperTool,
   editLeaseToolDefinitions,
-  guideToolDefinition,
   personalizationHelperTool,
   searchableOperationToolDefinitions,
-  testToolDefinition,
   type GenericToolBranch,
   type McpToolShape,
 } from "@openshapeforge/operations";
@@ -803,17 +800,6 @@ export type McpDerivedToolsDefinition = {
   };
 };
 
-export type McpGuideToolDefinition = {
-  name: string;
-  description: string;
-  roles: string[];
-  content: string;
-  entity: string;
-  /** Physical table of the guide's own entity, for the create gate. */
-  table: string;
-  requireBeforeCreate?: boolean;
-};
-
 export type McpDiscoveryToolDefinition = {
   name: string;
   description: string;
@@ -873,7 +859,7 @@ export function selectOperationToolProjection(
   if (dedicatedWithoutOperations > maximum) {
     throw new Error(
       `MCP tool catalog would advertise ${dedicatedWithoutOperations} dedicated non-Operation tools, ` +
-        `over the ${maximum} limit. Switch entities to \`mcp: { tools: generic }\` or disable ` +
+        `over the ${maximum} limit. Switch entities to \`interfaces.mcp: { tools: generic }\` or disable ` +
         "connector operations for MCP.",
     );
   }
@@ -891,7 +877,6 @@ export type McpCatalog = {
   derivedTools: McpDerivedToolsDefinition[];
   discoveryTools: McpDiscoveryToolDefinition[];
   testTools: McpTestToolDefinition[];
-  guideTools: McpGuideToolDefinition[];
   operationTools: {
     key: string;
     plugin: string;
@@ -958,9 +943,6 @@ export type StaticListingInput = {
   }[];
   projection: McpOperationToolProjection;
   derivedTools?: readonly McpDerivedToolsDefinition[];
-  guideTools?: readonly McpGuideToolDefinition[];
-  discoveryTools?: readonly McpDiscoveryToolDefinition[];
-  testTools?: readonly McpTestToolDefinition[];
   /** Ids of lease-protected Operations the listing offers; empty lists the release tool alone. */
   editLeaseOperationIds?: readonly string[];
   connectorTools?: readonly McpToolShape[];
@@ -1124,17 +1106,6 @@ export function advertisedToolSizes(input: StaticListingInput): AdvertisedToolSi
       sizes.push(sizeOf(entry.dryRun.name, dryRunHelperTool(entry.dryRun.name, entry.dryRun.description)));
     }
   }
-  for (const guide of input.guideTools ?? []) {
-    sizes.push(sizeOf(guide.name, guideToolDefinition(guide.name, guide.description)));
-  }
-  for (const discovery of input.discoveryTools ?? []) {
-    if (discovery.compatibility) continue;
-    sizes.push(sizeOf(discovery.name, discoveryToolDefinition(discovery.name, discovery.description, discovery.entity)));
-  }
-  for (const test of input.testTools ?? []) {
-    if (test.compatibility) continue;
-    sizes.push(sizeOf(test.name, testToolDefinition(test.name, test.description, test.entity)));
-  }
   for (const tool of input.connectorTools ?? []) {
     sizes.push(sizeOf(tool.name, {
       name: tool.name,
@@ -1171,7 +1142,7 @@ export function assertAdvertisedToolBytes(
       `fixed tools and the ${kb(DYNAMIC_TOOL_BYTES_ALLOWANCE)} reserved for tools that exist ` +
       `only at run time, that is ${kb(total + reserved - maximum)} over the ${kb(maximum)} ` +
       `listing budget (MAX_ADVERTISED_TOOL_BYTES). Largest: ${largest}. Switch the entities ` +
-      "behind the largest dedicated tools to `mcp: { tools: generic }`, whose per-entity " +
+      "behind the largest dedicated tools to `interfaces.mcp: { tools: generic }`, whose per-entity " +
       "schemas are served on demand by osf_describe, or disable operations that are not " +
       "needed on MCP.",
   );
@@ -1256,7 +1227,6 @@ export function buildMcpCatalog(
   const derivedTools: McpDerivedToolsDefinition[] = [];
   const discoveryTools: McpDiscoveryToolDefinition[] = [];
   const testTools: McpTestToolDefinition[] = [];
-  const guideTools: McpGuideToolDefinition[] = [];
   const executionCompatibilityOperations: McpCatalog["executionCompatibility"] = [];
 
   // Every entity in the input set is a possible relationship target, whether
@@ -1399,132 +1369,6 @@ export function buildMcpCatalog(
       });
     }
 
-    if (mcp.guide) {
-      guideTools.push({
-        name: mcp.guide.name,
-        description: mcp.guide.description,
-        roles: [...mcp.guide.roles],
-        content: mcp.guide.content,
-        entity: contract.entity.name,
-        table: input.table,
-        ...(mcp.guide.requireBeforeCreate ? { requireBeforeCreate: true } : {}),
-      });
-    }
-
-    if (mcp.discovery) {
-      discoveryTools.push({
-        name: mcp.discovery.name,
-        description:
-          mcp.discovery.description ??
-          `Fetch and summarize the declared API schema of one ${entityLabel(contract)} by its identifier.`,
-        entity: contract.entity.name,
-        table: input.table,
-      });
-    }
-
-    if (mcp.test) {
-      testTools.push({
-        name: mcp.test.name,
-        description:
-          mcp.test.description ??
-          `Verify one ${entityLabel(contract)} by its identifier: checks its stored values ` +
-            `and credentials, and exercises them against the provider when a probe request ` +
-            `is declared. Reports what was and was not verified.`,
-        entity: contract.entity.name,
-        table: input.table,
-      });
-    }
-
-    if (mcp.derivedTools) {
-      const execution = mcp.derivedTools.execution;
-      derivedTools.push({
-        entity: contract.entity.name,
-        table: input.table,
-        roles: [...mcp.derivedTools.roles],
-        keyField: mcp.derivedTools.keyField,
-        ...(mcp.derivedTools.titleField
-          ? { titleField: mcp.derivedTools.titleField }
-          : {}),
-        descriptionField: mcp.derivedTools.descriptionField,
-        inputFieldsField: mcp.derivedTools.inputFieldsField,
-        ...(mcp.derivedTools.outputFieldsField
-          ? { outputFieldsField: mcp.derivedTools.outputFieldsField }
-          : {}),
-        ...(mcp.derivedTools.versionField
-          ? { versionField: mcp.derivedTools.versionField }
-          : {}),
-        ...(mcp.derivedTools.visibleWhen
-          ? { visibleWhen: { ...mcp.derivedTools.visibleWhen } }
-          : {}),
-        ...(mcp.derivedTools.visibleToRolesField
-          ? { visibleToRolesField: mcp.derivedTools.visibleToRolesField }
-          : {}),
-        ...(mcp.derivedTools.internalOnlyField
-          ? { internalOnlyField: mcp.derivedTools.internalOnlyField }
-          : {}),
-        ...(mcp.derivedTools.connect
-          ? {
-              connect: {
-                name: mcp.derivedTools.connect.name,
-                roles: [...mcp.derivedTools.connect.roles],
-                description:
-                  mcp.derivedTools.connect.description ??
-                  `Start a provider connection for one ${entityLabel(contract)}: ` +
-                    `validates the definition chain and returns an authorization URL for the ` +
-                    `caller to open in a browser.`,
-              },
-            }
-          : {}),
-        ...(mcp.derivedTools.personalization
-          ? {
-              personalization: {
-                entity: mcp.derivedTools.personalization.entity,
-                table: resolveEntityTable(
-                  inputs,
-                  mcp.derivedTools.personalization.entity,
-                  contract.entity.name,
-                  "derivedTools.personalization.entity",
-                ),
-                serviceRef: mcp.derivedTools.personalization.serviceRef,
-                instructionField:
-                  mcp.derivedTools.personalization.instructionField,
-                set: {
-                  name: mcp.derivedTools.personalization.set.name,
-                  description:
-                    mcp.derivedTools.personalization.set.description ??
-                    `Store YOUR standing instruction for one ${entityLabel(contract)} tool ` +
-                      `(or for all of them): from then on, every assistant you use sees it ` +
-                      `alongside the tool. An empty instruction clears it.`,
-                },
-              },
-            }
-          : {}),
-        ...(mcp.derivedTools.dryRun
-          ? {
-              dryRun: {
-                name: mcp.derivedTools.dryRun.name,
-                description:
-                  mcp.derivedTools.dryRun.description ??
-                  `Compose the exact provider request(s) one ${entityLabel(contract)} tool ` +
-                    `call would make — method, URL, headers with placeholder credentials, ` +
-                    `body — without sending anything. Works on drafts, so a definition can ` +
-                    `be verified before it is published.`,
-                roles: [...mcp.derivedTools.dryRun.roles],
-              },
-            }
-          : {}),
-        ...(execution
-          ? {
-              execution: resolveDerivedExecution(
-                inputs,
-                input,
-                execution,
-                "derivedTools.execution",
-              ),
-            }
-          : {}),
-      });
-    }
   }
 
   const compatibilityNames = new Map<string, string>();
@@ -1939,9 +1783,6 @@ export function buildMcpCatalog(
           : undefined);
     }
   }
-  for (const guide of guideTools) {
-    reserveName(guide.name, guide.entity, "guide");
-  }
   for (const discovery of discoveryTools) {
     reserveName(discovery.name, discovery.entity, "discovery", discovery.compatibility);
   }
@@ -1964,7 +1805,7 @@ export function buildMcpCatalog(
       throw new Error(
         `MCP tool name "${tool.name}" (${tool.entity}.${tool.operation}) uses the reserved ` +
           `"${GENERIC_TOOL_NAME_PREFIX}" prefix of the shared generic tools. Choose another ` +
-          `toolPrefix or name override, or switch the entity to \`mcp: { tools: generic }\`.`,
+          `Operation name override, or switch the entity to \`interfaces.mcp: { tools: generic }\`.`,
       );
     }
     claimName(tool.name, { owner: `${tool.entity}.${tool.operation}`, kind: "other" });
@@ -2065,9 +1906,6 @@ export function buildMcpCatalog(
       operationTools: operationTools.filter((tool) => operationMcpServer(tool) === "tenant"),
       projection: operationToolProjection,
       derivedTools,
-      guideTools,
-      discoveryTools,
-      testTools,
       editLeaseOperationIds,
       connectorTools,
       canonicalTexts: new Map(
@@ -2090,7 +1928,6 @@ export function buildMcpCatalog(
     derivedTools,
     discoveryTools,
     testTools,
-    guideTools,
     operationTools,
     operationToolProjection: {
       mode: operationToolProjection,

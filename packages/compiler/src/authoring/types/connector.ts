@@ -269,7 +269,7 @@ export interface ConnectorRestExposure {
 }
 
 /**
- * MCP exposure mirrors the per-entity `mcp:` block: same opt-in shape, same
+ * MCP exposure mirrors the per-entity `interfaces.mcp` opt-in: same shape, same
  * tool-prefix constraint, same dedicated/generic trade-off, and connector tools
  * count against the same catalog budget. Connector operations differ from CRUD
  * in one way that matters — each carries its own input and output schema — so

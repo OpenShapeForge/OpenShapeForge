@@ -257,7 +257,7 @@ export type ArtifactCollection = {
  * `schema.table` string the MCP runtime dispatches on is by construction the
  * same one the CRUD layer keys its table map on. An entity whose table did not
  * make it into the manifest is skipped — the backend manifest already fails
- * the build for an `mcp:` block without generated CRUD, so this is a guard
+ * the build for `interfaces.mcp` without generated CRUD, so this is a guard
  * against surprises, not an expected path.
  */
 function mcpCatalogInputs(

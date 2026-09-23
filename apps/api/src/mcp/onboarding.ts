@@ -726,10 +726,6 @@ export type OnboardingEnvironment = {
     filter: Record<string, unknown>,
     limit?: number,
   ) => Promise<Record<string, unknown>[]>;
-  /** The role guide tools this session is shown. */
-  guideTools: () => ReadonlyArray<{ name: string }>;
-  /** Guides read in THIS session (the server's per-session set). */
-  guidesCalled: ReadonlySet<string>;
   store: OnboardingStore;
   /**
    * The connection entity's create contract: how its configuration is
@@ -853,7 +849,7 @@ export function onboardingStore(
 
 /**
  * Bind the real environment. The server passes its own per-session builders
- * so the checklist sees exactly the tools and guides `tools/list` would show.
+ * so the checklist sees exactly the tools `tools/list` would show.
  */
 export function onboardingEnvironment(input: {
   db: OpenShapeForgeDatabase;
@@ -861,8 +857,6 @@ export function onboardingEnvironment(input: {
   tables: Map<string, GeneratedTable>;
   derivedEntries: readonly DerivedToolsCatalogEntry[];
   projectedTools: () => Promise<Array<Pick<DerivedTool, "name" | "table" | "rowId">>>;
-  guideTools: () => ReadonlyArray<{ name: string }>;
-  guidesCalled: ReadonlySet<string>;
   connectionContract: OnboardingEnvironment["connectionContract"];
   tenantConnection: OnboardingEnvironment["tenantConnection"];
   redirectUri: OnboardingEnvironment["redirectUri"];
@@ -872,8 +866,6 @@ export function onboardingEnvironment(input: {
     session,
     derivedEntries: input.derivedEntries,
     projectedTools: input.projectedTools,
-    guideTools: input.guideTools,
-    guidesCalled: input.guidesCalled,
     connectionContract: input.connectionContract,
     tenantConnection: input.tenantConnection,
     redirectUri: input.redirectUri,
@@ -1077,7 +1069,6 @@ async function preferencesFor(env: OnboardingEnvironment): Promise<OnboardingFac
 export async function gatherOnboardingFacts(env: OnboardingEnvironment): Promise<OnboardingFacts> {
   const relation = env.session.relation ?? null;
   const record = await env.store.read();
-  const guidesRead = new Set([...(record?.guidesRead ?? []), ...env.guidesCalled]);
   const [organizationConnections, personalSignIns, preferences] = await Promise.all([
     organizationConnectionsFor(env),
     personalSignInsFor(env),
@@ -1091,7 +1082,7 @@ export async function gatherOnboardingFacts(env: OnboardingEnvironment): Promise
     organizationConnections,
     personalSignIns,
     preferences,
-    guides: env.guideTools().map((guide) => ({ name: guide.name, read: guidesRead.has(guide.name) })),
+    guides: [],
     record,
   };
 }

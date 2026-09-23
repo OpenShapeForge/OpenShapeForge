@@ -156,7 +156,7 @@ export const ownedBindings: CompiledRelationship = {
 };
 
 export function ownerInput(
-  execution: Omit<AuthoredDerivedExecution, "bindingsRelation"> & {
+  _execution: Omit<AuthoredDerivedExecution, "bindingsRelation"> & {
     bindingsRelation?: string;
   },
   relationships: CompiledRelationship[] = [ownedBindings],
@@ -183,14 +183,6 @@ export function ownerInput(
           create: false,
           update: false,
           delete: false,
-        },
-        derivedTools: {
-          roles: ["viewer"],
-          keyField: "key",
-          descriptionField: "description",
-          inputFieldsField: "inputFields",
-          versionField: "version",
-          execution: execution as AuthoredDerivedExecution,
         },
       },
     }),

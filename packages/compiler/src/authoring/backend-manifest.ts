@@ -1293,13 +1293,13 @@ export function compileAuthoringBackendManifest(
       );
     }
     // Same fail-closed reasoning as rest: MCP tools delegate to the generated
-    // CRUD layer, so an mcp: block on an entity that has none is authoring
+    // CRUD layer, so interfaces.mcp on an entity that has none is authoring
     // intent that would silently evaporate.
     if (candidate.contract.mcp && !generatedCrudEligible) {
       throw new Error(
-        `Entity ${describeCandidateOrigin(candidate)} declares an mcp: block but is not ` +
+        `Entity ${describeCandidateOrigin(candidate)} declares interfaces.mcp but is not ` +
           `generated-CRUD enabled${domainInternal ? " (domain-internal)" : ""}. ` +
-          `Add it to the generated CRUD allowlist or remove the mcp: block.`,
+          `Add it to the generated CRUD allowlist or remove interfaces.mcp.`,
       );
     }
     const tenantScoped = candidate.contract.authorization !== undefined;

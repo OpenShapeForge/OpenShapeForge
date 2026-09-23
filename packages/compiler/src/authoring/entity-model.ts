@@ -9,7 +9,6 @@ import type {
   CoreEntity,
   CrudOperationKey,
   EntityOperationDefinition,
-  McpConfig,
   RestConfig,
   UIDefinition,
 } from "./types.js";
@@ -116,22 +115,6 @@ function completeProjectedActions(
 export function restConfig(entity: CoreEntity): RestConfig | undefined {
   if (!entity.interfaces?.rest) return undefined;
   return { ...(entity.interfaces.rest.basePath ? { basePath: entity.interfaces.rest.basePath } : {}), operations: completeProjectedActions(entity, "rest") };
-}
-
-export function mcpConfig(entity: CoreEntity): McpConfig | undefined {
-  const mcp = entity.interfaces?.mcp;
-  if (!mcp) return undefined;
-  return {
-    ...(mcp.tools ? { tools: mcp.tools } : {}),
-    operations: completeProjectedActions(entity, "mcp"),
-    ...(mcp.resource ? { resource: mcp.resource } : {}),
-    ...(() => {
-      const secureInput = operationByAction(entity).create?.[1].interaction;
-      if (!secureInput) return {};
-      const { type: _type, ...elicitOnCreate } = secureInput;
-      return { elicitOnCreate };
-    })(),
-  };
 }
 
 export function webOperationActions(

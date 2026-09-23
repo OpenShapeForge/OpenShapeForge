@@ -260,18 +260,6 @@ export interface McpSection {
     description?: string;
     templateDescription?: string;
   };
-  /** Authored playbook tool, validated at compile. */
-  guide?: {
-    name: string;
-    description: string;
-    roles: string[];
-    content: string;
-    requireBeforeCreate?: boolean;
-  };
-  /** Authored schema-discovery tool, validated at compile. */
-  discovery?: { name: string; description?: string };
-  /** Authored elicited-values verification tool, validated at compile. */
-  test?: { name: string; description?: string };
   /** Authored create-time elicitation config, validated at compile. */
   elicitOnCreate?: {
     sourceField: string;
@@ -279,37 +267,6 @@ export interface McpSection {
     definitionsField: string;
     into: string;
     message?: string;
-  };
-  /** Authored row-to-tool projection config, validated at compile. */
-  derivedTools?: {
-    roles: string[];
-    keyField: string;
-    titleField?: string;
-    descriptionField: string;
-    inputFieldsField: string;
-    outputFieldsField?: string;
-    versionField?: string;
-    execution?: {
-      bindingsRelation: string;
-      operationRef: string;
-      operationEntity: string;
-      providerRef: string;
-      providerEntity: string;
-      connectionEntity: string;
-      connectionProviderRef: string;
-      connectionValuesField: string;
-    };
-    visibleWhen?: { field: string; equals: string };
-    visibleToRolesField?: string;
-    internalOnlyField?: string;
-    connect?: { name: string; description?: string; roles: string[] };
-    dryRun?: { name: string; description?: string; roles: string[] };
-    personalization?: {
-      entity: string;
-      serviceRef: string;
-      instructionField: string;
-      set: { name: string; description?: string };
-    };
   };
 }
 

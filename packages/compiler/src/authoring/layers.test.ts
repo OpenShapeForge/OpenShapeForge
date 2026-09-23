@@ -384,7 +384,6 @@ describe("resolveAuthoringLayers", () => {
   test("entity patches cannot enable legacy interface or worker capability exposure", () => {
     for (const [base, patch, error] of [
       [{ ...baseEntity, rest: false }, { rest: true }, /widens rest exposure/],
-      [{ ...baseEntity, mcp: { enabled: false } }, { mcp: true }, /widens mcp exposure/],
       [baseEntity, { workerAccess: "widget-worker" }, /enables workerAccess/],
     ] as const) {
       const root = makeRepo();

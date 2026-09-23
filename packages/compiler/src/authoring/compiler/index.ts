@@ -252,6 +252,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
         onEdit: { field: "lifecycleStatus", value: "draft" },
       },
     } : {}),
+    ...(coreEntity.hardDelete ? { hardDelete: coreEntity.hardDelete } : {}),
     crud,
     entityOperations,
     pluginOperations: pluginOperations(coreEntity),

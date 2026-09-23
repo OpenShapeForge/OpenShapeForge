@@ -182,7 +182,12 @@ export type RetentionReviewGate = {
 
 export type RetentionRuleDefinition = {
   id: string;
-  after: RetentionDuration;
+  /** Distinct policy bounds; never flatten these into one execution date. */
+  duration: {
+    minimum?: RetentionDuration;
+    default?: RetentionDuration;
+    maximum?: RetentionDuration;
+  };
   action: RetentionAction;
   /** Authored disposition before {@link RetentionAction} coarsening. */
   disposition?: RetentionDisposition;
@@ -199,12 +204,14 @@ export type RetentionRuleDefinition = {
 };
 
 /**
- * Legal-hold / litigation-hold control plane. When `suspendDestruction` is
- * true a retention executor MUST NOT run any destructive disposition for the
- * table, regardless of clock expiry, until the hold is lifted.
+ * Legal-hold capability. `suspendDestruction` says the policy supports hold
+ * suspension; `activeColumn` resolves whether an individual record is
+ * actually under hold.
  */
 export type RetentionLegalHold = {
   suspendDestruction: boolean;
+  /** Boolean record column whose true value represents an actual active hold. */
+  activeColumn?: string;
 };
 
 /**
@@ -361,6 +368,11 @@ export type TableSourceDefinition = {
      * the head (the persisted `versionsField` inverse).
      */
     storage: VersioningStorageBinding;
+  };
+  /** Narrow hard-delete eligibility compiled from the entity contract. */
+  hardDelete?: {
+    /** Refuse deletion once durable version history exists. */
+    requireNeverPublished: true;
   };
   /**
    * Authored localized labels for the entity (e.g. `{ en: "Contact Moment",

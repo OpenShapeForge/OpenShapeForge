@@ -13,10 +13,9 @@ indexes:
   - { name: document_type_versions_tenant_number_uidx, fields: [tenantId, documentType, versionNumber], unique: true }
 authorization:
   roles:
-    read: [CaseFile.All.Read, CaseFile.All.ReadWrite, DocumentTypes.All.Delete]
+    read: [CaseFile.All.Read, CaseFile.All.ReadWrite]
     create: [CaseFile.All.ReadWrite]
     update: [CaseFile.All.ReadWrite]
-    delete: [DocumentTypes.All.Delete]
   rowAccess: { enabled: true, empty: public }
 fields:
   - key: documentType

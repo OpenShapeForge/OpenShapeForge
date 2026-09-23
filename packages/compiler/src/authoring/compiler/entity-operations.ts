@@ -90,6 +90,18 @@ function compileOperation(
   const pluginImplementation = definition?.implementation.type === "plugin"
     ? definition.implementation
     : undefined;
+  // A user-facing hard delete is never an unguarded CRUD shortcut. The
+  // canonical Operation adds these controls once, so REST, GraphQL, MCP and
+  // web all receive the same explicit acknowledgement and stale-row guard.
+  const concurrency = intent === "delete"
+    ? {
+        ...definition?.concurrency,
+        version: { mode: "required" as const, field: "updatedAt" as const },
+      }
+    : definition?.concurrency;
+  const confirmation = intent === "delete" && definition?.confirmation?.mode !== "challenge"
+    ? { mode: "acknowledgement" as const }
+    : definition?.confirmation ?? { mode: "none" as const };
   const shared = {
     id: definition?.id ?? `${source.entity.name}.${key}`,
     key,
@@ -116,8 +128,8 @@ function compileOperation(
       : {}),
     errors: withDeclaredEntityOperationErrors(
       deriveEntityOperationErrors(source.entity.name, intent, {
-        concurrency: definition?.concurrency,
-        confirmation: definition?.confirmation ?? { mode: "none" },
+        concurrency,
+        confirmation,
         recordPermissions: source.authorization.rowAccess?.recordPermissions !== undefined,
         secureInput: definition?.interaction !== undefined,
         collections: (source.relationships ?? []).some((relationship) => relationship.kind === "hasMany"),
@@ -152,9 +164,9 @@ function compileOperation(
     },
     effects: definition?.effects ?? defaultEffects(intent),
     reliability: definition?.reliability ?? defaultIdempotency(intent),
-    ...(definition?.concurrency ? { concurrency: definition.concurrency } : {}),
+    ...(concurrency ? { concurrency } : {}),
     interaction: {
-      confirmation: definition?.confirmation ?? { mode: "none" as const },
+      confirmation,
       ...(definition?.interaction ? { secureInput: definition.interaction } : {}),
     },
   };

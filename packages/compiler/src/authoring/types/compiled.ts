@@ -751,6 +751,7 @@ export interface CompiledEntityContract {
     /** The head field every content edit resets, and the value it resets to (the draft rule). */
     onEdit: { field: string; value: string };
   };
+  hardDelete?: { requireNeverPublished: true };
   /** Common upper bound for generated CRUD across every transport. */
   crud: CrudSection;
   /** Canonical generated operations projected by REST, MCP, web and GraphQL. */

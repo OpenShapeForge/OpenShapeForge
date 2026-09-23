@@ -824,6 +824,10 @@ export interface CoreEntity {
     versionsField: string;
     snapshot?: { ownedRelationships?: "recursive" };
   };
+  /** Optional shared-runtime hard-delete restrictions. */
+  hardDelete?: {
+    requireNeverPublished: true;
+  };
   fields: Field[];
   authorization?: AuthorizationConfig;
   /** Derived by the compiler from `interfaces.web`; never authored. */

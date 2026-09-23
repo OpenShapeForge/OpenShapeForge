@@ -52,6 +52,7 @@ import {
 } from "./derive-on-create.js";
 import { assertRelationshipConstraintsInTransaction } from "./relationship-constraints.js";
 import { assertPublishableRelatedMutationInTransaction } from "./derived-execution-guards.js";
+import { assertHardDeleteAllowedInTransaction } from "./deletion-guards.js";
 
 async function fetchGeneratedRowInTransaction(
   trx: Transaction<DB>,
@@ -525,6 +526,14 @@ export async function deleteGeneratedEntity(
     await assertNoOwnedChildrenInTransaction(trx, table, input.id);
     const current = await fetchGeneratedRowInTransaction(trx, session, table, input.id, true);
     if (current) {
+      await assertHardDeleteAllowedInTransaction(
+        trx,
+        session,
+        table,
+        input.id,
+        current,
+        entityValues.tables ?? getGeneratedCrudTables(),
+      );
       await assertPublishableRelatedMutationInTransaction(trx, session, table, {
         kind: "delete",
         id: input.id,

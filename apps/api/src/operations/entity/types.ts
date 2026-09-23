@@ -86,6 +86,20 @@ export type GeneratedCrudTable = {
   generatedCrudEligible: boolean;
   primaryKey: string | null;
   columns: GeneratedCrudColumn[];
+  retention?: {
+    clock: { column: string; type?: "timestamptz" | "date"; fallbackColumns?: string[] };
+    rules: Array<{
+      id: string;
+      duration: {
+        minimum?: { years?: number; months?: number; days?: number };
+        default?: { years?: number; months?: number; days?: number };
+        maximum?: { years?: number; months?: number; days?: number };
+      };
+      action: "retain" | "archive" | "redact" | "delete";
+      disposition?: "keep" | "archive" | "delete" | "anonymize" | "mask" | "cryptoDelete" | "review";
+    }>;
+    legalHold?: { suspendDestruction: boolean; activeColumn?: string };
+  };
   /** Compiler- and plugin-owned table constraints, as the manifest carries them. */
   constraints?: Array<{ name: string; kind: string; expression?: string; columns?: string[] }>;
   realtime?: { readPredicate: string; visibilityColumns: string[] };
@@ -122,6 +136,7 @@ export type GeneratedCrudTable = {
         owned: Array<{ schema: string; table: string; childColumns: string[]; parentColumns: string[]; children: unknown[] }>;
       };
     };
+    hardDelete?: { requireNeverPublished: true };
     computedFields?: Array<{
       field: string;
       resolver: "labelRules";

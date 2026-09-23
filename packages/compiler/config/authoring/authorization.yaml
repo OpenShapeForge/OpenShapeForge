@@ -280,6 +280,7 @@ clientRoles:
     - General.All.Read
     - Templates.Read
     - CaseFile.All.ReadWrite
+    - DocumentTypes.All.Delete
     - Energy.All.ReadWrite
     - Finance.All.ReadWrite
     - Finance.All.Read

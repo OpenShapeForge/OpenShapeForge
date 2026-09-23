@@ -31,6 +31,9 @@ export function assertEntityAuthoring(entity: CoreEntity, origin: string): void 
   if (!entity.interfaces) {
     throw new Error(`${origin} requires explicit interface declarations.`);
   }
+  if (entity.hardDelete?.requireNeverPublished && !entity.versioning) {
+    throw new Error(`${origin} hardDelete.requireNeverPublished requires durable publishedSnapshot versioning.`);
+  }
 
   const fieldsByKey = new Map(entity.fields.map((field) => [field.key, field]));
   for (const field of entity.fields) {

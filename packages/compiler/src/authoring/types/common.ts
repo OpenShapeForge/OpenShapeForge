@@ -221,6 +221,8 @@ export interface RetentionPolicy {
   };
   holds?: {
     suspendDestruction?: boolean;
+    /** Boolean entity field whose true value means a hold is active. */
+    activeField?: string;
   };
   tenantOverride?: {
     allowExtension?: boolean;

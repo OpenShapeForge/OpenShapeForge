@@ -439,6 +439,7 @@ export function resolveDetailPageHeader(
     }),
     actionsContext: {
       entityId: id,
+      expectedVersion: typeof entity.updatedAt === "string" ? entity.updatedAt : undefined,
       baseRoute: translateDetailText(config.listRoute ?? null, lang) || undefined,
       deleteMutationName: config.deleteMutationName,
       lang,

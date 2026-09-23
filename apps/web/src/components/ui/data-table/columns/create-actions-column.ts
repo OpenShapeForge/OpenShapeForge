@@ -247,8 +247,13 @@ export function createActionsColumn<TData extends Record<string, unknown>>(
   });
 
   const handleClick = (action: EntityListAction, row: TData) => {
-    if (action.confirm && typeof window !== "undefined") {
-      if (!window.confirm(action.confirm)) return;
+    const confirmation = action.confirm ?? (action.mutation === "delete"
+      ? (lang === "nl"
+          ? "Dit verwijdert het record permanent. Deze actie kan niet ongedaan worden gemaakt. Doorgaan?"
+          : "This permanently deletes the record. This action cannot be undone. Continue?")
+      : undefined);
+    if (confirmation && typeof window !== "undefined") {
+      if (!window.confirm(confirmation)) return;
     }
     const payload = resolvePayload(action.payload, row as Record<string, unknown>);
     const detail: ActionEventDetail<TData> = { action, row, payload };

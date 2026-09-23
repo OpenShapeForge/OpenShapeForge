@@ -10,6 +10,7 @@ import { collectAllArtifacts } from "../packages/compiler/src/index.ts";
 import {
   compilerOwnedGeneratedFiles,
   compilerOwnedGeneratedRoots,
+  orphanCompilerGeneratedFiles,
 } from "./compiler-generated-artifact-paths.mjs";
 
 const repoRoot = process.cwd();
@@ -304,7 +305,7 @@ const existingOwnedFiles = (
 )
   .flat()
   .sort();
-const orphanGeneratedFiles = existingOwnedFiles.filter((path) => !artifactPathSet.has(path));
+const orphanGeneratedFiles = orphanCompilerGeneratedFiles(existingOwnedFiles, artifactPathSet);
 if (orphanGeneratedFiles.length > 0) {
   coverageFailures.push("compiler-owned generated roots contain orphan files");
   console.error("\nCompiler-owned generated roots contain orphan files:");

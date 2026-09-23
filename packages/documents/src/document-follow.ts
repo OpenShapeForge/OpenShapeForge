@@ -75,6 +75,35 @@ export function planFollow(current: readonly FollowBlock[], previous: ReadonlyMa
 export type TrackedDocument = Readonly<{ id: string; template_version_id: string | null }>;
 export type ApplyContext = Readonly<{ trx: unknown; columns: BlockColumns; permitted: ReadonlySet<string>; tracked: Map<string, TemplateVersionRow | undefined> }>;
 
+/**
+ * Applies a batch under one isolation boundary. A failed item is recorded and
+ * excluded before the ordered survivors are retried together, so the ordinary
+ * success path and the eventual all-success survivor batch each use only one
+ * non-aborted subtransaction. Failures do not prevent healthy documents from
+ * being applied; repeated failures trade extra work for bounded subtransactions.
+ */
+export async function isolateFollowFailures<T>(
+  items: readonly T[],
+  applyBatch: (batch: readonly T[]) => Promise<Readonly<{ index: number; error: unknown }> | null>,
+  recordFailure: (item: T, error: unknown) => Promise<void>,
+): Promise<void> {
+  if (!items.length) return;
+  const failure = await applyBatch(items);
+  if (!failure) return;
+  const failed = items[failure.index];
+  if (failed === undefined) throw new Error(`Follow batch reported invalid failure index ${failure.index}.`);
+  await recordFailure(failed, failure.error);
+  // The failed batch was rolled back. Retry every remaining document as one
+  // batch, preserving order but never retrying the document that threw. This
+  // leaves at most one successful, write-bearing subtransaction even when
+  // several documents fail independently.
+  await isolateFollowFailures(
+    [...items.slice(0, failure.index), ...items.slice(failure.index + 1)],
+    applyBatch,
+    recordFailure,
+  );
+}
+
 /** Content columns a snapshot row knows; a column added later never counts as a local edit. */
 const snapshotColumns = (node: SnapshotNode) => Object.keys(node.row);
 const variantBlocks = (node: SnapshotNode) => orderedChildren(node, "blocks", "variant_id_position");
@@ -184,16 +213,24 @@ export const followTemplatePublish: PublishFollower = async (context) => {
     permitted: new Set(platform.schemas.entityValues?.collection("DocumentVariant", "blocks")?.allowedDefinitions ?? []),
   };
   await withDocumentCommand(trx, "follow", async () => {
-    for (const document of documents) {
-      // A savepoint keeps one failing document from poisoning the publish transaction.
+    const applyBatch = async (batch: readonly TrackedDocument[]) => {
       await rows(trx, "savepoint follow_document", []);
-      try {
-        await applyTemplateVersion(apply, document, next);
-        await rows(trx, "release savepoint follow_document", []);
-      } catch (error) {
-        await rows(trx, "rollback to savepoint follow_document", []);
-        await rows(trx, `update erp.documents set follow_error = $2::text, ${TOUCH} where tenant_id = app.current_tenant() and id = $1::uuid`, [document.id, describe(platform, error).slice(0, 2000)]);
+      for (const [index, document] of batch.entries()) {
+        try {
+          await applyTemplateVersion(apply, document, next);
+        } catch (error) {
+          await rows(trx, "rollback to savepoint follow_document", []);
+          await rows(trx, "release savepoint follow_document", []);
+          return { index, error };
+        }
       }
+      await rows(trx, "release savepoint follow_document", []);
+      return null;
+    };
+    await isolateFollowFailures(documents, applyBatch, async (document, error) => {
+      await rows(trx, `update erp.documents set follow_error = $2::text, ${TOUCH} where tenant_id = app.current_tenant() and id = $1::uuid`, [document.id, describe(platform, error).slice(0, 2000)]);
+    });
+    for (const document of documents) {
       await appendRecordEvent(platform, session, { aggregateType: "document", table: "documents", id: document.id, operation: "updated" });
     }
   });

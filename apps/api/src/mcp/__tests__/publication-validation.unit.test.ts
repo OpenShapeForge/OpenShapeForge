@@ -139,6 +139,71 @@ describe("validateVisibleDefinition", () => {
     ]);
   });
 
+  it("validates every distinct reference beyond the storage reader's default page", async () => {
+    const count = 51;
+    const bindings = Array.from({ length: count }, (_, index) => ({
+      ...BINDING,
+      id: `bind-${index + 1}`,
+      order: index + 1,
+      operationId: `op-${index + 1}`,
+    }));
+    const operations = Array.from({ length: count }, (_, index) => ({
+      ...OPERATION,
+      id: `op-${index + 1}`,
+      key: `operation-${index + 1}`,
+      providerId: `prov-${index + 1}`,
+    }));
+    const providers = Array.from({ length: count }, (_, index) => ({
+      id: `prov-${index + 1}`,
+      name: `Provider ${index + 1}`,
+      auth: {},
+    }));
+    const connections = Array.from({ length: count }, (_, index) => ({
+      id: `conn-${index + 1}`,
+      providerId: `prov-${index + 1}`,
+      values: {},
+    }));
+    const base = readerFor({
+      "core.operations": operations,
+      "core.providers": providers,
+      "core.connections": connections,
+      "core.services": [],
+    });
+    const limits: Array<{ table: string; limit: number | undefined }> = [];
+    const readRows = async (table: string, filter: Row, limit?: number) => {
+      limits.push({ table, limit });
+      return (await base(table, filter)).slice(0, limit ?? 50);
+    };
+
+    await validateVisibleDefinition({
+      entry: ENTRY,
+      row: ROW,
+      reservedNames: new Set(),
+      readRows,
+      readBindingPages: async () => ({ rows: bindings, nextCursor: null }),
+    });
+    expect(limits.find((call) => call.table === "core.operations")?.limit).toBe(count);
+    expect(limits.find((call) => call.table === "core.providers")?.limit).toBe(count);
+    const connectionReads = limits.filter((call) => call.table === "core.connections");
+    expect(connectionReads).toHaveLength(count);
+    expect(connectionReads.every((call) => call.limit === MAX_BINDINGS_PER_OWNER)).toBe(true);
+
+    const message = await failure({
+      entry: ENTRY,
+      row: ROW,
+      reservedNames: new Set(),
+      readRows: async (table, filter, limit) => {
+        const rows = await readRows(table, filter, limit);
+        return table === "core.operations"
+          ? rows.filter((candidate) => candidate.id !== `op-${count}`)
+          : rows;
+      },
+      readBindingPages: async () => ({ rows: bindings, nextCursor: null }),
+    });
+    expect(message).toContain(`binding ${count} references Operation op-${count}`);
+    expect(message).toContain("does not exist");
+  });
+
   it("passes a complete chain with a usable tenant connection", async () => {
     await validateVisibleDefinition({
       entry: ENTRY,

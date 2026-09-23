@@ -196,8 +196,8 @@ function overlayRowReader(
   table: string,
   overlay: ReferencedRowOverlay,
 ): PublicationRowReader {
-  return async (rowTable, filter) => {
-    const rows = await readRows(rowTable, filter);
+  return async (rowTable, filter, limit) => {
+    const rows = await readRows(rowTable, filter, limit);
     if (rowTable !== table) return rows;
     const without = rows.filter((row) => row.id !== overlay.id);
     if (overlay.kind === "delete") return without;
@@ -313,8 +313,8 @@ async function revalidatePublishedOwner(
   if (!current) return;
   const ownerRow = serializeRow(ownerTable, current);
   if (!isPublishedOwner(entry, ownerRow)) return;
-  let readRows: PublicationRowReader = (rowTable, filter) =>
-    runtimeRowsByFilter(db, session, tables, rowTable, filter);
+  let readRows: PublicationRowReader = (rowTable, filter, limit) =>
+    runtimeRowsByFilter(db, session, tables, rowTable, filter, limit);
   if (options.referenced) {
     readRows = overlayRowReader(readRows, options.referenced.table, options.referenced.overlay);
   }

@@ -178,8 +178,8 @@ export async function assertPublishableWrite(
     reservedNames: reservedDerivedToolNames(),
     providerDefinitionsField: entityForTable(entry.execution!.connectionTable)
       ?.elicitOnCreate?.definitionsField,
-    readRows: (rowTable, filter) =>
-      runtimeRowsByFilter(db, session, tables, rowTable, filter),
+    readRows: (rowTable, filter, limit) =>
+      runtimeRowsByFilter(db, session, tables, rowTable, filter, limit),
     readBindingPages: runtimeBindingReader(db, session, tables),
   });
 }
@@ -199,4 +199,3 @@ function reservedDerivedToolNames(): Set<string> {
     ...catalogTestTools.map((tool) => tool.name),
   ]);
 }
-

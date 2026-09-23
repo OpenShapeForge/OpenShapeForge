@@ -11,17 +11,27 @@
  * no implementation package, which is the point — the contract compiles and is
  * advertised while the runtime honestly reports it cannot be run.
  *
- * Needs the compose Postgres up.
+ * Creates and migrates its own scratch database. The caller only provides the
+ * PostgreSQL administrator endpoint plus the trusted-context signing and
+ * identity-issuer configuration used by the real session resolver.
  */
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { SQL } from "bun";
 import { randomUUID } from "node:crypto";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { createApiApp } from "../../roles/api.js";
+import { createDatabaseRuntime } from "../../db/connection.js";
+import { runMigrationChain } from "../../db/migration-chain.js";
 import { MCP_MOUNT_PATH } from "../../mcp/generated-mcp-server.js";
 import { listConnectorContracts } from "../catalog.js";
 import { CONNECTOR_ADMIN_ROLE, CONNECTOR_READER_ROLE } from "../authorization.js";
 
 const SECRET = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ?? null;
+const IDENTITY_ISSUER = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER ?? null;
+const ADMIN_URL =
+  process.env.SCRATCH_ADMIN_DATABASE_URL ??
+  "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
+const APP_ROLE = "openshapeforge_app";
 const SLUG = "example-object-store";
 const LIST_TOOL = "example_object_store_list_objects";
 const PUT_TOOL = "example_object_store_put_object";
@@ -38,18 +48,52 @@ function identity(roles: string[]): Identity {
 }
 
 let app: ReturnType<typeof createApiApp> | null = null;
+let admin: SQL;
+let scratchName: string;
+let databaseUrl: string;
+
 function getApp() {
-  app ??= createApiApp(
-    process.env.DATABASE_URL
-      ? { cors: false, databaseUrl: process.env.DATABASE_URL }
-      : { cors: false },
-  );
+  app ??= createApiApp({ cors: false, databaseUrl });
   return app;
 }
+
+beforeAll(async () => {
+  if (!SECRET) {
+    throw new Error(
+      "OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET is required for the connector surface E2E suite.",
+    );
+  }
+  if (!IDENTITY_ISSUER) {
+    throw new Error(
+      "OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER is required so trusted sessions can resolve identity links.",
+    );
+  }
+
+  scratchName = `connector_surfaces_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  admin = new SQL(ADMIN_URL, { max: 1 });
+  await admin.unsafe(`create database "${scratchName}"`);
+
+  const privilegedUrl = new URL(ADMIN_URL);
+  privilegedUrl.pathname = `/${scratchName}`;
+  const privileged = createDatabaseRuntime({
+    databaseUrl: privilegedUrl.toString(),
+    maxConnections: 1,
+  });
+  await privileged.db.connection().execute((connection) => runMigrationChain(connection));
+  await privileged.close();
+
+  const appUrl = new URL(ADMIN_URL);
+  appUrl.username = APP_ROLE;
+  appUrl.password = APP_ROLE;
+  appUrl.pathname = `/${scratchName}`;
+  databaseUrl = appUrl.toString();
+}, 120_000);
 
 afterAll(async () => {
   await app?.close();
   app = null;
+  await admin?.unsafe(`drop database if exists "${scratchName}" with (force)`);
+  await admin?.close();
 });
 
 function headersFor(who: Identity | null, extra: Record<string, string> = {}) {

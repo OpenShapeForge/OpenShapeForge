@@ -142,7 +142,7 @@ jobs:
       - name: Workflow layout unit tests
         run: bun run test:layout
 
-      # API unit tests that need no database: config (limits, production guard),
+      # API tests that need no database: config (limits, production guard),
       # the Fastify rate-limit boundary (driven with app.inject), and the
       # authorization guards that reject before any transaction opens. The
       # database-backed suites run in the db-tests job below.
@@ -182,6 +182,7 @@ jobs:
           src/documents/__tests__/generated-contract.unit.test.ts
           src/documents/__tests__/rest-routes.unit.test.ts
           src/connectors/__tests__/*.unit.test.ts
+          src/connectors/__tests__/example-connector.e2e.test.ts
           src/rest/rest-docs.test.ts
           src/rest/generated-rest-session.test.ts
           src/rest/serialize-generated-row.test.ts
@@ -425,6 +426,22 @@ jobs:
           bun test src/documents/__tests__/document-content-db.test.ts src/documents/__tests__/document-content-authorization-db.test.ts
           find src/modules -name '*.test.ts' ! -name 'platform-artifact-transaction.test.ts' -print0 | xargs -0 bun test
           bun test src/modules/platform-artifact-transaction.test.ts
+
+      # The three connector suites below exercise real RLS sessions and the
+      # booted HTTP surfaces. Each creates, migrates, and drops its own scratch
+      # database, so no suite can pass by inheriting another test's state. The
+      # signing secret is test-only and ensures the HTTP suite exercises the
+      # real trusted-context verification path instead of vacuous anonymous
+      # refusals.
+      - name: Connector database and surface tests
+        env:
+          OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET: connector-ci-trusted-context-only-not-a-runtime-secret
+          OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER: https://connector-ci.invalid/realms/test
+        run: >-
+          cd apps/api && bun test
+          src/connectors/__tests__/connector-surfaces.e2e.test.ts
+          src/connectors/__tests__/dispatch.e2e.test.ts
+          src/connectors/__tests__/service.e2e.test.ts
 
   # Software-composition analysis (issue #105). The other jobs prove the code
   # builds and behaves; nothing here proves its dependencies are free of known

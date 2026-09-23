@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import type { ModuleOperationContext, RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
+import { CONTENT_LIMITS } from "./content/index.js";
+import { composeTemplate, materializeFields } from "./content-runtime.js";
 import { contentBlockFromRow } from "./content-snapshot.js";
 import { materializeDocument } from "./document-materialize.js";
 
@@ -11,8 +13,9 @@ const ids = {
   documentVariant: "20000000-0000-4000-8000-000000000007", first: "20000000-0000-4000-8000-000000000008",
   second: "20000000-0000-4000-8000-000000000009", include: "20000000-0000-4000-8000-00000000000a",
   included: "20000000-0000-4000-8000-00000000000b", includedVariant: "20000000-0000-4000-8000-00000000000c",
-  includedBlock: "20000000-0000-4000-8000-00000000000d",
+  includedBlock: "20000000-0000-4000-8000-00000000000d", chip: "20000000-0000-4000-8000-00000000000e",
 };
+const numberedId = (family: number, index: number) => `20000000-0000-4000-${String(family).padStart(4, "0")}-${String(index).padStart(12, "0")}`;
 const carrier: RuntimeEntityValueCarrier = {
   entityName: "Block", fieldKey: "values", definitionField: "definitionKey", schema: "erp", table: "blocks",
   valuesColumn: "values", definitionColumn: "definition_key",
@@ -40,7 +43,10 @@ const operations = {
   "IncludeBlock.compose": {
     id: "IncludeBlock.compose", intent: "invoke", effects: { data: "read", external: "none" },
     output: { kind: "json-schema", schema: { type: "object" } },
-    input: { kind: "json-schema", schema: { type: "object", properties: { definitionKey: { const: "IncludeBlock" }, values: { type: "object" }, references: { type: "object" } } } },
+    input: { kind: "json-schema", schema: { type: "object", properties: {
+      definitionKey: { const: "IncludeBlock" }, referenceField: { const: "version" }, parametersField: { const: "parameters" },
+      values: { type: "object" }, references: { type: "object" },
+    } } },
   },
 } as const;
 
@@ -52,19 +58,42 @@ function templateSnapshot(templateId: string, variantId: string, blocks: Record<
     ] } } };
 }
 
-function fixture(options: { templateVersionId?: string | null; parameters?: unknown; withInclusion?: boolean } = {}) {
+function fixture(options: {
+  templateVersionId?: string | null;
+  parameters?: unknown;
+  withInclusion?: boolean;
+  aggregateBlockOverflow?: boolean;
+  inclusionDepth?: number;
+  amplifyVariable?: boolean;
+} = {}) {
   const templateVersionId = options.templateVersionId === undefined ? ids.version : options.templateVersionId;
   const authorizations: string[] = [];
   const reads: string[] = [];
   const queries: string[] = [];
   const validated: unknown[] = [];
   const executions: { id: string; input: Record<string, unknown> }[] = [];
-  const data = { firstText: "First {{local.name}}", secondText: "Second", frozenText: "FROZEN-TEMPLATE-TEXT", includedText: "Included {{local.name}}" };
-  const documentBlocks = () => [
+  const data = {
+    firstText: options.amplifyVariable ? "{{chips.brand}}{{chips.brand}}" : "First {{local.name}}",
+    secondText: "Second", frozenText: "FROZEN-TEMPLATE-TEXT", includedText: "Included {{local.name}}",
+    chip: "a".repeat(options.amplifyVariable ? CONTENT_LIMITS.stringCharacters / 2 + 1 : 1),
+  };
+  const ordinaryBlocks = () => [
     { id: ids.first, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 0, variant_id: null, origin: "template", template_block_id: ids.templateBlock, diverged: true, locked: false, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.firstText }, include_version_id: null },
-    ...(options.withInclusion ? [{ id: ids.include, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 1, variant_id: null, origin: "local", template_block_id: null, diverged: false, locked: false, definition_key: "IncludeBlock", definition_version: 1, values: { parameters: {} }, include_version_id: ids.included }] : []),
+    ...(options.withInclusion || options.inclusionDepth ? [{ id: ids.include, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 1, variant_id: null, origin: "local", template_block_id: null, diverged: false, locked: false, definition_key: "IncludeBlock", definition_version: 1, values: { parameters: {} }, include_version_id: options.inclusionDepth ? numberedId(8100, 0) : ids.included }] : []),
     { id: ids.second, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 2, variant_id: null, origin: "local", template_block_id: null, diverged: false, locked: false, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.secondText }, include_version_id: null },
   ];
+  const documentBlocks = () => !options.aggregateBlockOverflow ? ordinaryBlocks() : Array.from(
+    { length: CONTENT_LIMITS.blocks },
+    (_, index) => {
+      const inclusion = options.aggregateBlockOverflow && index === CONTENT_LIMITS.blocks - 1;
+      return {
+        id: numberedId(8200, index), tenant_id: ids.tenant, document_variant_id: ids.documentVariant,
+        document_variant_id_position: index, variant_id: null, origin: "local", template_block_id: null,
+        diverged: false, locked: false, definition_key: inclusion ? "IncludeBlock" : "TextBlock", definition_version: 1,
+        values: inclusion ? { parameters: {} } : { markdown: `Block ${index}` }, include_version_id: inclusion ? ids.included : null,
+      };
+    },
+  );
   const context = {
     transport: "operation",
     session: { tenantId: ids.tenant, userId: ids.tenant, credential: "bearer", roles: ["CaseFile.All.Read"], groups: [], scope: "tenant" },
@@ -100,16 +129,18 @@ function fixture(options: { templateVersionId?: string | null; parameters?: unkn
             expect(query.parameters[1]).toBe(ids.documentVariant);
             return { rows: documentBlocks().map((row) => ({ row })) };
           }
+          if (query.sql.includes("from erp.chips")) return { rows: [{ id: ids.chip }] };
           throw new Error(`Unexpected query: ${query.sql}`);
         } });
       } },
       operations: {
-        list: async () => ["TemplateVersion", "Document"].map((entityName) => ({ id: `${entityName}.get`, entityName, intent: "get", effects: { data: "read", external: "none" } })),
+        list: async () => ["TemplateVersion", "Document", ...(options.amplifyVariable ? ["Chip"] : [])].map((entityName) => ({ id: `${entityName}.get`, entityName, intent: "get", effects: { data: "read", external: "none" } })),
         get: async (_session: unknown, id: keyof typeof operations) => operations[id],
         async execute(_session: unknown, request: { operation: { id: string; intent: string; entityName?: string }; input: Record<string, unknown> }) {
           if (request.operation.intent === "get") {
             reads.push(`${request.operation.entityName}:${request.input.id}`);
             const base = { id: request.input.id, tenantId: ids.tenant, updatedAt: "2026-01-01T00:00:00Z" };
+            if (request.operation.entityName === "Chip") return { data: { ...base, key: "brand", value: data.chip }, operations: [] };
             if (request.input.id === ids.version) {
               const frozenBlock = { id: ids.templateBlock, tenant_id: ids.tenant, variant_id: ids.templateVariant, variant_id_position: 0, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.frozenText } };
               return { data: { ...base, template: ids.template, versionNumber: 3, snapshot: templateSnapshot(ids.template, ids.templateVariant, [frozenBlock]) }, operations: [] };
@@ -118,11 +149,29 @@ function fixture(options: { templateVersionId?: string | null; parameters?: unkn
               const includedBlock = { id: ids.includedBlock, tenant_id: ids.tenant, variant_id: ids.includedVariant, variant_id_position: 0, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.includedText } };
               return { data: { ...base, template: ids.include, versionNumber: 1, snapshot: templateSnapshot(ids.include, ids.includedVariant, [includedBlock]) }, operations: [] };
             }
+            if (options.inclusionDepth) {
+              const index = Array.from({ length: options.inclusionDepth }, (_, candidate) => candidate)
+                .find((candidate) => request.input.id === numberedId(8100, candidate));
+              if (index !== undefined) {
+                const templateId = numberedId(8300, index);
+                const variantId = numberedId(8400, index);
+                const blockId = numberedId(8500, index);
+                const include = {
+                  id: blockId, tenant_id: ids.tenant, variant_id: variantId, variant_id_position: 0,
+                  definition_key: "IncludeBlock", definition_version: 1, values: { parameters: {} },
+                  include_version_id: numberedId(8100, index + 1),
+                };
+                return { data: { ...base, template: templateId, versionNumber: 1, snapshot: templateSnapshot(templateId, variantId, [include]) }, operations: [] };
+              }
+            }
             return { data: null, operations: [] };
           }
           executions.push({ id: request.operation.id, input: request.input });
-          if (request.operation.id === "IncludeBlock.compose") return { data: { kind: "template", referenceField: "version", parameters: {} }, operations: [] };
-          return { data: { kind: "block", value: request.input.values }, operations: [] };
+          const result = request.operation.id === "IncludeBlock.compose"
+            ? await composeTemplate(request.input, context as unknown as ModuleOperationContext)
+            : await materializeFields(request.input, context as unknown as ModuleOperationContext);
+          if (!("value" in result)) throw new Error(`Materialization refused: ${result.code}`);
+          return { data: result.value, operations: [] };
         },
       },
     },
@@ -200,6 +249,28 @@ describe("Document.materialize", () => {
     expect(included.variants[0].blocks[0].id).toBe(ids.includedBlock);
     expect(JSON.stringify(snapshot)).toContain("Included ");
     expect(JSON.stringify(snapshot)).not.toContain(f.data.frozenText);
+  });
+  test("enforces the aggregate block limit through the compiled registry and real block Operation", async () => {
+    const f = fixture({ aggregateBlockOverflow: true });
+    await expect(materializeDocument(request, f.context))
+      .rejects.toMatchObject({ operationError: { code: "CONTENT_LIMIT_EXCEEDED" } });
+    expect(f.executions).toHaveLength(CONTENT_LIMITS.blocks);
+    expect(f.executions.at(-1)?.id).toBe("IncludeBlock.compose");
+  });
+  test("enforces template inclusion depth through real compose Operations", async () => {
+    const f = fixture({ inclusionDepth: CONTENT_LIMITS.templateDepth });
+    await expect(materializeDocument(request, f.context))
+      .rejects.toMatchObject({ operationError: { code: "CONTENT_LIMIT_EXCEEDED" } });
+    expect(f.executions).toHaveLength(CONTENT_LIMITS.templateDepth + 1);
+    expect(f.executions.filter((execution) => execution.id === "IncludeBlock.compose"))
+      .toHaveLength(CONTENT_LIMITS.templateDepth);
+  });
+  test("enforces variable amplification before invoking a block Operation", async () => {
+    const f = fixture({ amplifyVariable: true });
+    await expect(materializeDocument(request, f.context))
+      .rejects.toMatchObject({ operationError: { code: "CONTENT_LIMIT_EXCEEDED" } });
+    expect(f.reads).toContain(`Chip:${ids.chip}`);
+    expect(f.executions).toHaveLength(0);
   });
   test("produces the same composition hash for an unchanged head and a different one after an edit", async () => {
     const f = fixture();

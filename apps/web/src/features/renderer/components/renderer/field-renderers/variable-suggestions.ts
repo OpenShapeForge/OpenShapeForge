@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
+import {
+  assertCanonicalStoredFieldDefinition,
+  storedFieldDefinitionBaseType,
+} from "@/lib/field-contract/stored-field-definition";
 import type { Field as CompilerField } from "../../../../../generated/compiler/field-contract";
 import { isFieldCardinalityCollection } from "../../../edit/controls/complex/field-schema-editor/utils";
 import { translateRendererText } from "../../../runtime/field-utils";
@@ -141,6 +145,7 @@ export function variableSuggestionFromFieldDefinitionRow(
   if (!row || row.kind !== "variable" || typeof row.source !== "string") {
     return null;
   }
+  assertCanonicalStoredFieldDefinition(row, "Stored variable FieldDefinition");
   const label =
     translateRendererText(
       row.label as CompilerField["label"] | undefined,
@@ -150,6 +155,7 @@ export function variableSuggestionFromFieldDefinitionRow(
     return null;
   }
   const source = row.source.trim();
+  const baseType = storedFieldDefinitionBaseType(row);
   return {
     path: source.replace(/^\{\{\s*([^{}]+?)\s*\}\}$/, "$1"),
     displayPath: source,
@@ -160,17 +166,14 @@ export function variableSuggestionFromFieldDefinitionRow(
     sourceNodeLabel: "Opgeslagen variabele",
     valueType: isFieldCardinalityCollection(row.cardinality)
       ? "array"
-      : row.valueType === "number" || row.valueType === "integer"
+      : baseType === "number" || baseType === "integer"
         ? "number"
-        : row.valueType === "boolean"
+        : baseType === "boolean"
           ? "boolean"
-          : row.valueType === "object"
+          : baseType === "object"
             ? "object"
             : "string",
-    fieldType:
-      typeof row.valueType === "string"
-        ? (row.valueType as VariableSuggestion["fieldType"])
-        : "string",
+    fieldType: baseType,
     ...(typeof row.osfType === "string"
       ? { osfType: row.osfType }
       : {}),

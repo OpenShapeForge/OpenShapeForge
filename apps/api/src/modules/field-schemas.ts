@@ -58,6 +58,40 @@ export type GeneratedRuntimeFieldSchemaRegistry = OperationFieldSchemaRegistry &
   fieldDefinitionSchema: Record<string, unknown>;
 };
 
+const LEGACY_FIELD_DEFINITION_KEYS = ["valueType", "semanticType"] as const;
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Stored FieldDefinitions have no compatibility reader: the old two-axis
+ * `valueType`/`semanticType` shape must be reset instead of being silently
+ * reinterpreted as a canonical `osfType` field. Walk only recursive
+ * FieldDefinition positions; similarly named properties inside unrelated
+ * metadata remain outside this contract.
+ */
+function assertCanonicalStoredFieldDefinition(value: unknown, path: string): void {
+  if (!isRecord(value)) return;
+  for (const key of LEGACY_FIELD_DEFINITION_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(value, key)) {
+      throw new Error(
+        `${path} uses removed legacy key "${key}"; reset the stored definition and use canonical "osfType".`,
+      );
+    }
+  }
+  for (const key of ["shape", "children"] as const) {
+    const nested = value[key];
+    if (Array.isArray(nested)) {
+      nested.forEach((child, index) =>
+        assertCanonicalStoredFieldDefinition(child, `${path}.${key}[${index}]`));
+    }
+  }
+  if (value.item !== undefined) {
+    assertCanonicalStoredFieldDefinition(value.item, `${path}.item`);
+  }
+}
+
 function assertRegistry(value: unknown): asserts value is GeneratedRuntimeFieldSchemaRegistry {
   if (
     !value || typeof value !== "object" || Array.isArray(value) ||
@@ -82,6 +116,7 @@ export function createRuntimeFieldSchemaCompiler(
         throw new Error("FieldDefinitions must be an array.");
       }
       for (let index = 0; index < fields.length; index += 1) {
+        assertCanonicalStoredFieldDefinition(fields[index], `FieldDefinition at index ${index}`);
         if (!validate(fields[index])) {
           const paths = [...new Set((validate.errors ?? []).map((error: { instancePath: string }) =>
             error.instancePath || "/"
@@ -123,7 +158,10 @@ function loadGeneratedRegistry(): GeneratedRuntimeFieldSchemaRegistry {
  * osf-type registry the way the compiler resolves an authored field. An
  * unknown osfType is refused, never projected as a string.
  */
-export function storedFieldBaseType(definition: { key?: unknown; osfType?: unknown }): OperationFieldBaseType {
+export function storedFieldBaseType(
+  definition: { key?: unknown; osfType?: unknown; valueType?: unknown; semanticType?: unknown },
+): OperationFieldBaseType {
+  assertCanonicalStoredFieldDefinition(definition, `FieldDefinition "${typeof definition.key === "string" ? definition.key : "(field)"}"`);
   return resolveFieldBaseType({
     key: typeof definition.key === "string" ? definition.key : "(field)",
     osfType: typeof definition.osfType === "string" ? definition.osfType : "(none)",

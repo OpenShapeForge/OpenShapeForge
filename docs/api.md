@@ -241,7 +241,7 @@ projections:
 | `PATCH /api/control/v1/tenants/{tenantSlug}/organizations/{orgUnitId}` | Rename and/or reparent one, with `confirmed: true`. `parentOrgUnitId: null` means the top level; the slug is refused. |
 | `GET /api/control/v1/reconciliation`, `POST …/reconciliation/reapply` | The drift report; the repair, with `confirmed: true`. |
 | `GET /api/control/v1/audit` | The platform audit projection, filtered by actor, action (an Operation key), result and window. |
-| `GET`/`POST /api/control/v1/catalog…`, `…/notices…` | The Service catalog and the update notices — `platform_admin` only. |
+| `GET`/`POST /api/control/v1/catalog…`, `…/notices…` | The Service catalog and the update notices — `platform-operator` only. |
 
 Errors come in the Operations' declared vocabulary (`VALIDATION`,
 `NOT_FOUND`, `CONFLICT`, `IDENTITY_PROVIDER_ERROR`,
@@ -258,9 +258,9 @@ is the one surface that is **not** per-tenant.
   list.
 - **Its own realm.** Operators authenticate against `openshapeforge-control`,
   never the tenant realm (`src/control/control-session.ts`), and each
-  Operation names the realm roles that may invoke it: `platform-operator`
-  holds the tenant lifecycle, `platform_admin` the catalog and the audit, and
-  both may read the registry. The pin is on `azp` rather than `aud`: the
+  Operation names the single realm role that may invoke it:
+  `platform-operator`. It covers tenant lifecycle, organization state,
+  reconciliation, catalog, notices and audit. The pin is on `azp` rather than `aud`: the
   control realm has no resource-server client, so operator tokens carry no
   audience, and without the pin a token from Keycloak's built-in public
   `admin-cli` client would be accepted.
@@ -316,9 +316,8 @@ single-hyphen groups, which is what makes `--` an unambiguous separator.
 The control plane has one more surface, for a different job: `/api/control/mcp`
 (Streamable HTTP, `src/mcp/control-mcp-server.ts`) lets an authorized
 **control-realm user** — not a tenant member — perform the bounded platform
-Operations allowed by their roles. `platform-operator` owns tenant lifecycle,
-organization changes and reconciliation; `platform_admin` owns catalog, notices
-and audit; both may inspect shared platform state. It is a
+Operations allowed by the single `platform-operator` role: tenant lifecycle,
+organization changes, reconciliation, catalog, notices and audit. It is a
 separate small MCP server beside the generated one rather than a mode of it,
 for the reason the REST control plane is not on the GraphQL schema: the
 generated server is per-tenant by construction and a platform session names
@@ -328,7 +327,7 @@ no tenant.
   a party on `OPENSHAPEFORGE_CONTROL_MCP_AUTHORIZED_PARTIES` (default: the
   operator client; the reference realm setup adds a public PKCE client
   `codex-platform` for interactive sign-in from an MCP client), holding the
-  realm role `platform_admin` or `platform-operator` — looked for in
+  realm role `platform-operator` — looked for in
   `realm_access` only. The Operation's own role list then filters both discovery
   and execution. API keys
   and trusted-context headers name a tenant and are refused; a tenant-realm
@@ -361,17 +360,16 @@ no tenant.
   one-time material is created by explicit actions and delivered through its
   secure handoff; tokens, credential material, and invitation links are never
   returned by ordinary read Operations.
-- **Reconciliation tools:** both roles may inspect `get_reconciliation_report`;
-  only `platform-operator` may invoke `reapply_reconciliation`. A tenant-bound re-apply may change only that
+- **Reconciliation tools:** `platform-operator` may inspect
+  `get_reconciliation_report` and invoke `reapply_reconciliation`. A tenant-bound re-apply may change only that
   tenant's Organization tree and audience scopes and never performs orphan
   cleanup. An all-tenant re-apply may reconcile realm-wide audience scopes and
   remove derived orphan scopes; it still never deletes an unclaimed Keycloak
   Organization.
-- **Identity and guide tools:** both roles receive `whoami` (a role label that
-  distinguishes administrator, operator, or both; scope `platform`; tenant
-  count) and `platform_guide`, whose
+- **Identity and guide tools:** `platform-operator` receives `whoami` (role
+  `Platform operator`; scope `platform`; tenant count) and `platform_guide`, whose
   instructions tell the client to use only Operations offered to the session.
-- **Catalog, notice and audit tools** (`platform_admin`):
+- **Catalog, notice and audit tools** (`platform-operator`):
   `list_catalog_entries`, `get_catalog_entry`, `list_platform_audit`,
   `publish_catalog_entry` (version N+1 from a whole definition; tenants
   without overrides updated in place, overridden ones flagged),

@@ -2010,7 +2010,7 @@ describe("control-realm Operation tools", () => {
     key: `control.operation-${index}`,
     id: `control.operation-${index}`,
     plugin: "osf-control",
-    auth: { mode: "control", roles: ["platform_admin"] },
+    auth: { mode: "control", roles: ["platform-operator"] },
     tenancy: { mode: "none" },
     effects: { data: "read", external: "none" },
     transports: {
@@ -2037,7 +2037,7 @@ describe("control-realm Operation tools", () => {
     expect(catalog.operationTools.find((tool) => tool.key === "control.operation-0")).toMatchObject({
       plugin: "osf-control",
       name: "control_operation_0",
-      auth: { mode: "control", roles: ["platform_admin"] },
+      auth: { mode: "control", roles: ["platform-operator"] },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false },
     });
     // Sixty-one tenant tools would flip the catalog to searchable; these

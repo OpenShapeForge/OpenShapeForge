@@ -23,13 +23,12 @@ const administrator = {
   authorizedParty: "codex-platform",
   expiresAtMs: null,
 };
-const admin = controlSessionFor(administrator, ["platform_admin"]);
 const operator = controlSessionFor(administrator, ["platform-operator"]);
 const tenant: TrustedSessionContext = {
   tenantId: "tenant-a",
   userId: "user-a",
   // Role names that happen to collide with the control realm's must not help.
-  roles: ["platform_admin", "platform-operator", "Organization.All.ReadWrite"],
+  roles: ["platform-operator", "Organization.All.ReadWrite"],
   groups: [],
   scope: "tenant",
   credential: "bearer",
@@ -53,15 +52,14 @@ const status = (operation: OperationContract, session: TrustedSessionContext | u
 };
 
 describe("requireOperationAuthorization with the control credential", () => {
-  test("a control Operation admits a control session holding one of its roles", () => {
-    expect(status(controlOperationContract("listTenants"), admin)).toBe(200);
+  test("the single platform-operator role admits every control Operation", () => {
     expect(status(controlOperationContract("listTenants"), operator)).toBe(200);
     expect(status(controlOperationContract("createTenant"), operator)).toBe(200);
-    // Registry reads are shared, but tenant lifecycle mutations belong to the operator.
-    expect(status(controlOperationContract("createTenant"), admin)).toBe(403);
-    expect(status(controlOperationContract("listCatalogEntries"), admin)).toBe(200);
-    // The catalog is platform_admin's; the operator role does not imply it.
-    expect(status(controlOperationContract("listCatalogEntries"), operator)).toBe(403);
+    expect(status(controlOperationContract("listCatalogEntries"), operator)).toBe(200);
+    for (const operation of controlOperationContracts()) {
+      expect(operation.auth).toEqual({ mode: "control", roles: ["platform-operator"] });
+      expect(status(operation, operator)).toBe(200);
+    }
   });
 
   test("a tenant session never satisfies a control Operation, with the same 401 as no session", () => {
@@ -75,7 +73,7 @@ describe("requireOperationAuthorization with the control credential", () => {
     expect(status(sessionOperation, tenant)).toBe(200);
     expect(status(sessionOperation, { ...tenant, roles: ["reader"] })).toBe(403);
     expect(status(sessionOperation, controlSessionFor(administrator, ["Organization.All.ReadWrite"]))).toBe(401);
-    expect(status(sessionOperation, admin)).toBe(401);
+    expect(status(sessionOperation, operator)).toBe(401);
   });
 
   test("the runtime registry offers each control Operation to exactly the sessions its roles admit", () => {
@@ -91,16 +89,8 @@ describe("requireOperationAuthorization with the control credential", () => {
     expect(registrations).toHaveLength(37);
     const availableTo = (session: TrustedSessionContext) =>
       registrations.filter((registration) => registration.available(session)).map((registration) => registration.definition.id);
-    expect(availableTo(admin)).toEqual(
-      controlOperationContracts()
-        .filter((operation) => operation.auth.mode === "control" && operation.auth.roles.includes("platform_admin"))
-        .map((operation) => operation.key),
-    );
-    expect(availableTo(admin)).not.toContain("control.create-tenant");
     expect(availableTo(operator)).toEqual(
-      controlOperationContracts()
-        .filter((operation) => operation.auth.mode === "control" && operation.auth.roles.includes("platform-operator"))
-        .map((operation) => operation.key),
+      controlOperationContracts().map((operation) => operation.key),
     );
     expect(availableTo(tenant)).toEqual([]);
   });
@@ -116,13 +106,13 @@ describe("the tenant MCP", () => {
       description: "",
       inputSchema: {},
       outputSchema: {},
-      auth: { mode: "control" as const, roles: ["platform_admin"] },
+      auth: { mode: "control" as const, roles: ["platform-operator"] },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
     };
     expect(__operationMayInvokeForTests(controlTool, tenant)).toBe(false);
-    expect(__operationMayInvokeForTests(controlTool, admin)).toBe(false);
-    const sessionTool = { ...controlTool, auth: { mode: "session" as const, roles: ["platform_admin"] } };
+    expect(__operationMayInvokeForTests(controlTool, operator)).toBe(false);
+    const sessionTool = { ...controlTool, auth: { mode: "session" as const, roles: ["platform-operator"] } };
     expect(__operationMayInvokeForTests(sessionTool, tenant)).toBe(true);
-    expect(__operationMayInvokeForTests(sessionTool, admin)).toBe(false);
+    expect(__operationMayInvokeForTests(sessionTool, operator)).toBe(false);
   });
 });

@@ -135,7 +135,7 @@ export const CONTROL_RESOURCE_SCOPE = "mcp-resource:control";
  *
  * Comma-separated, default `roles,profile,email`. `roles` is not decoration
  * here: it is the scope carrying the realm-role mapper, so
- * `realm_access.roles` — and with it `platform_admin`, the only authority this
+ * `realm_access.roles` — and with it `platform-operator`, the only authority this
  * surface recognises — is absent without it. `profile` and `email` carry
  * `preferred_username`, `name` and `email`, which become the audit actor on
  * every `Platform.SystemBypass` elevation this surface makes. It has to be ADVERTISED because Keycloak 26 applies a realm's

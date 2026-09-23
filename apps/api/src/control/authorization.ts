@@ -42,11 +42,11 @@ import { SYSTEM_BYPASS_ROLE, type SystemSessionInput } from "../db/session.js";
 import type { ControlPlaneConfig } from "./config.js";
 
 /**
- * The control realm's tenant-lifecycle role. Holding it means "may use the
- * control plane's tenant and organization Operations"; it composes nothing,
- * because the authority to change anything lives on the far side of a
- * server-side call rather than in the token. The catalog is
- * `platform_admin`'s (platform-admin.ts).
+ * The control realm's single platform role. Holding it means "may use the
+ * control plane" across tenant lifecycle, organization, reconciliation,
+ * catalog, notice and audit Operations. It composes nothing, because the
+ * authority to change anything lives on the far side of a server-side call
+ * rather than in the token.
  */
 export const PLATFORM_OPERATOR_ROLE = "platform-operator";
 

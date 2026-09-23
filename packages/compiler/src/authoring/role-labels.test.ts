@@ -36,12 +36,12 @@ describe("role labels", () => {
       ...base,
       realm: { name: "openshapeforge-control" },
       roleLabels: {
-        platform_admin: { label: { en: "Platform administrator" } },
+        "platform-operator": { label: { en: "Platform operator" } },
         "Relations.All.ReadWrite": { phrase: { nl: "relaties beheren", en: "manage relations" } },
       },
     } as unknown as AuthorizationConfigFile;
     const table = buildRoleLabels([base, control]);
-    expect(Object.keys(table)).toEqual(["org_admin", "Relations.All.ReadWrite", "platform_admin"]);
+    expect(Object.keys(table)).toEqual(["org_admin", "Relations.All.ReadWrite", "platform-operator"]);
     expect(Object.keys(table.org_admin!.label!)).toEqual(["en", "nl"]);
     expect(table["Relations.All.ReadWrite"]).toEqual({
       phrase: { en: "manage relations", nl: "relaties beheren" },

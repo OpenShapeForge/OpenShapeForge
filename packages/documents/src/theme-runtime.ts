@@ -142,7 +142,8 @@ export const resolveDocumentTheme: ModuleOperationHandler = async (input, contex
       if (versionId) {
         const version = (await rows<{ snapshot: unknown }>(trx,
           "select snapshot from erp.template_versions where tenant_id = $1 and id = $2 for share", [tenantId, versionId]))[0];
-        storedThemeId = themeIdFromTemplateSnapshot(version?.snapshot);
+        if (!version) refuse("NOT_FOUND", "The document's template version no longer exists.");
+        storedThemeId = themeIdFromTemplateSnapshot(version.snapshot);
         kind = storedThemeId ? "template-version" : "document";
       }
     }

@@ -115,4 +115,11 @@ describe("DocumentTheme.resolve", () => {
     ]);
     await expect(resolveDocumentTheme({ templateId }, ctx)).rejects.toMatchObject({ operationError: { code: "INVALID_STATE" } });
   });
+
+  test("a malformed theme id in a published snapshot is an invalid state", async () => {
+    const ctx = context([
+      { sql: "from erp.template_versions", rows: [{ snapshot: { schemaVersion: 1, entity: "Template", head: { row: { document_theme_id: "bad" } } } }] },
+    ]);
+    await expect(resolveDocumentTheme({ templateVersionId: versionId }, ctx)).rejects.toMatchObject({ operationError: { code: "INVALID_STATE" } });
+  });
 });

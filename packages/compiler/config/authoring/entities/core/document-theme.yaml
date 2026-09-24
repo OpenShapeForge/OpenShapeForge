@@ -286,6 +286,7 @@ operations:
       - { status: 400, code: VALIDATION, description: The resolve input is invalid. }
       - { status: 403, code: FORBIDDEN, description: The source record is not accessible. }
       - { status: 404, code: NOT_FOUND, description: The source record does not exist. }
+      - { status: 409, code: INVALID_STATE, description: The stored theme selection or theme values are malformed. }
     auth: { mode: session, roles: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite, CaseFile.All.Read, CaseFile.All.ReadWrite] }
     tenancy: { mode: required }
     effects: { data: read, external: none }

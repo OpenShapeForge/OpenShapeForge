@@ -13,10 +13,11 @@ describe("live document theme selection", () => {
   test("reads the theme id frozen on a published template snapshot and ignores token-shaped extras", () => {
     expect(themeIdFromTemplateSnapshot(snapshot(theme))).toBe(theme);
     expect(themeIdFromTemplateSnapshot(snapshot(null))).toBeNull();
-    expect(themeIdFromTemplateSnapshot({ schemaVersion: 1, entity: "Document", head: { row: { document_theme_id: theme } } })).toBeNull();
-    expect(themeIdFromTemplateSnapshot(snapshot("not-a-uuid"))).toBeNull();
+    expect(() => themeIdFromTemplateSnapshot({ schemaVersion: 1, entity: "Document", head: { row: { document_theme_id: theme } } })).toThrow();
+    expect(() => themeIdFromTemplateSnapshot(snapshot("not-a-uuid"))).toThrow();
     expect(themeIdValue(theme)).toBe(theme);
-    expect(themeIdValue("")).toBeNull();
+    expect(themeIdValue(null)).toBeNull();
+    expect(() => themeIdValue("")).toThrow();
   });
 
 });

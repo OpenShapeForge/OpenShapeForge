@@ -116,6 +116,26 @@ describe("DocumentTheme.resolve", () => {
     await expect(resolveDocumentTheme({ templateId }, ctx)).rejects.toMatchObject({ operationError: { code: "INVALID_STATE" } });
   });
 
+  test("corrupt stored colors and typography fail instead of changing document styling", async () => {
+    const valid = themeRow(themeId, "#ffffff");
+    const broken = [
+      { ...valid, surfaceColor: "var(--app-color)" },
+      { ...valid, typography: null },
+      { ...valid, typography: { ...valid.typography, body: null } },
+      { ...valid, typography: { ...valid.typography, body: { ...valid.typography.body, fontSize: 100 } } },
+      { ...valid, typography: { ...valid.typography, body: { ...valid.typography.body, lineHeight: "1.5" } } },
+      { ...valid, typography: { ...valid.typography, body: { ...valid.typography.body, colorRole: "app" } } },
+      { ...valid, typography: { ...valid.typography, body: { ...valid.typography.body, spaceBefore: -1 } } },
+    ];
+    for (const row of broken) {
+      const ctx = context([
+        { sql: "from erp.templates", rows: [{ document_theme_id: themeId }] },
+        { sql: "from erp.document_themes where tenant_id = $1 and id = $2", rows: [row] },
+      ]);
+      await expect(resolveDocumentTheme({ templateId }, ctx)).rejects.toMatchObject({ operationError: { code: "INVALID_STATE" } });
+    }
+  });
+
   test("a malformed theme id in a published snapshot is an invalid state", async () => {
     const ctx = context([
       { sql: "from erp.template_versions", rows: [{ snapshot: { schemaVersion: 1, entity: "Template", head: { row: { document_theme_id: "bad" } } } }] },

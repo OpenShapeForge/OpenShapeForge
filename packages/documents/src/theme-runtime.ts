@@ -39,18 +39,19 @@ function sourceField(input: Record<string, unknown>): (typeof SOURCE_FIELDS)[num
   return present[0]!;
 }
 
-function fontFamily(value: unknown, fallback: DocumentFontFamily): DocumentFontFamily {
-  if (value === undefined) return fallback;
+function fontFamily(value: unknown): DocumentFontFamily {
   if (!DOCUMENT_FONT_FAMILIES.includes(value as DocumentFontFamily)) refuse("INVALID_STATE", "Stored document theme uses an unavailable font.");
   return value as DocumentFontFamily;
 }
 
 function colorRole(value: unknown): DocumentColorRole {
-  return DOCUMENT_COLOR_ROLES.includes(value as DocumentColorRole) ? (value as DocumentColorRole) : "text";
+  if (!DOCUMENT_COLOR_ROLES.includes(value as DocumentColorRole)) refuse("INVALID_STATE", "Stored document theme uses an invalid color role.");
+  return value as DocumentColorRole;
 }
 
-function finiteNumber(value: unknown, fallback: number, min: number, max: number): number {
-  return typeof value === "number" && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+function finiteNumber(value: unknown, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) refuse("INVALID_STATE", "Stored document theme has an invalid numeric token.");
+  return value;
 }
 
 function fontWeight(value: unknown): 400 | 700 {
@@ -58,17 +59,18 @@ function fontWeight(value: unknown): 400 | 700 {
   return value as 400 | 700;
 }
 
-function textStyle(value: unknown, fallbackFamily: DocumentFontFamily): DocumentTextStyle {
-  const row = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+function textStyle(value: unknown): DocumentTextStyle {
+  if (!value || typeof value !== "object" || Array.isArray(value)) refuse("INVALID_STATE", "Stored document theme has an invalid text style.");
+  const row = value as Record<string, unknown>;
   const style: DocumentTextStyle = {
-    fontSize: finiteNumber(row.fontSize, 11, 6, 72),
-    lineHeight: finiteNumber(row.lineHeight, 1.5, 1, 3),
+    fontSize: finiteNumber(row.fontSize, 6, 72),
+    lineHeight: finiteNumber(row.lineHeight, 1, 3),
     fontWeight: fontWeight(row.fontWeight),
     colorRole: colorRole(row.colorRole),
   };
-  const family = row.fontFamily === undefined ? undefined : fontFamily(row.fontFamily, fallbackFamily);
-  const spaceBefore = row.spaceBefore === undefined ? undefined : finiteNumber(row.spaceBefore, 0, 0, 96);
-  const spaceAfter = row.spaceAfter === undefined ? undefined : finiteNumber(row.spaceAfter, 0, 0, 96);
+  const family = row.fontFamily === undefined ? undefined : fontFamily(row.fontFamily);
+  const spaceBefore = row.spaceBefore === undefined ? undefined : finiteNumber(row.spaceBefore, 0, 96);
+  const spaceAfter = row.spaceAfter === undefined ? undefined : finiteNumber(row.spaceAfter, 0, 96);
   return {
     ...style,
     ...(family ? { fontFamily: family } : {}),
@@ -77,34 +79,36 @@ function textStyle(value: unknown, fallbackFamily: DocumentFontFamily): Document
   };
 }
 
-function typography(value: unknown, fallbackFamily: DocumentFontFamily): DocumentTypography {
-  const row = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+function typography(value: unknown): DocumentTypography {
+  if (!value || typeof value !== "object" || Array.isArray(value)) refuse("INVALID_STATE", "Stored document theme has invalid typography.");
+  const row = value as Record<string, unknown>;
   return {
-    body: textStyle(row.body, fallbackFamily),
-    heading1: textStyle(row.heading1, fallbackFamily),
-    heading2: textStyle(row.heading2, fallbackFamily),
-    heading3: textStyle(row.heading3, fallbackFamily),
-    quote: textStyle(row.quote, fallbackFamily),
-    list: textStyle(row.list, fallbackFamily),
+    body: textStyle(row.body),
+    heading1: textStyle(row.heading1),
+    heading2: textStyle(row.heading2),
+    heading3: textStyle(row.heading3),
+    quote: textStyle(row.quote),
+    list: textStyle(row.list),
   };
 }
 
-function hexColor(value: unknown, fallback: string): string {
-  return typeof value === "string" && DOCUMENT_THEME_COLOR.test(value) ? value : fallback;
+function hexColor(value: unknown): string {
+  if (typeof value !== "string" || !DOCUMENT_THEME_COLOR.test(value)) refuse("INVALID_STATE", "Stored document theme has an invalid color.");
+  return value;
 }
 
 function projectTheme(row: ThemeRow): ResolvedDocumentTheme {
-  const family = fontFamily(row.fontFamily, "dm-sans");
+  const family = fontFamily(row.fontFamily);
   return {
     id: row.id,
     key: row.key,
     name: row.name,
     isDefault: row.isDefault === true,
-    surfaceColor: hexColor(row.surfaceColor, "#ffffff"),
-    textColor: hexColor(row.textColor, "#111827"),
-    accentColor: hexColor(row.accentColor, "#2563eb"),
+    surfaceColor: hexColor(row.surfaceColor),
+    textColor: hexColor(row.textColor),
+    accentColor: hexColor(row.accentColor),
     fontFamily: family,
-    typography: typography(row.typography, family),
+    typography: typography(row.typography),
     updatedAt: row.updatedAt,
   };
 }

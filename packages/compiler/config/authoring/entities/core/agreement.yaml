@@ -489,6 +489,9 @@ interfaces:
                   fields:
                     - sequenceNumber
                     - externalCode
+            - id: document
+              label: { en: Document, nl: Document }
+              relationship: { name: document, view: record }
             - id: childAgreements
               label:
                 en: Child agreements

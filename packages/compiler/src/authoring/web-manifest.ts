@@ -798,12 +798,24 @@ function projectEntity(
 
   const tabs: WebRecordTab[] = (view?.detail?.groups.items ?? []).flatMap((tab) => {
     const relationshipId = tab.relationship?.name;
-    if (relationshipId && !relationships[relationshipId]) return [];
+    if (relationshipId && !relationships[relationshipId]) {
+      if (tab.relationship?.view) throw new Error(`${entityName}.${relationshipId}: selected target view requires a projected relationship and target.`);
+      return [];
+    }
+    const requestedView = tab.relationship?.view;
+    if (requestedView) {
+      const relation = relationships[relationshipId!];
+      const target = relation && all.get(relation.targetEntityId);
+      if (relation?.kind !== "belongsTo" || requestedView !== "record" || !target?.view?.detail || !target.operations.get) {
+        throw new Error(`${entityName}.${relationshipId}: target view ${requestedView} must be an available single-reference record view.`);
+      }
+    }
     return [{
       id: tab.id,
       label: localized(tab.label ?? tab.title, tab.id),
       groups: projectTabGroups(tab),
       ...(relationshipId ? { relationshipId } : {}),
+      ...(requestedView ? { targetView: requestedView as "record" } : {}),
     }];
   });
   const authoredContext = contract.interfaces?.web?.recordContext;

@@ -1,0 +1,278 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: DocumentTheme
+title: Document theme
+description: Tenant-owned document appearance. Templates select one theme; live views resolve current token values.
+  Generated PDF artifact bytes stay fixed.
+language: en
+labels: { en: Document theme, nl: Documentthema }
+pluralLabels: { en: Document themes, nl: Documentthema's }
+domains: [documents]
+authorization:
+  roles:
+    read: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite, CaseFile.All.Read, CaseFile.All.ReadWrite]
+    create: [Organization.All.ReadWrite]
+    update: [Organization.All.ReadWrite]
+    delete: [Organization.All.ReadWrite]
+displayTemplate: "{{name}}"
+filterField: name
+indexes:
+  - { name: document_themes_tenant_key_uidx, fields: [tenantId, key], unique: true }
+  - { name: document_themes_tenant_default_uidx, fields: [tenantId], unique: true, where: { field: isDefault, equals: true } }
+fields:
+  - key: key
+    label: { en: Key, nl: Sleutel }
+    osfType: string
+    required: true
+    deriveOnCreate: { from: name, transform: slug, onConflict: suffix }
+    validation: { pattern: "^[a-z][a-z0-9.-]*$", maxLength: 100 }
+    persisted: { column: key, storageClass: core }
+  - key: name
+    osfType: string
+    required: true
+    label: { en: Name, nl: Naam }
+    validation: { minLength: 1, maxLength: 200 }
+    persisted: { column: name, storageClass: core }
+  - key: isDefault
+    osfType: boolean
+    required: true
+    defaultValue: false
+    label: { en: Default for new templates, nl: Standaard voor nieuwe templates }
+    description:
+      en: At most one default per tenant. New templates without a theme receive this one.
+      nl: Hoogstens één standaard per tenant. Nieuwe templates zonder thema krijgen deze.
+    persisted: { column: is_default, storageClass: core }
+  - key: surfaceColor
+    osfType: string
+    required: true
+    defaultValue: "#ffffff"
+    label: { en: Surface, nl: Oppervlak }
+    validation: { pattern: "^#[0-9A-Fa-f]{6}$", maxLength: 7 }
+    persisted: { column: surface_color, storageClass: core }
+  - key: textColor
+    osfType: string
+    required: true
+    defaultValue: "#111827"
+    label: { en: Text, nl: Tekst }
+    validation: { pattern: "^#[0-9A-Fa-f]{6}$", maxLength: 7 }
+    persisted: { column: text_color, storageClass: core }
+  - key: accentColor
+    osfType: string
+    required: true
+    defaultValue: "#2563eb"
+    label: { en: Accent, nl: Accent }
+    validation: { pattern: "^#[0-9A-Fa-f]{6}$", maxLength: 7 }
+    persisted: { column: accent_color, storageClass: core }
+  - key: fontFamily
+    osfType: string
+    required: true
+    defaultValue: source-sans
+    label: { en: Font, nl: Lettertype }
+    description:
+      en: Closed token a renderer maps to a file it actually has. This catalog does not ship font binaries.
+      nl: Gesloten token dat een renderer koppelt aan een bestand dat het werkelijk heeft. Deze catalogus levert geen fontbestanden.
+    persisted: { column: font_family, storageClass: core }
+    options:
+      type: static
+      items: &documentFonts
+        - { value: source-sans, label: { en: Source Sans, nl: Source Sans } }
+        - { value: source-serif, label: { en: Source Serif, nl: Source Serif } }
+        - { value: inter, label: { en: Inter, nl: Inter } }
+        - { value: noto-sans, label: { en: Noto Sans, nl: Noto Sans } }
+        - { value: noto-serif, label: { en: Noto Serif, nl: Noto Serif } }
+        - { value: liberation-sans, label: { en: Liberation Sans, nl: Liberation Sans } }
+        - { value: liberation-serif, label: { en: Liberation Serif, nl: Liberation Serif } }
+        - { value: georgia, label: { en: Georgia, nl: Georgia } }
+        - { value: times, label: { en: Times, nl: Times } }
+        - { value: arial, label: { en: Arial, nl: Arial } }
+        - { value: system, label: { en: System, nl: Systeem } }
+  - key: typography
+    osfType: object
+    required: true
+    label: { en: Text styles, nl: Tekststijlen }
+    persisted: { column: typography, storageClass: core }
+    defaultValue:
+      body: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: text }
+      heading1: { fontSize: 22, lineHeight: 1.25, fontWeight: 700, colorRole: text }
+      heading2: { fontSize: 16, lineHeight: 1.3, fontWeight: 600, colorRole: text }
+      heading3: { fontSize: 13, lineHeight: 1.35, fontWeight: 600, colorRole: text }
+      quote: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: text, spaceBefore: 8, spaceAfter: 8 }
+      list: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: text, spaceBefore: 4, spaceAfter: 4 }
+    children:
+      - { key: body, osfType: object, required: true, label: { en: Body, nl: Broodtekst }, children: &textStyle
+          [
+            { key: fontFamily, osfType: string, label: { en: Font, nl: Lettertype }, options: { type: static, items: *documentFonts } },
+            { key: fontSize, osfType: number, required: true, label: { en: Size (pt), nl: Grootte (pt) }, validation: { min: 6, max: 72 } },
+            { key: lineHeight, osfType: number, required: true, label: { en: Line height, nl: Regelhoogte }, validation: { min: 1, max: 3 } },
+            { key: fontWeight, osfType: integer, required: true, label: { en: Weight, nl: Gewicht }, validation: { min: 100, max: 900 } },
+            {
+              key: colorRole, osfType: string, required: true, label: { en: Color, nl: Kleur }, defaultValue: text,
+              options: { type: static, items: [
+                { value: surface, label: { en: Surface, nl: Oppervlak } },
+                { value: text, label: { en: Text, nl: Tekst } },
+                { value: accent, label: { en: Accent, nl: Accent } }
+              ] }
+            },
+            { key: spaceBefore, osfType: number, label: { en: Space before (pt), nl: Ruimte ervoor (pt) }, validation: { min: 0, max: 96 } },
+            { key: spaceAfter, osfType: number, label: { en: Space after (pt), nl: Ruimte erna (pt) }, validation: { min: 0, max: 96 } }
+          ] }
+      - { key: heading1, osfType: object, required: true, label: { en: Heading 1, nl: Kop 1 }, children: *textStyle }
+      - { key: heading2, osfType: object, required: true, label: { en: Heading 2, nl: Kop 2 }, children: *textStyle }
+      - { key: heading3, osfType: object, required: true, label: { en: Heading 3, nl: Kop 3 }, children: *textStyle }
+      - { key: quote, osfType: object, required: true, label: { en: Quote, nl: Citaat }, children: *textStyle }
+      - { key: list, osfType: object, required: true, label: { en: List, nl: Lijst }, children: *textStyle }
+operations:
+  list:
+    name: List document theme
+    description: Read accessible document theme records.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read document theme
+    description: Read one accessible document theme record.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: Create document theme
+    description: Create a document theme record.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: Update document theme
+    description: Update a document theme. Live document views follow the new token values.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  delete:
+    name: { en: Delete, nl: Verwijderen }
+    description: Delete a document theme record.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  resolve:
+    name: { en: Resolve document theme, nl: Documentthema bepalen }
+    description:
+      en: Resolve live theme tokens for a template, published template version, or document. Missing stored ids fall back to the tenant default without writing it.
+      nl: Bepaal actuele thematokens voor een template, gepubliceerde templateversie of document. Ontbrekende opgeslagen id's vallen terug op het tenantstandaardthema zonder dat te schrijven.
+    implementation: { type: plugin, plugin: documents, handler: resolveDocumentTheme }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        oneOf:
+          - required: [documentId]
+            properties:
+              documentId: { x-osf-i18n: { title: { en: Document, nl: Document } } }
+          - required: [templateId]
+            properties:
+              templateId: { x-osf-i18n: { title: { en: Template, nl: Template } } }
+          - required: [templateVersionId]
+            properties:
+              templateVersionId: { x-osf-i18n: { title: { en: Template version, nl: Templateversie } } }
+        properties:
+          documentId:
+            type: string
+            format: uuid
+            x-osf-reference: { entity: Document }
+            x-osf-i18n: { title: { en: Document, nl: Document } }
+          templateId:
+            type: string
+            format: uuid
+            x-osf-reference: { entity: Template }
+            x-osf-i18n: { title: { en: Template, nl: Template } }
+          templateVersionId:
+            type: string
+            format: uuid
+            x-osf-reference: { entity: TemplateVersion }
+            x-osf-i18n: { title: { en: Template version, nl: Templateversie } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [theme, resolution]
+        properties:
+          theme:
+            type: ["object", "null"]
+            x-osf-i18n: { title: { en: Theme, nl: Thema } }
+          resolution:
+            type: object
+            additionalProperties: false
+            required: [kind, sourceId]
+            x-osf-i18n: { title: { en: Resolution, nl: Bepaling } }
+            properties:
+              kind:
+                type: string
+                enum: [template-version, template, document, tenant-default, none]
+                x-osf-i18n:
+                  title: { en: Kind, nl: Soort }
+                  enum:
+                    {
+                      template-version: { en: Published template version, nl: Gepubliceerde templateversie },
+                      template: { en: Template, nl: Template },
+                      document: { en: Document, nl: Document },
+                      tenant-default: { en: Tenant default, nl: Tenantstandaard },
+                      none: { en: None, nl: Geen }
+                    }
+              sourceId: { type: string, x-osf-i18n: { title: { en: Source, nl: Bron } } }
+              themeId: { type: ["string", "null"], format: uuid, x-osf-i18n: { title: { en: Theme, nl: Thema } } }
+    errors:
+      - { status: 400, code: VALIDATION, description: The resolve input is invalid. }
+      - { status: 403, code: FORBIDDEN, description: The source record is not accessible. }
+      - { status: 404, code: NOT_FOUND, description: The source record does not exist. }
+    auth: { mode: session, roles: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite, CaseFile.All.Read, CaseFile.All.ReadWrite] }
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest:
+    operations:
+      resolve: { method: POST, path: /api/document-themes/resolve }
+  graphql: {}
+  mcp: { tools: generic }
+  web:
+    views:
+      collection:
+        route: /document-themes
+        title: { en: Document themes, nl: Documentthema's }
+        columns: [{ key: name, sortable: true }, { key: isDefault, sortable: true }, { key: fontFamily }]
+        defaultSort: { key: name, direction: asc }
+      record:
+        routes: { read: "/document-themes/:id", create: /document-themes/new }
+        title: "{{name}}"
+        subtitle: "{{key}}"
+        badges: [isDefault]
+        actions: [update, delete]
+        layout:
+          tabs:
+            - id: overview
+              label: { en: Overview, nl: Overzicht }
+              groups:
+                - { title: { en: Theme, nl: Thema }, fields: [name, key, isDefault, fontFamily] }
+                - { title: { en: Colors, nl: Kleuren }, fields: [surfaceColor, textColor, accentColor] }
+            - id: typography
+              label: { en: Text styles, nl: Tekststijlen }
+              groups: [{ title: { en: Text styles, nl: Tekststijlen }, fields: [typography] }]
+        modes:
+          create:
+            title: { en: Create, nl: Toevoegen }
+            groups:
+              - { title: { en: Theme, nl: Thema }, fields: [name, isDefault, fontFamily] }
+              - { title: { en: Colors, nl: Kleuren }, fields: [surfaceColor, textColor, accentColor] }
+              - { title: { en: Text styles, nl: Tekststijlen }, fields: [typography] }
+          update:
+            title: { en: Edit, nl: Bewerken }
+            groups:
+              - { title: { en: Theme, nl: Thema }, fields: [name, isDefault, fontFamily] }
+              - { title: { en: Colors, nl: Kleuren }, fields: [surfaceColor, textColor, accentColor] }
+              - { title: { en: Text styles, nl: Tekststijlen }, fields: [typography] }

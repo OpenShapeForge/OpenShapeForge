@@ -1291,6 +1291,7 @@
       "required": ["name"],
       "properties": {
         "name": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "relationship" },
+        "view": { "type": "string", "enum": ["record"] },
         "overrides": {
           "type": "object",
           "additionalProperties": false,

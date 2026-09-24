@@ -290,6 +290,26 @@ describe("web manifest projection", () => {
       pagination: { kind: "cursor", defaultLimit: 10, maxLimit: 200 },
     });
   });
+  test("a single relationship selects its target record view without a route", () => {
+    const sourceView = coreView();
+    sourceView.detail!.groups.items[1]!.relationship = {
+      render: { component: "RelationshipPanel" }, name: "contactDetails", view: "record",
+    };
+    const source = entity("Source", "source", [field("displayName"), field("contactDetails", { osfType: "Target" })], sourceView, [
+      { key: "contactDetails", fieldKey: "contactDetails", kind: "belongsTo", target: "Target", foreignKey: "contact_details_id", ownership: "reference" },
+    ]);
+    source.contract.storage.columns.find((column) => column.field === "contactDetails")!.column = "contact_details_id";
+    const target = entity("Target", "target", [field("displayName")], coreView());
+    const manifest = buildWebManifest([source, target]);
+    expect(manifest.entities.Source?.views.record?.layout.tabs[1]).toMatchObject({ relationshipId: "contactDetails", targetView: "record" });
+    expect(buildWebManifest([source]).entities.Source?.views.record?.layout.tabs).toHaveLength(1);
+    expect(() => buildWebManifest([source, target])).not.toThrow();
+    sourceView.detail!.groups.items[1]!.relationship.view = "missing";
+    expect(() => buildWebManifest([source, target])).toThrow(/Source.contactDetails: target view missing/);
+    sourceView.detail!.groups.items[1]!.relationship.view = "record";
+    source.contract.model.relationships[0]!.kind = "hasMany";
+    expect(() => buildWebManifest([source, target])).toThrow(/single-reference record view/);
+  });
   test("a system-written reference key from the corpus is never create-writable and its collection offers no create", () => {
     // Comment.authorId is authored readOnly (attribution, not an input); the
     // derived Relation.comments collection therefore cannot pre-fill it.

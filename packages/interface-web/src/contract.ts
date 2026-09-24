@@ -244,6 +244,8 @@ export type WebRecordTab = {
   label: LocalizedText;
   groups: WebFieldGroup[];
   relationshipId?: string;
+  /** Named view of the single relationship target selected by this placement. */
+  targetView?: "record";
 };
 
 export type WebRecordView = {

@@ -300,6 +300,9 @@ interfaces:
                   fields: [ description ]
                 - title: { en: Source, nl: Herkomst }
                   fields: [ externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration ]
+            - id: document
+              label: { en: Document, nl: Document }
+              relationship: { name: document, view: record }
         modes:
           create:
             title: { en: Create quote, nl: Offerte aanmaken }

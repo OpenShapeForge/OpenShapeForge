@@ -602,6 +602,13 @@ describe("generated MCP server", () => {
         expect(await expectedDeleteOutcome(table, row.id, tenantA)).toEqual(outcome);
         return;
       }
+      if (table.source?.authoringEntityName === "DocumentTheme" && row.isDefault === true) {
+        expect(toolError(deleted.body)).toMatch(/VALIDATION: choose another default/);
+        const still = await call(tenantA, "get", { id: row.id });
+        expect(toolError(still.body)).toBeUndefined();
+        expect(toolPayload(still.body).id).toBe(row.id);
+        return;
+      }
       expectCanonicalToolOutput(table, "delete", deleted.body);
       expect(toolError(deleted.body)).toBeUndefined();
       expect(toolPayload(deleted.body)).toEqual({ deleted: true });

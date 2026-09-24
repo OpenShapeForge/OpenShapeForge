@@ -3,6 +3,7 @@ import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../connection.js";
 import { applyArtifactBinding } from "./core-invariants-artifacts.js";
 import { applyDocumentAuthority, applyDocumentCommands } from "./core-invariants-documents.js";
+import { applyDocumentThemeInvariants } from "./document-themes.js";
 
 /**
  * The core's own database invariants on manifest tables: functions,
@@ -63,6 +64,7 @@ export async function applyCoreInvariants(db: OpenShapeForgeDatabase): Promise<v
   await applyDocumentAuthority(db);
   await applyDocumentCommands(db);
   await applyArtifactBinding(db);
+  await applyDocumentThemeInvariants(db);
 }
 
 

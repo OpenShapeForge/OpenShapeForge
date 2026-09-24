@@ -302,7 +302,7 @@ describe("web manifest projection", () => {
     const target = entity("Target", "target", [field("displayName")], coreView());
     const manifest = buildWebManifest([source, target]);
     expect(manifest.entities.Source?.views.record?.layout.tabs[1]).toMatchObject({ relationshipId: "contactDetails", targetView: "record" });
-    expect(() => buildWebManifest([source])).toThrow(/Source.contactDetails: selected target view requires a projected relationship and target/);
+    expect(buildWebManifest([source]).entities.Source?.views.record?.layout.tabs).toHaveLength(1);
     expect(() => buildWebManifest([source, target])).not.toThrow();
     sourceView.detail!.groups.items[1]!.relationship.view = "missing";
     expect(() => buildWebManifest([source, target])).toThrow(/Source.contactDetails: target view missing/);

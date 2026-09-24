@@ -798,10 +798,7 @@ function projectEntity(
 
   const tabs: WebRecordTab[] = (view?.detail?.groups.items ?? []).flatMap((tab) => {
     const relationshipId = tab.relationship?.name;
-    if (relationshipId && !relationships[relationshipId]) {
-      if (tab.relationship?.view) throw new Error(`${entityName}.${relationshipId}: selected target view requires a projected relationship and target.`);
-      return [];
-    }
+    if (relationshipId && !relationships[relationshipId]) return [];
     const requestedView = tab.relationship?.view;
     if (requestedView) {
       const relation = relationships[relationshipId!];

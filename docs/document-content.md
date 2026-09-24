@@ -22,6 +22,32 @@ Document (head = draft)
 Document ──publish──▶ DocumentVersion (generic publishedSnapshot; an uploaded file is the other kind of version)
 ```
 
+## Document theme
+
+A tenant owns many `DocumentTheme` records and exactly one default when it has themes
+(`entities/core/document-theme.yaml`). A `Template` may name one theme;
+variants, documents and blocks do not. New templates without a choice receive
+the tenant default at insert. Published template snapshots freeze that theme
+**id** with the head row; they do not freeze token values. Live preview and
+`DocumentTheme.resolve` read the current theme row. Bytes already stored on a
+`DocumentVersion` artifact stay those bytes.
+The first theme becomes the default. `DocumentTheme.setDefault` changes that
+choice atomically for future templates; the current default cannot be deleted
+until another theme has been selected.
+
+Resolution, for a template, published version or document, uses the stored
+theme id (draft template column, or the id on the frozen template-version
+head). An older record with no theme id stays unthemed. A stored id whose row
+is missing is an error; live reads never silently adopt a different default.
+
+Semantic tokens are surface/text/accent colors, a closed font-family token
+(hosts map the token to a file they actually have; this repository does not
+ship font binaries), and body / H1–H3 / quote / list styles. Logo and icon
+are not theme fields: the reusable file field is one file per row, bound to
+the fixed companions `fileName`, `mimeType` and `checksum`, and `Attachment`
+belongs to a support issue. Two marks would need a second pointer model, so
+they stay out. There is no free CSS and no per-block override.
+
 - **`Document`** (`entities/core/document.yaml`) declares
   `versioning: { strategy: publishedSnapshot, versionEntity: DocumentVersion, versionsField: versions }`
   exactly like `template.yaml`; the compiler supplies `lifecycleStatus`,
@@ -194,7 +220,8 @@ field.
 | `DocumentVariant.updateBlock` `{ id, expectedVersion, childId, values }` | Owner-scoped edit of one unlocked block's caller-writable fields. |
 | `DocumentVariant.moveBlock` `{ id, expectedVersion, childId, beforeId }` | Reorder an unlocked block. |
 | `DocumentVariant.removeBlock` `{ id, expectedVersion, childId }` | Owner-scoped removal of an unlocked block; positions are compacted. |
-| `Document.materialize` `{ id, channel, locale }` | Read-only; needs the document's read roles only (the pinned version is read under that authority; an included template still needs its own read roles). Resolves the editable head for one channel and locale (served by language, see above) through the same content engine as `TemplateVersion.materialize`: the root is the pinned version's identity and parameter definitions with the document's **live** variants and blocks, the document's stored `parameters` are the values, and any template version a `TemplateBlock` includes resolves from its frozen snapshot. Returns the same `MaterializedTemplateContent` shape; `compositionHash` covers the live content, so an unchanged head hashes the same and an edit changes it. `INVALID_STATE` without a linked template version. REST `POST /api/document-content/:id/materialize`. |
+| `Document.materialize` `{ id, channel, locale }` | Read-only; needs the document's read roles only (the pinned version is read under that authority; an included template still needs its own read roles). Resolves the editable head for one channel and locale (served by language, see above) through the same content engine as `TemplateVersion.materialize`: the root is the pinned version's identity and parameter definitions with the document's **live** variants and blocks, the document's stored `parameters` are the values, and any template version a `TemplateBlock` includes resolves from its frozen snapshot. Returns the same `MaterializedTemplateContent` shape; `compositionHash` covers the live content, so an unchanged head hashes the same and an edit changes it. Theme tokens are **not** part of that snapshot; resolve them with `DocumentTheme.resolve`. `INVALID_STATE` without a linked template version. REST `POST /api/document-content/:id/materialize`. |
+| `DocumentTheme.resolve` `{ documentId }` / `{ templateId }` / `{ templateVersionId }` | Read-only live theme tokens for one source. REST `POST /api/document-themes/resolve`. |
 | `Document.publish` `{ id, expectedVersion }` | Generic snapshot publish (`packages/versioning`): freezes the document row with its variants and blocks into a new `DocumentVersion`, moves `latestVersion(Id)`/`publishedVersion(Id)`, sets `lifecycleStatus = published`. |
 | `Template.publish` (existing) | Unchanged input; also runs the follow rule. |
 | `TemplateVersion.createDocument` (existing) | Still materializes a frozen template straight into a `DocumentVersion` artifact; plugins that render a frozen template to a file build on it. |

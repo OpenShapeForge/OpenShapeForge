@@ -89,7 +89,23 @@ function pseudoUuid() {
   );
 }
 
-function sampleValue(column, marker) {
+function checkFor(table, column) {
+  return ((table && table.constraints) || []).find(
+    (constraint) =>
+      constraint.kind === "check" &&
+      typeof constraint.expression === "string" &&
+      constraint.expression.includes(`"${column.name}"`),
+  );
+}
+
+function sampleValue(column, marker, table) {
+  const check = checkFor(table, column);
+  if (check) {
+    const options = check.expression.match(/IN \('([^']+)'/);
+    if (options) return options[1];
+    const pattern = check.expression.match(/~ '([^']+)'/);
+    if (pattern && pattern[1] === "^#[0-9A-Fa-f]{6}$") return "#111827";
+  }
   switch (column.type) {
     case "text":
       return `perf-${marker}-${fieldName(column)}`;
@@ -99,7 +115,7 @@ function sampleValue(column, marker) {
     case "numeric":
       return 7.5;
     case "boolean":
-      return true;
+      return column.name !== "is_default";
     case "uuid":
       return pseudoUuid();
     case "date":
@@ -107,7 +123,16 @@ function sampleValue(column, marker) {
     case "timestamptz":
       return "2026-01-02T03:04:05.000Z";
     case "jsonb":
-      return {};
+      return column.name === "typography"
+        ? {
+            body: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: "text" },
+            heading1: { fontSize: 22, lineHeight: 1.25, fontWeight: 700, colorRole: "text" },
+            heading2: { fontSize: 16, lineHeight: 1.3, fontWeight: 700, colorRole: "text" },
+            heading3: { fontSize: 13, lineHeight: 1.35, fontWeight: 700, colorRole: "text" },
+            quote: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: "text" },
+            list: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: "text" },
+          }
+        : {};
     default:
       return `perf-${marker}`;
   }
@@ -238,18 +263,19 @@ function createRow(table, marker, depth) {
       continue;
     }
     if (column.required) {
-      input[fieldName(column)] = sampleValue(column, marker);
+      input[fieldName(column)] = sampleValue(column, marker, table);
     }
   }
 
   const data = gql(
     `mutation($input: Create${graphql.typeName}Input!) {
-       ${graphql.createMutationName}(input: $input) { id }
+       ${graphql.createMutationName}(input: $input) { data { id } error { code } }
      }`,
     { input },
     { entity: slug, op: "create" },
   );
-  const id = data && data[graphql.createMutationName] && data[graphql.createMutationName].id;
+  const created = data && data[graphql.createMutationName];
+  const id = created && !created.error && created.data && created.data.id;
   if (!id) return null;
   return { id, cleanup: dependencies };
 }
@@ -264,13 +290,13 @@ export function lifecycle() {
   if (!created) return;
 
   gql(
-    `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
+    `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { data { id } error { code } } }`,
     { id: created.id },
     { entity: slug, op: "get" },
   );
 
   gql(
-    `query { ${graphql.listQueryName}(first: 25) { totalCount edges { node { id } } } }`,
+    `query { ${graphql.listQueryName}(first: 25) { data { items { data { id } } } error { code } } }`,
     undefined,
     { entity: slug, op: "list" },
   );
@@ -279,7 +305,7 @@ export function lifecycle() {
   if (updateColumn) {
     gql(
       `mutation($input: Update${graphql.typeName}Input!) {
-         ${graphql.updateMutationName}(input: $input) { id }
+         ${graphql.updateMutationName}(input: $input) { data { id } error { code } }
        }`,
       { input: { id: created.id, [fieldName(updateColumn)]: `perf-upd-${marker}` } },
       { entity: slug, op: "update" },
@@ -287,15 +313,19 @@ export function lifecycle() {
   }
 
   gql(
-    `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
-    { id: created.id },
+    `mutation($input: Delete${graphql.typeName}Input!) {
+       ${graphql.deleteMutationName}(input: $input) { data { deleted } error { code } }
+     }`,
+    { input: { id: created.id } },
     { entity: slug, op: "delete" },
   );
   for (const dependency of created.cleanup.reverse()) {
     const dependencyGraphql = dependency.table.source.graphql;
     gql(
-      `mutation($id: ID!) { ${dependencyGraphql.deleteMutationName}(id: $id) }`,
-      { id: dependency.id },
+      `mutation($input: Delete${dependencyGraphql.typeName}Input!) {
+         ${dependencyGraphql.deleteMutationName}(input: $input) { data { deleted } error { code } }
+       }`,
+      { input: { id: dependency.id } },
       { entity: dependency.table.source.authoringEntitySlug, op: "delete" },
     );
   }

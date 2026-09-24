@@ -186,6 +186,8 @@ describe("Document commands", () => {
       "renderSnapshot",
       "linkTemplate",
       "materializeDocument",
+      "resolveDocumentTheme",
+      "setDefaultDocumentTheme",
     ]);
   });
 

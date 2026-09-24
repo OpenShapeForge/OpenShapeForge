@@ -40,6 +40,19 @@ fields:
     osfType: string
     label: { en: Description, nl: Omschrijving }
     persisted: { column: description, storageClass: core }
+  - key: documentThemeId
+    label: { en: Document theme, nl: Documentthema }
+    description:
+      en: Theme every variant and document from this template inherits. A new template without a choice receives the tenant default. Variants do not select a theme.
+      nl: Thema dat iedere variant en ieder document van deze template erft. Een nieuwe template zonder keuze krijgt het tenantstandaardthema. Varianten kiezen geen thema.
+    required: false
+    persisted: { column: document_theme_id, storageClass: core }
+    osfType: DocumentTheme
+    relationship:
+      ownership: reference
+      inverse:
+        key: templates
+        label: { en: Templates, nl: Templates }
   - key: parameters
     osfType: fieldDefinition
     cardinality: collection
@@ -106,16 +119,16 @@ interfaces:
               groups: [{ title: { en: Local variables, nl: Lokale variabelen }, fields: [parameters] }]
             - id: details
               label: { en: Details, nl: Details }
-              groups: [{ title: { en: Template, nl: Template }, fields: [name, description, lifecycleStatus, publishedVersion] }]
+              groups: [{ title: { en: Template, nl: Template }, fields: [name, description, documentThemeId, lifecycleStatus, publishedVersion] }]
             - id: versions
               label: { en: Version history, nl: Versiehistorie }
               relationship: versions
         modes:
           create:
             title: { en: Create, nl: Toevoegen }
-            groups: [{ title: { en: Template, nl: Template }, fields: [name, description] }]
+            groups: [{ title: { en: Template, nl: Template }, fields: [name, description, documentThemeId] }]
           update:
             title: { en: Edit, nl: Bewerken }
             groups:
-              - { title: { en: Template, nl: Template }, fields: [name, description] }
+              - { title: { en: Template, nl: Template }, fields: [name, description, documentThemeId] }
               - { title: { en: Local variables, nl: Lokale variabelen }, fields: [parameters] }

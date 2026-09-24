@@ -174,6 +174,8 @@ type FieldSchema = {
   enum?: unknown[];
   maxLength?: number;
   pattern?: string;
+  minimum?: number;
+  maximum?: number;
   required?: string[];
   properties?: Record<string, FieldSchema>;
   "x-osf-reference"?: { entity: string; valueField?: string };
@@ -198,19 +200,38 @@ function createFieldSchema(table: GeneratedTable, field: string): FieldSchema | 
  */
 export function schemaSample(
   column: Column,
-  schema: Pick<FieldSchema, "enum" | "maxLength" | "pattern"> | undefined,
+  schema: FieldSchema | undefined,
   marker: string,
 ): unknown {
   if (Array.isArray(schema?.enum) && schema.enum.length > 0) return schema.enum[0];
+  if (schema?.type === "object" && schema.properties) {
+    return Object.fromEntries(
+      Object.entries(schema.properties).map(([key, property]) => [
+        key,
+        schemaSample(column, property, `${marker}:${key}`),
+      ]),
+    );
+  }
+  if (schema?.type === "integer" || schema?.type === "number") {
+    const min = typeof schema.minimum === "number" ? schema.minimum : 0;
+    const max = typeof schema.maximum === "number" ? schema.maximum : (schema.type === "integer" ? 400 : 11);
+    const preferred = schema.type === "integer" ? 400 : 1.5;
+    const value = Math.min(max, Math.max(min, preferred));
+    return schema.type === "integer" ? Math.round(value) : value;
+  }
+  if (schema?.type === "boolean") return true;
   const rawSample = sampleValue(column, marker);
   if (typeof rawSample !== "string") return rawSample;
   let sample: string = rawSample;
   if (schema?.pattern && !new RegExp(schema.pattern).test(sample)) {
     // An identifier-shaped candidate first; then the marker's digest, which
-    // is what a checksum column (a content hash) is authored to hold.
+    // is what a checksum column (a content hash) is authored to hold; then a
+    // six-digit hex color derived from that digest.
+    const digest = createHash("sha256").update(`${marker}:${fieldName(column)}`).digest("hex");
     const candidates = [
       `e2e${marker.replace(/[^a-zA-Z0-9]/g, "")}${fieldName(column)}`,
-      createHash("sha256").update(`${marker}:${fieldName(column)}`).digest("hex"),
+      digest,
+      `#${digest.slice(0, 6)}`,
     ];
     const fitting = candidates.find((candidate) => new RegExp(schema.pattern!).test(candidate));
     if (fitting === undefined) {

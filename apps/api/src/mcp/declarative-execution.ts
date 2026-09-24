@@ -7,7 +7,7 @@
  * which references a PROVIDER row (transport, base URL, auth metadata,
  * egress allow-list); the tenant's values for the provider live on a
  * CONNECTION row. Which entities play these parts is configuration
- * (`mcp.derivedTools.execution`); WHAT their fields mean is the canonical
+ * (plugin `executionCompatibility`); WHAT their fields mean is the canonical
  * vocabulary this module interprets:
  *
  *   provider row:   transport ("rest"), baseUrlTemplate, optional

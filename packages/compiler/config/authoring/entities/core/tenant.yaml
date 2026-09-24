@@ -20,12 +20,11 @@ authorization:
     read:
       - Organization.All.Read
       - Organization.All.ReadWrite
-    update:
-      - Organization.All.ReadWrite
 fields:
   - key: slug
     osfType: string
     required: true
+    immutable: true
     label:
       en: Slug
       nl: Slug
@@ -42,6 +41,7 @@ fields:
   - key: name
     osfType: string
     required: true
+    immutable: true
     label:
       en: Name
       nl: Naam
@@ -56,6 +56,7 @@ fields:
       storageClass: core
   - key: status
     required: true
+    immutable: true
     label:
       en: Status
       nl: Status
@@ -76,6 +77,7 @@ fields:
   - key: tenantKind
     osfType: string
     required: true
+    immutable: true
     label:
       en: Tenant kind
       nl: Tenantsoort
@@ -91,6 +93,7 @@ fields:
       storageClass: core
   - key: description
     required: false
+    immutable: true
     label:
       en: Description
       nl: Omschrijving
@@ -106,6 +109,7 @@ fields:
   - key: avatarStorageLocation
     osfType: string
     required: false
+    immutable: true
     label:
       en: Avatar
       nl: Avatar
@@ -120,6 +124,7 @@ fields:
   - key: externalCode
     osfType: string
     required: false
+    immutable: true
     label:
       en: External code
       nl: Externe code
@@ -165,22 +170,6 @@ operations:
         mode: natural
     confirmation:
       mode: none
-  update:
-    name:
-      en: Edit
-      nl: Bewerken
-    description: Update Tenant records.
-    implementation:
-      type: entity
-      action: update
-    effects:
-      data: write
-      external: none
-    reliability:
-      idempotency:
-        mode: none
-    confirmation:
-      mode: none
 interfaces:
   graphql: {}
   web:
@@ -211,8 +200,6 @@ interfaces:
         subtitle: "{{slug}}"
         badges:
           - status
-        actions:
-          - update
         layout:
           tabs:
             - id: overview
@@ -234,21 +221,6 @@ interfaces:
                 en: Settings
                 nl: Instellingen
               relationship: tenantSettings
-        modes:
-          update:
-            title:
-              en: Edit tenant
-              nl: Tenant bewerken
-            groups:
-              - title:
-                  en: Tenant details
-                  nl: Tenantgegevens
-                fields:
-                  - slug
-                  - name
-                  - status
-                  - description
-                  - avatarStorageLocation
     fields:
       status:
         render:

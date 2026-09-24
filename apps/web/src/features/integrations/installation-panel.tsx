@@ -30,6 +30,7 @@ import {
   verifyConnector,
 } from "@/actions/integrations";
 import { ConnectorFieldControl, localized } from "./connector-field-control";
+import { tryFieldValueType } from "@/lib/field-contract/field-v2";
 import { CONTRACT_STATE_TONE } from "./connector-status";
 import { SECRET_SENTINEL, type Connector, type ConnectorInstallation } from "./types";
 
@@ -56,6 +57,10 @@ const COPY = {
   repairBlocked: {
     en: "Supply the missing required fields before enabling this installation.",
     nl: "Vul de ontbrekende verplichte velden in voordat je deze installatie inschakelt.",
+  },
+  contractBlocked: {
+    en: "This connector contains an unsupported field contract. Saving and enabling are blocked until the contract is corrected.",
+    nl: "Deze connector bevat een niet-ondersteund veldcontract. Opslaan en inschakelen zijn geblokkeerd totdat het contract is hersteld.",
   },
   connect: { en: "Connect", nl: "Koppelen" },
   reconnect: { en: "Reconnect", nl: "Opnieuw koppelen" },
@@ -98,6 +103,9 @@ export function InstallationPanel({
   const health = installation.contract;
   const missing = new Set(health.missingRequiredFields);
   const blockedByRepair = health.state === "NEEDS_REPAIR";
+  const blockedByUnsupportedField = connector.configFields.some(
+    (field) => !tryFieldValueType(field).ok,
+  );
 
   function update(key: string, value: unknown) {
     if (secretKeys.has(key)) {
@@ -108,6 +116,7 @@ export function InstallationPanel({
   }
 
   function onSave() {
+    if (blockedByUnsupportedField) return;
     setFeedback(null);
     startTransition(async () => {
       // Non-secret fields only. The sentinel would otherwise be written back as
@@ -276,6 +285,9 @@ export function InstallationPanel({
         {blockedByRepair ? (
           <p className="text-sm text-destructive">{say("repairBlocked")}</p>
         ) : null}
+        {blockedByUnsupportedField ? (
+          <p className="text-sm text-destructive" role="alert">{say("contractBlocked")}</p>
+        ) : null}
 
         {connector.usesOAuth ? (
           <p className="text-sm text-muted-foreground">
@@ -284,7 +296,7 @@ export function InstallationPanel({
         ) : null}
 
         <div className="flex flex-wrap gap-2">
-          <Button onClick={onSave} disabled={pending}>
+          <Button onClick={onSave} disabled={pending || blockedByUnsupportedField}>
             {pending ? say("saving") : say("save")}
           </Button>
 
@@ -315,7 +327,7 @@ export function InstallationPanel({
               onClick={onToggleEnabled}
               // NEEDS_REPAIR blocks enabling but never disabling: switching a
               // broken installation off must always be available.
-              disabled={pending || (blockedByRepair && !installation.enabled)}
+              disabled={pending || ((blockedByRepair || blockedByUnsupportedField) && !installation.enabled)}
             >
               {installation.enabled ? say("disable") : say("enable")}
             </Button>

@@ -9,7 +9,12 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { ARTIFACT_UPLOAD_APP_URI } from "./artifact-upload.js";
 import { ORGANIZATION_PROFILE_RESOURCE } from "./organization-profile-tools.js";
-import { describeOnboarding, onboardingEnvironment, withOnboarding } from "./onboarding.js";
+import {
+  describeOnboarding,
+  onboardingEnvironment,
+  onboardingToolProjection,
+  withOnboarding,
+} from "./onboarding.js";
 import {
   ONBOARDING_STEP_RESOURCE_TEMPLATE,
   onboardingResourcesForSession,
@@ -22,10 +27,11 @@ import { ENTITY_CATALOG_URI } from "./server-instructions.js";
 import {
   JSON_MIME_TYPE,
   catalog,
+  catalogDerivedTools,
   entityForTable,
   projectedDerivedTools,
 } from "./catalog.js";
-import { guideToolsForSession, resourcesForSession } from "./session-projection.js";
+import { resourcesForSession } from "./session-projection.js";
 import { derivedToolsForSession } from "./derived-session-tools.js";
 import { entitiesForSession, entityResourceUri } from "./entity-resources.js";
 import {
@@ -57,7 +63,6 @@ export function createSessionSurface(scope: ServerScope) {
     coreResourceOwnership,
     db,
     editLeaseOperationIds,
-    guidesCalled,
     invocationContext,
     locale,
     modulePlatform,
@@ -138,16 +143,24 @@ export function createSessionSurface(scope: ServerScope) {
     };
   };
   server.setRequestHandler(ListResourcesRequestSchema, listedResources);
+  const { runtimeProviderToolsForSession, listedTools } = createToolListing(scope);
   // ---- first-use onboarding (mcp/onboarding.ts): the checklist reads the
   // same per-session projections tools/list uses, and rides on whoami. ----
   const onboarding = onboardingEnvironment({
     db,
     session,
     tables,
-    derivedEntries: projectedDerivedTools,
-    projectedTools: () => derivedToolsForSession(db, session, tables, locale),
-    guideTools: () => guideToolsForSession(session),
-    guidesCalled,
+    derivedEntries: catalogDerivedTools,
+    projectedTools: async () =>
+      onboardingToolProjection(
+        catalogDerivedTools,
+        await derivedToolsForSession(db, session, tables, locale),
+        (await runtimeProviderToolsForSession()).map(({ definition, tool }) => ({
+          name: tool.name,
+          entityName: definition.entityName,
+          entityId: definition.entityId,
+        })),
+      ),
     // The administrator step reads the same contract the create tool and
     // the execution path use: which fields the form asks, which tool
     // creates the row, and the redirect URL an OAuth client must register.
@@ -225,8 +238,6 @@ export function createSessionSurface(scope: ServerScope) {
   server.setRequestHandler(ListPromptsRequestSchema, async () => ({
     prompts: [],
   }));
-
-  const { runtimeProviderToolsForSession, listedTools } = createToolListing(scope);
 
   return {
     listedResources,

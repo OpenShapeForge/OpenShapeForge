@@ -51,6 +51,11 @@ implementation:
 availability:
   entitlement: connector.afas-profit
 
+authorization:
+  roles:
+    read: Connectors.AfasProfit.Read
+    write: Connectors.AfasProfit.Write
+
 configuration:
   # Multiple: an organisation routinely runs production alongside a test
   # environment, and they are separate installations with separate tokens
@@ -130,9 +135,6 @@ operations:
     description:
       en: Fetch rows from a GetConnector published in the AFAS environment.
       nl: Haal rijen op uit een GetConnector die in de AFAS-omgeving is gepubliceerd.
-    authorization:
-      roles:
-        invoke: [Connectors.All.Read]
     input:
       - key: connectorId
         osfType: string
@@ -213,9 +215,6 @@ operations:
     description:
       en: Send an insert or update payload to an AFAS UpdateConnector.
       nl: Stuur een insert- of update-payload naar een AFAS UpdateConnector.
-    authorization:
-      roles:
-        invoke: [Connectors.All.ReadWrite]
     input:
       - key: connectorId
         osfType: string

@@ -245,8 +245,20 @@ export function contentResolvers(context: ModuleOperationContext, trx: unknown, 
       const frozen = templateSnapshotContent(version.snapshot, {
         tenantId, templateId, channel, carrier, allowedDefinitions: scope.allowedDefinitions, definitionVersionColumn: DEFINITION_VERSION_COLUMN,
       });
+      const projected = frozen.variants.map((variant) => ({
+        ...variant,
+        blocks: variant.blocks.map((block) => {
+          const fields = platform.records.projectStoredFields(session, {
+            entityName: carrier.entityName,
+            fields: { [carrier.fieldKey]: block.values },
+          });
+          const values = fields[carrier.fieldKey];
+          if (!isObject(values)) refuse("MISSING_VARIABLE", "Block values are not available under the current disclosure policy.");
+          return { ...block, values: immutableContent(values) as JsonObject };
+        }),
+      }));
       parameterFields.set(id, frozen.parameterFields);
-      return { id, tenantId, templateId, versionNumber: Number(version.versionNumber), parameters: parameterShapes(context, frozen.parameterFields), variants: frozen.variants };
+      return { id, tenantId, templateId, versionNumber: Number(version.versionNumber), parameters: parameterShapes(context, frozen.parameterFields), variants: projected };
     },
     resolveGlobalVariable: chipResolver(trx, tenantId, read),
     resolveEntity: entityResolver(tenantId, read),

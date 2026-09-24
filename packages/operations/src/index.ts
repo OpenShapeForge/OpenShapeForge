@@ -85,7 +85,6 @@ export {
 } from "./mcp-search-tools.js";
 export type { SearchableOperationToolNames } from "./mcp-search-tools.js";
 export { connectHelperTool, dryRunHelperTool, personalizationHelperTool } from "./mcp-derived-helper-tools.js";
-export { discoveryToolDefinition, guideToolDefinition, testToolDefinition } from "./mcp-entity-static-tools.js";
 export { connectorMcpTools, connectorToolAnnotations } from "./mcp-connector-tools.js";
 export type {
   ConnectorMcpContractShape,

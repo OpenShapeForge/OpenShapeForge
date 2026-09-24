@@ -31,6 +31,7 @@ import {
   readMigrateDatabaseUrl,
   type DatabaseRuntime,
 } from "../../../db/connection.js";
+import { SYSTEM_BYPASS_ROLE, withSystemSession } from "../../../db/session.js";
 import { loadRuntimeModules, type ModuleRegistry } from "../../../modules/registry.js";
 import { listEntityEvents } from "../../../platform/entity-events.js";
 import { createApiApp } from "../../../roles/api.js";
@@ -47,6 +48,8 @@ export { seedKeycloakTokenPeople };
 process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ??=
   "openshapeforge-local-dev-context-secret";
 process.env.DATABASE_URL ??=
+  "postgres://openshapeforge_app:openshapeforge_app@localhost:5434/openshapeforge_dev";
+process.env.OPENSHAPEFORGE_MIGRATE_DATABASE_URL ??=
   "postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev";
 // The realm a trusted-context session's identity is issued by: the session
 // layer refuses a linkable session that names none (503), so the harness's
@@ -441,6 +444,48 @@ export function ensureTenantRows(): Promise<void> {
         VALUES (${tenantId}, ${`e2e-${tenantId}`}, ${`e2e tenant ${tenantId}`}, 'active')
         ON CONFLICT (id) DO NOTHING
       `.execute(db);
+    }
+    // The canonical create Operations that stamp an acting Relation must see
+    // the same admitted identity state production sessions require. Trusted
+    // context proves who signed the internal request; it deliberately does
+    // not invent an organization membership or Relation link. Seed one
+    // tenant-owned person and linked identity for every synthetic caller.
+    const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER!;
+    for (const identity of [tenantA, tenantB, readOnly, noRoles]) {
+      const relationId = randomUUID();
+      const identityId = randomUUID();
+      const email = `e2e-${identity.userId}@example.invalid`;
+      await sql`
+        insert into erp.relations (id, tenant_id, display_name, relation_type, status)
+        values (${relationId}, ${identity.tenantId}, ${`E2E ${identity.userId}`}, 'person', 'active')
+      `.execute(db);
+      await sql`
+        insert into platform.identities (id, issuer, subject, email, display_name)
+        values (${identityId}, ${issuer}, ${identity.userId}, ${email}, ${`E2E ${identity.userId}`})
+        on conflict (issuer, subject) do update set display_name = excluded.display_name
+      `.execute(db);
+      await withSystemSession(
+        db,
+        {
+          actorSubject: "e2e-seed",
+          roles: [SYSTEM_BYPASS_ROLE],
+          reason: "e2e: admit synthetic transport identity",
+          tenantId: identity.tenantId,
+        },
+        (trx) => sql`
+          insert into platform.identity_relations
+            (identity_id, tenant_id, status, relation_id, linked_at, linked_by, roles)
+          select i.id, ${identity.tenantId}, 'linked', ${relationId}, now(), 'e2e-seed',
+                 (select coalesce(array_agg(value), '{}'::text[])
+                    from jsonb_array_elements_text(${identity.roles}::jsonb))
+            from platform.identities i
+           where i.issuer = ${issuer} and i.subject = ${identity.userId}
+          on conflict (identity_id, tenant_id) do update
+            set status = 'linked', relation_id = excluded.relation_id,
+                linked_at = now(), linked_by = 'e2e-seed', roles = excluded.roles,
+                updated_at = now()
+        `.execute(trx),
+      );
     }
   })();
   return store.tenantRowsEnsured;

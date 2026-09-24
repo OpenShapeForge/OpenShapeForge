@@ -21,11 +21,16 @@ function connector(
       provenance: "firstParty",
       license: { spdx: "LicenseRef-BatterAI-Commercial" },
     },
+    authorization: {
+      roles: {
+        read: `Connectors.${name}.Read`,
+        write: `Connectors.${name}.Write`,
+      },
+    },
     operations: [
       {
         key: "listThings",
         kind: "query",
-        authorization: { roles: { invoke: ["Connectors.All.Read"] } },
         output: { cardinality: "many", fields: [] },
       },
     ],
@@ -186,13 +191,11 @@ describe("shared MCP tool budget", () => {
         {
           key: "listThings",
           kind: "query",
-          authorization: { roles: { invoke: ["R"] } },
           output: { cardinality: "many", fields: [] },
         },
         {
           key: "getThing",
           kind: "query",
-          authorization: { roles: { invoke: ["R"] } },
           output: { cardinality: "one", fields: [] },
         },
       ],
@@ -211,7 +214,6 @@ describe("shared MCP tool budget", () => {
         {
           key: "putThing",
           kind: "mutation",
-          authorization: { roles: { invoke: ["W"] } },
           output: { cardinality: "one", fields: [] },
         },
       ],

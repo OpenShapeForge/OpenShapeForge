@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The platform administrator: what a verified control-realm operator is on
+ * The platform operator identity: what a verified control-realm operator is on
  * the far side of the door (`control-session.ts`), and how one becomes a
  * system-bypass database session for one Operation.
  *
- * The marker role here is `platform_admin` — a person who manages the
- * integration catalog for every tenant — as distinct from
- * `platform-operator` (`authorization.ts`), which is the tenant lifecycle.
- * One person may hold both; the roles do not imply each other, and each
- * control Operation names the roles that may invoke it.
+ * The single marker role is `platform-operator` (`authorization.ts`). It
+ * authorizes every control Operation: tenant lifecycle, organization state,
+ * reconciliation, catalog, notices and audit.
  *
  * The elevation is the operator's, made in the same place: an administrator
  * becomes a `Platform.SystemBypass` database session for exactly one call,
@@ -19,10 +17,7 @@
 import { systemSessionForOperator } from "./authorization.js";
 import type { SystemSessionInput } from "../db/session.js";
 
-/** The control realm's marker role for the integration catalog. */
-export const PLATFORM_ADMIN_ROLE = "platform_admin";
-
-/** An authenticated, authorized platform administrator. */
+/** An authenticated, authorized platform operator. */
 export type PlatformAdministrator = {
   /** The `sub` claim, unique within `issuer` and only within it. */
   subject: string;

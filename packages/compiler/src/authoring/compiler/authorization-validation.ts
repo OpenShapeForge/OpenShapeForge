@@ -24,10 +24,95 @@ import type {
   AuthorizationRealmRole,
 } from "../types/authoring.js";
 import type { CompiledEntityContract } from "../types/compiled.js";
+import type { CompiledConnectorContract } from "../types/connector.js";
 
 export interface AuthorizationValidationResult {
   errors: string[];
   warnings: string[];
+}
+
+/**
+ * Validate the roles carried by compiler-lowered transition Operations.
+ *
+ * Transition lowering is deliberately per-entity, while the declared role
+ * vocabulary is realm-wide. Keep this check at the corpus boundary where the
+ * compiled Operations and the applicable authorization contract are both
+ * available. In particular, do not let the Keycloak generator treat a typo as
+ * a new role merely because it occurs on an Operation.
+ */
+export function validateTransitionAuthorizationReferences(
+  contracts: CompiledEntityContract[],
+  authConfig: AuthorizationConfigFile,
+): AuthorizationValidationResult {
+  const errors: string[] = [];
+  const { clientRoles, realmRoles } = buildDeclaredRoleSet(authConfig);
+  const declared = new Set<string>([...clientRoles, ...realmRoles]);
+
+  for (const contract of contracts) {
+    for (const operation of contract.pluginOperations ?? []) {
+      if (
+        operation.definition.implementation.type !== "plugin" ||
+        operation.definition.implementation.plugin !== "osf-transitions" ||
+        operation.definition.auth.mode !== "session"
+      ) {
+        continue;
+      }
+      for (const role of operation.definition.auth.roles ?? []) {
+        if (!declared.has(role)) {
+          errors.push(
+            `[${contract.entity.name}] transition Operation "${operation.id}" ` +
+              `references role "${role}", which is not declared in the applicable ` +
+              `authorization contract. Declare the role before using it on a transition.`,
+          );
+        }
+      }
+    }
+  }
+
+  return { errors, warnings: [] };
+}
+
+/** Validate connector-specific invocation permissions against one tenant realm. */
+export function validateConnectorAuthorizationReferences(
+  connectors: readonly CompiledConnectorContract[],
+  authConfig: AuthorizationConfigFile,
+): AuthorizationValidationResult {
+  const errors: string[] = [];
+  const client = entityRoleClientId(authConfig);
+  const declared = buildDeclaredRoleSet(authConfig).perClient.get(client) ?? new Set<string>();
+  const owners = new Map<string, string>();
+
+  for (const connector of connectors) {
+    const { read, write } = connector.authorization.roles;
+    for (const [permission, role] of [["read", read], ["write", write]] as const) {
+      if (!declared.has(role)) {
+        errors.push(
+          `[${connector.connector}] authorization.roles.${permission} references "${role}", ` +
+            `which is not declared for client "${client}" in the applicable authorization contract.`,
+        );
+      }
+      const previous = owners.get(role);
+      if (previous && previous !== connector.connector) {
+        errors.push(
+          `Connector role "${role}" is shared by ${previous} and ${connector.connector}. ` +
+            "A connector-specific permission may authorize exactly one connector.",
+        );
+      } else {
+        owners.set(role, connector.connector);
+      }
+    }
+
+    const writeComposite = authConfig.clientRoleComposites?.[client]?.[write];
+    const included = writeComposite?.composites?.[client] ?? [];
+    if (!included.includes(read)) {
+      errors.push(
+        `[${connector.connector}] write role "${write}" must be a client-role composite ` +
+          `that includes its read role "${read}" on client "${client}".`,
+      );
+    }
+  }
+
+  return { errors, warnings: [] };
 }
 
 /**

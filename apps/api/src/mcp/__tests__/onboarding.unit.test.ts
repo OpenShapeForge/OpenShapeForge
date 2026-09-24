@@ -18,6 +18,7 @@ import {
   ONBOARDING_VERSION,
   onboardingGuideText,
   onboardingIndex,
+  onboardingToolProjection,
   onboardingToolsForSession,
   providerNeedsPersonalSignIn,
   withOnboarding,
@@ -403,6 +404,7 @@ function tenantRows(overrides: Partial<Rows> = {}): Rows {
     "integration.adapters": [
       {
         id: GOOGLE,
+        key: "google-gmail",
         name: "Google Workspace",
         auth: { profile: "oauth2AuthorizationCode" },
         configurationFields: [
@@ -415,7 +417,7 @@ function tenantRows(overrides: Partial<Rows> = {}): Rows {
           },
         ],
       },
-      { id: SLACK, name: "Slack", auth: { profile: "apiKey", scheme: "bearer", tokenFrom: "token" } },
+      { id: SLACK, key: "slack", name: "Slack", auth: { profile: "apiKey", scheme: "bearer", tokenFrom: "token" } },
     ],
     "integration.connections": [
       {
@@ -458,9 +460,8 @@ function environment(input: {
   session?: TrustedSessionContext;
   rows?: Rows;
   record?: OnboardingRecord | null;
-  guides?: string[];
-  guidesCalled?: string[];
   entries?: DerivedToolsCatalogEntry[];
+  projectedTools?: OnboardingEnvironment["projectedTools"];
 }) {
   const rows = input.rows ?? tenantRows();
   const memory = memoryStore(
@@ -471,18 +472,16 @@ function environment(input: {
   const env: OnboardingEnvironment = {
     session: input.session ?? session(),
     derivedEntries: input.entries ?? [SERVICE_ENTRY],
-    projectedTools: async () =>
+    projectedTools: input.projectedTools ?? (async () =>
       (rows["integration.services"] ?? []).map((row) => ({
         name: String(row.key).replace(/-/g, "_"),
         table: "integration.services",
         rowId: String(row.id),
-      })),
+      }))),
     rowsByFilter: async (table, filter, limit = 100) =>
       (rows[table] ?? [])
         .filter((row) => Object.entries(filter).every(([key, value]) => row[key] === value))
         .slice(0, limit),
-    guideTools: () => (input.guides ?? []).map((name) => ({ name })),
-    guidesCalled: new Set(input.guidesCalled ?? []),
     store: memory.store,
     connectionContract: (connectionTable) =>
       connectionTable === "integration.connections"
@@ -510,6 +509,9 @@ describe("the organization_connections step", () => {
   const google = (overrides: Partial<OrganizationConnectionFact> = {}): OrganizationConnectionFact => ({
     adapter: "Google",
     adapterId: "adapter-google",
+    connectionEntity: "Connection",
+    connectionKey: "google-gmail",
+    connectionName: "Google",
     createTool: "create_connection",
     adapterArgument: "adapterId",
     configured: false,
@@ -545,7 +547,7 @@ describe("the organization_connections step", () => {
     const todo = step(summary, "organization_connections");
     expect(todo.status).toBe("todo");
     expect(todo.howTo).toContain(
-      'Run create_connection { adapterId: "adapter-google", key, name } for Google.',
+      'Run create_connection { key: "google-gmail", name: "Google", adapterId: "adapter-google" } for Google.',
     );
     expect(todo.howTo).toContain(
       "The secure form asks for: OAuth client ID, OAuth client secret (secret).",
@@ -574,13 +576,44 @@ describe("the organization_connections step", () => {
     );
     expect(todo.howTo).toContain(
       "The Google connection is incomplete (missing: clientSecret); delete it and run " +
-        'create_connection { adapterId: "adapter-google", key, name } again.',
+        'create_connection { key: "google-gmail", name: "Google", adapterId: "adapter-google" } again.',
     );
     expect(todo.howTo).not.toContain("redirect URL");
   });
 });
 
 describe("gatherOnboardingFacts", () => {
+  it("keeps compatibility-backed runtime Services in both connection steps", async () => {
+    const compatibilityEntry: DerivedToolsCatalogEntry = {
+      ...SERVICE_ENTRY,
+      compatibility: {
+        plugin: "integration-runtime",
+        providerId: "integration-runtime",
+        connectOperation: "integration.service.connect",
+      },
+    };
+    const projected = onboardingToolProjection(
+      [compatibilityEntry],
+      [],
+      [
+        { name: "google_koppelen", entityName: "Service", entityId: "svc-google" },
+        { name: "unrelated", entityName: "Other", entityId: "svc-google" },
+      ],
+    );
+    expect(projected).toEqual([
+      { name: "google_koppelen", table: "integration.services", rowId: "svc-google" },
+    ]);
+
+    const { env } = environment({
+      session: session({ roles: ["org_admin", "integration_admin", "integration_user"] }),
+      entries: [compatibilityEntry],
+      projectedTools: async () => projected,
+    });
+    const summary = computeOnboarding(await gatherOnboardingFacts(env));
+    expect(step(summary, "organization_connections").status).toBe("todo");
+    expect(step(summary, "connections").status).toBe("todo");
+  });
+
   it("lists organization connections for an administrator only, judged by required values", async () => {
     const employee = environment({});
     expect((await gatherOnboardingFacts(employee.env)).organizationConnections).toBeNull();
@@ -591,6 +624,9 @@ describe("gatherOnboardingFacts", () => {
       {
         adapter: "Google Workspace",
         adapterId: GOOGLE,
+        connectionEntity: "Connection",
+        connectionKey: "google-gmail",
+        connectionName: "Google Workspace",
         createTool: "create_connection",
         adapterArgument: "adapterId",
         configured: false,
@@ -604,6 +640,9 @@ describe("gatherOnboardingFacts", () => {
       {
         adapter: "Slack",
         adapterId: SLACK,
+        connectionEntity: "Connection",
+        connectionKey: "slack",
+        connectionName: "Slack",
         createTool: "create_connection",
         adapterArgument: "adapterId",
         configured: true,
@@ -667,23 +706,6 @@ describe("gatherOnboardingFacts", () => {
     expect((await gatherOnboardingFacts(outside.env)).preferences.offered).toBe(false);
   });
 
-  it("counts a guide as read from this session or from the record", async () => {
-    const fromSession = environment({ guides: ["pentest_guide"], guidesCalled: ["pentest_guide"] });
-    expect((await gatherOnboardingFacts(fromSession.env)).guides).toEqual([
-      { name: "pentest_guide", read: true },
-    ]);
-    const fromRecord = environment({
-      guides: ["pentest_guide"],
-      record: { completedAt: null, version: null, preferencesSkipped: false, guidesRead: ["pentest_guide"] },
-    });
-    expect((await gatherOnboardingFacts(fromRecord.env)).guides).toEqual([
-      { name: "pentest_guide", read: true },
-    ]);
-    const unread = environment({ guides: ["pentest_guide"] });
-    expect((await gatherOnboardingFacts(unread.env)).guides).toEqual([
-      { name: "pentest_guide", read: false },
-    ]);
-  });
 });
 
 describe("the onboarding tools", () => {
@@ -702,18 +724,17 @@ describe("the onboarding tools", () => {
   });
 
   it("refuses to complete while steps are missing, naming them", async () => {
-    const { env, memory } = environment({ guides: ["pentest_guide"] });
+    const { env, memory } = environment({});
     const result = await callOnboardingTool(COMPLETE_ONBOARDING_TOOL, {}, env);
     expect(result?.isError).toBe(true);
     const body = result!.structuredContent as {
       error: { code: string; message: string; missing: { key: string }[] };
     };
     expect(body.error.code).toBe("ONBOARDING_INCOMPLETE");
-    expect(body.error.message).toBe("3 steps still to do: connections, preferences, guide.");
+    expect(body.error.message).toBe("2 steps still to do: connections, preferences.");
     expect(body.error.missing.map((entry) => entry.key)).toEqual([
       "connections",
       "preferences",
-      "guide",
     ]);
     expect(memory.record?.completedAt).toBeNull();
   });
@@ -723,8 +744,6 @@ describe("the onboarding tools", () => {
       rows: tenantRows({
         "integration.connections": [{ id: "conn-google-mine", adapterId: GOOGLE, ownerUserId: USER_ID }],
       }),
-      guides: ["pentest_guide"],
-      guidesCalled: ["pentest_guide"],
     });
     const refused = await callOnboardingTool(COMPLETE_ONBOARDING_TOOL, {}, env);
     expect(refused?.isError).toBe(true);
@@ -742,21 +761,20 @@ describe("the onboarding tools", () => {
       "not_applicable",
       "done",
       "done",
-      "done",
+      "not_applicable",
     ]);
     expect(memory.record).toEqual({
       completedAt: "2026-09-04T10:00:00.000Z",
       version: ONBOARDING_VERSION,
       preferencesSkipped: true,
-      guidesRead: ["pentest_guide"],
+      guidesRead: [],
     });
 
-    // A new session: guidesCalled is empty, but the record remembers.
+    // A new session keeps the completed record.
     const later = environment({
       rows: tenantRows({
         "integration.connections": [{ id: "conn-google-mine", adapterId: GOOGLE, ownerUserId: USER_ID }],
       }),
-      guides: ["pentest_guide"],
       record: memory.record,
     });
     const status = await callOnboardingTool(ONBOARDING_STATUS_TOOL, {}, later.env);

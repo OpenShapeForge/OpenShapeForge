@@ -212,6 +212,59 @@ describe("buildMcpCatalog execution compatibility", () => {
     expect(() => selectOperationToolProjection(2, 0, 1)).toThrow(/over the 1 limit/);
   });
 
+  it("preserves internal discovery and test bridges from executionCompatibility", () => {
+    const operation = (key: string): CompiledPluginOperation => ({
+      key,
+      id: key,
+      intent: "invoke",
+      plugin: "demo",
+      title: key,
+      description: `${key}.`,
+      handler: key,
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      outputSchema: { type: "object", properties: {}, additionalProperties: false },
+      errors: [],
+      auth: { mode: "session", roles: ["viewer"] },
+      tenancy: { mode: "required" },
+      idempotency: { mode: "none" },
+      effects: { data: "read", external: "read" },
+      transports: {
+        rest: { method: "POST", path: `/api/demo/${key}`, response: { kind: "json" } },
+        mcp: { enabled: false, reason: "Internal compatibility bridge." },
+        graphql: { enabled: false, reason: "Not exposed in this fixture." },
+        typescript: { enabled: false, reason: "Not exposed in this fixture." },
+      },
+    });
+    const contribution: PluginExecutionCompatibility = {
+      version: 1,
+      discovery: [{ operation: "demo.discover", entity: "Service" }],
+      tests: [{ operation: "demo.test", entity: "Service" }],
+    };
+    const catalog = buildMcpCatalog(
+      catalogInputs(serviceOwner()),
+      "test",
+      {},
+      [operation("demo.discover"), operation("demo.test")],
+      [{ plugin: "demo", contribution }],
+    );
+    expect(catalog.discoveryTools).toEqual([
+      expect.objectContaining({
+        entity: "Service",
+        compatibility: { plugin: "demo", operation: "demo.discover" },
+      }),
+    ]);
+    expect(catalog.testTools).toEqual([
+      expect.objectContaining({
+        entity: "Service",
+        compatibility: { plugin: "demo", operation: "demo.test" },
+      }),
+    ]);
+    expect(catalog.executionCompatibility.map((entry) => entry.operation)).toEqual([
+      "demo.discover",
+      "demo.test",
+    ]);
+  });
+
   it("refuses leftover bindingsField on execution compatibility", () => {
     const owner = ownerInput({
       ...executionBase,

@@ -126,16 +126,6 @@ export type CatalogResource = {
   table: string;
 };
 
-export type CatalogGuideTool = {
-  name: string;
-  description: string;
-  roles: string[];
-  content: string;
-  entity?: string;
-  table?: string;
-  requireBeforeCreate?: boolean;
-};
-
 export type CapturedDerivedExecution = {
   entry: DerivedToolsCatalogEntry;
   serviceRow: Record<string, unknown>;
@@ -195,7 +185,6 @@ export type Catalog = {
   derivedTools?: DerivedToolsCatalogEntry[];
   discoveryTools?: CatalogDiscoveryTool[];
   testTools?: CatalogTestTool[];
-  guideTools?: CatalogGuideTool[];
   executionCompatibility?: Array<{
     plugin: string;
     operation: string;
@@ -247,7 +236,7 @@ export function entityForTable(table: string): CatalogEntity | undefined {
  * The catalog entries advertised under one tool name.
  *
  * A dedicated name has exactly one. A generic `osf_*` name has ONE PER ENTITY
- * that opted into `mcp: { tools: generic }`: the compiler emits a tool entry
+ * that opted into `interfaces.mcp: { tools: generic }`: the compiler emits a tool entry
  * per entity either way and skips `osf_`-prefixed names in its duplicate check
  * (packages/compiler/src/generate-mcp.ts), so `osf_list` legitimately appears
  * once for every generic entity in the deployment.
@@ -273,7 +262,6 @@ export const projectedDerivedTools = catalogDerivedTools.filter(
 export const catalogDiscoveryTools: CatalogDiscoveryTool[] =
   catalog.discoveryTools ?? [];
 export const catalogTestTools: CatalogTestTool[] = catalog.testTools ?? [];
-export const catalogGuideTools: CatalogGuideTool[] = catalog.guideTools ?? [];
 
 /**
  * The public names of the derived-tool helpers (connect, dry run, set

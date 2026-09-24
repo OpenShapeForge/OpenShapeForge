@@ -300,9 +300,9 @@ describe("platform.jobs", () => {
     const finished = (await appSession(sessionA, (trx) => getJob(trx, ok.id)))!;
     expect(finished.result).toEqual({ echoed: { hello: "world" } });
     expect(finished.actorSession).toEqual({ roles: ["Alpha.Role", "Zebra.Role"], groups: [], relationGroupIds: [relationGroup], scope: "tenant" });
-    const retried = await rawStatus(throws.id);
-    expect(retried.status).toBe("queued");
-    expect(retried.attempts).toBe(1);
+    const unclassified = await rawStatus(throws.id);
+    expect(unclassified.status).toBe("outcome_unknown");
+    expect(unclassified.attempts).toBe(1);
     expect((await rawStatus(unknown.id)).status).toBe("outcome_unknown");
     const dead = await appSession(sessionA, (trx) => getJob(trx, orphan.id));
     expect(dead!.status).toBe("dead");
@@ -314,6 +314,95 @@ describe("platform.jobs", () => {
     // The enqueuing session is stored as it was, and the least session is the default.
     expect((await appSession(sessionA, (trx) => getJob(trx, after.id)))!.actorSession).toEqual({ roles: [], groups: [], relationGroupIds: [], scope: "self" });
     await expect(enqueue(sessionA, "probe.ok", { actorSession: { scope: "everything" as "self" } })).rejects.toThrow(/scope/);
+  });
+
+  test("a completed handler is never changed to an automatic retry when its transaction fails", async () => {
+    const accepted: string[] = [];
+    const failAtCommit = async (db: Transaction<DB>) => {
+      // The invalid deferred foreign key is checked only when PostgreSQL
+      // commits. That proves the exact boundary at issue: the handler has
+      // returned and the provider may have accepted its effect, but the
+      // surrounding transaction cannot be confirmed.
+      await sql`create temporary table job_commit_failure_parent (id integer primary key) on commit drop`.execute(db);
+      await sql`
+        create temporary table job_commit_failure_child (
+          parent_id integer references job_commit_failure_parent(id) deferrable initially deferred
+        ) on commit drop
+      `.execute(db);
+      await sql`insert into job_commit_failure_child (parent_id) values (1)`.execute(db);
+    };
+    const afterAcceptance = (kind: string, outcome: Awaited<ReturnType<ModuleJobHandler>>) =>
+      (async (_payload, { db }) => {
+        accepted.push(kind);
+        await failAtCommit(db);
+        return outcome;
+      }) as ModuleJobHandler;
+    const handlers = composeJobHandlers([{
+      name: "commit-failure",
+      jobHandlers: {
+        "commit-failure.done": afterAcceptance("done", { outcome: "done" }),
+        "commit-failure.retry": afterAcceptance("retry", {
+          outcome: "retry",
+          error: { code: "SAFE_TO_REPEAT", message: "The handler classified repetition as safe." },
+        }),
+        "commit-failure.failed": afterAcceptance("failed", {
+          outcome: "failed",
+          error: { code: "PROVIDER_REFUSED", message: "The provider refused the request." },
+        }),
+        "commit-failure.unknown": afterAcceptance("unknown", {
+          outcome: "outcome_unknown",
+          error: { code: "PROVIDER_UNCERTAIN", message: "The provider may have accepted the request." },
+        }),
+        "commit-failure.throws": (async () => {
+          accepted.push("throws");
+          throw Object.assign(new Error("Connection ended after provider acceptance."), { code: "PROVIDER_CONNECTION_LOST" });
+        }) as ModuleJobHandler,
+      },
+    }]);
+    const done = await enqueue(sessionA, "commit-failure.done");
+    const retry = await enqueue(sessionA, "commit-failure.retry", { maxAttempts: 3 });
+    const failed = await enqueue(sessionA, "commit-failure.failed");
+    const unknown = await enqueue(sessionA, "commit-failure.unknown");
+    const thrown = await enqueue(sessionA, "commit-failure.throws");
+    const kinds = [
+      "commit-failure.done",
+      "commit-failure.retry",
+      "commit-failure.failed",
+      "commit-failure.unknown",
+      "commit-failure.throws",
+    ];
+
+    expect(await processJobBatch(suite.worker.db, handlers, silent, { kinds, batchSize: 5 })).toEqual({ processed: 5 });
+    expect(accepted.sort()).toEqual(["done", "failed", "retry", "throws", "unknown"]);
+
+    const doneRow = await appSession(sessionA, (trx) => getJob(trx, done.id));
+    expect(doneRow).toMatchObject({
+      status: "outcome_unknown",
+      lastError: { code: "JOB_COMMIT_OUTCOME_UNKNOWN" },
+    });
+    expect(await appSession(sessionA, (trx) => getJob(trx, retry.id))).toMatchObject({
+      status: "queued",
+      attempts: 1,
+      lastError: { code: "SAFE_TO_REPEAT" },
+    });
+    expect(await appSession(sessionA, (trx) => getJob(trx, failed.id))).toMatchObject({
+      status: "failed",
+      lastError: { code: "PROVIDER_REFUSED" },
+    });
+    expect(await appSession(sessionA, (trx) => getJob(trx, unknown.id))).toMatchObject({
+      status: "outcome_unknown",
+      lastError: { code: "PROVIDER_UNCERTAIN" },
+    });
+    expect(await appSession(sessionA, (trx) => getJob(trx, thrown.id))).toMatchObject({
+      status: "outcome_unknown",
+      lastError: { code: "PROVIDER_CONNECTION_LOST" },
+    });
+
+    // The accepted `done` and unclassified throw are terminal, so another
+    // worker pass cannot repeat either external effect. Only the handler that
+    // explicitly returned `retry` is eligible after its backoff.
+    expect(await processJobBatch(suite.worker.db, handlers, silent, { kinds, batchSize: 5 })).toEqual({ processed: 0 });
+    expect(accepted.sort()).toEqual(["done", "failed", "retry", "throws", "unknown"]);
   });
 
   test("a running handler holds its job row, and a claim that was reclaimed stops before any effect", async () => {

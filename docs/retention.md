@@ -20,15 +20,17 @@ A compiled `RetentionDefinition` carries:
   its `type` (`timestamptz` or `date`) and optional `fallbackColumns`. A
   business-`date` anchor (e.g. `contractEndDate`) is a first-class clock; it is
   no longer silently dropped in favour of a system timestamp.
-- **`rules[]`** — each with a coarse `action`
+- **`rules[]`** — each with distinct `duration.minimum`, `duration.default`
+  and `duration.maximum` values (when authored), plus a coarse `action`
   (`retain` / `archive` / `redact` / `delete`), the authored `disposition`
   verbatim (`keep` / `archive` / `delete` / `anonymize` / `mask` /
   `cryptoDelete` / `review`), an optional `review` gate
   (`{ required, queue }`), and — for `cryptoDelete` — `cryptoDelete.keyReference`
   identifying the key an executor must destroy.
-- **`legalHold`** — `{ suspendDestruction: true }` when the policy declares a
-  legal / litigation hold. An executor MUST NOT run any destructive
-  disposition for the table while this is set, regardless of clock expiry.
+- **`legalHold`** — `{ suspendDestruction: true, activeColumn? }` when the
+  policy supports legal / litigation holds. The static flag is capability
+  metadata, not an active hold on every record. When `activeColumn` is present,
+  a true value on that record represents an actual active hold.
 - **`erasure`** — advisory subject-erasure cascade metadata: `subjectScoped`,
   the `subjectColumns` that identify a data subject, and `cascades[]` naming
   dependent tables (`{ schema, table, via }`) that must also be erased.
@@ -59,18 +61,26 @@ a queue that forgot those would forget the very rows retention exists to
 account for. It reads no entity retention metadata and is not the executor
 described below — the queue is platform bookkeeping, not a business record.
 
-## Runtime enforcement: NOT IMPLEMENTED (follow-up)
+## Runtime enforcement
 
-**There is no retention-enforcement runtime.** Nothing in `apps/api` reads the
-compiled `retention` block: no scheduler, cron, or job deletes, anonymizes, or
-redacts records past their retention window, and nothing checks `legalHold`
-before acting. The compiled metadata exists so a future job can consume it, but
-until that job ships, retention is **advisory metadata only**.
+User-initiated hard deletion reads the compiled retention metadata. It refuses
+deletion while the record's configured clock is inside a `minimum` period or
+while its explicit active-hold column is true. If every configured clock value
+is null, retention has not started and does not prevent deletion. A
+`maximum`-only policy likewise permits earlier authorized deletion. Normal
+authorization, explicit acknowledgement, current-version comparison and
+foreign-key constraints still apply.
+
+There is not yet a scheduled retention executor. No scheduler, cron, or job
+automatically deletes, archives, anonymizes, masks, reviews, or crypto-erases
+records at the default or maximum date. The distinct bounds and disposition
+are preserved so that executor can apply the authored outcome rather than
+treating every expired policy as row deletion.
 
 Any executor built against this metadata MUST:
 
-1. Check `legalHold.suspendDestruction` first and skip all destructive
-   dispositions while a hold is active.
+1. Resolve actual per-record hold state; `suspendDestruction` by itself only
+   says the policy supports suspension.
 2. Honor each rule's `review` gate — route to the named queue instead of
    destroying unattended.
 3. For `cryptoDelete`, destroy the referenced key rather than deleting rows.
@@ -104,7 +114,6 @@ follow-up issue.
 ## Authored policy is not enforcement
 
 `Document` and `CaseFile` currently reference `records-archive-7y`, so their
-compiled tables contain retention metadata. This does **not** remove the
-runtime limitations above: an authored policy, a storage binding, or a passing
-Document creation test does not prove retention enforcement or legal-hold
-handling. Those boundaries require separate runtime and behavior evidence.
+compiled tables contain retention metadata. The generic hard-delete guard
+enforces a configured minimum and explicit active hold, but the authored policy
+still does not prove automated disposition at the default or maximum date.

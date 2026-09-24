@@ -71,10 +71,12 @@ issues, pull requests, and review comments. Act accordingly.
 
 - **Generated artifacts are never edited by hand.** The `generated-*`
   naming convention marks hand-written engines that CONSUME generated
-  manifests; the generated outputs themselves (gitignored paths listed in
-  `.gitignore` and `packages/compiler/src/generated-artifact-paths.ts`) are
-  reproduced by `bun run generate`. If a generated file looks wrong, fix
-  the generator, the authoring YAML, or a plugin — then regenerate.
+  manifests. Compiler-owned outputs are listed in
+  `packages/compiler/src/generated-artifact-paths.ts`; bulky runtime roots are
+  gitignored, while a small allowlist of shared contract artifacts is tracked.
+  Both are reproduced and freshness-checked by `bun run generate`. If a
+  generated file looks wrong, fix the generator, the authoring YAML, or a
+  plugin — then regenerate.
 - **Determinism is enforced.** Anything a generator or plugin emits must be
   byte-identical across runs: no timestamps, no randomness, no
   environment-dependent output. `bun run check:generated` runs everything

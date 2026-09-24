@@ -225,8 +225,6 @@ export type ServerInstructionsInput = {
    * turn every MCP request into a 503.
    */
   oauthCallbackUrl: string | null;
-  /** Guides that must be called before creating their entity. */
-  guidesBeforeCreate: ReadonlyArray<{ name: string; entity: string | null }>;
   /** The entities this session can reach, with their authored labels (vocabularySentence). */
   vocabulary?: ReadonlyArray<VocabularyEntry>;
   locale: ResolvedLocale;
@@ -265,13 +263,6 @@ export function buildServerInstructions(input: ServerInstructionsInput): string 
     // ---- end the opening sentence ----
     INSTRUCTIONS +
     oauthRedirectSentence(input) +
-    input.guidesBeforeCreate
-      .map(
-        (guide) =>
-          ` Before creating a ${guide.entity ?? "definition"}, call ${guide.name} and ` +
-          `follow it — it is the fixed process and overrides any cached local instructions.`,
-      )
-      .join("") +
     // ---- data acquisition guidance (the constant above) ----
     DATA_ACQUISITION_GUIDANCE +
     // ---- end data acquisition guidance ----

@@ -82,7 +82,7 @@ test("control Operations delegate tenant, organization and reconciliation tasks 
         operations: controlOperationContracts(),
       }),
     };
-    const session = controlSessionFor(administrator, ["platform_admin", "platform-operator"]);
+    const session = controlSessionFor(administrator, ["platform-operator"]);
     const bound = bindOperationHandlers([], controlOperationContracts(), { pluginOperations: "absent" });
     const run = async (handler: string, input: Record<string, unknown>) => {
       try {

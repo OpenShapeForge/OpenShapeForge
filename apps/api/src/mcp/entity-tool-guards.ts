@@ -23,7 +23,6 @@ import {
   catalog,
   catalogDerivedTools,
   catalogDiscoveryTools,
-  catalogGuideTools,
   catalogTestTools,
   entityForTable,
 } from "./catalog.js";
@@ -86,11 +85,18 @@ export function assertDeclaredProperties(
 export function assertOperationWrittenFields(
   values: Record<string, unknown>,
   table: GeneratedTable | undefined,
+  allowedWriter?: string,
 ): void {
   for (const column of table?.columns ?? []) {
     if (!isOperationWrittenColumn(column)) continue;
     const field = fieldNameForColumn(column);
     if (!Object.prototype.hasOwnProperty.call(values, field)) continue;
+    if (
+      allowedWriter &&
+      column.writtenBy!.some((writer) => writer.operation === allowedWriter)
+    ) {
+      continue;
+    }
     throw new HttpError(
       400,
       "BAD_USER_INPUT",
@@ -178,8 +184,8 @@ export async function assertPublishableWrite(
     reservedNames: reservedDerivedToolNames(),
     providerDefinitionsField: entityForTable(entry.execution!.connectionTable)
       ?.elicitOnCreate?.definitionsField,
-    readRows: (rowTable, filter) =>
-      runtimeRowsByFilter(db, session, tables, rowTable, filter),
+    readRows: (rowTable, filter, limit) =>
+      runtimeRowsByFilter(db, session, tables, rowTable, filter, limit),
     readBindingPages: runtimeBindingReader(db, session, tables),
   });
 }
@@ -194,9 +200,7 @@ function reservedDerivedToolNames(): Set<string> {
         ? [candidate.personalization.set.name]
         : []),
     ]),
-    ...catalogGuideTools.map((tool) => tool.name),
     ...catalogDiscoveryTools.map((tool) => tool.name),
     ...catalogTestTools.map((tool) => tool.name),
   ]);
 }
-

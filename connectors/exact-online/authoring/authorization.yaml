@@ -1,0 +1,11 @@
+kind: authorizationPatch
+clientRoles:
+  erp-provider:
+    - Connectors.ExactOnline.Read
+clientRoleComposites:
+  erp-provider:
+    Connectors.ExactOnline.Write:
+      description: Invoke write operations on the Exact Online connector
+      composites:
+        erp-provider:
+          - Connectors.ExactOnline.Read

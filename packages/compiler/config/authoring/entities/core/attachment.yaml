@@ -34,6 +34,7 @@ fields:
     osfType: string
     required: true
     readOnly: true
+    writeSource: caller
     label:
       en: File name
       nl: Bestandsnaam
@@ -49,6 +50,7 @@ fields:
     osfType: string
     required: true
     readOnly: true
+    writeSource: caller
     label:
       en: MIME type
       nl: MIME-type
@@ -64,6 +66,7 @@ fields:
     osfType: integer
     required: false
     readOnly: true
+    writeSource: caller
     label:
       en: Size (bytes)
       nl: Grootte (bytes)
@@ -91,6 +94,7 @@ fields:
     osfType: string
     required: false
     readOnly: true
+    writeSource: caller
     label:
       en: Checksum
       nl: Checksum

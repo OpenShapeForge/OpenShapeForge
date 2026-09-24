@@ -79,6 +79,39 @@ function compileOutcome(slug: keyof typeof expected): CompiledEntityInfo {
 }
 
 describe("field-relational outcome entities", () => {
+  test("compiles trusted human attribution once on the canonical create Operation", () => {
+    for (const [slug, field] of [
+      ["comment", "authorId"],
+      ["support-issue", "reporterId"],
+      ["maintenance-request", "reportedById"],
+      ["project-phase-decision", "decidedById"],
+    ] as const) {
+      const contract = compile(loadEntity(authoringDir, slug));
+      expect(contract.entityOperations.create?.stamps).toEqual([{ field, source: "actorRelation" }]);
+      expect(contract.model.fields.find((candidate) => candidate.key === field)?.writtenBy)
+        .toEqual([`${contract.entity.name}.create`]);
+    }
+  });
+
+  test("keeps Account identity-provider fields out of generic create and update", () => {
+    const contract = compile(loadEntity(authoringDir, "account"));
+    for (const field of ["keycloakSub", "lastLoginAt", "passwordChangedAt"]) {
+      expect(contract.model.fields.find((candidate) => candidate.key === field)?.writtenBy)
+        .toEqual(["Account.create", "Account.update"]);
+    }
+  });
+
+  test("rejects a bare persisted readOnly field and accepts an explicit caller source", () => {
+    const bare = loadEntity(authoringDir, "comment");
+    delete bare.coreEntity.operations!.create!.stamps;
+    expect(() => compile(bare)).toThrow(/authorId.*no legitimate write source/);
+
+    const caller = loadEntity(authoringDir, "comment");
+    delete caller.coreEntity.operations!.create!.stamps;
+    caller.coreEntity.fields.find((field) => field.key === "authorId")!.writeSource = "caller";
+    expect(compile(caller).model.fields.find((field) => field.key === "authorId")?.writeSource)
+      .toBe("caller");
+  });
   test("preserves the four canonical models, rights and operation subsets", () => {
     for (const [slug, contractExpected] of Object.entries(expected)) {
       const contract = compileOutcome(slug as keyof typeof expected).contract;

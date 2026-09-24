@@ -51,6 +51,7 @@ fields:
   - key: basisAmount
     required: false
     readOnly: true
+    writtenBy: [AgreementMilestone.create]
     immutable: true
     label:
       en: Basis amount
@@ -68,6 +69,7 @@ fields:
     osfType: number
     required: false
     readOnly: true
+    writtenBy: [AgreementMilestone.create]
     immutable: true
     label:
       en: Percent of basis
@@ -86,6 +88,7 @@ fields:
   - key: amount
     required: true
     readOnly: true
+    writtenBy: [AgreementMilestone.create]
     immutable: true
     label:
       en: Amount

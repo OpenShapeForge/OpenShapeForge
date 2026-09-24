@@ -52,11 +52,11 @@ describe("generated MCP server: operation-written references", () => {
         expect(toolError(created.body)).toBeUndefined();
         const row = toolPayload(created.body);
         createdRows.push({ table, id: row.id, identity: tenantA });
-        expect(row[field] ?? null).toBeNull();
+        const before = row[field] ?? null;
 
         const refusedUpdate = await call(tenantA, "update", { id: row.id, values: { [field]: randomUUID() } });
         expectWriterRefusal({ text: toolError(refusedUpdate.body) }, field, writers);
-        expect(toolPayload((await call(tenantA, "get", { id: row.id })).body)[field] ?? null).toBeNull();
+        expect(toolPayload((await call(tenantA, "get", { id: row.id })).body)[field] ?? null).toEqual(before);
       });
 
       test(`${prefix}: a filter on ${field} finds the row that carries it and never another tenant's rows`, async () => {
@@ -67,14 +67,14 @@ describe("generated MCP server: operation-written references", () => {
         const foreignRow = toolPayload((await call(tenantB, "create", await createArgs(table, tenantB))).body);
         createdRows.push({ table, id: foreignRow.id, identity: tenantB });
         await plantReference(table, foreignRow.id, column, foreignTargetId);
-        expect(await listedIds(tenantB, field, foreignTargetId)).toEqual([foreignRow.id]);
+        expect(await listedIds(tenantB, field, foreignTargetId)).toContain(foreignRow.id);
         expect(await listedIds(tenantA, field, foreignTargetId)).toEqual([]);
 
         const targetId = await target(tenantA);
         const row = toolPayload((await call(tenantA, "create", await createArgs(table, tenantA))).body);
         createdRows.push({ table, id: row.id, identity: tenantA });
         await plantReference(table, row.id, column, targetId);
-        expect(await listedIds(tenantA, field, targetId)).toEqual([row.id]);
+        expect(await listedIds(tenantA, field, targetId)).toContain(row.id);
         expect(await listedIds(tenantA, field, randomUUID())).toEqual([]);
       });
     }

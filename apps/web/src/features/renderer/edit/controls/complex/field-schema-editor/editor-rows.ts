@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
+import type { VariableSuggestion } from "@/features/renderer/runtime/variable-suggestions";
 import type { Field, LocalizedText } from "@/generated/compiler/field-contract";
 import type { FieldAuthoringProfile } from "@/lib/field-authoring/profiles";
-import type { VariableSuggestion } from "@/features/renderer/runtime/variable-suggestions";
-import type { FieldSchemaEditorLang } from "./types";
+import {
+  assertCanonicalStoredFieldDefinition,
+  storedFieldDefinitionBaseType,
+} from "@/lib/field-contract/stored-field-definition";
 import { normalizeFieldSchemaDraft } from "./draft-normalization";
+import type { FieldSchemaEditorLang } from "./types";
 import { isFieldCardinalityCollection, isRecord, translateText } from "./utils";
 
 export function isVariableFieldDefinitionRow(value: unknown): value is Record<string, unknown> & {
@@ -29,6 +33,7 @@ export function variableSuggestionFromStoredFieldDefinitionRow(
   if (!row || row.kind !== "variable" || typeof row.source !== "string") {
     return null;
   }
+  assertCanonicalStoredFieldDefinition(row, "Stored variable FieldDefinition");
 
   const label =
     translateText(row.label as LocalizedText | undefined, lang) ??
@@ -38,6 +43,7 @@ export function variableSuggestionFromStoredFieldDefinitionRow(
   }
 
   const source = row.source.trim();
+  const baseType = storedFieldDefinitionBaseType(row);
   return {
     path: source.replace(/^\{\{\s*([^{}]+?)\s*\}\}$/, "$1"),
     displayPath: source,
@@ -49,17 +55,14 @@ export function variableSuggestionFromStoredFieldDefinitionRow(
     valueType:
       isFieldCardinalityCollection(row.cardinality)
         ? "array"
-        : row.valueType === "number" || row.valueType === "integer"
+        : baseType === "number" || baseType === "integer"
           ? "number"
-          : row.valueType === "boolean"
+          : baseType === "boolean"
             ? "boolean"
-            : row.valueType === "object"
+            : baseType === "object"
               ? "object"
               : "string",
-    fieldType:
-      typeof row.valueType === "string"
-        ? row.valueType as VariableSuggestion["fieldType"]
-        : "string",
+    fieldType: baseType,
     ...(typeof row.osfType === "string" ? { osfType: row.osfType } : {}),
   };
 }
@@ -69,6 +72,7 @@ function normalizeFieldDefinitionEditorRow(
   createEmptyField: () => Field,
 ): unknown {
   if (isVariableFieldDefinitionRow(value)) {
+    assertCanonicalStoredFieldDefinition(value, "Stored variable FieldDefinition");
     const source = typeof value.source === "string" ? value.source : "";
     return {
       ...value,

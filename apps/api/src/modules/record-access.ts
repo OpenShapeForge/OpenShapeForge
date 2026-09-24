@@ -3,11 +3,14 @@ import { operationFailure } from "@openshapeforge/operations";
 import type {
   RuntimeRecordAccessRequest,
   RuntimeRecordAccessServices,
+  RuntimeStoredFieldProjectionRequest,
 } from "@openshapeforge/plugin-runtime";
 import { sql, type Transaction } from "kysely";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { DB } from "../generated/db/types.js";
 import { requireEntityOperation } from "../operations/entity/catalog.js";
+import { redactRow } from "../graphql/generated-authz.js";
+import { fieldNameForColumn } from "../operations/entity/columns.js";
 import { assertRecordPermissionInTransaction } from "../operations/entity/record-permissions.js";
 import {
   getEntityOperationContracts,
@@ -56,6 +59,26 @@ function operationFor(input: RuntimeRecordAccessRequest): EntityOperationContrac
   // entity-only role shape while attached plugin Operations can carry scopes.
   if (operation.implementation?.type !== "entity") return refusal();
   return operation;
+}
+
+function readOperationFor(entityName: string): EntityOperationContract {
+  return operationFor({ entityName, id: "stored-field-projection", intent: "get" });
+}
+
+function projection(value: RuntimeStoredFieldProjectionRequest): RuntimeStoredFieldProjectionRequest {
+  if (
+    !value ||
+    typeof value.entityName !== "string" ||
+    value.entityName.trim() !== value.entityName ||
+    value.entityName.length === 0 ||
+    value.entityName.length > 200 ||
+    !value.fields ||
+    typeof value.fields !== "object" ||
+    Array.isArray(value.fields)
+  ) {
+    throw operationFailure({ code: "VALIDATION", message: "The stored field projection request is invalid.", retryable: false });
+  }
+  return value;
 }
 
 function requireCanonicalRoles(
@@ -120,6 +143,25 @@ export class RecordAccessRuntime {
     ): Promise<T>;
   }) {
     this.services = Object.freeze({
+      projectStoredFields: (
+        session: TrustedSessionContext,
+        rawInput: RuntimeStoredFieldProjectionRequest,
+      ): Readonly<Record<string, unknown>> => {
+        if (!options.acceptsSession(session)) {
+          refusal("Stored field projection requires the live verified session.");
+        }
+        const input = projection(rawInput);
+        const operation = readOperationFor(input.entityName);
+        const table = tableForEntityOperation({ id: operation.id, intent: operation.intent });
+        const columns = new Map(table.columns.map((column) => [fieldNameForColumn(column), column]));
+        const fields = Object.entries(input.fields);
+        if (fields.some(([key]) => !columns.has(key))) {
+          throw operationFailure({ code: "VALIDATION", message: "The stored field projection contains an unknown field.", retryable: false });
+        }
+        const stored = Object.fromEntries(fields.map(([key, value]) => [columns.get(key)!.name, value]));
+        const redacted = redactRow(stored, table.columns, table.source?.authorization, session);
+        return Object.freeze(Object.fromEntries(fields.map(([key]) => [key, redacted[columns.get(key)!.name]])));
+      },
       assertAccess: async (
         session: TrustedSessionContext,
         rawInput: RuntimeRecordAccessRequest,

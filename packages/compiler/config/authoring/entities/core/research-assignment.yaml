@@ -131,6 +131,7 @@ fields:
     osfType: datetime
     required: false
     readOnly: true
+    writeSource: caller
     label:
       en: Completed at
       nl: Afgerond op

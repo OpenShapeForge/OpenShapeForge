@@ -271,6 +271,8 @@ export interface FieldDefinition {
   required?: boolean;
   /** Presentation only; selects the display component instead of the input. */
   readOnly?: boolean;
+  /** Explicitly preserves caller input for a presentation-readOnly field. */
+  writeSource?: "caller";
   /**
    * API contract: settable at create, refused on update by every generated
    * transport. Distinct from `readOnly`, which is a rendering choice (#177).

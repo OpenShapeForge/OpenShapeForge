@@ -81,7 +81,7 @@ describe("realmRoleNames", () => {
       path: "keycloak/openshapeforge-control-realm.json",
       contents: JSON.stringify({
         realm: "openshapeforge-control",
-        roles: { realm: [{ name: "platform-operator" }, { name: "platform_admin" }], client: {} },
+        roles: { realm: [{ name: "platform-operator" }], client: {} },
       }),
     },
   ];

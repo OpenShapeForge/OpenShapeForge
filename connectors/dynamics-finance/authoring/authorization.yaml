@@ -1,0 +1,11 @@
+kind: authorizationPatch
+clientRoles:
+  erp-provider:
+    - Connectors.DynamicsFinance.Read
+clientRoleComposites:
+  erp-provider:
+    Connectors.DynamicsFinance.Write:
+      description: Invoke write operations on the Dynamics 365 Finance connector
+      composites:
+        erp-provider:
+          - Connectors.DynamicsFinance.Read

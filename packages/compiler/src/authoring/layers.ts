@@ -728,7 +728,7 @@ function assertExactWhenPresent(
 function assertLegacyInterfaceOnlyNarrows(
   base: JsonObject,
   merged: JsonObject,
-  interfaceKey: "rest" | "mcp",
+  interfaceKey: "rest",
   origin: string,
 ): void {
   const resolve = (document: JsonObject, operation: (typeof CRUD_OPERATION_KEYS)[number]): boolean => {
@@ -1025,7 +1025,6 @@ function assertEntitySecurityOnlyNarrows(baseValue: JsonValue, mergedValue: Json
   const merged = mergedValue;
 
   assertLegacyInterfaceOnlyNarrows(base, merged, "rest", origin);
-  assertLegacyInterfaceOnlyNarrows(base, merged, "mcp", origin);
   assertRoleMapsOnlyNarrow(
     objectProperty(base, "permissions"),
     objectProperty(merged, "permissions"),

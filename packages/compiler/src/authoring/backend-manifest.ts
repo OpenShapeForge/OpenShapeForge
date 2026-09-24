@@ -24,6 +24,7 @@ import type {
   RelationshipRegisterEntry,
   RetentionAction,
   RetentionDefinition,
+  RetentionDuration,
   RowScopePolicy,
   TableDefinition,
 } from "../schema.js";
@@ -469,6 +470,26 @@ function parseIsoDuration(value: unknown) {
   return Object.keys(result).length === 0 ? undefined : result;
 }
 
+function retentionDurationParts(duration: RetentionDuration): { months: number; days: number } {
+  return { months: (duration.years ?? 0) * 12 + (duration.months ?? 0), days: duration.days ?? 0 };
+}
+
+function assertRetentionDurationOrder(
+  entityName: string,
+  shorterName: string,
+  shorter: RetentionDuration,
+  longerName: string,
+  longer: RetentionDuration,
+): void {
+  const left = retentionDurationParts(shorter);
+  const right = retentionDurationParts(longer);
+  if (left.months <= right.months && left.days <= right.days) return;
+  throw new Error(
+    `Entity "${entityName}" retention ${shorterName} duration must not exceed ${longerName}. ` +
+      "Calendar months and fixed days may only be combined when their ordering is unambiguous.",
+  );
+}
+
 function retentionAction(policy: RetentionPolicy | undefined): RetentionAction {
   const action = policy?.disposition?.action;
   switch (action) {
@@ -485,8 +506,7 @@ function retentionAction(policy: RetentionPolicy | undefined): RetentionAction {
       return "delete";
     // anonymize / mask / cryptoDelete all reduce to the coarse "redact"
     // disposition the runtime manifest carries. The finer authored intent is
-    // recorded on the source contract; it is intentionally not distinguished
-    // here.
+    // preserved separately on the compiled rule.
     case "anonymize":
     case "mask":
     case "cryptoDelete":
@@ -626,20 +646,33 @@ function compileRetention(
     policy = entityRetention;
   }
 
-  const rawDuration =
-    typeof policy?.duration === "string"
-      ? policy.duration
-      : policy?.duration?.default ?? policy?.duration?.minimum ?? policy?.duration?.maximum;
-  const parsedDuration = parseIsoDuration(rawDuration);
-  if (typeof rawDuration === "string" && parsedDuration === undefined) {
-    // An authored duration that fails the strict ISO-8601 parser must fail the
-    // build rather than default to 7 years, which would mask the bad value.
-    throw new Error(
-      `Entity "${entityName}" retention has an unparseable ISO-8601 duration "${rawDuration}". ` +
-        `Use a duration matching the pattern P<n>Y<n>M<n>D (e.g. P7Y).`,
-    );
+  const authoredDurations = typeof policy?.duration === "string"
+    ? { default: policy.duration }
+    : policy?.duration ?? {};
+  const duration = Object.fromEntries(
+    Object.entries(authoredDurations).map(([bound, raw]) => {
+      const parsed = parseIsoDuration(raw);
+      if (!parsed) {
+        throw new Error(
+          `Entity "${entityName}" retention has an unparseable ISO-8601 ${bound} duration ` +
+            `${JSON.stringify(raw)}. Use P<n>Y<n>M<n>D (e.g. P7Y).`,
+        );
+      }
+      return [bound, parsed];
+    }),
+  ) as { minimum?: RetentionDuration; default?: RetentionDuration; maximum?: RetentionDuration };
+  if (Object.keys(duration).length === 0) {
+    throw new Error(`Entity "${entityName}" retention must declare minimum, default, or maximum duration.`);
   }
-  const duration = parsedDuration ?? { years: 7 };
+  if (duration.minimum && duration.default) {
+    assertRetentionDurationOrder(entityName, "minimum", duration.minimum, "default", duration.default);
+  }
+  if (duration.default && duration.maximum) {
+    assertRetentionDurationOrder(entityName, "default", duration.default, "maximum", duration.maximum);
+  }
+  if (duration.minimum && duration.maximum) {
+    assertRetentionDurationOrder(entityName, "minimum", duration.minimum, "maximum", duration.maximum);
+  }
 
   const strategy = entityRetention.startsFrom?.strategy;
   const startFields = [
@@ -700,6 +733,18 @@ function compileRetention(
   const disposition = policy?.disposition?.action;
   const review = retentionReview(policy);
   const legalHold = policy?.holds?.suspendDestruction === true;
+  const activeHoldField = entityRetention.holds?.activeField ?? policy?.holds?.activeField;
+  const activeHoldColumn = activeHoldField ? columnsByField.get(activeHoldField) : undefined;
+  if (activeHoldField && (!activeHoldColumn || activeHoldColumn.type !== "boolean")) {
+    throw new Error(
+      `[${entityName}] retention.holds.activeField "${activeHoldField}" must resolve to a boolean field.`,
+    );
+  }
+  if (activeHoldField && !legalHold) {
+    throw new Error(
+      `[${entityName}] retention.holds.activeField requires suspendDestruction: true.`,
+    );
+  }
   const cryptoDeleteKey = policy?.disposition?.cryptoDelete?.keyReference;
   if (disposition === "cryptoDelete" && (!cryptoDeleteKey || cryptoDeleteKey.trim().length === 0)) {
     throw new Error(
@@ -719,7 +764,7 @@ function compileRetention(
     rules: [
       {
         id: `${snakeCase(candidate.slug)}_retention`,
-        after: duration,
+        duration,
         action: retentionAction(policy),
         // #100: preserve the authored disposition, review gate, and crypto-delete
         // key so a future executor can honor them instead of the coarse action.
@@ -738,7 +783,14 @@ function compileRetention(
     ],
     // #100: a legal hold must suspend all destructive dispositions; carry it so
     // an executor never deletes a record under litigation hold.
-    ...(legalHold ? { legalHold: { suspendDestruction: true } } : {}),
+    ...(legalHold
+      ? {
+          legalHold: {
+            suspendDestruction: true,
+            ...(activeHoldColumn ? { activeColumn: activeHoldColumn.name } : {}),
+          },
+        }
+      : {}),
     source: entityRetention.policy ?? "authoring-entity-retention",
   };
 }
@@ -1241,13 +1293,13 @@ export function compileAuthoringBackendManifest(
       );
     }
     // Same fail-closed reasoning as rest: MCP tools delegate to the generated
-    // CRUD layer, so an mcp: block on an entity that has none is authoring
+    // CRUD layer, so interfaces.mcp on an entity that has none is authoring
     // intent that would silently evaporate.
     if (candidate.contract.mcp && !generatedCrudEligible) {
       throw new Error(
-        `Entity ${describeCandidateOrigin(candidate)} declares an mcp: block but is not ` +
+        `Entity ${describeCandidateOrigin(candidate)} declares interfaces.mcp but is not ` +
           `generated-CRUD enabled${domainInternal ? " (domain-internal)" : ""}. ` +
-          `Add it to the generated CRUD allowlist or remove the mcp: block.`,
+          `Add it to the generated CRUD allowlist or remove interfaces.mcp.`,
       );
     }
     const tenantScoped = candidate.contract.authorization !== undefined;
@@ -1403,6 +1455,9 @@ export function compileAuthoringBackendManifest(
         authoringEntityName: candidate.contract.entity.name,
         authoringEntitySlug: candidate.slug,
         generatedCrudEligibility: generatedCrudEligible ? "explicitly_enabled" : "explicitly_disabled",
+        ...(candidate.contract.hardDelete
+          ? { hardDelete: candidate.contract.hardDelete }
+          : {}),
         crud: { operations: crudOperations },
         ...(() => {
           const secureInput = candidate.contract.entityOperations.create

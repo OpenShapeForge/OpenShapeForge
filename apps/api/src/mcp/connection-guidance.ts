@@ -164,6 +164,10 @@ export type ConnectionProblem =
       kind: "organization_missing";
       adapter: string;
       adapterId: string;
+      /** Stable non-secret identity fields the create Operation requires. */
+      connectionEntity?: string;
+      connectionKey?: string;
+      connectionName?: string;
       createTool: string;
       /** The create tool's argument naming the Adapter (elicit.sourceField). */
       adapterArgument: string;
@@ -204,6 +208,26 @@ const HTTP_BY_KIND: Record<ConnectionProblem["kind"], { status: number; code: st
   reauthorization: { status: 403, code: "REAUTHORIZATION_REQUIRED" },
 };
 
+/** The complete non-secret call an assistant can make before the secure form. */
+export function connectionCreateCall(input: {
+  createTool: string;
+  connectionEntity?: string | undefined;
+  adapterArgument: string;
+  adapterId: string;
+  connectionKey?: string | undefined;
+  connectionName?: string | undefined;
+}): string {
+  const args = [
+    ...(input.createTool === "osf_create" && input.connectionEntity
+      ? [`entity: ${JSON.stringify(input.connectionEntity)}`]
+      : []),
+    ...(input.connectionKey ? [`key: ${JSON.stringify(input.connectionKey)}`] : []),
+    ...(input.connectionName ? [`name: ${JSON.stringify(input.connectionName)}`] : []),
+    `${input.adapterArgument}: ${JSON.stringify(input.adapterId)}`,
+  ];
+  return `${input.createTool} { ${args.join(", ")} }`;
+}
+
 function connectCall(tool: string | null, toolName: string): string {
   return tool ? `${tool} { tool: ${JSON.stringify(toolName)} }` : "the connect tool";
 }
@@ -219,8 +243,8 @@ export function connectionProblemMessage(problem: ConnectionProblem): string {
         return `${state} Ask an organization administrator to set up the ${problem.adapter} connection (${problem.createTool}).`;
       }
       const create =
-        `As an organization administrator, set it up with ${problem.createTool} ` +
-        `{ ${problem.adapterArgument}: ${JSON.stringify(problem.adapterId)} }`;
+        "As an organization administrator, set it up with " +
+        connectionCreateCall(problem);
       const browser = problem.configurationUrl
         ? `, or open ${problem.configurationUrl} in a browser and enter the values there` +
           (problem.expiresAt ? ` (link valid until ${problem.expiresAt})` : "") +

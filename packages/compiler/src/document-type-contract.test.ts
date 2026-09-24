@@ -13,6 +13,7 @@ test("managed document type operations preserve read access and separate deletio
   expect(contract.authorization.roles.create).toEqual(["CaseFile.All.ReadWrite"]);
   expect(contract.authorization.roles.update).toEqual(["CaseFile.All.ReadWrite"]);
   expect(contract.authorization.roles.delete).toEqual(["DocumentTypes.All.Delete"]);
+  expect(contract.hardDelete).toEqual({ requireNeverPublished: true });
   expect(Object.keys(contract.entityOperations).sort()).toEqual(["create", "delete", "get", "list", "update"]);
   const defaults = Object.fromEntries(contract.model.fields.map(field => [field.key, field.defaultValue]));
   expect(defaults.requiresRegistration).toBe(true);
@@ -24,6 +25,14 @@ test("managed document type operations preserve read access and separate deletio
   expect(web.views.record?.routes.create).toBe("/document-types/new");
   expect(web.operations.create).toBeDefined();
   expect(web.operations.delete).toBeDefined();
+  expect(contract.entityOperations.delete).toMatchObject({
+    authorization: { roles: ["DocumentTypes.All.Delete"] },
+    concurrency: { version: { mode: "required", field: "updatedAt" } },
+    interaction: { confirmation: { mode: "acknowledgement" } },
+  });
+  const version = compile.entities.find(entity => entity.contract.entity.name === "DocumentTypeVersion")!.contract;
+  expect(version.entityOperations.delete).toBeUndefined();
+  expect(version.authorization.roles.delete).toEqual([]);
   const document = buildWebManifest(compile.entities).entities.Document!;
   expect(document.fields.documentType!.optionSource).toEqual({
     type: "entity", source: "DocumentType", valueField: "code",

@@ -18,6 +18,8 @@ import { controlSessionFor, type ControlSessionContext } from "../../control/con
 import type { ControlRuntime } from "../../control/runtime.js";
 import { controlOperationContracts } from "../../control/__tests__/control-operation-fixtures.js";
 import type { DB } from "../../generated/db/types.js";
+import type { RuntimeModule } from "../../modules/contract.js";
+import type { OperationContract } from "../../operations/runtime.js";
 import { PLATFORM_GUIDE, PLATFORM_SESSION_RESOURCE_URI } from "../../control/platform-tools.js";
 import { __buildPlatformServerForTests } from "../control-mcp-server.js";
 
@@ -46,12 +48,21 @@ const runtime: ControlRuntime = {
   operations: controlOperationContracts(),
 };
 
-async function connect(session: ControlSessionContext) {
+async function connect(
+  session: ControlSessionContext,
+  options: {
+    operations?: readonly OperationContract[];
+    modules?: readonly RuntimeModule[];
+    currentSession?: () => ControlSessionContext;
+  } = {},
+) {
   const server = __buildPlatformServerForTests({
     context: { db, control: runtime },
     session,
-    operations: controlOperationContracts(),
+    operations: options.operations ?? controlOperationContracts(),
+    modules: options.modules ?? [],
     client: { name: "Claude Code", version: "2.1.0", capabilities: [] },
+    currentSession: options.currentSession,
   });
   const client = new Client({ name: "control-mcp-test", version: "1" }, { capabilities: {} });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -62,26 +73,42 @@ async function connect(session: ControlSessionContext) {
 
 const contracts = controlOperationContracts();
 const mcpName = (handler: string) => contracts.find((c) => c.handler === handler)!.transports.mcp.name!;
-const rolesOf = (handler: string) => {
-  const auth = contracts.find((c) => c.handler === handler)!.auth;
-  return auth.mode === "control" ? auth.roles : [];
-};
 
 describe("the control MCP tool list", () => {
-  test("a platform_admin-only session sees shared reads and administrator tools, with the confirmed field where declared", async () => {
-    const { client, close } = await connect(controlSessionFor(administrator, ["platform_admin"]));
+  test("uses the current request's single control role without reinitializing the transport", async () => {
+    const established = controlSessionFor(administrator, ["platform-operator"]);
+    let current = established;
+    const { client, close } = await connect(established, { currentSession: () => current });
+    try {
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("list_catalog_entries");
+      current = controlSessionFor(administrator, ["unrelated-role"]);
+      const refreshed = (await client.listTools()).tools.map((tool) => tool.name);
+      expect(refreshed).toHaveLength(0);
+      expect(refreshed).not.toContain("list_catalog_entries");
+      const refused = await client.callTool({ name: "list_catalog_entries", arguments: {} });
+      expect(refused.isError).toBe(true);
+      expect(refused.structuredContent).toMatchObject({ error: { code: "NOT_FOUND" } });
+    } finally {
+      await close();
+    }
+  });
+
+  test("platform-operator sees every control tool, with confirmation where declared", async () => {
+    const { client, close } = await connect(controlSessionFor(administrator, ["platform-operator"]));
     try {
       const listed = await client.listTools();
       expect(listed.tools.map((tool) => tool.name).sort()).toEqual(
-        contracts
-          .filter((contract) => rolesOf(contract.handler).includes("platform_admin"))
-          .map((contract) => contract.transports.mcp.name!)
-          .sort(),
+        contracts.map((contract) => contract.transports.mcp.name!).sort(),
       );
+      expect(contracts.every((contract) =>
+        contract.auth.mode === "control" &&
+        contract.auth.roles.length === 1 &&
+        contract.auth.roles[0] === "platform-operator"
+      )).toBe(true);
       const retireCatalogEntry = listed.tools.find((tool) => tool.name === "retire_catalog_entry")!;
       expect(retireCatalogEntry.inputSchema.properties).toHaveProperty("confirmed");
       expect((retireCatalogEntry.inputSchema as { required?: string[] }).required).toEqual(["kind", "key"]);
-      expect(listed.tools.map((tool) => tool.name)).not.toContain("update_tenant");
+      expect(listed.tools.map((tool) => tool.name)).toContain("update_tenant");
       expect(listed.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
         "list_tenant_invitations",
         "revoke_tenant_invitation",
@@ -99,21 +126,58 @@ describe("the control MCP tool list", () => {
     }
   });
 
-  test("a platform-operator-only session sees the tenant lifecycle and not the catalog", async () => {
-    const { client, close } = await connect(controlSessionFor(administrator, ["platform-operator"]));
+  test("includes a loaded plugin's control Operation without exposing tenant Operations", async () => {
+    const base = contracts.find((contract) => contract.handler === "listTenants")!;
+    const pluginControl: OperationContract = {
+      ...base,
+      key: "example-admin.seed-tenant",
+      plugin: "example-admin",
+      title: "Seed tenant",
+      description: "Seeds one tenant.",
+      handler: "seedTenant",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: { slug: { type: "string" } },
+        required: ["slug"],
+      },
+      outputSchema: { type: "object", additionalProperties: true },
+      transports: {
+        ...base.transports,
+        rest: { method: "POST", path: "/api/example/tenants/:slug/seed", response: { status: 200, kind: "json" } },
+        mcp: { enabled: true, name: "seed_tenant" },
+        typescript: { enabled: true, functionName: "exampleAdminSeedTenant" },
+      },
+    };
+    const tenantOperation: OperationContract = {
+      ...pluginControl,
+      key: "example-admin.tenant-only",
+      handler: "tenantOnly",
+      auth: { mode: "session", roles: ["employee"] },
+      tenancy: { mode: "required" },
+      transports: { ...pluginControl.transports, mcp: { enabled: true, name: "tenant_only" } },
+    };
+    const module: RuntimeModule = {
+      name: "example-admin",
+      operationHandlers: {
+        seedTenant: async (input) => ({
+          value: { tenantSlug: (input as Record<string, unknown>).slug },
+          status: 200,
+        }),
+        tenantOnly: async () => ({ value: { exposed: true }, status: 200 }),
+      },
+    };
+    const { client, close } = await connect(
+      controlSessionFor(administrator, ["platform-operator"]),
+      { operations: [...contracts, pluginControl, tenantOperation], modules: [module] },
+    );
     try {
-      const names = (await client.listTools()).tools.map((tool) => tool.name).sort();
-      expect(names).toEqual(
-        contracts
-          .filter((contract) => rolesOf(contract.handler).includes("platform-operator"))
-          .map((contract) => contract.transports.mcp.name!)
-          .sort(),
-      );
-      expect(names).toContain("create_tenant");
-      expect(names).toContain("whoami");
-      expect(names).not.toContain("list_catalog_entries");
-      expect(names).not.toContain("publish_update_notice");
-      expect(names).not.toContain("list_platform_audit");
+      const names = (await client.listTools()).tools.map((tool) => tool.name);
+      expect(names).toContain("seed_tenant");
+      expect(names).not.toContain("tenant_only");
+      const result = await client.callTool({ name: "seed_tenant", arguments: { slug: "acme" } });
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toEqual({ tenantSlug: "acme" });
     } finally {
       await close();
     }
@@ -122,7 +186,7 @@ describe("the control MCP tool list", () => {
 
 describe("calling a control tool", () => {
   test("lists and dispatches invitation administration from the same session registry", async () => {
-    const { client, close } = await connect(controlSessionFor(administrator, ["platform_admin"]));
+    const { client, close } = await connect(controlSessionFor(administrator, ["platform-operator"]));
     try {
       const names = (await client.listTools()).tools.map((tool) => tool.name);
       expect(names).toContain("list_tenant_invitations");
@@ -165,15 +229,18 @@ describe("calling a control tool", () => {
     }
   });
 
-  test("refuses an unknown or unauthorized tool as NOT_FOUND and answers declared refusals as tool results", async () => {
+  test("refuses an unknown tool as NOT_FOUND and answers declared refusals as tool results", async () => {
     const { client, close } = await connect(controlSessionFor(administrator, ["platform-operator"]));
     try {
-      for (const name of ["finding_list", "list_catalog_entries"]) {
-        const refused = await client.callTool({ name, arguments: {} });
-        expect(refused.isError).toBe(true);
-        expect(refused.structuredContent).toMatchObject({ error: { code: "NOT_FOUND" } });
-        expect(JSON.stringify(refused)).not.toContain("publish_catalog_entry");
-      }
+      const refused = await client.callTool({ name: "finding_list", arguments: {} });
+      expect(refused.isError).toBe(true);
+      expect(refused.structuredContent).toMatchObject({ error: { code: "NOT_FOUND" } });
+      expect(JSON.stringify(refused)).not.toContain("publish_catalog_entry");
+      const unavailableCatalog = await client.callTool({ name: "list_catalog_entries", arguments: {} });
+      expect(unavailableCatalog.isError).toBe(true);
+      expect(unavailableCatalog.structuredContent).toMatchObject({
+        error: { code: "CONFLICT", detail: "PLATFORM_CATALOG_UNAVAILABLE" },
+      });
       // Schema before anything else: an argument the Operation does not declare.
       const unknownArgument = await client.callTool({ name: "list_tenants", arguments: { tenantId: "x" } });
       expect(unknownArgument.isError).toBe(true);

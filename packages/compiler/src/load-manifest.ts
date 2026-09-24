@@ -213,7 +213,13 @@ function loadRetentionLegalHold(
   if (typeof value.suspendDestruction !== "boolean") {
     throw new Error(`${label}.suspendDestruction must be a boolean.`);
   }
-  return { suspendDestruction: value.suspendDestruction };
+  if (value.activeColumn !== undefined && typeof value.activeColumn !== "string") {
+    throw new Error(`${label}.activeColumn must be text.`);
+  }
+  return {
+    suspendDestruction: value.suspendDestruction,
+    ...(value.activeColumn === undefined ? {} : { activeColumn: value.activeColumn }),
+  };
 }
 
 function loadRetentionErasure(
@@ -337,9 +343,23 @@ function loadRetention(
     if (rule.disposition !== undefined && typeof rule.disposition !== "string") {
       throw new Error(`${label}.rules[${index}].disposition must be text.`);
     }
+    if (!isRecord(rule.duration)) {
+      throw new Error(`${label}.rules[${index}].duration must be an object.`);
+    }
+    const authoredDuration = rule.duration;
+    const duration = Object.fromEntries(
+      (["minimum", "default", "maximum"] as const).flatMap((bound) =>
+        authoredDuration[bound] === undefined
+          ? []
+          : [[bound, loadRetentionDuration(authoredDuration[bound], `${label}.rules[${index}].duration.${bound}`)]],
+      ),
+    );
+    if (Object.keys(duration).length === 0) {
+      throw new Error(`${label}.rules[${index}].duration must include minimum, default, or maximum.`);
+    }
     return {
       id: rule.id,
-      after: loadRetentionDuration(rule.after, `${label}.rules[${index}].after`),
+      duration,
       action: rule.action as RetentionAction,
       ...(rule.disposition === undefined
         ? {}
@@ -355,6 +375,12 @@ function loadRetention(
   }
 
   const legalHold = loadRetentionLegalHold(value.legalHold, `${label}.legalHold`);
+  if (legalHold?.activeColumn) {
+    assertIdentifier(legalHold.activeColumn, `${label}.legalHold.activeColumn`);
+    if (columnsByName.get(legalHold.activeColumn) !== "boolean") {
+      throw new Error(`${label}.legalHold.activeColumn must reference a boolean column.`);
+    }
+  }
   const erasure = loadRetentionErasure(value.erasure, `${label}.erasure`);
 
   return {

@@ -62,12 +62,45 @@ export async function applyEmployeeInvitationsMigration(db: OpenShapeForgeDataba
     alter table platform.employee_invitations force row level security;
 
     drop policy if exists employee_invitations_tenant_isolation on platform.employee_invitations;
-    create policy employee_invitations_tenant_isolation on platform.employee_invitations
+    drop policy if exists employee_invitations_insertable on platform.employee_invitations;
+    drop policy if exists employee_invitations_updatable on platform.employee_invitations;
+    drop policy if exists employee_invitations_deletable on platform.employee_invitations;
+    create policy employee_invitations_tenant_isolation on platform.employee_invitations for select
       using (
         app.bypass_rls()
         or tenant_id = app.current_tenant()
+      );
+    create policy employee_invitations_insertable on platform.employee_invitations for insert
+      with check (
+        app.bypass_rls()
+        or (
+          tenant_id = app.current_tenant()
+          and ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
+            string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
+          )
+        )
+      );
+    create policy employee_invitations_updatable on platform.employee_invitations for update
+      using (
+        app.bypass_rls()
+        or (
+          tenant_id = app.current_tenant()
+          and ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
+            string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
+          )
+        )
       )
       with check (
+        app.bypass_rls()
+        or (
+          tenant_id = app.current_tenant()
+          and ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
+            string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
+          )
+        )
+      );
+    create policy employee_invitations_deletable on platform.employee_invitations for delete
+      using (
         app.bypass_rls()
         or (
           tenant_id = app.current_tenant()

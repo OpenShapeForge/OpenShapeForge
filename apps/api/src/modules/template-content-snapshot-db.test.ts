@@ -56,7 +56,10 @@ const authorizations: string[] = [];
 /** A platform whose database and schema services are the real generated ones; reads go to the real rows. */
 function context(): ModuleOperationContext {
   const platform = {
-    records: { async assertAccess(_session: unknown, request: { entityName: string; id: string }) { authorizations.push(`${request.entityName}:${request.id}`); } },
+    records: {
+      async assertAccess(_session: unknown, request: { entityName: string; id: string }) { authorizations.push(`${request.entityName}:${request.id}`); },
+      projectStoredFields(_session: unknown, request: { fields: Record<string, unknown> }) { return request.fields; },
+    },
     schemas: { fields: generatedRuntimeFieldSchemas, json: runtimeJsonSchemas, entityValues: generatedEntityValues, versioning: generatedVersioning },
     db: { withSession: (actor: typeof session, work: (trx: unknown) => Promise<unknown>) => withDbSession(restricted.db, actor, (trx) => work(trx)) },
     operations: {

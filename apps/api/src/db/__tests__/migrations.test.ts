@@ -410,10 +410,10 @@ describe("generated schema migration", () => {
         await withDb(url, async (db) => {
           // A leftover of another repository's plugin in a manifest-covered
           // schema, and a stray column on a declared table.
-          await sql`create table platform.preference_definitions (id uuid primary key)`.execute(db);
+          await sql`create table platform.retired_plugin_data (id uuid primary key)`.execute(db);
           await sql`alter table erp.relations add column legacy_extra text`.execute(db);
           expect(await findUndeclaredDatabaseSchema(db)).toEqual({
-            tables: ["platform.preference_definitions"],
+            tables: ["platform.retired_plugin_data"],
             columns: ["erp.relations.legacy_extra"],
           });
         });

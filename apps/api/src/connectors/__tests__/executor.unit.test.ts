@@ -21,7 +21,7 @@ const OPERATION: ConnectorOperationContract = {
     resultType: "ObjectStoreListObjectsResult",
   },
   rest: { method: "GET", path: "list-objects" },
-  roles: { invoke: ["Connectors.All.Read"] },
+  roles: { invoke: ["Connectors.ExampleObjectStore.Read"] },
   schemas: {
     input: {
       type: "object",

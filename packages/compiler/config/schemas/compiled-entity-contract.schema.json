@@ -306,6 +306,14 @@
         }
       }
     },
+    "hardDelete": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requireNeverPublished"],
+      "properties": {
+        "requireNeverPublished": { "type": "boolean", "const": true }
+      }
+    },
     "authorization": {
       "type": "object",
       "description": "Compiled RBAC authorization metadata."

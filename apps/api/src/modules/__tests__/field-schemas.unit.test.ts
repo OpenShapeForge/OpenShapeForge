@@ -150,6 +150,21 @@ test("the host validates stored fields before using its active schema registry",
     { key: "code", osfType: "string" },
     { key: "code", osfType: "string" },
   ])).toThrow(/key "code" is duplicated/);
+
+  for (const legacy of [
+    { key: "legacy", osfType: "string", valueType: "string" },
+    { key: "legacy", osfType: "string", semanticType: "email" },
+  ]) {
+    expect(() => compiler.object([legacy])).toThrow(/removed legacy key/);
+  }
+  expect(() => compiler.object([{
+    key: "group",
+    osfType: "object",
+    children: [{ key: "legacy", osfType: "string", valueType: "string" }],
+  }])).toThrow(/children\[0\].*removed legacy key/);
+
+  expect(compiler.object([{ key: "canonical", osfType: "string" }]))
+    .toMatchObject({ type: "object", properties: { canonical: { type: "string" } } });
 });
 
 test("a stored definition resolves its base type through the generated registry; an unknown osfType is refused", () => {
@@ -158,4 +173,8 @@ test("a stored definition resolves its base type through the generated registry;
   expect(storedFieldBaseType({ key: "email", osfType: "email" })).toBe("string");
   expect(() => storedFieldBaseType({ key: "account", osfType: "Acount" })).toThrow("account: unknown osfType Acount.");
   expect(() => storedFieldBaseType({})).toThrow("unknown osfType");
+  expect(() => storedFieldBaseType({ key: "legacy", osfType: "string", valueType: "string" }))
+    .toThrow('removed legacy key "valueType"');
+  expect(() => storedFieldBaseType({ key: "legacy", osfType: "string", semanticType: "email" }))
+    .toThrow('removed legacy key "semanticType"');
 });

@@ -13,7 +13,7 @@ import { getGeneratedCrudTables, projectGeneratedEntityRow } from "./catalog.js"
 import { decimalText } from "@openshapeforge/operations";
 import { fieldNameForColumn } from "./columns.js";
 import { assertCreateRecordPermissions } from "./record-permissions.js";
-import { assertNoOperationWrittenValues } from "./write-policy.js";
+import { assertNoForeignOperationWrittenValues } from "./write-policy.js";
 import type { EntityOperationContract, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
 
 type Executor = (
@@ -159,7 +159,9 @@ export function createEntityPluginExecutor(options: {
     // The write policy speaks before the plugin's own contract, on every
     // interface: a field an Operation writes is refused as such, naming the
     // Operation to call, not as a property the authored input does not know.
-    if (entityOperation.intent !== "delete") assertNoOperationWrittenValues(table, input);
+    if (entityOperation.intent !== "delete") {
+      assertNoForeignOperationWrittenValues(table, input, entityOperation.id);
+    }
     let result: Awaited<ReturnType<typeof invokeOperation>>;
     try {
       result = await invokeOperation(

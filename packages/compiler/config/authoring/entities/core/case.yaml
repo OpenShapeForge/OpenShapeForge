@@ -368,6 +368,7 @@ fields:
     osfType: datetime
     required: false
     readOnly: true
+    writeSource: caller
     label:
       en: Closed at
       nl: Gesloten op
@@ -421,6 +422,7 @@ fields:
   - key: aiSummary
     required: false
     readOnly: true
+    writeSource: caller
     label:
       en: AI summary
       nl: AI-samenvatting

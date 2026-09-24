@@ -4,11 +4,8 @@
  */
 import {
   connectHelperTool,
-  discoveryToolDefinition,
   dryRunHelperTool,
-  guideToolDefinition,
   personalizationHelperTool,
-  testToolDefinition,
   uploadToolDefinition,
 } from "@openshapeforge/operations";
 import { GENERIC_DESCRIBE_TOOL_NAME } from "@openshapeforge/operations";
@@ -30,11 +27,6 @@ import { SESSION_INFO_TOOL, SESSION_INFO_TOOL_NAME } from "./session-info.js";
 import { searchableOperationTools } from "./operation-search.js";
 import { type ProjectedRuntimeOperationTool, catalog, catalogDerivedTools } from "./catalog.js";
 import { projectRuntimeOperationTool } from "./catalog-rows.js";
-import {
-  discoveryToolsForSession,
-  guideToolsForSession,
-  testToolsForSession,
-} from "./session-projection.js";
 import { derivedToolsForSession } from "./derived-session-tools.js";
 import { operationMayInvoke, projectCatalogOperationTool } from "./entity-tool-invocation.js";
 import { crudToolsForSession } from "./generic-tool-projection.js";
@@ -141,13 +133,6 @@ export function createToolListing(scope: ServerScope) {
       // ---- update notices (mcp/update-notices.ts) ----
       ...updateToolsForSession(session),
       // ---- end update notices ----
-      ...guideToolsForSession(session).map((tool) => guideToolDefinition(tool.name, tool.description)),
-      ...discoveryToolsForSession(session, tables).map((tool) =>
-        discoveryToolDefinition(tool.name, tool.description, tool.entity),
-      ),
-      ...testToolsForSession(session, tables).map((tool) =>
-        testToolDefinition(tool.name, tool.description, tool.entity),
-      ),
       // Derived tools: definition rows projected per session and per tenant.
       ...(await derivedToolsForSession(db, session, tables, locale)).map((tool) => ({
         name: tool.name,

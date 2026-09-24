@@ -1037,7 +1037,7 @@ describe("platform schema generator", () => {
             rules: [
               {
                 id: "delete_closed_cases_after_7_years",
-                after: { years: 7 },
+                duration: { default: { years: 7 } },
                 action: "delete",
                 reason: "Reference assumption pending migrated compiler catalog policy.",
               },
@@ -1057,7 +1057,7 @@ describe("platform schema generator", () => {
         name: string;
         retention?: {
           clock: { column: string; fallbackColumns?: string[] };
-          rules: Array<{ id: string; after: { years: number }; action: string }>;
+          rules: Array<{ id: string; duration: { default: { years: number } }; action: string }>;
         };
       }>;
     };
@@ -1074,7 +1074,7 @@ describe("platform schema generator", () => {
           rules: [
             expect.objectContaining({
               id: "delete_closed_cases_after_7_years",
-              after: { years: 7 },
+              duration: { default: { years: 7 } },
               action: "delete",
             }),
           ],
@@ -1235,7 +1235,7 @@ tables:
     retention:
       clock: { column: closed_at, fallbackColumns: [created_at] }
       rules:
-        - { id: delete_after_7_years, after: { years: 7 }, action: delete }
+        - { id: delete_after_7_years, duration: { default: { years: 7 } }, action: delete }
 `,
       "utf8",
     );
@@ -1266,7 +1266,7 @@ tables:
     retention:
       clock: { column: status, fallbackColumns: [created_at] }
       rules:
-        - { id: delete_after_2_years, after: { years: 2 }, action: delete }
+        - { id: delete_after_2_years, duration: { default: { years: 2 } }, action: delete }
 `,
       "utf8",
     );
@@ -1297,7 +1297,7 @@ tables:
     retention:
       clock: { column: closed_at, fallbackColumns: [status] }
       rules:
-        - { id: delete_after_7_years, after: { years: 7 }, action: delete }
+        - { id: delete_after_7_years, duration: { default: { years: 7 } }, action: delete }
 `,
       "utf8",
     );
@@ -1327,7 +1327,7 @@ tables:
     retention:
       clock: { column: contract_end_date }
       rules:
-        - { id: delete_after_7_years, after: { years: 7 }, action: delete }
+        - { id: delete_after_7_years, duration: { default: { years: 7 } }, action: delete }
 `,
       "utf8",
     );
@@ -1366,7 +1366,7 @@ tables:
       clock: { column: closed_at }
       rules:
         - id: crypto_erase_after_7_years
-          after: { years: 7 }
+          duration: { default: { years: 7 } }
           action: redact
           disposition: cryptoDelete
           review: { required: true, queue: privacy-review }

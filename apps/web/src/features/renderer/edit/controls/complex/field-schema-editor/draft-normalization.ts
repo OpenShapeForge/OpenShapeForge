@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { Field, LocalizedText } from "@/generated/compiler/field-contract";
 import { fieldValueType } from "@/lib/field-contract/field-v2";
+import { assertCanonicalStoredFieldDefinition } from "@/lib/field-contract/stored-field-definition";
 import type { FieldAuthoringProfile, FieldWithAuthoringMetadata } from "@/lib/field-authoring/profiles";
 import { EMPTY_SELECT_VALUE } from "./constants";
 import {
@@ -163,6 +164,7 @@ export function normalizeFieldSchemaDraft(
   value: unknown,
   createEmptyField: () => Field,
 ): Field {
+  assertCanonicalStoredFieldDefinition(value);
   const field = value && typeof value === "object" && !Array.isArray(value)
     ? (value as Field)
     : createEmptyField();

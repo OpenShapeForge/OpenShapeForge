@@ -40,6 +40,7 @@ fields:
   - key: processId
     required: true
     readOnly: true
+    writeSource: caller
     label:
       en: Case step ID
       nl: Zaakstap-ID

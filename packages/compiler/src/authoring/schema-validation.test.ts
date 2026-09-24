@@ -55,11 +55,16 @@ function connectorDefinition(
       provenance: "firstParty",
       license: { spdx: "LicenseRef-BatterAI-Commercial" },
     },
+    authorization: {
+      roles: {
+        read: "Connectors.ObjectStore.Read",
+        write: "Connectors.ObjectStore.Write",
+      },
+    },
     operations: [
       {
         key: "listObjects",
         kind: "query",
-        authorization: { roles: { invoke: ["Connectors.All.Read"] } },
         input: [{ key: "prefix", osfType: "string" }],
         output: { cardinality: "many", fields: [{ key: "key", osfType: "string" }] },
       },
@@ -289,6 +294,19 @@ describe("connector contracts are validated at LOAD, not only in the corpus gate
     expect(loadFromDisk(definition)).toThrow(/connector\.schema\.json/);
   });
 
+  it("requires connector-level permissions and rejects the retired per-operation shape", () => {
+    const missing = { ...connectorDefinition() } as Record<string, unknown>;
+    delete missing.authorization;
+    expect(loadFromDisk(missing)).toThrow(/authorization/);
+
+    const legacy = connectorDefinition() as unknown as Record<string, unknown>;
+    const operations = legacy.operations as Array<Record<string, unknown>>;
+    operations[0]!.authorization = {
+      roles: { invoke: ["Connectors.ExampleObjectStore.Read"] },
+    };
+    expect(loadFromDisk(legacy)).toThrow(/authorization/);
+  });
+
   it("names the offending path", () => {
     const definition = connectorDefinition({
       operations: [
@@ -321,7 +339,6 @@ describe("connector contracts are validated at LOAD, not only in the corpus gate
         {
           key: "list`Objects",
           kind: "query",
-          authorization: { roles: { invoke: ["Connectors.All.Read"] } },
           output: { cardinality: "many", fields: [{ key: "key", osfType: "string" }] },
         },
       ],
@@ -347,7 +364,6 @@ describe("schema and compiler agree", () => {
           {
             key: "listObjects",
             kind: "query",
-            authorization: { roles: { invoke: ["Connectors.All.Read"] } },
             output: { cardinality: "many", fields: [{ key: "key", osfType: "string" }] },
             reliability: { timeouts: { attemptMs: 10_000, totalMs: 30_000 } },
           },
@@ -361,7 +377,6 @@ describe("schema and compiler agree", () => {
           {
             key: "putObject",
             kind: "mutation",
-            authorization: { roles: { invoke: ["Connectors.All.ReadWrite"] } },
             input: [{ key: "requestId", osfType: "string" }],
             output: { cardinality: "one", fields: [{ key: "key", osfType: "string" }] },
             reliability: {
@@ -495,6 +510,9 @@ describe("coreEntity properties the compiler implements", () => {
     // editor must not treat as free text.
     const isChoiceSite = (schema: Record<string, unknown>, path: string) => {
       if (path.includes("variableSources")) return false;
+      // A fixed enum is already a complete local choice list; x-osf-choice is
+      // only for choices an editor must resolve from entity or host metadata.
+      if (Array.isArray(schema.enum)) return false;
       if (schema.$ref === "#/$defs/fieldKey" || schema.$ref === "#/$defs/webRendererKeyV2") return true;
       // The last path element: an item of `actions` is `actions[]`, a map key is `<key>`.
       const name = path.match(/(?:^|[.>|])([^.>|]+)$/)?.[1] ?? "";
@@ -857,6 +875,24 @@ describe("coreEntity properties the compiler implements", () => {
       },
     });
     expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/tools/);
+  });
+
+  it("rejects the removed parallel entity-level MCP contract", () => {
+    const base = coreEntity({
+      schemaVersion: 3,
+      operations: { list: v2Operation("list") },
+      interfaces: { mcp: {} },
+    });
+    expect(() => validator.validate({ ...base, mcp: { enabled: true } }, "legacy.yaml"))
+      .toThrow(/mcp|additional/);
+    expect(() => validator.validate({
+      ...base,
+      interfaces: { mcp: { toolPrefix: "legacy" } },
+    }, "legacy.yaml")).toThrow(/toolPrefix|additional/);
+    expect(() => validator.validate({
+      ...base,
+      interfaces: { mcp: { derivedTools: {} } },
+    }, "legacy.yaml")).toThrow(/derivedTools|additional/);
   });
 
   it("accepts only the canonical server-issued, version-bound challenge shape", () => {

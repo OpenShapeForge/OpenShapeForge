@@ -2,6 +2,49 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 
+type FreshContextScope<T> = { active: boolean; value: T };
+
+/**
+ * Request-scoped state for a long-lived transport. `inactive` must carry no
+ * authority: async work retained past the authenticated request can still see
+ * the ALS store, but never the request's roles or other authorization state.
+ */
+export function createRequestFreshContext<T extends object>(inactive: T): {
+  current: () => T;
+  view: T;
+  run: <R>(current: T, work: () => Promise<R> | R) => Promise<R>;
+} {
+  const storage = new AsyncLocalStorage<FreshContextScope<T>>();
+  const current = (): T => {
+    const scope = storage.getStore();
+    return scope?.active ? scope.value : inactive;
+  };
+  // Callers retain this stable object, never a request's raw session. Property
+  // reads remain request-fresh, including from a callback created during the
+  // request but resumed after it has settled.
+  const view = new Proxy(inactive, {
+    get: (_target, property, receiver) => Reflect.get(current(), property, receiver),
+    has: (_target, property) => Reflect.has(current(), property),
+    ownKeys: () => Reflect.ownKeys(current()),
+    getOwnPropertyDescriptor: (_target, property) =>
+      Reflect.getOwnPropertyDescriptor(current(), property),
+  });
+  return {
+    current,
+    view,
+    run: async <R>(current: T, work: () => Promise<R> | R): Promise<R> => {
+      const scope: FreshContextScope<T> = { active: true, value: current };
+      return storage.run(scope, async () => {
+        try {
+          return await work();
+        } finally {
+          scope.active = false;
+        }
+      });
+    },
+  };
+}
+
 export type StatefulMcpAuthorization = Pick<
   TrustedSessionContext,
   | "tenantId"

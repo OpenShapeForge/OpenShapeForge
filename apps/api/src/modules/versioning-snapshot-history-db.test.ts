@@ -40,7 +40,7 @@ describe("published snapshots against PostgreSQL", () => {
     expect(stored.map((row) => row.version_number)).toEqual([1]);
 
     // Content that does change is a new version with a different hash; the first version is not embedded in it.
-    await sql`update erp.blocks set "values" = '{"text":"Changed"}'::jsonb where id = ${ids.second}::uuid`.execute(privileged());
+    await sql`update erp.blocks set "values" = '{"markdown":"Changed"}'::jsonb where id = ${ids.second}::uuid`.execute(privileged());
     await publishTemplate(context, ids.template);
     stored = await versions(ids.template);
     expect(stored.map((row) => row.version_number)).toEqual([1, 2]);
@@ -51,7 +51,7 @@ describe("published snapshots against PostgreSQL", () => {
     expect(stored[1]!.content_hash).not.toBe(stored[0]!.content_hash);
 
     // Identical content republished hashes the same as the first version again, as a third row (the latest differs).
-    await sql`update erp.blocks set "values" = '{"text":"Second"}'::jsonb where id = ${ids.second}::uuid`.execute(privileged());
+    await sql`update erp.blocks set "values" = '{"markdown":"Second"}'::jsonb where id = ${ids.second}::uuid`.execute(privileged());
     await publishTemplate(context, ids.template);
     const hashes = (await versions(ids.template)).map((row) => row.content_hash);
     expect(hashes).toHaveLength(3);

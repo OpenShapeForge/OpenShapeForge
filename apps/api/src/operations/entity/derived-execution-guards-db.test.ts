@@ -24,7 +24,7 @@ import { updateGeneratedEntityForTable } from "./mutations.js";
 import type { EntityOperationContract, GeneratedCrudColumn, GeneratedCrudTable } from "./types.js";
 
 const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ??
-  "postgres://openshapeforge:openshapeforge@127.0.0.1:5435/postgres";
+  "postgres://openshapeforge:openshapeforge@127.0.0.1:5434/postgres";
 const scratchName = `exec_bind_guard_${randomUUID().replaceAll("-", "")}`;
 let admin: SQL | undefined, privileged: DatabaseRuntime | undefined, restricted: DatabaseRuntime | undefined;
 let created = false;

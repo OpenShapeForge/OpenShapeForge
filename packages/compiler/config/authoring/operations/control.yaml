@@ -5,9 +5,9 @@
 # core `osf-control` runtime module, projected to REST (the web talks here),
 # to MCP (`/admin/mcp`, the assistant talks here) and to web pages. Every
 # operation is `auth.mode: control`: the bearer is verified against the
-# platform's control realm and must hold one of the listed realm roles;
-# `platform_admin` holds the catalog, `platform-operator` the tenant
-# lifecycle, and both may see the registry. No tenant context ever exists.
+# platform's control realm and must hold the single listed realm role.
+# `platform-operator` authorizes the complete control catalog. No tenant
+# context ever exists.
 #
 # Confirmation `acknowledgement` marks the operations whose blast radius is a
 # tenant's access or every tenant at once: a caller passes `confirmed: true`
@@ -66,7 +66,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none
@@ -135,7 +134,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none
@@ -286,7 +284,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none
@@ -332,7 +329,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none
@@ -506,7 +502,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none
@@ -670,7 +665,7 @@ operations:
           invitations:
             type: array
             x-osf-i18n: { title: { en: Invitations, nl: Uitnodigingen } }
-            items:
+            items: &tenantInvitationOutput
               type: object
               additionalProperties: false
               properties:
@@ -709,7 +704,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none
@@ -736,8 +730,8 @@ operations:
           slug: *id005
           invitationId: { type: string, pattern: '^[a-zA-Z0-9_-]{1,128}$', x-osf-i18n: { title: { en: Invitation ID, nl: Uitnodigings-ID } } }
         required: [slug, invitationId]
-    output: { schema: { type: object, additionalProperties: true } }
-    auth: { mode: control, roles: [platform_admin, platform-operator] }
+    output: { schema: *tenantInvitationOutput }
+    auth: { mode: control, roles: [platform-operator] }
     tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
     effects: { data: read, external: read }
     reliability: { idempotency: { mode: natural } }
@@ -803,7 +797,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none
@@ -851,7 +844,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none
@@ -892,7 +884,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none
@@ -1048,7 +1039,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none
@@ -1187,7 +1177,7 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
+      - platform-operator
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
@@ -1317,7 +1307,7 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
+      - platform-operator
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
@@ -1355,7 +1345,7 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
+      - platform-operator
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
@@ -1425,7 +1415,7 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
+      - platform-operator
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
@@ -1465,7 +1455,7 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
+      - platform-operator
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
@@ -1507,7 +1497,7 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
+      - platform-operator
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
@@ -1610,7 +1600,7 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
+      - platform-operator
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
@@ -1642,7 +1632,7 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
+      - platform-operator
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
@@ -1678,7 +1668,7 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
+      - platform-operator
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
@@ -1709,7 +1699,7 @@ operations:
           members:
             type: array
             x-osf-i18n: { title: { en: Members, nl: Leden } }
-            items:
+            items: &tenantMemberOutput
               type: object
               additionalProperties: false
               properties:
@@ -1726,7 +1716,7 @@ operations:
                 credentialTypes: { type: array, items: { type: string }, x-osf-i18n: { title: { en: Credential types, nl: Credentialtypen } } }
               required: [tenantSlug, memberId, username, email, firstName, lastName, enabled, emailVerified, roles, credentialCount, credentialTypes]
         required: [tenantSlug, members]
-    auth: { mode: control, roles: [platform_admin, platform-operator] }
+    auth: { mode: control, roles: [platform-operator] }
     tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
     effects: { data: read, external: read }
     reliability: { idempotency: { mode: natural } }
@@ -1745,8 +1735,8 @@ operations:
           slug: *id005
           memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
         required: [slug, memberId]
-    output: { schema: *id004 }
-    auth: { mode: control, roles: [platform_admin, platform-operator] }
+    output: { schema: *tenantMemberOutput }
+    auth: { mode: control, roles: [platform-operator] }
     tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
     effects: { data: read, external: read }
     reliability: { idempotency: { mode: natural } }
@@ -1857,7 +1847,7 @@ operations:
           credentials:
             type: array
             x-osf-i18n: { title: { en: Credentials, nl: Credentials } }
-            items:
+            items: &tenantCredentialOutput
               type: object
               additionalProperties: false
               properties:
@@ -1869,7 +1859,7 @@ operations:
                 createdAt: { type: [number, 'null'], x-osf-i18n: { title: { en: Created at, nl: Aangemaakt op } } }
               required: [tenantSlug, memberId, credentialId, type, label, createdAt]
         required: [tenantSlug, memberId, credentials]
-    auth: { mode: control, roles: [platform_admin, platform-operator] }
+    auth: { mode: control, roles: [platform-operator] }
     tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
     effects: { data: read, external: read }
     reliability: { idempotency: { mode: natural } }
@@ -1912,8 +1902,8 @@ operations:
           memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
           credentialId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Credential ID, nl: Credential-ID } } }
         required: [slug, memberId, credentialId]
-    output: { schema: *id004 }
-    auth: { mode: control, roles: [platform_admin, platform-operator] }
+    output: { schema: *tenantCredentialOutput }
+    auth: { mode: control, roles: [platform-operator] }
     tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
     effects: { data: read, external: read }
     reliability: { idempotency: { mode: natural } }

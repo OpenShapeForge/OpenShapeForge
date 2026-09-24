@@ -113,6 +113,7 @@ fields:
   # System-written by the reversal that creates this posting, not an input.
   - key: reversalOfId
     readOnly: true
+    writeSource: caller
     label:
       en: Reversal of
       nl: Tegenboeking van

@@ -126,6 +126,14 @@
         }
       }
     },
+    "hardDelete": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requireNeverPublished"],
+      "properties": {
+        "requireNeverPublished": { "type": "boolean", "const": true }
+      }
+    },
     "fields": {
       "type": "array",
       "minItems": 1,
@@ -322,6 +330,22 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/operationPrerequisiteV2" }
+        },
+        "stamps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["field", "source"],
+            "properties": {
+              "field": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field" },
+              "source": {
+                "enum": ["now", "actorRelation", "actorUserId"],
+                "description": "Trusted server source. actorRelation requires the session's confirmed tenant Relation; actorUserId records the explicit session identity and never substitutes a Relation."
+              }
+            }
+          }
         },
         "implementation": {
           "oneOf": [
@@ -1234,8 +1258,16 @@
         },
         "relationship": {
           "oneOf": [
-            { "$ref": "#/$defs/fieldKey" },
-            { "$ref": "#/$defs/webRelationshipUsageV2" }
+            {
+              "$ref": "#/$defs/fieldKey",
+              "x-osf-choice": "relationship",
+              "x-osf-i18n": { "title": { "en": "Relationship", "nl": "Relatie" } }
+            },
+            {
+              "$ref": "#/$defs/webRelationshipUsageV2",
+              "x-osf-choice": "relationship",
+              "x-osf-i18n": { "title": { "en": "Relationship with overrides", "nl": "Relatie met aanpassingen" } }
+            }
           ],
           "x-osf-i18n": { "title": { "en": "Relationship", "nl": "Relatie" } },
           "x-osf-choice": "relationship"
@@ -1258,7 +1290,7 @@
       "additionalProperties": false,
       "required": ["name"],
       "properties": {
-        "name": { "$ref": "#/$defs/fieldKey" },
+        "name": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "relationship" },
         "overrides": {
           "type": "object",
           "additionalProperties": false,
@@ -1269,13 +1301,13 @@
               "uniqueItems": true,
               "items": {
                 "oneOf": [
-                  { "$ref": "#/$defs/fieldKey" },
+                  { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field" },
                   {
                     "type": "object",
                     "additionalProperties": false,
                     "required": ["key"],
                     "properties": {
-                      "key": { "$ref": "#/$defs/fieldKey" },
+                      "key": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field" },
                       "label": { "$ref": "#/$defs/localizedText" }
                     }
                   }
@@ -1285,12 +1317,12 @@
             "filters": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "$ref": "#/$defs/fieldKey" }
+              "items": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field" }
             },
             "sortFields": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "$ref": "#/$defs/fieldKey" }
+              "items": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "sortableField" }
             },
             "pageSize": { "type": "integer", "minimum": 1 },
             "sort": {
@@ -1298,7 +1330,7 @@
               "additionalProperties": false,
               "required": ["key", "direction"],
               "properties": {
-                "key": { "$ref": "#/$defs/fieldKey" },
+                "key": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "sortableField" },
                 "direction": { "type": "string", "enum": ["asc", "desc"] }
               }
             },
@@ -1541,7 +1573,8 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "suspendDestruction": { "type": "boolean" }
+            "suspendDestruction": { "type": "boolean" },
+            "activeField": { "$ref": "#/$defs/fieldKey" }
           }
         },
         "tenantOverride": {
@@ -1585,6 +1618,10 @@
         },
         "readOnly": {
           "type": "boolean"
+        },
+        "writeSource": {
+          "const": "caller",
+          "description": "Explicitly declares that this persisted readOnly presentation field remains caller-written through generated create/update (or create only when immutable)."
         },
         "label": {
           "$ref": "#/$defs/localizedText"

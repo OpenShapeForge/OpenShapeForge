@@ -16,6 +16,7 @@ import {
 } from "../../../graphql/__tests__/e2e/harness.js";
 import {
   eligibleTables,
+  createRow,
   fieldName,
   foreignKeyTargets,
   isMutableColumn,
@@ -208,16 +209,7 @@ export async function createForeignKeyTarget(
 
   const restTarget = restCreateTables.find((table) => table.name === target);
   if (!restTarget) throw new Error(`REST FK target ${target} has no create operation`);
-  const response = await rest(
-    identity,
-    "POST",
-    `${REST_MOUNT_PATH}/${restTarget.source!.rest!.basePath}`,
-    await buildCreateBody(restTarget, identity, {}, depth + 1),
-  );
-  expect(response.status).toBe(201);
-  const id = recordPayload(response).id as string;
-  createdRows.push({ table: restTarget, id, identity });
-  return id;
+  return createRow(restTarget, identity, {}, depth + 1);
 }
 
 export function trackRestRow(table: (typeof restTables)[number], id: string, identity: Identity) {
@@ -241,4 +233,3 @@ export async function createRestRow(
   trackRestRow(table, id, identity);
   return id;
 }
-

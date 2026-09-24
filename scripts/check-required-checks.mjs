@@ -28,6 +28,13 @@ import { fileURLToPath } from "node:url";
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RULESET_PATH = "scripts/github/protect-main.ruleset.json";
 const WORKFLOW_DIR = ".github/workflows";
+// These are security boundaries whose workflow and ruleset entry must not be
+// deleted together. A two-way name comparison cannot detect that coordinated
+// omission because both sides still agree on the smaller set.
+const SECURITY_CRITICAL_REQUIRED_CONTEXTS = [
+  "API e2e (GraphQL, REST, MCP)",
+  "Browser e2e (apps/web)",
+];
 
 /**
  * Job names from a workflow file, whether it runs on pull_request, and whether
@@ -121,6 +128,13 @@ async function main() {
   }
 
   const problems = [];
+  for (const context of SECURITY_CRITICAL_REQUIRED_CONTEXTS) {
+    if (!required.includes(context)) {
+      problems.push(
+        `security-critical check "${context}" is absent from ${RULESET_PATH}`,
+      );
+    }
+  }
   for (const context of required) {
     const declaredIn = jobs.get(context);
     if (!declaredIn) {

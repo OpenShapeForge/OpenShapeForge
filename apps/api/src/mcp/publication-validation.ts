@@ -36,10 +36,11 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 
-/** Tenant-scoped row reader; the caller binds db/session/tables. */
+/** Tenant-scoped row reader; the caller binds db/session/tables and honours an explicit page size. */
 export type PublicationRowReader = (
   table: string,
   filter: JsonRecord,
+  limit?: number,
 ) => Promise<JsonRecord[]>;
 
 const TEMPLATE_PLACEHOLDER = /\{([a-zA-Z][a-zA-Z0-9]*)\}/g;
@@ -204,7 +205,11 @@ export async function validateVisibleDefinition(
   ];
   const operationsById = new Map<string, JsonRecord>();
   if (operationIds.length > 0) {
-    for (const row of await readRows(execution.operationTable, { id: { in: operationIds } })) {
+    for (const row of await readRows(
+      execution.operationTable,
+      { id: { in: operationIds } },
+      operationIds.length,
+    )) {
       if (asId(row.id)) operationsById.set(row.id, row);
     }
   }
@@ -215,7 +220,11 @@ export async function validateVisibleDefinition(
   ];
   const providers = new Map<string, JsonRecord>();
   if (providerIds.length > 0) {
-    for (const row of await readRows(execution.providerTable, { id: { in: providerIds } })) {
+    for (const row of await readRows(
+      execution.providerTable,
+      { id: { in: providerIds } },
+      providerIds.length,
+    )) {
       if (asId(row.id)) providers.set(row.id, row);
     }
   }
@@ -299,9 +308,11 @@ export async function validateVisibleDefinition(
 
   for (const [providerId, providerRow] of providers) {
     const providerName = String(providerRow.name ?? providerRow.key ?? providerId);
-    const connections = await readRows(execution.connectionTable, {
-      [execution.connectionProviderRef]: providerId,
-    });
+    const connections = await readRows(
+      execution.connectionTable,
+      { [execution.connectionProviderRef]: providerId },
+      MAX_BINDINGS_PER_OWNER,
+    );
     const tenantConnection = connections.find((connection) => !connection.ownerUserId);
     if (!tenantConnection) {
       problems.push(

@@ -9,14 +9,14 @@ import { sql } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../db/connection.js";
 import { runMigrationChain } from "../db/migration-chain.js";
 import { withDbSession } from "../db/session.js";
-import { createGeneratedEntity, createGeneratedEntityForTable, getGeneratedCrudTables, appendGeneratedCrudEvent, updateGeneratedEntity, deleteGeneratedEntity } from "../operations/entity/index.js";
+import { createGeneratedEntity, updateGeneratedEntity, deleteGeneratedEntity } from "../operations/entity/index.js";
 import { appendScopedEntityEventInTransaction } from "./entity-events.js";
 import { encodeStreamFrame, parseStreamCursor, readChangeBatch } from "./entity-change-stream.js";
 import { registerEntityChangeStream } from "../rest/entity-change-stream.js";
 
 const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
 const database = `sse_${randomUUID().replaceAll("-", "")}`;
-const actor = { tenantId: randomUUID(), userId: randomUUID(), roles: ["Relations.RelationGroups.ReadWrite", "Preferences.Self.Read", "Preferences.Self.Write"], groups: [], scope: "self" as const };
+const actor = { tenantId: randomUUID(), userId: randomUUID(), roles: ["Relations.RelationGroups.ReadWrite"], groups: [], scope: "self" as const };
 const reader = { ...actor, userId: randomUUID() };
 let admin: SQL;
 let privileged: DatabaseRuntime;
@@ -24,7 +24,9 @@ let runtime: DatabaseRuntime;
 const app = Fastify({ logger: false });
 let origin: string;
 const previousSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+const previousIssuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
 const secret = "sse-synthetic-test-context-secret";
+const issuer = "https://identity.example.test/realms/sse-test";
 beforeAll(async () => {
   admin = new SQL(adminUrl, { max: 1 });
   await admin.unsafe(`create database "${database}"`);
@@ -34,6 +36,7 @@ beforeAll(async () => {
   url.username = "openshapeforge_app"; url.password = "openshapeforge_app";
   runtime = createDatabaseRuntime({ databaseUrl: url.toString(), maxConnections: 6 });
   process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = secret;
+  process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = issuer;
   registerEntityChangeStream(app, { db: runtime.db });
   origin = await app.listen({ port: 0, host: "127.0.0.1" });
 }, 90_000);
@@ -42,6 +45,8 @@ afterAll(async () => {
   await admin?.unsafe(`drop database if exists "${database}" with (force)`); await admin?.close();
   if (previousSecret === undefined) delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
   else process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = previousSecret;
+  if (previousIssuer === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+  else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = previousIssuer;
 });
 
 test("cursor syntax and frame encoding reject injection and preserve exact identifiers", () => {
@@ -65,21 +70,6 @@ test("committed CRUD is replayed to another session; unauthorized tenants and ro
   expect((await readChangeBatch(runtime.db, reader, batch.cursor)).changes).toEqual([]);
   await deleteGeneratedEntity(runtime.db, actor, { table: "erp.relation_groups", id });
   expect((await readChangeBatch(runtime.db, reader, batch.cursor)).changes.map(e => e.data)).toEqual([{ entity: "RelationGroup", id, change: "deleted" }]);
-});
-
-test("owner-private rows remain private for updates AND tombstones", async () => {
-  const start = await readChangeBatch(runtime.db, actor);
-  const table = getGeneratedCrudTables().find(table => table.name === "erp.personal_preferences")!;
-  const row = await createGeneratedEntityForTable(runtime.db, actor, table, { ownerUserId: actor.userId, namespace: "sse", key: randomUUID() });
-  expect((await readChangeBatch(runtime.db, reader, start.cursor)).changes).toEqual([]);
-  const ownerBatch = await readChangeBatch(runtime.db, actor, start.cursor);
-  expect(ownerBatch.changes).toHaveLength(1);
-  await withDbSession(runtime.db, actor, async trx => {
-    const result = await sql<{ row: Record<string, unknown> }>`delete from erp.personal_preferences where id = ${row.id} returning to_jsonb(personal_preferences.*) as row`.execute(trx);
-    await appendGeneratedCrudEvent(trx, table, { aggregateId: String(row.id), eventType: "deleted", row: result.rows[0]!.row });
-  });
-  expect((await readChangeBatch(runtime.db, reader, ownerBatch.cursor)).changes).toEqual([]);
-  expect((await readChangeBatch(runtime.db, actor, ownerBatch.cursor)).changes[0]?.data.change).toBe("deleted");
 });
 
 test("rollback never publishes and late commits get later delivery cursors without blocking writers", async () => {

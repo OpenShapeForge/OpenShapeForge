@@ -298,6 +298,10 @@
           "type": "boolean",
           "description": "Presentation only: render the field with its display component instead of its input component. Not an API contract — use `immutable` for that."
         },
+        "writeSource": {
+          "const": "caller",
+          "description": "Explicitly declares that this persisted readOnly presentation field remains caller-written through generated create/update (or create only when immutable). Omit for compiler-derived fields or fields owned by canonical Operations."
+        },
         "immutable": {
           "type": "boolean",
           "description": "API contract: the field may be set when the record is created and is refused by every generated transport afterwards (REST 400; absent from the GraphQL update input and the MCP update schema). Use it for provenance links and other values that must not be re-pointed once written."

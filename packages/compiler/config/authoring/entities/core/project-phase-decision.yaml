@@ -142,6 +142,9 @@ operations:
     implementation:
       type: entity
       action: create
+    stamps:
+      - field: decidedById
+        source: actorRelation
     effects:
       data: write
       external: none

@@ -11,7 +11,6 @@
 import type {
   CompiledEntityContract,
   CompiledRelationship,
-  Field,
 } from "./authoring/types.js";
 import {
   assertBindingRowVocabulary,
@@ -67,37 +66,6 @@ export function requireBindingsRelation(
     );
   }
   return execution.bindingsRelation;
-}
-
-/** Owner-side check used while compiling one entity's `mcp.derivedTools`. */
-export function assertAuthoredExecutionBindings(
-  coreEntity: { entity: string; fields?: readonly Field[] },
-  execution: AuthoredDerivedExecution,
-  option = "mcp derivedTools.execution",
-): void {
-  const key = requireBindingsRelation(execution, coreEntity.entity, option);
-  const relation = ownedCollectionField(coreEntity.fields ?? [], key);
-  if (!relation) {
-    throw new Error(
-      `${option} bindingsRelation ${JSON.stringify(key)} ` +
-        `on entity "${coreEntity.entity}" does not name an owned hasMany collection.`,
-    );
-  }
-}
-
-function ownedCollectionField(
-  fields: readonly Field[],
-  key: string,
-): Field | undefined {
-  const field = fields.find((candidate) => candidate.key === key);
-  if (!field) return undefined;
-  const relationship = field.relationship;
-  if (!relationship || relationship.ownership !== "owned") return undefined;
-  const collection =
-    relationship.kind === "hasMany" || field.cardinality === "collection";
-  if (!collection) return undefined;
-  const target = relationship.target ?? field.osfType;
-  return target ? field : undefined;
 }
 
 function ownedCollectionRelationship(

@@ -21,6 +21,8 @@ versioning:
   versionEntity: DocumentTypeVersion
   versionsField: versions
   snapshot: { ownedRelationships: recursive }
+hardDelete:
+  requireNeverPublished: true
 indexes:
   - name: document_types_tenant_code_uidx
     fields: [ tenantId, code ]
@@ -140,11 +142,12 @@ operations:
     confirmation: { mode: none }
   delete:
     name: { en: Delete document type, nl: Documenttype verwijderen }
-    description: Deletes an unreferenced document type with the separate delete right.
+    description: Deletes a never-published, unreferenced document type with the separate delete right.
     implementation: { type: entity, action: delete }
     effects: { data: delete, external: none }
     reliability: { idempotency: { mode: natural } }
-    confirmation: { mode: none }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: acknowledgement }
 interfaces:
   rest: {}
   graphql: {}

@@ -158,6 +158,7 @@ fields:
   # System-written by scheduling: the appointment this request became, not an input.
   - key: appointmentId
     readOnly: true
+    writeSource: caller
     label:
       en: Appointment
       nl: Afspraak

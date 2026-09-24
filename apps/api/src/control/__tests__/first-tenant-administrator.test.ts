@@ -194,7 +194,7 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     expect(sends).toHaveLength(0);
   });
   it('leaves the ordinary invitation org_admin gate intact', async () => {
-    await expect(inviteEmployee(runtime.db, { roles: ['platform_admin'] } as never, clients.members,
+    await expect(inviteEmployee(runtime.db, { roles: ['platform-operator'] } as never, clients.members,
       { email: 'admin@example.com', role: 'org_admin' })).rejects.toMatchObject({ status: 403 });
     expect(sends).toHaveLength(0);
   });

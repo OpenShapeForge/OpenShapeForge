@@ -16,7 +16,6 @@ import {
   type CapturedDerivedExecution,
   catalog,
   catalogDerivedTools,
-  catalogGuideTools,
   compatibilityToolNames,
 } from "./catalog.js";
 import { operationMayInvoke, projectCatalogOperationTool } from "./entity-tool-invocation.js";
@@ -140,7 +139,6 @@ export function createDispatchTool(scope: ServerScope, surface: SessionSurface):
               entry.dryRun?.name === name ||
               entry.personalization?.set.name === name,
           ) ||
-          catalogGuideTools.some((tool) => tool.name === name) ||
           (catalog.discoveryTools ?? []).some((tool) => tool.name === name) ||
           (catalog.testTools ?? []).some((tool) => tool.name === name) ||
           (operationToolProjection.mode === "searchable" &&

@@ -123,6 +123,7 @@ fields:
     osfType: datetime
     required: false
     readOnly: true
+    writeSource: caller
     label:
       en: Resolved at
       nl: Opgelost op
@@ -136,6 +137,7 @@ fields:
     osfType: datetime
     required: false
     readOnly: true
+    writeSource: caller
     label:
       en: Closed at
       nl: Gesloten op
@@ -276,6 +278,9 @@ operations:
     implementation:
       type: entity
       action: create
+    stamps:
+      - field: reporterId
+        source: actorRelation
     effects:
       data: write
       external: none

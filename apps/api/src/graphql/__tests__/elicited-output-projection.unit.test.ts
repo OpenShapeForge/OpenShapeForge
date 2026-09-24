@@ -13,10 +13,10 @@ import {
 import { renderTypeDefinition } from "../generated-entity-schema.js";
 
 const table = getGeneratedCrudTables().find(
-  (candidate) => candidate.source?.authoringEntityName === "Preference",
+  (candidate) => candidate.source?.authoringEntityName === "Task",
 )!;
 const target = table.columns.find(
-  (column) => column.sourceField === "valueJson",
+  (column) => column.sourceField === "metadata",
 )!;
 const readRole = table.source!.authorization!.roles.read.find(
   (role) => !table.source!.authorization!.roles.update.includes(role),
@@ -42,7 +42,7 @@ async function withElicitedTarget(
   const previousMcp = table.source!.mcp;
   const previousClassification = target.classification;
   table.source!.mcp = {
-    toolPrefix: "preference",
+    toolPrefix: "task",
     tools: "dedicated",
     operations: {
       list: true,
@@ -52,10 +52,10 @@ async function withElicitedTarget(
       delete: true,
     },
     elicitOnCreate: {
-      sourceField: "key",
-      sourceEntity: "Preference",
-      definitionsField: "valueJson",
-      into: "valueJson",
+      sourceField: "title",
+      sourceEntity: "Task",
+      definitionsField: "metadata",
+      into: "metadata",
     },
   };
   if (classification) target.classification = classification;
@@ -74,7 +74,7 @@ describe("elicited-value shared CRUD output", () => {
     await withElicitedTarget(() => {
       const stored = {
         id: "row-1",
-        value_json: {
+        metadata: {
           endpoint: "https://example.test",
           apiToken: storedSecret,
         },
@@ -82,12 +82,12 @@ describe("elicited-value shared CRUD output", () => {
       const projected = projectGeneratedEntityRow(table, writeSession, stored);
       expect(projected).toEqual({
         id: "row-1",
-        value_json: {
+        metadata: {
           endpoint: "https://example.test",
           apiToken: "__set__",
         },
       });
-      expect(stored.value_json.apiToken).toBe(storedSecret);
+      expect(stored.metadata.apiToken).toBe(storedSecret);
     });
   });
 
@@ -101,18 +101,18 @@ describe("elicited-value shared CRUD output", () => {
       expect(
         projectGeneratedEntityRow(table, readSession, {
           id: "row-2",
-          value_json: { apiToken: storedSecret },
+          metadata: { apiToken: storedSecret },
         }),
-      ).toEqual({ id: "row-2", value_json: { apiToken: "__set__" } });
+      ).toEqual({ id: "row-2", metadata: { apiToken: "__set__" } });
     });
 
     await withElicitedTarget(() => {
-      const row = { id: "row-3", value_json: { apiToken: storedSecret } };
+      const row = { id: "row-3", metadata: { apiToken: storedSecret } };
       expect(
-        projectGeneratedEntityRow(table, readSession, row).value_json,
+        projectGeneratedEntityRow(table, readSession, row).metadata,
       ).toBeNull();
       expect(
-        projectGeneratedEntityRow(table, writeSession, row).value_json,
+        projectGeneratedEntityRow(table, writeSession, row).metadata,
       ).toEqual({
         apiToken: "__set__",
       });
@@ -124,12 +124,12 @@ describe("elicited-value shared CRUD output", () => {
       table.source!.mcp!.elicitOnCreate!.into = "missingField";
       expect(() =>
         projectGeneratedEntityRow(table, writeSession, {
-          value_json: { apiToken: storedSecret },
+          metadata: { apiToken: storedSecret },
         }),
       ).toThrow(/elicited-output metadata is invalid/);
       try {
         projectGeneratedEntityRow(table, writeSession, {
-          value_json: { apiToken: storedSecret },
+          metadata: { apiToken: storedSecret },
         });
       } catch (error) {
         expect((error as Error).message).not.toContain("missingField");
@@ -142,9 +142,9 @@ describe("elicited-value shared CRUD output", () => {
     await withElicitedTarget(async () => {
       for (const session of [readSession, writeSession]) {
         for (const input of [
-          { filter: { valueJson: { apiToken: storedSecret } } },
-          { filter: { valueJsonIn: [{ apiToken: storedSecret }] } },
-          { sort: { field: "valueJson", direction: "asc" } },
+          { filter: { metadata: { apiToken: storedSecret } } },
+          { filter: { metadataIn: [{ apiToken: storedSecret }] } },
+          { sort: { field: "metadata", direction: "asc" } },
         ]) {
           const error = await listGeneratedEntities(noDb, session, {
             table: table.name,
@@ -160,7 +160,7 @@ describe("elicited-value shared CRUD output", () => {
       }
       await expect(
         listGeneratedEntitiesForTable(noDb, writeSession, table, {
-          filter: { valueJson: { apiToken: storedSecret } },
+          filter: { metadata: { apiToken: storedSecret } },
         }),
       ).rejects.toMatchObject({
         operationError: { code: "FORBIDDEN", retryable: false },
@@ -178,7 +178,7 @@ describe("elicited-value shared CRUD output", () => {
       ]) {
         const createError = await createGeneratedEntity(noDb, writeSession, {
           table: table.name,
-          values: { valueJson: supplied },
+          values: { metadata: supplied },
         }).catch((caught: unknown) => caught);
         expect(createError).toMatchObject({
           operationError: { code: "BAD_USER_INPUT", retryable: false },
@@ -190,7 +190,7 @@ describe("elicited-value shared CRUD output", () => {
         const updateError = await updateGeneratedEntity(noDb, writeSession, {
           table: table.name,
           id: "row-1",
-          values: { valueJson: supplied },
+          values: { metadata: supplied },
         }).catch((caught: unknown) => caught);
         expect(updateError).toMatchObject({
           operationError: { code: "BAD_USER_INPUT", retryable: false },
@@ -205,17 +205,17 @@ describe("elicited-value shared CRUD output", () => {
   test("withholds the target from GraphQL filters and mutation inputs", async () => {
     await withElicitedTarget(() => {
       const sdl = renderTypeDefinition(table);
-      const filter = sdl.split("input PreferenceFilter {")[1]!.split("}")[0]!;
-      expect(filter).not.toContain("valueJson");
+      const filter = sdl.split("input TaskFilter {")[1]!.split("}")[0]!;
+      expect(filter).not.toContain("metadata");
       const create = sdl
-        .split("input CreatePreferenceInput {")[1]!
+        .split("input CreateTaskInput {")[1]!
         .split("}")[0]!;
       const update = sdl
-        .split("input UpdatePreferenceInput {")[1]!
+        .split("input UpdateTaskInput {")[1]!
         .split("}")[0]!;
-      expect(create).not.toContain("valueJson");
-      expect(update).not.toContain("valueJson");
-      expect(sdl).toContain("valueJson: JSON");
+      expect(create).not.toContain("metadata");
+      expect(update).not.toContain("metadata");
+      expect(sdl).toContain("metadata: JSON");
     });
   });
 });

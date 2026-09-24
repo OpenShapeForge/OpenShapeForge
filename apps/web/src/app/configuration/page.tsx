@@ -7,7 +7,7 @@ import {
   CardTitle,
 } from "@/components/ui/display/card";
 import { getCachedSession } from "@/lib/cached-session";
-import { type FieldValueType, fieldValueType } from "@/lib/field-contract/field-v2";
+import { type FieldValueType, tryFieldValueType } from "@/lib/field-contract/field-v2";
 import { buildGatewayUrl } from "@/lib/server/gateway";
 import { submitPendingConfiguration } from "./actions";
 
@@ -49,8 +49,11 @@ function text(value: unknown): string {
  * Stored definitions name their type as `osfType`; the input control follows
  * its base type, the way the runtime's own configuration form does.
  */
-function baseType(field: FieldDefinition): FieldValueType {
-  return fieldValueType({ osfType: typeof field.osfType === "string" ? field.osfType : "string" });
+function baseType(field: FieldDefinition) {
+  return tryFieldValueType({
+    key: typeof field.key === "string" ? field.key : "(unnamed)",
+    osfType: typeof field.osfType === "string" ? field.osfType : "",
+  });
 }
 
 function inputType(field: FieldDefinition, base: FieldValueType): string {
@@ -102,6 +105,14 @@ export default async function ConfigurationPage({
   }
 
   const pending = await loadPending();
+  const hasUnsupportedFields = pending?.definitions.some((field) => !baseType(field).ok) ?? false;
+  if (pending && hasUnsupportedFields) {
+    console.error("Secure configuration contains an unsupported field contract.", {
+      fields: pending.definitions
+        .filter((field) => !baseType(field).ok)
+        .map((field) => ({ key: field.key, osfType: field.osfType })),
+    });
+  }
   return (
     <div className="space-y-6 p-6">
       <BodyHeader
@@ -119,7 +130,7 @@ export default async function ConfigurationPage({
               Er staat voor jouw account geen configuratie klaar. Start opnieuw vanuit je gesprek.
             </p>
           ) : (
-            <form action={submitPendingConfiguration} className="space-y-5">
+            <form action={hasUnsupportedFields ? undefined : submitPendingConfiguration} className="space-y-5">
               <input type="hidden" name="handoffId" value={pending.id} />
               {pending.messagePrefix ? (
                 <p className="rounded-lg border bg-muted/40 p-3 text-sm">
@@ -138,7 +149,16 @@ export default async function ConfigurationPage({
                 const description = text(field.description);
                 const options = field.options?.items ?? [];
                 const required = field.required === true;
-                const base = baseType(field);
+                const resolution = baseType(field);
+                if (!resolution.ok) {
+                  return (
+                    <div key={key} role="alert" data-unsupported-field={key} className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                      <span className="font-medium">{label}</span>
+                      <span className="mt-1 block">Dit veld gebruikt een niet-ondersteund contract en kan niet worden ingevuld.</span>
+                    </div>
+                  );
+                }
+                const base = resolution.value;
                 if (base === "boolean") {
                   return (
                     <label key={key} className="flex items-start gap-3 text-sm">
@@ -173,7 +193,12 @@ export default async function ConfigurationPage({
                   </label>
                 );
               })}
-              <button type="submit" className="rounded-lg bg-action-primary px-4 py-2 text-sm font-medium text-action-primary-foreground hover:bg-action-primary-hover">
+              {hasUnsupportedFields ? (
+                <p className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
+                  Opslaan is geblokkeerd om te voorkomen dat configuratie verloren gaat. Neem contact op met de beheerder.
+                </p>
+              ) : null}
+              <button type={hasUnsupportedFields ? "button" : "submit"} disabled={hasUnsupportedFields} className="rounded-lg bg-action-primary px-4 py-2 text-sm font-medium text-action-primary-foreground hover:bg-action-primary-hover disabled:cursor-not-allowed disabled:opacity-50">
                 Veilig opslaan
               </button>
             </form>

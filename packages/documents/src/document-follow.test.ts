@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { planFollow, type FollowBlock, type FollowTemplateBlock } from "./document-follow.js";
+import { isolateFollowFailures, planFollow, type FollowBlock, type FollowTemplateBlock } from "./document-follow.js";
 
 const template = (id: string, templateBlockId: string, key: string, diverged = false): FollowBlock => ({ id, origin: "template", templateBlockId, diverged, key });
 const local = (id: string, key = "local"): FollowBlock => ({ id, origin: "local", templateBlockId: null, diverged: false, key });
@@ -60,5 +60,70 @@ describe("the follow-template plan", () => {
     const plan = planFollow([template("a", "t1", "one"), local("l1")], previous, []);
     expect(plan.remove).toEqual(["a"]);
     expect(plan.order).toEqual([{ kind: "existing", id: "l1" }]);
+  });
+});
+
+describe("follow failure isolation", () => {
+  test("more than 64 successful documents use one batch boundary", async () => {
+    const documents = Array.from({ length: 100 }, (_, index) => index + 1);
+    const attempts: number[][] = [];
+    const failures: number[] = [];
+
+    await isolateFollowFailures(
+      documents,
+      async (batch) => { attempts.push([...batch]); return null; },
+      async (document) => { failures.push(document); },
+    );
+
+    expect(attempts).toEqual([documents]);
+    expect(failures).toEqual([]);
+  });
+
+  test("records a one-time failure once and never retries that document", async () => {
+    const applied: number[] = [];
+    const attempts: number[][] = [];
+    const failures: Array<{ document: number; message: string }> = [];
+    let failOnce = true;
+
+    await isolateFollowFailures(
+      [1, 2, 3, 4],
+      async (batch) => {
+        attempts.push([...batch]);
+        const index = batch.indexOf(3);
+        if (failOnce && index >= 0) {
+          failOnce = false;
+          return { index, error: new Error("broken document") };
+        }
+        applied.push(...batch);
+        return null;
+      },
+      async (document, error) => {
+        failures.push({ document, message: error instanceof Error ? error.message : String(error) });
+      },
+    );
+
+    expect(applied).toEqual([1, 2, 4]);
+    expect(attempts).toEqual([[1, 2, 3, 4], [1, 2, 4]]);
+    expect(failures).toEqual([{ document: 3, message: "broken document" }]);
+  });
+
+  test("many independent failures still leave one successful batch", async () => {
+    const attempts: number[][] = [];
+    const failures: number[] = [];
+    const rejected = new Set(Array.from({ length: 40 }, (_, index) => index * 2 + 1));
+
+    await isolateFollowFailures(
+      Array.from({ length: 80 }, (_, index) => index + 1),
+      async (batch) => {
+        attempts.push([...batch]);
+        const index = batch.findIndex((document) => rejected.has(document));
+        return index < 0 ? null : { index, error: new Error("broken document") };
+      },
+      async (document) => { failures.push(document); },
+    );
+
+    expect(failures).toEqual([...rejected]);
+    expect(attempts).toHaveLength(rejected.size + 1);
+    expect(attempts.at(-1)).toEqual(Array.from({ length: 40 }, (_, index) => index * 2 + 2));
   });
 });

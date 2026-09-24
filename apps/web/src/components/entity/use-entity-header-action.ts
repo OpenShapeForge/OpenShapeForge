@@ -17,6 +17,12 @@ function unavailableDeleteMessage(
     : "Delete is not available in the web client yet.";
 }
 
+function defaultDeleteConfirmation(lang: EntityPageHeaderActionsContext["lang"] | undefined) {
+  return lang === "nl"
+    ? "Dit verwijdert het record permanent. Deze actie kan niet ongedaan worden gemaakt. Doorgaan?"
+    : "This permanently deletes the record. This action cannot be undone. Continue?";
+}
+
 export function useEntityHeaderAction(
   actionsContext: EntityPageHeaderActionsContext | undefined,
 ) {
@@ -41,20 +47,23 @@ export function useEntityHeaderAction(
     if (
       !actionsContext?.baseRoute ||
       !actionsContext.entityId ||
-      !actionsContext.deleteMutationName
+      !actionsContext.deleteMutationName ||
+      !actionsContext.expectedVersion
     ) {
       setActionError(unavailableDeleteMessage(actionsContext?.lang));
       return;
     }
 
-    const { baseRoute, deleteMutationName, entityId } = actionsContext;
-    if (action.confirm && !window.confirm(action.confirm)) return;
+    const { baseRoute, deleteMutationName, entityId, expectedVersion } = actionsContext;
+    if (!window.confirm(action.confirm ?? defaultDeleteConfirmation(actionsContext.lang))) return;
 
     startTransition(async () => {
       try {
         await deleteEntity({
           mutationName: deleteMutationName,
           entityId,
+          expectedVersion,
+          confirmed: true,
         });
         router.push(baseRoute);
       } catch (error) {

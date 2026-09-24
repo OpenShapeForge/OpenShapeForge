@@ -2,15 +2,12 @@
 /**
  * The control-realm session for the canonical operations runtime.
  *
- * `authorization.ts` admits a platform OPERATOR (one pinned client, the
- * `platform-operator` role) and `platform-admin.ts` a platform ADMINISTRATOR
- * (an `azp` allow-list or a resource audience, the `platform_admin` role).
- * Both surfaces used to decide the role at the door. The operations runtime
- * decides it per Operation instead — `auth: { mode: control, roles }` names
- * the realm roles that may invoke it — so the door only has to establish who
- * the person is and which control-realm roles they hold. This resolver is
- * that door, and it is the ONLY place a `credential: "control-bearer"`
- * session is minted.
+ * `authorization.ts` admits one platform role: `platform-operator`. An
+ * admitted party may arrive through the pinned REST client, the MCP party
+ * allow-list or the MCP resource audience. The operations runtime still
+ * enforces each Operation's declared role, so every control declaration names
+ * the same role. This resolver is the ONLY place a
+ * `credential: "control-bearer"` session is minted.
  *
  * The preconditions are the union of the two existing surfaces, not a
  * relaxation of either:
@@ -26,10 +23,8 @@
  *      before any Operation is looked at — the same answer the old doors gave.
  *
  * What it carries: every realm role the token holds. The Operation's own
- * `auth.roles` (any-of) is the authorization decision; `platform_admin`
- * holds the catalog and `platform-operator` the tenant lifecycle, and one
- * person may hold both. Client roles (`resource_access`) never count, for
- * the reason `realmRolesOf` gives.
+ * `auth.roles` is the authorization decision. Client roles
+ * (`resource_access`) never count, for the reason `realmRolesOf` gives.
  */
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { usesHostOrganizationContext } from "../config/host-organization.js";
@@ -42,15 +37,13 @@ import {
   verifyControlBearer,
 } from "./authorization.js";
 import { platformMcpAuthorizedParties, type ControlPlaneConfig } from "./config.js";
-import { PLATFORM_ADMIN_ROLE, type PlatformAdministrator } from "./platform-admin.js";
+import type { PlatformAdministrator } from "./platform-admin.js";
 import { assertHostRealm, hasKeycloakRealmAdmin } from "./realm-boundary.js";
 
 /**
- * The realm roles that mean "may use the control plane at all". A token
- * holding neither is refused at the door; which of the two an Operation
- * needs is the Operation's `auth.roles`.
+ * The only realm role that means "may use the control plane at all".
  */
-export const CONTROL_REALM_ROLES: readonly string[] = [PLATFORM_ADMIN_ROLE, PLATFORM_OPERATOR_ROLE];
+export const CONTROL_REALM_ROLES: readonly string[] = [PLATFORM_OPERATOR_ROLE];
 
 /** A control session as a handler sees it: the administrator is guaranteed. */
 export type ControlSessionContext = TrustedSessionContext & {
@@ -145,9 +138,8 @@ export async function resolveControlSession(
     );
   }
 
-  // Host-organization mode has one authority, Keycloak's built-in realm
-  // admin, standing in for both marker roles; it is projected as both so the
-  // Operations' role lists keep one meaning across the two modes.
+  // Host-organization mode maps Keycloak's built-in realm administrator onto
+  // the same single control-plane role used in the dedicated control realm.
   const roles = usesHostOrganizationContext()
     ? hasKeycloakRealmAdmin(claims) ? [...CONTROL_REALM_ROLES] : []
     : realmRolesOf(claims);

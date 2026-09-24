@@ -2,7 +2,7 @@
 
 The authenticated platform MCP exposes `invite_first_tenant_admin` with only
 `slug` and `email`. It requires the control-realm `platform-operator` role;
-tenant tokens and an admin-only `platform_admin` session are insufficient.
+tenant tokens and an admin-only `platform-operator` session are insufficient.
 The tenant must already be active and linked to the exact enabled Keycloak
 organization in the configured tenant realm. Confirm tenant and recipient before
 calling this mail-sending tool.

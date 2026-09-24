@@ -118,7 +118,7 @@ describe("findUndeclaredDatabaseSchema", () => {
   // repository's plugin table left behind is reported like any other.
   test("reports every table the manifest does not declare", async () => {
     await sql`create table platform.operation_execution_receipts (id uuid primary key)`.execute(runtime.db);
-    await sql`create table platform.preference_definitions (namespace text, key text, definition jsonb, primary key (namespace, key))`.execute(runtime.db);
+    await sql`create table platform.retired_plugin_data (id uuid primary key)`.execute(runtime.db);
     await sql`create table platform.unknown_receipts (id uuid primary key)`.execute(runtime.db);
     const result = await findUndeclaredDatabaseSchema(runtime.db, [{
       name: "platform.schema_migrations",
@@ -127,13 +127,13 @@ describe("findUndeclaredDatabaseSchema", () => {
     }]);
     expect(result.tables).toEqual([
       "platform.operation_execution_receipts",
-      "platform.preference_definitions",
+      "platform.retired_plugin_data",
       "platform.unknown_receipts",
     ]);
     expect(result.columns).toEqual([]);
     await sql`drop table platform.unknown_receipts`.execute(runtime.db);
     await sql`drop table platform.operation_execution_receipts`.execute(runtime.db);
-    await sql`drop table platform.preference_definitions`.execute(runtime.db);
+    await sql`drop table platform.retired_plugin_data`.execute(runtime.db);
   });
 
   test("reports every column on a declared table the manifest does not declare", async () => {

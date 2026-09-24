@@ -122,6 +122,7 @@ fields:
     osfType: object
     required: false
     readOnly: true
+    writeSource: caller
     label:
       en: Required input
       nl: Benodigde input

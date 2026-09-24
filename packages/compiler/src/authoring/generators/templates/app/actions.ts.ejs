@@ -121,7 +121,9 @@ export async function delete<%= typeName %>(id: string, controls: Record<string,
     <%= gql.mutations.delete.name %>?: { data?: { deleted?: boolean } | null; error?: { code?: string; message?: string } | null } | null;
   }>({
     query: `mutation Delete<%= typeName %>($input: Delete<%= typeName %>Input!) { <%= gql.mutations.delete.name %>(input: $input) { data { deleted } error { code message retryable } } }`,
-    variables: { input: { id, ...controls<% if (contract.entityOperations.delete?.interaction.confirmation.mode === "acknowledgement") { %>, confirmed: true<% } %> } },
+    // Confirmation is caller-owned. A generated client must never turn an
+    // ordinary delete call into an acknowledgement on the user's behalf.
+    variables: { input: { id, ...controls } },
   });
   const result = response?.<%= gql.mutations.delete.name %>;
   if (result?.error) throw new Error(`${result.error.code ?? "OPERATION_FAILED"}: ${result.error.message ?? "Operation failed."}`);

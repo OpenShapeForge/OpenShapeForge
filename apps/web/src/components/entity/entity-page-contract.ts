@@ -28,6 +28,7 @@ export type EntityPageHeaderAction = {
 
 export type EntityPageHeaderActionsContext = {
   entityId: string;
+  expectedVersion?: string;
   baseRoute?: string;
   deleteMutationName?: string;
   lang: string;

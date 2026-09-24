@@ -137,6 +137,7 @@ fields:
   # System-written by invoicing: the invoice that billed this cumulative, not an input.
   - key: invoiceId
     readOnly: true
+    writtenBy: [BillingRun.execute]
     label:
       en: Invoice
       nl: Factuur

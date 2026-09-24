@@ -42,7 +42,7 @@ const administrator: PlatformAdministrator = {
   authorizedParty: "codex-platform",
   expiresAtMs: null,
 };
-const session = controlSessionFor(administrator, ["platform_admin", "platform-operator"]);
+const session = controlSessionFor(administrator, ["platform-operator"]);
 
 /** A database that would explode if touched: the point is that it is not. */
 const untouchable = new Proxy({}, { get: () => { throw new Error("database touched"); } }) as never;

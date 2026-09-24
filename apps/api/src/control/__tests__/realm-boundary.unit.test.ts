@@ -23,7 +23,7 @@ describe("host realm boundary", () => {
   });
   test("requires the exact built-in client role", () => {
     expect(hasKeycloakRealmAdmin({ resource_access: { "realm-management": { roles: ["realm-admin"] } } })).toBe(true);
-    for (const claims of [{}, { realm_access: { roles: ["realm-admin", "platform_admin"] } }, { resource_access: { other: { roles: ["realm-admin"] } } }, { resource_access: { "realm-management": { roles: ["manage-users"] } } }, { resource_access: { "realm-management": { roles: "realm-admin" } } }]) {
+    for (const claims of [{}, { realm_access: { roles: ["realm-admin", "platform-operator"] } }, { resource_access: { other: { roles: ["realm-admin"] } } }, { resource_access: { "realm-management": { roles: ["manage-users"] } } }, { resource_access: { "realm-management": { roles: "realm-admin" } } }]) {
       expect(hasKeycloakRealmAdmin(claims)).toBe(false);
     }
   });

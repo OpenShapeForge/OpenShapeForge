@@ -21,7 +21,6 @@ import {
 import { connectedViaLabel, type McpClientInfo } from "../mcp/session-client.js";
 import { PLATFORM_OPERATOR_ROLE } from "./authorization.js";
 import type { PlatformAdministrator } from "./platform-admin.js";
-import { PLATFORM_ADMIN_ROLE } from "./platform-admin.js";
 import { listPlatformTenants, type PlatformCatalogDeps } from "./platform-catalog.js";
 
 export const PLATFORM_SERVER_INFO = { name: "openshapeforge-platform", version: "1" } as const;
@@ -29,9 +28,8 @@ export const PLATFORM_SERVER_INFO = { name: "openshapeforge-platform", version: 
 export const PLATFORM_SERVER_INSTRUCTIONS =
   "Platform administration for an OpenShapeForge deployment: tenant lifecycle, " +
   "organization structure, identity reconciliation, and the integration catalog " +
-  "that is installed per tenant. Each Operation is role-filtered: platform-operator " +
-  "changes tenant lifecycle and organization state, while platform_admin manages " +
-  "the catalog, notices and audit; both may inspect shared platform state. Use only " +
+  "that is installed per tenant. Every Operation requires the single " +
+  "platform-operator role. Use only " +
   "the tools offered in this session. " +
   "Catalog writes act for EVERY tenant at once — a publish or retirement reaches " +
   "all of them in one call. Read platform_guide before changing anything, " +
@@ -49,7 +47,7 @@ export const PLATFORM_SESSION_RESOURCE_URI = "osf://platform-session";
 export const PLATFORM_GUIDE = [
   "# Platform administration guide",
   "",
-  "You are acting in the control realm of this OpenShapeForge deployment, not as a member of any tenant. There is no 'current organization'. Every Operation is filtered by your realm roles: platform-operator changes tenant lifecycle, organization state and reconciliation; platform_admin manages catalog publication, notices and audit; both may inspect shared platform state. Use only the tools offered in this session.",
+  "You are acting in the control realm of this OpenShapeForge deployment, not as a member of any tenant. There is no 'current organization'. The single platform-operator role authorizes tenant lifecycle, organization state, reconciliation, catalog publication, notices and audit. Use only the tools offered in this session.",
   "",
   "## What the catalog is",
   "Integration definitions (Adapters, Capabilities, Services) are platform-level, versioned catalog entries identified by kind and key. Each tenant has an installed copy. A published version is immutable: changing a definition always means publishing version N+1.",
@@ -95,7 +93,7 @@ export const PLATFORM_SESSION_RESOURCE = {
 export type PlatformSessionInfo = {
   name: string | null;
   email: string | null;
-  role: "Platform administrator" | "Platform operator" | "Platform administrator and operator";
+  role: "Platform operator";
   scope: "platform";
   /** How many tenants the platform currently has; null when the registry is unreachable. */
   tenants: number | null;
@@ -129,13 +127,10 @@ export function buildPlatformSessionInfo(input: {
   nowMs?: number;
 }): PlatformSessionInfo {
   const { administrator, tenants, access } = input;
-  const administratorRole = input.roles.includes(PLATFORM_ADMIN_ROLE);
-  const operatorRole = input.roles.includes(PLATFORM_OPERATOR_ROLE);
-  const role = administratorRole && operatorRole
-    ? "Platform administrator and operator"
-    : operatorRole
-      ? "Platform operator"
-      : "Platform administrator";
+  if (!input.roles.includes(PLATFORM_OPERATOR_ROLE)) {
+    throw new Error(`Platform session info requires ${PLATFORM_OPERATOR_ROLE}.`);
+  }
+  const role = "Platform operator" as const;
   const nowMs = input.nowMs ?? Date.now();
   // Only what the label is derived from; the rest of the administrator's facts
   // are read straight from `administrator` below.

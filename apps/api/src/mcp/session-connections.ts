@@ -165,6 +165,11 @@ export async function organizationConnectionProblem(input: {
     kind: "organization_missing",
     adapter: providerDisplayName(providerRow, execution),
     adapterId,
+    connectionEntity: execution.connectionEntity,
+    ...(typeof providerRow.key === "string"
+      ? { connectionKey: providerRow.key }
+      : {}),
+    connectionName: providerDisplayName(providerRow, execution),
     createTool: connectionToolsFor(execution, input.entry).create,
     adapterArgument: elicit?.sourceField ?? "adapterId",
     administrator,

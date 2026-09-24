@@ -261,22 +261,18 @@ describe("generated GraphQL CRUD exposure", () => {
 
 describe("the Tenant registry on GraphQL", () => {
   // The registry row is provisioned (control/provisioning.ts); the contract
-  // offers get, list and update, and the SDL rendered from the manifest says
-  // exactly that.
+  // offers only get and list. Name/status changes use the separate control
+  // Operations and never the tenant-facing generic CRUD runtime.
   const tenants = getGeneratedCrudTables().find((table) => table.name === "erp.tenants")!;
 
-  test("renders update, and neither createTenant nor deleteTenant", () => {
+  test("renders no tenant-facing mutation", () => {
     const mutations = renderGeneratedMutationFields(tenants).join("\n");
-    expect(mutations).toContain("updateTenant(");
-    expect(mutations).not.toContain("createTenant(");
-    expect(mutations).not.toContain("deleteTenant(");
-    expect(renderMutationFields(tenants)).toContain("updateTenant(");
-    expect(renderMutationFields(tenants)).not.toMatch(/createTenant\(|deleteTenant\(/);
+    expect(mutations).not.toMatch(/createTenant\(|updateTenant\(|deleteTenant\(/);
+    expect(renderMutationFields(tenants)).not.toMatch(/createTenant\(|updateTenant\(|deleteTenant\(/);
     // The whole schema's Mutation block: what a client can call. The
     // Create/Delete input types are rendered per entity regardless, as for
     // every partial policy, and are not callable without a field.
-    expect(generatedEntityMutationFields).toContain("updateTenant(");
-    expect(generatedEntityMutationFields).not.toMatch(/\bcreateTenant\(|\bdeleteTenant\(/);
+    expect(generatedEntityMutationFields).not.toMatch(/\bcreateTenant\(|\bupdateTenant\(|\bdeleteTenant\(/);
     expect(renderGeneratedQueryFields(tenants).join("\n")).toMatch(/\btenant\(|\btenants\(/);
   });
 });

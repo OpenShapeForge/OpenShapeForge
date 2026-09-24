@@ -260,7 +260,7 @@ function buildExposure(
   const exposure = definition.exposure ?? {};
 
   // GraphQL is the native surface, as it is for entities; REST and MCP are
-  // opt-in, matching the per-entity `rest:` / `mcp:` blocks.
+  // opt-in, matching the per-entity interface projections.
   const graphql = exposure.graphql !== false;
 
   const restAuthored = exposure.rest;
@@ -561,6 +561,23 @@ export function buildConnector(
     );
   }
 
+  const readRole = expectNonEmptyString(
+    definition.authorization?.roles?.read,
+    "authorization.roles.read",
+    origin,
+  );
+  const writeRole = expectNonEmptyString(
+    definition.authorization?.roles?.write,
+    "authorization.roles.write",
+    origin,
+  );
+  if (readRole === writeRole) {
+    throw new Error(
+      `Connector ${origin}: authorization.roles.read and authorization.roles.write ` +
+        `must be distinct permissions (both are ${JSON.stringify(readRole)}).`,
+    );
+  }
+
   assertUnique(operations.map((operation) => operation.key), "operation key", origin);
 
   const configFields = expectArray(
@@ -642,22 +659,6 @@ export function buildConnector(
     );
     expectArray(operation.input ?? [], `operation "${operation.key}" input`, origin);
 
-    const roles = expectArray(
-      operation.authorization?.roles?.invoke ?? [],
-      `operation "${operation.key}" authorization.roles.invoke`,
-      origin,
-    ) as string[];
-    for (const role of roles) {
-      expectNonEmptyString(role, `operation "${operation.key}" invoke role`, origin);
-    }
-    if (roles.length === 0) {
-      throw new Error(
-        `Operation "${operation.key}" in connector ${origin} declares no invoke roles. ` +
-          "Authorization is fail-closed: an operation nobody is allowed to call is a " +
-          "configuration error, not an open one.",
-      );
-    }
-
     const typeBase = `${definition.connector}${toPascal(operation.key)}`;
     return {
       key: operation.key,
@@ -677,7 +678,7 @@ export function buildConnector(
       ...(exposure.mcp && mcpOperationFlags[operation.key] !== false
         ? { mcp: { toolName: `${exposure.mcp.toolPrefix}_${toSnake(operation.key)}` } }
         : {}),
-      roles: { invoke: [...new Set(roles)].sort() },
+      roles: { invoke: [operation.kind === "query" ? readRole : writeRole] },
       input: operation.input ?? [],
       output: operation.output,
       schemas: buildOperationSchemas(operation.input ?? [], operation.output, osfTypes),
@@ -707,6 +708,7 @@ export function buildConnector(
     capabilities: [...capabilities].sort(),
     implementation: definition.implementation,
     availability: entitlement === undefined ? {} : { entitlement },
+    authorization: { roles: { read: readRole, write: writeRole } },
     configuration: {
       instances: definition.configuration?.instances ?? "single",
       verify: definition.configuration?.verify === true,

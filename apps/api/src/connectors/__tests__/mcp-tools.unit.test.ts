@@ -9,8 +9,8 @@ import {
 } from "../mcp-tools.js";
 import type { ConnectorContract, ConnectorOperationContract } from "../catalog.js";
 
-const READ_ROLE = "Connectors.All.Read";
-const WRITE_ROLE = "Connectors.All.ReadWrite";
+const READ_ROLE = "Connectors.ExampleObjectStore.Read";
+const WRITE_ROLE = "Connectors.ExampleObjectStore.Write";
 
 function operation(
   key: string,
@@ -57,6 +57,7 @@ function contract(
       license: { spdx: "MIT" },
     },
     availability: {},
+    authorization: { roles: { read: READ_ROLE, write: WRITE_ROLE } },
     configuration: {
       instances: "single",
       verify: false,

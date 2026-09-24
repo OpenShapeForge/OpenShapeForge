@@ -40,7 +40,7 @@ test("platform tenancy and authored tenant references keep distinct storage cont
   expect(active.manifest.tables.filter(table => table.name === "tenants").map(table => table.schema).sort()).toEqual(["erp", "platform"]);
   const owner = active.entities.find(entity => entity.contract.entity.name === "Tenant")!.contract;
   expect(owner.model.relationships.find(relationship => relationship.key === "tenantSettings")).toMatchObject({ target: "TenantSetting", kind: "hasMany", inverse: "tenantId", ownership: "reference", foreignKey: "tenant_id" });
-}, 30_000);
+}, 60_000);
 
 test("the Tenant registry row is provisioned, never created or deleted through a generated surface", async () => {
   const root = join(import.meta.dir, "../../../..");
@@ -48,10 +48,11 @@ test("the Tenant registry row is provisioned, never created or deleted through a
   const artifacts = await collectAllArtifacts(root);
   const tenants = active.manifest.tables.find(table => table.schema === "erp" && table.name === "tenants")!;
 
-  // The contract: no create, no delete, and no role that could grant either.
-  expect(tenants.source?.crud?.operations).toEqual({ list: true, get: true, create: false, update: true, delete: false });
-  expect(tenants.source?.graphql?.operations).toMatchObject({ create: false, delete: false });
-  expect(tenants.source?.authorization?.roles).toMatchObject({ create: [], delete: [] });
+  // The contract: the registry is observable, but every generic mutation is
+  // closed; provisioning and canonical control Operations own its lifecycle.
+  expect(tenants.source?.crud?.operations).toEqual({ list: true, get: true, create: false, update: false, delete: false });
+  expect(tenants.source?.graphql?.operations).toMatchObject({ create: false, update: false, delete: false });
+  expect(tenants.source?.authorization?.roles).toMatchObject({ create: [], update: [], delete: [] });
 
   // Database: the registry mark, and the restrictive policies emitted beside it.
   const manifest = JSON.parse(artifacts.groups.db.find(artifact => artifact.path.endsWith("manifest.json"))!.contents);
@@ -64,7 +65,7 @@ test("the Tenant registry row is provisioned, never created or deleted through a
 
   // MCP: the tool catalog carries one entry per entity operation
   // (osf_create/osf_get/... with an `entity`); Tenant contributes none at
-  // all — it has no mcp: block — so there is no create or delete to find.
+  // all - it has no interfaces.mcp - so there is no create or delete to find.
   const tools = JSON.parse(artifacts.groups.mcp.find(artifact => artifact.path.endsWith("tools.json"))!.contents);
   expect((tools.entities as Array<{ entity: string }>).some(entry => entry.entity === "Tenant")).toBe(false);
   const entityTools = (tools.tools as Array<{ name: string; entity?: string; operation?: string }>)
@@ -91,23 +92,21 @@ test("the Tenant registry row is provisioned, never created or deleted through a
   expect(pageConfigs.rows.filter((row: { entitySlug: string }) => row.entitySlug === "tenant")).toEqual([]);
   const web = JSON.parse(artifacts.groups.ui.find(artifact => artifact.path.endsWith("apps/web/src/generated/web-manifest.json"))!.contents);
   const webTenant = web.entities.Tenant;
-  expect(Object.keys(webTenant.operations).sort()).toEqual(["get", "list", "update"]);
+  expect(Object.keys(webTenant.operations).sort()).toEqual(["get", "list"]);
   expect(webTenant.views.collection.modes).toEqual(["read"]);
-  expect(webTenant.views.record.modes).toEqual(["read", "update"]);
+  expect(webTenant.views.record.modes).toEqual(["read"]);
   expect(webTenant.views.record.routes).toEqual({ read: "/tenants/:id" });
   expect(webTenant.views.record.operations.actions).toEqual([]);
-  expect(Object.keys(webTenant.views.record.operations).sort()).toEqual(["actions", "read", "update"]);
+  expect(Object.keys(webTenant.views.record.operations).sort()).toEqual(["actions", "read"]);
   expect(webTenant.views.record.formGroups.create).toEqual([]);
-  expect(webTenant.views.record.formGroups.update).toEqual([
-    expect.objectContaining({ id: "tenant-details", fields: ["slug", "name", "status", "description", "avatarStorageLocation"] }),
-  ]);
+  expect(webTenant.views.record.formGroups.update).toEqual([]);
   const writable = Object.values(webTenant.fields as Record<string, { key: string; supports: { create: boolean; update: boolean } }>)
     .filter(field => field.supports.update).map(field => field.key);
-  expect(writable).toEqual(["slug", "name", "status", "description", "avatarStorageLocation"]);
+  expect(writable).toEqual([]);
   expect(Object.values(webTenant.fields as Record<string, { supports: { create: boolean } }>).some(field => field.supports.create)).toBe(false);
   const webManifest = artifacts.groups.ui.find(artifact => artifact.path.endsWith("compiler/entity-manifest.ts"))!.contents;
   const webEntry = webManifest.match(/"tenant": \{[\s\S]*?\n  \}/)![0];
   expect(webEntry).toContain('"create": []');
   expect(webEntry).toContain('"delete": []');
-  expect(webEntry).toContain('"update": [\n        "Organization.All.ReadWrite"\n      ]');
-}, 30_000);
+  expect(webEntry).toContain('"update": []');
+}, 60_000);

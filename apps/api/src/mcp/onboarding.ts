@@ -43,6 +43,7 @@ import {
 } from "../graphql/generated-crud.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import {
+  connectionCreateCall,
   connectionFieldsOf,
   connectionNeedsOf,
   missingRequiredConnectionValues,
@@ -196,6 +197,10 @@ export type OrganizationConnectionFact = {
   /** Display name of the Adapter. */
   adapter: string;
   adapterId: string;
+  /** Stable non-secret identity fields for the Connection create call. */
+  connectionEntity: string;
+  connectionKey: string | null;
+  connectionName: string;
   /** The tool that creates the Connection, e.g. create_connection. */
   createTool: string;
   /** The create tool's argument naming the Adapter, e.g. adapterId. */
@@ -269,8 +274,22 @@ function describeOrganizationConnection(entry: OrganizationConnectionFact): stri
   const parts = [
     entry.missingValues.length > 0
       ? `The ${entry.adapter} connection is incomplete (missing: ${entry.missingValues.join(", ")}); ` +
-        `delete it and run ${entry.createTool} { ${entry.adapterArgument}: ${JSON.stringify(entry.adapterId)}, key, name } again.`
-      : `Run ${entry.createTool} { ${entry.adapterArgument}: ${JSON.stringify(entry.adapterId)}, key, name } for ${entry.adapter}.`,
+        `delete it and run ${connectionCreateCall({
+          createTool: entry.createTool,
+          connectionEntity: entry.connectionEntity,
+          connectionKey: entry.connectionKey ?? undefined,
+          connectionName: entry.connectionName,
+          adapterArgument: entry.adapterArgument,
+          adapterId: entry.adapterId,
+        })} again.`
+      : `Run ${connectionCreateCall({
+          createTool: entry.createTool,
+          connectionEntity: entry.connectionEntity,
+          connectionKey: entry.connectionKey ?? undefined,
+          connectionName: entry.connectionName,
+          adapterArgument: entry.adapterArgument,
+          adapterId: entry.adapterId,
+        })} for ${entry.adapter}.`,
   ];
   if (fields) parts.push(`The secure form asks for: ${fields}.`);
   if (entry.redirectUri) {
@@ -707,10 +726,6 @@ export type OnboardingEnvironment = {
     filter: Record<string, unknown>,
     limit?: number,
   ) => Promise<Record<string, unknown>[]>;
-  /** The role guide tools this session is shown. */
-  guideTools: () => ReadonlyArray<{ name: string }>;
-  /** Guides read in THIS session (the server's per-session set). */
-  guidesCalled: ReadonlySet<string>;
   store: OnboardingStore;
   /**
    * The connection entity's create contract: how its configuration is
@@ -732,6 +747,37 @@ export type OnboardingEnvironment = {
   /** The OAuth redirect URL to register at providers; null when no public origin is configured. */
   redirectUri: () => string | null;
 };
+
+type OnboardingProjectedTool = Pick<DerivedTool, "name" | "table" | "rowId">;
+
+/**
+ * Join the ordinary row-derived tools with runtime Operation projections.
+ * Compatibility-backed Operations still identify the canonical entity row,
+ * so onboarding can reason about the same Service that tools/list exposes.
+ */
+export function onboardingToolProjection(
+  entries: readonly DerivedToolsCatalogEntry[],
+  projected: readonly OnboardingProjectedTool[],
+  runtime: ReadonlyArray<{
+    name: string;
+    entityName?: string | undefined;
+    entityId?: string | undefined;
+  }>,
+): OnboardingProjectedTool[] {
+  const tools = [...projected];
+  const seen = new Set(tools.map((tool) => `${tool.table}\u0000${tool.rowId}\u0000${tool.name}`));
+  for (const tool of runtime) {
+    if (!tool.entityName || !tool.entityId) continue;
+    for (const entry of entries) {
+      if (!entry.compatibility || entry.entity !== tool.entityName) continue;
+      const identity = `${entry.table}\u0000${tool.entityId}\u0000${tool.name}`;
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      tools.push({ name: tool.name, table: entry.table, rowId: tool.entityId });
+    }
+  }
+  return tools;
+}
 
 type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 
@@ -803,7 +849,7 @@ export function onboardingStore(
 
 /**
  * Bind the real environment. The server passes its own per-session builders
- * so the checklist sees exactly the tools and guides `tools/list` would show.
+ * so the checklist sees exactly the tools `tools/list` would show.
  */
 export function onboardingEnvironment(input: {
   db: OpenShapeForgeDatabase;
@@ -811,8 +857,6 @@ export function onboardingEnvironment(input: {
   tables: Map<string, GeneratedTable>;
   derivedEntries: readonly DerivedToolsCatalogEntry[];
   projectedTools: () => Promise<Array<Pick<DerivedTool, "name" | "table" | "rowId">>>;
-  guideTools: () => ReadonlyArray<{ name: string }>;
-  guidesCalled: ReadonlySet<string>;
   connectionContract: OnboardingEnvironment["connectionContract"];
   tenantConnection: OnboardingEnvironment["tenantConnection"];
   redirectUri: OnboardingEnvironment["redirectUri"];
@@ -822,8 +866,6 @@ export function onboardingEnvironment(input: {
     session,
     derivedEntries: input.derivedEntries,
     projectedTools: input.projectedTools,
-    guideTools: input.guideTools,
-    guidesCalled: input.guidesCalled,
     connectionContract: input.connectionContract,
     tenantConnection: input.tenantConnection,
     redirectUri: input.redirectUri,
@@ -964,9 +1006,11 @@ async function organizationConnectionsFor(
   env: OnboardingEnvironment,
 ): Promise<OnboardingFacts["organizationConnections"]> {
   if (!isOrganizationAdministrator(env.session.roles)) return null;
+  const projectedTables = new Set((await env.projectedTools()).map((tool) => tool.table));
   const seen = new Set<string>();
   const facts: OrganizationConnectionFact[] = [];
   for (const entry of env.derivedEntries) {
+    if (!projectedTables.has(entry.table)) continue;
     const execution = entry.execution;
     if (!execution || seen.has(execution.providerTable)) continue;
     seen.add(execution.providerTable);
@@ -994,6 +1038,9 @@ async function organizationConnectionsFor(
       facts.push({
         adapter: typeof provider.name === "string" ? provider.name : providerId,
         adapterId: providerId,
+        connectionEntity: execution.connectionEntity,
+        connectionKey: typeof provider.key === "string" ? provider.key : null,
+        connectionName: typeof provider.name === "string" ? provider.name : providerId,
         createTool: contract.createTool,
         adapterArgument: contract.elicit.sourceField,
         configured: connection !== null && missingValues.length === 0,
@@ -1022,7 +1069,6 @@ async function preferencesFor(env: OnboardingEnvironment): Promise<OnboardingFac
 export async function gatherOnboardingFacts(env: OnboardingEnvironment): Promise<OnboardingFacts> {
   const relation = env.session.relation ?? null;
   const record = await env.store.read();
-  const guidesRead = new Set([...(record?.guidesRead ?? []), ...env.guidesCalled]);
   const [organizationConnections, personalSignIns, preferences] = await Promise.all([
     organizationConnectionsFor(env),
     personalSignInsFor(env),
@@ -1036,7 +1082,7 @@ export async function gatherOnboardingFacts(env: OnboardingEnvironment): Promise
     organizationConnections,
     personalSignIns,
     preferences,
-    guides: env.guideTools().map((guide) => ({ name: guide.name, read: guidesRead.has(guide.name) })),
+    guides: [],
     record,
   };
 }

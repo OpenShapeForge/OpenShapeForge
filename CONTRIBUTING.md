@@ -27,8 +27,10 @@ bun run dev:api        # http://127.0.0.1:3001/api/graphql (GraphiQL in dev)
 
 ## The golden rule: never edit generated artifacts
 
-Everything the compiler emits is gitignored, reproducible, and named or located to make
+Everything the compiler emits is reproducible and named or located to make
 its origin obvious (`apps/api/src/generated/`, `generated-*`, `*.generated.*`).
+Bulky runtime roots are gitignored; a small allowlist of shared compiler contract
+artifacts is tracked and freshness-checked.
 Hand-written engines consume generated manifests; they never contain per-entity code.
 If a generated file looks wrong, fix the authoring YAML, a template, or a generator —
 then rerun `bun run generate` and let the gates verify. Hand-edits are overwritten and

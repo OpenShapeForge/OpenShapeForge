@@ -68,6 +68,11 @@ implementation:
 availability:
   entitlement: connector.twinfield
 
+authorization:
+  roles:
+    read: Connectors.Twinfield.Read
+    write: Connectors.Twinfield.Write
+
 configuration:
   # Multiple: an organisation routinely holds several administrations, and a
   # company code is per installation rather than a setting toggled on one.
@@ -176,9 +181,6 @@ operations:
     description:
       en: List the Twinfield companies this authorization can reach.
       nl: Toon de Twinfield-administraties die deze autorisatie kan bereiken.
-    authorization:
-      roles:
-        invoke: [Connectors.All.Read]
     input: []
     output:
       cardinality: one
@@ -204,9 +206,6 @@ operations:
     description:
       en: Send a Twinfield read document to ProcessXmlDocument and return the answer.
       nl: Stuur een Twinfield-leesdocument naar ProcessXmlDocument en geef het antwoord terug.
-    authorization:
-      roles:
-        invoke: [Connectors.All.Read]
     input:
       - key: document
         osfType: string
@@ -259,9 +258,6 @@ operations:
     description:
       en: Search Twinfield's finder for codes — dimensions, offices, articles.
       nl: Zoek via de Twinfield-finder naar codes — dimensies, administraties, artikelen.
-    authorization:
-      roles:
-        invoke: [Connectors.All.Read]
     input:
       - key: type
         osfType: string
@@ -336,9 +332,6 @@ operations:
     description:
       en: Send a Twinfield write document — a transaction, a dimension, an invoice.
       nl: Stuur een Twinfield-schrijfdocument — een transactie, een dimensie, een factuur.
-    authorization:
-      roles:
-        invoke: [Connectors.All.ReadWrite]
     input:
       - key: document
         osfType: string

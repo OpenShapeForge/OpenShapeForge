@@ -18,6 +18,7 @@ import type { GeneratedTable } from "../catalog.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
+  process.env.OPENSHAPEFORGE_MIGRATE_DATABASE_URL?.replace(/\/[^/]+$/, "/postgres") ??
   process.env.DATABASE_URL?.replace(/\/[^/]+$/, "/postgres") ??
   "postgres://openshapeforge:openshapeforge@127.0.0.1:5435/postgres";
 const APP_ROLE_PASSWORD = process.env.OPENSHAPEFORGE_APP_PASSWORD ?? "openshapeforge_app";

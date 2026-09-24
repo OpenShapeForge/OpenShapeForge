@@ -36,6 +36,7 @@ import type {
 import {
   assertNoCallerElicitedOutput,
   assertNoOperationWrittenValues,
+  addTrustedOperationValues,
   normalizeWritableValues,
   writableColumnMap,
 } from "./write-policy.js";
@@ -52,6 +53,7 @@ import {
 } from "./derive-on-create.js";
 import { assertRelationshipConstraintsInTransaction } from "./relationship-constraints.js";
 import { assertPublishableRelatedMutationInTransaction } from "./derived-execution-guards.js";
+import { assertHardDeleteAllowedInTransaction } from "./deletion-guards.js";
 
 async function fetchGeneratedRowInTransaction(
   trx: Transaction<DB>,
@@ -176,6 +178,7 @@ export async function createGeneratedEntity(
   input: {
     table: string;
     values: Record<string, unknown>;
+    trusted?: { operation: string; values: Record<string, unknown> };
   },
 ): Promise<GeneratedEntityRow> {
   const table = readGeneratedCrudTable(input.table, "create", session);
@@ -185,6 +188,7 @@ export async function createGeneratedEntity(
   assertNoOperationWrittenValues(table, input.values);
   assertCreateRecordPermissions(table, session, input.values);
   const values = normalizeWritableValues(table, input.values, "create");
+  if (input.trusted) addTrustedOperationValues(table, values, input.trusted.operation, input.trusted.values);
   return insertGeneratedRow(db, session, table, values);
 }
 
@@ -310,6 +314,7 @@ export async function updateGeneratedEntity(
     table: string;
     id: string;
     values: Record<string, unknown>;
+    trusted?: { operation: string; values: Record<string, unknown> };
     guard?: {
       operation: ChallengeProtectedOperation & LeaseProtectedOperation;
       expectedVersion: string;
@@ -326,6 +331,7 @@ export async function updateGeneratedEntity(
   assertNoOperationWrittenValues(table, input.values);
   assertUpdateRecordPermissions(table, input.values);
   const values = normalizeWritableValues(table, input.values, "update");
+  if (input.trusted) addTrustedOperationValues(table, values, input.trusted.operation, input.trusted.values);
   return applyGeneratedRowUpdate(db, session, table, input.id, values, input.guard);
 }
 
@@ -525,6 +531,14 @@ export async function deleteGeneratedEntity(
     await assertNoOwnedChildrenInTransaction(trx, table, input.id);
     const current = await fetchGeneratedRowInTransaction(trx, session, table, input.id, true);
     if (current) {
+      await assertHardDeleteAllowedInTransaction(
+        trx,
+        session,
+        table,
+        input.id,
+        current,
+        entityValues.tables ?? getGeneratedCrudTables(),
+      );
       await assertPublishableRelatedMutationInTransaction(trx, session, table, {
         kind: "delete",
         id: input.id,

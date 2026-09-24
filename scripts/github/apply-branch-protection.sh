@@ -6,17 +6,19 @@
 #
 #   sh scripts/github/apply-branch-protection.sh
 #
-# Protects the default branch: all changes via PR, >=1 approving review from a
-# CODEOWNER, stale reviews dismissed on push, conversations resolved, linear
-# history, no force-push, no deletion, and every CI gate green.
+# Protects the default branch and the package-publishing hans/dev integration
+# branch: all changes via PR, >=1 approving review from a CODEOWNER, stale
+# reviews dismissed on push, conversations resolved, linear history, no
+# force-push, no deletion, and every CI gate green.
 #
 # Repository admins can bypass IN PULL REQUESTS ONLY (bypass_mode
 # "pull_request"), not with a direct push to the default branch. "always" — the
 # previous setting — let an admin, or anyone who compromised an admin account,
-# push straight to main with no review and no CI (issue #47). The pull_request
-# bypass keeps the emergency valve that stops a single-CODEOWNER repo from
-# deadlocking on its own review requirement, while still forcing the change
-# through a PR that CI has run against and that leaves a reviewable trail.
+# push straight to a protected publishing branch with no review and no CI
+# (issue #47). The pull_request bypass keeps the emergency valve that stops a
+# single-CODEOWNER repo from deadlocking on its own review requirement, while
+# still forcing the change through a PR that CI has run against and that leaves
+# a reviewable trail.
 #
 # Required checks are matched BY JOB NAME, so renaming a job in
 # .github/workflows/** silently stops enforcing it until this file is updated

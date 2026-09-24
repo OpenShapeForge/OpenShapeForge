@@ -4,8 +4,11 @@ import { COMPILER_OSF_TYPES } from "@/generated/compiler/osf-types";
 import type { VariableSuggestion } from "@/features/renderer/runtime/variable-suggestions";
 import {
   fieldRuntimeKind,
+  fieldValueType,
+  isBaseType,
   isFieldCollection,
-  type FieldRuntimeKind, fieldValueType } from "@/lib/field-contract/field-v2";
+  type FieldRuntimeKind,
+} from "@/lib/field-contract/field-v2";
 
 type VariableValueType =
   | "string"
@@ -37,6 +40,17 @@ function normalizeOptionalString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0
     ? value.trim()
     : undefined;
+}
+
+/**
+ * Compiled fields always carry an `osfType`, including plain base types. The
+ * old contract kept base type and semantic refinement on separate properties,
+ * so only a genuine refinement used to take precedence over item/value/date
+ * compatibility below. Preserve that distinction after the contract rename.
+ */
+function semanticOsfType(value: unknown): string | undefined {
+  const osfType = normalizeOptionalString(value);
+  return osfType && !isBaseType(osfType) ? osfType : undefined;
 }
 
 function osfTypesCompatible(
@@ -95,7 +109,7 @@ export function getVariableFilterForField(
 ): VariableFilter | null {
   const osfType =
     normalizeOptionalString(field.render?.props?.expectedOsfType) ??
-    normalizeOptionalString(field.osfType);
+    semanticOsfType(field.osfType);
   if (osfType) {
     // `variableTemplate` classifies the *field* (a string containing `{{...}}` tokens), not
     // the semantic type of each referenced variable (iban, relationId, plain strings, …).
@@ -121,7 +135,7 @@ export function getVariableFilterForField(
 
   const itemOsfType =
     normalizeOptionalString(field.render?.props?.expectedItemOsfType) ??
-    normalizeOptionalString(field.item?.osfType);
+    semanticOsfType(field.item?.osfType);
   if (itemOsfType) {
     return {
       valueType: "array",

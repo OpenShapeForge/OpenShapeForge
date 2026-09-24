@@ -26,6 +26,16 @@ function relationSource(): Parameters<typeof buildEntityOperations>[0] {
 }
 
 describe("canonical entity operations", () => {
+  test("adds acknowledgement and current-version protection to every hard delete", () => {
+    const source = relationSource();
+    source.crud.operations.delete = true;
+    const deletion = buildEntityOperations(source).delete;
+    expect(deletion).toMatchObject({
+      concurrency: { version: { mode: "required", field: "updatedAt" } },
+      interaction: { confirmation: { mode: "acknowledgement" } },
+    });
+  });
+
   test("compiles identity, fields, rights and interaction once", () => {
     const operations = buildEntityOperations(relationSource());
 

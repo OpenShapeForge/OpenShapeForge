@@ -80,6 +80,25 @@ export function renderRenderableField(
     ctx.fieldConfigByKey.get(field.key),
   );
   const nodeKey = getRenderableFieldNodeKey(field, path);
+  const unsupported = ctx.unsupportedFields?.get(field);
+  if (unsupported) {
+    const label = translateRendererText(field.label, ctx.lang) || field.key;
+    return (
+      <div
+        key={nodeKey}
+        role="alert"
+        className={`${getRendererFieldSpanClass(field, columns)} rounded-lg border border-destructive/30 bg-destructive/10 p-3`}
+        data-unsupported-field={field.key}
+      >
+        <p className="text-sm font-medium text-destructive">{label}</p>
+        <p className="mt-1 text-xs text-destructive">
+          {ctx.lang === "nl"
+            ? "Dit veld gebruikt een niet-ondersteund contract en is alleen-lezen. De gegevens zijn niet gewijzigd."
+            : "This field uses an unsupported contract and is read-only. Its data was not changed."}
+        </p>
+      </div>
+    );
+  }
   const customProps = getCustomFieldRenderProps(
     ctx,
     field,

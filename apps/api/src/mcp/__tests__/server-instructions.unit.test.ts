@@ -26,7 +26,6 @@ describe("buildServerInstructions", () => {
       opening,
       hasConnectors: false,
       oauthCallbackUrl: null,
-      guidesBeforeCreate: [{ name: "pentest_guide", entity: "Assessment" }],
       locale: nl,
       client,
     });
@@ -34,7 +33,6 @@ describe("buildServerInstructions", () => {
     const order = [
       opening,
       INSTRUCTIONS,
-      "Before creating a Assessment, call pentest_guide",
       "Data acquisition —",
       ONBOARDING_INSTRUCTION,
       "Talking to a person —",
@@ -52,7 +50,6 @@ describe("buildServerInstructions", () => {
       opening: null,
       hasConnectors: false,
       oauthCallbackUrl: null,
-      guidesBeforeCreate: [],
       locale: nl,
       client: null,
     });
@@ -67,7 +64,6 @@ describe("buildServerInstructions", () => {
       opening: null,
       hasConnectors: true,
       oauthCallbackUrl: "https://hubble.localhost/api/entity-oauth/callback",
-      guidesBeforeCreate: [],
       locale: nl,
       client: null,
     });
@@ -79,7 +75,6 @@ describe("buildServerInstructions", () => {
       opening: null,
       hasConnectors: false,
       oauthCallbackUrl: "https://hubble.localhost/api/entity-oauth/callback",
-      guidesBeforeCreate: [],
       locale: nl,
       client: null,
     });
@@ -91,7 +86,6 @@ describe("buildServerInstructions", () => {
       opening: null,
       hasConnectors: true,
       oauthCallbackUrl: null,
-      guidesBeforeCreate: [],
       locale: nl,
       client: null,
     });

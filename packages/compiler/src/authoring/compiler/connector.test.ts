@@ -21,11 +21,16 @@ function definition(
       provenance: "firstParty",
       license: { spdx: "LicenseRef-BatterAI-Commercial" },
     },
+    authorization: {
+      roles: {
+        read: "Connectors.ObjectStore.Read",
+        write: "Connectors.ObjectStore.Write",
+      },
+    },
     operations: [
       {
         key: "listObjects",
         kind: "query",
-        authorization: { roles: { invoke: ["Connectors.All.Read"] } },
         input: [{ key: "prefix", osfType: "string" }],
         output: { cardinality: "many", fields: [{ key: "key", osfType: "string" }] },
       },
@@ -47,6 +52,7 @@ describe("buildConnector — surface projection", () => {
     });
     // A query becomes a GET; the path is the kebab-cased operation key.
     expect(operation.rest).toEqual({ method: "GET", path: "list-objects" });
+    expect(operation.roles.invoke).toEqual(["Connectors.ObjectStore.Read"]);
   });
 
   it("derives POST for mutations", () => {
@@ -56,7 +62,6 @@ describe("buildConnector — surface projection", () => {
           {
             key: "putObject",
             kind: "mutation",
-            authorization: { roles: { invoke: ["Connectors.All.ReadWrite"] } },
             output: { cardinality: "one", fields: [{ key: "key", osfType: "string" }] },
           },
         ],
@@ -65,6 +70,7 @@ describe("buildConnector — surface projection", () => {
       ORIGIN,
     );
     expect(compiled.operations[0]!.rest).toEqual({ method: "POST", path: "put-object" });
+    expect(compiled.operations[0]!.roles.invoke).toEqual(["Connectors.ObjectStore.Write"]);
   });
 
   it("emits no MCP tool names unless MCP exposure is opted into", () => {
@@ -149,22 +155,14 @@ describe("buildConnector — fail closed", () => {
     ).toThrow(/require the reserved eventSource \/ eventSink capabilities/);
   });
 
-  it("rejects an operation with no invoke roles", () => {
+  it("rejects a connector with no invocation permissions", () => {
     expect(() =>
       buildConnector(
-        definition({
-          operations: [
-            {
-              key: "listObjects",
-              kind: "query",
-              output: { cardinality: "many", fields: [] },
-            },
-          ],
-        }),
+        definition({ authorization: undefined } as unknown as Partial<ConnectorDefinition>),
         "object-store",
         ORIGIN,
       ),
-    ).toThrow(/declares no invoke roles/);
+    ).toThrow(/authorization\.roles\.read must be a non-empty string/);
   });
 
   it("rejects an operation without an output shape", () => {
@@ -175,7 +173,6 @@ describe("buildConnector — fail closed", () => {
             {
               key: "listObjects",
               kind: "query",
-              authorization: { roles: { invoke: ["Connectors.All.Read"] } },
             },
           ],
         } as Partial<ConnectorDefinition>),
@@ -199,7 +196,6 @@ describe("buildConnector — fail closed", () => {
     const operation = {
       key: "listObjects",
       kind: "query" as const,
-      authorization: { roles: { invoke: ["Connectors.All.Read"] } },
       output: { cardinality: "many" as const, fields: [] },
     };
     expect(() =>
@@ -226,26 +222,22 @@ describe("buildConnector — fail closed", () => {
 });
 
 describe("buildConnector — structural guards", () => {
-  // A scalar where a list belongs used to be spread character by character:
-  // `invoke: "AdminRole"` compiled to ["A","R","d","e",…]. Silent corruption of
-  // an authorization allow-list is worse than a build failure.
-  it("refuses a scalar where a list of roles belongs", () => {
+  it("requires two distinct connector-level invocation permissions", () => {
     expect(() =>
       buildConnector(
-        definition({
-          operations: [
-            {
-              key: "listObjects",
-              kind: "query",
-              authorization: { roles: { invoke: "AdminRole" } },
-              output: { cardinality: "many", fields: [] },
-            },
-          ],
-        } as unknown as Partial<ConnectorDefinition>),
+        definition({ authorization: { roles: { read: "Reader", write: "Reader" } } }),
         "object-store",
         ORIGIN,
       ),
-    ).toThrow(/authorization\.roles\.invoke must be a list, got string/);
+    ).toThrow(/must be distinct permissions/);
+
+    expect(() =>
+      buildConnector(
+        definition({ authorization: { roles: { read: "", write: "Writer" } } }),
+        "object-store",
+        ORIGIN,
+      ),
+    ).toThrow(/authorization\.roles\.read must be a non-empty string/);
   });
 
   it("refuses a scalar where the capability list belongs", () => {
@@ -284,7 +276,6 @@ describe("buildConnector — structural guards", () => {
             {
               key: "listObjects",
               kind: "query",
-              authorization: { roles: { invoke: ["R"] } },
               output: { cardinality: "several", fields: [] },
             },
           ],
@@ -301,7 +292,6 @@ describe("buildConnector — structural guards", () => {
             {
               key: "listObjects",
               kind: "query",
-              authorization: { roles: { invoke: ["R"] } },
               output: { cardinality: "many", fields: [] },
               reliability: { timeouts: { attemptMs: "fast" } },
             },
@@ -321,7 +311,6 @@ describe("buildConnector — reliability", () => {
         {
           key: "putObject",
           kind: "mutation",
-          authorization: { roles: { invoke: ["Connectors.All.ReadWrite"] } },
           input: [{ key: "requestId", osfType: "string" }],
           output: { cardinality: "one", fields: [] },
           reliability,
@@ -464,7 +453,6 @@ describe("buildConnector — timeout budgets", () => {
         {
           key: "putObject",
           kind: "mutation",
-          authorization: { roles: { invoke: ["W"] } },
           output: { cardinality: "one", fields: [] },
           reliability: {
             retry: { eligible: true, maxAttempts: 3 },

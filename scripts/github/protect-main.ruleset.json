@@ -2,7 +2,12 @@
   "name": "protect-main",
   "target": "branch",
   "enforcement": "active",
-  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "conditions": {
+    "ref_name": {
+      "include": ["~DEFAULT_BRANCH", "refs/heads/hans/dev"],
+      "exclude": []
+    }
+  },
   "rules": [
     { "type": "deletion" },
     { "type": "non_fast_forward" },
@@ -31,7 +36,8 @@
           { "context": "Dependency and secret scan (Trivy)" },
           { "context": "Build, smoke test, push the API image" },
           { "context": "Build, smoke test, push the Keycloak image" },
-          { "context": "API e2e (GraphQL, REST, MCP)" }
+          { "context": "API e2e (GraphQL, REST, MCP)" },
+          { "context": "Browser e2e (apps/web)" }
         ]
       }
     }

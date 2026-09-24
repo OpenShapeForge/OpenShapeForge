@@ -17,7 +17,6 @@ import type { DB } from "../../generated/db/types.js";
 import { registerOperationRestRoutes } from "../../operations/runtime.js";
 import { __resetControlVerifiersForTests, PLATFORM_OPERATOR_ROLE } from "../authorization.js";
 import type { ControlPlaneConfig } from "../config.js";
-import { PLATFORM_ADMIN_ROLE } from "../platform-admin.js";
 import { PLATFORM_GUIDE } from "../platform-tools.js";
 import { createControlRuntime } from "../runtime.js";
 import { controlOperationContracts } from "./control-operation-fixtures.js";
@@ -125,20 +124,20 @@ async function call(method: "GET" | "POST" | "PATCH" | "PUT", url: string, beare
 }
 
 describe("one round trip per page group", () => {
-  test("platform: the guide and whoami, for either role", async () => {
+  test("platform: the guide and whoami for the single control role", async () => {
     const guide = await call("GET", "/api/control/v1/guide", token([PLATFORM_OPERATOR_ROLE]));
     expect(guide.status).toBe(200);
     expect(guide.body).toEqual({ guide: PLATFORM_GUIDE });
-    const who = await call("GET", "/api/control/v1/whoami", token([PLATFORM_ADMIN_ROLE]));
+    const who = await call("GET", "/api/control/v1/whoami", token([PLATFORM_OPERATOR_ROLE]));
     expect(who.status).toBe(200);
-    expect(who.body).toMatchObject({ role: "Platform administrator", scope: "platform", tenants: 0, access: { tools: 24, resources: 1 } });
+    expect(who.body).toMatchObject({ role: "Platform operator", scope: "platform", tenants: 0, access: { tools: 37, resources: 1 } });
     // The default product name, then a configured one; the variable is
     // restored so no later file inherits it.
     expect(who.body.signedInVia).toBe("OpenShapeForge control plane");
     const previous = process.env.OPENSHAPEFORGE_PRODUCT_NAME;
     process.env.OPENSHAPEFORGE_PRODUCT_NAME = "Atlas";
     try {
-      const named = await call("GET", "/api/control/v1/whoami", token([PLATFORM_ADMIN_ROLE]));
+      const named = await call("GET", "/api/control/v1/whoami", token([PLATFORM_OPERATOR_ROLE]));
       expect(named.body.signedInVia).toBe("Atlas control plane");
     } finally {
       if (previous === undefined) delete process.env.OPENSHAPEFORGE_PRODUCT_NAME;
@@ -173,22 +172,19 @@ describe("one round trip per page group", () => {
     expect(badSlug.status).toBe(400);
   });
 
-  test("services: the catalog is platform_admin's, and without a provider says so as a conflict", async () => {
-    const forbidden = await call("GET", "/api/control/v1/catalog", token([PLATFORM_OPERATOR_ROLE]));
-    expect(forbidden.status).toBe(403);
-    expect(forbidden.body.error.code).toBe("FORBIDDEN");
-    const unavailable = await call("GET", "/api/control/v1/catalog", token([PLATFORM_ADMIN_ROLE]));
+  test("services: the catalog uses the same platform role and without a provider says so as a conflict", async () => {
+    const unavailable = await call("GET", "/api/control/v1/catalog", token([PLATFORM_OPERATOR_ROLE]));
     expect(unavailable.status).toBe(409);
     expect(unavailable.body.error).toMatchObject({ code: "CONFLICT", detail: "PLATFORM_CATALOG_UNAVAILABLE" });
-    const both = await call("GET", "/api/control/v1/catalog/service/record-finding", token([PLATFORM_ADMIN_ROLE, PLATFORM_OPERATOR_ROLE]));
-    expect(both.status).toBe(409);
+    const entry = await call("GET", "/api/control/v1/catalog/service/record-finding", token([PLATFORM_OPERATOR_ROLE]));
+    expect(entry.status).toBe(409);
   });
 
   test("notices: listed and withdrawn under the Operation's own shapes", async () => {
-    const notices = await call("GET", "/api/control/v1/notices", token([PLATFORM_ADMIN_ROLE]));
+    const notices = await call("GET", "/api/control/v1/notices", token([PLATFORM_OPERATOR_ROLE]));
     expect(notices.status).toBe(200);
     expect(notices.body).toEqual({ notices: [] });
-    const withdrawn = await call("POST", "/api/control/v1/notices/day-start-v3/withdraw", token([PLATFORM_ADMIN_ROLE]));
+    const withdrawn = await call("POST", "/api/control/v1/notices/day-start-v3/withdraw", token([PLATFORM_OPERATOR_ROLE]));
     expect(withdrawn.status).toBe(404);
     expect(withdrawn.body.error).toMatchObject({ code: "NOT_FOUND", detail: "UPDATE_NOTICE_NOT_FOUND" });
   });
@@ -201,7 +197,7 @@ describe("who is refused, and how", () => {
     expect(anonymous.body.error.code).toBe("UNAUTHENTICATED");
     const tenantToken = mint(tenantKey, {
       iss: TENANT_ISSUER, sub: "user-a", azp: "codex", aud: ["erp-provider"],
-      realm_access: { roles: [PLATFORM_ADMIN_ROLE] },
+      realm_access: { roles: [PLATFORM_OPERATOR_ROLE] },
     });
     const foreign = await call("GET", "/api/control/v1/tenants", tenantToken);
     expect(foreign.status).toBe(401);
@@ -210,14 +206,14 @@ describe("who is refused, and how", () => {
       expect(message).not.toContain("openshapeforge");
       expect(message).not.toContain("issuer");
     }
-    expect((await call("GET", "/api/control/v1/tenants", token([PLATFORM_ADMIN_ROLE], { azp: "admin-cli" }))).status).toBe(401);
+    expect((await call("GET", "/api/control/v1/tenants", token([PLATFORM_OPERATOR_ROLE], { azp: "admin-cli" }))).status).toBe(401);
     const noRole = await call("GET", "/api/control/v1/tenants", token(["default-roles-openshapeforge-control"]));
     expect(noRole.status).toBe(403);
     expect(noRole.body.error.code).toBe("FORBIDDEN");
   });
 
   test("an unconfigured control plane answers 503 naming what is missing, before any token is read", async () => {
-    const response = await call("GET", "/api/control/v1/tenants", token([PLATFORM_ADMIN_ROLE]), undefined, unconfigured);
+    const response = await call("GET", "/api/control/v1/tenants", token([PLATFORM_OPERATOR_ROLE]), undefined, unconfigured);
     expect(response.status).toBe(503);
     expect(response.body.error.code).toBe("CONTROL_PLANE_NOT_CONFIGURED");
     expect(response.body.error.message).toContain("OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER");

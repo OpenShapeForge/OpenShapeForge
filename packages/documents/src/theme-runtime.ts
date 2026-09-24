@@ -179,8 +179,8 @@ export const setDefaultDocumentTheme: ModuleOperationHandler = async (input, con
     if (!target.isDefault) {
       await rows(trx, "select set_config('app.document_theme_switching', '1', true)", []);
       try {
-        await rows(trx, "update erp.document_themes set is_default = false where tenant_id = $1 and is_default", [tenantId]);
-        await rows(trx, "update erp.document_themes set is_default = true where tenant_id = $1 and id = $2", [tenantId, themeId]);
+        await rows(trx, "update erp.document_themes set is_default = false, updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond') where tenant_id = $1 and is_default", [tenantId]);
+        await rows(trx, "update erp.document_themes set is_default = true, updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond') where tenant_id = $1 and id = $2", [tenantId, themeId]);
       } finally {
         await rows(trx, "select set_config('app.document_theme_switching', '', true)", []);
       }

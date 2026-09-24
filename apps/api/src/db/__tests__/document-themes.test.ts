@@ -154,7 +154,18 @@ describe("document theme invariants", () => {
       const prematureDelete = await rejection(sql`delete from erp.document_themes where id = ${second}::uuid`.execute(db));
       expect(String((prematureDelete as { message?: string } | undefined)?.message ?? prematureDelete)).toContain("choose another default");
       await sql`update erp.templates set document_theme_id = ${third}::uuid where id = ${templateId}::uuid`.execute(db);
+      const beforeSwitch = await sql<{ id: string; updatedAt: string }>`
+        select id::text as id, updated_at::text as "updatedAt" from erp.document_themes
+        where id in (${second}::uuid, ${third}::uuid)
+      `.execute(db);
       await setDefaultDocumentTheme({ id: third }, ctx);
+      for (const row of beforeSwitch.rows) {
+        const advanced = await sql<{ advanced: boolean }>`
+          select updated_at > ${row.updatedAt}::timestamptz as advanced
+          from erp.document_themes where id = ${row.id}::uuid
+        `.execute(db);
+        expect(advanced.rows[0]?.advanced).toBe(true);
+      }
       await sql`delete from erp.document_themes where id = ${second}::uuid`.execute(db);
       const promoted = await sql<{ key: string }>`
         select key from erp.document_themes where tenant_id = ${tenantA}::uuid and is_default

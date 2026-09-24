@@ -30,6 +30,8 @@ type ThemeRow = Readonly<{
 }>;
 
 const SOURCE_FIELDS = ["documentId", "templateId", "templateVersionId"] as const;
+const STYLE_FIELDS = new Set(["fontFamily", "fontSize", "lineHeight", "fontWeight", "colorRole", "spaceBefore"]);
+const TYPOGRAPHY_FIELDS = new Set(["body", "heading1", "heading2", "heading3", "quote", "list"]);
 const THEME_SELECT = `id, key, name, is_default as "isDefault", surface_color as "surfaceColor", text_color as "textColor",
   accent_color as "accentColor", font_family as "fontFamily", typography, updated_at::text as "updatedAt"`;
 
@@ -62,6 +64,7 @@ function fontWeight(value: unknown): 400 | 700 {
 function textStyle(value: unknown): DocumentTextStyle {
   if (!value || typeof value !== "object" || Array.isArray(value)) refuse("INVALID_STATE", "Stored document theme has an invalid text style.");
   const row = value as Record<string, unknown>;
+  if (Object.keys(row).some((key) => !STYLE_FIELDS.has(key))) refuse("INVALID_STATE", "Stored document theme has an unsupported text style token.");
   const style: DocumentTextStyle = {
     fontSize: finiteNumber(row.fontSize, 6, 72),
     lineHeight: finiteNumber(row.lineHeight, 1, 3),
@@ -70,18 +73,17 @@ function textStyle(value: unknown): DocumentTextStyle {
   };
   const family = row.fontFamily === undefined ? undefined : fontFamily(row.fontFamily);
   const spaceBefore = row.spaceBefore === undefined ? undefined : finiteNumber(row.spaceBefore, 0, 96);
-  const spaceAfter = row.spaceAfter === undefined ? undefined : finiteNumber(row.spaceAfter, 0, 96);
   return {
     ...style,
     ...(family ? { fontFamily: family } : {}),
     ...(spaceBefore !== undefined ? { spaceBefore } : {}),
-    ...(spaceAfter !== undefined ? { spaceAfter } : {}),
   };
 }
 
 function typography(value: unknown): DocumentTypography {
   if (!value || typeof value !== "object" || Array.isArray(value)) refuse("INVALID_STATE", "Stored document theme has invalid typography.");
   const row = value as Record<string, unknown>;
+  if (Object.keys(row).some((key) => !TYPOGRAPHY_FIELDS.has(key))) refuse("INVALID_STATE", "Stored document theme has an unsupported typography role.");
   return {
     body: textStyle(row.body),
     heading1: textStyle(row.heading1),

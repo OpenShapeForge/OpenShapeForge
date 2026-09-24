@@ -15721,16 +15721,14 @@
               "lineHeight": 1.5,
               "fontWeight": 400,
               "colorRole": "text",
-              "spaceBefore": 8,
-              "spaceAfter": 8
+              "spaceBefore": 8
             },
             "list": {
               "fontSize": 11,
               "lineHeight": 1.5,
               "fontWeight": 400,
               "colorRole": "text",
-              "spaceBefore": 4,
-              "spaceAfter": 4
+              "spaceBefore": 4
             }
           },
           "children": [
@@ -15866,18 +15864,6 @@
                   "label": {
                     "en": "Space before (pt)",
                     "nl": "Ruimte ervoor (pt)"
-                  },
-                  "validation": {
-                    "min": 0,
-                    "max": 96
-                  }
-                },
-                {
-                  "key": "spaceAfter",
-                  "osfType": "number",
-                  "label": {
-                    "en": "Space after (pt)",
-                    "nl": "Ruimte erna (pt)"
                   },
                   "validation": {
                     "min": 0,
@@ -16023,18 +16009,6 @@
                     "min": 0,
                     "max": 96
                   }
-                },
-                {
-                  "key": "spaceAfter",
-                  "osfType": "number",
-                  "label": {
-                    "en": "Space after (pt)",
-                    "nl": "Ruimte erna (pt)"
-                  },
-                  "validation": {
-                    "min": 0,
-                    "max": 96
-                  }
                 }
               ]
             },
@@ -16170,18 +16144,6 @@
                   "label": {
                     "en": "Space before (pt)",
                     "nl": "Ruimte ervoor (pt)"
-                  },
-                  "validation": {
-                    "min": 0,
-                    "max": 96
-                  }
-                },
-                {
-                  "key": "spaceAfter",
-                  "osfType": "number",
-                  "label": {
-                    "en": "Space after (pt)",
-                    "nl": "Ruimte erna (pt)"
                   },
                   "validation": {
                     "min": 0,
@@ -16327,18 +16289,6 @@
                     "min": 0,
                     "max": 96
                   }
-                },
-                {
-                  "key": "spaceAfter",
-                  "osfType": "number",
-                  "label": {
-                    "en": "Space after (pt)",
-                    "nl": "Ruimte erna (pt)"
-                  },
-                  "validation": {
-                    "min": 0,
-                    "max": 96
-                  }
                 }
               ]
             },
@@ -16479,18 +16429,6 @@
                     "min": 0,
                     "max": 96
                   }
-                },
-                {
-                  "key": "spaceAfter",
-                  "osfType": "number",
-                  "label": {
-                    "en": "Space after (pt)",
-                    "nl": "Ruimte erna (pt)"
-                  },
-                  "validation": {
-                    "min": 0,
-                    "max": 96
-                  }
                 }
               ]
             },
@@ -16626,18 +16564,6 @@
                   "label": {
                     "en": "Space before (pt)",
                     "nl": "Ruimte ervoor (pt)"
-                  },
-                  "validation": {
-                    "min": 0,
-                    "max": 96
-                  }
-                },
-                {
-                  "key": "spaceAfter",
-                  "osfType": "number",
-                  "label": {
-                    "en": "Space after (pt)",
-                    "nl": "Ruimte erna (pt)"
                   },
                   "validation": {
                     "min": 0,

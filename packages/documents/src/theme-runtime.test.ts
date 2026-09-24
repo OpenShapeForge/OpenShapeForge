@@ -126,6 +126,7 @@ describe("DocumentTheme.resolve", () => {
       { ...valid, typography: { ...valid.typography, body: { ...valid.typography.body, lineHeight: "1.5" } } },
       { ...valid, typography: { ...valid.typography, body: { ...valid.typography.body, colorRole: "app" } } },
       { ...valid, typography: { ...valid.typography, body: { ...valid.typography.body, spaceBefore: -1 } } },
+      { ...valid, typography: { ...valid.typography, body: { ...valid.typography.body, spaceAfter: 4 } } },
     ];
     for (const row of broken) {
       const ctx = context([

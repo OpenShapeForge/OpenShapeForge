@@ -81,7 +81,7 @@ function fontWeight(value: unknown, label: string): 400 | 700 {
 
 function textStyle(value: unknown, label: string): DocumentTextStyle {
   const row = object(value, label);
-  const optional = ["fontFamily", "spaceBefore", "spaceAfter"] as const;
+  const optional = ["fontFamily", "spaceBefore"] as const;
   const required = ["fontSize", "lineHeight", "fontWeight", "colorRole"] as const;
   for (const key of Object.keys(row)) {
     if (![...required, ...optional].includes(key as (typeof required)[number])) {
@@ -104,7 +104,6 @@ function textStyle(value: unknown, label: string): DocumentTextStyle {
     colorRole: row.colorRole as DocumentColorRole,
     ...(row.fontFamily !== undefined ? { fontFamily: row.fontFamily as DocumentFontFamily } : {}),
     ...(row.spaceBefore !== undefined ? { spaceBefore: finite(row.spaceBefore, `${label}.spaceBefore`, 0, 96) } : {}),
-    ...(row.spaceAfter !== undefined ? { spaceAfter: finite(row.spaceAfter, `${label}.spaceAfter`, 0, 96) } : {}),
   };
 }
 

@@ -23,7 +23,6 @@ export type DocumentTextStyle = Readonly<{
   fontWeight: DocumentFontWeight;
   colorRole: DocumentColorRole;
   spaceBefore?: number;
-  spaceAfter?: number;
 }>;
 
 export type DocumentTypography = Readonly<{

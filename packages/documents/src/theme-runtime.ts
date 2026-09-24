@@ -4,6 +4,7 @@ import { contextServices, rows } from "./commands.js";
 import {
   DOCUMENT_COLOR_ROLES,
   DOCUMENT_FONT_FAMILIES,
+  DOCUMENT_FONT_WEIGHTS,
   DOCUMENT_THEME_COLOR,
   type DocumentColorRole,
   type DocumentFontFamily,
@@ -12,7 +13,7 @@ import {
   type DocumentTypography,
   type ResolvedDocumentTheme,
 } from "./theme-tokens.js";
-import { selectLiveThemeId, themeIdFromTemplateSnapshot, themeIdValue } from "./theme-resolution.js";
+import { themeIdFromTemplateSnapshot, themeIdValue } from "./theme-resolution.js";
 import { object, refuse, uuid } from "./validation.js";
 
 type ThemeRow = Readonly<{
@@ -39,7 +40,9 @@ function sourceField(input: Record<string, unknown>): (typeof SOURCE_FIELDS)[num
 }
 
 function fontFamily(value: unknown, fallback: DocumentFontFamily): DocumentFontFamily {
-  return DOCUMENT_FONT_FAMILIES.includes(value as DocumentFontFamily) ? (value as DocumentFontFamily) : fallback;
+  if (value === undefined) return fallback;
+  if (!DOCUMENT_FONT_FAMILIES.includes(value as DocumentFontFamily)) refuse("INVALID_STATE", "Stored document theme uses an unavailable font.");
+  return value as DocumentFontFamily;
 }
 
 function colorRole(value: unknown): DocumentColorRole {
@@ -50,12 +53,17 @@ function finiteNumber(value: unknown, fallback: number, min: number, max: number
   return typeof value === "number" && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
 }
 
+function fontWeight(value: unknown): 400 | 700 {
+  if (!DOCUMENT_FONT_WEIGHTS.includes(value as 400 | 700)) refuse("INVALID_STATE", "Stored document theme uses an unavailable font weight.");
+  return value as 400 | 700;
+}
+
 function textStyle(value: unknown, fallbackFamily: DocumentFontFamily): DocumentTextStyle {
   const row = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
   const style: DocumentTextStyle = {
     fontSize: finiteNumber(row.fontSize, 11, 6, 72),
     lineHeight: finiteNumber(row.lineHeight, 1.5, 1, 3),
-    fontWeight: Math.round(finiteNumber(row.fontWeight, 400, 100, 900)),
+    fontWeight: fontWeight(row.fontWeight),
     colorRole: colorRole(row.colorRole),
   };
   const family = row.fontFamily === undefined ? undefined : fontFamily(row.fontFamily, fallbackFamily);
@@ -86,7 +94,7 @@ function hexColor(value: unknown, fallback: string): string {
 }
 
 function projectTheme(row: ThemeRow): ResolvedDocumentTheme {
-  const family = fontFamily(row.fontFamily, "source-sans");
+  const family = fontFamily(row.fontFamily, "dm-sans");
   return {
     id: row.id,
     key: row.key,
@@ -103,26 +111,6 @@ function projectTheme(row: ThemeRow): ResolvedDocumentTheme {
 
 async function themeById(trx: unknown, tenantId: string, id: string): Promise<ThemeRow | null> {
   return (await rows<ThemeRow>(trx, `select ${THEME_SELECT} from erp.document_themes where tenant_id = $1 and id = $2 for share`, [tenantId, id]))[0] ?? null;
-}
-
-async function defaultTheme(trx: unknown, tenantId: string): Promise<ThemeRow | null> {
-  return (await rows<ThemeRow>(trx, `select ${THEME_SELECT} from erp.document_themes where tenant_id = $1 and is_default for share`, [tenantId]))[0] ?? null;
-}
-
-async function liveTheme(
-  trx: unknown,
-  tenantId: string,
-  storedThemeId: string | null,
-): Promise<{ row: ThemeRow | null; usedDefault: boolean }> {
-  const stored = storedThemeId ? await themeById(trx, tenantId, storedThemeId) : null;
-  const fallback = stored ? null : await defaultTheme(trx, tenantId);
-  const selected = selectLiveThemeId({
-    storedThemeId,
-    storedThemeExists: stored != null,
-    defaultThemeId: fallback?.id ?? null,
-  });
-  if (selected.themeId && stored && !selected.usedDefault) return { row: stored, usedDefault: false };
-  return { row: fallback, usedDefault: fallback != null };
 }
 
 export const resolveDocumentTheme: ModuleOperationHandler = async (input, context) => {
@@ -158,13 +146,39 @@ export const resolveDocumentTheme: ModuleOperationHandler = async (input, contex
         kind = storedThemeId ? "template-version" : "document";
       }
     }
-    const live = await liveTheme(trx, tenantId, storedThemeId);
-    if (live.usedDefault) kind = live.row ? "tenant-default" : "none";
-    else if (!live.row) kind = "none";
+    const theme = storedThemeId ? await themeById(trx, tenantId, storedThemeId) : null;
+    if (storedThemeId && !theme) refuse("NOT_FOUND", "The selected document theme no longer exists.");
+    if (!theme) kind = "none";
     return {
-      theme: live.row ? projectTheme(live.row) : null,
-      resolution: { kind, sourceId, themeId: live.row?.id ?? null },
+      theme: theme ? projectTheme(theme) : null,
+      resolution: { kind, sourceId, themeId: theme?.id ?? null },
     };
   });
   return { value: resolved };
+};
+
+/** Select the only tenant default before any row is written, so competing
+ * selections serialize without relying on a unique-index failure. */
+export const setDefaultDocumentTheme: ModuleOperationHandler = async (input, context) => {
+  const { platform, session } = contextServices(context);
+  if (!session.tenantId) refuse("UNAUTHENTICATED", "Changing the default document theme requires a tenant session.");
+  const themeId = uuid(object(input, "input").id, "id");
+  await platform.records.assertAccess(session, { entityName: "DocumentTheme", id: themeId, intent: "update" });
+  const tenantId = session.tenantId;
+  const value = await platform.db.withSession(session, async (trx) => {
+    await rows(trx, "select pg_advisory_xact_lock(683165, hashtext($1::text))", [tenantId]);
+    const target = await themeById(trx, tenantId, themeId);
+    if (!target) refuse("NOT_FOUND", "The document theme does not exist.");
+    if (!target.isDefault) {
+      await rows(trx, "select set_config('app.document_theme_switching', '1', true)", []);
+      try {
+        await rows(trx, "update erp.document_themes set is_default = false where tenant_id = $1 and is_default", [tenantId]);
+        await rows(trx, "update erp.document_themes set is_default = true where tenant_id = $1 and id = $2", [tenantId, themeId]);
+      } finally {
+        await rows(trx, "select set_config('app.document_theme_switching', '', true)", []);
+      }
+    }
+    return { id: themeId, isDefault: true };
+  });
+  return { value };
 };

@@ -24,20 +24,21 @@ Document ──publish──▶ DocumentVersion (generic publishedSnapshot; an u
 
 ## Document theme
 
-A tenant owns many `DocumentTheme` records and at most one default
+A tenant owns many `DocumentTheme` records and exactly one default when it has themes
 (`entities/core/document-theme.yaml`). A `Template` may name one theme;
 variants, documents and blocks do not. New templates without a choice receive
 the tenant default at insert. Published template snapshots freeze that theme
 **id** with the head row; they do not freeze token values. Live preview and
 `DocumentTheme.resolve` read the current theme row. Bytes already stored on a
 `DocumentVersion` artifact stay those bytes.
+The first theme becomes the default. `DocumentTheme.setDefault` changes that
+choice atomically for future templates; the current default cannot be deleted
+until another theme has been selected.
 
-Resolution, for a template, published version or document:
-
-1. The stored theme id (draft template column, or the id on the frozen
-   template-version head).
-2. If that row is missing or deleted, the tenant default, without writing it.
-3. Otherwise no theme.
+Resolution, for a template, published version or document, uses the stored
+theme id (draft template column, or the id on the frozen template-version
+head). An older record with no theme id stays unthemed. A stored id whose row
+is missing is an error; live reads never silently adopt a different default.
 
 Semantic tokens are surface/text/accent colors, a closed font-family token
 (hosts map the token to a file they actually have; this repository does not

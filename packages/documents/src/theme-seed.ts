@@ -4,6 +4,7 @@ import { parse as parseYaml } from "yaml";
 import {
   DOCUMENT_COLOR_ROLES,
   DOCUMENT_FONT_FAMILIES,
+  DOCUMENT_FONT_WEIGHTS,
   DOCUMENT_THEME_COLOR,
   type DocumentColorRole,
   type DocumentFontFamily,
@@ -71,6 +72,13 @@ function finite(value: unknown, label: string, min: number, max: number): number
   return value;
 }
 
+function fontWeight(value: unknown, label: string): 400 | 700 {
+  if (!DOCUMENT_FONT_WEIGHTS.includes(value as 400 | 700)) {
+    throw new Error(`DocumentTheme seed ${label} must be 400 or 700.`);
+  }
+  return value as 400 | 700;
+}
+
 function textStyle(value: unknown, label: string): DocumentTextStyle {
   const row = object(value, label);
   const optional = ["fontFamily", "spaceBefore", "spaceAfter"] as const;
@@ -92,7 +100,7 @@ function textStyle(value: unknown, label: string): DocumentTextStyle {
   return {
     fontSize: finite(row.fontSize, `${label}.fontSize`, 6, 72),
     lineHeight: finite(row.lineHeight, `${label}.lineHeight`, 1, 3),
-    fontWeight: finite(row.fontWeight, `${label}.fontWeight`, 100, 900),
+    fontWeight: fontWeight(row.fontWeight, `${label}.fontWeight`),
     colorRole: row.colorRole as DocumentColorRole,
     ...(row.fontFamily !== undefined ? { fontFamily: row.fontFamily as DocumentFontFamily } : {}),
     ...(row.spaceBefore !== undefined ? { spaceBefore: finite(row.spaceBefore, `${label}.spaceBefore`, 0, 96) } : {}),

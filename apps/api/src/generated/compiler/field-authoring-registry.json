@@ -15569,6 +15569,10 @@
         {
           "key": "isDefault",
           "osfType": "boolean",
+          "readOnly": true,
+          "writtenBy": [
+            "DocumentTheme.setDefault"
+          ],
           "required": true,
           "defaultValue": false,
           "label": {
@@ -15576,8 +15580,8 @@
             "nl": "Standaard voor nieuwe templates"
           },
           "description": {
-            "en": "At most one default per tenant. New templates without a theme receive this one.",
-            "nl": "Hoogstens één standaard per tenant. Nieuwe templates zonder thema krijgen deze."
+            "en": "Exactly one default while the tenant has themes. Use Set as default to change it; new templates without a choice receive this one.",
+            "nl": "Precies één standaard zolang de klant thema's heeft. Gebruik Als standaard instellen om te wisselen; nieuwe templates zonder keuze krijgen dit thema."
           },
           "persisted": {
             "column": "is_default",
@@ -15642,7 +15646,7 @@
           "key": "fontFamily",
           "osfType": "string",
           "required": true,
-          "defaultValue": "source-sans",
+          "defaultValue": "dm-sans",
           "label": {
             "en": "Font",
             "nl": "Lettertype"
@@ -15659,24 +15663,10 @@
             "type": "static",
             "items": [
               {
-                "value": "source-sans",
+                "value": "dm-sans",
                 "label": {
-                  "en": "Source Sans",
-                  "nl": "Source Sans"
-                }
-              },
-              {
-                "value": "source-serif",
-                "label": {
-                  "en": "Source Serif",
-                  "nl": "Source Serif"
-                }
-              },
-              {
-                "value": "inter",
-                "label": {
-                  "en": "Inter",
-                  "nl": "Inter"
+                  "en": "DM Sans",
+                  "nl": "DM Sans"
                 }
               },
               {
@@ -15684,55 +15674,6 @@
                 "label": {
                   "en": "Noto Sans",
                   "nl": "Noto Sans"
-                }
-              },
-              {
-                "value": "noto-serif",
-                "label": {
-                  "en": "Noto Serif",
-                  "nl": "Noto Serif"
-                }
-              },
-              {
-                "value": "liberation-sans",
-                "label": {
-                  "en": "Liberation Sans",
-                  "nl": "Liberation Sans"
-                }
-              },
-              {
-                "value": "liberation-serif",
-                "label": {
-                  "en": "Liberation Serif",
-                  "nl": "Liberation Serif"
-                }
-              },
-              {
-                "value": "georgia",
-                "label": {
-                  "en": "Georgia",
-                  "nl": "Georgia"
-                }
-              },
-              {
-                "value": "times",
-                "label": {
-                  "en": "Times",
-                  "nl": "Times"
-                }
-              },
-              {
-                "value": "arial",
-                "label": {
-                  "en": "Arial",
-                  "nl": "Arial"
-                }
-              },
-              {
-                "value": "system",
-                "label": {
-                  "en": "System",
-                  "nl": "Systeem"
                 }
               }
             ]
@@ -15766,13 +15707,13 @@
             "heading2": {
               "fontSize": 16,
               "lineHeight": 1.3,
-              "fontWeight": 600,
+              "fontWeight": 700,
               "colorRole": "text"
             },
             "heading3": {
               "fontSize": 13,
               "lineHeight": 1.35,
-              "fontWeight": 600,
+              "fontWeight": 700,
               "colorRole": "text"
             },
             "quote": {
@@ -15813,24 +15754,10 @@
                     "type": "static",
                     "items": [
                       {
-                        "value": "source-sans",
+                        "value": "dm-sans",
                         "label": {
-                          "en": "Source Sans",
-                          "nl": "Source Sans"
-                        }
-                      },
-                      {
-                        "value": "source-serif",
-                        "label": {
-                          "en": "Source Serif",
-                          "nl": "Source Serif"
-                        }
-                      },
-                      {
-                        "value": "inter",
-                        "label": {
-                          "en": "Inter",
-                          "nl": "Inter"
+                          "en": "DM Sans",
+                          "nl": "DM Sans"
                         }
                       },
                       {
@@ -15838,55 +15765,6 @@
                         "label": {
                           "en": "Noto Sans",
                           "nl": "Noto Sans"
-                        }
-                      },
-                      {
-                        "value": "noto-serif",
-                        "label": {
-                          "en": "Noto Serif",
-                          "nl": "Noto Serif"
-                        }
-                      },
-                      {
-                        "value": "liberation-sans",
-                        "label": {
-                          "en": "Liberation Sans",
-                          "nl": "Liberation Sans"
-                        }
-                      },
-                      {
-                        "value": "liberation-serif",
-                        "label": {
-                          "en": "Liberation Serif",
-                          "nl": "Liberation Serif"
-                        }
-                      },
-                      {
-                        "value": "georgia",
-                        "label": {
-                          "en": "Georgia",
-                          "nl": "Georgia"
-                        }
-                      },
-                      {
-                        "value": "times",
-                        "label": {
-                          "en": "Times",
-                          "nl": "Times"
-                        }
-                      },
-                      {
-                        "value": "arial",
-                        "label": {
-                          "en": "Arial",
-                          "nl": "Arial"
-                        }
-                      },
-                      {
-                        "value": "system",
-                        "label": {
-                          "en": "System",
-                          "nl": "Systeem"
                         }
                       }
                     ]
@@ -15926,9 +15804,24 @@
                     "en": "Weight",
                     "nl": "Gewicht"
                   },
-                  "validation": {
-                    "min": 100,
-                    "max": 900
+                  "options": {
+                    "type": "static",
+                    "items": [
+                      {
+                        "value": "400",
+                        "label": {
+                          "en": "Regular",
+                          "nl": "Normaal"
+                        }
+                      },
+                      {
+                        "value": "700",
+                        "label": {
+                          "en": "Bold",
+                          "nl": "Vet"
+                        }
+                      }
+                    ]
                   }
                 },
                 {
@@ -16013,24 +15906,10 @@
                     "type": "static",
                     "items": [
                       {
-                        "value": "source-sans",
+                        "value": "dm-sans",
                         "label": {
-                          "en": "Source Sans",
-                          "nl": "Source Sans"
-                        }
-                      },
-                      {
-                        "value": "source-serif",
-                        "label": {
-                          "en": "Source Serif",
-                          "nl": "Source Serif"
-                        }
-                      },
-                      {
-                        "value": "inter",
-                        "label": {
-                          "en": "Inter",
-                          "nl": "Inter"
+                          "en": "DM Sans",
+                          "nl": "DM Sans"
                         }
                       },
                       {
@@ -16038,55 +15917,6 @@
                         "label": {
                           "en": "Noto Sans",
                           "nl": "Noto Sans"
-                        }
-                      },
-                      {
-                        "value": "noto-serif",
-                        "label": {
-                          "en": "Noto Serif",
-                          "nl": "Noto Serif"
-                        }
-                      },
-                      {
-                        "value": "liberation-sans",
-                        "label": {
-                          "en": "Liberation Sans",
-                          "nl": "Liberation Sans"
-                        }
-                      },
-                      {
-                        "value": "liberation-serif",
-                        "label": {
-                          "en": "Liberation Serif",
-                          "nl": "Liberation Serif"
-                        }
-                      },
-                      {
-                        "value": "georgia",
-                        "label": {
-                          "en": "Georgia",
-                          "nl": "Georgia"
-                        }
-                      },
-                      {
-                        "value": "times",
-                        "label": {
-                          "en": "Times",
-                          "nl": "Times"
-                        }
-                      },
-                      {
-                        "value": "arial",
-                        "label": {
-                          "en": "Arial",
-                          "nl": "Arial"
-                        }
-                      },
-                      {
-                        "value": "system",
-                        "label": {
-                          "en": "System",
-                          "nl": "Systeem"
                         }
                       }
                     ]
@@ -16126,9 +15956,24 @@
                     "en": "Weight",
                     "nl": "Gewicht"
                   },
-                  "validation": {
-                    "min": 100,
-                    "max": 900
+                  "options": {
+                    "type": "static",
+                    "items": [
+                      {
+                        "value": "400",
+                        "label": {
+                          "en": "Regular",
+                          "nl": "Normaal"
+                        }
+                      },
+                      {
+                        "value": "700",
+                        "label": {
+                          "en": "Bold",
+                          "nl": "Vet"
+                        }
+                      }
+                    ]
                   }
                 },
                 {
@@ -16213,24 +16058,10 @@
                     "type": "static",
                     "items": [
                       {
-                        "value": "source-sans",
+                        "value": "dm-sans",
                         "label": {
-                          "en": "Source Sans",
-                          "nl": "Source Sans"
-                        }
-                      },
-                      {
-                        "value": "source-serif",
-                        "label": {
-                          "en": "Source Serif",
-                          "nl": "Source Serif"
-                        }
-                      },
-                      {
-                        "value": "inter",
-                        "label": {
-                          "en": "Inter",
-                          "nl": "Inter"
+                          "en": "DM Sans",
+                          "nl": "DM Sans"
                         }
                       },
                       {
@@ -16238,55 +16069,6 @@
                         "label": {
                           "en": "Noto Sans",
                           "nl": "Noto Sans"
-                        }
-                      },
-                      {
-                        "value": "noto-serif",
-                        "label": {
-                          "en": "Noto Serif",
-                          "nl": "Noto Serif"
-                        }
-                      },
-                      {
-                        "value": "liberation-sans",
-                        "label": {
-                          "en": "Liberation Sans",
-                          "nl": "Liberation Sans"
-                        }
-                      },
-                      {
-                        "value": "liberation-serif",
-                        "label": {
-                          "en": "Liberation Serif",
-                          "nl": "Liberation Serif"
-                        }
-                      },
-                      {
-                        "value": "georgia",
-                        "label": {
-                          "en": "Georgia",
-                          "nl": "Georgia"
-                        }
-                      },
-                      {
-                        "value": "times",
-                        "label": {
-                          "en": "Times",
-                          "nl": "Times"
-                        }
-                      },
-                      {
-                        "value": "arial",
-                        "label": {
-                          "en": "Arial",
-                          "nl": "Arial"
-                        }
-                      },
-                      {
-                        "value": "system",
-                        "label": {
-                          "en": "System",
-                          "nl": "Systeem"
                         }
                       }
                     ]
@@ -16326,9 +16108,24 @@
                     "en": "Weight",
                     "nl": "Gewicht"
                   },
-                  "validation": {
-                    "min": 100,
-                    "max": 900
+                  "options": {
+                    "type": "static",
+                    "items": [
+                      {
+                        "value": "400",
+                        "label": {
+                          "en": "Regular",
+                          "nl": "Normaal"
+                        }
+                      },
+                      {
+                        "value": "700",
+                        "label": {
+                          "en": "Bold",
+                          "nl": "Vet"
+                        }
+                      }
+                    ]
                   }
                 },
                 {
@@ -16413,24 +16210,10 @@
                     "type": "static",
                     "items": [
                       {
-                        "value": "source-sans",
+                        "value": "dm-sans",
                         "label": {
-                          "en": "Source Sans",
-                          "nl": "Source Sans"
-                        }
-                      },
-                      {
-                        "value": "source-serif",
-                        "label": {
-                          "en": "Source Serif",
-                          "nl": "Source Serif"
-                        }
-                      },
-                      {
-                        "value": "inter",
-                        "label": {
-                          "en": "Inter",
-                          "nl": "Inter"
+                          "en": "DM Sans",
+                          "nl": "DM Sans"
                         }
                       },
                       {
@@ -16438,55 +16221,6 @@
                         "label": {
                           "en": "Noto Sans",
                           "nl": "Noto Sans"
-                        }
-                      },
-                      {
-                        "value": "noto-serif",
-                        "label": {
-                          "en": "Noto Serif",
-                          "nl": "Noto Serif"
-                        }
-                      },
-                      {
-                        "value": "liberation-sans",
-                        "label": {
-                          "en": "Liberation Sans",
-                          "nl": "Liberation Sans"
-                        }
-                      },
-                      {
-                        "value": "liberation-serif",
-                        "label": {
-                          "en": "Liberation Serif",
-                          "nl": "Liberation Serif"
-                        }
-                      },
-                      {
-                        "value": "georgia",
-                        "label": {
-                          "en": "Georgia",
-                          "nl": "Georgia"
-                        }
-                      },
-                      {
-                        "value": "times",
-                        "label": {
-                          "en": "Times",
-                          "nl": "Times"
-                        }
-                      },
-                      {
-                        "value": "arial",
-                        "label": {
-                          "en": "Arial",
-                          "nl": "Arial"
-                        }
-                      },
-                      {
-                        "value": "system",
-                        "label": {
-                          "en": "System",
-                          "nl": "Systeem"
                         }
                       }
                     ]
@@ -16526,9 +16260,24 @@
                     "en": "Weight",
                     "nl": "Gewicht"
                   },
-                  "validation": {
-                    "min": 100,
-                    "max": 900
+                  "options": {
+                    "type": "static",
+                    "items": [
+                      {
+                        "value": "400",
+                        "label": {
+                          "en": "Regular",
+                          "nl": "Normaal"
+                        }
+                      },
+                      {
+                        "value": "700",
+                        "label": {
+                          "en": "Bold",
+                          "nl": "Vet"
+                        }
+                      }
+                    ]
                   }
                 },
                 {
@@ -16613,24 +16362,10 @@
                     "type": "static",
                     "items": [
                       {
-                        "value": "source-sans",
+                        "value": "dm-sans",
                         "label": {
-                          "en": "Source Sans",
-                          "nl": "Source Sans"
-                        }
-                      },
-                      {
-                        "value": "source-serif",
-                        "label": {
-                          "en": "Source Serif",
-                          "nl": "Source Serif"
-                        }
-                      },
-                      {
-                        "value": "inter",
-                        "label": {
-                          "en": "Inter",
-                          "nl": "Inter"
+                          "en": "DM Sans",
+                          "nl": "DM Sans"
                         }
                       },
                       {
@@ -16638,55 +16373,6 @@
                         "label": {
                           "en": "Noto Sans",
                           "nl": "Noto Sans"
-                        }
-                      },
-                      {
-                        "value": "noto-serif",
-                        "label": {
-                          "en": "Noto Serif",
-                          "nl": "Noto Serif"
-                        }
-                      },
-                      {
-                        "value": "liberation-sans",
-                        "label": {
-                          "en": "Liberation Sans",
-                          "nl": "Liberation Sans"
-                        }
-                      },
-                      {
-                        "value": "liberation-serif",
-                        "label": {
-                          "en": "Liberation Serif",
-                          "nl": "Liberation Serif"
-                        }
-                      },
-                      {
-                        "value": "georgia",
-                        "label": {
-                          "en": "Georgia",
-                          "nl": "Georgia"
-                        }
-                      },
-                      {
-                        "value": "times",
-                        "label": {
-                          "en": "Times",
-                          "nl": "Times"
-                        }
-                      },
-                      {
-                        "value": "arial",
-                        "label": {
-                          "en": "Arial",
-                          "nl": "Arial"
-                        }
-                      },
-                      {
-                        "value": "system",
-                        "label": {
-                          "en": "System",
-                          "nl": "Systeem"
                         }
                       }
                     ]
@@ -16726,9 +16412,24 @@
                     "en": "Weight",
                     "nl": "Gewicht"
                   },
-                  "validation": {
-                    "min": 100,
-                    "max": 900
+                  "options": {
+                    "type": "static",
+                    "items": [
+                      {
+                        "value": "400",
+                        "label": {
+                          "en": "Regular",
+                          "nl": "Normaal"
+                        }
+                      },
+                      {
+                        "value": "700",
+                        "label": {
+                          "en": "Bold",
+                          "nl": "Vet"
+                        }
+                      }
+                    ]
                   }
                 },
                 {
@@ -16813,24 +16514,10 @@
                     "type": "static",
                     "items": [
                       {
-                        "value": "source-sans",
+                        "value": "dm-sans",
                         "label": {
-                          "en": "Source Sans",
-                          "nl": "Source Sans"
-                        }
-                      },
-                      {
-                        "value": "source-serif",
-                        "label": {
-                          "en": "Source Serif",
-                          "nl": "Source Serif"
-                        }
-                      },
-                      {
-                        "value": "inter",
-                        "label": {
-                          "en": "Inter",
-                          "nl": "Inter"
+                          "en": "DM Sans",
+                          "nl": "DM Sans"
                         }
                       },
                       {
@@ -16838,55 +16525,6 @@
                         "label": {
                           "en": "Noto Sans",
                           "nl": "Noto Sans"
-                        }
-                      },
-                      {
-                        "value": "noto-serif",
-                        "label": {
-                          "en": "Noto Serif",
-                          "nl": "Noto Serif"
-                        }
-                      },
-                      {
-                        "value": "liberation-sans",
-                        "label": {
-                          "en": "Liberation Sans",
-                          "nl": "Liberation Sans"
-                        }
-                      },
-                      {
-                        "value": "liberation-serif",
-                        "label": {
-                          "en": "Liberation Serif",
-                          "nl": "Liberation Serif"
-                        }
-                      },
-                      {
-                        "value": "georgia",
-                        "label": {
-                          "en": "Georgia",
-                          "nl": "Georgia"
-                        }
-                      },
-                      {
-                        "value": "times",
-                        "label": {
-                          "en": "Times",
-                          "nl": "Times"
-                        }
-                      },
-                      {
-                        "value": "arial",
-                        "label": {
-                          "en": "Arial",
-                          "nl": "Arial"
-                        }
-                      },
-                      {
-                        "value": "system",
-                        "label": {
-                          "en": "System",
-                          "nl": "Systeem"
                         }
                       }
                     ]
@@ -16926,9 +16564,24 @@
                     "en": "Weight",
                     "nl": "Gewicht"
                   },
-                  "validation": {
-                    "min": 100,
-                    "max": 900
+                  "options": {
+                    "type": "static",
+                    "items": [
+                      {
+                        "value": "400",
+                        "label": {
+                          "en": "Regular",
+                          "nl": "Normaal"
+                        }
+                      },
+                      {
+                        "value": "700",
+                        "label": {
+                          "en": "Bold",
+                          "nl": "Vet"
+                        }
+                      }
+                    ]
                   }
                 },
                 {

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { selectLiveThemeId, themeIdFromTemplateSnapshot, themeIdValue } from "./theme-resolution.js";
+import { themeIdFromTemplateSnapshot, themeIdValue } from "./theme-resolution.js";
 
 const theme = "10000000-0000-4000-8000-000000000001";
-const other = "10000000-0000-4000-8000-000000000002";
 const snapshot = (themeId: unknown) => ({
   schemaVersion: 1,
   entity: "Template",
@@ -20,25 +19,4 @@ describe("live document theme selection", () => {
     expect(themeIdValue("")).toBeNull();
   });
 
-  test("a stored theme that still exists wins over the tenant default", () => {
-    expect(selectLiveThemeId({ storedThemeId: theme, storedThemeExists: true, defaultThemeId: other })).toEqual({
-      themeId: theme,
-      usedDefault: false,
-    });
-  });
-
-  test("a missing, deleted, or unpublished selection falls back to the tenant default without inventing an id", () => {
-    expect(selectLiveThemeId({ storedThemeId: theme, storedThemeExists: false, defaultThemeId: other })).toEqual({
-      themeId: other,
-      usedDefault: true,
-    });
-    expect(selectLiveThemeId({ storedThemeId: null, storedThemeExists: false, defaultThemeId: other })).toEqual({
-      themeId: other,
-      usedDefault: true,
-    });
-    expect(selectLiveThemeId({ storedThemeId: null, storedThemeExists: false, defaultThemeId: null })).toEqual({
-      themeId: null,
-      usedDefault: false,
-    });
-  });
 });

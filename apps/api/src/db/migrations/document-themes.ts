@@ -5,9 +5,9 @@ import { entityColumnName, entityTableName } from "../manifest-lookup.js";
 
 /**
  * Document-theme invariants the generated unique index cannot keep usable:
- * the first theme of a tenant becomes the default, choosing a new default
- * unsets the previous one, deleting the default promotes another remaining
- * theme, and a new template without a theme receives the tenant default.
+ * the first theme of a tenant becomes the default, the explicit setDefault
+ * Operation changes it under a tenant lock, a default cannot be deleted, and
+ * a new template without a theme receives the tenant default.
  * None of these statements write a DocumentVersion, so stored PDF bytes stay
  * the bytes that were generated.
  */
@@ -24,27 +24,15 @@ export async function applyDocumentThemeInvariants(db: OpenShapeForgeDatabase): 
     set search_path = pg_catalog, pg_temp
     as $function$
     begin
-      if nullif(current_setting('app.document_theme_switching', true), '') is not null then
-        return new;
-      end if;
-      if tg_op = 'UPDATE' and old.${sql.ref(isDefault)} and not new.${sql.ref(isDefault)} then
-        raise exception 'VALIDATION: cannot unset the tenant default document theme; choose another theme as default.';
-      end if;
-      if new.${sql.ref(isDefault)} then
-        perform set_config('app.document_theme_switching', '1', true);
-        update ${themes} other
-          set ${sql.ref(isDefault)} = false
-          where other.tenant_id = new.tenant_id
-            and other.id is distinct from new.id
-            and other.${sql.ref(isDefault)};
-        perform set_config('app.document_theme_switching', '', true);
-      elsif tg_op = 'INSERT' and not exists (
-        select 1 from ${themes} other
-        where other.tenant_id = new.tenant_id
-          and other.id is distinct from new.id
-          and other.${sql.ref(isDefault)}
-      ) then
-        new.${sql.ref(isDefault)} := true;
+      if tg_op = 'INSERT' then
+        perform pg_advisory_xact_lock(683165, hashtext(new.tenant_id::text));
+        new.${sql.ref(isDefault)} := not exists (
+          select 1 from ${themes} other
+          where other.tenant_id = new.tenant_id and other.${sql.ref(isDefault)}
+        );
+      elsif new.${sql.ref(isDefault)} is distinct from old.${sql.ref(isDefault)}
+        and current_setting('app.document_theme_switching', true) is distinct from '1' then
+        raise exception 'VALIDATION: use DocumentTheme.setDefault to change the tenant default.';
       end if;
       return new;
     end;
@@ -55,30 +43,24 @@ export async function applyDocumentThemeInvariants(db: OpenShapeForgeDatabase): 
       before insert or update on ${themes}
       for each row execute function app.enforce_document_theme_default();
 
-    create or replace function app.promote_document_theme_default()
+    create or replace function app.protect_document_theme_default()
     returns trigger
     language plpgsql
     set search_path = pg_catalog, pg_temp
     as $function$
     begin
       if old.${sql.ref(isDefault)} then
-        update ${themes} other
-          set ${sql.ref(isDefault)} = true
-          where other.id = (
-            select candidate.id from ${themes} candidate
-            where candidate.tenant_id = old.tenant_id
-            order by candidate.created_at, candidate.id
-            limit 1
-          );
+        raise exception 'VALIDATION: choose another default before deleting this document theme.';
       end if;
       return old;
     end;
     $function$;
 
     drop trigger if exists document_themes_default_promote on ${themes};
-    create trigger document_themes_default_promote
-      after delete on ${themes}
-      for each row execute function app.promote_document_theme_default();
+    drop trigger if exists document_themes_default_guard_delete on ${themes};
+    create trigger document_themes_default_guard_delete
+      before delete on ${themes}
+      for each row execute function app.protect_document_theme_default();
 
     create or replace function app.fill_template_document_theme()
     returns trigger

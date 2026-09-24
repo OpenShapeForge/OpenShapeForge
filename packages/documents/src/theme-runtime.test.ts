@@ -13,8 +13,15 @@ const documentId = "20000000-0000-4000-8000-000000000022";
 
 const themeRow = (id: string, color: string, isDefault = false) => ({
   id, key: id === defaultId ? "default" : "brand", name: "Theme", isDefault, surfaceColor: color,
-  textColor: "#111827", accentColor: "#2563eb", fontFamily: "source-sans",
-  typography: { body: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: "text" } },
+  textColor: "#111827", accentColor: "#2563eb", fontFamily: "dm-sans",
+  typography: {
+    body: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: "text" },
+    heading1: { fontSize: 22, lineHeight: 1.25, fontWeight: 700, colorRole: "text" },
+    heading2: { fontSize: 16, lineHeight: 1.3, fontWeight: 700, colorRole: "text" },
+    heading3: { fontSize: 13, lineHeight: 1.35, fontWeight: 700, colorRole: "text" },
+    quote: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: "text" },
+    list: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: "text" },
+  },
   updatedAt: "2026-01-01T00:00:00.000Z",
 });
 
@@ -83,14 +90,29 @@ describe("DocumentTheme.resolve", () => {
     expect(statements).not.toContain("document_versions");
   });
 
-  test("a missing stored selection falls back to the tenant default without writing", async () => {
+  test("an older template without a selection stays unthemed", async () => {
     const ctx = context([
       { sql: "from erp.templates", rows: [{ document_theme_id: null }] },
-      { sql: "from erp.document_themes where tenant_id = $1 and is_default", rows: [themeRow(defaultId, "#ffffff", true)] },
     ]);
-    const result = await resolveDocumentTheme({ templateId }, ctx) as { value: { theme: { id: string }; resolution: { kind: string; sourceId: string; themeId: string } } };
-    expect(result.value.resolution).toEqual({ kind: "tenant-default", sourceId: templateId, themeId: defaultId });
-    expect(result.value.theme.id).toBe(defaultId);
-    expect(ctx.platform).toBeDefined();
+    const result = await resolveDocumentTheme({ templateId }, ctx) as { value: { theme: null; resolution: { kind: string; sourceId: string; themeId: null } } };
+    expect(result.value.resolution).toEqual({ kind: "none", sourceId: templateId, themeId: null });
+    expect(result.value.theme).toBeNull();
+    expect(ctx.seen.join("\n")).not.toContain("document_themes");
+  });
+
+  test("a deleted selected theme fails instead of silently changing an existing document", async () => {
+    const ctx = context([
+      { sql: "from erp.templates", rows: [{ document_theme_id: themeId }] },
+      { sql: "from erp.document_themes where tenant_id = $1 and id = $2", rows: [] },
+    ]);
+    await expect(resolveDocumentTheme({ templateId }, ctx)).rejects.toMatchObject({ operationError: { code: "NOT_FOUND" } });
+  });
+
+  test("an unavailable stored font is an error rather than a silent substitute", async () => {
+    const ctx = context([
+      { sql: "from erp.templates", rows: [{ document_theme_id: themeId }] },
+      { sql: "from erp.document_themes where tenant_id = $1 and id = $2", rows: [{ ...themeRow(themeId, "#ffffff"), fontFamily: "system" }] },
+    ]);
+    await expect(resolveDocumentTheme({ templateId }, ctx)).rejects.toMatchObject({ operationError: { code: "INVALID_STATE" } });
   });
 });

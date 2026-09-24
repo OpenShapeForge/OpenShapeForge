@@ -14,7 +14,7 @@ describe("DocumentTheme seed", () => {
     expect(catalog[0]).toMatchObject({
       key: "default",
       isDefault: true,
-      fontFamily: "source-sans",
+      fontFamily: "dm-sans",
       surfaceColor: "#ffffff",
       textColor: "#111827",
       accentColor: "#2563eb",
@@ -31,7 +31,7 @@ describe("DocumentTheme seed", () => {
         key: "default",
         name: "Default",
         isDefault: true,
-        fontFamily: "source-sans",
+        fontFamily: "dm-sans",
       }),
     ]);
     expect(records[0]).not.toHaveProperty("id");

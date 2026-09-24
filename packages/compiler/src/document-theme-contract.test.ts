@@ -28,10 +28,17 @@ test("document themes are tenant-owned, selected on templates, and projected gen
   });
   expect(resolve?.interfaces.rest).toMatchObject({ method: "POST", path: "/api/document-themes/resolve" });
   expect(resolve?.interfaces.mcp).not.toBe(false);
+  const resolvedSchema = resolve?.definition.output?.schema as { properties?: { theme?: { properties?: Record<string, unknown> } } } | undefined;
+  expect(resolvedSchema?.properties?.theme?.properties).toHaveProperty("typography");
+  expect(resolvedSchema?.properties?.theme?.properties).toHaveProperty("fontFamily");
+  const setDefault = contract.pluginOperations?.find((operation) => operation.key === "setDefault");
+  expect(setDefault?.definition.implementation).toEqual({ type: "plugin", plugin: "documents", handler: "setDefaultDocumentTheme" });
+  expect(setDefault?.definition.target).toMatchObject({ scope: "record", inputField: "id" });
   const fields = Object.fromEntries(contract.model.fields.map((field) => [field.key, field]));
   expect(fields.isDefault?.defaultValue).toBe(false);
+  expect(fields.isDefault?.readOnly).toBe(true);
   expect(fields.surfaceColor?.validation?.pattern).toBe("^#[0-9A-Fa-f]{6}$");
-  expect(JSON.stringify(fields.fontFamily)).toContain("source-sans");
+  expect(JSON.stringify(fields.fontFamily)).toContain("dm-sans");
   expect(fields.typography?.children?.map((child) => child.key)).toEqual([
     "body", "heading1", "heading2", "heading3", "quote", "list",
   ]);
@@ -69,6 +76,7 @@ test("document themes are tenant-owned, selected on templates, and projected gen
   const web = buildWebManifest(compile.entities);
   expect(web.entities.DocumentTheme?.views.collection.route).toBe("/document-themes");
   expect(web.entities.DocumentTheme?.views.record?.routes.create).toBe("/document-themes/new");
+  expect(web.entities.DocumentTheme?.operations.setDefault).toMatchObject({ target: { scope: "record" } });
   expect(web.entities.Template?.fields.documentThemeId).toBeDefined();
   expect(web.entities.TemplateVariant?.fields.documentThemeId).toBeUndefined();
 }, 30_000);

@@ -2,17 +2,8 @@
 /** Closed document-theme tokens. Renderers map font tokens to files they actually have. */
 
 export const DOCUMENT_FONT_FAMILIES = [
-  "source-sans",
-  "source-serif",
-  "inter",
+  "dm-sans",
   "noto-sans",
-  "noto-serif",
-  "liberation-sans",
-  "liberation-serif",
-  "georgia",
-  "times",
-  "arial",
-  "system",
 ] as const;
 
 export type DocumentFontFamily = (typeof DOCUMENT_FONT_FAMILIES)[number];
@@ -20,13 +11,16 @@ export type DocumentFontFamily = (typeof DOCUMENT_FONT_FAMILIES)[number];
 export const DOCUMENT_COLOR_ROLES = ["surface", "text", "accent"] as const;
 export type DocumentColorRole = (typeof DOCUMENT_COLOR_ROLES)[number];
 
+export const DOCUMENT_FONT_WEIGHTS = [400, 700] as const;
+export type DocumentFontWeight = (typeof DOCUMENT_FONT_WEIGHTS)[number];
+
 export const DOCUMENT_THEME_COLOR = /^#[0-9A-Fa-f]{6}$/;
 
 export type DocumentTextStyle = Readonly<{
   fontFamily?: DocumentFontFamily;
   fontSize: number;
   lineHeight: number;
-  fontWeight: number;
+  fontWeight: DocumentFontWeight;
   colorRole: DocumentColorRole;
   spaceBefore?: number;
   spaceAfter?: number;
@@ -58,7 +52,6 @@ export type DocumentThemeResolutionKind =
   | "template-version"
   | "template"
   | "document"
-  | "tenant-default"
   | "none";
 
 export type DocumentThemeResolution = Readonly<{

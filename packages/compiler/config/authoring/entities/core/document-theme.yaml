@@ -36,12 +36,14 @@ fields:
     persisted: { column: name, storageClass: core }
   - key: isDefault
     osfType: boolean
+    readOnly: true
+    writtenBy: [DocumentTheme.setDefault]
     required: true
     defaultValue: false
     label: { en: Default for new templates, nl: Standaard voor nieuwe templates }
     description:
-      en: At most one default per tenant. New templates without a theme receive this one.
-      nl: Hoogstens één standaard per tenant. Nieuwe templates zonder thema krijgen deze.
+      en: Exactly one default while the tenant has themes. Use Set as default to change it; new templates without a choice receive this one.
+      nl: Precies één standaard zolang de klant thema's heeft. Gebruik Als standaard instellen om te wisselen; nieuwe templates zonder keuze krijgen dit thema.
     persisted: { column: is_default, storageClass: core }
   - key: surfaceColor
     osfType: string
@@ -67,7 +69,7 @@ fields:
   - key: fontFamily
     osfType: string
     required: true
-    defaultValue: source-sans
+    defaultValue: dm-sans
     label: { en: Font, nl: Lettertype }
     description:
       en: Closed token a renderer maps to a file it actually has. This catalog does not ship font binaries.
@@ -76,17 +78,8 @@ fields:
     options:
       type: static
       items: &documentFonts
-        - { value: source-sans, label: { en: Source Sans, nl: Source Sans } }
-        - { value: source-serif, label: { en: Source Serif, nl: Source Serif } }
-        - { value: inter, label: { en: Inter, nl: Inter } }
+        - { value: dm-sans, label: { en: DM Sans, nl: DM Sans } }
         - { value: noto-sans, label: { en: Noto Sans, nl: Noto Sans } }
-        - { value: noto-serif, label: { en: Noto Serif, nl: Noto Serif } }
-        - { value: liberation-sans, label: { en: Liberation Sans, nl: Liberation Sans } }
-        - { value: liberation-serif, label: { en: Liberation Serif, nl: Liberation Serif } }
-        - { value: georgia, label: { en: Georgia, nl: Georgia } }
-        - { value: times, label: { en: Times, nl: Times } }
-        - { value: arial, label: { en: Arial, nl: Arial } }
-        - { value: system, label: { en: System, nl: Systeem } }
   - key: typography
     osfType: object
     required: true
@@ -95,8 +88,8 @@ fields:
     defaultValue:
       body: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: text }
       heading1: { fontSize: 22, lineHeight: 1.25, fontWeight: 700, colorRole: text }
-      heading2: { fontSize: 16, lineHeight: 1.3, fontWeight: 600, colorRole: text }
-      heading3: { fontSize: 13, lineHeight: 1.35, fontWeight: 600, colorRole: text }
+      heading2: { fontSize: 16, lineHeight: 1.3, fontWeight: 700, colorRole: text }
+      heading3: { fontSize: 13, lineHeight: 1.35, fontWeight: 700, colorRole: text }
       quote: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: text, spaceBefore: 8, spaceAfter: 8 }
       list: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: text, spaceBefore: 4, spaceAfter: 4 }
     children:
@@ -105,7 +98,10 @@ fields:
             { key: fontFamily, osfType: string, label: { en: Font, nl: Lettertype }, options: { type: static, items: *documentFonts } },
             { key: fontSize, osfType: number, required: true, label: { en: Size (pt), nl: Grootte (pt) }, validation: { min: 6, max: 72 } },
             { key: lineHeight, osfType: number, required: true, label: { en: Line height, nl: Regelhoogte }, validation: { min: 1, max: 3 } },
-            { key: fontWeight, osfType: integer, required: true, label: { en: Weight, nl: Gewicht }, validation: { min: 100, max: 900 } },
+            { key: fontWeight, osfType: integer, required: true, label: { en: Weight, nl: Gewicht }, options: { type: static, items: [
+              { value: "400", label: { en: Regular, nl: Normaal } },
+              { value: "700", label: { en: Bold, nl: Vet } }
+            ] } },
             {
               key: colorRole, osfType: string, required: true, label: { en: Color, nl: Kleur }, defaultValue: text,
               options: { type: static, items: [
@@ -158,11 +154,39 @@ operations:
     effects: { data: delete, external: none }
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: none }
+  setDefault:
+    name: { en: Set as default, nl: Als standaard instellen }
+    description: Select this theme as the tenant default for new templates. Existing template selections stay unchanged.
+    implementation: { type: plugin, plugin: documents, handler: setDefaultDocumentTheme }
+    target: { scope: record, inputField: id }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id]
+        properties:
+          id: { type: string, format: uuid, x-osf-reference: { entity: DocumentTheme }, x-osf-i18n: { title: { en: Theme, nl: Thema } } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, isDefault]
+        properties:
+          id: { type: string, format: uuid }
+          isDefault: { type: boolean, const: true }
+    errors:
+      - { status: 403, code: FORBIDDEN, description: The theme is not accessible. }
+      - { status: 404, code: NOT_FOUND, description: The theme does not exist. }
+    auth: { mode: session, roles: [Organization.All.ReadWrite] }
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
   resolve:
     name: { en: Resolve document theme, nl: Documentthema bepalen }
     description:
-      en: Resolve live theme tokens for a template, published template version, or document. Missing stored ids fall back to the tenant default without writing it.
-      nl: Bepaal actuele thematokens voor een template, gepubliceerde templateversie of document. Ontbrekende opgeslagen id's vallen terug op het tenantstandaardthema zonder dat te schrijven.
+      en: Resolve live theme tokens for a template, published template version, or document. Only a new template receives the tenant default at insert; existing selections never change implicitly.
+      nl: Bepaal actuele thematokens voor een template, gepubliceerde templateversie of document. Alleen een nieuwe template krijgt bij invoegen het tenantstandaardthema; bestaande keuzes veranderen niet stilzwijgend.
     implementation: { type: plugin, plugin: documents, handler: resolveDocumentTheme }
     target: { scope: collection }
     input:
@@ -203,7 +227,41 @@ operations:
         properties:
           theme:
             type: ["object", "null"]
+            additionalProperties: false
+            required: [id, key, name, isDefault, surfaceColor, textColor, accentColor, fontFamily, typography, updatedAt]
             x-osf-i18n: { title: { en: Theme, nl: Thema } }
+            properties:
+              id: { type: string, format: uuid }
+              key: { type: string }
+              name: { type: string }
+              isDefault: { type: boolean }
+              surfaceColor: { type: string, pattern: "^#[0-9A-Fa-f]{6}$" }
+              textColor: { type: string, pattern: "^#[0-9A-Fa-f]{6}$" }
+              accentColor: { type: string, pattern: "^#[0-9A-Fa-f]{6}$" }
+              fontFamily: { type: string, enum: [dm-sans, noto-sans] }
+              typography:
+                type: object
+                additionalProperties: false
+                required: [body, heading1, heading2, heading3, quote, list]
+                properties:
+                  body: &resolvedTextStyle
+                    type: object
+                    additionalProperties: false
+                    required: [fontSize, lineHeight, fontWeight, colorRole]
+                    properties:
+                      fontFamily: { type: string, enum: [dm-sans, noto-sans] }
+                      fontSize: { type: number, minimum: 6, maximum: 72 }
+                      lineHeight: { type: number, minimum: 1, maximum: 3 }
+                      fontWeight: { type: number, enum: [400, 700] }
+                      colorRole: { type: string, enum: [surface, text, accent] }
+                      spaceBefore: { type: number, minimum: 0, maximum: 96 }
+                      spaceAfter: { type: number, minimum: 0, maximum: 96 }
+                  heading1: *resolvedTextStyle
+                  heading2: *resolvedTextStyle
+                  heading3: *resolvedTextStyle
+                  quote: *resolvedTextStyle
+                  list: *resolvedTextStyle
+              updatedAt: { type: string }
           resolution:
             type: object
             additionalProperties: false
@@ -212,7 +270,7 @@ operations:
             properties:
               kind:
                 type: string
-                enum: [template-version, template, document, tenant-default, none]
+                enum: [template-version, template, document, none]
                 x-osf-i18n:
                   title: { en: Kind, nl: Soort }
                   enum:
@@ -220,7 +278,6 @@ operations:
                       template-version: { en: Published template version, nl: Gepubliceerde templateversie },
                       template: { en: Template, nl: Template },
                       document: { en: Document, nl: Document },
-                      tenant-default: { en: Tenant default, nl: Tenantstandaard },
                       none: { en: None, nl: Geen }
                     }
               sourceId: { type: string, x-osf-i18n: { title: { en: Source, nl: Bron } } }
@@ -237,6 +294,7 @@ operations:
 interfaces:
   rest:
     operations:
+      setDefault: { method: POST, path: "/api/document-themes/:id/set-default" }
       resolve: { method: POST, path: /api/document-themes/resolve }
   graphql: {}
   mcp: { tools: generic }
@@ -252,7 +310,7 @@ interfaces:
         title: "{{name}}"
         subtitle: "{{key}}"
         badges: [isDefault]
-        actions: [update, delete]
+        actions: [update, setDefault, delete]
         layout:
           tabs:
             - id: overview
@@ -267,12 +325,12 @@ interfaces:
           create:
             title: { en: Create, nl: Toevoegen }
             groups:
-              - { title: { en: Theme, nl: Thema }, fields: [name, isDefault, fontFamily] }
+              - { title: { en: Theme, nl: Thema }, fields: [name, fontFamily] }
               - { title: { en: Colors, nl: Kleuren }, fields: [surfaceColor, textColor, accentColor] }
               - { title: { en: Text styles, nl: Tekststijlen }, fields: [typography] }
           update:
             title: { en: Edit, nl: Bewerken }
             groups:
-              - { title: { en: Theme, nl: Thema }, fields: [name, isDefault, fontFamily] }
+              - { title: { en: Theme, nl: Thema }, fields: [name, fontFamily] }
               - { title: { en: Colors, nl: Kleuren }, fields: [surfaceColor, textColor, accentColor] }
               - { title: { en: Text styles, nl: Tekststijlen }, fields: [typography] }

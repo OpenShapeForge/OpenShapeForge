@@ -171,8 +171,8 @@ operations:
         additionalProperties: false
         required: [id, isDefault]
         properties:
-          id: { type: string, format: uuid }
-          isDefault: { type: boolean, const: true }
+          id: { type: string, format: uuid, x-osf-i18n: { title: { en: Theme, nl: Thema } } }
+          isDefault: { type: boolean, const: true, x-osf-i18n: { title: { en: Default, nl: Standaard } } }
     errors:
       - { status: 403, code: FORBIDDEN, description: The theme is not accessible. }
       - { status: 404, code: NOT_FOUND, description: The theme does not exist. }
@@ -230,36 +230,41 @@ operations:
             required: [id, key, name, isDefault, surfaceColor, textColor, accentColor, fontFamily, typography, updatedAt]
             x-osf-i18n: { title: { en: Theme, nl: Thema } }
             properties:
-              id: { type: string, format: uuid }
-              key: { type: string }
-              name: { type: string }
-              isDefault: { type: boolean }
-              surfaceColor: { type: string, pattern: "^#[0-9A-Fa-f]{6}$" }
-              textColor: { type: string, pattern: "^#[0-9A-Fa-f]{6}$" }
-              accentColor: { type: string, pattern: "^#[0-9A-Fa-f]{6}$" }
-              fontFamily: { type: string, enum: [dm-sans, noto-sans] }
+              id: { type: string, format: uuid, x-osf-i18n: { title: { en: Theme, nl: Thema } } }
+              key: { type: string, x-osf-i18n: { title: { en: Key, nl: Sleutel } } }
+              name: { type: string, x-osf-i18n: { title: { en: Name, nl: Naam } } }
+              isDefault: { type: boolean, x-osf-i18n: { title: { en: Default, nl: Standaard } } }
+              surfaceColor: { type: string, pattern: "^#[0-9A-Fa-f]{6}$", x-osf-i18n: { title: { en: Surface, nl: Oppervlak } } }
+              textColor: { type: string, pattern: "^#[0-9A-Fa-f]{6}$", x-osf-i18n: { title: { en: Text, nl: Tekst } } }
+              accentColor: { type: string, pattern: "^#[0-9A-Fa-f]{6}$", x-osf-i18n: { title: { en: Accent, nl: Accent } } }
+              fontFamily:
+                type: string
+                enum: [dm-sans, noto-sans]
+                x-osf-i18n: { title: { en: Font, nl: Lettertype }, enum: { dm-sans: { en: DM Sans, nl: DM Sans }, noto-sans: { en: Noto Sans, nl: Noto Sans } } }
               typography:
                 type: object
                 additionalProperties: false
                 required: [body, heading1, heading2, heading3, quote, list]
+                x-osf-i18n: { title: { en: Text styles, nl: Tekststijlen } }
                 properties:
-                  body: &resolvedTextStyle
+                  body:
                     type: object
                     additionalProperties: false
                     required: [fontSize, lineHeight, fontWeight, colorRole]
-                    properties:
-                      fontFamily: { type: string, enum: [dm-sans, noto-sans] }
-                      fontSize: { type: number, minimum: 6, maximum: 72 }
-                      lineHeight: { type: number, minimum: 1, maximum: 3 }
-                      fontWeight: { type: number, enum: [400, 700] }
-                      colorRole: { type: string, enum: [surface, text, accent] }
-                      spaceBefore: { type: number, minimum: 0, maximum: 96 }
-                  heading1: *resolvedTextStyle
-                  heading2: *resolvedTextStyle
-                  heading3: *resolvedTextStyle
-                  quote: *resolvedTextStyle
-                  list: *resolvedTextStyle
-              updatedAt: { type: string }
+                    x-osf-i18n: { title: { en: Body, nl: Broodtekst } }
+                    properties: &resolvedTextStyleProperties
+                      fontFamily: { type: string, enum: [dm-sans, noto-sans], x-osf-i18n: { title: { en: Font, nl: Lettertype }, enum: { dm-sans: { en: DM Sans, nl: DM Sans }, noto-sans: { en: Noto Sans, nl: Noto Sans } } } }
+                      fontSize: { type: number, minimum: 6, maximum: 72, x-osf-i18n: { title: { en: Size (pt), nl: Grootte (pt) } } }
+                      lineHeight: { type: number, minimum: 1, maximum: 3, x-osf-i18n: { title: { en: Line height, nl: Regelhoogte } } }
+                      fontWeight: { type: number, enum: [400, 700], x-osf-i18n: { title: { en: Weight, nl: Gewicht }, enum: { "400": { en: Regular, nl: Normaal }, "700": { en: Bold, nl: Vet } } } }
+                      colorRole: { type: string, enum: [surface, text, accent], x-osf-i18n: { title: { en: Color, nl: Kleur }, enum: { surface: { en: Surface, nl: Oppervlak }, text: { en: Text, nl: Tekst }, accent: { en: Accent, nl: Accent } } } }
+                      spaceBefore: { type: number, minimum: 0, maximum: 96, x-osf-i18n: { title: { en: Space before (pt), nl: Ruimte ervoor (pt) } } }
+                  heading1: { type: object, additionalProperties: false, required: [fontSize, lineHeight, fontWeight, colorRole], x-osf-i18n: { title: { en: Heading 1, nl: Kop 1 } }, properties: *resolvedTextStyleProperties }
+                  heading2: { type: object, additionalProperties: false, required: [fontSize, lineHeight, fontWeight, colorRole], x-osf-i18n: { title: { en: Heading 2, nl: Kop 2 } }, properties: *resolvedTextStyleProperties }
+                  heading3: { type: object, additionalProperties: false, required: [fontSize, lineHeight, fontWeight, colorRole], x-osf-i18n: { title: { en: Heading 3, nl: Kop 3 } }, properties: *resolvedTextStyleProperties }
+                  quote: { type: object, additionalProperties: false, required: [fontSize, lineHeight, fontWeight, colorRole], x-osf-i18n: { title: { en: Quote, nl: Citaat } }, properties: *resolvedTextStyleProperties }
+                  list: { type: object, additionalProperties: false, required: [fontSize, lineHeight, fontWeight, colorRole], x-osf-i18n: { title: { en: List, nl: Lijst } }, properties: *resolvedTextStyleProperties }
+              updatedAt: { type: string, x-osf-i18n: { title: { en: Updated at, nl: Bijgewerkt op } } }
           resolution:
             type: object
             additionalProperties: false

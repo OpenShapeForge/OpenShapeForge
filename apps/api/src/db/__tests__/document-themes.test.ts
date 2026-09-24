@@ -26,8 +26,8 @@ const typography = {
   heading1: { fontSize: 22, lineHeight: 1.25, fontWeight: 700, colorRole: "text" },
   heading2: { fontSize: 16, lineHeight: 1.3, fontWeight: 700, colorRole: "text" },
   heading3: { fontSize: 13, lineHeight: 1.35, fontWeight: 700, colorRole: "text" },
-  quote: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: "text", spaceBefore: 8, spaceAfter: 8 },
-  list: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: "text", spaceBefore: 4, spaceAfter: 4 },
+  quote: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: "text", spaceBefore: 8 },
+  list: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: "text", spaceBefore: 4 },
 };
 
 async function withScratchDb<T>(fn: (db: Kysely<DB>) => Promise<T>): Promise<T> {

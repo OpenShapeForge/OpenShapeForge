@@ -964,7 +964,7 @@
     },
     "webViewsV2": {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": { "$ref": "#/$defs/webViewsV2/properties/named/additionalProperties" },
       "required": ["collection"],
       "properties": {
         "named": {
@@ -978,10 +978,34 @@
                 "type": "object",
                 "x-osf-i18n": { "title": { "en": "Record view", "nl": "Recordweergave" } },
                 "additionalProperties": false,
-                "required": ["kind", "fields"],
+                "required": ["kind"],
+                "oneOf": [
+                  { "required": ["fields"] },
+                  { "required": ["layout"] }
+                ],
                 "properties": {
                   "kind": { "const": "record", "x-osf-i18n": { "title": { "en": "Kind", "nl": "Soort" } } },
-                  "fields": { "type": "array", "minItems": 1, "uniqueItems": true, "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } }, "items": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } } } }
+                  "fields": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } },
+                    "items": {
+                      "$ref": "#/$defs/fieldKey",
+                      "x-osf-choice": "field",
+                      "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
+                    }
+                  },
+                  "title": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Title", "nl": "Titel" } } },
+                  "layout": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["tabs"],
+                    "properties": {
+                      "tabs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/webViewGroupV2" } }
+                    },
+                    "x-osf-i18n": { "title": { "en": "Layout", "nl": "Indeling" } }
+                  }
                 }
               },
               {

@@ -421,6 +421,15 @@ export interface CompiledViewGroup {
   timeline?: CompiledTimelineConfig;
 }
 
+export type CompiledEntityWebNamedViewDefinition =
+  | { kind: "record"; fields: string[] }
+  | {
+      kind: "record";
+      title?: string;
+      layout: { tabs: CompiledViewGroup[] };
+    }
+  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string };
+
 export interface CompiledViewAction extends ViewAction {}
 
 export interface CompiledViewActionDefinition extends ViewActionDefinition {}
@@ -734,7 +743,7 @@ export interface CompiledEntityContract {
   /** Explicit v2 interface exposure; v1 contracts keep using legacy projections. */
   interfaces?: {
     web?: {
-      namedViews?: NonNullable<import("./authoring.js").EntityWebViewDefinition["named"]>;
+      namedViews?: Record<string, CompiledEntityWebNamedViewDefinition>;
       fields?: Record<string, { render: import("./common.js").FieldRender }>;
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];

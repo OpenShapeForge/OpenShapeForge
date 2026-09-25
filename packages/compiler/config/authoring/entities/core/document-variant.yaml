@@ -130,8 +130,7 @@ interfaces:
     operations:
       update: false
     views:
-      named:
-        tabbed: { kind: collection, collectionLayout: tabs, itemView: record, tabLabel: locale }
+      tabbed: { kind: collection, collectionLayout: tabs, itemView: record, tabLabel: locale }
       collection:
         route: /document-variants
         title: { en: Document variants, nl: Documentvarianten }

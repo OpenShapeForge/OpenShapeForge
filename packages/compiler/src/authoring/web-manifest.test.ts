@@ -325,8 +325,10 @@ describe("web manifest projection", () => {
     };
     const manifest = buildWebManifest([source, target]);
     expect(manifest.entities.Source?.views.record?.layout.tabs[1]?.targetView).toBe("tabbed");
-    expect(manifest.entities.Target?.views.named?.tabbed).toEqual(target.contract.interfaces!.web!.namedViews.tabbed);
-    expect(manifest.entities.Target?.views.named?.preview).toEqual(target.contract.interfaces!.web!.namedViews.preview);
+    expect(manifest.entities.Target?.views.named?.tabbed).toEqual({
+      kind: "collection", collectionLayout: "tabs", itemView: "preview", tabLabel: "displayName",
+    });
+    expect(manifest.entities.Target?.views.named?.preview).toEqual({ kind: "record", fields: ["body"] });
   });
   test("a system-written reference key from the corpus is never create-writable and its collection offers no create", () => {
     // Comment.authorId is authored readOnly (attribution, not an input); the

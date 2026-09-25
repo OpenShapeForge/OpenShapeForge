@@ -20,12 +20,15 @@ domains:
 authorization:
   roles:
     read:
+      - Relations.Relation.ReadWrite
       - Relations.All.Read
       - Relations.All.ReadWrite
       - Relations.All.Delete
     create:
+      - Relations.Relation.ReadWrite
       - Relations.All.ReadWrite
     update:
+      - Relations.Relation.ReadWrite
       - Relations.All.ReadWrite
     delete:
       - Relations.All.Delete

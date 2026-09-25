@@ -52,6 +52,7 @@ describe("employeeInvitationToolsForSession", () => {
     expect(invite.title).toBe("Admit an employee");
     expect(invite.description).toContain("receives no redundant mail");
     expect(invite.description).toContain("reused without resending");
+    expect(invite.description).toContain("status pending means the Hubble role awaits sign-in");
   });
 
   test("invite_employee reports each delivery outcome explicitly", () => {
@@ -70,12 +71,14 @@ describe("employeeInvitationToolsForSession", () => {
       admitted: true,
       delivery: "sent",
       reason: "invitation_sent",
+      message: "Keycloak accepted a new invitation e-mail request. The role awaits the person's sign-in.",
       nextStep: "The person must follow the invitation link and sign in.",
     });
     expect(publicEmployeeAdmission({ ...invitation, delivery: "not_required" })).toMatchObject({
       delivery: "not_required",
       reason: "existing_organization_member",
-      nextStep: "No e-mail was needed. The person can sign in again now.",
+      message: "This person already belongs to the Keycloak organization. No e-mail was sent. The role awaits their next sign-in.",
+      nextStep: "The person must sign out and sign in again with this account. There is no e-mail invitation to accept.",
     });
     expect(publicEmployeeAdmission({ ...invitation, delivery: "already_pending" })).toMatchObject({
       delivery: "already_pending",

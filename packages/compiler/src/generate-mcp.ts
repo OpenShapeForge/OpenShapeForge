@@ -1712,6 +1712,26 @@ export function buildMcpCatalog(
     });
     return name;
   };
+  /**
+   * The connect/dryRun/personalization-set operations are meant to be called
+   * by an assistant, unlike the discovery/test/record dispatch bridges named
+   * by internalCompatibilityName above — so they keep the Operation's own
+   * projected mcp tool name (e.g. connect_service) instead of an
+   * osf_internal_* name that never reaches an assistant's tool list.
+   */
+  const publicCompatibilityName = (
+    plugin: string,
+    operation: CompatibilityOperation,
+    purpose: string,
+  ): string => {
+    if (!operation.transports.mcp.enabled) {
+      throw new Error(
+        `Plugin "${plugin}" execution compatibility ${purpose} operation "${operation.key}" ` +
+          `must enable its own mcp transport to be assistant-callable.`,
+      );
+    }
+    return operation.transports.mcp.name;
+  };
   const compatibilityEntity = (plugin: string, entityName: string) => {
     const found = inputs.find(
       (candidate) => candidate.contract.entity.name === entityName,
@@ -1864,7 +1884,7 @@ export function buildMcpCatalog(
         ...(connect
           ? {
               connect: {
-                name: internalCompatibilityName(plugin, connect),
+                name: publicCompatibilityName(plugin, connect, "connect"),
                 description: connect.description,
                 roles: [...connect.auth.roles],
               },
@@ -1873,7 +1893,7 @@ export function buildMcpCatalog(
         ...(dryRun
           ? {
               dryRun: {
-                name: internalCompatibilityName(plugin, dryRun),
+                name: publicCompatibilityName(plugin, dryRun, "dry-run"),
                 description: dryRun.description,
                 roles: [...dryRun.auth.roles],
               },
@@ -1890,7 +1910,11 @@ export function buildMcpCatalog(
                 serviceRef: personalization.authored.serviceRef,
                 instructionField: personalization.authored.instructionField,
                 set: {
-                  name: internalCompatibilityName(plugin, personalization.operation),
+                  name: publicCompatibilityName(
+                    plugin,
+                    personalization.operation,
+                    "personalization set",
+                  ),
                   description: personalization.operation.description,
                 },
               },

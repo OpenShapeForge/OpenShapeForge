@@ -964,7 +964,7 @@
     },
     "webViewsV2": {
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": { "$ref": "#/$defs/webViewsV2/properties/named/additionalProperties" },
       "required": ["collection"],
       "properties": {
         "named": {
@@ -978,21 +978,29 @@
                 "type": "object",
                 "x-osf-i18n": { "title": { "en": "Record view", "nl": "Recordweergave" } },
                 "additionalProperties": false,
-                "required": ["kind", "fields"],
+                "required": ["kind"],
+                "oneOf": [
+                  { "required": ["fields"] },
+                  { "required": ["layout"] }
+                ],
                 "properties": {
                   "kind": { "const": "record", "x-osf-i18n": { "title": { "en": "Kind", "nl": "Soort" } } },
-                  "fields": { "type": "array", "minItems": 1, "uniqueItems": true, "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } }, "items": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } } } }
-                }
-              },
-              {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["kind", "layout"],
-                "x-osf-i18n": { "title": { "en": "Record layout", "nl": "Recordindeling" } },
-                "properties": {
-                  "kind": { "const": "record", "x-osf-i18n": { "title": { "en": "Kind", "nl": "Soort" } } },
-                  "title": { "type": "string", "x-osf-i18n": { "title": { "en": "Title", "nl": "Titel" } } },
-                  "layout": { "$ref": "#/$defs/webViewsV2/properties/record/properties/layout", "x-osf-i18n": { "title": { "en": "Layout", "nl": "Indeling" } } }
+                  "fields": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } },
+                    "items": {
+                      "$ref": "#/$defs/fieldKey",
+                      "x-osf-choice": "field",
+                      "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
+                    }
+                  },
+                  "title": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Title", "nl": "Titel" } } },
+                  "layout": {
+                    "$ref": "#/$defs/webViewsV2/properties/record/properties/layout",
+                    "x-osf-i18n": { "title": { "en": "Layout", "nl": "Indeling" } }
+                  }
                 }
               },
               {

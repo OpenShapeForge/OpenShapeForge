@@ -288,6 +288,11 @@ export type WebNamedView =
   | (WebRecordView & { relationships?: Record<string, WebRelationshipProjection> })
   /** Compatibility with manifests compiled before named record layouts. */
   | { kind: "record"; fields: string[] }
+  | {
+      kind: "record";
+      titleTemplate?: string;
+      layout: { tabs: WebRecordTab[] };
+    }
   | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string };
 
 export type WebEntityView = WebCollectionView | WebRecordView | WebNamedView;

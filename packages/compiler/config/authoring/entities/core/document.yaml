@@ -599,6 +599,14 @@ interfaces:
     operations:
       materialize: { resultRenderer: document.content }
     views:
+      quotePreview:
+        kind: record
+        title: "{{title}}"
+        layout:
+          tabs:
+            - id: content
+              label: { en: Content, nl: Inhoud }
+              relationship: { name: variants, view: tabbed }
       collection:
         route: /documents
         title: { en: Documents, nl: Documenten }

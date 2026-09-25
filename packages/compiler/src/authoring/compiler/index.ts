@@ -259,6 +259,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     ...(coreEntity.interfaces?.web?.fields?.[field.key] ?? {}),
   })) };
   const views = buildViews(viewEntity, profiles, componentCatalog, artifacts.viewDefinition ?? undefined);
+  const namedViews = buildNamedViews(coreEntity, componentCatalog);
 
   validateTimelineIncludes(coreEntity.entity, relationships, views);
   const compiledProfiles = buildProfiles(profiles, mappings);
@@ -332,7 +333,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
       ...(coreEntity.interfaces?.web
         ? {
             web: {
-              ...(coreEntity.interfaces.web.views?.named ? { namedViews: buildNamedViews(coreEntity, componentCatalog) } : {}),
+              ...(Object.keys(namedViews).length ? { namedViews } : {}),
               ...(coreEntity.interfaces.web.fields
                 ? { fields: coreEntity.interfaces.web.fields }
                 : {}),

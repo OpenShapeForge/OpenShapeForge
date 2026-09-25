@@ -367,7 +367,7 @@ describe("web manifest projection", () => {
     expect(result.views.named?.compact).toMatchObject({ kind: "record", layout: { tabs: [{ groups: [{ fields: ["values"] }] }] } });
     const detailed = views.named.detailed;
     const projected = result.views.named!.detailed;
-    if (!detailed || !("layout" in detailed) || !projected || !("layout" in projected)) throw new Error("Missing record layout");
+    if (!detailed || !("layout" in detailed) || !projected || !("layout" in projected) || !("context" in projected.layout)) throw new Error("Missing record layout");
     views.record!.layout = detailed.layout;
     expect(compileView().views.record!.layout).toEqual(projected.layout);
     detailed.layout.tabs[0]!.groups![0]!.fields = ["missing"];
@@ -392,6 +392,24 @@ describe("web manifest projection", () => {
     source.contract.interfaces!.web!.namedViews.extra = { kind: "record", detail, context: { fields: ["missing"] } };
     detail.groups.items[1]!.relationship!.view = "record";
     expect(() => buildWebManifest([source, target])).toThrow(/context field missing/);
+    source.contract.interfaces!.web!.namedViews.extra = { kind: "record", title: "{{displayName}}", layout: { tabs: detail.groups.items } };
+    expect(buildWebManifest([source, target]).entities.Source!.views.named!.extra).toMatchObject({
+      kind: "record", layout: { tabs: [{ id: "overview" }, { targetView: "record" }] },
+    });
+  });
+
+  test("flat named views from the merged document chain compile through the shared pipeline", () => {
+    const entries = ["quote", "document", "document-variant", "block", "text-block", "youtube-embed", "template-block"]
+      .map(slug => ({ slug, contract: compile(loadEntity(authoringDir, slug)) }));
+    const result = buildWebManifest(entries);
+    expect(result.entities.Quote!.views.record!.layout.tabs.some(tab => tab.targetView === "quotePreview")).toBe(true);
+    expect(result.entities.Document!.views.named!.quotePreview).toMatchObject({ kind: "record", layout: {
+      tabs: [{ id: "content", relationshipId: "variants", targetView: "tabbed" }],
+    } });
+    expect(result.entities.DocumentVariant!.views.named!.tabbed).toMatchObject({ kind: "collection", collectionLayout: "tabs" });
+    expect(result.entities.Block!.views.named!.preview).toMatchObject({ kind: "record", layout: {
+      tabs: [{ groups: [{ fields: ["values"] }] }],
+    } });
   });
 
   test("a system-written reference key from the corpus is never create-writable and its collection offers no create", () => {

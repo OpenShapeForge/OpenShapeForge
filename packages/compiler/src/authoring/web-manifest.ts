@@ -796,7 +796,7 @@ function projectEntity(
     };
   }
 
-  const tabs: WebRecordTab[] = (view?.detail?.groups.items ?? []).flatMap((tab) => {
+  const projectRecordTab = (tab: CompiledViewGroup): WebRecordTab[] => {
     const relationshipId = tab.relationship?.name;
     if (relationshipId && !relationships[relationshipId]) return [];
     const requestedView = tab.relationship?.view;
@@ -818,7 +818,8 @@ function projectEntity(
       ...(relationshipId ? { relationshipId } : {}),
       ...(requestedView ? { targetView: requestedView } : {}),
     }];
-  });
+  };
+  const tabs: WebRecordTab[] = (view?.detail?.groups.items ?? []).flatMap(projectRecordTab);
   const authoredContext = contract.interfaces?.web?.recordContext;
   for (const key of authoredContext?.fields ?? []) {
     if (!fields[key]?.supports.read) throw new Error(`${entityName}: context field ${key} is not readable.`);
@@ -922,12 +923,19 @@ function projectEntity(
     if (definition.kind !== "record" || "fields" in definition) return [name, definition];
     const { namedViews: _named, recordContext: _context, renderers: _renderers, ...web } = contract.interfaces!.web!;
     const { form: _form, ...readView } = view!;
+    // Older compiled contracts store tab groups directly rather than a detail.
+    const namedDetail = "detail" in definition ? definition.detail : {
+      type: "detail" as const,
+      header: { render: view?.detail?.header.render ?? view!.page,
+        title: definition.title ?? view?.detail?.header.title ?? "{{id}}" },
+      groups: { render: view?.detail?.groups.render ?? view!.page, items: definition.layout.tabs },
+    };
     const projected = projectEntity({
       ...source,
       contract: { ...contract, interfaces: { ...contract.interfaces, web: {
-        ...web, ...(definition.context ? { recordContext: definition.context } : {}),
+        ...web, ...("context" in definition && definition.context ? { recordContext: definition.context } : {}),
       } } },
-      view: { ...readView, detail: definition.detail },
+      view: { ...readView, detail: namedDetail },
     }, all, providers);
     if (!projected.views.record?.operations.read) throw new Error(`${entityName}.${name}: a record view requires a read Operation.`);
     return [name, { ...projected.views.record, id: `${entityName}.${name}`, routes: {},

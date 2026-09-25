@@ -40,6 +40,7 @@ import type {
   ViewRowAction,
 } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
+import { authoredNamedViews } from "../entity-model.js";
 import {
   normalizeSingleContextPresentations,
   normalizeMultiContextPresentations,
@@ -341,7 +342,7 @@ function compileListPresentation(
 /** Named records share the default detail compiler, including group normalization. */
 export function buildNamedViews(coreEntity: LoadedArtifacts["coreEntity"], catalog: ComponentCatalog) {
   const views = coreEntity.interfaces?.web?.views;
-  return Object.fromEntries(Object.entries(views?.named ?? {}).map(([name, definition]) => {
+  return Object.fromEntries(Object.entries(authoredNamedViews(views)).map(([name, definition]) => {
     if (definition.kind === "collection") return [name, definition];
     const layout = "fields" in definition
       ? { tabs: [{ id: "main", fields: definition.fields }] }

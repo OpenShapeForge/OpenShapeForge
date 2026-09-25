@@ -9,12 +9,23 @@ import type {
   CoreEntity,
   CrudOperationKey,
   EntityOperationDefinition,
+  EntityWebNamedViewDefinition,
+  EntityWebViewDefinition,
   RestConfig,
   UIDefinition,
 } from "./types.js";
 
 /** The only authored entity shape: schemaVersion 3, behaviour in operations and interfaces. */
 export const CORE_ENTITY_SCHEMA_VERSION = 3;
+
+/** Flat view names and the namespaced form share one validation/compilation path. */
+export function authoredNamedViews(views: EntityWebViewDefinition | undefined): Record<string, EntityWebNamedViewDefinition> {
+  return {
+    ...(views?.named ?? {}),
+    ...Object.fromEntries(Object.entries(views ?? {}).filter(([name]) =>
+      name !== "record" && name !== "collection" && name !== "named")),
+  } as Record<string, EntityWebNamedViewDefinition>;
+}
 
 export function operationEntries(
   entity: CoreEntity,

@@ -421,6 +421,17 @@ export interface CompiledViewGroup {
   timeline?: CompiledTimelineConfig;
 }
 
+export type CompiledEntityWebNamedViewDefinition =
+  | { kind: "record"; detail: NonNullable<CompiledViewContext["detail"]>; context?: { fields: string[]; relationships?: string[] } }
+  /** Previously compiled contracts may still contain fields or tab layouts. */
+  | { kind: "record"; fields: string[] }
+  | {
+      kind: "record";
+      title?: string;
+      layout: { tabs: CompiledViewGroup[] };
+    }
+  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string };
+
 export interface CompiledViewAction extends ViewAction {}
 
 export interface CompiledViewActionDefinition extends ViewActionDefinition {}
@@ -734,12 +745,7 @@ export interface CompiledEntityContract {
   /** Explicit v2 interface exposure; v1 contracts keep using legacy projections. */
   interfaces?: {
     web?: {
-      namedViews?: Record<string,
-        | { kind: "record"; detail: NonNullable<CompiledViewContext["detail"]>; context?: { fields: string[]; relationships?: string[] } }
-        /** Previously compiled contracts may still contain the fields shorthand. */
-        | { kind: "record"; fields: string[] }
-        | Extract<NonNullable<import("./authoring.js").EntityWebViewDefinition["named"]>[string], { kind: "collection" }>
-      >;
+      namedViews?: Record<string, CompiledEntityWebNamedViewDefinition>;
       fields?: Record<string, { render: import("./common.js").FieldRender }>;
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];

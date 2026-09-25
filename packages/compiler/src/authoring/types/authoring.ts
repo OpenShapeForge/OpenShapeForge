@@ -425,13 +425,16 @@ export interface EntityWebRecordLayout {
   context?: { fields: string[]; relationships?: string[] };
 }
 
+export type EntityWebNamedViewDefinition =
+    | { kind: "record"; title?: string; fields: string[] }
+    | { kind: "record"; title?: string; layout: EntityWebRecordLayout }
+    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string };
+
 export interface EntityWebViewDefinition {
   /** Additional target-owned views, addressable by relationship placements. */
-  named?: Record<string,
-    | { kind: "record"; fields: string[] }
-    | { kind: "record"; title?: string; layout: EntityWebRecordLayout }
-    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string }
-  >;
+  named?: Record<string, EntityWebNamedViewDefinition>;
+  /** Authoring shorthand: every non-reserved key is a target-owned named view. */
+  [name: string]: unknown;
   collection: {
     /** Opaque host renderer-registry key; omission uses the generic collection renderer. */
     renderer?: string;

@@ -42,7 +42,7 @@ permissions:
 jobs:
   pack:
     name: Pack and smoke-test the compiler tarball
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, osf-package]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -106,7 +106,7 @@ jobs:
     name: Publish to GitHub Packages
     needs: pack
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, osf-package]
     permissions:
       contents: read
       packages: write

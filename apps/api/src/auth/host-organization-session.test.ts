@@ -388,10 +388,10 @@ describe("explicit service credentials in host mode", () => {
       expect(response.statusCode).toBe(200);
       expect((response.json() as { id: string }).id).toBe(operation.key);
 
-      // Outside host mode an issuer match identifies a control credential;
-      // its control-role refusal must not be retried as a tenant session.
+      // Even before host mode is enabled, a shared issuer can mint tenant
+      // credentials for a different client than the control client.
       process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "off";
-      const separateRealmResponse = await app.inject({
+      const sharedRealmResponse = await app.inject({
         method: "GET",
         url: `/api/operations/${operation.key}`,
         headers: Object.fromEntries(await headers({
@@ -400,7 +400,9 @@ describe("explicit service credentials in host mode", () => {
           resource_access: { api: { roles: ["Records.Read"] } },
         })),
       });
-      expect(separateRealmResponse.statusCode).toBe(401);
+      // The fixture has no tenant role for discovery, so authorization now
+      // reaches operation visibility and hides this definition with 404.
+      expect(sharedRealmResponse.statusCode).toBe(404);
     } finally {
       await app.close();
       await db.destroy();

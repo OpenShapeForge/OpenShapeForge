@@ -40,6 +40,7 @@ import type {
   ViewRowAction,
 } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
+import { authoredNamedViews } from "../entity-model.js";
 import {
   normalizeSingleContextPresentations,
   normalizeMultiContextPresentations,
@@ -234,15 +235,6 @@ function compileGroup(
   };
 }
 
-export function compileViewGroups(
-  groups: import("../types.js").ViewGroup[],
-  catalog: ComponentCatalog,
-  fallbackPrefix = "group",
-): CompiledViewGroup[] {
-  return resolveViewGroups({ groups }, {}, fallbackPrefix)
-    .map((group) => compileGroup(group, catalog));
-}
-
 function buildViewContext(
   presentations: Record<string, PresentationDefinition>,
   routes: Record<string, string | LocalizedText>,
@@ -345,6 +337,26 @@ function compileListPresentation(
   }
 
   return compiled;
+}
+
+/** Named records share the default detail compiler, including group normalization. */
+export function buildNamedViews(coreEntity: LoadedArtifacts["coreEntity"], catalog: ComponentCatalog) {
+  const views = coreEntity.interfaces?.web?.views;
+  return Object.fromEntries(Object.entries(authoredNamedViews(views)).map(([name, definition]) => {
+    if (definition.kind === "collection") return [name, definition];
+    const layout = "fields" in definition
+      ? { tabs: [{ id: "main", fields: definition.fields }] }
+      : definition.layout;
+    return [name, {
+      kind: "record",
+      detail: compileDetailPresentation(name, {
+        type: "detail",
+        header: { title: ("title" in definition ? definition.title : undefined) ?? views?.record?.title ?? "{{id}}" },
+        groups: layout.tabs,
+      }, catalog),
+      ...(layout.context ? { context: layout.context } : {}),
+    }];
+  }));
 }
 
 function compileDetailPresentation(

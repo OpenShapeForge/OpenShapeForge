@@ -291,9 +291,11 @@ describe("entity operation runtime", () => {
       ({ id }) => id === "Relation.update",
     )!;
     expect(restEditLeaseOperationIdsForSession({ roles: [] })).toEqual([]);
+    // Roles are alternatives, not an ordered broad-to-narrow permission ladder.
+    expect(update.authorization.roles).toContain("Relations.All.ReadWrite");
     expect(
       restEditLeaseOperationIdsForSession({
-        roles: [update.authorization.roles[0]!],
+        roles: ["Relations.All.ReadWrite"],
       }),
     ).toEqual([
       "Address.delete",
@@ -304,6 +306,9 @@ describe("entity operation runtime", () => {
       "PaymentDetail.update",
       "Relation.update",
     ]);
+    expect(update.authorization.roles).toContain("Relations.Relation.ReadWrite");
+    expect(restEditLeaseOperationIdsForSession({ roles: ["Relations.Relation.ReadWrite"] }))
+      .toEqual(["Relation.update"]);
     // RelationGroup is a blueprint entity, so its tenant-local reset holds
     // the same lease as an update for the role that may write it.
     expect(restEditLeaseOperationIdsForSession({ roles: ["Relations.RelationGroups.ReadWrite"] })).toEqual([
@@ -330,8 +335,11 @@ describe("entity operation runtime", () => {
     const contracts = getEntityOperationContracts().filter(
       (operation) => operation.entityName === "Relation",
     );
-    const readRole = contracts.find((operation) => operation.intent === "get")!
-      .authorization.roles[0]!;
+    const readRole = "Relations.All.Read";
+    expect(contracts.find((operation) => operation.intent === "get")!.authorization.roles).toContain(readRole);
+    for (const intent of ["update", "delete"]) {
+      expect(contracts.find((operation) => operation.intent === intent)!.authorization.roles).not.toContain(readRole);
+    }
 
     expect(
       getEntityOperationOffers(

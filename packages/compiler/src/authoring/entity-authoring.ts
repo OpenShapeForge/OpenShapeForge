@@ -6,9 +6,8 @@
  * interface's references and renderer keys.
  */
 import type { CoreEntity } from "./types.js";
-import { CORE_ENTITY_SCHEMA_VERSION, operationByAction, operationEntries, projectedActions } from "./entity-model.js";
+import { CORE_ENTITY_SCHEMA_VERSION, authoredNamedViews, operationByAction, operationEntries, projectedActions } from "./entity-model.js";
 import { assertOperationAuthoring } from "./operation-authoring.js";
-import type { EntityWebNamedViewDefinition } from "./types/authoring.js";
 
 const RESERVED_MUTATION_CONTROL_FIELD_KEYS = new Set([
   "expectedVersion",
@@ -73,17 +72,19 @@ export function assertEntityAuthoring(entity: CoreEntity, origin: string): void 
 
   const web = entity.interfaces?.web;
   if (web) {
-    const namedViews = {
-      ...(web.views?.named ?? {}),
-      ...Object.fromEntries(Object.entries(web.views ?? {}).filter(([name]) =>
-        name !== "record" && name !== "collection" && name !== "named")),
-    } as Record<string, EntityWebNamedViewDefinition>;
+    const namedViews = authoredNamedViews(web.views);
     for (const [name, namedView] of Object.entries(namedViews)) {
       if (name === "record" || name === "collection") {
         throw new Error(`${origin} named Web view ${name} conflicts with a built-in view.`);
       }
       if (namedView.kind === "record") {
-        for (const field of "fields" in namedView ? namedView.fields : []) {
+        const collectFields = (groups: import("./types.js").ViewGroup[]): string[] => groups.flatMap(group => [
+          ...(group.fields ?? []).map(field => typeof field === "string" ? field : field.key),
+          ...collectFields(group.groups ?? []),
+        ]);
+        const keys = "fields" in namedView ? namedView.fields
+          : [...collectFields(namedView.layout.tabs), ...(namedView.layout.context?.fields ?? [])];
+        for (const field of keys) {
           if (!fieldsByKey.has(field)) throw new Error(`${origin} named Web view ${name} references unknown field ${field}.`);
         }
       } else {

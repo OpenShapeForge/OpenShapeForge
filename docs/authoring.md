@@ -146,6 +146,35 @@ The compiler checks that the selected view exists and accepts the relation's
 single-record or collection shape. No referring-entity renderer mapping is
 needed.
 
+Named record views also accept the same `layout` as the default `record`:
+
+```yaml
+named:
+  card:
+    kind: record
+    title: "{{title}}"
+    layout:
+      tabs:
+        - id: details
+          label: { en: Details, nl: Details }
+          groups:
+            - id: summary
+              title: { en: Summary, nl: Samenvatting }
+              fields: [title, status]
+        - id: children
+          label: { en: Children, nl: Onderdelen }
+          relationship: { name: children, view: tabbed }
+```
+
+The example assumes `title`, `status` and `children` are fields on this entity,
+and the child entity owns `tabbed`. Either a single relationship selects `card`,
+or a collection view on this entity selects `itemView: card`. The compiler uses
+the default record layout compiler and manifest projection for both. Relationship
+overrides stay local to the selected view. `fields: [...]` remains a shorthand
+for one tab and is normalized to the same record layout; do not combine it with
+`layout`. Named views are embedded read presentations, not additional routes or
+write Operations. The optional `title` defaults to the standard record title.
+
 ### Action-specific record permissions
 
 An entity can let one persisted JSON field further narrow its ordinary tenant

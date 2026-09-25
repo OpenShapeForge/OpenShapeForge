@@ -786,15 +786,7 @@ function projectEntity(
     return [[relationship.key, projected]];
   }));
 
-  const authoredNamedViews = contract.interfaces?.web?.namedViews ?? {};
-  const namedRecordTabs = Object.values(authoredNamedViews).flatMap((namedView) =>
-    namedView.kind === "record" && "layout" in namedView
-      ? namedView.layout.tabs
-      : [],
-  );
-  const placedTabs = [...(view?.detail?.groups.items ?? []), ...namedRecordTabs];
-
-  for (const tab of placedTabs) {
+  for (const tab of view?.detail?.groups.items ?? []) {
     const usage = tab.relationship;
     if (!usage?.name || !relationships[usage.name]) continue;
     const target = all.get(relationships[usage.name]!.targetEntityId);
@@ -828,16 +820,6 @@ function projectEntity(
     }];
   };
   const tabs: WebRecordTab[] = (view?.detail?.groups.items ?? []).flatMap(projectRecordTab);
-  const namedViews = Object.fromEntries(Object.entries(authoredNamedViews).map(([name, namedView]) => {
-    if (namedView.kind !== "record" || !("layout" in namedView)) return [name, namedView];
-    return [name, {
-      kind: "record" as const,
-      ...(namedView.title ? { titleTemplate: namedView.title } : {}),
-      layout: {
-        tabs: namedView.layout.tabs.flatMap(projectRecordTab),
-      },
-    }];
-  }));
   const authoredContext = contract.interfaces?.web?.recordContext;
   for (const key of authoredContext?.fields ?? []) {
     if (!fields[key]?.supports.read) throw new Error(`${entityName}: context field ${key} is not readable.`);
@@ -935,6 +917,33 @@ function projectEntity(
     },
   } : undefined;
 
+  // Named records use exactly the same projection as the default record. Their
+  // relationship overrides stay local to the selected view, not the entity.
+  const named = Object.fromEntries(Object.entries(contract.interfaces?.web?.namedViews ?? {}).map(([name, definition]) => {
+    if (definition.kind !== "record" || "fields" in definition) return [name, definition];
+    const { namedViews: _named, recordContext: _context, renderers: _renderers, ...web } = contract.interfaces!.web!;
+    const { form: _form, ...readView } = view!;
+    // Older compiled contracts store tab groups directly rather than a detail.
+    const namedDetail = "detail" in definition ? definition.detail : {
+      type: "detail" as const,
+      header: { render: view?.detail?.header.render ?? view!.page,
+        title: definition.title ?? view?.detail?.header.title ?? "{{id}}" },
+      groups: { render: view?.detail?.groups.render ?? view!.page, items: definition.layout.tabs },
+    };
+    const projected = projectEntity({
+      ...source,
+      contract: { ...contract, interfaces: { ...contract.interfaces, web: {
+        ...web, ...("context" in definition && definition.context ? { recordContext: definition.context } : {}),
+      } } },
+      view: { ...readView, detail: namedDetail },
+    }, all, providers);
+    if (!projected.views.record?.operations.read) throw new Error(`${entityName}.${name}: a record view requires a read Operation.`);
+    return [name, { ...projected.views.record, id: `${entityName}.${name}`, routes: {},
+      modes: ["read" as const], operations: { read: projected.views.record.operations.read },
+      relationships: projected.relationships,
+    }];
+  }));
+
   return {
     ...(contract.blueprint ? { blueprint: contract.blueprint } : {}),
     ...(contract.transitions
@@ -966,7 +975,7 @@ function projectEntity(
     views: {
       collection: createUnsupported ? { ...source.collection, operations: withoutCreate(source.collection.operations) } : source.collection,
       ...(record ? { record } : {}),
-      ...(Object.keys(namedViews).length ? { named: namedViews } : {}),
+      ...(Object.keys(named).length ? { named } : {}),
     },
     relationships,
   };

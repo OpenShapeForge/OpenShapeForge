@@ -419,14 +419,16 @@ export type EntityInterfaceOperationProjection =
   | false
   | EntityInterfaceOperationProjectionConfig;
 
+export interface EntityWebRecordLayout {
+  tabs: import("./views.js").ViewGroup[];
+  /** Deliberately selected summary, independent of the full record tabs. */
+  context?: { fields: string[]; relationships?: string[] };
+}
+
 export type EntityWebNamedViewDefinition =
-  | { kind: "record"; fields: string[] }
-  | {
-      kind: "record";
-      title?: string;
-      layout: { tabs: import("./views.js").ViewGroup[] };
-    }
-  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string };
+    | { kind: "record"; title?: string; fields: string[] }
+    | { kind: "record"; title?: string; layout: EntityWebRecordLayout }
+    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string };
 
 export interface EntityWebViewDefinition {
   /** Additional target-owned views, addressable by relationship placements. */
@@ -452,11 +454,7 @@ export interface EntityWebViewDefinition {
     badges?: string[];
     variableSources?: import("./views.js").FormVariableSource[];
     actions?: string[];
-    layout: {
-      tabs: import("./views.js").ViewGroup[];
-      /** Deliberately selected summary, independent of the full record tabs. */
-      context?: { fields: string[]; relationships?: string[] };
-    };
+    layout: EntityWebRecordLayout;
     modes?: {
       create?: { title: LocalizedText; groups: import("./views.js").ViewGroup[] };
       update?: { title: LocalizedText; groups?: import("./views.js").ViewGroup[] };

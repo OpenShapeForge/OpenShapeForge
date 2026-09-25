@@ -971,8 +971,8 @@
           "additionalProperties": false,
           "required": ["kind"],
           "oneOf": [
-            { "required": ["fields"] },
-            { "required": ["layout"] }
+            { "required": ["fields"], "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } } },
+            { "required": ["layout"], "x-osf-i18n": { "title": { "en": "Layout", "nl": "Indeling" } } }
           ],
           "properties": {
             "kind": { "const": "record", "x-osf-i18n": { "title": { "en": "Kind", "nl": "Soort" } } },
@@ -989,12 +989,7 @@
             },
             "title": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Title", "nl": "Titel" } } },
             "layout": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["tabs"],
-              "properties": {
-                "tabs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/webViewGroupV2" } }
-              },
+              "$ref": "#/$defs/webViewsV2/properties/record/properties/layout",
               "x-osf-i18n": { "title": { "en": "Layout", "nl": "Indeling" } }
             }
           }

@@ -27,7 +27,7 @@ import { buildGraphQL } from "./graphql.js";
 import { buildCrud } from "./crud.js";
 import { buildRest } from "./rest.js";
 import { buildMcp } from "./mcp.js";
-import { buildViews, compileViewGroups } from "./views.js";
+import { buildViews, buildNamedViews } from "./views.js";
 import { buildProfiles } from "./profiles.js";
 import { deriveTableName } from "./helpers.js";
 import { buildAuthorization } from "./authorization.js";
@@ -36,30 +36,6 @@ import { buildEntityOperations } from "./entity-operations.js";
 import { resolveDerivedOnCreateBindings } from "./derive-on-create.js";
 import { withStatusTransitions } from "./transitions.js";
 import { pluginOperations, webOperationActions, webUi } from "../entity-model.js";
-
-function authoredNamedViews(views: Record<string, unknown> | undefined) {
-  if (!views) return undefined;
-  const named = {
-    ...((views.named as Record<string, unknown> | undefined) ?? {}),
-    ...Object.fromEntries(Object.entries(views).filter(([name]) =>
-      name !== "record" && name !== "collection" && name !== "named")),
-  };
-  return Object.keys(named).length ? named : undefined;
-}
-
-function compiledNamedViews(
-  views: Record<string, unknown> | undefined,
-  catalog: LoadedArtifacts["componentCatalog"],
-) {
-  const named = authoredNamedViews(views) as Record<string, import("../types.js").EntityWebNamedViewDefinition> | undefined;
-  if (!named) return undefined;
-  return Object.fromEntries(Object.entries(named).map(([name, view]) => [
-    name,
-    view.kind === "record" && "layout" in view
-      ? { ...view, layout: { tabs: compileViewGroups(view.layout.tabs, catalog, `named-${name}`) } }
-      : view,
-  ]));
-}
 
 /**
  * Make trusted Operation stamps the field's writer contract before any input
@@ -283,6 +259,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     ...(coreEntity.interfaces?.web?.fields?.[field.key] ?? {}),
   })) };
   const views = buildViews(viewEntity, profiles, componentCatalog, artifacts.viewDefinition ?? undefined);
+  const namedViews = buildNamedViews(coreEntity, componentCatalog);
 
   validateTimelineIncludes(coreEntity.entity, relationships, views);
   const compiledProfiles = buildProfiles(profiles, mappings);
@@ -356,9 +333,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
       ...(coreEntity.interfaces?.web
         ? {
             web: {
-              ...(compiledNamedViews(coreEntity.interfaces.web.views as Record<string, unknown>, componentCatalog)
-                ? { namedViews: compiledNamedViews(coreEntity.interfaces.web.views as Record<string, unknown>, componentCatalog) }
-                : {}),
+              ...(Object.keys(namedViews).length ? { namedViews } : {}),
               ...(coreEntity.interfaces.web.fields
                 ? { fields: coreEntity.interfaces.web.fields }
                 : {}),

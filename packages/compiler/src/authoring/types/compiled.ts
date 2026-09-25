@@ -422,6 +422,8 @@ export interface CompiledViewGroup {
 }
 
 export type CompiledEntityWebNamedViewDefinition =
+  | { kind: "record"; detail: NonNullable<CompiledViewContext["detail"]>; context?: { fields: string[]; relationships?: string[] } }
+  /** Previously compiled contracts may still contain fields or tab layouts. */
   | { kind: "record"; fields: string[] }
   | {
       kind: "record";

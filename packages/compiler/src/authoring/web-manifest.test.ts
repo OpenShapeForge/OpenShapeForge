@@ -7,7 +7,11 @@ import { buildWebManifest, renderWebManifest } from "./web-manifest.js";
 import { buildEntityOperations } from "./compiler/entity-operations.js";
 import { compile } from "./compiler/index.js";
 import { loadEntity } from "./loader.js";
+import { assertEntityAuthoring } from "./entity-authoring.js";
+import { createAuthoringValidator } from "./schema-validation.js";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { parse } from "yaml";
 
 const authoringDir = join(import.meta.dir, "../../config/authoring");
 
@@ -278,7 +282,14 @@ describe("web manifest projection", () => {
     ], childView, [{ key: "parentId", fieldKey: "parentId", kind: "belongsTo", target: "Parent", foreignKey: "parent_id", ownership: "reference" }]);
     child.contract.storage.columns.find((column) => column.field === "parentId")!.column = "parent_id";
 
-    const relationship = buildWebManifest([parent, child]).entities.Parent!.relationships.children!;
+    const namedDetail = structuredClone(parentView.detail!);
+    namedDetail.groups.items[2]!.relationship!.overrides = { columns: ["role"] };
+    parent.contract.interfaces!.web!.namedViews = { roles: { kind: "record", detail: namedDetail } };
+    const projectedParent = buildWebManifest([parent, child]).entities.Parent!;
+    const selected = projectedParent.views.named!.roles;
+    if (!selected || !("relationships" in selected)) throw new Error("Missing named relationship projection");
+    expect(selected.relationships!.children!.collection!.columns.map(({ key }) => key)).toEqual(["role"]);
+    const relationship = projectedParent.relationships.children!;
     expect(relationship.operations.create).toBeUndefined();
     expect(relationship.collection?.operations.create).toBeUndefined();
     expect(relationship.collection?.columns.map(({ key }) => key)).toEqual(["displayName", "status"]);
@@ -325,11 +336,82 @@ describe("web manifest projection", () => {
     };
     const manifest = buildWebManifest([source, target]);
     expect(manifest.entities.Source?.views.record?.layout.tabs[1]?.targetView).toBe("tabbed");
-    expect(manifest.entities.Target?.views.named?.tabbed).toEqual({
-      kind: "collection", collectionLayout: "tabs", itemView: "preview", tabLabel: "displayName",
-    });
+    expect(manifest.entities.Target?.views.named?.tabbed).toEqual({ kind: "collection", collectionLayout: "tabs", itemView: "preview", tabLabel: "displayName" });
     expect(manifest.entities.Target?.views.named?.preview).toEqual({ kind: "record", fields: ["body"] });
   });
+  test("named layouts compile and project through the default record layout path", () => {
+    const artifacts = loadEntity(authoringDir, "block");
+    const views = artifacts.coreEntity.interfaces!.web!.views!;
+    views.named = {
+      compact: { kind: "record", fields: ["values"] },
+      detailed: { kind: "record", title: "{{id}}", layout: {
+        tabs: [
+          { id: "content", label: text("Content"), groups: [{ id: "value", title: text("Value"), fields: ["values"] }] },
+          { id: "identity", label: text("Identity"), fields: ["id"] },
+        ], context: { fields: ["id"] },
+      } },
+      tabbed: { kind: "collection", collectionLayout: "tabs", itemView: "detailed" },
+    };
+    const validator = createAuthoringValidator();
+    const raw = parse(readFileSync(join(authoringDir, "entities/core/block.yaml"), "utf8"));
+    raw.interfaces.web.views.named = views.named;
+    expect(() => validator.validate(raw, "block.yaml")).not.toThrow();
+    const compileView = () => buildWebManifest([{ slug: "block", contract: compile(artifacts) }]).entities.Block!;
+    const result = compileView();
+    expect(result.views.named?.detailed).toMatchObject({ kind: "record", id: "Block.detailed", modes: ["read"], routes: {}, layout: {
+      tabs: [
+        { id: "content", label: text("Content"), groups: [{ id: "value", title: text("Value"), fields: ["values"] }] },
+        { id: "identity", label: text("Identity"), groups: [{ id: "identity", fields: ["id"] }] },
+      ], context: { groups: [{ fields: ["id"] }], relationships: [] },
+    } });
+    expect(result.views.named?.compact).toMatchObject({ kind: "record", layout: { tabs: [{ groups: [{ fields: ["values"] }] }] } });
+    const detailed = views.named.detailed;
+    const projected = result.views.named!.detailed;
+    if (!detailed || !("layout" in detailed) || !projected || !("layout" in projected) || !("context" in projected.layout)) throw new Error("Missing record layout");
+    views.record!.layout = detailed.layout;
+    expect(compileView().views.record!.layout).toEqual(projected.layout);
+    detailed.layout.tabs[0]!.groups![0]!.fields = ["missing"];
+    expect(() => assertEntityAuthoring(artifacts.coreEntity, "block.yaml")).toThrow(/unknown field missing/);
+    views.named.detailed = { ...views.named.detailed, fields: ["values"] } as never;
+    expect(() => validator.validate(raw, "block.yaml")).toThrow();
+  });
+
+  test("named record relationship views are validated and projected independently", () => {
+    const source = entity("Source", "source", [field("displayName"), field("contactDetails")], coreView(), [
+      { key: "contactDetails", fieldKey: "contactDetails", kind: "belongsTo", target: "Target", foreignKey: "contact_details_id", ownership: "reference" },
+    ]);
+    const target = entity("Target", "target", [field("displayName")], coreView());
+    const detail = coreView().detail!;
+    detail.groups.items[1]!.relationship!.view = "record";
+    source.contract.interfaces!.web!.namedViews = { extra: { kind: "record", detail } };
+    const named = buildWebManifest([source, target]).entities.Source!.views.named!.extra;
+    expect(named).toMatchObject({ layout: { tabs: [{ id: "overview" }, { relationshipId: "contactDetails", targetView: "record" }] } });
+    expect(buildWebManifest([source, target]).entities.Source!.views.record!.layout.tabs[1]?.targetView).toBeUndefined();
+    detail.groups.items[1]!.relationship!.view = "missing";
+    expect(() => buildWebManifest([source, target])).toThrow(/target view missing/);
+    source.contract.interfaces!.web!.namedViews.extra = { kind: "record", detail, context: { fields: ["missing"] } };
+    detail.groups.items[1]!.relationship!.view = "record";
+    expect(() => buildWebManifest([source, target])).toThrow(/context field missing/);
+    source.contract.interfaces!.web!.namedViews.extra = { kind: "record", title: "{{displayName}}", layout: { tabs: detail.groups.items } };
+    expect(buildWebManifest([source, target]).entities.Source!.views.named!.extra).toMatchObject({
+      kind: "record", layout: { tabs: [{ id: "overview" }, { targetView: "record" }] },
+    });
+  });
+
+  test("flat named views from the merged document chain compile through the shared pipeline", () => {
+    const entries = ["quote", "document", "document-variant", "block", "text-block", "youtube-embed", "template-block"]
+      .map(slug => ({ slug, contract: compile(loadEntity(authoringDir, slug)) }));
+    const result = buildWebManifest(entries);
+    expect(result.entities.Quote!.views.record!.layout.tabs.some(tab => tab.targetView === "quotePreview")).toBe(true);
+    expect(result.entities.Document!.views.named!.quotePreview).toMatchObject({ kind: "record", layout: {
+      tabs: [{ id: "content", relationshipId: "variants", targetView: "tabbed" }],
+    } });
+    expect(result.entities.DocumentVariant!.views.named!.tabbed).toMatchObject({ kind: "collection", collectionLayout: "tabs" });
+    expect(result.entities.Block!.views.named!.preview).toMatchObject({ kind: "record", layout: {
+      tabs: [{ groups: [{ fields: ["values"] }] }],
+    } });
+  });
+
   test("a system-written reference key from the corpus is never create-writable and its collection offers no create", () => {
     // Comment.authorId is authored readOnly (attribution, not an input); the
     // derived Relation.comments collection therefore cannot pre-fill it.

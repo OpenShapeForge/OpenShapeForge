@@ -15,6 +15,7 @@ domains:
 authorization:
   roles:
     read:
+      - Relations.Relation.ReadWrite
       - Relations.All.Read
       - Relations.All.ReadWrite
     create:

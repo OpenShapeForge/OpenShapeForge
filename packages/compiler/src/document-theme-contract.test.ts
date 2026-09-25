@@ -38,6 +38,10 @@ test("document themes are tenant-owned, selected on templates, and projected gen
   expect(fields.isDefault?.defaultValue).toBe(false);
   expect(fields.isDefault?.readOnly).toBe(true);
   expect(fields.surfaceColor?.validation?.pattern).toBe("^#[0-9A-Fa-f]{6}$");
+  for (const key of ["surfaceColor", "textColor", "accentColor"]) {
+    expect(fields[key]?.osfType).toBe("color");
+    expect(fields[key]?.baseType).toBe("string");
+  }
   expect(JSON.stringify(fields.fontFamily)).toContain("dm-sans");
   expect(fields.typography?.children?.map((child) => child.key)).toEqual([
     "body", "heading1", "heading2", "heading3", "quote", "list",

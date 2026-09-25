@@ -46,25 +46,22 @@ fields:
       nl: Precies één standaard zolang de klant thema's heeft. Gebruik Als standaard instellen om te wisselen; nieuwe templates zonder keuze krijgen dit thema.
     persisted: { column: is_default, storageClass: core }
   - key: surfaceColor
-    osfType: string
+    osfType: color
     required: true
     defaultValue: "#ffffff"
     label: { en: Surface, nl: Oppervlak }
-    validation: { pattern: "^#[0-9A-Fa-f]{6}$", maxLength: 7 }
     persisted: { column: surface_color, storageClass: core }
   - key: textColor
-    osfType: string
+    osfType: color
     required: true
     defaultValue: "#111827"
     label: { en: Text, nl: Tekst }
-    validation: { pattern: "^#[0-9A-Fa-f]{6}$", maxLength: 7 }
     persisted: { column: text_color, storageClass: core }
   - key: accentColor
-    osfType: string
+    osfType: color
     required: true
     defaultValue: "#2563eb"
     label: { en: Accent, nl: Accent }
-    validation: { pattern: "^#[0-9A-Fa-f]{6}$", maxLength: 7 }
     persisted: { column: accent_color, storageClass: core }
   - key: fontFamily
     osfType: string

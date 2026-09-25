@@ -130,6 +130,8 @@ interfaces:
     operations:
       update: false
     views:
+      named:
+        tabbed: { kind: collection, collectionLayout: tabs, itemView: record, tabLabel: locale }
       collection:
         route: /document-variants
         title: { en: Document variants, nl: Documentvarianten }
@@ -144,7 +146,7 @@ interfaces:
               groups: [{ title: { en: Variant, nl: Variant }, fields: [document, channel, locale] }]
             - id: blocks
               label: { en: Blocks, nl: Blokken }
-              relationship: blocks
+              relationship: { name: blocks, view: previewStack }
         modes:
           create:
             title: { en: Create, nl: Toevoegen }

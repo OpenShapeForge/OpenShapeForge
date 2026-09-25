@@ -72,6 +72,27 @@ export function assertEntityAuthoring(entity: CoreEntity, origin: string): void 
 
   const web = entity.interfaces?.web;
   if (web) {
+    for (const [name, namedView] of Object.entries(web.views?.named ?? {})) {
+      if (name === "record" || name === "collection") {
+        throw new Error(`${origin} named Web view ${name} conflicts with a built-in view.`);
+      }
+      if (namedView.kind === "record") {
+        for (const field of namedView.fields) {
+          if (!fieldsByKey.has(field)) throw new Error(`${origin} named Web view ${name} references unknown field ${field}.`);
+        }
+      } else {
+        if (namedView.collectionLayout !== "table" && !namedView.itemView) {
+          throw new Error(`${origin} named Web collection view ${name} requires itemView.`);
+        }
+        if (namedView.itemView && namedView.itemView !== "record" &&
+          web.views?.named?.[namedView.itemView]?.kind !== "record") {
+          throw new Error(`${origin} named Web collection view ${name} requires a record itemView owned by this entity.`);
+        }
+        if (namedView.tabLabel && !fieldsByKey.has(namedView.tabLabel)) {
+          throw new Error(`${origin} named Web view ${name} references unknown tabLabel field ${namedView.tabLabel}.`);
+        }
+      }
+    }
     const variableSources = web.views?.record?.variableSources ?? [];
     if (new Set(variableSources.map(source => source.key)).size !== variableSources.length) throw new Error(`${origin} duplicate Web variable source key.`);
     for (const source of variableSources) {

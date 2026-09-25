@@ -803,8 +803,12 @@ function projectEntity(
     if (requestedView) {
       const relation = relationships[relationshipId!];
       const target = relation && all.get(relation.targetEntityId);
-      if (relation?.kind !== "belongsTo" || requestedView !== "record" || !target?.view?.detail || !target.operations.get) {
-        throw new Error(`${entityName}.${relationshipId}: target view ${requestedView} must be an available single-reference record view.`);
+      const namedView = target?.contract.interfaces?.web?.namedViews?.[requestedView];
+      const targetKind = requestedView === "record" && target?.view?.detail ? "record"
+        : requestedView === "collection" ? "collection" : namedView?.kind;
+      const expectedKind = relation?.kind === "belongsTo" ? "record" : "collection";
+      if (!target || targetKind !== expectedKind || (targetKind === "record" && !target.operations.get)) {
+        throw new Error(`${entityName}.${relationshipId}: target view ${requestedView} must be an available ${expectedKind} view on ${relation?.targetEntityId ?? "the target"}.`);
       }
     }
     return [{
@@ -812,7 +816,7 @@ function projectEntity(
       label: localized(tab.label ?? tab.title, tab.id),
       groups: projectTabGroups(tab),
       ...(relationshipId ? { relationshipId } : {}),
-      ...(requestedView ? { targetView: requestedView as "record" } : {}),
+      ...(requestedView ? { targetView: requestedView } : {}),
     }];
   });
   const authoredContext = contract.interfaces?.web?.recordContext;
@@ -943,6 +947,7 @@ function projectEntity(
     views: {
       collection: createUnsupported ? { ...source.collection, operations: withoutCreate(source.collection.operations) } : source.collection,
       ...(record ? { record } : {}),
+      ...(contract.interfaces?.web?.namedViews ? { named: contract.interfaces.web.namedViews } : {}),
     },
     relationships,
   };

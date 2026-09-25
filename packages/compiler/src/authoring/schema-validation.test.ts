@@ -586,7 +586,7 @@ describe("coreEntity properties the compiler implements", () => {
       for (const [index, variant] of ((schema.oneOf as unknown[] | undefined) ?? []).entries()) walk(variant, `${path}|${index}`);
     };
     walk((defs.entityInterfacesV2 as { properties: { web: unknown } }).properties.web, "web");
-    for (const def of ["webViewsV2", "webViewGroupV2", "webWriteModeV2", "webFieldEntryV2"]) walk(defs[def], def);
+    for (const def of ["webViewsV2", "webNamedViewV2", "webViewGroupV2", "webWriteModeV2", "webFieldEntryV2"]) walk(defs[def], def);
     expect(untitled).toEqual([]);
   });
 

@@ -962,61 +962,62 @@
         "templateDescription": { "type": "string" }
       }
     },
+    "webNamedViewV2": {
+      "x-osf-i18n": { "title": { "en": "View", "nl": "Weergave" } },
+      "oneOf": [
+        {
+          "type": "object",
+          "x-osf-i18n": { "title": { "en": "Record view", "nl": "Recordweergave" } },
+          "additionalProperties": false,
+          "required": ["kind"],
+          "oneOf": [
+            { "required": ["fields"], "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } } },
+            { "required": ["layout"], "x-osf-i18n": { "title": { "en": "Layout", "nl": "Indeling" } } }
+          ],
+          "properties": {
+            "kind": { "const": "record", "x-osf-i18n": { "title": { "en": "Kind", "nl": "Soort" } } },
+            "fields": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } },
+              "items": {
+                "$ref": "#/$defs/fieldKey",
+                "x-osf-choice": "field",
+                "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
+              }
+            },
+            "title": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Title", "nl": "Titel" } } },
+            "layout": {
+              "$ref": "#/$defs/webViewsV2/properties/record/properties/layout",
+              "x-osf-i18n": { "title": { "en": "Layout", "nl": "Indeling" } }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "x-osf-i18n": { "title": { "en": "Collection view", "nl": "Collectieweergave" } },
+          "additionalProperties": false,
+          "required": ["kind", "collectionLayout"],
+          "properties": {
+            "kind": { "const": "collection", "x-osf-i18n": { "title": { "en": "Kind", "nl": "Soort" } } },
+            "collectionLayout": { "enum": ["table", "tabs", "stack"], "x-osf-i18n": { "title": { "en": "Collection layout", "nl": "Collectie-indeling" }, "enum": { "table": { "en": "Table", "nl": "Tabel" }, "tabs": { "en": "Tabs", "nl": "Tabbladen" }, "stack": { "en": "Stack", "nl": "Onder elkaar" } } } },
+            "itemView": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$", "x-osf-i18n": { "title": { "en": "Item view", "nl": "Itemweergave" } } },
+            "tabLabel": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Tab label field", "nl": "Tabbladlabelveld" } } }
+          }
+        }
+      ]
+    },
     "webViewsV2": {
       "type": "object",
-      "additionalProperties": { "$ref": "#/$defs/webViewsV2/properties/named/additionalProperties" },
+      "additionalProperties": { "$ref": "#/$defs/webNamedViewV2" },
       "required": ["collection"],
       "properties": {
         "named": {
           "type": "object",
           "x-osf-i18n": { "title": { "en": "Named views", "nl": "Benoemde weergaven" } },
           "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
-          "additionalProperties": {
-            "x-osf-i18n": { "title": { "en": "View", "nl": "Weergave" } },
-            "oneOf": [
-              {
-                "type": "object",
-                "x-osf-i18n": { "title": { "en": "Record view", "nl": "Recordweergave" } },
-                "additionalProperties": false,
-                "required": ["kind"],
-                "oneOf": [
-                  { "required": ["fields"] },
-                  { "required": ["layout"] }
-                ],
-                "properties": {
-                  "kind": { "const": "record", "x-osf-i18n": { "title": { "en": "Kind", "nl": "Soort" } } },
-                  "fields": {
-                    "type": "array",
-                    "minItems": 1,
-                    "uniqueItems": true,
-                    "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } },
-                    "items": {
-                      "$ref": "#/$defs/fieldKey",
-                      "x-osf-choice": "field",
-                      "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
-                    }
-                  },
-                  "title": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Title", "nl": "Titel" } } },
-                  "layout": {
-                    "$ref": "#/$defs/webViewsV2/properties/record/properties/layout",
-                    "x-osf-i18n": { "title": { "en": "Layout", "nl": "Indeling" } }
-                  }
-                }
-              },
-              {
-                "type": "object",
-                "x-osf-i18n": { "title": { "en": "Collection view", "nl": "Collectieweergave" } },
-                "additionalProperties": false,
-                "required": ["kind", "collectionLayout"],
-                "properties": {
-                  "kind": { "const": "collection", "x-osf-i18n": { "title": { "en": "Kind", "nl": "Soort" } } },
-                  "collectionLayout": { "enum": ["table", "tabs", "stack"], "x-osf-i18n": { "title": { "en": "Collection layout", "nl": "Collectie-indeling" }, "enum": { "table": { "en": "Table", "nl": "Tabel" }, "tabs": { "en": "Tabs", "nl": "Tabbladen" }, "stack": { "en": "Stack", "nl": "Onder elkaar" } } } },
-                  "itemView": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$", "x-osf-i18n": { "title": { "en": "Item view", "nl": "Itemweergave" } } },
-                  "tabLabel": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Tab label field", "nl": "Tabbladlabelveld" } } }
-                }
-              }
-            ]
-          }
+          "additionalProperties": { "$ref": "#/$defs/webNamedViewV2" }
         },
         "collection": {
           "type": "object",

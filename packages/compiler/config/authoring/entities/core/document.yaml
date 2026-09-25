@@ -630,7 +630,7 @@ interfaces:
                   fields: [receivedAt, registeredAt, publishedAt]
             - id: content
               label: { en: Content, nl: Inhoud }
-              relationship: variants
+              relationship: { name: variants, view: tabbed }
             - id: variables
               label: { en: Variables, nl: Variabelen }
               groups: [{ title: { en: Local values, nl: Lokale waarden }, fields: [templateVersionId, parameters, followError] }]

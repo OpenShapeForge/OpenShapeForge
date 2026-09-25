@@ -332,6 +332,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
       ...(coreEntity.interfaces?.web
         ? {
             web: {
+              ...(coreEntity.interfaces.web.views?.named ? { namedViews: coreEntity.interfaces.web.views.named } : {}),
               ...(coreEntity.interfaces.web.fields
                 ? { fields: coreEntity.interfaces.web.fields }
                 : {}),

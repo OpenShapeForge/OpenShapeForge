@@ -420,6 +420,11 @@ export type EntityInterfaceOperationProjection =
   | EntityInterfaceOperationProjectionConfig;
 
 export interface EntityWebViewDefinition {
+  /** Additional target-owned views, addressable by relationship placements. */
+  named?: Record<string,
+    | { kind: "record"; fields: string[] }
+    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string }
+  >;
   collection: {
     /** Opaque host renderer-registry key; omission uses the generic collection renderer. */
     renderer?: string;

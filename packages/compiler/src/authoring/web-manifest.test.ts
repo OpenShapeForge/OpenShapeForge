@@ -308,7 +308,25 @@ describe("web manifest projection", () => {
     expect(() => buildWebManifest([source, target])).toThrow(/Source.contactDetails: target view missing/);
     sourceView.detail!.groups.items[1]!.relationship.view = "record";
     source.contract.model.relationships[0]!.kind = "hasMany";
-    expect(() => buildWebManifest([source, target])).toThrow(/single-reference record view/);
+    expect(() => buildWebManifest([source, target])).toThrow(/available collection view/);
+  });
+  test("a collection relationship selects a named target-owned view", () => {
+    const sourceView = coreView();
+    sourceView.detail!.groups.items[1]!.relationship = {
+      render: { component: "RelationshipPanel" }, name: "items", view: "tabbed",
+    };
+    const source = entity("Source", "source", [field("displayName"), field("items", { osfType: "Target", cardinality: "collection" })], sourceView, [
+      { key: "items", fieldKey: "items", kind: "hasMany", target: "Target", foreignKey: "source_id", ownership: "owned" },
+    ]);
+    const target = entity("Target", "target", [field("displayName"), field("body")], coreView());
+    target.contract.interfaces!.web!.namedViews = {
+      tabbed: { kind: "collection", collectionLayout: "tabs", itemView: "preview", tabLabel: "displayName" },
+      preview: { kind: "record", fields: ["body"] },
+    };
+    const manifest = buildWebManifest([source, target]);
+    expect(manifest.entities.Source?.views.record?.layout.tabs[1]?.targetView).toBe("tabbed");
+    expect(manifest.entities.Target?.views.named?.tabbed).toEqual(target.contract.interfaces!.web!.namedViews.tabbed);
+    expect(manifest.entities.Target?.views.named?.preview).toEqual(target.contract.interfaces!.web!.namedViews.preview);
   });
   test("a system-written reference key from the corpus is never create-writable and its collection offers no create", () => {
     // Comment.authorId is authored readOnly (attribution, not an input); the

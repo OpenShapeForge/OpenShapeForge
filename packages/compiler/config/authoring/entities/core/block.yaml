@@ -180,6 +180,9 @@ interfaces:
   mcp: { tools: generic }
   web:
     views:
+      named:
+        previewStack: { kind: collection, collectionLayout: stack, itemView: preview }
+        preview: { kind: record, fields: [values] }
       collection:
         route: /blocks
         title: { en: Blocks, nl: Blokken }

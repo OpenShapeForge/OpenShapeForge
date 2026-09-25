@@ -734,6 +734,7 @@ export interface CompiledEntityContract {
   /** Explicit v2 interface exposure; v1 contracts keep using legacy projections. */
   interfaces?: {
     web?: {
+      namedViews?: NonNullable<import("./authoring.js").EntityWebViewDefinition["named"]>;
       fields?: Record<string, { render: import("./common.js").FieldRender }>;
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];

@@ -244,8 +244,8 @@ export type WebRecordTab = {
   label: LocalizedText;
   groups: WebFieldGroup[];
   relationshipId?: string;
-  /** Named view of the single relationship target selected by this placement. */
-  targetView?: "record";
+  /** Named view owned by the relationship target selected by this placement. */
+  targetView?: string;
 };
 
 export type WebRecordView = {
@@ -285,6 +285,10 @@ export type WebRecordView = {
 };
 
 export type WebEntityView = WebCollectionView | WebRecordView;
+
+export type WebNamedView =
+  | { kind: "record"; fields: string[] }
+  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string };
 
 /**
  * A status field declared as a state machine. Each rule is also one of the
@@ -353,6 +357,7 @@ export type WebEntityInterface = {
   views: {
     collection: WebCollectionView;
     record?: WebRecordView;
+    named?: Record<string, WebNamedView>;
   };
   relationships: Record<string, WebRelationshipProjection>;
 };

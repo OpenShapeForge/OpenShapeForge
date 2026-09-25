@@ -1751,11 +1751,14 @@ export function registerRuntimeOperationRestRoutes(
       try {
         controlSession = await resolveControlSession(headers, control);
       } catch (error) {
-        // Only host-organization mode deliberately gives control and tenant
-        // credentials one issuer. In a separate-realm deployment this token
-        // was unambiguously routed to the control verifier, so preserve its
-        // refusal instead of retrying it against an unrelated tenant realm.
-        if (!usesHostOrganizationContext()) throw controlSessionHttpError(error);
+        // A deployment can share an issuer between control and tenant clients
+        // before enabling host-organization mode. Only retry when the tenant
+        // verifier is configured for that same issuer; it still checks the
+        // signature, audience and admitted client independently.
+        if (!usesHostOrganizationContext() &&
+          control.operator.issuer !== process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER) {
+          throw controlSessionHttpError(error);
+        }
       }
     }
     // Host-organization deployments intentionally use one issuer for both

@@ -234,6 +234,15 @@ function compileGroup(
   };
 }
 
+export function compileViewGroups(
+  groups: import("../types.js").ViewGroup[],
+  catalog: ComponentCatalog,
+  fallbackPrefix = "group",
+): CompiledViewGroup[] {
+  return resolveViewGroups({ groups }, {}, fallbackPrefix)
+    .map((group) => compileGroup(group, catalog));
+}
+
 function buildViewContext(
   presentations: Record<string, PresentationDefinition>,
   routes: Record<string, string | LocalizedText>,

@@ -786,7 +786,15 @@ function projectEntity(
     return [[relationship.key, projected]];
   }));
 
-  for (const tab of view?.detail?.groups.items ?? []) {
+  const authoredNamedViews = contract.interfaces?.web?.namedViews ?? {};
+  const namedRecordTabs = Object.values(authoredNamedViews).flatMap((namedView) =>
+    namedView.kind === "record" && "layout" in namedView
+      ? namedView.layout.tabs
+      : [],
+  );
+  const placedTabs = [...(view?.detail?.groups.items ?? []), ...namedRecordTabs];
+
+  for (const tab of placedTabs) {
     const usage = tab.relationship;
     if (!usage?.name || !relationships[usage.name]) continue;
     const target = all.get(relationships[usage.name]!.targetEntityId);
@@ -796,7 +804,7 @@ function projectEntity(
     };
   }
 
-  const tabs: WebRecordTab[] = (view?.detail?.groups.items ?? []).flatMap((tab) => {
+  const projectRecordTab = (tab: CompiledViewGroup): WebRecordTab[] => {
     const relationshipId = tab.relationship?.name;
     if (relationshipId && !relationships[relationshipId]) return [];
     const requestedView = tab.relationship?.view;
@@ -818,7 +826,18 @@ function projectEntity(
       ...(relationshipId ? { relationshipId } : {}),
       ...(requestedView ? { targetView: requestedView } : {}),
     }];
-  });
+  };
+  const tabs: WebRecordTab[] = (view?.detail?.groups.items ?? []).flatMap(projectRecordTab);
+  const namedViews = Object.fromEntries(Object.entries(authoredNamedViews).map(([name, namedView]) => {
+    if (namedView.kind !== "record" || !("layout" in namedView)) return [name, namedView];
+    return [name, {
+      kind: "record" as const,
+      ...(namedView.title ? { titleTemplate: namedView.title } : {}),
+      layout: {
+        tabs: namedView.layout.tabs.flatMap(projectRecordTab),
+      },
+    }];
+  }));
   const authoredContext = contract.interfaces?.web?.recordContext;
   for (const key of authoredContext?.fields ?? []) {
     if (!fields[key]?.supports.read) throw new Error(`${entityName}: context field ${key} is not readable.`);
@@ -947,7 +966,7 @@ function projectEntity(
     views: {
       collection: createUnsupported ? { ...source.collection, operations: withoutCreate(source.collection.operations) } : source.collection,
       ...(record ? { record } : {}),
-      ...(contract.interfaces?.web?.namedViews ? { named: contract.interfaces.web.namedViews } : {}),
+      ...(Object.keys(namedViews).length ? { named: namedViews } : {}),
     },
     relationships,
   };

@@ -333,16 +333,22 @@ export async function inviteEmployee(
       }
     }
   } catch (error) {
+    console.warn("[employee-invitation] " + JSON.stringify({
+      outcome: "keycloak_failed", tenantId: session.tenantId, organizationId,
+      actor, email, role: input.role,
+      code: error instanceof KeycloakAdminError ? error.code : "UNKNOWN",
+      status: error instanceof KeycloakAdminError ? error.status : null,
+    }));
     rethrowKeycloakError(error);
   }
 
   const invitation = await withDbSession(db, session, (trx) =>
     recordEmployeeInvitation(trx, session.tenantId, actor, input, email),
   );
-  console.info(
-    `[auth] ${actor} admitted ${email} to tenant ${session.tenantId} as ${input.role}; ` +
-      `mail delivery: ${delivery}.`,
-  );
+  console.info("[employee-invitation] " + JSON.stringify({
+    outcome: "admission_recorded", tenantId: session.tenantId, organizationId,
+    invitationId: invitation.id, actor, email, role: input.role, delivery,
+  }));
   return { ...invitation, delivery };
 }
 

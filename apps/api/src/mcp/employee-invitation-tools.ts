@@ -43,7 +43,9 @@ const INVITE_EMPLOYEE: Tool = {
     "Admit an employee or colleague into this organization with a pre-selected role. " +
     "A person not yet in the Keycloak organization receives an invitation e-mail. Someone who is " +
     "already a member receives no redundant mail and can sign in again immediately. An " +
-    "existing pending invitation is reused without resending it. For organization administrators.",
+    "existing pending invitation is reused without resending it. Report the returned delivery " +
+    "and nextStep exactly: status pending means the Hubble role awaits sign-in, not that an " +
+    "e-mail was sent or must be accepted. For organization administrators.",
   inputSchema: {
     type: "object",
     properties: {
@@ -69,7 +71,7 @@ const INVITE_EMPLOYEE: Tool = {
 const LIST_INVITATIONS: Tool = {
   name: LIST_INVITATIONS_TOOL,
   title: "List pending invitations",
-  description: "List this organization's pending admissions that have not yet been accepted or revoked.",
+  description: "List this organization's role admissions awaiting sign-in. A pending row does not prove an invitation e-mail was sent: existing Keycloak members need no e-mail.",
   inputSchema: {
     type: "object",
     properties: {},
@@ -137,22 +139,27 @@ export function publicEmployeeAdmission(admission: EmployeeAdmission): Record<st
   const outcome = admission.delivery === "sent"
     ? {
         reason: "invitation_sent",
+        message: "Keycloak accepted a new invitation e-mail request. The role awaits the person's sign-in.",
         nextStep: "The person must follow the invitation link and sign in.",
       }
     : admission.delivery === "not_required"
     ? {
         reason: "existing_organization_member",
-        nextStep: "No e-mail was needed. The person can sign in again now.",
+        message: "This person already belongs to the Keycloak organization. No e-mail was sent. The role awaits their next sign-in.",
+        nextStep: "The person must sign out and sign in again with this account. There is no e-mail invitation to accept.",
       }
     : {
         reason: "existing_invitation",
+        message: "Keycloak already holds a pending invitation. This operation did not send another e-mail.",
         nextStep: "Keycloak retained the existing invitation; this operation did not resend it. " +
           "Revoke and admit again if a fresh message is required.",
       };
   return {
-    admitted: true,
+    message: outcome.message,
+    nextStep: outcome.nextStep,
     delivery: admission.delivery,
-    ...outcome,
+    reason: outcome.reason,
+    admitted: true,
     ...publicInvitation(admission),
   };
 }

@@ -593,7 +593,11 @@ export function onboardingGuideText(roles: readonly string[] | null | undefined)
       "admission and reports what happened: someone not yet in the Keycloak organization receives an",
       "invitation e-mail; an existing member receives no redundant mail and can sign in again;",
       "an existing pending invitation is reused without being resent. The selected role is",
-      "applied automatically when they sign in. list_invitations shows who is still pending;",
+      "applied automatically when they sign in. In your reply, use the tool's delivery and",
+      "nextStep exactly. For delivery not_required, say no e-mail was sent and ask the existing",
+      "member to sign out and back in; never tell them to accept an invitation. A pending",
+      "status means the role awaits sign-in, not that a mail was sent. list_invitations shows",
+      "pending role admissions, including existing members who received no mail;",
       "revoke_invitation cancels one that has not been accepted yet. For someone who has ALREADY",
       "signed in without being invited first (they show up unlinked or pending), use",
       "link_identity instead to link their login to a Relation and assign roles by hand.",
@@ -608,10 +612,10 @@ export function onboardingGuideText(roles: readonly string[] | null | undefined)
       "    field (relation_update) is then readable by any session through osf://organization/",
       "    profile — a one-time \"what does this company do\" instead of re-explaining it every",
       "    conversation. Distinct from that Relation's notes field, which stays internal.",
-      "e. Anyone who signs in without a matching invitation still gets a Relation automatically",
-      "   on their first session, but starts with read-only access only. Call list_pending_members",
-      "   regularly to see who is waiting, and set_member_role {identityId or relationId, role:",
-      "   \"org_admin\" | \"org_employee\"} to grant them their real role — their next session picks it up.",
+      "e. A sign-in without a matching invitation or existing link is refused; it does not",
+      "   grant read-only access. Use invite_employee for the exact e-mail address, then ask",
+      "   the person to sign in again. For an existing unlinked identity, inspect",
+      "   list_pending_members and use link_identity when manual linking is needed.",
     );
   }
   if (integrationAdministrator) {

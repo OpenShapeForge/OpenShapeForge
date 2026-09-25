@@ -156,6 +156,21 @@
     }
   },
   "osfTypes": {
+    "color": {
+      "label": {
+        "en": "Color",
+        "nl": "Kleur"
+      },
+      "baseType": "string",
+      "validation": {
+        "pattern": "^#[0-9A-Fa-f]{6}$",
+        "maxLength": 7
+      },
+      "render": {
+        "display": "ColorDisplay",
+        "input": "ColorPicker"
+      }
+    },
     "entityValue": {
       "kind": "object",
       "label": {
@@ -15590,16 +15605,12 @@
         },
         {
           "key": "surfaceColor",
-          "osfType": "string",
+          "osfType": "color",
           "required": true,
           "defaultValue": "#ffffff",
           "label": {
             "en": "Surface",
             "nl": "Oppervlak"
-          },
-          "validation": {
-            "pattern": "^#[0-9A-Fa-f]{6}$",
-            "maxLength": 7
           },
           "persisted": {
             "column": "surface_color",
@@ -15608,16 +15619,12 @@
         },
         {
           "key": "textColor",
-          "osfType": "string",
+          "osfType": "color",
           "required": true,
           "defaultValue": "#111827",
           "label": {
             "en": "Text",
             "nl": "Tekst"
-          },
-          "validation": {
-            "pattern": "^#[0-9A-Fa-f]{6}$",
-            "maxLength": 7
           },
           "persisted": {
             "column": "text_color",
@@ -15626,16 +15633,12 @@
         },
         {
           "key": "accentColor",
-          "osfType": "string",
+          "osfType": "color",
           "required": true,
           "defaultValue": "#2563eb",
           "label": {
             "en": "Accent",
             "nl": "Accent"
-          },
-          "validation": {
-            "pattern": "^#[0-9A-Fa-f]{6}$",
-            "maxLength": 7
           },
           "persisted": {
             "column": "accent_color",

@@ -73,6 +73,7 @@ jobs:
             cp LICENSE "packages/${package}/LICENSE"
           done
           cp docs/consuming.md packages/compiler/README.md
+          rm -rf /tmp/compiler-pack
           mkdir -p /tmp/compiler-pack
           npm pack --pack-destination /tmp/compiler-pack ./packages/operations
           npm pack --pack-destination /tmp/compiler-pack ./packages/interface-web
@@ -86,6 +87,7 @@ jobs:
       # packaged compiler must reproduce them byte-for-byte.
       - name: Smoke-test the tarball against this repo
         run: |
+          rm -rf /tmp/compiler-smoke
           mkdir -p /tmp/compiler-smoke
           cd /tmp/compiler-smoke
           printf '{"name":"compiler-smoke","private":true}\n' > package.json

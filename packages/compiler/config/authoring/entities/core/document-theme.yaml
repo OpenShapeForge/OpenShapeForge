@@ -331,7 +331,3 @@ interfaces:
               - { title: { en: Text styles, nl: Tekststijlen }, fields: [typography] }
           update:
             title: { en: Edit, nl: Bewerken }
-            groups:
-              - { title: { en: Theme, nl: Thema }, fields: [name, fontFamily] }
-              - { title: { en: Colors, nl: Kleuren }, fields: [surfaceColor, textColor, accentColor] }
-              - { title: { en: Text styles, nl: Tekststijlen }, fields: [typography] }

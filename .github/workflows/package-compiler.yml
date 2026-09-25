@@ -42,7 +42,7 @@ permissions:
 jobs:
   pack:
     name: Pack and smoke-test the compiler tarball
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, osf-package]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -65,6 +65,7 @@ jobs:
         run: |
           cp LICENSE packages/compiler/LICENSE
           cp docs/consuming.md packages/compiler/README.md
+          rm -rf /tmp/compiler-pack
           mkdir -p /tmp/compiler-pack
           npm pack --pack-destination /tmp/compiler-pack ./packages/compiler
 
@@ -76,6 +77,7 @@ jobs:
       # packaged compiler must reproduce them byte-for-byte.
       - name: Smoke-test the tarball against this repo
         run: |
+          rm -rf /tmp/compiler-smoke
           mkdir -p /tmp/compiler-smoke
           cd /tmp/compiler-smoke
           printf '{"name":"compiler-smoke","private":true}\n' > package.json
@@ -106,7 +108,7 @@ jobs:
     name: Publish to GitHub Packages
     needs: pack
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, osf-package]
     permissions:
       contents: read
       packages: write

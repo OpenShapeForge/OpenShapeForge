@@ -44,7 +44,7 @@ permissions:
 jobs:
   pack:
     name: Pack and smoke-test the compiler tarball
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, osf-package]
     permissions:
       contents: read
       # The publish dry run below asks the registry which versions already
@@ -135,7 +135,7 @@ jobs:
     name: Publish to GitHub Packages
     needs: pack
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/hans/dev')
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, osf-package]
     permissions:
       contents: read
       packages: write

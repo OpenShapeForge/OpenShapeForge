@@ -120,6 +120,32 @@ interfaces:                  # thin per-transport projections of `operations`;
         layout: { tabs: [...] }
 ```
 
+### Target-owned Web views on relationships
+
+A record tab may select a view by name on its relationship target. The target
+entity owns that view; the referring entity only chooses it. `record` and
+`collection` remain the standard names. Additional views live under
+`interfaces.web.views.named` on the target:
+
+```yaml
+# On Document: a collection relationship placement
+- id: content
+  label: { en: Content, nl: Inhoud }
+  relationship: { name: variants, view: tabbed }
+
+# On DocumentVariant: the target-owned collection view
+named:
+  tabbed: { kind: collection, collectionLayout: tabs, itemView: record, tabLabel: locale }
+```
+
+`collectionLayout` is `table`, `tabs` (one tab per item), or `stack` (items in
+order). A tabs/stack view selects an `itemView` owned by the same target
+entity. That can be its standard `record` view or a named `record` view with
+`fields`, for example `preview: { kind: record, fields: [values] }` on Block.
+The compiler checks that the selected view exists and accepts the relation's
+single-record or collection shape. No referring-entity renderer mapping is
+needed.
+
 ### Action-specific record permissions
 
 An entity can let one persisted JSON field further narrow its ordinary tenant

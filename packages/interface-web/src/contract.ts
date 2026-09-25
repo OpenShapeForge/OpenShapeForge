@@ -284,11 +284,11 @@ export type WebRecordView = {
   };
 };
 
-export type WebEntityView = WebCollectionView | WebRecordView;
-
 export type WebNamedView =
   | { kind: "record"; fields: string[] }
   | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string };
+
+export type WebEntityView = WebCollectionView | WebRecordView | WebNamedView;
 
 /**
  * A status field declared as a state machine. Each rule is also one of the

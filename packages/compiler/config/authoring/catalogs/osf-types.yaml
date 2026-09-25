@@ -3,6 +3,16 @@ kind: osfTypeCatalog
 
 # Core semantic types — always available
 types:
+  color:
+    label: { en: Color, nl: Kleur }
+    baseType: string
+    validation:
+      pattern: "^#[0-9A-Fa-f]{6}$"
+      maxLength: 7
+    render:
+      display: ColorDisplay
+      input: ColorPicker
+
   # A selected entity definition supplies the shape. Its relationship fields
   # are stored relationally, never embedded in this object's JSON values.
   entityValue:

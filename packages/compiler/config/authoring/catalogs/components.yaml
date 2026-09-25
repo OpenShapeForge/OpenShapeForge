@@ -174,6 +174,16 @@ components:
     description: Read-only text display.
     props: []
 
+  ColorDisplay:
+    kind: field
+    description: Read-only color swatch with the hex value available on hover.
+    props: []
+
+  ColorPicker:
+    kind: field
+    description: Color picker for a hex color value.
+    props: []
+
   FieldDefinitionView:
     kind: field
     description: Read-only display for single field definitions and field-definition lists.

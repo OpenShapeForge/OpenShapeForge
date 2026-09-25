@@ -338,6 +338,26 @@ function compileListPresentation(
   return compiled;
 }
 
+/** Named records share the default detail compiler, including group normalization. */
+export function buildNamedViews(coreEntity: LoadedArtifacts["coreEntity"], catalog: ComponentCatalog) {
+  const views = coreEntity.interfaces?.web?.views;
+  return Object.fromEntries(Object.entries(views?.named ?? {}).map(([name, definition]) => {
+    if (definition.kind === "collection") return [name, definition];
+    const layout = "fields" in definition
+      ? { tabs: [{ id: "main", fields: definition.fields }] }
+      : definition.layout;
+    return [name, {
+      kind: "record",
+      detail: compileDetailPresentation(name, {
+        type: "detail",
+        header: { title: ("title" in definition ? definition.title : undefined) ?? views?.record?.title ?? "{{id}}" },
+        groups: layout.tabs,
+      }, catalog),
+      ...(layout.context ? { context: layout.context } : {}),
+    }];
+  }));
+}
+
 function compileDetailPresentation(
   name: string,
   presentation: DetailPresentation,

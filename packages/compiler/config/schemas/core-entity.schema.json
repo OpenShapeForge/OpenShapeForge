@@ -986,6 +986,17 @@
               },
               {
                 "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "layout"],
+                "x-osf-i18n": { "title": { "en": "Record layout", "nl": "Recordindeling" } },
+                "properties": {
+                  "kind": { "const": "record", "x-osf-i18n": { "title": { "en": "Kind", "nl": "Soort" } } },
+                  "title": { "type": "string", "x-osf-i18n": { "title": { "en": "Title", "nl": "Titel" } } },
+                  "layout": { "$ref": "#/$defs/webViewsV2/properties/record/properties/layout", "x-osf-i18n": { "title": { "en": "Layout", "nl": "Indeling" } } }
+                }
+              },
+              {
+                "type": "object",
                 "x-osf-i18n": { "title": { "en": "Collection view", "nl": "Collectieweergave" } },
                 "additionalProperties": false,
                 "required": ["kind", "collectionLayout"],

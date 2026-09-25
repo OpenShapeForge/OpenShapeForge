@@ -27,7 +27,7 @@ import { buildGraphQL } from "./graphql.js";
 import { buildCrud } from "./crud.js";
 import { buildRest } from "./rest.js";
 import { buildMcp } from "./mcp.js";
-import { buildViews } from "./views.js";
+import { buildViews, buildNamedViews } from "./views.js";
 import { buildProfiles } from "./profiles.js";
 import { deriveTableName } from "./helpers.js";
 import { buildAuthorization } from "./authorization.js";
@@ -332,7 +332,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
       ...(coreEntity.interfaces?.web
         ? {
             web: {
-              ...(coreEntity.interfaces.web.views?.named ? { namedViews: coreEntity.interfaces.web.views.named } : {}),
+              ...(coreEntity.interfaces.web.views?.named ? { namedViews: buildNamedViews(coreEntity, componentCatalog) } : {}),
               ...(coreEntity.interfaces.web.fields
                 ? { fields: coreEntity.interfaces.web.fields }
                 : {}),

@@ -916,6 +916,26 @@ function projectEntity(
     },
   } : undefined;
 
+  // Named records use exactly the same projection as the default record. Their
+  // relationship overrides stay local to the selected view, not the entity.
+  const named = Object.fromEntries(Object.entries(contract.interfaces?.web?.namedViews ?? {}).map(([name, definition]) => {
+    if (definition.kind !== "record" || "fields" in definition) return [name, definition];
+    const { namedViews: _named, recordContext: _context, renderers: _renderers, ...web } = contract.interfaces!.web!;
+    const { form: _form, ...readView } = view!;
+    const projected = projectEntity({
+      ...source,
+      contract: { ...contract, interfaces: { ...contract.interfaces, web: {
+        ...web, ...(definition.context ? { recordContext: definition.context } : {}),
+      } } },
+      view: { ...readView, detail: definition.detail },
+    }, all, providers);
+    if (!projected.views.record?.operations.read) throw new Error(`${entityName}.${name}: a record view requires a read Operation.`);
+    return [name, { ...projected.views.record, id: `${entityName}.${name}`, routes: {},
+      modes: ["read" as const], operations: { read: projected.views.record.operations.read },
+      relationships: projected.relationships,
+    }];
+  }));
+
   return {
     ...(contract.blueprint ? { blueprint: contract.blueprint } : {}),
     ...(contract.transitions
@@ -947,7 +967,7 @@ function projectEntity(
     views: {
       collection: createUnsupported ? { ...source.collection, operations: withoutCreate(source.collection.operations) } : source.collection,
       ...(record ? { record } : {}),
-      ...(contract.interfaces?.web?.namedViews ? { named: contract.interfaces.web.namedViews } : {}),
+      ...(Object.keys(named).length ? { named } : {}),
     },
     relationships,
   };

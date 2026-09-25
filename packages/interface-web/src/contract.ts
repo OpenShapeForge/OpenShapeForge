@@ -285,6 +285,8 @@ export type WebRecordView = {
 };
 
 export type WebNamedView =
+  | (WebRecordView & { relationships?: Record<string, WebRelationshipProjection> })
+  /** Compatibility with manifests compiled before named record layouts. */
   | { kind: "record"; fields: string[] }
   | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string };
 

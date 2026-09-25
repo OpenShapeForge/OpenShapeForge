@@ -173,7 +173,7 @@ describe("startWorkerRole", () => {
         modules: registry([moduleWith("workflow", ["workflow-worker"])]),
         log: silentLog,
       }),
-    ).rejects.toThrow(/Unknown worker role "typo-worker". Contributed roles: workflow-worker./);
+    ).rejects.toThrow(/Unknown worker role "typo-worker". Contributed roles: job-worker, workflow-worker./);
   });
 
   test("reports the bounded load reason without exposing loader details", async () => {
@@ -311,6 +311,6 @@ describe("startWorkerRole", () => {
           },
         ]),
       }),
-    ).rejects.toThrow(/Unknown worker role "probe". Contributed roles: \(none\)./);
+    ).rejects.toThrow(/Unknown worker role "probe". Contributed roles: job-worker./);
   });
 });

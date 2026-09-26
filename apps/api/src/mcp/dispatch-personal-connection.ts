@@ -4,6 +4,7 @@
  * dispatch-derived-connection.ts, verbatim; the branch starts from the same
  * initial values the shared prelude gave it.
  */
+import { actingRelationId } from "../db/acting-relation.js";
 import { randomUUID } from "node:crypto";
 import { resolveTemplate } from "./declarative-execution.js";
 import { connectionTokenSecretScope } from "../connectors/secrets.js";
@@ -63,7 +64,7 @@ export async function resolvePersonalConnection(
   const personal = selectOAuthConnectionRow(
     connectionRows,
     "user",
-    session.userId,
+    actingRelationId(session),
   );
   if (!personal) {
     // The organization's side comes first: a person cannot
@@ -184,7 +185,7 @@ export async function resolvePersonalConnection(
       valuesField: execution.connectionValuesField,
       providerField: execution.connectionProviderRef,
       expectedProviderId: String(providerId),
-      expectedOwnerUserId: session.userId,
+      expectedOwnerUserId: actingRelationId(session),
       refreshLeewaySeconds: refreshLeewaySeconds(providerAuth),
       audit: oauthConnectionAudit!,
       tokenUrl: resolveTemplate(providerAuth.tokenUrl as string, tenantUrlValues.plain, "auth.tokenUrl", tenantUrlValues.secretKeys),

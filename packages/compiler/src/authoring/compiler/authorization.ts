@@ -39,6 +39,8 @@ import type {
 import { fieldSqlType, isCollectionField } from "./helpers.js";
 import { buildCrud } from "./crud.js";
 
+const OWNER_SESSIONS = new Set(["app.current_user_id", "app.current_relation_id"]);
+
 /**
  * Derive a kebab-case slug from a PascalCase entity name. Used internally as
  * the artifact key — never as a granted role name.
@@ -230,15 +232,16 @@ export function buildAuthorization(
 
     if (owner) {
       validateAxisColumn(owner.column, "owner");
-      // The owner axis maps to `rowScope.userColumns`, whose emitter hardcodes
-      // `= app.current_user_id()` (generate.ts). The runtime only ever sets the
-      // `app.user_id` GUC — no code populates an arbitrary per-account session
-      // var — so we constrain owner.session to the identity user id at compile
-      // time rather than shipping a dead GUC surface.
-      if (owner.session !== "app.current_user_id") {
+      // The owner axis compares against one of the two identities the
+      // runtime writes per session (applyDbSession): the login
+      // (`app.current_user_id`, rowScope.userColumns) or the Relation it acts
+      // as (`app.current_relation_id`, rowScope.relationColumns) — the owner
+      // of a person-owned record. No other session var is ever populated, so
+      // anything else would compile to a dead policy.
+      if (!OWNER_SESSIONS.has(owner.session)) {
         throw new AuthorizationCompileError(
           coreEntity.entity,
-          `authorization.rowAccess.owner.session must be "app.current_user_id" — the runtime only exposes the current user id GUC. Per-account session vars are not supported.`,
+          `authorization.rowAccess.owner.session must be "app.current_user_id" or "app.current_relation_id" — the runtime only exposes those session identities.`,
         );
       }
     }

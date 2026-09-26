@@ -57,6 +57,7 @@ import {
   revokeCapabilityGrantInTransaction,
 } from "../operations/capability-grants.js";
 import { CapabilityGrantNotFoundError } from "../operations/grants-operations.js";
+import { actingRelationId } from "../db/acting-relation.js";
 
 function contractPreconditionFailure(
   definition: RuntimeOperationDefinition,
@@ -395,6 +396,7 @@ export class ModulePlatformRuntime {
             roles: session.roles,
             groups: session.groups,
             relationGroupIds: session.relationGroupIds ?? [],
+            ...(actingRelationId(session) ? { relationId: actingRelationId(session)! } : {}),
             scope: session.scope,
           };
           // One path in: the module session join (or open) is what fences the tenant.

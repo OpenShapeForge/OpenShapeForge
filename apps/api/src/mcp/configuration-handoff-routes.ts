@@ -6,6 +6,7 @@
  *
  * Split out of generated-mcp-server.ts.
  */
+import { requireActingRelationId } from "./acting-relation-guard.js";
 import type { DbSessionInput } from "../db/session.js";
 import {
   createGeneratedEntityForTable,
@@ -146,12 +147,12 @@ export async function registerConfigurationHandoffRoutes(
           connectionScopeOf(
             sourceRow.auth as Record<string, unknown> | null | undefined,
           ) === "user" &&
-          pending.userId &&
           tableDef.columns.some(
             (column) => fieldNameForColumn(column) === "ownerUserId",
           )
         ) {
-          values.ownerUserId = pending.userId;
+          // Owned by the Relation the person acts as; an unlinked sign-in owns nothing.
+          values.ownerUserId = requireActingRelationId(pending, "A personal connection");
         }
       }
     }
@@ -288,6 +289,7 @@ export async function registerConfigurationHandoffRoutes(
         const writeSession: DbSessionInput = {
           tenantId: pending.tenantId,
           userId: pending.userId,
+          relationId: pending.relationId ?? null,
           roles: [],
           groups: [],
           scope: "self",

@@ -26,6 +26,14 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
       select nullif(current_setting('app.user_id', true), '')::uuid
     $$;
 
+    -- The Relation the session acts as (identity.actingParty), written by
+    -- applyDbSession from the verified identity link. Owner-axis policies of
+    -- person-owned records compare against it (rowAccess.owner.session).
+    create or replace function app.current_relation_id() returns uuid
+    language sql stable parallel safe as $$
+      select nullif(current_setting('app.relation_id', true), '')::uuid
+    $$;
+
     create or replace function app.current_groups() returns uuid[]
     language sql stable parallel safe as $$
       select case

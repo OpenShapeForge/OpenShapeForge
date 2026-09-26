@@ -626,10 +626,9 @@ export interface CompiledAuthorization {
     enabled: boolean;
     empty: "public" | "restricted";
     /**
-     * When set, the generated RLS policy adds `"<column>" = app.current_user_id()`
-     * (owner axis). The backend manifest maps this to `rowScope.userColumns`.
-     * `owner.session` is constrained to `"app.current_user_id"` at compile time
-     * — the runtime only exposes the current user id GUC.
+     * When set, the generated RLS policy adds `"<column>" = <owner.session>()`
+     * (owner axis): `app.current_user_id` (the login, `rowScope.userColumns`)
+     * or `app.current_relation_id` (the acting Relation, `rowScope.relationColumns`).
      */
     owner?: {
       column: string;

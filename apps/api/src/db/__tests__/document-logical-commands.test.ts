@@ -45,7 +45,6 @@ let admin: SQL;
 let privileged: DatabaseRuntime;
 let restricted: DatabaseRuntime;
 let worker: DatabaseRuntime;
-let foreignAccountId: string;
 let foreignRelationId: string;
 
 function scratchUrl(role?: { username: string; password: string }): string {
@@ -148,18 +147,7 @@ beforeAll(async () => {
     insert into erp.document_types (tenant_id, code, name)
     values (${tenantA}::uuid, 'quote', 'Quote'), (${tenantB}::uuid, 'quote', 'Quote')
   `.execute(privileged.db);
-  foreignAccountId = randomUUID();
   foreignRelationId = randomUUID();
-  await sql`
-    insert into erp.accounts (id, tenant_id, username, email, status)
-    values (
-      ${foreignAccountId}::uuid,
-      ${tenantB}::uuid,
-      ${`document-account-${foreignAccountId}`},
-      ${`${foreignAccountId}@example.test`},
-      'active'
-    )
-  `.execute(privileged.db);
   await sql`
     insert into erp.relations (id, tenant_id, display_name, relation_type)
     values (
@@ -454,7 +442,7 @@ describe("logical Document database commands", () => {
       createLogicalDocument(
         sessionA,
         { title: "Foreign account", documentType: "quote", status: "draft" },
-        { versionLabel: "1.0", status: "draft", accountId: foreignAccountId },
+        { versionLabel: "1.0", status: "draft", accountId: foreignRelationId },
       ),
     );
     expect(sqlState(accountFailure)).toBe("23503");

@@ -75,8 +75,8 @@ function assertCanonicalDocumentInput(schema: JsonObject): void {
   expect(versionProperties.accountId).toMatchObject({
     type: "string",
     format: "uuid",
-    title: "Account",
-    "x-osf-reference": { entity: "Account" },
+    title: "Person",
+    "x-osf-reference": { entity: "Relation" },
   });
 }
 

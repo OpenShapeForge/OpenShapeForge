@@ -130,11 +130,11 @@ describe("canonical storage type propagation", () => {
 });
 
 describe("rowAccess fail-closed compile guards (§B.1, §C)", () => {
-  it("owner.session other than app.current_user_id throws (§B.1)", () => {
+  it("owner.session other than the two session identities throws (§B.1)", () => {
     expect(() =>
       compileFixtures(["rowaccess-bad-session", "rowaccess-owner-target"]),
     ).toThrow(
-      'authorization.rowAccess.owner.session must be "app.current_user_id"',
+      'authorization.rowAccess.owner.session must be "app.current_user_id" or "app.current_relation_id"',
     );
   });
 

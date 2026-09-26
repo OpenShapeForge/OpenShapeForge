@@ -130,7 +130,7 @@ fields:
     persisted:
       column: assignee_account_id
       storageClass: core
-    osfType: Account
+    osfType: Relation
     relationship:
       ownership: reference
       inverse: false
@@ -141,7 +141,7 @@ fields:
     persisted:
       column: assigned_by_account_id
       storageClass: core
-    osfType: Account
+    osfType: Relation
     relationship:
       ownership: reference
       inverse: false

@@ -182,7 +182,7 @@ describe("generated MCP runtime module security boundary", () => {
             await sql`alter table ${sql.id("public", tableName)} enable row level security`.execute(trx);
             await sql`alter table ${sql.id("public", tableName)} force row level security`.execute(trx);
             const ownerPredicate = tableName === "module_connection_test"
-              ? sql`and (owner_user_id is null or owner_user_id = app.current_user_id())`
+              ? sql`and (owner_user_id is null or owner_user_id = app.current_relation_id())`
               : sql``;
             await sql`
               create policy ${sql.id(`${tableName}_tenant_policy`)}
@@ -196,6 +196,14 @@ describe("generated MCP runtime module security boundary", () => {
         const tenantId = randomUUID();
         const userId = randomUUID();
         const otherUserId = randomUUID();
+        // The person acts as a Relation; a personal connection is owned by it.
+        const relationId = randomUUID();
+        const relation = {
+          identityId: randomUUID(), issuer: "https://issuer.example", subject: userId,
+          status: "linked" as const, relationId, relationType: "person" as const,
+          displayName: null, candidateRelationId: null, linkedBy: "jit" as const,
+          needsRoleAssignment: false, roles: [],
+        };
         const publicDefinitionId = randomUUID();
         const hiddenDefinitionId = randomUUID();
         const operationId = randomUUID();
@@ -874,6 +882,7 @@ describe("generated MCP runtime module security boundary", () => {
             oauthScopes: [],
             scope: "self",
             credential: "bearer",
+            relation,
           },
           modules: [documentsRuntime, versioningRuntime, notebookModule, module],
           modulePlatform: platform,
@@ -1379,14 +1388,14 @@ describe("generated MCP runtime module security boundary", () => {
              where id = ${providerId}::uuid
             `.execute(trx);
             await sql`update public.module_connection_test
-               set owner_user_id = ${userId}::uuid,
+               set owner_user_id = ${relationId}::uuid,
                    values = '{"apiKey":"obviously-fake","sourceReference":"config-reference","scope":"tenant"}'::jsonb
              where id = ${connectionId}::uuid
             `.execute(trx);
             await sql`insert into public.module_connection_test
               (id, tenant_id, owner_user_id, provider_id, values)
             values (${secondConnectionId}::uuid, ${tenantId}::uuid,
-              ${userId}::uuid, ${providerId}::uuid,
+              ${relationId}::uuid, ${providerId}::uuid,
               '{"apiKey":"obviously-fake-two","sourceReference":"other-config-reference","scope":"tenant"}'::jsonb)
             `.execute(trx);
           });
@@ -1518,6 +1527,7 @@ describe("generated MCP runtime module security boundary", () => {
               oauthScopes: [],
               scope: "self",
               credential: "bearer",
+              relation,
             },
             (active) => directExecutor(active, {
               definition: {

@@ -15,9 +15,12 @@ export type JobActorSession = {
   roles: readonly string[];
   groups: readonly string[];
   relationGroupIds: readonly string[];
+  /** The Relation the person acted as at enqueue; absent when not linked. */
+  relationId?: string;
   scope: DbSessionScope;
 };
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SESSION_SCOPES: readonly DbSessionScope[] = ["tenant", "group", "self"];
 const MAX_SESSION_LIST = 4096;
 
@@ -38,6 +41,7 @@ export function actorSessionOf(value: Partial<JobActorSession> | Record<string, 
     roles: stringList(input.roles, "roles"),
     groups: stringList(input.groups, "groups"),
     relationGroupIds: stringList(input.relationGroupIds, "relationGroupIds"),
+    ...(typeof input.relationId === "string" && UUID.test(input.relationId) ? { relationId: input.relationId } : {}),
     scope: scope as DbSessionScope,
   };
 }

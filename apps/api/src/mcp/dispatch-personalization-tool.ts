@@ -10,6 +10,7 @@ import { HttpError } from "../rest/http-error.js";
 import { catalogDerivedTools } from "./catalog.js";
 import { serializeRow } from "./catalog-rows.js";
 import { derivedToolsForSession } from "./derived-session-tools.js";
+import { requireActingRelationId } from "./acting-relation-guard.js";
 import { requireArguments } from "./entity-tool-guards.js";
 import { failed, ok } from "./tool-results.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -89,12 +90,13 @@ export async function personalizationToolCall(
           "Preference table is missing from the manifest.",
         );
       }
-      // The row is the CALLER's own, bound to them by the runtime — the
-      // same ownership model as personal connections.
+      // The row is the CALLER's own, bound by the runtime to the Relation
+      // they act as — the same ownership model as personal connections.
+      const ownerRelationId = requireActingRelationId(session, "A personal instruction");
       const mine = (
         await listGeneratedEntitiesForTable(db, session, preferenceTable, {
           limit: 100,
-          fixedWhere: [{ column: "owner_user_id", value: session.userId }],
+          fixedWhere: [{ column: "owner_user_id", value: ownerRelationId }],
         })
       ).rows.map((row) => serializeRow(preferenceTable, row));
       const existing = mine.find(
@@ -105,6 +107,7 @@ export async function personalizationToolCall(
         userId: session.userId as string,
         roles: [],
         groups: [],
+        relationId: ownerRelationId,
         scope: "self",
       };
       if (existing) {
@@ -123,9 +126,9 @@ export async function personalizationToolCall(
           writeSession,
           preferenceTable,
           {
-            key: `pref-${String(session.userId)}-${serviceRowId ?? "all"}`.toLowerCase(),
+            key: `pref-${ownerRelationId}-${serviceRowId ?? "all"}`.toLowerCase(),
             name: `Personal instruction (${appliesTo})`,
-            ownerUserId: session.userId,
+            ownerUserId: ownerRelationId,
             ...(serviceRowId
               ? { [personalization.serviceRef]: serviceRowId }
               : {}),

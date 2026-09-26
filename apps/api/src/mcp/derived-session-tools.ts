@@ -6,6 +6,7 @@
  *
  * Split out of generated-mcp-server.ts.
  */
+import { actingRelationId } from "../db/acting-relation.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import { listGeneratedEntitiesForTable } from "../operations/entity/index.js";
@@ -177,7 +178,8 @@ export async function derivedToolsForSession(
     }
     // The caller's stored standing instructions ride along on THEIR view of
     // the tools — appended under the authored description, never over it.
-    if (entry.personalization && entryTools.length > 0) {
+    const ownerRelationId = actingRelationId(session);
+    if (entry.personalization && entryTools.length > 0 && ownerRelationId) {
       const preferenceTable = tables.get(entry.personalization.table);
       if (preferenceTable) {
         const mine = await listGeneratedEntitiesForTable(
@@ -186,7 +188,7 @@ export async function derivedToolsForSession(
           preferenceTable,
           {
             limit: 100,
-            fixedWhere: [{ column: "owner_user_id", value: session.userId }],
+            fixedWhere: [{ column: "owner_user_id", value: ownerRelationId }],
           },
         );
         entryTools = applyPersonalNotes(

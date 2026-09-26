@@ -211,7 +211,7 @@ export async function applyDocumentAuthority(db: OpenShapeForgeDatabase): Promis
     as $function$
     begin
       if new.${sql.ref(version.accountId)} is not null and not exists (
-        select 1 from ${sql.table(entityTableName("Account"))} target
+        select 1 from ${sql.table(entityTableName("Relation"))} target
         where target.id = new.${sql.ref(version.accountId)} and target.tenant_id = new.tenant_id
       ) then
         raise exception 'DocumentVersion.accountId must reference the same tenant' using errcode = '23503';

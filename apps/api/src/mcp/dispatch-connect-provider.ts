@@ -4,6 +4,8 @@
  * dispatch-connect-tool.ts, verbatim, with `continue` spelled as an
  * undefined answer.
  */
+import { requireActingRelationId } from "./acting-relation-guard.js";
+import { actingRelationId } from "../db/acting-relation.js";
 import { selectOAuthConnectionRow } from "./session-connections.js";
 import { type DerivedToolsCatalogEntry } from "./derived-tools.js";
 import { resolveTemplate } from "./declarative-execution.js";
@@ -137,7 +139,7 @@ export async function connectProviderStep(
   );
   const existingForScope =
     scope_ === "user"
-      ? selectOAuthConnectionRow(connectionRows, "user", session.userId)
+      ? selectOAuthConnectionRow(connectionRows, "user", actingRelationId(session))
       : selectOAuthConnectionRow(connectionRows, "tenant", session.userId);
   const existingValues = (existingForScope?.[
     execution.connectionValuesField
@@ -230,6 +232,9 @@ export async function connectProviderStep(
     db,
     tenantId: session.tenantId as string,
     userId: session.userId as string,
+    relationId: scope_ === "user"
+      ? requireActingRelationId(session, "A personal connection")
+      : actingRelationId(session),
     providerTable: execution.providerTable,
     providerRowId,
     connectionTable: execution.connectionTable,

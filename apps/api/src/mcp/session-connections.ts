@@ -7,6 +7,7 @@
  *
  * Split out of generated-mcp-server.ts.
  */
+import { actingRelationId } from "../db/acting-relation.js";
 import { compareCodeUnits } from "@openshapeforge/operations";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
@@ -76,12 +77,12 @@ export function normalizeConnectionValueRows(
 export function selectOAuthConnectionRow(
   rows: readonly Record<string, unknown>[],
   scope: "user" | "tenant",
-  userId: string | null | undefined,
+  ownerRelationId: string | null | undefined,
 ): Record<string, unknown> | undefined {
   return rows
     .filter((row) =>
       scope === "user"
-        ? row.ownerUserId === userId
+        ? typeof ownerRelationId === "string" && row.ownerUserId === ownerRelationId
         : row.ownerUserId === null || row.ownerUserId === undefined,
     )
     .sort((left, right) => compareCodeUnits(String(left.id ?? ""), String(right.id ?? "")))[0];
@@ -94,7 +95,7 @@ export function selectOAuthConnectionRow(
  */
 export function capturePersonalOAuthConnections(
   rows: readonly Record<string, unknown>[],
-  userId: string | null | undefined,
+  ownerRelationId: string | null | undefined,
 ): {
   tenantSupport: Record<string, unknown>;
   personal: (Record<string, unknown> & { id: string })[];
@@ -110,7 +111,7 @@ export function capturePersonalOAuthConnections(
     throw new HttpError(404, "NOT_FOUND", "Invocation source is unavailable.");
   }
   const personal = rows
-    .filter((row) => row.ownerUserId === userId)
+    .filter((row) => typeof ownerRelationId === "string" && row.ownerUserId === ownerRelationId)
     .filter(
       (row): row is Record<string, unknown> & { id: string } =>
         typeof row.id === "string" && row.id.length > 0,
@@ -216,6 +217,7 @@ export async function organizationConnectionProblem(input: {
         db: input.db,
         tenantId: session.tenantId,
         userId: session.userId,
+        relationId: actingRelationId(session),
         table: table.name,
         elicit,
         modelValues,

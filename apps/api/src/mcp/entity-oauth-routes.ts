@@ -5,6 +5,7 @@
  *
  * Split out of generated-mcp-server.ts.
  */
+import { requireActingRelationId } from "./acting-relation-guard.js";
 import type { DbSessionInput } from "../db/session.js";
 import {
   createGeneratedEntityForTable,
@@ -93,11 +94,17 @@ export async function registerEntityOAuthCallbackRoute(
       const writeSession: DbSessionInput = {
         tenantId: pending.tenantId,
         userId: pending.userId,
+        relationId: pending.relationId ?? null,
         roles: [],
         groups: [],
         scope: "self",
       };
       const personalScope = pending.connectionScope === "user";
+      // A personal connection is owned by the Relation the person acted as
+      // when they started the sign-in; without one there is nothing to own it.
+      const ownerRelationId = personalScope
+        ? requireActingRelationId(pending, "A personal connection")
+        : null;
       // The owner is part of the query, not of a scan over the first page:
       // a tenant with more personal connections to one provider than a
       // page holds would otherwise get a second row for the same person.
@@ -107,7 +114,7 @@ export async function registerEntityOAuthCallbackRoute(
         await listGeneratedEntitiesForTable(db, writeSession, table, {
           limit: 1,
           filter: { [pending.connectionProviderRef]: pending.providerRowId },
-          fixedWhere: [{ column: "owner_user_id", value: personalScope ? pending.userId : null }],
+          fixedWhere: [{ column: "owner_user_id", value: ownerRelationId }],
           sort: { field: "id", direction: "asc" },
         })
       ).rows.map((row) => serializeRow(table, row))[0];
@@ -125,7 +132,7 @@ export async function registerEntityOAuthCallbackRoute(
           key: `personal-${pending.userId.replace(/[^a-z0-9-]/g, "").slice(0, 20)}`,
           name: `Personal ${pending.providerName} connection`,
           [pending.connectionProviderRef]: pending.providerRowId,
-          ...(personalScope ? { ownerUserId: pending.userId } : {}),
+          ...(ownerRelationId ? { ownerUserId: ownerRelationId } : {}),
           [pending.connectionValuesField]: values,
         });
       }

@@ -164,13 +164,13 @@ fields:
       storageClass: core
   - key: completedByAccountId
     required: false
-    osfType: Account
+    osfType: Relation
     label:
       en: Completed by
       nl: Afgerond door
     description:
-      en: Account that manually completed this case step container.
-      nl: Account dat deze zaakstapcontainer handmatig heeft afgerond.
+      en: The person (their Relation) who manually completed this case step container.
+      nl: De persoon (diens relatie) die deze zaakstapcontainer handmatig heeft afgerond.
     validation:
       format: uuid
     persisted:
@@ -257,7 +257,7 @@ fields:
     persisted:
       column: owner_account_id
       storageClass: core
-    osfType: Account
+    osfType: Relation
     relationship:
       ownership: reference
       inverse: false

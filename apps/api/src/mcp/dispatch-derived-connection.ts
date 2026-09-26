@@ -3,6 +3,7 @@
  * The connection a derived tool's binding runs with. Split out of the
  * binding step of tool dispatch, verbatim.
  */
+import { ownedByActingRelation } from "../db/acting-relation.js";
 import { type ConnectionTokenAudit } from "./connection-token-refresh.js";
 import { HttpError } from "../rest/http-error.js";
 import { type CapturedDerivedExecution, entityForTable } from "./catalog.js";
@@ -76,7 +77,7 @@ export async function resolveDerivedConnection(
   const personalExecution =
     declaredScope === "user" ||
     (declaredScope === "both" &&
-      selectedConnection?.ownerUserId === session.userId);
+      ownedByActingRelation(selectedConnection?.ownerUserId, session));
   const effectiveScope = personalExecution ? "user" : "tenant";
 
   const resolved = personalExecution

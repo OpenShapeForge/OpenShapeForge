@@ -958,58 +958,6 @@
           "relationship": {
             "ownership": "reference"
           }
-        },
-        {
-          "key": "caseStatusEvents",
-          "label": {
-            "en": "Case status events",
-            "nl": "Zaakstatusgebeurtenissen"
-          },
-          "osfType": "CaseStatusEvent",
-          "cardinality": "collection",
-          "relationship": {
-            "inverse": "accountId",
-            "ownership": "reference"
-          }
-        },
-        {
-          "key": "documentVersions",
-          "label": {
-            "en": "Document versions",
-            "nl": "Documentversies"
-          },
-          "osfType": "DocumentVersion",
-          "cardinality": "collection",
-          "relationship": {
-            "inverse": "accountId",
-            "ownership": "reference"
-          }
-        },
-        {
-          "key": "milestones",
-          "label": {
-            "en": "Milestones",
-            "nl": "Mijlpalen"
-          },
-          "osfType": "Milestone",
-          "cardinality": "collection",
-          "relationship": {
-            "inverse": "ownerId",
-            "ownership": "reference"
-          }
-        },
-        {
-          "key": "supportIssues",
-          "label": {
-            "en": "Support issues",
-            "nl": "Supportverzoeken"
-          },
-          "osfType": "SupportIssue",
-          "cardinality": "collection",
-          "relationship": {
-            "inverse": "assigneeId",
-            "ownership": "reference"
-          }
         }
       ],
       "render": {
@@ -6277,7 +6225,7 @@
             "column": "assignee_account_id",
             "storageClass": "core"
           },
-          "osfType": "Account",
+          "osfType": "Relation",
           "relationship": {
             "ownership": "reference",
             "inverse": false
@@ -6293,7 +6241,7 @@
             "column": "assigned_by_account_id",
             "storageClass": "core"
           },
-          "osfType": "Account",
+          "osfType": "Relation",
           "relationship": {
             "ownership": "reference",
             "inverse": false
@@ -10872,16 +10820,17 @@
         {
           "key": "accountId",
           "label": {
-            "en": "Account",
-            "nl": "Account"
+            "en": "Person",
+            "nl": "Persoon"
           },
           "persisted": {
             "column": "account_id",
             "storageClass": "core"
           },
-          "osfType": "Account",
+          "osfType": "Relation",
           "relationship": {
-            "ownership": "reference"
+            "ownership": "reference",
+            "inverse": false
           }
         }
       ],
@@ -17476,16 +17425,17 @@
         {
           "key": "accountId",
           "label": {
-            "en": "Account",
-            "nl": "Account"
+            "en": "Person",
+            "nl": "Persoon"
           },
           "persisted": {
             "column": "account_id",
             "storageClass": "core"
           },
-          "osfType": "Account",
+          "osfType": "Relation",
           "relationship": {
-            "ownership": "reference"
+            "ownership": "reference",
+            "inverse": false
           }
         },
         {
@@ -24203,9 +24153,10 @@
             "column": "owner_account_id",
             "storageClass": "core"
           },
-          "osfType": "Account",
+          "osfType": "Relation",
           "relationship": {
-            "ownership": "reference"
+            "ownership": "reference",
+            "inverse": false
           }
         }
       ],
@@ -27948,14 +27899,14 @@
         {
           "key": "completedByAccountId",
           "required": false,
-          "osfType": "Account",
+          "osfType": "Relation",
           "label": {
             "en": "Completed by",
             "nl": "Afgerond door"
           },
           "description": {
-            "en": "Account that manually completed this case step container.",
-            "nl": "Account dat deze zaakstapcontainer handmatig heeft afgerond."
+            "en": "The person (their Relation) who manually completed this case step container.",
+            "nl": "De persoon (diens relatie) die deze zaakstapcontainer handmatig heeft afgerond."
           },
           "validation": {
             "format": "uuid"
@@ -28084,7 +28035,7 @@
             "column": "owner_account_id",
             "storageClass": "core"
           },
-          "osfType": "Account",
+          "osfType": "Relation",
           "relationship": {
             "ownership": "reference",
             "inverse": false
@@ -28610,14 +28561,14 @@
         {
           "key": "completedByAccountId",
           "required": false,
-          "osfType": "Account",
+          "osfType": "Relation",
           "label": {
             "en": "Completed by",
             "nl": "Afgerond door"
           },
           "description": {
-            "en": "Account that manually completed this process step.",
-            "nl": "Account dat deze processtap handmatig heeft afgerond."
+            "en": "The person (their Relation) who manually completed this process step.",
+            "nl": "De persoon (diens relatie) die deze processtap handmatig heeft afgerond."
           },
           "validation": {
             "format": "uuid"
@@ -28764,7 +28715,7 @@
             "column": "owner_account_id",
             "storageClass": "core"
           },
-          "osfType": "Account",
+          "osfType": "Relation",
           "relationship": {
             "ownership": "reference",
             "inverse": false
@@ -36374,7 +36325,10 @@
           },
           "osfType": "Relation",
           "relationship": {
-            "ownership": "reference"
+            "ownership": "reference",
+            "inverse": {
+              "key": "supportIssues"
+            }
           }
         },
         {
@@ -36387,9 +36341,10 @@
             "column": "assignee_account_id",
             "storageClass": "core"
           },
-          "osfType": "Account",
+          "osfType": "Relation",
           "relationship": {
-            "ownership": "reference"
+            "ownership": "reference",
+            "inverse": false
           }
         },
         {
@@ -37989,7 +37944,10 @@
           },
           "osfType": "Relation",
           "relationship": {
-            "ownership": "reference"
+            "ownership": "reference",
+            "inverse": {
+              "key": "tasks"
+            }
           }
         },
         {
@@ -38002,7 +37960,7 @@
             "column": "assignee_account_id",
             "storageClass": "core"
           },
-          "osfType": "Account",
+          "osfType": "Relation",
           "relationship": {
             "ownership": "reference",
             "inverse": false
@@ -38018,7 +37976,7 @@
             "column": "owner_account_id",
             "storageClass": "core"
           },
-          "osfType": "Account",
+          "osfType": "Relation",
           "relationship": {
             "ownership": "reference",
             "inverse": false

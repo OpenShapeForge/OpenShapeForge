@@ -455,19 +455,19 @@ function loadRowScope(
     };
   }
 
-  if (value.userColumns !== undefined) {
-    if (!Array.isArray(value.userColumns) || value.userColumns.length === 0) {
-      throw new Error(`${label}.userColumns must be a non-empty array.`);
+  for (const axis of ["userColumns", "relationColumns"] as const) {
+    const columns = value[axis];
+    if (columns === undefined) continue;
+    if (!Array.isArray(columns) || columns.length === 0) {
+      throw new Error(`${label}.${axis} must be a non-empty array.`);
     }
-    for (const [index, column] of value.userColumns.entries()) {
-      assertIdentifier(column, `${label}.userColumns[${index}]`);
+    for (const [index, column] of columns.entries()) {
+      assertIdentifier(column, `${label}.${axis}[${index}]`);
       if (!columnNames.has(column)) {
-        throw new Error(
-          `${label}.userColumns[${index}] references unknown column ${column}.`,
-        );
+        throw new Error(`${label}.${axis}[${index}] references unknown column ${column}.`);
       }
     }
-    policy.userColumns = [...value.userColumns];
+    policy[axis] = [...columns];
   }
 
   if (value.bypassRoles !== undefined) {
@@ -482,9 +482,9 @@ function loadRowScope(
     policy.bypassRoles = [...value.bypassRoles];
   }
 
-  if (!policy.group && !policy.userColumns) {
+  if (!policy.group && !policy.userColumns && !policy.relationColumns) {
     throw new Error(
-      `${label} must declare at least one of group or userColumns; declaring rowScope without any axis is meaningless.`,
+      `${label} must declare at least one of group, userColumns or relationColumns; declaring rowScope without any axis is meaningless.`,
     );
   }
 

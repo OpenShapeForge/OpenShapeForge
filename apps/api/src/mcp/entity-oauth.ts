@@ -46,6 +46,8 @@ export type PendingAuthorization = {
   codeVerifier: string;
   tenantId: string;
   userId: string;
+  /** The Relation the person acted as when authorizing; owns a personal connection. */
+  relationId?: string | null;
   /** Physical table + row id of the provider the connection is for. */
   providerTable: string;
   providerRowId: string;

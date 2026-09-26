@@ -4,6 +4,7 @@
  * tool dispatch: the loop body, verbatim, with `continue` spelled as an
  * undefined answer.
  */
+import { ownedByActingRelation } from "../db/acting-relation.js";
 import { createHash } from "node:crypto";
 import { type DerivedToolsCatalogEntry } from "./derived-tools.js";
 import { executeBindingStep, mergeOutputs } from "./declarative-execution.js";
@@ -190,9 +191,9 @@ export async function runDerivedBinding(
           mintInvocationSourceReference({
             tenantId: session.tenantId!,
             actorId:
-              row.ownerUserId === session.userId ? session.userId : null,
+              ownedByActingRelation(row.ownerUserId, session) ? session.userId : null,
             scope:
-              row.ownerUserId === session.userId ? "personal" : "tenant",
+              ownedByActingRelation(row.ownerUserId, session) ? "personal" : "tenant",
             connectionTable: execution.connectionTable,
             connectionId: String(row.id),
           }),

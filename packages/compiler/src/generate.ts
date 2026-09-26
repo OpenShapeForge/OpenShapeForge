@@ -373,6 +373,14 @@ function renderRowScopePredicate(
     }
     branches.push(`${quoteIdent(userColumn)} = app.current_user_id()`);
   }
+  for (const relationColumn of scope.relationColumns ?? []) {
+    if (!present.has(relationColumn)) {
+      throw new Error(
+        `Table ${table.schema}.${table.name} declares rowScope.relationColumns "${relationColumn}" but the column is not defined.`,
+      );
+    }
+    branches.push(`${quoteIdent(relationColumn)} = app.current_relation_id()`);
+  }
   // `empty: public` — each listed column emits an extra "IS NULL" OR-branch so
   // that rows whose owner/group column is NULL stay visible tenant-wide.
   // Validated for presence exactly like the group/user axes.
@@ -458,7 +466,7 @@ function deriveRowScopeIndexes(table: TableDefinition): Array<{
       columns: ["tenant_id", scope.group.column],
     });
   }
-  for (const userColumn of scope.userColumns ?? []) {
+  for (const userColumn of [...(scope.userColumns ?? []), ...(scope.relationColumns ?? [])]) {
     indexes.push({
       name: `${table.name}_tenant_${userColumn}_idx`,
       columns: ["tenant_id", userColumn],
@@ -783,6 +791,7 @@ function renderManifestJson(
           "tenant_id",
           ...(table.rowScope?.group ? [table.rowScope.group.column] : []),
           ...(table.rowScope?.userColumns ?? []),
+          ...(table.rowScope?.relationColumns ?? []),
           ...(table.rowScope?.nullVisibleColumns ?? []),
           ...(table.rowScope?.recordPermissions ? [table.rowScope.recordPermissions.column] : []),
         ])].sort(),

@@ -254,7 +254,9 @@ function filterRelationshipRegisterForTables(
  * unregistered.
  *
  * Axes wired:
- *   - owner   → rowScope.userColumns = [owner.column]
+ *   - owner   → rowScope.userColumns = [owner.column], or
+ *               rowScope.relationColumns when owner.session is
+ *               app.current_relation_id (the acting Relation)
  *   - group   → rowScope.group = { column, expand } (Phase 2). The emitter
  *     selects the session-groups reader by `expand`
  *     (descendants|ancestors|exact); expansion happens once per session.
@@ -281,6 +283,7 @@ export function deriveRowScope(
   if (!rowAccess?.enabled) return undefined;
 
   const userColumns: string[] = [];
+  const relationColumns: string[] = [];
   const nullVisibleColumns: string[] = [];
   let group: RowScopePolicy["group"] | undefined;
   let recordPermissions: RowScopePolicy["recordPermissions"] | undefined;
@@ -302,7 +305,7 @@ export function deriveRowScope(
 
   if (rowAccess.owner) {
     requireColumn(rowAccess.owner.column, "owner.column");
-    userColumns.push(rowAccess.owner.column);
+    (rowAccess.owner.session === "app.current_relation_id" ? relationColumns : userColumns).push(rowAccess.owner.column);
     if (rowAccess.empty === "public") nullVisibleColumns.push(rowAccess.owner.column);
   }
   if (rowAccess.group) {
@@ -333,11 +336,12 @@ export function deriveRowScope(
   }
 
   // No restriction axis declared → plain tenant scoping (documented no-op).
-  if (userColumns.length === 0 && !group && !recordPermissions) return undefined;
+  if (userColumns.length === 0 && relationColumns.length === 0 && !group && !recordPermissions) return undefined;
 
   return {
     ...(group ? { group } : {}),
     ...(userColumns.length > 0 ? { userColumns } : {}),
+    ...(relationColumns.length > 0 ? { relationColumns } : {}),
     ...(nullVisibleColumns.length > 0 ? { nullVisibleColumns } : {}),
     ...(recordPermissions ? { recordPermissions } : {}),
     // bypassRoles wired in a later phase (see §E.3 note); omitted for now.

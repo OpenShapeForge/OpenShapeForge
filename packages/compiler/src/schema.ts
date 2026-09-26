@@ -76,6 +76,7 @@ export type TableConstraintDefinition = {
  *   tenant : tenant_id = app.current_tenant() (always required)
  *   group  : group column = ANY(app.current_groups())
  *   user   : user columns = app.current_user_id()
+ *   party  : relation columns = app.current_relation_id() (the acting Relation)
  *
  * Plus an outermost `app.bypass_rls()` short-circuit and an
  * `app.has_scope('tenant')` shortcut for bypass-role users.
@@ -122,6 +123,12 @@ export type RowScopePolicy = {
    * is visible if ANY listed column equals the current user id.
    */
   userColumns?: string[];
+  /**
+   * The acting-party axis: a row is visible if ANY listed column equals the
+   * Relation the session acts as (`app.current_relation_id()`). Person-owned
+   * records reference the acting party, not the login.
+   */
+  relationColumns?: string[];
   /**
    * Owner/group columns whose NULL rows are visible tenant-wide (the
    * `empty: public` semantics). Each column listed here emits an extra

@@ -682,10 +682,10 @@ describe("gatherOnboardingFacts", () => {
       rows: tenantRows({
         "integration.connections": [
           { id: "conn-google-other", adapterId: GOOGLE, ownerUserId: OTHER_USER_ID },
-          { id: "conn-google-mine", adapterId: GOOGLE, ownerUserId: USER_ID },
+          { id: "conn-google-mine", adapterId: GOOGLE, ownerUserId: RELATION_ID },
         ],
         "integration.personal_instructions": [
-          { id: "pref-1", ownerUserId: USER_ID, instruction: "Plan only within working hours" },
+          { id: "pref-1", ownerUserId: RELATION_ID, instruction: "Plan only within working hours" },
           { id: "pref-2", ownerUserId: OTHER_USER_ID, instruction: "Not mine" },
         ],
       }),
@@ -742,7 +742,7 @@ describe("the onboarding tools", () => {
   it("completes once every step is done or skipped, and stays completed", async () => {
     const { env, memory } = environment({
       rows: tenantRows({
-        "integration.connections": [{ id: "conn-google-mine", adapterId: GOOGLE, ownerUserId: USER_ID }],
+        "integration.connections": [{ id: "conn-google-mine", adapterId: GOOGLE, ownerUserId: RELATION_ID }],
       }),
     });
     const refused = await callOnboardingTool(COMPLETE_ONBOARDING_TOOL, {}, env);
@@ -773,7 +773,7 @@ describe("the onboarding tools", () => {
     // A new session keeps the completed record.
     const later = environment({
       rows: tenantRows({
-        "integration.connections": [{ id: "conn-google-mine", adapterId: GOOGLE, ownerUserId: USER_ID }],
+        "integration.connections": [{ id: "conn-google-mine", adapterId: GOOGLE, ownerUserId: RELATION_ID }],
       }),
       record: memory.record,
     });

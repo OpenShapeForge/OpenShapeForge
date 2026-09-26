@@ -161,13 +161,13 @@ fields:
       storageClass: core
   - key: completedByAccountId
     required: false
-    osfType: Account
+    osfType: Relation
     label:
       en: Completed by
       nl: Afgerond door
     description:
-      en: Account that manually completed this process step.
-      nl: Account dat deze processtap handmatig heeft afgerond.
+      en: The person (their Relation) who manually completed this process step.
+      nl: De persoon (diens relatie) die deze processtap handmatig heeft afgerond.
     validation:
       format: uuid
     persisted:
@@ -268,7 +268,7 @@ fields:
     persisted:
       column: owner_account_id
       storageClass: core
-    osfType: Account
+    osfType: Relation
     relationship:
       ownership: reference
       inverse: false

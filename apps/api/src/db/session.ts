@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { readStatementTimeoutMs } from "../config/limits.js";
+import { actingRelationId, type ActingRelationSource } from "./acting-relation.js";
 
 export type DbSessionScope = "tenant" | "group" | "self";
 
@@ -37,7 +38,7 @@ export type DbSessionInput = {
    */
   relationGroupIds?: readonly string[] | null;
   scope?: DbSessionScope | null;
-};
+} & NonNullable<ActingRelationSource>;
 
 export type DbSessionContext = {
   tenantId: string;
@@ -45,6 +46,8 @@ export type DbSessionContext = {
   roles: readonly string[];
   groups: readonly string[];
   relationGroupIds: readonly string[];
+  /** The acting Relation (acting-relation.ts); `app.current_relation_id()`. */
+  relationId: string | null;
   scope: DbSessionScope;
 };
 
@@ -143,6 +146,7 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
     roles: input.roles ?? [],
     groups: normalizeGroups(input.groups),
     relationGroupIds: normalizeRelationGroupIds(input.relationGroupIds),
+    relationId: actingRelationId(input),
     scope: normalizeScope(input.scope),
   };
 }
@@ -172,6 +176,7 @@ export async function applyDbSession<TDatabase>(
   await sql`select set_config('app.roles', ${session.roles.join(",")}, true)`.execute(trx);
   await sql`select set_config('app.scope', ${session.scope}, true)`.execute(trx);
   await sql`select set_config('app.relation_group_ids', ${session.relationGroupIds.join(",")}, true)`.execute(trx);
+  await sql`select set_config('app.relation_id', ${session.relationId ?? ""}, true)`.execute(trx);
 
   // Group expansion (§E.1/E.3). The user's DIRECT org-unit UUIDs
   // (session.groups — already UUID-filtered and capped at MAX_SESSION_GROUPS by
@@ -243,7 +248,8 @@ export async function withDbSession<TDatabase, TResult>(
       active.session.relationGroupIds.length === session.relationGroupIds.length &&
       active.session.relationGroupIds.every(
         (group, index) => group === session.relationGroupIds[index],
-      );
+      ) &&
+      (session.relationId === null || active.session.relationId === session.relationId);
     if (!sameSession) {
       throw new Error("Nested database work cannot replace the active session.");
     }

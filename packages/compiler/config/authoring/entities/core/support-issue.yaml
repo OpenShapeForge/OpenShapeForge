@@ -233,6 +233,8 @@ fields:
     osfType: Relation
     relationship:
       ownership: reference
+      inverse:
+        key: supportIssues
   - key: assigneeId
     label:
       en: Assignee
@@ -240,9 +242,10 @@ fields:
     persisted:
       column: assignee_account_id
       storageClass: core
-    osfType: Account
+    osfType: Relation
     relationship:
       ownership: reference
+      inverse: false
 operations:
   list:
     name: List Support issue

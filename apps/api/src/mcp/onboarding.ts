@@ -31,6 +31,7 @@
  * `onboardingEnvironment()` binds the real one for the MCP server (session-surface.ts),
  * which wires this in with a few delimited hunks.
  */
+import { ownedByActingRelation } from "../db/acting-relation.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { sql } from "kysely";
 import type { IdentityLinkState } from "../auth/identity-link.js";
@@ -973,7 +974,7 @@ async function personalSignInsFor(
           known = {
             provider: typeof provider.name === "string" ? provider.name : providerId,
             connected: connections.some(
-              (connection) => connection.ownerUserId === env.session.userId,
+              (connection) => ownedByActingRelation(connection.ownerUserId, env.session),
             ),
             tools: [],
           };
@@ -1065,7 +1066,7 @@ async function preferencesFor(env: OnboardingEnvironment): Promise<OnboardingFac
   let count = 0;
   for (const entry of entries) {
     const rows = await env.rowsByFilter(entry.personalization!.table, {});
-    count += rows.filter((row) => row.ownerUserId === env.session.userId).length;
+    count += rows.filter((row) => ownedByActingRelation(row.ownerUserId, env.session)).length;
   }
   return { offered: true, count };
 }

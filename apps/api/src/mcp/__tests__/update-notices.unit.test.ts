@@ -104,7 +104,7 @@ function tenantRows(overrides: Rows = {}): Rows {
     "integration.personal_instructions": [
       {
         id: "pi-1",
-        ownerUserId: USER_ID,
+        ownerUserId: RELATION_ID,
         serviceId: DAY_START,
         instruction: "Only ever show me today; I do not want the week.",
       },
@@ -114,7 +114,7 @@ function tenantRows(overrides: Rows = {}): Rows {
         serviceId: DAY_START,
         instruction: "Someone else's instruction.",
       },
-      { id: "pi-general", ownerUserId: USER_ID, serviceId: null, instruction: "Answer in Dutch." },
+      { id: "pi-general", ownerUserId: RELATION_ID, serviceId: null, instruction: "Answer in Dutch." },
     ],
     ...overrides,
   };

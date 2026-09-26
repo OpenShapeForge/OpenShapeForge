@@ -215,18 +215,18 @@
             },
             "owner": {
               "type": "object",
-              "description": "Owner-predicated axis. When set, the generated policy adds `\"<column>\" = app.current_user_id()`. Use for per-user data (preferences, notifications, drafts) where each user only sees rows they own. The column must be a uuid field or belongsTo foreignKey on this entity.",
+              "description": "Owner-predicated axis. When set, the generated policy adds `\"<column>\" = <session>()`. Use for per-person data (preferences, personal connections, drafts) where each person only sees rows they own. The column must be a uuid field or belongsTo foreignKey on this entity.",
               "additionalProperties": false,
               "required": ["column", "session"],
               "properties": {
                 "column": {
                   "type": "string",
-                  "description": "Persisted uuid column (or belongsTo foreignKey) on this entity that holds the owner's user id. Must reference a uuid-typed field or relationship foreignKey."
+                  "description": "Persisted uuid column (or belongsTo foreignKey) on this entity that holds the owner's id — the login's user id or the acting Relation's id, matching `session`. Must reference a uuid-typed field or relationship foreignKey."
                 },
                 "session": {
                   "type": "string",
-                  "const": "app.current_user_id",
-                  "description": "Session identity the owner column is compared against. Only 'app.current_user_id' is accepted — the runtime exposes just the current user id GUC. Per-account session vars are not supported."
+                  "enum": ["app.current_user_id", "app.current_relation_id"],
+                  "description": "Session identity the owner column is compared against: 'app.current_user_id' (the login) or 'app.current_relation_id' (the Relation the person acts as — the owner of a person-owned record whose column references the acting party)."
                 }
               }
             },

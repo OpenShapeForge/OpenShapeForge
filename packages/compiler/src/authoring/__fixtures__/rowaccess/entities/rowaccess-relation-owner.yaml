@@ -1,0 +1,123 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: RowAccessRelationOwner
+title: Row Access Relation Owner
+description: Test fixture — owner axis against the acting Relation. Not part of the shipped slice.
+language: en
+displayTemplate: "{{title}}"
+filterField: title
+labels:
+  en: Row Access Relation Owner
+  nl: Row Access Relation Owner
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+    owner:
+      column: owner_id
+      session: app.current_relation_id
+fields:
+  - key: title
+    osfType: string
+    required: true
+    label:
+      en: Title
+      nl: Titel
+    persisted:
+      column: title
+      storageClass: core
+  - key: ownerId
+    label:
+      en: Owner
+      nl: Eigenaar
+    persisted:
+      column: owner_id
+      storageClass: core
+    osfType: RowAccessOwnerTarget
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Row Access Relation Owner
+    description: List RowAccessRelationOwner records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Row Access Relation Owner
+    description: Get RowAccessRelationOwner records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Row Access Relation Owner
+    description: Create RowAccessRelationOwner records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Row Access Relation Owner
+    description: Update RowAccessRelationOwner records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Row Access Relation Owner
+    description: Delete RowAccessRelationOwner records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}

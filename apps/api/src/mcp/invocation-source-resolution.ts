@@ -3,6 +3,7 @@
  * Authorized invocation sources of derived tools. Split out of
  * server-scope.ts, verbatim.
  */
+import { actingRelationId, ownedByActingRelation } from "../db/acting-relation.js";
 import { compareCodeUnits } from "@openshapeforge/operations";
 import { withDbSession } from "../db/session.js";
 import {
@@ -215,7 +216,7 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
             try {
               personalCapture = capturePersonalOAuthConnections(
                 connectionRows,
-                session.userId,
+                actingRelationId(session),
               );
             } catch {
               // No (single) tenant support row: the organization's side is
@@ -235,7 +236,7 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
               ]
             : connectionRows
                 .filter((row) =>
-                  (allowsPersonal && row.ownerUserId === session.userId) ||
+                  (allowsPersonal && ownedByActingRelation(row.ownerUserId, session)) ||
                   (allowsTenant &&
                     (row.ownerUserId === null || row.ownerUserId === undefined)),
                 )
@@ -279,7 +280,7 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
               needsReauthorization = true;
               continue;
             }
-            const sourceIsPersonal = connection.ownerUserId === session.userId;
+            const sourceIsPersonal = ownedByActingRelation(connection.ownerUserId, session);
             const identity = {
               tenantId,
               actorId: sourceIsPersonal ? session.userId : null,

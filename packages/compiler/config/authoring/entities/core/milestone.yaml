@@ -161,9 +161,10 @@ fields:
     persisted:
       column: owner_account_id
       storageClass: core
-    osfType: Account
+    osfType: Relation
     relationship:
       ownership: reference
+      inverse: false
 operations:
   list:
     name: List Milestone

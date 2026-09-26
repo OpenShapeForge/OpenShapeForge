@@ -134,14 +134,15 @@ fields:
           nl: Statusgebeurtenissen
   - key: accountId
     label:
-      en: Account
-      nl: Account
+      en: Person
+      nl: Persoon
     persisted:
       column: account_id
       storageClass: core
-    osfType: Account
+    osfType: Relation
     relationship:
       ownership: reference
+      inverse: false
 operations:
   list:
     name: List Case Status Event

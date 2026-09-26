@@ -64,6 +64,8 @@ export type PendingConfiguration = {
   token: string;
   tenantId: string;
   userId: string;
+  /** The Relation the person acted as when the form was minted; owns a personal row. */
+  relationId?: string | null;
   /** Physical table the created row is written to. */
   table: string;
   elicit: ElicitOnCreateEntry;

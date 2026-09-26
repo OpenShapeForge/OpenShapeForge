@@ -129,7 +129,7 @@ export async function registerEntityOAuthCallbackRoute(
         );
       } else {
         await createGeneratedEntityForTable(db, writeSession, table, {
-          key: `personal-${pending.userId.replace(/[^a-z0-9-]/g, "").slice(0, 20)}`,
+          key: `personal-${(ownerRelationId ?? pending.userId).replace(/[^a-z0-9-]/g, "").slice(0, 20)}`,
           name: `Personal ${pending.providerName} connection`,
           [pending.connectionProviderRef]: pending.providerRowId,
           ...(ownerRelationId ? { ownerUserId: ownerRelationId } : {}),

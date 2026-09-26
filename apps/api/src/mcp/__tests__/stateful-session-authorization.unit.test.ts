@@ -165,15 +165,20 @@ describe("sameStatefulMcpAuthorization", () => {
       // A plugin cannot rewrite whom core acts as.
       expect(() => { (moduleCapability.relation as { relationId: string }).relationId = "forged"; }).toThrow();
       expect(stateful.relation?.relationId).toBe("relation-after-relink");
+      expect(() => { (moduleCapability.relation!.roles as string[]).push("Forged.Role"); }).toThrow();
+      expect(stateful.relation?.roles).toEqual(["General.All.Read"]);
       // A tool updating the link mid-request (confirm_my_link) is seen by the
       // rest of that request only.
       stateful.relation = link("relation-confirmed-now");
       expect(stateful.relation?.relationId).toBe("relation-confirmed-now");
+      expect(moduleCapability.relation?.relationId).toBe("relation-confirmed-now");
     });
     expect(stateful.relation).toBeNull();
+    expect(moduleCapability.relation).toBeNull();
     const unlinked = { ...authorization(), relation: null } as TrustedSessionContext;
     await withFreshRelationGroupMemberships(unlinked, async () => {
       expect(stateful.relation).toBeNull();
+      expect(moduleCapability.relation).toBeNull();
     });
   });
 

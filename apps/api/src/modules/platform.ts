@@ -258,6 +258,14 @@ export function createModuleSessionCapability(
     configurable: false,
     get: () => Object.freeze([...(session.relationGroupIds ?? [])]),
   });
+  // The acting Relation is request-scoped on a stateful MCP session too (a
+  // getter there); a copy taken when the capability was minted would be the
+  // Relation of no request, and person-owned rows would be written as nobody.
+  Object.defineProperty(capability, "relation", {
+    enumerable: true,
+    configurable: false,
+    get: () => session.relation,
+  });
   return Object.freeze(capability) as unknown as TrustedSessionContext;
 }
 

@@ -150,14 +150,18 @@ describe("sameStatefulMcpAuthorization", () => {
     });
     const established = { ...authorization(), relation: link("relation-at-initialize") } as TrustedSessionContext;
     const stateful = createStatefulMcpSessionContext(established);
+    // A plugin's capability is minted once per server; it reads the request's link, never a copy.
+    const moduleCapability = createModuleSessionCapability(stateful);
     // No request: no link authority, and the initialize snapshot is not it.
     expect(stateful.relation).toBeNull();
+    expect(moduleCapability.relation).toBeNull();
 
     // An administrator re-linked the person between two requests; the second
     // request resolved the new link, and that is what the session answers.
     const relinked = { ...authorization(), relation: link("relation-after-relink") } as TrustedSessionContext;
     await withFreshRelationGroupMemberships(relinked, async () => {
       expect(stateful.relation?.relationId).toBe("relation-after-relink");
+      expect(moduleCapability.relation?.relationId).toBe("relation-after-relink");
       // A tool updating the link mid-request (confirm_my_link) is seen by the
       // rest of that request only.
       stateful.relation = link("relation-confirmed-now");

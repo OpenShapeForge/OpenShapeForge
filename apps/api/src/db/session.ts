@@ -249,7 +249,7 @@ export async function withDbSession<TDatabase, TResult>(
       active.session.relationGroupIds.every(
         (group, index) => group === session.relationGroupIds[index],
       ) &&
-      (session.relationId === null || active.session.relationId === session.relationId);
+      active.session.relationId === session.relationId;
     if (!sameSession) {
       throw new Error("Nested database work cannot replace the active session.");
     }

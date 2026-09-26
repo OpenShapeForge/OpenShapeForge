@@ -264,7 +264,11 @@ export function createModuleSessionCapability(
   Object.defineProperty(capability, "relation", {
     enumerable: true,
     configurable: false,
-    get: () => session.relation,
+    // A frozen copy per read: a plugin can never rewrite whom core acts as.
+    get: () => {
+      const link = session.relation;
+      return link ? Object.freeze({ ...link, roles: Object.freeze([...(link.roles ?? [])]) }) : link;
+    },
   });
   return Object.freeze(capability) as unknown as TrustedSessionContext;
 }

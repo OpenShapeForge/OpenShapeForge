@@ -162,6 +162,9 @@ describe("sameStatefulMcpAuthorization", () => {
     await withFreshRelationGroupMemberships(relinked, async () => {
       expect(stateful.relation?.relationId).toBe("relation-after-relink");
       expect(moduleCapability.relation?.relationId).toBe("relation-after-relink");
+      // A plugin cannot rewrite whom core acts as.
+      expect(() => { (moduleCapability.relation as { relationId: string }).relationId = "forged"; }).toThrow();
+      expect(stateful.relation?.relationId).toBe("relation-after-relink");
       // A tool updating the link mid-request (confirm_my_link) is seen by the
       // rest of that request only.
       stateful.relation = link("relation-confirmed-now");

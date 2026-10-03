@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import accountsRuntime from "../../accounts/runtime.js";
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
@@ -884,7 +885,7 @@ describe("generated MCP runtime module security boundary", () => {
             credential: "bearer",
             relation,
           },
-          modules: [documentsRuntime, versioningRuntime, notebookModule, module],
+          modules: [accountsRuntime,documentsRuntime, versioningRuntime, notebookModule, module],
           modulePlatform: platform,
           egressOwner: module.egress,
           tables,
@@ -1513,7 +1514,7 @@ describe("generated MCP runtime module security boundary", () => {
             .not.toContain("public_read");
           const directExecutor = createRuntimeDeclarativeServiceExecutor({
             db,
-            modules: [documentsRuntime, versioningRuntime, notebookModule, module],
+            modules: [accountsRuntime,documentsRuntime, versioningRuntime, notebookModule, module],
             modulePlatform: platform,
             egressOwner: module.egress,
             tablesForTests: tables,

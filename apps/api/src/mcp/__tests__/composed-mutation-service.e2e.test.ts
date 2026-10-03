@@ -12,6 +12,7 @@
  * after an earlier step wrote comes back as `status: "partial"` naming what
  * was written and what was not — never as a silent half-success.
  */
+import accountsRuntime from "../../accounts/runtime.js";
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
@@ -456,7 +457,7 @@ describe("composed mutation Service on the native provider", () => {
             scope: "self",
             credential: "bearer",
           },
-          modules: [
+          modules: [accountsRuntime,
             documentsPluginRuntime as unknown as RuntimeModule,
             versioningPluginRuntime as unknown as RuntimeModule,
             notebookModule,

@@ -305,7 +305,7 @@ describe("the milestone billing run against PostgreSQL", () => {
     // writable sibling or record version can change.
     const table = billingTable("AgreementMilestone");
     expect(table.columns.find((column) => column.name === "agreement_id")).toMatchObject({ immutable: true });
-    const before = (await sql`select * from erp.agreement_milestones where id = ${id}::uuid`.execute(privileged.db)).rows[0]!;
+    const before = (await sql<{ agreement_id: string }>`select * from erp.agreement_milestones where id = ${id}::uuid`.execute(privileged.db)).rows[0]!;
     await expect(updateGeneratedEntity(restricted.db, session, {
       table: table.name, id, values: { agreementId: other.agreementId, description: "Moved?" },
     })).rejects.toMatchObject({ operationError: {

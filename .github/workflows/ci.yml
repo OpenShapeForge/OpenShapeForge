@@ -192,6 +192,7 @@ jobs:
           src/accounts/account-retirement.test.ts
           src/accounts/account-session.unit.test.ts
           src/accounts/catalog-session.test.ts
+          src/accounts/invite.unit.test.ts
           src/accounts/member-confirmation.test.ts
           src/accounts/source-query.unit.test.ts
           src/mcp/organization-profile-tools.test.ts

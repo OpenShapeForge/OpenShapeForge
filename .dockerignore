@@ -4,6 +4,8 @@
 # examples/plugins (the workflow plugin is a registered workspace member), or
 # authoring.config.yaml — the compiler needs them at build time.
 .git
+.npmrc
+.runtime/
 node_modules
 **/node_modules
 .env

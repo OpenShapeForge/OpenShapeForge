@@ -47,7 +47,7 @@
  * tenant issuer's.
  */
 import { randomUUID } from "node:crypto";
-import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
+import { FastifyStreamableHTTPServerTransport } from "./legacy-http.js";
 import { Server } from "@modelcontextprotocol/server";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/server";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -542,7 +542,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
     });
 
     type SessionEntry = {
-      transport: NodeStreamableHTTPServerTransport;
+      transport: FastifyStreamableHTTPServerTransport;
       server: Server;
       subject: string;
       issuer: string;
@@ -594,7 +594,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
         existing.lastSeenMs = Date.now();
         reply.hijack();
         await existing.runWithSession(session, () =>
-          existing.transport.handleRequest(request.raw, reply.raw, request.body));
+          existing.transport.handleNodeRequest(request.raw, reply.raw, request.body));
         return;
       }
 
@@ -613,7 +613,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
           client,
           log,
         });
-        const transport = new NodeStreamableHTTPServerTransport({
+        const transport = new FastifyStreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
             sessions.set(id, {
@@ -632,21 +632,21 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
         reply.hijack();
         await requestSession.run(session, async () => {
           await server.connect(transport);
-          await transport.handleRequest(request.raw, reply.raw, request.body);
+          await transport.handleNodeRequest(request.raw, reply.raw, request.body);
         });
         return;
       }
 
       // Sessionless single shot, for probes and scripted proofs.
       const server = buildPlatformServer({ context, db, session: () => session, bound, client: null, log });
-      const transport = new NodeStreamableHTTPServerTransport({ enableJsonResponse: true });
+      const transport = new FastifyStreamableHTTPServerTransport({ enableJsonResponse: true });
       reply.raw.on("close", () => {
         void transport.close();
         void server.close();
       });
       reply.hijack();
       await server.connect(transport);
-      await transport.handleRequest(request.raw, reply.raw, request.body);
+      await transport.handleNodeRequest(request.raw, reply.raw, request.body);
     };
 
     instance.route({ url: CONTROL_MCP_ROUTE_PATH, method: ["GET", "POST", "DELETE"], handler: handle });

@@ -4,7 +4,7 @@
  * of generated-mcp-server.ts, verbatim.
  */
 import { randomUUID } from "node:crypto";
-import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
+import { FastifyStreamableHTTPServerTransport } from "./legacy-http.js";
 import { Server } from "@modelcontextprotocol/server";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { SHORT_ADDRESS_VARY } from "./address.js";
@@ -44,7 +44,7 @@ export function createTransportSessions(input: {
   // per-process; a multi-replica deployment needs session affinity on this
   // path.
   type McpSessionEntry = {
-    transport: NodeStreamableHTTPServerTransport;
+    transport: FastifyStreamableHTTPServerTransport;
     server: Server;
     /** Resource path the session was initialized on; it is not portable. */
     resource: string;
@@ -186,7 +186,7 @@ export function createTransportSessions(input: {
       reply.hijack();
       await withFreshRelationGroupMemberships(
         session,
-        () => existing.transport.handleRequest(
+        () => existing.transport.handleNodeRequest(
           request.raw,
           reply.raw,
           request.body,
@@ -215,7 +215,7 @@ export function createTransportSessions(input: {
         undefined,
         await resolveServerIcons(options.modules, options.modulePlatform, statefulSession),
       );
-      const transport = new NodeStreamableHTTPServerTransport({
+      const transport = new FastifyStreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (id) => {
           mcpSessions.set(id, {
@@ -247,7 +247,7 @@ export function createTransportSessions(input: {
       );
       await withFreshRelationGroupMemberships(
         session,
-        () => transport.handleRequest(request.raw, reply.raw, request.body),
+        () => transport.handleNodeRequest(request.raw, reply.raw, request.body),
       );
       return;
     }
@@ -267,7 +267,7 @@ export function createTransportSessions(input: {
     // `sessionIdGenerator` is omitted rather than set to undefined: the SDK
     // reads it as `=== undefined` to mean stateless, and omitting keeps
     // exactOptionalPropertyTypes happy.
-    const transport = new NodeStreamableHTTPServerTransport({
+    const transport = new FastifyStreamableHTTPServerTransport({
       enableJsonResponse: true,
     });
     reply.raw.on("close", () => {
@@ -279,7 +279,7 @@ export function createTransportSessions(input: {
     await server.connect(
       transport,
     );
-    await transport.handleRequest(request.raw, reply.raw, request.body);
+    await transport.handleNodeRequest(request.raw, reply.raw, request.body);
   };
 
   return { handleMcpRequest, notifyDerivedDefinitionChanged };

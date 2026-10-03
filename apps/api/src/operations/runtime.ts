@@ -956,8 +956,11 @@ async function invokeGuardedCustomOperation(
       () => invokeHandler(customHandlerInput(operation, input)),
     );
   }
+  // Lease and challenge consumption are keyed on the record version; without
+  // one they would silently not run.
   if (!operation.target || operation.target.scope !== "record" ||
-    !operation.target.inputField || !context.session || !context.db || !context.platform) {
+    !operation.target.inputField || !context.session || !context.db || !context.platform ||
+    ((operation.concurrency?.editLease || confirmation.mode === "challenge") && !operation.concurrency?.version)) {
     throw operationFailure({
       code: "INTERNAL_SERVER_ERROR",
       message: "The protected Operation contract is incomplete.",

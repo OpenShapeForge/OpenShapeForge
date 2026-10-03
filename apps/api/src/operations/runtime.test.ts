@@ -295,6 +295,46 @@ describe("canonical operation runtime", () => {
     } finally { await db.destroy(); }
   });
 
+  test("a challenge or lease without a version contract fails closed before the handler", async () => {
+    const db = testDatabase();
+    const platform = new ModulePlatformRuntime(db);
+    const operation: OperationContract = {
+      ...restOperation,
+      key: "demo.relation.archive",
+      handler: "archive",
+      target: { entityId: "Relation", entityName: "Relation", scope: "record", inputField: "id" },
+      inputSchema: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+      outputSchema: { type: "object" },
+      idempotency: { mode: "none" },
+      transports: { ...restOperation.transports, rest: { method: "POST", path: "/api/demo/relations/:id/archive", response: { status: 200, kind: "json" } } },
+    };
+    let calls = 0;
+    const module: RuntimeModule = {
+      name: operation.plugin,
+      operationHandlers: { archive: async () => { calls++; return { value: {} }; } },
+    };
+    const verified = { ...session, roles: ["quote-publisher"], tenantId: "22222222-2222-4222-8222-222222222222" };
+    const context = { db, platform: platform.services, transport: "rest" as const, session: verified };
+    const id = "44444444-4444-4444-8444-444444444444";
+    const challenge = { ...operation, confirmation: { mode: "challenge" as const, challenge: {
+      kind: "type-current-field" as const, field: "displayName", issuedBy: "server" as const,
+      bindTo: ["subject", "tenant", "operation", "target.id", "target.version"] as const,
+      expiresAfter: "PT5M", singleUse: true as const,
+    } } };
+    const lease = { ...operation, concurrency: { editLease: { mode: "required" as const, expiresAfterInactivity: "PT5M" } } };
+    try {
+      for (const [contract, input] of [
+        [challenge, { id, confirmationToken: "any", confirmationAnswer: "any" }],
+        [lease, { id, leaseToken: "any" }],
+      ] as const) {
+        const bound = bindOperationHandlers([module], [contract]).get(operation.key)!;
+        await expect(invokeOperation(bound, input, context))
+          .rejects.toMatchObject({ operationError: { code: "INTERNAL_SERVER_ERROR" } });
+      }
+      expect(calls).toBe(0);
+    } finally { await db.destroy(); }
+  });
+
   test("availability cannot be registered outside the owning authored record operation", () => {
     const module: RuntimeModule = { name: restOperation.plugin,
       operationHandlers: { [restOperation.handler]: async () => ({ value: {} }) },

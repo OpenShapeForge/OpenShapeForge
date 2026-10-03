@@ -72,3 +72,43 @@ The host may pass `--date` as product input. `DATABASE_URL` must be the restrict
 app connection; `OPENSHAPEFORGE_MIGRATE_DATABASE_URL` owns privileged store work.
 A superuser or `BYPASSRLS` app connection is refused. Actual opened store and app connections must report the same server address/port, postmaster start, database name and database OID; live maintenance also checks the verified invocation platform connection. Credentials and URL aliases are not compared. A database override that selects a different database fails before the maintenance callback. Installed module load/init
 failures identify their module and reason and prevent a partial headless runtime.
+
+## Managed tenant provisioning command
+
+The API OCI image also owns a closed trusted-process command:
+
+```sh
+bun apps/api/src/control/maintenance.ts --action provision --tenant example \
+  --name Example --confirm-managed-maintenance
+bun apps/api/src/control/maintenance.ts --action get --tenant example \
+  --confirm-managed-maintenance
+```
+
+It prints the existing provisioning/read result as one JSON value (`null` for an
+absent read). Errors do not print credentials or provider response bodies. No
+caller bearer token, session, audit principal or runtime factory is accepted.
+The command obtains its own existing service-account credential from the pinned
+HTTPS endpoint and checks its issuer, client and subject before audited access.
+
+Required environment: `OPENSHAPEFORGE_MIGRATE_DATABASE_URL`,
+`OPENSHAPEFORGE_MAINTENANCE_EXPECTED_DATABASE`,
+`OPENSHAPEFORGE_MAINTENANCE_EXPECTED_DATABASE_ROLE`,
+`OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL`,
+`OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM`,
+`OPENSHAPEFORGE_CONTROL_KEYCLOAK_CLIENT_ID`,
+`KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API`,
+`OPENSHAPEFORGE_PUBLIC_ORIGIN` and `OPENSHAPEFORGE_MCP_CLIENTS`.
+Additional resource origins use `OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS`.
+`OPENSHAPEFORGE_CONTROL_KEYCLOAK_CONNECT_URL` reuses the existing HTTPS ingress
+route with the public TLS server name and certificate validation. Host source
+configuration, including `OPENSHAPEFORGE_ORGANIZATION_CONTEXT`, remains in force.
+Actual database/current role/session role are checked before provider access;
+the host remains responsible for its deployment-specific network and staging gate.
+
+Managed replay always preserves an existing organization binding. For an already
+bound tenant, the SPI response is checked before registry/name/starter-group
+mutation and reused once by existing `provisionTenant`. A replacement refuses
+without these database mutations; the audited read remains. The SPI upsert may
+already have provider effects. Fresh tenants keep normal partial-commit
+provisioning and replay recovery; this command does not claim distributed
+atomicity or replace the host's identity/member orchestration.

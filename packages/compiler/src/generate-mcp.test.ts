@@ -275,7 +275,7 @@ describe("buildMcpCatalog", () => {
 
     for (const tool of catalog.tools) {
       expect(tool.outputSchema!.type).toBe("object");
-      expect(tool.outputSchema!.$defs).toMatchObject({
+      expect(structuredClone(tool.outputSchema!.$defs)).toMatchObject({
         OperationReference: expect.any(Object),
         OperationOffer: expect.any(Object),
         OperationError: expect.any(Object),
@@ -297,6 +297,15 @@ describe("buildMcpCatalog", () => {
       name: null,
     };
     const offers = [
+      {
+        operation: { id: "Widget.publish", intent: "invoke" },
+        available: true,
+      },
+      {
+        operation: { id: "Widget.custom", intent: "plugin.custom" },
+        available: false,
+        error: { code: "FORBIDDEN", message: "Unavailable", retryable: false },
+      },
       {
         operation: { id: "Widget.update", intent: "update" },
         available: true,
@@ -323,6 +332,12 @@ describe("buildMcpCatalog", () => {
     for (const tool of catalog.tools) {
       const validate = ajv.compile(tool.outputSchema!);
       expect(validate(successes[tool.operation])).toBe(true);
+      if (successes[tool.operation]) {
+        expect(validate({
+          ...successes[tool.operation] as Record<string, unknown>,
+          operations: [{ operation: { id: "Widget.publish", intent: 42 }, available: true }],
+        }), tool.operation).toBe(false);
+      }
       expect(
         validate({
           error: {

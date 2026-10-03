@@ -11,6 +11,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { COMPILER_ENTITY_FIELDS } from "@/generated/compiler/entity-fields";
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 import { entityFieldsResolver } from "@/features/renderer/runtime/resolvers/entity-fields-resolver";
 import {
   getEntityConditionFilterFields,
@@ -47,6 +48,9 @@ describe("entity field suggestions come from the compiled contract", () => {
       sourceNodeLabel: "Relation",
       valueType: "string",
     });
+    // Provider-backed account records retain their object collection and child contracts.
+    expect(relation.find((suggestion) => suggestion.path === "accounts")).toMatchObject({ valueType: "array", fieldType: "array" });
+    expect(fieldValueType(COMPILER_ENTITY_FIELDS.Relation.find((field) => field.key === "accounts")!)).toBe("object");
     // Reference-typed fields carry their options, so a condition can offer a
     // dropdown rather than a free-text literal.
     expect(relation.find((suggestion) => suggestion.path === "relationType")?.options?.length).toBeGreaterThan(0);
@@ -61,4 +65,8 @@ describe("entity field suggestions come from the compiled contract", () => {
     expect(fields.find((field) => field.key === "status")).toMatchObject({ inputKind: "select" });
     expect(getEntityFieldSuggestions("Task", "en")).toBe(getEntityFieldSuggestions("Task", "en"));
   });
+});
+
+test("unregistered object types remain refused", () => {
+  expect(() => fieldValueType({ osfType: "UnknownProviderRecord", baseType: "object" })).toThrow(/unknown osfType/);
 });

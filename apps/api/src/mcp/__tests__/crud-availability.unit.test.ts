@@ -9,6 +9,7 @@
  * and manifest, and both the resolution and the real call answer as for an
  * unknown tool. Runs without a database.
  */
+import accountsRuntime from "../../accounts/runtime.js";
 import { describe, expect, it } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -92,7 +93,7 @@ async function withServer<T>(roles: string[], tables: Map<string, unknown>, run:
   const server = __buildGeneratedMcpServerForTests({
     db,
     session: session(...roles),
-    modules: [
+    modules: [accountsRuntime,
       documentsPluginRuntime as unknown as RuntimeModule,
       versioningPluginRuntime as unknown as RuntimeModule,
       { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }) } },

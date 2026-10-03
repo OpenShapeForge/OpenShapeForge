@@ -10,6 +10,7 @@
  * Runs without a database, so it holds the line even while no shipped entity
  * authors an `mcp.resource` block.
  */
+import accountsRuntime from "../../accounts/runtime.js";
 import { describe, expect, it } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -125,7 +126,7 @@ describe("resourcesForSession", () => {
     const server = __buildGeneratedMcpServerForTests({
       db,
       session: session(READ),
-      modules: [documentsRuntime, versioningRuntime, {
+      modules: [accountsRuntime,documentsRuntime, versioningRuntime, {
         name: "notebook",
         operationHandlers: {
           importNotebook: async () => ({ value: undefined }),
@@ -176,7 +177,7 @@ describe("resourcesForSession", () => {
     const server = __buildGeneratedMcpServerForTests({
       db,
       session: session("Other.Role"),
-      modules: [documentsRuntime, versioningRuntime, {
+      modules: [accountsRuntime,documentsRuntime, versioningRuntime, {
         name: "notebook",
         operationHandlers: {
           importNotebook: async () => ({ value: undefined }),
@@ -240,7 +241,7 @@ describe("resourcesForSession", () => {
     const server = __buildGeneratedMcpServerForTests({
       db,
       session: session("Other.Role"),
-      modules: [documentsRuntime, versioningRuntime, {
+      modules: [accountsRuntime,documentsRuntime, versioningRuntime, {
         name: "notebook",
         operationHandlers: {
           importNotebook: async () => ({ value: undefined }),

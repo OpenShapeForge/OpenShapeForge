@@ -8,6 +8,7 @@
  * skipped compatibility entries, and the bridge no longer knew the key.
  * Runs on the compiled catalogue with one entry added, without a database.
  */
+import accountsRuntime from "../../accounts/runtime.js";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -106,7 +107,7 @@ async function withServer<T>(roles: string[], run: (client: Client, server: Retu
   const server = __buildGeneratedMcpServerForTests({
     db,
     session: session(...roles),
-    modules: [
+    modules: [accountsRuntime,
       documentsPluginRuntime as unknown as RuntimeModule,
       versioningPluginRuntime as unknown as RuntimeModule,
       { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }) } },

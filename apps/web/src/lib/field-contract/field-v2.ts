@@ -49,13 +49,13 @@ export function fieldValueType(field: Pick<Field, "osfType" | "baseType"> & { ke
     );
   } catch (error) {
     // Generated relationship fields use the referenced entity name as their
-    // osfType. They are a declared string-valued contract even though entity
-    // names are not semantic type aliases in COMPILER_OSF_TYPES.
+    // osfType. ID references are strings; provider-backed record projections
+    // are objects. Both name registered entities, not arbitrary type aliases.
     if (
-      field.baseType === "string" &&
+      (field.baseType === "string" || field.baseType === "object") &&
       ENTITY_REFERENCE_TYPES.has(field.osfType)
     ) {
-      resolved = "string";
+      resolved = field.baseType;
     } else {
       throw error;
     }

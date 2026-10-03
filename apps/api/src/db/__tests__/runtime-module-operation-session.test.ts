@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import accountsRuntime from "../../accounts/runtime.js";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import documentsPluginRuntime from "@openshapeforge/documents/runtime";
 import { OperationFailure } from "@openshapeforge/operations";
@@ -476,7 +477,7 @@ describe("canonical operation database sessions", () => {
 
           const graphqlPlatform = new ModulePlatformRuntime(db);
           const schema = buildGraphqlSchema(
-            [documentsRuntime, versioningRuntime, module],
+            [accountsRuntime, documentsRuntime, versioningRuntime, module],
             { db, platform: graphqlPlatform.services },
           );
           const graphqlResult = await graphql({
@@ -499,7 +500,7 @@ describe("canonical operation database sessions", () => {
           const server = __buildGeneratedMcpServerForTests({
             db,
             session: verifiedSession,
-            modules: [documentsRuntime, versioningRuntime, module],
+            modules: [accountsRuntime,documentsRuntime, versioningRuntime, module],
             modulePlatform: mcpPlatform,
           });
           const client = new Client(

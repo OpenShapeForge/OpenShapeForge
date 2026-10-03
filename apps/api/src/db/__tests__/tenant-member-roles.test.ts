@@ -1,3 +1,4 @@
+import { IDENTITY_LINK_ADMIN_ROLE, NEEDS_ROLE_ASSIGNMENT_ROLES } from "../../auth/organization-roles.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * The platform operator's member-role administration writes the tenant's
@@ -179,7 +180,7 @@ describe("tenant member roles from the control plane", () => {
         await expect(confirmTenantMemberLink(patDeps, "acme", pendingSubject))
           .rejects.toMatchObject({ status: 409, detail: "NO_PENDING_LINK" });
         expect(await changeTenantMemberRoles(patDeps, "acme", pendingSubject, ["org_admin"], "assign"))
-          .toMatchObject({ roles: ["Organization.Access.Manage", "org_admin"] });
+          .toMatchObject({ roles: [IDENTITY_LINK_ADMIN_ROLE, "org_admin"] });
 
         // A pending sign-in whose candidate is gone (deleted Relation) has
         // nothing to confirm: a different refusal, and confirming refuses too.
@@ -228,7 +229,7 @@ describe("tenant member roles from the control plane", () => {
         const assigned = await changeTenantMemberRoles(deps, "acme", subject, ["org_admin"], "assign");
         expect(assigned).toMatchObject({
           action: "assigned",
-          roles: ["Notifications.Self.Read", "Notifications.Self.Write", "Organization.Access.Manage", "org_admin", "org_employee"],
+          roles: [...NEEDS_ROLE_ASSIGNMENT_ROLES, IDENTITY_LINK_ADMIN_ROLE, "org_admin", "org_employee"].sort(),
         });
         const listed = await listTenantMembers(deps, "acme");
         expect(listed.members[0]).toMatchObject({ memberId: subject, roles: assigned.roles, linkStatus: "linked" });
@@ -237,12 +238,12 @@ describe("tenant member roles from the control plane", () => {
         // The other tenant's row is untouched, and so is the next session there.
         __resetIdentityLinkForTests();
         const inOther = await resolveIdentityLink(appDb, { tenantId: OTHER_TENANT, userId: subject, roles: [], groups: [], scope: "self" }, claims);
-        expect(inOther!.roles).toEqual(["Notifications.Self.Read", "Notifications.Self.Write", "org_employee"]);
+        expect(inOther!.roles).toEqual([...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort());
         const inAcme = await resolveIdentityLink(appDb, { tenantId: TENANT, userId: subject, roles: [], groups: [], scope: "self" }, claims);
         expect(inAcme!.roles).toEqual(assigned.roles);
 
         const removed = await changeTenantMemberRoles(deps, "acme", subject, ["org_admin"], "remove");
-        expect(removed.roles).toEqual(["Notifications.Self.Read", "Notifications.Self.Write", "org_employee"]);
+        expect(removed.roles).toEqual([...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort());
         // Nothing in Keycloak was asked to grant anything: the stub has no such method.
         expect("grantClientRoles" in deps.members).toBe(false);
 
@@ -273,7 +274,7 @@ describe("tenant member roles from the control plane", () => {
         await confirmPendingLink(appDb, { ...noraSession, relation: back });
         __resetIdentityLinkForTests();
         const again = await resolveIdentityLink(appDb, noraSession, claims);
-        expect(again!.roles).toEqual(["Organization.Access.Manage", "org_admin"]);
+        expect(again!.roles).toEqual([IDENTITY_LINK_ADMIN_ROLE, "org_admin"]);
       });
     },
     TEST_TIMEOUT,

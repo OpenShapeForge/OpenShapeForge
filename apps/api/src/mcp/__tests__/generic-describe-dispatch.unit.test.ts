@@ -7,6 +7,7 @@
  * helper reads schemas through tools/call only, which is why it did not see
  * that path. Runs on the compiled catalogue and manifest, without a database.
  */
+import accountsRuntime from "../../accounts/runtime.js";
 import { describe, expect, it } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -41,7 +42,7 @@ async function withServer<T>(
   const server = __buildGeneratedMcpServerForTests({
     db,
     session: session(...roles),
-    modules: [
+    modules: [accountsRuntime,
       documentsPluginRuntime as unknown as RuntimeModule,
       versioningPluginRuntime as unknown as RuntimeModule,
       { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }) } },

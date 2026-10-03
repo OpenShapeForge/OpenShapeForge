@@ -562,8 +562,8 @@ describe("worker-role RLS axis", () => {
             // The other policies are untouched. Spot-checked on the business
             // tables the old blanket bypass exposed. An INSERT-only policy
             // (the tenant registry's) has no USING, only WITH CHECK.
-            const untouched = await sql<{ qual: string }>`
-              select coalesce(qual, with_check, '') as qual
+            const untouched = await sql<{ qual: string; permissive: string }>`
+              select coalesce(qual, with_check, '') as qual, permissive
               from pg_policies
               where schemaname = 'erp'
             `.execute(conn);
@@ -572,7 +572,8 @@ describe("worker-role RLS axis", () => {
             for (const row of untouched.rows) {
               expect(row.qual).not.toContain("current_worker_role");
               expect(row.qual).not.toContain("CURRENT_USER");
-              expect(row.qual).toContain("bypass_rls");
+              // Restrictive guards narrow an existing grant; they never grant worker bypass.
+              if (row.permissive === "PERMISSIVE") expect(row.qual).toContain("bypass_rls");
             }
           });
         });

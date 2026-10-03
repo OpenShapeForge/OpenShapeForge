@@ -14,6 +14,7 @@ export type {
   OperationOffer,
   OperationPrerequisite,
   OperationTargetBinding,
+  OperationInputBinding,
   OperationReference,
   OperationResult,
   OperationViolation,

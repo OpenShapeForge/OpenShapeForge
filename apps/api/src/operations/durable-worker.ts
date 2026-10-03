@@ -65,6 +65,34 @@ function safeToRepeat(definition: RuntimeOperationDefinition): boolean {
 }
 
 type WorkerIdentityVerifier = (token: string) => Promise<{ tenantId: string | null; userId: string | null; serviceIdentityId: string | null }>;
+/** The persisted command key fences a visit; the Operation may declare its own delivery key. */
+function canonicalOperation(work: RuntimeResolvedOperationWork, definition: RuntimeOperationDefinition): RuntimeDurableOperationRequest["operation"] {
+  const input = { ...(work.operation.input ?? {}) };
+  let idempotencyKey = work.operation.idempotencyKey;
+  const field = definition.reliability.idempotency.mode === "keyed"
+    ? definition.reliability.idempotency.inputField
+    : undefined;
+  if (field !== undefined) {
+    if (typeof field !== "string" || !field.trim()) throw new DurableAuthorityError("OPERATION_CONTRACT_INVALID", "De automatische stap heeft geen geldig sleutelveld.");
+    if (Object.hasOwn(input, field)) {
+      const authored = input[field];
+      if (typeof authored !== "string" || !authored.trim()) {
+        throw new DurableAuthorityError("OPERATION_INPUT_INVALID", "De automatische stap heeft geen geldige idempotentiesleutel.");
+      }
+      idempotencyKey = authored;
+    } else {
+      input[field] = idempotencyKey;
+    }
+  }
+  try {
+    // Refuse an invalid header as input, rather than an endlessly retryable transport failure.
+    if (new Headers({ "idempotency-key": idempotencyKey }).get("idempotency-key") !== idempotencyKey) throw new Error("The header would change the key.");
+  } catch {
+    throw new DurableAuthorityError("OPERATION_INPUT_INVALID", "De automatische stap heeft geen geldige idempotentiesleutel.");
+  }
+  return { operation: { id: definition.id, intent: definition.intent },
+    ...(work.operation.input || field !== undefined ? { input } : {}), idempotencyKey };
+}
 
 export type DurableWorkerBrokerOptions = {
   /** Bound by core to the actual registered module's persisted claim resolver. */
@@ -220,8 +248,7 @@ export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): 
         const capability = Object.freeze({}) as RuntimeDelegatedOperationCapability;
         const result: RuntimeDurableOperationRequest = freeze({
           authority: { mode: "serviceIdentity", serviceIdentityId: work.serviceIdentityId }, capability,
-          operation: { operation: { id: definition.id, intent: definition.intent },
-            ...(work.operation.input ? { input: work.operation.input } : {}), idempotencyKey: work.operation.idempotencyKey },
+          operation: canonicalOperation(work, definition),
         });
         capabilities.set(capability, { reference: structuredClone(reference), workHash: workFingerprint(pinned.work),
           requestHash: fingerprint(result), contractFingerprint, expiresAt: now() + 30_000 });
@@ -295,10 +322,10 @@ export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): 
           reached = true;
           const answer = await request(new URL(`/api/operations/${encodeURIComponent(definition.id)}/execute`, api), {
             method: "POST", redirect: "error", signal,
-            headers: { ...headers, "content-type": "application/json", "idempotency-key": work.operation.idempotencyKey },
+            headers: { ...headers, "content-type": "application/json", "idempotency-key": input.operation.idempotencyKey! },
             body: JSON.stringify({
               intent: definition.intent,
-              input: work.operation.input ?? {},
+              input: input.operation.input ?? {},
               expectedContractFingerprint: minted.contractFingerprint,
             }),
           });

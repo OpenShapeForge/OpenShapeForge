@@ -11,8 +11,7 @@
  * the ones that need Keycloak refuse by name.
  */
 import { describe, expect, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { DummyDriver, Kysely, PostgresAdapter, PostgresIntrospector, PostgresQueryCompiler } from "kysely";
 import { controlSessionFor, type ControlSessionContext } from "../../control/control-session.js";
 import type { ControlRuntime } from "../../control/runtime.js";

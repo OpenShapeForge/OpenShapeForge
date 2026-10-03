@@ -6,9 +6,11 @@ import { resolveSessionContext } from "../auth/identity.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { headersFromFastify } from "../http/headers.js";
 import { encodeStreamFrame, parseStreamCursor, readChangeBatch } from "../platform/entity-change-stream.js";
+import type { ResourceChangeAuthorizer } from "../platform/entity-change-stream.js";
+import type { TrustedSessionContext } from "../auth/trusted-context.js";
 
 /** Authenticated SSE. No credentials or business payloads are accepted in URLs. */
-export function registerEntityChangeStream(app: FastifyInstance, options: { db?: OpenShapeForgeDatabase }) {
+export function registerEntityChangeStream(app: FastifyInstance, options: { db?: OpenShapeForgeDatabase; authorizeResource?:(session: TrustedSessionContext, entity:string, id:string) => Promise<boolean> }) {
   const active = new Map<string, number>();
   const controllers = new Set<AbortController>();
   app.addHook("onClose", async () => { for (const controller of controllers) controller.abort(); });
@@ -59,7 +61,10 @@ export function registerEntityChangeStream(app: FastifyInstance, options: { db?:
         while (!abort.signal.aborted && Date.now() - started < 55_000) {
           const current = await resolveSessionContext(headers, { db });
           if (current.tenantId !== session.tenantId || current.userId !== session.userId) break;
-          const batch = await readChangeBatch(db!, current, cursor, validateCursor);
+          const authorize: ResourceChangeAuthorizer | undefined = options.authorizeResource
+            ? (_dbSession, entity, id) => options.authorizeResource!(current, entity, id)
+            : undefined;
+          const batch = await readChangeBatch(db!, current, cursor, validateCursor, authorize);
           validateCursor = false;
           if (batch.reset) yield encodeStreamFrame(batch.cursor, "stream.reset", { reason: "cursor_expired" });
           for (const event of batch.changes) yield encodeStreamFrame(event.cursor, "resource.changed", event.data);

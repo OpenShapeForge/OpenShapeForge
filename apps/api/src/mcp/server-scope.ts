@@ -24,8 +24,8 @@ import {
   tablesByName,
 } from "./catalog.js";
 import { toolsForSession } from "./session-projection.js";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import type { Icon } from "@modelcontextprotocol/sdk/types.js";
+import { Server } from "@modelcontextprotocol/server";
+import type { Icon } from "@modelcontextprotocol/server";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { ARTIFACT_UPLOAD_APP_URI } from "./artifact-upload.js";
 import { editLeaseOperationIdsForSession } from "./edit-lease-tools.js";
@@ -38,6 +38,7 @@ import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { sessionLocale } from "./session-info.js";
 import { sessionClientOf } from "./session-client.js";
 import { buildServerInstructions, ENTITY_CATALOG_URI } from "./server-instructions.js";
+import { projectAgentSkills, visibleAgentSkills, SKILLS_EXTENSION } from "./agent-skills.js";
 import { type SearchableOperationToolNames } from "./operation-search.js";
 import { bindOperationHandlers } from "../operations/runtime.js";
 import { describeTool, entityTitle } from "./entity-tool-projection.js";
@@ -96,6 +97,8 @@ function createServerScopePrologue(input: {
       module.mcp?.resourceTemplates !== undefined,
   );
   const tables = tableOverride ?? tablesByName();
+  const allAgentSkills = projectAgentSkills(runtimeModules);
+  const skillsForSession = () => visibleAgentSkills(allAgentSkills, session.roles);
   const server = new Server({ ...SERVER_INFO, ...(input.serverIcons ? { icons: input.serverIcons } : {}) }, {
     capabilities: {
       // listChanged is advertised only when the tool list can actually change
@@ -106,6 +109,7 @@ function createServerScopePrologue(input: {
           : {},
       resources: hasDynamicModuleResources ? { listChanged: true } : {},
       prompts: {},
+      extensions: { [SKILLS_EXTENSION]: {} },
     },
     // Written once, here, from the fixed guidance and this session's own
     // parts: who the person is, which client is in front of the model and
@@ -126,6 +130,7 @@ function createServerScopePrologue(input: {
       })),
       locale,
       client: sessionClientOf(session),
+      skills: skillsForSession().map(({ entry }) => ({ uri: entry.uri, description: entry.frontmatter.description })),
     }),
   });
   const hasArtifactStorage = runtimeModules.some((module) => module.artifactStorage !== undefined);
@@ -194,6 +199,7 @@ function createServerScopePrologue(input: {
       ...ONBOARDING_RESOURCE_URIS,
       ...catalog.entities.map(entityResourceUri),
       ...catalogResources.map((resource) => resource.uri),
+      ...allAgentSkills.flatMap((skill) => skill.resources.map((resource) => resource.uri)),
     ],
     templates: [
       ONBOARDING_STEP_RESOURCE_TEMPLATE.uriTemplate,
@@ -202,6 +208,7 @@ function createServerScopePrologue(input: {
   };
 
   return {
+    skillsForSession,
     db,
     session,
     modulePlatform,

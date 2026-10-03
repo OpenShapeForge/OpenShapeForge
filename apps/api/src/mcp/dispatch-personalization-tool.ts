@@ -13,7 +13,7 @@ import { derivedToolsForSession } from "./derived-session-tools.js";
 import { requireActingRelationId } from "./acting-relation-guard.js";
 import { requireArguments } from "./entity-tool-guards.js";
 import { failed, ok } from "./tool-results.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { DirectCallScope } from "./tool-dispatch.js";
 
 

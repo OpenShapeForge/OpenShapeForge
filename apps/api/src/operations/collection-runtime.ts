@@ -6,6 +6,7 @@ import { executeCollectionMutationInTransaction, type CollectionMutationBinding,
 import type { OperationContract } from "./runtime.js";
 import { getGeneratedCrudTables } from "./entity/catalog.js";
 import { serializeEntityRow } from "./entity/serialize-result.js";
+import type { LeaseProtectedOperation } from "./entity/edit-leases.js";
 
 /** Validate compiler-owned bindings once at boot, never choose them from input. */
 export function nativeCollectionBinding(operation: OperationContract): Readonly<CollectionMutationBinding> {
@@ -18,7 +19,9 @@ export function nativeCollectionBinding(operation: OperationContract): Readonly<
       operation.auth.mode !== "session" || !operation.auth.roles?.length || operation.tenancy.mode !== "required" ||
       operation.effects?.data !== "write" || operation.effects.external !== "none" ||
       operation.concurrency?.version?.mode !== "required" || operation.concurrency.version.field !== "updatedAt" ||
-      operation.concurrency.editLease || operation.confirmation?.mode !== "none" || operation.idempotency.mode !== "none") {
+      (operation.concurrency.editLease && (operation.concurrency.editLease.mode !== "required" ||
+        typeof operation.concurrency.editLease.expiresAfterInactivity !== "string")) ||
+      operation.confirmation?.mode !== "none" || operation.idempotency.mode !== "none") {
     throw new Error(`Canonical collection Operation ${operation.key} has an unsupported or incomplete binding.`);
   }
   return Object.freeze({ entityName: binding.entityName, field: binding.field, action: binding.action });
@@ -34,7 +37,11 @@ export function nativeCollectionHandler(operation: OperationContract): ModuleOpe
     const parents = getGeneratedCrudTables().filter((table) => table.source?.authoringEntityName === binding.entityName);
     if (parents.length !== 1) throw operationFailure({ code: "INVALID_DEFINITION", message: "The collection owner has no unambiguous record projection." });
     const value = await withModuleOperationTransaction(context.platform, context.session, async (trx) => {
-      const result = await executeCollectionMutationInTransaction(trx, context.session!, binding, input as CollectionMutationRequest);
+      const guard: LeaseProtectedOperation = {
+        id: operation.key, entityId: operation.target!.entityId!, entityName: binding.entityName,
+        intent: "invoke", concurrency: operation.concurrency!,
+      };
+      const result = await executeCollectionMutationInTransaction(trx, context.session!, binding, input as CollectionMutationRequest, guard);
       return { ...result, parent: serializeEntityRow(parents[0]!, result.parent) };
     });
     return { value };

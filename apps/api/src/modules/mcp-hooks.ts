@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Deterministic composition of runtime-module MCP hooks. */
 import { AsyncLocalStorage } from "node:async_hooks";
-import type {
-  ReadResourceResult,
-  Resource,
-  ResourceTemplate,
-  Tool,
-} from "@modelcontextprotocol/sdk/types.js";
-import { UriTemplate } from "@modelcontextprotocol/sdk/shared/uriTemplate.js";
+import { UriTemplate } from "@modelcontextprotocol/server";
+import type { ReadResourceResult, Resource, ResourceTemplateType, Tool } from "@modelcontextprotocol/server";
 import type {
   McpInvocationContext,
   McpProjectionContext,
@@ -189,7 +184,7 @@ export type CoreResourceOwnership = {
 
 type ProjectedModuleResources = {
   resources: Resource[];
-  templates: ResourceTemplate[];
+  templates: ResourceTemplateType[];
   ownerFor(uri: string): RuntimeModule | "core" | undefined;
 };
 
@@ -199,7 +194,7 @@ async function projectModuleResources(
   core: CoreResourceOwnership = { exact: [], templates: [] },
 ): Promise<ProjectedModuleResources> {
   const resources: Resource[] = [];
-  const templates: ResourceTemplate[] = [];
+  const templates: ResourceTemplateType[] = [];
   const exactClaims = new Map<string, RuntimeModule | "core">();
   const templateClaims = new Map<string, RuntimeModule | "core">();
   for (const uri of core.exact) exactClaims.set(uri, "core");
@@ -322,7 +317,7 @@ export async function moduleResourceTemplates(
   modules: readonly RuntimeModule[],
   context: McpProjectionContext,
   core?: CoreResourceOwnership,
-): Promise<ResourceTemplate[]> {
+): Promise<ResourceTemplateType[]> {
   return (await projectModuleResources(modules, context, core)).templates;
 }
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
-import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { Tool } from "@modelcontextprotocol/server";
 import {
   DEFAULT_OPERATION_SEARCH_RESULTS,
   MAX_OPERATION_SEARCH_RESULTS,

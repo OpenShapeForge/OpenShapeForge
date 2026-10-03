@@ -5,7 +5,7 @@
  */
 
 /** The dry-run helper of a derived tool: compose the provider requests without sending them. */
-import { type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import { listGeneratedEntitiesForTable } from "../operations/entity/index.js";
 import { deriveToolName, derivedHelperAvailable, derivedToolsFromRows } from "./derived-tools.js";
 import { bindingSelected, composeBindingRequest } from "./declarative-execution.js";

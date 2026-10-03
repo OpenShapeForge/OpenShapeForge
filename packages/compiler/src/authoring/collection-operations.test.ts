@@ -141,6 +141,19 @@ test("binds Web relationship insert/move by field and advertises atomic only for
   expect(buildWebManifest(hidden).entities.Owner!.relationships.children).toMatchObject({ mutationSupport: "unsupported" });
 });
 
+test("owned collection Operations inherit the owner's edit lease across repeated catalog/Web compilation", () => {
+  const entries = fixture(owner => {
+    owner.operations!.update!.concurrency!.editLease = { mode: "required", expiresAfterInactivity: "PT15M" };
+  });
+  const first = compile(entries).find(operation => operation.id === "Owner.insertChild")!;
+  expect(first.concurrency).toEqual({ version: { mode: "required", field: "updatedAt" }, editLease: { mode: "required", expiresAfterInactivity: "PT15M" } });
+  expect(first.inputSchema.required).toContain("leaseToken");
+  expect(buildWebManifest(entries).entities.Owner!.relationships.children!.operations!.insert!.id).toBe("Owner.insertChild");
+  const repeated = compile(entries).find(operation => operation.id === "Owner.insertChild")!;
+  expect(repeated.inputSchema).toEqual(first.inputSchema);
+  expect(repeated.concurrency).toEqual(first.concurrency);
+});
+
 test("materializes one atomic create Operation for a reference with a hasMany constraint", () => {
   const membership = entity("Membership", [
     { key: "child", osfType: "Child", required: true },

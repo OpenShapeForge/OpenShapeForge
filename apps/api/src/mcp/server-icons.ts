@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import type { Icon } from "@modelcontextprotocol/sdk/types.js";
+import type { Icon } from "@modelcontextprotocol/server";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { RuntimeModule } from "../modules/contract.js";
 import type { ModulePlatformRuntime } from "../modules/platform.js";

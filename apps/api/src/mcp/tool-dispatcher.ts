@@ -4,7 +4,7 @@
  * verbatim.
  */
 import { GENERIC_DESCRIBE_TOOL_NAME } from "@openshapeforge/operations";
-import { type CallToolResult, type Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/server";
 import { inputSchemaFromStoredFields, type DerivedToolsCatalogEntry } from "./derived-tools.js";
 import { HttpError } from "../rest/http-error.js";
 import { listConnectorContracts } from "../connectors/catalog.js";

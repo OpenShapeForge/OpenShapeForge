@@ -35,6 +35,8 @@ import { SYSTEM_BYPASS_ROLE, withSystemSession } from "../../../db/session.js";
 import { loadRuntimeModules, type ModuleRegistry } from "../../../modules/registry.js";
 import { listEntityEvents } from "../../../platform/entity-events.js";
 import { createApiApp } from "../../../roles/api.js";
+import type { PersistedOperationManifest } from "../../yoga.js";
+import { Registry } from "@openshapeforge/observability";
 import { getGeneratedCrudTables } from "../../generated-crud.js";
 import persistedManifest from "../../../generated/graphql/persisted-operations.json" with { type: "json" };
 import { seedKeycloakTokenPeople } from "./keycloak.js";
@@ -114,6 +116,7 @@ type Store = {
   seedRuntime: DatabaseRuntime | null;
   app: Promise<{ instance: ApiApp }> | null;
   tenantRowsEnsured: Promise<void> | null;
+  persistedOperations: PersistedOperationManifest;
 };
 
 /**
@@ -185,6 +188,10 @@ const store: Store = ((
   seedRuntime: null,
   app: null,
   tenantRowsEnsured: null,
+  persistedOperations: {
+    operationNames: [...persistedManifest.operationNames],
+    operations: { ...persistedManifest.operations } as Record<string, string>,
+  },
 } satisfies Store);
 
 export const seed = store.seed;
@@ -194,6 +201,20 @@ export const readOnly = store.readOnly;
 export const noRoles = store.noRoles;
 export const createdRows = store.createdRows;
 export const remoteUrl = process.env.E2E_API_URL;
+
+/** Add a fixture client's documents to the test-owned manifest, never generated JSON.
+ * Keep one API/module lifecycle even when several clients share this process.
+ */
+export function registerPersistedFixture(fixture: PersistedOperationManifest): void {
+  for (const [hash, query] of Object.entries(fixture.operations)) {
+    const existing = store.persistedOperations.operations[hash];
+    if (existing && existing !== query) throw new Error("Persisted fixture hash collision.");
+    store.persistedOperations.operations[hash] = query;
+  }
+  store.persistedOperations.operationNames = [...new Set([
+    ...store.persistedOperations.operationNames, ...fixture.operationNames,
+  ])].sort();
+}
 
 // ---------------------------------------------------------------------------
 // describe/test wrappers — attribute captured traffic to its test
@@ -276,6 +297,8 @@ export async function apiApp(): Promise<ApiApp> {
         cors: false,
         ...(process.env.DATABASE_URL ? { databaseUrl: process.env.DATABASE_URL } : {}),
         modules,
+        persistedOperations: store.persistedOperations,
+        metricsRegistry: new Registry(),
       }),
     };
   })();

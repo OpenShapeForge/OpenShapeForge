@@ -28,7 +28,7 @@ import {
   operationToolResult,
   runtimeOperationToolResult,
 } from "./tool-results.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { DirectCallScope } from "./tool-dispatch.js";
 
 /**

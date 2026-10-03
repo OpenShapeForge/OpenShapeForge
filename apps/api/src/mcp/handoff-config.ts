@@ -6,7 +6,7 @@
  *
  * Split out of generated-mcp-server.ts.
  */
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { Server } from "@modelcontextprotocol/server";
 import { keyringFromEnv } from "../connectors/secrets.js";
 import { HttpError } from "../rest/http-error.js";
 

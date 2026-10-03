@@ -26,7 +26,8 @@
  * the MCP server (session-surface.ts, dispatch-platform-tools.ts) by the same two delimited hunks; everything else
  * lives here.
  */
-import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/server";
+import { employeeInvitationRoleGrants } from "../auth/employee-invitations.js";
 import {
   confirmPendingLink,
   IDENTITY_LINK_ADMIN_ROLE,

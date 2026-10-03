@@ -33,7 +33,7 @@
  */
 import { ownedByActingRelation } from "../db/acting-relation.js";
 import { IDENTITY_LINK_ADMIN_ROLE } from "../auth/organization-roles.js";
-import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/server";
 import { sql } from "kysely";
 import type { IdentityLinkState } from "../auth/identity-link.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";

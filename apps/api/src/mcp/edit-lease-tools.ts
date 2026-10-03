@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** MCP projection of the central edit-lease service. */
-import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { Tool } from "@modelcontextprotocol/server";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import {

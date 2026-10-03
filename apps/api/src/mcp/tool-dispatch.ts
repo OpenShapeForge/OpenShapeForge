@@ -14,7 +14,7 @@
  * the direct-call handler, verbatim, reading what it captured from the
  * call scope.
  */
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import type {
   ModuleToolExecutionOptions,
   ModuleToolExecutionResult,

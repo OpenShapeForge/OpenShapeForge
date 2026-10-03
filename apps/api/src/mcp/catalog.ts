@@ -12,7 +12,7 @@
  */
 import type { RuntimeModule } from "../modules/contract.js";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
-import { type Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { Tool } from "@modelcontextprotocol/server";
 import rawCatalog from "../generated/mcp/tools.json" with { type: "json" };
 import { getGeneratedCrudTables } from "../operations/entity/catalog.js";
 import { type DerivedToolsCatalogEntry } from "./derived-tools.js";

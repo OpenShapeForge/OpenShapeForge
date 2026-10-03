@@ -12,8 +12,8 @@ import type {
   RuntimeHostOperationRequest,
   RuntimeOperationExecutionResult,
 } from "@openshapeforge/plugin-runtime";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { Server } from "@modelcontextprotocol/server";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import { toHttpError } from "../rest/http-error.js";
 import { withConfirmationHint } from "./confirmation-hint.js";
 import { failureSummary } from "../connectors/provider-outcome.js";
@@ -135,11 +135,13 @@ export function failed(error: unknown): ToolResult {
 export function runtimeOperationResult(
   result: {
     content: CallToolResult["content"];
-    structuredContent?: Record<string, unknown> | undefined;
+    structuredContent?: unknown;
     isError?: boolean | undefined;
   },
 ): RuntimeOperationExecutionResult {
-  const structured = result.structuredContent;
+  const structured = result.structuredContent && typeof result.structuredContent === "object" && !Array.isArray(result.structuredContent)
+    ? result.structuredContent as Record<string, unknown>
+    : undefined;
   if (result.isError) {
     const candidate = structured?.error as Record<string, unknown> | undefined;
     return {

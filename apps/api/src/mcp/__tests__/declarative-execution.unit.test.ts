@@ -962,6 +962,15 @@ describe("executeBinding", () => {
     );
   });
 
+  it("treats an omitted nullable named base URL map as absent", async () => {
+    const request = await composeBindingRequest({
+      binding: {}, operationRow: { operation: { method: "GET", pathTemplate: "/records" } },
+      providerRow: { transport: "rest", baseUrlTemplate: "https://example.com", baseUrlTemplates: null, egressHosts: ["example.com"] },
+      connectionValues: {}, serviceInputs: {}, secretScope: "unused",
+    });
+    expect(request.url.href).toBe("https://example.com/records");
+  });
+
   it("selects an authored named HTTPS base URL through canonical egress", async () => {
     const requests: any[] = [];
     const outputs = await executeBinding({
@@ -1096,7 +1105,7 @@ describe("executeBinding", () => {
       {
         key: "secondary",
         templates: null,
-        message: /must be a plain authored key-to-URL object/,
+        message: /is not declared by the adapter/,
       },
       {
         key: "secondary",

@@ -448,10 +448,10 @@ export function templatePlaceholders(template: unknown): string[] {
 export function namedBaseUrlTemplates(
   providerRow: JsonRecord,
 ): Array<{ key: string; template: string }> {
-  if (providerRow.baseUrlTemplates === undefined) return [];
+  // Optional persisted object fields serialize as null when not authored.
+  if (providerRow.baseUrlTemplates === undefined || providerRow.baseUrlTemplates === null) return [];
   const templates = providerRow.baseUrlTemplates;
   if (
-    templates === null ||
     typeof templates !== "object" ||
     Array.isArray(templates) ||
     (Object.getPrototypeOf(templates) !== Object.prototype &&

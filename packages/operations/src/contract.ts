@@ -131,6 +131,12 @@ export type OperationTargetBinding = {
   };
   input: Readonly<Record<string, unknown>>;
 };
+/** Module Operations may bind server-owned input without claiming an Entity target.
+ * This fragment is a form default; it carries no record authorization or lease. */
+export type OperationInputBinding = {
+  target?: never;
+  input: Readonly<Record<string, unknown>>;
+};
 
 type OperationInteractionBase = {
   /** Opaque, server-issued identifier; clients must never mint or reinterpret it. */
@@ -165,7 +171,7 @@ export type OperationOffer<TIntent extends string = string> =
   | {
       operation: OperationReference<TIntent>;
       available: true;
-      binding?: OperationTargetBinding;
+      binding?: OperationTargetBinding | OperationInputBinding;
       interaction?: OperationInteraction;
       /** Canonical controls and lease timing for this currently available Operation. */
       concurrency?: OperationConcurrency;

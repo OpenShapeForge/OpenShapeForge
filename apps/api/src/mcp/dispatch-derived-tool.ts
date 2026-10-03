@@ -14,7 +14,7 @@ import {
   unavailableOutcome,
 } from "./composed-results.js";
 import { assertSchemaValid } from "./tool-schema.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { DirectCallScope } from "./tool-dispatch.js";
 import { runDerivedBinding } from "./dispatch-derived-binding.js";
 

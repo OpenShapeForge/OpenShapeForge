@@ -113,6 +113,23 @@ describe("plugin schema migrations", () => {
     }] })])).toThrow("must not contain the $osf$ quote tag");
   });
 
+  test("refuses CHECK expressions whose quoting the guard cannot read like PostgreSQL", () => {
+    const check = (expression: string) => () => registry([table("values", { constraints: [{
+      version: "0001_values-check",
+      name: "values_check",
+      kind: "check",
+      expression,
+    }] })]);
+    // `x$a$` is one identifier to PostgreSQL, not a dollar-quoted string.
+    expect(check("x$a$ IS NOT NULL); DROP TABLE cpq.values; SELECT (x$a$ IS NULL"))
+      .toThrow(/must not contain "\$" outside a quoted string/);
+    expect(check("id::text <> $$x$$")).toThrow(/must not contain "\$" outside a quoted string/);
+    // In an escape string `\'` is a quote character, so the string stays open.
+    expect(check("id::text <> E'\\'' ); DROP TABLE cpq.values; PERFORM ( '"))
+      .toThrow(/must not contain an escape string/);
+    expect(check("id::text ~ '^[a-z]+$' AND id::text <> 'it''s'")).not.toThrow();
+  });
+
   test("validates foreign-key targets before emitting SQL", () => {
     expect(() =>
       registry([

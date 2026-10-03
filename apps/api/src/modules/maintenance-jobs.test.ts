@@ -24,3 +24,27 @@ test("discarded failure surfaces, awaited failure can reconcile, successful disc
   await drainMaintenanceJobs([pending]);
   expect(done).toBe(true);
 });
+
+test("a discarded success-only chain cannot hide its failed job", async () => {
+  const job = maintenanceJob(Promise.reject(new Error("success-only failure")));
+  const logging = job.promise.then(() => "only success is logged");
+  // Test owner suppresses noise without pretending a caller handled the refusal.
+  void Promise.prototype.then.call(logging, undefined, () => undefined);
+  await expect(drainMaintenanceJobs([job])).rejects.toThrow(
+    "success-only failure",
+  );
+  expect(job.observed()).toBe(false);
+});
+
+test("a chained catch can reconcile the original failed job", async () => {
+  const job = maintenanceJob(Promise.reject(new Error("chain refusal")));
+  const recovered = await job.promise
+    .then(() => "success")
+    .catch((error) => {
+      expect(error.message).toBe("chain refusal");
+      return "reconciled";
+    });
+  expect(recovered).toBe("reconciled");
+  expect(job.observed()).toBe(true);
+  await expect(drainMaintenanceJobs([job])).resolves.toBeUndefined();
+});

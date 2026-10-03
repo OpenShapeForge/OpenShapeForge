@@ -643,3 +643,11 @@ consumer source tree. For example, branding derives Tenant.logo transforms;
 another plugin can derive locale/format settings without sharing mutable state
 between hosts. Ordinary modules without build configuration export their module
 object directly.
+
+"Isolated" means isolated *state*: each configured instance gets its own
+detached copy of the configuration and its own handlers. It is not a sandbox.
+A runtime module is imported into the API process and runs with its
+privileges — `process.env` (including the secret keyring), the database
+handle, the network — exactly as the
+[connector execution trust model](connectors.md#execution-trust-model)
+describes for connector packages. Load only reviewed modules.

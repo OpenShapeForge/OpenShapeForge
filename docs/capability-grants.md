@@ -135,8 +135,12 @@ records: [
 ```
 
 Issuing verifies every delegated intent against the issuer's own access
-through the same oracle, so a grant never reaches a record its issuer could
-not; the delegation is journaled with the grant and shown in its summary.
+through the same oracle, so a delegated record never reaches past its
+issuer; the delegation is journaled with the grant and shown in its summary.
+The **subject** is not checked that way: core only validates its shape (an
+entity name and a UUID) and a grant session then reaches it for `get` and
+`update`. Issue a grant only for a subject the issuing session may itself
+act on, and never take the subject id from client input unchecked.
 `delete` is never delegated. This is what lets a recipient open the PDF they
 are asked to sign and lets the completing handler append the signed copy to
 the record's Document (`appendDocumentVersion` from
@@ -180,7 +184,7 @@ const { id, token, expiresAt } = await platform.grants.issue(session, {
   subject: { entity: "Envelope", id: envelopeId },
   recipient: { kind: "email", address },
   expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000),
-  maxUses: 1,                              // null or omitted: reusable until expiry
+  maxUses: 2,                              // every call counts: one read, one sign; null or omitted: reusable until expiry
   supersede: "same-subject-and-recipient", // optional
 });
 ```

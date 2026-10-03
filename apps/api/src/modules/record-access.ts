@@ -96,7 +96,9 @@ function requireCanonicalRoles(
  * The subject record is reachable for `get` and `update` (the capability
  * Operation exists to act on it), and every other record only with an intent
  * its issuer delegated — verified against the issuer's own access when the
- * grant was issued, so this never widens past what that session could do.
+ * grant was issued. The subject itself is not checked against the issuer at
+ * issue time: the issuing plugin is responsible for naming only a subject
+ * its session may act on.
  */
 function requireGrantedRecord(
   session: TrustedSessionContext,

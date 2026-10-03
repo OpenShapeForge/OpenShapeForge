@@ -120,7 +120,10 @@ const runtimeModule: RuntimeModule = {
 ```
 
 A handler returns one of `done`, `retry`, `failed` or `outcome_unknown`
-(`RuntimeJobOutcome`). Returning nothing is `done`; throwing is `retry`; an
+(`RuntimeJobOutcome`). Returning nothing is `done`; throwing is
+`outcome_unknown`, because the worker cannot tell whether the handler's
+external effect already happened (a handler that knows repetition is safe
+returns `retry` explicitly); an
 outcome that is not one of those, or a `retry`, `failed` or `outcome_unknown`
 without an `error` to record, is a handler bug and settles that job `failed`
 with `INVALID_OUTCOME` — never the batch.
@@ -146,7 +149,8 @@ to anyone else, however long the run takes. When the handler returns, the
 outcome is settled in the same transaction, so the handler's writes and the
 job's state commit together — there is no window in which the work is done
 and the row still says `running`. Only a handler that **throws** is settled
-apart, as a `retry`, after its transaction rolled back. A crash between
+apart, as `outcome_unknown`, after its transaction rolled back (a throw before
+the handler started — opening the session, say — is settled as `retry`). A crash between
 commit and nothing — the process dying mid-run — leaves a `running` row
 whose lease expires and is reclaimed, and the handler runs again: a handler
 with an external effect must be idempotent on its own terms, or end

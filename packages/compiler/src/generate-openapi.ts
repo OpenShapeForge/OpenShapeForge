@@ -472,6 +472,8 @@ export function renderOpenApiSpec(
             properties: {
               id: { type: "string" },
               intent: {
+                // Canonical offers include invoke and plugin-defined intents.
+                // Keep the transport aligned with OperationReference's string contract.
                 type: "string",
               },
             },

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { SQL } from "bun";
-import { Kysely, type KyselyConfig } from "kysely";
+import { Kysely, sql, type KyselyConfig } from "kysely";
 import { PostgresJSDialect } from "kysely-postgres-js";
 import type { DB } from "../generated/db/types.js";
 
@@ -92,4 +92,16 @@ export function createDatabaseRuntime(
       await db.destroy();
     },
   };
+}
+
+/** Internal owner guard; credentials and URL aliases do not establish DB identity. */
+export async function assertSameDatabase(left: OpenShapeForgeDatabase, right: OpenShapeForgeDatabase): Promise<void> {
+  const identity = async (db: OpenShapeForgeDatabase) => (await sql<{ name: string; oid: string; address: string | null; port: number | null; started: string }>`
+    select current_database() as name, oid::text as oid,
+           inet_server_addr()::text as address, inet_server_port() as port,
+           pg_postmaster_start_time()::text as started
+      from pg_database where datname = current_database()
+  `.execute(db)).rows[0];
+  const [a, b] = await Promise.all([identity(left), identity(right)]);
+  if (!a || !b || JSON.stringify(a) !== JSON.stringify(b)) throw new Error("Maintenance connections must target the same database.");
 }

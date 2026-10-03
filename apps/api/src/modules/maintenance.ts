@@ -4,7 +4,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import type { MaintenanceContext, MaintenanceConnection, MaintenanceQuery, RunMaintenanceSeed, RuntimeMaintenanceContribution, RuntimeOperationRequest } from "@openshapeforge/plugin-runtime";
-import { createDatabaseRuntime, readMigrateDatabaseUrl, type OpenShapeForgeDatabase } from "../db/connection.js";
+import { assertSameDatabase, createDatabaseRuntime, readMigrateDatabaseUrl, type OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, withSystemSession, SYSTEM_BYPASS_ROLE } from "../db/session.js";
 import { isControlSession } from "../control/control-session.js";
 import { systemSessionForAdministrator } from "../control/platform-admin.js";
@@ -146,7 +146,10 @@ export function liveMaintenanceRunner(module: RuntimeModule, platform: ModulePla
     const contribution = contributionCopy(registeredOwner, selection.contribution);
     const database = createDatabaseRuntime({ databaseUrl: readMigrateDatabaseUrl(), maxConnections: 1 });
     const app = createDatabaseRuntime();
-    try { return await lifecycle({ storeDb: database.db, appDb: app.db, platform, system: systemSessionForAdministrator(administrator, "maintenance"), check, operator: { subject: administrator.subject, issuer: administrator.issuer } }, contribution, selection.tenantSlug, selection.reason, work); }
+    try {
+      await assertSameDatabase(database.db, app.db);
+      await assertRestrictedModuleOperationConnection(platform, app.db); check();
+      return await lifecycle({ storeDb: database.db, appDb: app.db, platform, system: systemSessionForAdministrator(administrator, "maintenance"), check, operator: { subject: administrator.subject, issuer: administrator.issuer } }, contribution, selection.tenantSlug, selection.reason, work); }
     finally { await Promise.all([database.close(), app.close()]); }
   };
 }
@@ -165,6 +168,7 @@ async function withJobOwner<T>(module: RuntimeModule, db: OpenShapeForgeDatabase
     // Refuse accidental privileged app credentials before any canonical read.
     const role = await sql<{ rolbypassrls: boolean; rolsuper: boolean }>`select rolbypassrls, rolsuper from pg_roles where rolname = current_user`.execute(app.db);
     if (!role.rows[0] || role.rows[0].rolbypassrls || role.rows[0].rolsuper) throw new Error("Maintenance Operations require the restricted application connection.");
+    await assertSameDatabase(db, app.db);
     const platform = new ModulePlatformRuntime(app.db);
     const context = { db: app.db, platform: platform.services };
     const initialised = await initRuntimeModules(await loadRuntimeModules(), context);

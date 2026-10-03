@@ -70,5 +70,5 @@ bun apps/api/src/db/maintenance.ts --contribution example-fixtures --tenant demo
 
 The host may pass `--date` as product input. `DATABASE_URL` must be the restricted
 app connection; `OPENSHAPEFORGE_MIGRATE_DATABASE_URL` owns privileged store work.
-A superuser or `BYPASSRLS` app connection is refused. Installed module load/init
+A superuser or `BYPASSRLS` app connection is refused. Actual opened store and app connections must report the same server address/port, postmaster start, database name and database OID; live maintenance also checks the verified invocation platform connection. Credentials and URL aliases are not compared. A database override that selects a different database fails before the maintenance callback. Installed module load/init
 failures identify their module and reason and prevent a partial headless runtime.

@@ -790,9 +790,139 @@ function keyedObjects(value: JsonValue | undefined, key = "key"): Map<string, Js
   return result;
 }
 
+/** Restricting tiers gate reads at runtime; a later layer may only raise a field's tier. */
+const CLASSIFICATION_RANK: Readonly<Record<string, number>> = {
+  public: 0,
+  internal: 1,
+  confidential: 2,
+  pii: 3,
+  bsn: 4,
+};
+
+function assertClassificationOnlyNarrows(
+  before: JsonValue | undefined,
+  after: JsonValue | undefined,
+  path: string,
+  origin: string,
+): void {
+  if (!isPlainObject(before)) return;
+  const prior = CLASSIFICATION_RANK[String(before.sensitivity)];
+  const next = isPlainObject(after) ? CLASSIFICATION_RANK[String(after.sensitivity)] : undefined;
+  if (prior !== undefined && (next === undefined || next < prior)) {
+    throw new Error(`${origin} downgrades ${path} declared by an earlier layer.`);
+  }
+}
+
+/** A precondition's refusal text is presentation; the fact it checks is not. */
+function preconditionFacts(value: JsonValue | undefined): Set<string> {
+  if (!Array.isArray(value)) return new Set();
+  return new Set(value.map((item) => {
+    if (!isPlainObject(item)) return stableJson(item);
+    const { refusal: _refusal, ...fact } = item;
+    return stableJson(fact);
+  }));
+}
+
+function assertTransitionsOnlyNarrow(
+  before: JsonObject,
+  after: JsonObject,
+  updateRoles: { before: JsonValue | undefined; after: JsonValue | undefined },
+  path: string,
+  origin: string,
+): void {
+  const beforeTransitions = objectProperty(before, "transitions");
+  if (!beforeTransitions) return;
+  const afterTransitions = objectProperty(after, "transitions");
+  if (!afterTransitions) {
+    throw new Error(`${origin} removes ${path}.transitions declared by an earlier layer.`);
+  }
+  assertExactWhenPresent(beforeTransitions.initial, afterTransitions.initial, `${path}.transitions.initial`, origin);
+  const beforeRules = keyedObjects(beforeTransitions.rules);
+  for (const [ruleKey, rule] of keyedObjects(afterTransitions.rules)) {
+    const prior = beforeRules.get(ruleKey);
+    const rulePath = `${path}.transitions.rules.${ruleKey}`;
+    if (!prior) {
+      throw new Error(`${origin} adds ${rulePath} to a state machine declared by an earlier layer.`);
+    }
+    assertOrListOnlyNarrows(prior.from, rule.from, `${rulePath}.from`, origin);
+    assertExactWhenPresent(prior.to, rule.to, `${rulePath}.to`, origin);
+    const priorAuth = objectProperty(prior, "auth");
+    const ruleAuth = objectProperty(rule, "auth");
+    // Without authored roles a rule is invocable by the entity's update roles.
+    assertOrListOnlyNarrows(
+      priorAuth?.roles ?? updateRoles.before,
+      ruleAuth?.roles ?? updateRoles.after,
+      `${rulePath}.auth.roles`,
+      origin,
+    );
+    assertAndListOnlyNarrows(priorAuth?.alsoRequire, ruleAuth?.alsoRequire, `${rulePath}.auth.alsoRequire`, origin);
+    assertExactWhenPresent(
+      priorAuth?.recordPermission,
+      ruleAuth?.recordPermission,
+      `${rulePath}.auth.recordPermission`,
+      origin,
+    );
+    const facts = preconditionFacts(rule.preconditions);
+    if ([...preconditionFacts(prior.preconditions)].some((fact) => !facts.has(fact))) {
+      throw new Error(`${origin} widens ${rulePath}.preconditions by removing a required precondition.`);
+    }
+    for (const key of ["writes", "stamps"] as const) {
+      if (!sameJson(prior[key], rule[key])) {
+        throw new Error(
+          `${origin} changes ${rulePath}.${key} declared by an earlier layer. Which fields a ` +
+            "transition writes is part of its security contract.",
+        );
+      }
+    }
+    assertConfirmationOnlyNarrows(prior.confirmation, rule.confirmation, `${rulePath}.confirmation`, origin);
+  }
+}
+
+function inverseCollection(field: JsonObject | undefined): JsonObject | undefined {
+  return objectProperty(objectProperty(field, "relationship"), "inverse");
+}
+
+/**
+ * Owner authorization lends the owning entity's update roles to the child's
+ * writes, so only the layer that owns the reference may grant it.
+ */
+function assertCollectionPolicyOnlyNarrows(
+  before: JsonObject | undefined,
+  after: JsonObject,
+  path: string,
+  origin: string,
+): void {
+  for (const [policyPath, prior, next] of [
+    [path, before, after],
+    [`${path}.relationship.inverse`, inverseCollection(before), inverseCollection(after)],
+  ] as const) {
+    if (prior?.childAuthorization !== "owner" && next?.childAuthorization === "owner") {
+      throw new Error(`${origin} adds ${policyPath}.childAuthorization: owner not granted by an earlier layer.`);
+    }
+    if (prior !== undefined) {
+      assertExactWhenPresent(prior.childLock, next?.childLock, `${policyPath}.childLock`, origin);
+    }
+  }
+  for (const [ownershipPath, prior, next] of [
+    [`${path}.relationship.ownership`, objectProperty(before, "relationship"), objectProperty(after, "relationship")],
+    [`${path}.relationship.inverse.ownership`, inverseCollection(before), inverseCollection(after)],
+  ] as const) {
+    if (prior?.ownership !== "owned" && next?.ownership === "owned") {
+      throw new Error(`${origin} adds ${ownershipPath}: owned not declared by an earlier layer.`);
+    }
+  }
+}
+
 function assertFieldsOnlyNarrow(base: JsonObject, merged: JsonObject, origin: string): void {
   const beforeFields = keyedObjects(base.fields);
   const afterFields = keyedObjects(merged.fields);
+  const updateRoles = {
+    before: objectProperty(objectProperty(base, "authorization"), "roles")?.update,
+    after: objectProperty(objectProperty(merged, "authorization"), "roles")?.update,
+  };
+  for (const [key, after] of afterFields) {
+    assertCollectionPolicyOnlyNarrows(beforeFields.get(key), after, `fields.${key}`, origin);
+  }
   for (const [key, before] of beforeFields) {
     const after = afterFields.get(key);
     if (!after) continue;
@@ -816,6 +946,14 @@ function assertFieldsOnlyNarrow(base: JsonObject, merged: JsonObject, origin: st
       throw new Error(`${origin} removes fields.${key}.immutable declared by an earlier layer.`);
     }
     assertOrListOnlyNarrows(before.writtenBy, after.writtenBy, `fields.${key}.writtenBy`, origin);
+    assertTransitionsOnlyNarrow(before, after, updateRoles, `fields.${key}`, origin);
+    assertClassificationOnlyNarrows(
+      before.classification,
+      after.classification,
+      `fields.${key}.classification`,
+      origin,
+    );
+    assertExactWhenPresent(before.deriveOnCreate, after.deriveOnCreate, `fields.${key}.deriveOnCreate`, origin);
   }
 }
 
@@ -950,7 +1088,7 @@ function assertOperationOnlyNarrows(
   if (!after) {
     throw new Error(`${origin} removes ${path} declared by an earlier layer.`);
   }
-  for (const key of ["implementation", "target", "input", "effects", "reliability", "tenancy"] as const) {
+  for (const key of ["implementation", "target", "input", "effects", "reliability", "tenancy", "stamps"] as const) {
     assertExactWhenPresent(before[key], after[key], `${path}.${key}`, origin);
   }
 
@@ -1060,6 +1198,13 @@ function assertEntitySecurityOnlyNarrows(baseValue: JsonValue, mergedValue: Json
   assertFieldsOnlyNarrow(base, merged, origin);
   assertRowAccessOnlyNarrows(base, merged, origin);
   assertOperationsOnlyNarrow(base, merged, origin);
+
+  if (
+    objectProperty(base, "hardDelete")?.requireNeverPublished === true &&
+    objectProperty(merged, "hardDelete")?.requireNeverPublished !== true
+  ) {
+    throw new Error(`${origin} removes hardDelete.requireNeverPublished declared by an earlier layer.`);
+  }
 
   if (base.workerAccess === undefined && merged.workerAccess !== undefined) {
     throw new Error(`${origin} enables workerAccess not granted by the owning layer.`);

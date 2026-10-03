@@ -354,6 +354,148 @@ describe("resolveAuthoringLayers", () => {
     }
   });
 
+  const lifecycleEntity = {
+    ...securedEntity,
+    hardDelete: { requireNeverPublished: true },
+    fields: [
+      ...securedEntity.fields,
+      {
+        key: "status",
+        osfType: "string",
+        options: { type: "static", values: ["draft", "approved", "invoiced"] },
+        transitions: {
+          initial: "draft",
+          rules: [
+            {
+              key: "approve",
+              from: ["draft"],
+              to: "approved",
+              preconditions: [{ field: "notes", present: true, refusal: { en: "Add notes first." } }],
+              stamps: [{ field: "approvedBy", value: "actor" }],
+            },
+            {
+              key: "invoice",
+              from: ["approved"],
+              to: "invoiced",
+              auth: { roles: ["Widgets.Manage"], alsoRequire: ["Finance.Write"] },
+              writes: ["notes"],
+            },
+          ],
+        },
+      },
+      { key: "approvedBy", osfType: "string" },
+      { key: "taxNumber", osfType: "string", classification: { sensitivity: "pii" } },
+      { key: "slug", osfType: "string", deriveOnCreate: { from: "name", transform: "slug", onConflict: "suffix" } },
+      {
+        key: "parent",
+        osfType: "Widget",
+        relationship: { inverse: { ownership: "owned", childLock: "locked" } },
+      },
+      { key: "parts", osfType: "Part", cardinality: "many", childAuthorization: "owner", childLock: "locked" },
+    ],
+    operations: {
+      ...securedEntity.operations,
+      approve: { ...securedEntity.operations.approve, stamps: [{ field: "approvedBy", source: "actorRelation" }] },
+    },
+  };
+
+  test("entity patches may narrow transitions and keep lifecycle contracts", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/entities/core/widget.yaml", lifecycleEntity);
+    writeYaml(root, "overlay/entities/core/widget.yaml", {
+      kind: "entityPatch",
+      fields: [
+        {
+          key: "status",
+          transitions: {
+            rules: [
+              {
+                key: "approve",
+                auth: { roles: ["Widgets.Edit"] },
+                preconditions: [{ field: "notes", present: true, refusal: { en: "Write notes first." } }],
+              },
+              { key: "invoice", auth: { alsoRequire: ["Finance.Write", "Finance.Approve"] } },
+            ],
+          },
+        },
+        { key: "taxNumber", classification: { sensitivity: "bsn" } },
+        { key: "parts", label: { en: "Parts" } },
+      ],
+    });
+    configureLayers(root, ["base", "overlay"]);
+
+    const resolved = resolveAuthoringLayers(root);
+    const merged = YAML.parse(readFileSync(join(resolved, "entities/core/widget.yaml"), "utf8"));
+    const status = merged.fields.find((field: { key: string }) => field.key === "status");
+    expect(status.transitions.rules[0].auth.roles).toEqual(["Widgets.Edit"]);
+    expect(status.transitions.rules[1].auth.alsoRequire).toEqual(["Finance.Write", "Finance.Approve"]);
+  });
+
+  test("entity patches cannot widen transitions or drop lifecycle contracts", () => {
+    const rule = (key: string, change: object) => ({
+      fields: [{ key: "status", transitions: { rules: [{ key, ...change }] } }],
+    });
+    for (const [patch, error] of [
+      [rule("invoice", { auth: null }), /widens fields\.status\.transitions\.rules\.invoice\.auth\.roles/],
+      [
+        rule("invoice", { auth: { roles: ["Widgets.Manage", "Widgets.Read"] } }),
+        /widens fields\.status\.transitions\.rules\.invoice\.auth\.roles/,
+      ],
+      [
+        rule("approve", { auth: { roles: ["Widgets.Edit", "Widgets.Read"] } }),
+        /widens fields\.status\.transitions\.rules\.approve\.auth\.roles/,
+      ],
+      [
+        rule("invoice", { auth: { alsoRequire: [] } }),
+        /widens fields\.status\.transitions\.rules\.invoice\.auth\.alsoRequire/,
+      ],
+      [rule("approve", { preconditions: [] }), /widens fields\.status\.transitions\.rules\.approve\.preconditions/],
+      [rule("approve", { from: ["draft", "invoiced"] }), /widens fields\.status\.transitions\.rules\.approve\.from/],
+      [rule("approve", { stamps: null }), /changes fields\.status\.transitions\.rules\.approve\.stamps/],
+      [rule("approve", { writes: ["taxNumber"] }), /changes fields\.status\.transitions\.rules\.approve\.writes/],
+      [
+        rule("reopen", { from: ["invoiced"], to: "draft" }),
+        /adds fields\.status\.transitions\.rules\.reopen/,
+      ],
+      [{ fields: [{ key: "status", transitions: null }] }, /removes fields\.status\.transitions/],
+      [{ operations: { approve: { stamps: null } } }, /changes operations\.approve\.stamps/],
+      [
+        { fields: [{ key: "taxNumber", classification: { sensitivity: "internal" } }] },
+        /downgrades fields\.taxNumber\.classification/,
+      ],
+      [{ fields: [{ key: "taxNumber", classification: null }] }, /downgrades fields\.taxNumber\.classification/],
+      [{ fields: [{ key: "slug", deriveOnCreate: null }] }, /changes fields\.slug\.deriveOnCreate/],
+      [{ fields: [{ key: "parts", childLock: null }] }, /changes fields\.parts\.childLock/],
+      [
+        { fields: [{ key: "parent", relationship: { inverse: { childLock: null } } }] },
+        /changes fields\.parent\.relationship\.inverse\.childLock/,
+      ],
+      [
+        { fields: [{ key: "parent", relationship: { inverse: { childAuthorization: "owner" } } }] },
+        /adds fields\.parent\.relationship\.inverse\.childAuthorization: owner/,
+      ],
+      [
+        { fields: [{ key: "owner", osfType: "Widget", relationship: { inverse: { childAuthorization: "owner" } } }] },
+        /adds fields\.owner\.relationship\.inverse\.childAuthorization: owner/,
+      ],
+      [
+        { fields: [{ key: "notes", childAuthorization: "owner" }] },
+        /adds fields\.notes\.childAuthorization: owner/,
+      ],
+      [
+        { fields: [{ key: "notes", relationship: { ownership: "owned" } }] },
+        /adds fields\.notes\.relationship\.ownership: owned/,
+      ],
+      [{ hardDelete: null }, /removes hardDelete\.requireNeverPublished/],
+    ] as const) {
+      const root = makeRepo();
+      writeYaml(root, "base/entities/core/widget.yaml", lifecycleEntity);
+      writeYaml(root, "overlay/entities/core/widget.yaml", { kind: "entityPatch", ...patch });
+      configureLayers(root, ["base", "overlay"]);
+      expect(() => resolveAuthoringLayers(root), JSON.stringify(patch)).toThrow(error);
+    }
+  });
+
   test("entity patches may add a new plugin operation without changing owner operations", () => {
     const root = makeRepo();
     writeYaml(root, "base/entities/core/widget.yaml", securedEntity);

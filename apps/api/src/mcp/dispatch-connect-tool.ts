@@ -6,7 +6,7 @@
 
 /** The connect helper of a derived tool: a personal or organization sign-in at the provider. */
 import { connectProviderStep } from "./dispatch-connect-provider.js";
-import { type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import { withDbSession } from "../db/session.js";
 import { listGeneratedEntitiesForTable } from "../operations/entity/index.js";
 import { deriveToolName, derivedHelperAvailable, derivedToolsFromRows } from "./derived-tools.js";

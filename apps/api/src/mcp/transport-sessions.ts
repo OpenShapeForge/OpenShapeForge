@@ -4,8 +4,8 @@
  * of generated-mcp-server.ts, verbatim.
  */
 import { randomUUID } from "node:crypto";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
+import { Server } from "@modelcontextprotocol/server";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { SHORT_ADDRESS_VARY } from "./address.js";
 import { HttpError } from "../rest/http-error.js";
@@ -16,9 +16,10 @@ import {
   withFreshRelationGroupMemberships,
 } from "./stateful-session-authorization.js";
 import { carrySessionIdentity } from "./session-info.js";
-import { clientInfoFromInitializeBody, rememberSessionClient } from "./session-client.js";
+import { clientInfoFromEnvelopeBody, clientInfoFromInitializeBody, rememberSessionClient } from "./session-client.js";
 import { sessionOpeningSentence } from "./session-opening.js";
 import { catalogDerivedTools } from "./catalog.js";
+import { handleModernMcpRequest } from "./modern-http.js";
 import type { McpRegistrationOptions, McpRouteContext } from "./route-context.js";
 import type { BuildServer } from "./generated-mcp-server.js";
 import { resolveServerIcons } from "./server-icons.js";
@@ -43,7 +44,7 @@ export function createTransportSessions(input: {
   // per-process; a multi-replica deployment needs session affinity on this
   // path.
   type McpSessionEntry = {
-    transport: StreamableHTTPServerTransport;
+    transport: NodeStreamableHTTPServerTransport;
     server: Server;
     /** Resource path the session was initialized on; it is not portable. */
     resource: string;
@@ -121,6 +122,12 @@ export function createTransportSessions(input: {
   ): Promise<void> => {
     void reply.header("vary", SHORT_ADDRESS_VARY);
     const { db, session, resource } = await requireMcpSession(request);
+    rememberSessionClient(session, clientInfoFromEnvelopeBody(request.body));
+    if (await handleModernMcpRequest(request, reply, async () => buildServer(
+      db, session, options.modules, options.modulePlatform, options.egressOwner,
+      notifyDerivedDefinitionChanged, false, undefined,
+      await sessionOpeningSentence({ db, session }),
+    ), (server) => options.modulePlatform?.unregisterServer(server))) return;
 
     const sessionHeader = request.headers["mcp-session-id"];
     const sessionId = Array.isArray(sessionHeader)
@@ -208,7 +215,7 @@ export function createTransportSessions(input: {
         undefined,
         await resolveServerIcons(options.modules, options.modulePlatform, statefulSession),
       );
-      const transport = new StreamableHTTPServerTransport({
+      const transport = new NodeStreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (id) => {
           mcpSessions.set(id, {
@@ -235,11 +242,8 @@ export function createTransportSessions(input: {
         options.modulePlatform?.unregisterServer(server);
       };
       reply.hijack();
-      // The SDK declares Transport's optional callbacks as required-when-present,
-      // which collides with this repo's exactOptionalPropertyTypes. The cast is
-      // to the SDK's own Transport shape and changes no behaviour.
       await server.connect(
-        transport as unknown as Parameters<Server["connect"]>[0],
+        transport,
       );
       await withFreshRelationGroupMemberships(
         session,
@@ -263,7 +267,7 @@ export function createTransportSessions(input: {
     // `sessionIdGenerator` is omitted rather than set to undefined: the SDK
     // reads it as `=== undefined` to mean stateless, and omitting keeps
     // exactOptionalPropertyTypes happy.
-    const transport = new StreamableHTTPServerTransport({
+    const transport = new NodeStreamableHTTPServerTransport({
       enableJsonResponse: true,
     });
     reply.raw.on("close", () => {
@@ -273,7 +277,7 @@ export function createTransportSessions(input: {
     });
     reply.hijack();
     await server.connect(
-      transport as unknown as Parameters<Server["connect"]>[0],
+      transport,
     );
     await transport.handleRequest(request.raw, reply.raw, request.body);
   };

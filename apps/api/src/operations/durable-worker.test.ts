@@ -14,7 +14,7 @@ function fixture(mode: "none" | "keyed" | "natural" = "keyed") {
   let deny = false, uncertain = false, pinFails = false;
   let wrongTenant = false, wrongClient = false, now = 1000;
   let pinCalls = 0;
-  const calls: Array<{ url: string; method: string; body: unknown; redirect: unknown }> = [];
+  const calls: Array<{ url: string; method: string; body: unknown; redirect: unknown; key: string | null }> = [];
   const definition = { id: "Note.create", intent: "Note.create", effects: { data: "write", external: "none" },
     reliability: { idempotency: { mode } } } as RuntimeOperationDefinition;
   const broker = createDurableWorkerBroker({
@@ -28,7 +28,8 @@ function fixture(mode: "none" | "keyed" | "natural" = "keyed") {
     verify: async () => ({ tenantId: wrongTenant ? "other" : identity.tenantId, userId: "service-subject",
       serviceIdentityId: wrongClient ? "different-service" : identity.clientId }),
     fetch: (async (url: URL, init: RequestInit) => {
-      calls.push({ url: String(url), method: init?.method ?? "GET", body: init?.body, redirect: init?.redirect });
+      calls.push({ url: String(url), method: init?.method ?? "GET", body: init?.body, redirect: init?.redirect,
+        key: new Headers(init?.headers).get("idempotency-key") });
       if (String(url).endsWith("/token")) return Response.json({ access_token: `token-${calls.length}` });
       if (String(url).endsWith("/execute")) {
         if (uncertain) throw new Error("private bearer transport details must not escape");
@@ -117,6 +118,83 @@ test("keyed retries preserve the same key; no lease/challenge/confirmation is fa
   expect(request.operation.idempotencyKey).toBe("stable-key");
   expect(request.operation.input).toEqual({ value: "requested" });
   expect(await f.broker.execute(request)).toMatchObject({ error: { code: "OPERATION_TEMPORARILY_UNAVAILABLE", retryable: true } });
+});
+
+test("an authored Operation delivery key is preserved independently of the durable visit key", async () => {
+  const f = fixture();
+  f.definition.reliability.idempotency.inputField = "deduplicationKey";
+  f.setWork({ ...f.work(), operation: { ...f.work().operation,
+    input: { value: "requested", deduplicationKey: "notification-delivery" } } });
+  const request = await f.broker.authorize(reference);
+  expect(request.operation.idempotencyKey).toBe("notification-delivery");
+  expect(request.operation.input).toEqual({ value: "requested", deduplicationKey: "notification-delivery" });
+  expect(f.work().operation.idempotencyKey).toBe("stable-key");
+  expect(Object.isFrozen(request.operation.input)).toBe(true);
+  expect(await f.broker.execute(request)).toHaveProperty("data");
+  const dispatched = f.calls.find(call => call.url.endsWith("/execute"))!;
+  expect(dispatched.key).toBe("notification-delivery");
+  expect(JSON.parse(String(dispatched.body)).input).toEqual(request.operation.input);
+});
+
+test("a missing declared key is injected into the immutable canonical body and header", async () => {
+  const f = fixture();
+  f.definition.reliability.idempotency.inputField = "idempotencyKey";
+  const request = await f.broker.authorize(reference);
+  expect(request.operation.input).toEqual({ value: "requested", idempotencyKey: "stable-key" });
+  expect(f.work().operation.input).toEqual({ value: "requested" });
+  expect(await f.broker.execute(request)).toHaveProperty("data");
+  const dispatched = f.calls.find(call => call.url.endsWith("/execute"))!;
+  expect(dispatched.key).toBe("stable-key");
+  expect(JSON.parse(String(dispatched.body)).input.idempotencyKey).toBe(dispatched.key);
+});
+
+test("authored delivery keys survive transport retries and may intentionally deduplicate later visits", async () => {
+  const f = fixture();
+  f.definition.reliability.idempotency.inputField = "deduplicationKey";
+  f.setWork({ ...f.work(), operation: { ...f.work().operation,
+    input: { value: "requested", deduplicationKey: "same-delivery" } } });
+  f.uncertain();
+  const first = await f.broker.authorize(reference);
+  expect(await f.broker.execute(first)).toMatchObject({ error: { retryable: true } });
+  const retry = await f.broker.authorize({ ...reference, attempt: 2 });
+  expect(retry.operation).toEqual(first.operation);
+  expect(await f.broker.execute(retry)).toMatchObject({ error: { retryable: true } });
+  f.setWork({ ...f.work(), operation: { ...f.work().operation, idempotencyKey: "next-visit-key" } });
+  const next = await f.broker.authorize({ ...reference, workId: "command-2" });
+  expect(next.operation.idempotencyKey).toBe("same-delivery");
+  expect(f.work().operation.idempotencyKey).toBe("next-visit-key");
+});
+
+test("the canonical key remains bound to the exact capability and persisted input", async () => {
+  const f = fixture();
+  f.definition.reliability.idempotency.inputField = "deduplicationKey";
+  f.setWork({ ...f.work(), operation: { ...f.work().operation, input: { deduplicationKey: "original" } } });
+  const first = await f.broker.authorize(reference);
+  expect(await f.broker.execute({ ...first, operation: { ...first.operation, idempotencyKey: "forged" } }))
+    .toMatchObject({ error: { code: "DURABLE_CAPABILITY_REQUIRED" } });
+  f.setWork({ ...f.work(), operation: { ...f.work().operation, input: { deduplicationKey: "changed" } } });
+  expect(await f.broker.execute(first)).toMatchObject({ error: { code: "DURABLE_CLAIM_CHANGED" } });
+  expect(f.calls.some(call => call.url.endsWith("/execute"))).toBe(false);
+});
+
+test("changing the declared key field changes the pinned contract before dispatch or retry", async () => {
+  const f = fixture();
+  f.definition.reliability.idempotency.inputField = "deduplicationKey";
+  const request = await f.broker.authorize(reference);
+  f.definition.reliability.idempotency.inputField = "idempotencyKey";
+  expect(await f.broker.execute(request)).toMatchObject({ error: { code: "OPERATION_CONTRACT_CHANGED" } });
+  await expect(f.broker.authorize({ ...reference, attempt: 2 })).rejects.toHaveProperty("code", "OPERATION_CONTRACT_CHANGED");
+  expect(f.calls.some(call => call.url.endsWith("/execute"))).toBe(false);
+});
+
+test("invalid authored keys are refused before dispatch rather than retried as transport failures", async () => {
+  for (const key of [null, 42, "", "bad\nheader", " padded "]) {
+    const f = fixture();
+    f.definition.reliability.idempotency.inputField = "deduplicationKey";
+    f.setWork({ ...f.work(), operation: { ...f.work().operation, input: { deduplicationKey: key } } });
+    await expect(f.broker.authorize(reference)).rejects.toMatchObject({ code: "OPERATION_INPUT_INVALID", retryable: false });
+    expect(f.calls.some(call => call.url.endsWith("/execute"))).toBe(false);
+  }
 });
 
 test("a reclaimed write without a persisted contract never infers safety from the current catalog", async () => {

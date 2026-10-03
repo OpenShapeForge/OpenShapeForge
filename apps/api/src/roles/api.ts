@@ -72,6 +72,7 @@ import {
 import type { ModuleRuntimeContext } from "../modules/contract.js";
 import type { InitializedMaintenanceOwner } from "../modules/maintenance.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
+import { moduleRealtimeAuthorizer } from "../modules/realtime-resources.js";
 import { composeJobHandlers } from "../jobs/handlers.js";
 import { createJobsRuntimeModule } from "../jobs/module.js";
 import {
@@ -577,7 +578,7 @@ export function createApiApp(options: {
       });
 
     registerGeneratedRestRoutes(routes, dbOptions);
-    registerEntityChangeStream(routes, dbOptions);
+    registerEntityChangeStream(routes, {...dbOptions,...(modulePlatform ? {authorizeResource:moduleRealtimeAuthorizer(initialised.loaded,modulePlatform)} : {})});
     registerRuntimeOperationRestRoutes(routes, moduleContext);
     registerEditLeaseRestRoutes(routes, dbOptions);
     if (modulePlatform) {

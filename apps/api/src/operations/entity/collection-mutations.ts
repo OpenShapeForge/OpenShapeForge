@@ -21,6 +21,8 @@ import { assertEntityValuesValid } from "./input-validation.js";
 import { assertEntityValueInput, entityValueCarriers, prepareEntityValueWriteInTransaction } from "./entity-value-io.js";
 import { assertRelationshipConstraintsInTransaction } from "./relationship-constraints.js";
 import type { EntityOperationContract, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
+import type { LeaseProtectedOperation } from "./edit-leases.js";
+import { hasConsumedCollectionLease } from "./collection-lease-context.js";
 
 /** Compiler/boot-owned binding, never a request-selected table or FK. */
 export type CollectionMutationBinding = { entityName: string; field: string; action: "insert" | "move" | "update" | "remove" };
@@ -59,7 +61,7 @@ const invalid = (message: string): never => { throw generatedCrudError(message, 
  * child's Operation must still exist and be unguarded; only its role list is
  * widened by the owner's.
  */
-function safeOperation(operations: readonly EntityOperationContract[], table: GeneratedCrudTable, intent: "list" | "create" | "update", session: DbSessionInput, via?: EntityOperationContract) {
+function safeOperation(operations: readonly EntityOperationContract[], table: GeneratedCrudTable, intent: "list" | "create" | "update", session: DbSessionInput, via?: EntityOperationContract, guardedOwnerLease = false) {
   if (via) {
     if (!isGeneratedCrudOperationEnabled(table, intent)) throw generatedCrudError(`Generated CRUD operation ${intent} is not enabled for ${table.source?.authoringEntityName ?? table.name}.`, "GENERATED_CRUD_OPERATION_NOT_ENABLED");
   } else requireEntityOperation(table, intent, session);
@@ -71,7 +73,7 @@ function safeOperation(operations: readonly EntityOperationContract[], table: Ge
   const extra = op as unknown as Record<string, unknown>;
   const source = table.source as unknown as Record<string, unknown>;
   if (op.implementation?.type !== "entity" || op.interaction.confirmation.mode !== "none" ||
-      op.interaction.secureInput || op.concurrency?.editLease || op.prerequisites?.length ||
+      op.interaction.secureInput || (op.concurrency?.editLease && !guardedOwnerLease) || op.prerequisites?.length ||
       op.effects.external !== "none" || op.reliability.idempotency.mode === "keyed" ||
       ["hooks", "hook", "availability", "before", "after"].some((key) => extra[key] !== undefined || source[key] !== undefined)) {
     return unsupported("This Operation has safeguards that collection mutations cannot execute transactionally.");
@@ -96,7 +98,7 @@ function fieldRow(table: GeneratedCrudTable, row: GeneratedEntityRow): Record<st
 }
 
 export function createCollectionMutationExecutor(catalog: { tables: readonly GeneratedCrudTable[]; operations: readonly EntityOperationContract[]; entityValues?: typeof generatedEntityValues; derivedTools?: readonly DerivedToolsCatalogEntry[] }) {
-  async function execute(db: OpenShapeForgeDatabase | undefined, session: DbSessionInput, binding: CollectionMutationBinding, request: CollectionMutationRequest, transaction?: Transaction<DB>): Promise<CollectionMutationResult> {
+  async function execute(db: OpenShapeForgeDatabase | undefined, session: DbSessionInput, binding: CollectionMutationBinding, request: CollectionMutationRequest, transaction?: Transaction<DB>, guard?: LeaseProtectedOperation): Promise<CollectionMutationResult> {
     if (!["insert", "move", "update", "remove"].includes(binding.action)) unsupported("Only insert, move, update and remove are supported.");
     if (!request || typeof request !== "object" || Array.isArray(request)) invalid("Collection mutation input must be an object.");
     const parents = catalog.tables.filter((table) => table.source?.authoringEntityName === binding.entityName);
@@ -128,7 +130,13 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
     const inverse = target.source?.graphql?.relationships?.find((item) => item.fieldKey === relation.inverse);
     if (!foreignKey || foreignKey.type !== "uuid" || foreignKey.writtenBy?.length || inverse?.resolve !== "belongsTo" || inverse.target !== owner.source?.graphql?.typeName || inverse.foreignKey !== foreignKey.name || (relation.sortable && (!position || position.type !== "integer" || position.immutable || position.writtenBy?.length || !target.columns.some((column) => column.name === "updated_at" && column.type === "timestamptz")))) unsupported("Inverse or position metadata is inconsistent.");
     if (target.realtime?.readPredicate !== '"tenant_id" = app.current_tenant()' || target.realtime.visibilityColumns.length !== 1 || target.realtime.visibilityColumns[0] !== "tenant_id") unsupported("The collection must have complete tenant-level read visibility.");
-    const parentOp = safeOperation(catalog.operations, owner, "update", session);
+    const guardedOwnerLease = guard?.entityName === binding.entityName && guard.intent === "invoke" &&
+      hasConsumedCollectionLease(transaction, session, guard, request.id, request.expectedVersion);
+    const parentOp = safeOperation(catalog.operations, owner, "update", session, undefined, guardedOwnerLease);
+    if (parentOp.concurrency?.editLease && (!guard?.concurrency?.editLease ||
+      parentOp.concurrency.editLease.expiresAfterInactivity !== guard.concurrency.editLease.expiresAfterInactivity)) {
+      unsupported("The collection Operation must inherit its owner's edit lease.");
+    }
     // Only a collection authored with `childAuthorization: owner` lends the owner's roles to its children.
     const via = relation.childAuthorization === "owner" ? parentOp : undefined;
     const readOp = safeOperation(catalog.operations, target, "list", session, via);
@@ -316,7 +324,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
   }
   return Object.assign(
     (db: OpenShapeForgeDatabase, session: DbSessionInput, binding: CollectionMutationBinding, request: CollectionMutationRequest) => execute(db, session, binding, request),
-    { inTransaction: (trx: Transaction<DB>, session: DbSessionInput, binding: CollectionMutationBinding, request: CollectionMutationRequest) => execute(undefined, session, binding, request, trx) },
+    { inTransaction: (trx: Transaction<DB>, session: DbSessionInput, binding: CollectionMutationBinding, request: CollectionMutationRequest, guard?: LeaseProtectedOperation) => execute(undefined, session, binding, request, trx, guard) },
   );
 }
 
@@ -325,6 +333,6 @@ export function executeCollectionMutation(db: OpenShapeForgeDatabase, session: D
 }
 
 /** The canonical Operation wrapper owns the verified DB session, commit and rollback. */
-export function executeCollectionMutationInTransaction(trx: Transaction<DB>, session: DbSessionInput, binding: CollectionMutationBinding, request: CollectionMutationRequest): Promise<CollectionMutationResult> {
-  return createCollectionMutationExecutor({ tables: getGeneratedCrudTables(), operations: (rawCatalog as unknown as { entityOperations: EntityOperationContract[] }).entityOperations }).inTransaction(trx, session, binding, request);
+export function executeCollectionMutationInTransaction(trx: Transaction<DB>, session: DbSessionInput, binding: CollectionMutationBinding, request: CollectionMutationRequest, guard?: LeaseProtectedOperation): Promise<CollectionMutationResult> {
+  return createCollectionMutationExecutor({ tables: getGeneratedCrudTables(), operations: (rawCatalog as unknown as { entityOperations: EntityOperationContract[] }).entityOperations }).inTransaction(trx, session, binding, request, guard);
 }

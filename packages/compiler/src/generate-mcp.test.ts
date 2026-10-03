@@ -356,6 +356,21 @@ describe("buildMcpCatalog", () => {
     }
   });
 
+  it("validates authored invoke offers in generic create responses with canonical intent types", () => {
+    const generic = contract({ mcp: { tools: "generic", toolPrefix: "widget", operations: { list: false, get: false, create: true, update: false, delete: false } } });
+    const create = buildMcpCatalog([input(generic)], "test").tools.find((tool) => tool.operation === "create")!;
+    const validate = new Ajv2020.default({ strict: false, validateFormats: false }).compile(create.outputSchema!);
+    const response = {
+      data: { id: "00000000-0000-4000-8000-000000000001", tenantId: "00000000-0000-4000-8000-000000000002",
+        createdAt: "2026-10-03T12:00:00.000Z", updatedAt: "2026-10-03T12:00:00.000Z", name: "Draft" },
+      operations: [{ operation: { id: "Widget.confirm", intent: "invoke" }, available: true,
+        binding: { target: { entityId: "core.Widget", id: "00000000-0000-4000-8000-000000000001" }, input: {} } }],
+    };
+    expect(validate(response)).toBe(true);
+    expect(validate({ ...response, operations: [{ ...response.operations[0], operation: { id: "Widget.confirm", intent: 42 } }] })).toBe(false);
+    expect(validate({ ...response, operations: [{ ...response.operations[0], unexpected: true }] })).toBe(false);
+  });
+
   it("does not advertise update as idempotent while it repeats events and updatedAt", () => {
     const catalog = buildMcpCatalog([input(contract())], "test");
     const update = catalog.tools.find((tool) => tool.operation === "update")!;

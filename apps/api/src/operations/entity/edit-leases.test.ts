@@ -52,7 +52,7 @@ describe("central entity edit leases", () => {
     expect(successData(0)).toContain("leaseToken");
     expect(successData(1)).not.toContain("leaseToken");
     const ajv = new Ajv2020.default({ strict: false, validateFormats: false });
-    const validateFailure = ajv.compile(tools[0]!.outputSchema!);
+    const validateFailure = ajv.compile(tools[0]!.outputSchema as import("ajv").AnySchema);
     expect(validateFailure({
       error: {
         code: "LOCKED",

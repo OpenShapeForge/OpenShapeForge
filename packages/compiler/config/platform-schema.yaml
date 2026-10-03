@@ -225,6 +225,8 @@ tables:
       - { name: sequence, type: bigint, required: true, generated: identity }
       # Assigned by the stream projector only after the writer has committed.
       - { name: delivery_sequence, type: bigint }
+      # Immutable writer transaction identity; workflow activation captures commit visibility.
+      - { name: origin_xid, type: text, required: true, default: "pg_current_xact_id()::text" }
       - { name: occurred_at, type: timestamptz, required: true, default: now() }
     indexes:
       - name: entity_events_tenant_sequence_idx

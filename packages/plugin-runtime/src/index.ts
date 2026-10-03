@@ -8,6 +8,8 @@ import type {
 import type { Kysely, Transaction } from "kysely";
 import type { RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
 import type { RuntimeSettingsService } from "./settings.js";
+import type { RuntimeWebhookSecretServices } from "./webhook-secrets.js";
+export type { RuntimeWebhookSecretServices, RuntimeWebhookSignatureInput } from "./webhook-secrets.js";
 import type { RuntimeRecordAccessServices } from "./record-access.js";
 export type { RuntimeRecordAccessServices, RuntimeRecordAccessRequest, RuntimeRecordAccessIntent, RuntimeStoredFieldProjectionRequest } from "./record-access.js";
 export type { RuntimeSettingValue, RuntimeSettingsService } from "./settings.js";
@@ -260,7 +262,11 @@ export type RuntimeOperationDefinition = OperationReference & {
     external: "none" | "read" | "write";
   };
   reliability: {
-    idempotency: { mode: "natural" | "keyed" | "none" };
+    idempotency: {
+      mode: "natural" | "keyed" | "none";
+      /** Keyed Operations bind the canonical request key to this input field. */
+      inputField?: string;
+    };
   };
   /** Core-issued completion proof is required before this Operation may run. */
   prerequisites?: readonly OperationPrerequisite[];
@@ -380,6 +386,8 @@ export type PluginDatabase = {
 };
 
 export type PluginPlatformServices = {
+  /** Host-owned signing secret sealing and raw-body verification; no plaintext read API. */
+  readonly webhookSecrets?: RuntimeWebhookSecretServices<PluginSessionContext>;
   readonly records: RuntimeRecordAccessServices<PluginSessionContext>;
   readonly settings: RuntimeSettingsService;
   readonly artifacts: RuntimeArtifactServices<PluginSessionContext>;
@@ -703,6 +711,9 @@ export type ModuleOperationContextContract<
   reply?: Reply;
   /** Present only for a registered owner during an active Control invocation. */
   runSeed?: RunMaintenanceSeed;
+  /** Stamp only fields authored as written by this exact record-bound Operation.
+   * Core retains the live session, entity, writer and canonical mutation path. */
+  applyOwnedEntityFields?(input: { id: string; values: Readonly<Record<string, unknown>> }): Promise<Readonly<Record<string, unknown>>>;
   /**
    * Live, host-minted bridge to a temporary core compatibility handler.
    * The canonical Operation handler remains the public entry point; this
@@ -766,6 +777,16 @@ export type ModuleReadinessCheck = {
   check(): Promise<void> | void;
 };
 
+/** Static Agent Skills shipped with a plugin; never tenant-authored instructions. */
+export type RuntimeAgentSkill = {
+  /** Slash-separated namespace ending in the SKILL.md frontmatter name. */
+  path: string;
+  /** Omit for public documentation; otherwise at least one role must match. */
+  roles?: readonly string[];
+  /** Complete file manifest. Paths are relative to this skill directory. */
+  files: Readonly<Record<string, { text: string; mimeType: string }>>;
+};
+
 export type RuntimeModuleContract<
   RuntimeContext,
   OperationHandler,
@@ -781,6 +802,10 @@ export type RuntimeModuleContract<
 > = {
   /** Must match the compiler plugin name. */
   name: string;
+  /** Server-owned documentation, projected as MCP skills and ordinary resources. */
+  agentSkills?: readonly RuntimeAgentSkill[];
+  /** Journal hints for private module resources, authorized by a live canonical read. */
+  realtimeResources?: readonly {entity: string; readOperationId: string; idInputField: string}[];
   init?(context: RuntimeContext): Promise<void>;
   readinessChecks?: readonly ModuleReadinessCheck[];
   close?(): Promise<void>;

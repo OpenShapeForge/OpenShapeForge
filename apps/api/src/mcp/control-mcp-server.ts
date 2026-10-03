@@ -47,17 +47,11 @@
  * tenant issuer's.
  */
 import { randomUUID } from "node:crypto";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import {
-  CallToolRequestSchema,
-  ListResourcesRequestSchema,
-  ListToolsRequestSchema,
-  ReadResourceRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
-import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
+import { Server } from "@modelcontextprotocol/server";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/server";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { clientInfoFromInitializeBody, type McpClientInfo } from "./session-client.js";
+import { clientInfoFromEnvelopeBody, clientInfoFromInitializeBody, type McpClientInfo } from "./session-client.js";
 import {
   controlSessionHttpError,
   resolveControlSession,
@@ -96,6 +90,7 @@ import {
   requestOrigin,
 } from "./protected-resource-metadata.js";
 import { createRequestFreshContext } from "./stateful-session-authorization.js";
+import { handleModernMcpRequest } from "./modern-http.js";
 
 /** The route this server mounts the control MCP on. */
 export const CONTROL_MCP_ROUTE_PATH = "/api/control/mcp";
@@ -345,13 +340,13 @@ function buildPlatformServer(input: {
   const access = () => ({ tools: tools().length, resources: 1 });
   const presentation: ControlPresentation = { client: input.client, access };
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  server.setRequestHandler('tools/list', async () => ({
     tools: tools().map(({ tool }) => tool),
   }));
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+  server.setRequestHandler('resources/list', async () => ({
     resources: [PLATFORM_SESSION_RESOURCE],
   }));
-  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  server.setRequestHandler('resources/read', async (request) => {
     if (request.params.uri !== PLATFORM_SESSION_RESOURCE_URI) {
       throw new HttpError(404, "NOT_FOUND", `Unknown resource "${request.params.uri}".`);
     }
@@ -379,7 +374,7 @@ function buildPlatformServer(input: {
   });
   // Unknown names and Operations this session may not use get the same
   // refusal: NOT_FOUND, no hint of what exists.
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler('tools/call', async (request) => {
     const match = tools().find(({ tool }) => tool.name === request.params.name);
     if (!match) {
       return failedToolResult(
@@ -547,7 +542,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
     });
 
     type SessionEntry = {
-      transport: StreamableHTTPServerTransport;
+      transport: NodeStreamableHTTPServerTransport;
       server: Server;
       subject: string;
       issuer: string;
@@ -580,6 +575,9 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
       const { db, session } = await requirePlatformSession(request);
       const { administrator } = session;
       const log = (error: unknown) => request.log.error({ err: error }, "Platform tool failed.");
+      if (await handleModernMcpRequest(request, reply, () => buildPlatformServer({
+        context, db, session: () => session, bound, client: clientInfoFromEnvelopeBody(request.body), log,
+      }))) return;
       const sessionHeader = request.headers["mcp-session-id"];
       const sessionId = Array.isArray(sessionHeader) ? sessionHeader[0] : sessionHeader;
 
@@ -615,7 +613,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
           client,
           log,
         });
-        const transport = new StreamableHTTPServerTransport({
+        const transport = new NodeStreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
             sessions.set(id, {
@@ -633,7 +631,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
         };
         reply.hijack();
         await requestSession.run(session, async () => {
-          await server.connect(transport as unknown as Parameters<Server["connect"]>[0]);
+          await server.connect(transport);
           await transport.handleRequest(request.raw, reply.raw, request.body);
         });
         return;
@@ -641,13 +639,13 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
 
       // Sessionless single shot, for probes and scripted proofs.
       const server = buildPlatformServer({ context, db, session: () => session, bound, client: null, log });
-      const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
+      const transport = new NodeStreamableHTTPServerTransport({ enableJsonResponse: true });
       reply.raw.on("close", () => {
         void transport.close();
         void server.close();
       });
       reply.hijack();
-      await server.connect(transport as unknown as Parameters<Server["connect"]>[0]);
+      await server.connect(transport);
       await transport.handleRequest(request.raw, reply.raw, request.body);
     };
 

@@ -41,7 +41,7 @@ import {
 import { configurationAppResult, configurationHandoffResult } from "./handoff-results.js";
 import { failed } from "./tool-results.js";
 import { ENVELOPE_KEYS, assertSchemaValid, envelopeSchema } from "./tool-schema.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { DirectCallScope } from "./tool-dispatch.js";
 /**
  * The CRUD execution of an entity tool the session may invoke: validates

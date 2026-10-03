@@ -4,7 +4,8 @@
  * verbatim.
  */
 import { OperationFailure } from "@openshapeforge/operations";
-import { ErrorCode, McpError, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { readAgentSkillResource } from "./agent-skills.js";
+import { ProtocolError, ProtocolErrorCode } from "@modelcontextprotocol/server";
 import { entityOperationRef, executeEntityOperation } from "../operations/entity/index.js";
 import { renderConfigurationApp } from "./configuration-app.js";
 import { ARTIFACT_UPLOAD_APP_URI, renderArtifactUploadApp } from "./artifact-upload.js";
@@ -44,6 +45,7 @@ export function registerResourceReadHandler(
   },
 ): void {
   const {
+    skillsForSession,
     canUploadArtifacts,
     coreResourceOwnership,
     db,
@@ -58,8 +60,10 @@ export function registerResourceReadHandler(
     tables,
   } = scope;
   const { onboarding, sessionInfo } = surface;
-  server.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
-    const ctx = invocationContext(extra.requestId);
+  server.setRequestHandler('resources/read', async (request, protocolContext) => {
+    const skillResource = readAgentSkillResource(skillsForSession(), request.params.uri);
+    if (skillResource) return skillResource;
+    const ctx = invocationContext(protocolContext.mcpReq.id);
     const moduleRead = await prepareModuleResourceRead(
       runtimeModules,
       request.params.uri,
@@ -76,7 +80,7 @@ export function registerResourceReadHandler(
     const fallbackOrNotFound = async () => {
       const result = await moduleFallback();
       if (result !== undefined) return result;
-      throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
+      throw new ProtocolError(ProtocolErrorCode.InvalidParams, "Resource not found.");
     };
     // --- session-info (whoami / osf://session) ---
     if (request.params.uri === SESSION_RESOURCE_URI) {

@@ -15,7 +15,7 @@
  * Both wired into the MCP server (session-surface.ts, dispatch-platform-tools.ts) by the same delimited-hunk
  * convention identity-link-tools.ts and session-info.ts use.
  */
-import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/server";
 import {
   getOrganizationProfile,
   setOrganizationRelation,

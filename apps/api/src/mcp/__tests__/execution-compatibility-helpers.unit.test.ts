@@ -10,8 +10,7 @@
  */
 import accountsRuntime from "../../accounts/runtime.js";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import documentsPluginRuntime from "@openshapeforge/documents/runtime";
 import versioningPluginRuntime from "@openshapeforge/versioning/runtime";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";

@@ -32,20 +32,24 @@ export function materializeCollectionOperations(
       if (!child || child.entity.valueDefinition) fail("collection child storage is absent.");
       const inverse = child.model.relationships.find((candidate) => candidate.fieldKey === relation.inverse);
       if (inverse?.kind !== "belongsTo" || inverse.target !== owner.entity.name || inverse.foreignKey !== relation.foreignKey) fail("collection inverse does not refer to its owner.");
-      const requireEntityOperation = (operation: CompiledEntityOperation | undefined, name: string): CompiledEntityOperation => {
+      const requireEntityOperation = (operation: CompiledEntityOperation | undefined, name: string, allowOwnerLease = false): CompiledEntityOperation => {
         if (!operation || operation.implementation.type !== "entity" || !operation.authorization.roles.length ||
           operation.effects.external !== "none" || operation.interaction.confirmation.mode !== "none" || operation.interaction.secureInput ||
-          operation.concurrency?.editLease || operation.prerequisites?.length || operation.reliability.idempotency.mode === "keyed") fail(`${name} needs an unguarded native entity Operation; custom handlers, leases, confirmation, prerequisites and secure input are unsupported.`);
+          (operation.concurrency?.editLease && !allowOwnerLease) || operation.prerequisites?.length || operation.reliability.idempotency.mode === "keyed") fail(`${name} needs an unguarded native entity Operation; custom handlers, child leases, confirmation, prerequisites and secure input are unsupported.`);
         return operation;
       };
-      const update = requireEntityOperation(owner.entityOperations.update, "owner update");
+      const update = requireEntityOperation(owner.entityOperations.update, "owner update", true);
       requireEntityOperation(child.entityOperations.list, "child list");
       // update and remove edit an owned child through its owner; the child's own
       // update Operation proves it is mutable, its roles are not required.
       if (relation.sortable || action === "update" || action === "remove") requireEntityOperation(child.entityOperations.update, "child update");
       if (update.concurrency?.version?.mode !== "required" || update.concurrency.version.field !== "updatedAt" ||
         !owner.storage.columns.some((column) => column.field === "updatedAt" && column.column === "updated_at" && column.type === "timestamptz")) fail("owner update requires persisted updatedAt version concurrency.");
-      if (definition.effects.data !== "write" || definition.effects.external !== "none" || definition.confirmation.mode !== "none" || definition.reliability.idempotency.mode !== "none" || definition.concurrency?.editLease) fail("unsupported collection guard/effect combination.");
+      const declaredLease = definition.concurrency?.editLease;
+      const ownerLease = update.concurrency?.editLease;
+      if (definition.effects.data !== "write" || definition.effects.external !== "none" || definition.confirmation.mode !== "none" || definition.reliability.idempotency.mode !== "none" ||
+        (declaredLease && (!ownerLease || declaredLease.mode !== ownerLease.mode ||
+          declaredLease.expiresAfterInactivity !== ownerLease.expiresAfterInactivity))) fail("unsupported collection guard/effect combination.");
 
       // A child never chooses its owner nor its lock through the owner's
       // collection Operations: every owning foreign key of the child (this
@@ -66,6 +70,10 @@ export function materializeCollectionOperations(
         ...(relation.sortable ? { beforeId: { anyOf: [{ ...uuid }, { type: "null" }], ...title("Insert before", "Invoegen voor") } } : {}),
       };
       const required = ["id", "expectedVersion"];
+      if (update.concurrency?.editLease) {
+        properties.leaseToken = { type: "string", minLength: 1, ...title("Edit lease", "Bewerkingslease") };
+        required.push("leaseToken");
+      }
       let definitions: unknown;
       if (action === "insert") {
         const create = requireEntityOperation(child.entityOperations.create, "child create");
@@ -140,7 +148,8 @@ export function materializeCollectionOperations(
         } } },
         auth: { mode: "session", roles: [...update.authorization.roles] },
         tenancy: { mode: "required" },
-        concurrency: { version: { mode: "required", field: "updatedAt" } },
+        concurrency: { version: { mode: "required", field: "updatedAt" },
+          ...(update.concurrency?.editLease ? { editLease: { ...update.concurrency.editLease } } : {}) },
         errors: [],
       };
       authored.definition = normalized;

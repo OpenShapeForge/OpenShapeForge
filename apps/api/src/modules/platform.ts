@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Core-owned services made available to reviewed runtime modules. */
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import type { Server } from "@modelcontextprotocol/server";
 import { sql, type Transaction } from "kysely";
 import { assertSameDatabase, type OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession } from "../db/session.js";
@@ -50,6 +50,7 @@ import { operationErrorOf } from "@openshapeforge/operations";
 import { ArtifactStorageRuntime } from "./artifact-storage.js";
 import { runtimeSettings } from "./settings.js";
 import { RecordAccessRuntime } from "./record-access.js";
+import { createWebhookSecretServices } from "./webhook-secrets.js";
 import {
   generatedCapabilityOperations,
   issueCapabilityGrantInTransaction,
@@ -373,6 +374,14 @@ export class ModulePlatformRuntime {
       },
     });
     this.services = {
+      webhookSecrets: createWebhookSecretServices({
+        acceptsSession: (session) => this.#acceptsScopedSession(session),
+        serviceIdentity: (tenantId) => organizationServiceIdentities().find((entry) => entry.tenantId === tenantId)?.clientId,
+        runVerified: (session, work) => {
+          if (activeOperationSessionStorage.getStore()) throw new Error("Signed webhook admission requires its own verified invocation.");
+          return this.withActiveOperationSession(session, work);
+        },
+      }),
       records: records.services,
       settings: runtimeSettings,
       artifacts: this.#artifactStorage.services,
@@ -392,7 +401,9 @@ export class ModulePlatformRuntime {
             throw new Error("Module database work requires a live verified session.");
           }
           const active = this.#activeTransaction(session, "Module database transaction");
-          return active ? fn(active) : withDbSession(this.#db, session, fn);
+          return active ? fn(active) : withDbSession(this.#db, session, (trx) =>
+            this.#recordAccessTransactionStorage.run({ session, trx }, () => fn(trx))
+          );
         },
       },
       jobs: {

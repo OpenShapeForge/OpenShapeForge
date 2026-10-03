@@ -517,6 +517,9 @@ describe("rich generated REST OpenAPI", () => {
       "retryable",
     ]);
     expect(schemas.OperationOffer!.oneOf).toHaveLength(2);
+    expect(schemas.OperationReference).toMatchObject({ properties: {
+      intent: { type: "string" },
+    } });
     expect(
       (schemas.OperationOffer!.oneOf as Array<{ properties: Record<string, unknown> }>)[0]!
         .properties.concurrency,

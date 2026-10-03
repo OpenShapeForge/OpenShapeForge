@@ -52,6 +52,7 @@ import type {
   RuntimeArtifactServices,
   RuntimeArtifactStorageContribution,
   RuntimeCapabilityGrantServices,
+  RuntimeWebhookSecretServices,
   RuntimeWorkerContextContract,
   RuntimeWorkerContract,
   RuntimeWorkerHandle,
@@ -63,15 +64,7 @@ import type {
 } from "@openshapeforge/plugin-runtime";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Kysely, Transaction } from "kysely";
-import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import type {
-  CallToolResult,
-  Icon,
-  ReadResourceResult,
-  Resource,
-  ResourceTemplate,
-  Tool,
-} from "@modelcontextprotocol/sdk/types.js";
+import type { Server, CallToolResult, ReadResourceResult, Resource, ResourceTemplateType, Tool, Icon } from "@modelcontextprotocol/server";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import type { CatalogSeedResult } from "../db/migrations/catalog-seed.js";
@@ -307,6 +300,7 @@ export type ModuleConnectionResolution =
     };
 
 export type ModulePlatformServices = {
+  readonly webhookSecrets?: RuntimeWebhookSecretServices<TrustedSessionContext>;
   readonly records: RuntimeRecordAccessServices<TrustedSessionContext>;
   readonly settings: RuntimeSettingsService;
   readonly artifacts: RuntimeArtifactServices<TrustedSessionContext>;
@@ -459,7 +453,7 @@ export type RuntimeMcpContribution = {
     ctx: McpProjectionContext,
   ): Tool;
   resources?(ctx: McpProjectionContext): Promise<Resource[]>;
-  resourceTemplates?(ctx: McpProjectionContext): Promise<ResourceTemplate[]>;
+  resourceTemplates?(ctx: McpProjectionContext): Promise<ResourceTemplateType[]>;
   readResource?(
     uri: string,
     ctx: McpInvocationContext,

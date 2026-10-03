@@ -20,7 +20,7 @@ import {
   describeToolDefinition,
   type GenericToolBranch,
 } from "@openshapeforge/operations";
-import { type Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { Tool } from "@modelcontextprotocol/server";
 import type { DbSessionInput } from "../db/session.js";
 import { HttpError } from "../rest/http-error.js";
 import { ENTITY_CATALOG_URI } from "./server-instructions.js";

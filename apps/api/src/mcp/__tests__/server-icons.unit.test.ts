@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { Icon } from "@modelcontextprotocol/sdk/types.js";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import type { Icon } from "@modelcontextprotocol/server";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import type { RuntimeModule } from "../../modules/contract.js";
 import type { ModulePlatformRuntime } from "../../modules/platform.js";
@@ -21,7 +20,7 @@ const session: TrustedSessionContext = {
 describe("MCP initialize presentation", () => {
   test("uses only the active platform capability and allows one owning projection", async () => {
     const active = { ...session, roles: ["active-role"] };
-    const services = {};
+    const services = {} as ModulePlatformRuntime["services"];
     let entered: TrustedSessionContext | undefined;
     const runtime = {
       services,

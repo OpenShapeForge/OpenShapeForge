@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { registerResourceReadHandler } from "./resource-read-handler.js";
+import { registerAgentSkillHandlers } from "./agent-skills.js";
 import { createToolListing } from "./tool-listing.js";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
-import {
-  ListPromptsRequestSchema,
-  ListResourcesRequestSchema,
-  ListResourceTemplatesRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
 import { ARTIFACT_UPLOAD_APP_URI } from "./artifact-upload.js";
 import { ORGANIZATION_PROFILE_RESOURCE } from "./organization-profile-tools.js";
 import {
@@ -58,6 +54,7 @@ export type ListedTool = SourcedTool & {
  */
 export function createSessionSurface(scope: ServerScope) {
   const {
+    skillsForSession,
     assertModuleToolNamesAvailable,
     canUploadArtifacts,
     coreResourceOwnership,
@@ -86,6 +83,7 @@ export function createSessionSurface(scope: ServerScope) {
       resources: [
         SESSION_RESOURCE,
         ORGANIZATION_PROFILE_RESOURCE,
+        ...skillsForSession().flatMap((skill) => skill.resources),
         // The detail behind whoami's onboarding index. Static per session:
         // the five step keys are fixed, so listing them gathers no facts —
         // which is what keeps whoami's own resource count cheap.
@@ -142,7 +140,8 @@ export function createSessionSurface(scope: ServerScope) {
       ],
     };
   };
-  server.setRequestHandler(ListResourcesRequestSchema, listedResources);
+  server.setRequestHandler('resources/list', listedResources);
+  registerAgentSkillHandlers(server, skillsForSession);
   const { runtimeProviderToolsForSession, listedTools } = createToolListing(scope);
   // ---- first-use onboarding (mcp/onboarding.ts): the checklist reads the
   // same per-session projections tools/list uses, and rides on whoami. ----
@@ -214,7 +213,7 @@ export function createSessionSurface(scope: ServerScope) {
     );
   // --- end session-info ---
 
-  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+  server.setRequestHandler('resources/templates/list', async () => ({
     resourceTemplates: [
       ...(onboardingResourcesForSession(session).length > 0
         ? [ONBOARDING_STEP_RESOURCE_TEMPLATE]
@@ -235,7 +234,7 @@ export function createSessionSurface(scope: ServerScope) {
 
   registerResourceReadHandler(scope, { onboarding, sessionInfo });
 
-  server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+  server.setRequestHandler('prompts/list', async () => ({
     prompts: [],
   }));
 

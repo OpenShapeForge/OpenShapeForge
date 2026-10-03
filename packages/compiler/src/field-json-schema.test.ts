@@ -17,6 +17,7 @@ import type {
   McpDeclarativeAdapterUrls,
   McpDeclarativeOperationUrl,
   McpDeclarativeRequestMapping,
+  OsfTypeDefinition,
 } from "./index.js";
 
 const componentCatalog: ComponentCatalog = {
@@ -24,6 +25,7 @@ const componentCatalog: ComponentCatalog = {
   kind: "componentCatalog",
   defaults: {
     string: { component: "Input" },
+    number: { component: "NumberInput" },
     boolean: { component: "Checkbox" },
     object: { component: "ObjectEditor" },
     collection: { component: "CollectionEditor" },
@@ -60,6 +62,14 @@ function field(overrides: Partial<CompiledField> & Pick<CompiledField, "key">): 
     render: { component: "Input" },
     ...rest,
   };
+}
+
+function freezeRecursively<T>(value: T): T {
+  if (value && typeof value === "object") {
+    Object.freeze(value);
+    Object.values(value).forEach(freezeRecursively);
+  }
+  return value;
 }
 
 describe("compiled field JSON Schema projection", () => {
@@ -497,5 +507,87 @@ describe("compiled field JSON Schema projection", () => {
     expect(validate({ actions: [{ kind: "task" }, { kind: "wait" }] })).toBe(true);
     expect(validate({ actions: [{ kind: "unknown" }] })).toBe(false);
     expect(validate({ actions: Array.from({ length: 5 }, () => ({ kind: "task" })) })).toBe(false);
+  });
+
+  it("compiles the same merged semantic validation as field and object projection without changing source definitions", () => {
+    const osfTypes = freezeRecursively<Record<string, OsfTypeDefinition>>({
+      shortCode: {
+        baseType: "string",
+        label: { en: "Code" },
+        validation: { minLength: 3, maxLength: 8 },
+      },
+      codeRow: {
+        baseType: "object",
+        label: { en: "Row" },
+        shape: [{ key: "code", osfType: "shortCode", validation: { maxLength: 5 }, immutable: true }],
+      },
+    });
+    const definitions = freezeRecursively<FieldDefinition[]>([
+      { key: "code", osfType: "shortCode", required: true, validation: { maxLength: 5 } },
+      { key: "details", osfType: "object", shape: [{ key: "code", osfType: "shortCode", validation: { maxLength: 5 } }] },
+      { key: "rows", osfType: "object", cardinality: { min: 1, max: 2 }, item: { key: "row", osfType: "codeRow" } },
+    ]);
+    const originalDefinitions = structuredClone(definitions);
+    const originalTypes = structuredClone(osfTypes);
+    const fieldSchemas = createFieldSchemaCompiler({ componentCatalog, osfTypes });
+    const compiled = fieldSchemas.compile(definitions);
+
+    expect(compiled[0]?.validation).toEqual({ minLength: 3, maxLength: 5 });
+    expect(compiled[1]?.children?.[0]?.validation).toEqual({ minLength: 3, maxLength: 5 });
+    expect(compiled[2]).toMatchObject({ cardinality: "collection", cardinalityBounds: { min: 1, max: 2 }, required: true });
+    expect(compiled[2]?.item?.children?.[0]).toMatchObject({ validation: { minLength: 3, maxLength: 5 }, immutable: true });
+    expect(compiledFieldSchema(compiled[0]!)).toEqual(fieldSchemas.field(definitions[0]!));
+    const schema = compiledObjectSchema(compiled, {}, { requireRequired: true });
+    expect(schema).toEqual(fieldSchemas.object(definitions));
+
+    const validate = new Ajv2020.default({ strict: false }).compile(schema);
+    expect(validate({ code: "abc", details: { code: "abcde" }, rows: [{ code: "abc" }] })).toBe(true);
+    expect(validate({ code: "ab", rows: [{ code: "abc" }] })).toBe(false);
+    expect(validate({ code: "abcdef", rows: [{ code: "abc" }] })).toBe(false);
+    expect(validate({ code: "abc", details: { code: "ab" }, rows: [{ code: "abc" }] })).toBe(false);
+    expect(validate({ code: "abc", rows: [{ code: "abcdef" }] })).toBe(false);
+    expect(validate({ code: "abc", rows: [] })).toBe(false);
+    expect(definitions).toEqual(originalDefinitions);
+    expect(osfTypes).toEqual(originalTypes);
+  });
+
+  it("resolves configured renderers from the osfType base and inherited cardinality at every nesting level", () => {
+    const osfTypes = freezeRecursively<Record<string, OsfTypeDefinition>>({
+      amount: { baseType: "number", label: { en: "Amount" } },
+      amounts: { baseType: "number", label: { en: "Amounts" }, cardinality: { min: 2, max: 4 } },
+      money: {
+        baseType: "number", label: { en: "Money" },
+        render: { input: "MoneyInput", display: "MoneyDisplay" }, props: { currency: "EUR" },
+      },
+    });
+    const definitions = freezeRecursively<FieldDefinition[]>([
+      { key: "number", osfType: "number" },
+      { key: "amount", osfType: "amount" },
+      { key: "amounts", osfType: "amounts" },
+      { key: "singleAmount", osfType: "amounts", cardinality: "single" },
+      { key: "details", osfType: "object", children: [{ key: "amount", osfType: "amount" }] },
+      { key: "rows", osfType: "object", cardinality: "collection", item: { key: "row", osfType: "boolean" } },
+      { key: "total", osfType: "money", readOnly: true },
+      { key: "override", osfType: "money", render: { component: "NumberInput", props: { step: 5 } } },
+    ]);
+    const originalDefinitions = structuredClone(definitions);
+    const originalTypes = structuredClone(osfTypes);
+    const compiled = createFieldSchemaCompiler({ componentCatalog, osfTypes }).compile(definitions);
+
+    expect(compiled.map((field) => field.render)).toEqual([
+      { component: "NumberInput" },
+      { component: "NumberInput" },
+      { component: "CollectionEditor" },
+      { component: "NumberInput" },
+      { component: "ObjectEditor" },
+      { component: "CollectionEditor" },
+      { component: "MoneyDisplay", props: { currency: "EUR" } },
+      { component: "NumberInput", props: { step: 5 } },
+    ]);
+    expect(compiled[4]?.children?.[0]?.render).toEqual({ component: "NumberInput" });
+    expect(compiled[5]?.item?.render).toEqual({ component: "Checkbox" });
+    expect(compiled[6]?.readOnly).toBe(true);
+    expect(definitions).toEqual(originalDefinitions);
+    expect(osfTypes).toEqual(originalTypes);
   });
 });

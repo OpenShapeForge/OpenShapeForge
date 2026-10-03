@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { visitFieldPolicyWriters } from "./field-policy-writers.js";
 import { createHash } from "node:crypto";
 import { renderOpenApiSpec, type OpenApiSpecOptions } from "./generate-openapi.js";
 import type { CompiledStaticOperation } from "./plugins.js";
@@ -774,6 +775,12 @@ function renderManifestJson(
   source: string,
   operations?: readonly CompiledStaticOperation[],
 ): string {
+  for (const table of manifest.tables) {
+    for (const column of table.columns) {
+      if (column.fieldPolicy) visitFieldPolicyWriters(column.fieldPolicy, column.name,
+        (name, writtenBy) => { resolveColumnWriters(table, { name, writtenBy }, operations); });
+    }
+  }
   const checksum = createHash("sha256")
     .update(JSON.stringify(manifest))
     .digest("hex");
@@ -808,6 +815,7 @@ function renderManifestJson(
       primaryKey: column.primaryKey === true,
       generated: column.generated ?? null,
       ...(column.sourceField === undefined ? {} : { sourceField: column.sourceField }),
+      ...(column.fieldPolicy === undefined ? {} : { fieldPolicy: column.fieldPolicy }),
       ...(column.classification === undefined ? {} : { classification: column.classification }),
       // Authored `immutable: true` — the runtime's writability rule refuses the
       // column on update on every transport (#177).
@@ -869,6 +877,7 @@ function renderManifestJson(
         required: column.required,
         primaryKey: column.primaryKey,
         ...(column.classification === undefined ? {} : { classification: column.classification }),
+        ...(column.fieldPolicy === undefined ? {} : { fieldPolicy: column.fieldPolicy }),
         ...(column.immutable === undefined ? {} : { immutable: column.immutable }),
         // Already resolved on the rendered table above; republished here so the
         // runtime's generated-entity view carries the same one fact.

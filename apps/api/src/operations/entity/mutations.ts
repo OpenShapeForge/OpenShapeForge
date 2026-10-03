@@ -54,6 +54,8 @@ import {
 import { assertRelationshipConstraintsInTransaction } from "./relationship-constraints.js";
 import { assertPublishableRelatedMutationInTransaction } from "./derived-execution-guards.js";
 import { assertHardDeleteAllowedInTransaction } from "./deletion-guards.js";
+import { assertCallerTopLevelFields, prepareProtectedFieldWrites } from "./field-policy.js";
+import { isDeepStrictEqual } from "node:util";
 
 async function fetchGeneratedRowInTransaction(
   trx: Transaction<DB>,
@@ -112,9 +114,10 @@ export async function updateGeneratedEntityForTable(
 }
 
 /**
- * Merge an object field entirely inside PostgreSQL. Runtime flows use this to
- * preserve encrypted siblings without reading their storage representation
- * back through the shared CRUD output boundary.
+ * Merge an object field inside the update transaction. Runtime flows preserve
+ * encrypted siblings without sending their storage representation through
+ * the shared CRUD output boundary. Protected fields merge against the locked
+ * stored object so the complete value can be validated before assignment.
  */
 export async function mergeGeneratedEntityObjectForTable(
   db: OpenShapeForgeDatabase,
@@ -131,6 +134,11 @@ export async function mergeGeneratedEntityObjectForTable(
       "Generated CRUD object-merge metadata is invalid.",
       "INTERNAL_SERVER_ERROR",
     );
+  }
+  if (column.fieldPolicy) {
+    const supplied = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
+    return applyGeneratedRowUpdate(db, session, table, id, new Map([[column, supplied]]),
+      undefined, {}, false, [], column);
   }
   const values = new Map<GeneratedCrudColumn, unknown>([
     [
@@ -186,8 +194,10 @@ export async function createGeneratedEntity(
   if (unsupported) throw operationFailure(unsupported);
   assertNoCallerElicitedOutput(table, input.values);
   assertNoOperationWrittenValues(table, input.values);
+  assertCallerTopLevelFields(table, session, input.values, "create");
   assertCreateRecordPermissions(table, session, input.values);
-  const values = normalizeWritableValues(table, input.values, "create");
+  const values = prepareProtectedFieldWrites(table, session,
+    normalizeWritableValues(table, input.values, "create"), "create");
   if (input.trusted) addTrustedOperationValues(table, values, input.trusted.operation, input.trusted.values);
   return insertGeneratedRow(db, session, table, values);
 }
@@ -237,7 +247,8 @@ async function insertGeneratedRowInTransaction(
   values: ReturnType<typeof normalizeWritableValues>,
   entityValues: EntityValueIOContext = {},
 ): Promise<GeneratedEntityRow> {
-  const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, values, "create", undefined, entityValues);
+  const identified = prepareProtectedFieldWrites(table, session, values, "create", undefined, false);
+  const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, identified, "create", undefined, entityValues);
   await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
   await assertPublishableRelatedMutationInTransaction(trx, session, table, {
     kind: "create",
@@ -295,6 +306,19 @@ async function insertGeneratedRowInTransaction(
       "INTERNAL_SERVER_ERROR",
     );
   }
+  // Database-authored JSON defaults need generated item identities too.
+  // Initialize them inside this create transaction, before its single event.
+  const storedPolicies = new Map(table.columns.filter(column => column.fieldPolicy && row![column.name] !== undefined)
+    .map(column => [column, row![column.name]]));
+  const initialized = prepareProtectedFieldWrites(table, session, storedPolicies, "create", undefined, false);
+  const identityChanges = [...initialized].filter(([column, value]) => !isDeepStrictEqual(value, row![column.name]));
+  if (identityChanges.length) {
+    const result = await sql<{ row: GeneratedEntityRow }>`update ${sql.id(table.schema, table.table)}
+      set ${sql.join(identityChanges.map(([column, value]) => sql`${sql.id(column.name)} = ${value}`))}
+      where ${sql.id(table.primaryKey!)} = ${row[table.primaryKey!]}
+      returning to_jsonb(${sql.id(table.table)}.*) as row`.execute(trx);
+    row = result.rows[0]!.row;
+  }
   // A new row under a versioned head is a content change of that head. The
   // public create refuses an owned child (collectionMutationError), so this
   // covers the in-transaction create the collection insert runs.
@@ -329,10 +353,12 @@ export async function updateGeneratedEntity(
   if (unsupported) throw operationFailure(unsupported);
   assertNoCallerElicitedOutput(table, input.values);
   assertNoOperationWrittenValues(table, input.values);
+  assertCallerTopLevelFields(table, session, input.values, "update");
   assertUpdateRecordPermissions(table, input.values);
   const values = normalizeWritableValues(table, input.values, "update");
   if (input.trusted) addTrustedOperationValues(table, values, input.trusted.operation, input.trusted.values);
-  return applyGeneratedRowUpdate(db, session, table, input.id, values, input.guard);
+  return applyGeneratedRowUpdate(db, session, table, input.id, values, input.guard, {}, true,
+    Object.keys(input.trusted?.values ?? {}));
 }
 
 async function applyGeneratedRowUpdate(
@@ -349,6 +375,9 @@ async function applyGeneratedRowUpdate(
     confirmationAnswer?: string;
   },
   entityValues: EntityValueIOContext = {},
+  caller = false,
+  trustedFields: readonly string[] = [],
+  objectMergeColumn?: GeneratedCrudColumn,
 ): Promise<GeneratedEntityRow | null> {
   const updatedAt = table.columns.find((column) => column.name === "updated_at");
   const carriers = entityValueCarriers(table, entityValues.registry);
@@ -367,7 +396,16 @@ async function applyGeneratedRowUpdate(
 
   return withDbSession(db, session, async (trx) => {
     const current = await fetchGeneratedRowInTransaction(trx, session, table, id, true);
-    if (carriers.length && !current) return null;
+    if ((carriers.length || objectMergeColumn) && !current) return null;
+    if (objectMergeColumn && current) {
+      const stored = current[objectMergeColumn.name];
+      if (stored !== null && stored !== undefined && (typeof stored !== "object" || Array.isArray(stored))) {
+        throw generatedCrudError("Generated CRUD object merge requires a stored object.", "BAD_USER_INPUT");
+      }
+      values = new Map(values);
+      values.set(objectMergeColumn, { ...stored as Record<string, unknown> | undefined,
+        ...values.get(objectMergeColumn) as Record<string, unknown> });
+    }
     if (table.source?.authorization?.recordPermissions) {
       await assertRecordPermissionInTransaction(trx, session, table, id, "edit");
     }
@@ -410,7 +448,8 @@ async function applyGeneratedRowUpdate(
       ? sql`and ${sql.id(versionColumn.name)} = ${normalizeTimestampToken(guard.expectedVersion)}::timestamptz`
       : sql``;
 
-    const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, values, "update", current ?? undefined, entityValues);
+    const protectedValues = prepareProtectedFieldWrites(table, session, values, "update", current ?? undefined, caller, trustedFields);
+    const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, protectedValues, "update", current ?? undefined, entityValues);
     await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
     if (current) {
       await assertPublishableRelatedMutationInTransaction(trx, session, table, {

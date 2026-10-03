@@ -23,6 +23,7 @@ import { assertEntityValueDefinition } from "./entity-values.js";
 import { materializeCollectionOperations } from "./collection-operations.js";
 import { constrainedReferenceCreateOperationId, withOperationControls } from "../generate-operations.js";
 import { fieldOptionSource } from "./web-field-options.js";
+import { compileFieldValuePolicy } from "./field-value-policy.js";
 import type {
   CompiledEntityContract,
   CompiledEntityOperation,
@@ -482,6 +483,7 @@ function projectField(
   const nestedSupports = editNested ? supports : { read: true, create: false, update: false };
   const presentation = presentations[`${parent}.${field.key}`.split(".").slice(1).join(".")]?.render;
   const optionSource = fieldOptionSource(field);
+  const fieldPolicy = compileFieldValuePolicy(field);
   return {
     id: `${parent}.${field.key}`, key: field.key,
     label: localized(field.label, field.key), description: localized(field.description, ""),
@@ -489,6 +491,7 @@ function projectField(
     baseType: field.baseType,
     cardinality: field.cardinality === "collection" ? "many" : "one",
     required: field.required,
+    ...(fieldPolicy ? { fieldPolicy } : {}),
     ...(presentation ? { presentation } : {}),
     ...projectedTextLength(field),
     ...(field.relationship?.target ? { relationship: {

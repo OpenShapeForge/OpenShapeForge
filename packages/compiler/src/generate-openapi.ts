@@ -186,11 +186,12 @@ function isRestrictedSensitivity(sensitivity: string | undefined): boolean {
 function isRestrictedColumn(
   column: TableDefinition["columns"][number],
 ): boolean {
-  return isRestrictedSensitivity(column.classification);
+  return isRestrictedSensitivity(column.classification) || column.fieldPolicy?.readRoles !== undefined ||
+    column.fieldPolicy?.children !== undefined || column.fieldPolicy?.item !== undefined;
 }
 
 function isRestrictedField(field: CompiledField | undefined): boolean {
-  return isRestrictedSensitivity(field?.classification?.sensitivity);
+  return isRestrictedSensitivity(field?.classification?.sensitivity) || field?.authorization !== undefined;
 }
 
 

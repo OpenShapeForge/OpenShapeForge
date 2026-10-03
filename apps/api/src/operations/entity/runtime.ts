@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { createFromBlueprint } from "./blueprints.js";
+import { assertCallerTopLevelFields } from "./field-policy.js";
 import {
   operationFailure,
   operationErrorOf,
@@ -215,9 +216,11 @@ function requireContractValues(
   table: GeneratedCrudTable,
   values: Record<string, unknown>,
   options: EntityValuesValidation,
+  session: DbSessionInput,
 ): void {
   assertNoCallerElicitedOutput(table, values);
   assertNoOperationWrittenValues(table, values);
+  assertCallerTopLevelFields(table, session, values, operation.intent as "create" | "update");
   assertEntityValuesValid(operation, table, values, options);
 }
 
@@ -942,7 +945,7 @@ export async function executeEntityOperation(
         // blueprint create completes the caller's overlay from the blueprint
         // before the row is written; the merged record is what the contract
         // has to hold for, so it is validated in full once merged.
-        requireContractValues(operation, table, values, { partial: blueprintId !== undefined });
+        requireContractValues(operation, table, values, { partial: blueprintId !== undefined }, session);
         await requireOperationPrerequisites(db, session, operation);
         requireCreateOperationConfirmation(operation, request.input);
         const interactionError = secureInputInteractionError(operation);
@@ -979,7 +982,7 @@ export async function executeEntityOperation(
         // Before any confirmation or lease work: an illegal payload must not
         // start a challenge it can only fail on the confirmed retry.
         const values = requireValues(request.input);
-        requireContractValues(operation, table, values, { partial: true });
+        requireContractValues(operation, table, values, { partial: true }, session);
         const confirmation = await prepareMutationConfirmation(
           db,
           session,

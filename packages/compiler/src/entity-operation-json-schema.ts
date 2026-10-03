@@ -15,6 +15,7 @@ import {
   splitBundledDefinitions,
 } from "./field-json-schema.js";
 import type { JsonSchema } from "./plugins.js";
+import { compileFieldValuePolicy, fieldValuePolicySchema, partialFieldPolicySchema } from "./authoring/field-value-policy.js";
 import { isScalarType, scalarJsonSchema } from "@openshapeforge/operations";
 import {
   operationControlProperties,
@@ -94,10 +95,12 @@ export function entityRecordOutputSchema(
       ...(title ? { title } : {}),
       ...(description ? { description } : {}),
     };
+    const readMayBeRedacted = field?.authorization !== undefined ||
+      ["pii", "bsn", "confidential"].includes(field?.classification?.sensitivity ?? "");
     add(
       column.field,
       {
-        ...(column.nullable ? nullableSchema(schema) : schema),
+        ...(column.nullable || readMayBeRedacted ? nullableSchema(schema) : schema),
         ...(field?.label && typeof field.label === "object"
           ? { "x-osf-i18n": { title: field.label } } : {}),
         // The type a reader renders the property through, on the node a reader gets (the nullable wrapper included).
@@ -393,6 +396,15 @@ export function entityValuesSchema(
     operation === "create",
   );
   const { schema: values, definitions } = splitBundledDefinitions(compiledValues);
+  const properties = values.properties as Record<string, JsonObject>;
+  for (const field of fields) {
+    const policy = compileFieldValuePolicy(field);
+    if (policy && (policy.children || policy.item) && properties[field.key]) {
+      properties[field.key] = operation === "update"
+        ? partialFieldPolicySchema(properties[field.key]!, policy)
+        : fieldValuePolicySchema(properties[field.key]!, policy);
+    }
+  }
   return { values, definitions };
 }
 

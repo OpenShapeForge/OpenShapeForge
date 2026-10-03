@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
-import { collectAllArtifacts } from "./index.js";
+import { collectAllArtifacts, runCompiler } from "./index.js";
 import { renderEmptyApiPersistedOperationArtifact } from "./persisted-operations.js";
 
 const roots: string[] = [];
@@ -54,6 +54,52 @@ async function hostRoot(options: { web?: boolean; plugin?: string } = {}) {
 }
 
 describe("compiler host artifact assembly", () => {
+  test("rejects traversal and aliased artifact paths before writing any output", async () => {
+    const plugin = "path-plugin.ts";
+    const root = await hostRoot({ plugin });
+    await writeFile(join(root, plugin), `
+      export const artifact = { path: "placeholder", contents: "replacement" };
+      export default { name: "path-fixture", generate: () => [artifact] };
+    `);
+    const { artifact } = await import(join(root, plugin));
+    const protectedPath = join(root, "apps/api/src/generated/graphql/persisted-operations.json");
+    await mkdir(join(protectedPath, ".."), { recursive: true });
+    await writeFile(protectedPath, "original");
+    for (const path of [
+      "apps/api/src/generated/graphql/../graphql/persisted-operations.json",
+      "../outside.txt", "/outside.txt", "C:/outside.txt", "C:\\outside.txt",
+      "./apps/api/src/generated/graphql/persisted-operations.json",
+      "apps//duplicate.txt", "", "apps/invalid\0.txt",
+    ]) {
+      artifact.path = path;
+      await expect(runCompiler({ repoRoot: root })).rejects.toThrow("canonical repo-relative path");
+      expect(await readFile(protectedPath, "utf8")).toBe("original");
+      await expect(readFile(join(root, "apps/api/src/generated/db/schema.sql"), "utf8"))
+        .rejects.toMatchObject({ code: "ENOENT" });
+    }
+    artifact.path = "apps/api/src/generated/graphql/persisted-operations.json";
+    await expect(runCompiler({ repoRoot: root })).rejects.toThrow("Artifact path collision");
+    expect(await readFile(protectedPath, "utf8")).toBe("original");
+    artifact.path = "plugin/generated.json";
+    await runCompiler({ repoRoot: root });
+    expect(await readFile(join(root, artifact.path), "utf8")).toBe("replacement");
+  }, 60_000);
+
+  test("CLI refuses a missing repo-root value before compilation", async () => {
+    const root = await hostRoot();
+    for (const args of [["--repo-root"], ["--repo-root", "--unexpected"]]) {
+      const child = Bun.spawn([process.execPath, join(import.meta.dir, "index.ts"), ...args], {
+        cwd: root, stdout: "pipe", stderr: "pipe",
+      });
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+      ]);
+      expect(exitCode).not.toBe(0);
+      expect(stdout).toBe("");
+      expect(stderr).toContain("--repo-root requires a directory path");
+    }
+  }, 30_000);
+
   test("rejects an Operation name claimed by a different compatibility bridge", async () => {
     const plugin = "collision-plugin/index.ts";
     const root = await hostRoot({ plugin });

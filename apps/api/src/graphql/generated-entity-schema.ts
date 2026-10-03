@@ -226,7 +226,7 @@ function fieldNameForColumn(column: GeneratedTable["columns"][number]) {
  * admits the null that redaction produces.
  */
 export function nonNullSuffix(column: GeneratedTable["columns"][number]) {
-  if (column.classification) {
+  if (column.classification || column.fieldPolicy?.readRoles !== undefined) {
     return "";
   }
   return column.required || column.primaryKey ? "!" : "";

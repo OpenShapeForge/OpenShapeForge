@@ -251,7 +251,13 @@ Notes on what the compiler does with this:
   edited, and allocates `name-2`, `name-3`, and so on under the database unique
   index. Tenant-scoped entities must declare that index as
   `fields: [tenantId, <derivedField>]`; global entities use only the derived
-  field. The compiler rejects missing sources, non-persisted/non-string fields,
+  field. The identifier stays unique across every row in that scope, including
+  inactive rows. An authored partial unique index remains in the output; the
+  compiler adds an unconditional unique index for suffix allocation when
+  needed. Existing data must satisfy that unconditional rule before applying
+  the generated schema. Generated index names over PostgreSQL's identifier
+  limit use the existing deterministic hash suffix to keep them distinct.
+  The compiler rejects missing sources, non-persisted/non-string fields,
   and derivations without this race-safe index. Put only fields a person should
   actually enter in form groups; identifiers and IDs are implementation data.
 - **`tenant_id` is injected automatically** when the entity has an
@@ -277,6 +283,15 @@ Notes on what the compiler does with this:
   Keycloak-normalized (Dutch → English) forms so bearer tokens and
   trusted-context callers both match. See
   [api.md](api.md#authentication--authorization).
+- A field `authorization` block is fail-closed on each side. A missing or empty
+  `roles.read` list permits nobody to read that field; a missing or empty
+  `roles.write` list permits nobody to write it through caller input. Declare
+  both lists when both kinds of access are needed. A field without an
+  `authorization` block uses the entity's grants.
+- Protecting existing object collections requires reseeding development data
+  so every row has its runtime-generated `__osfItemId`. Missing stored identities
+  fail closed; the greenfield compiler does not add a positional fallback or a
+  migration for older development data.
 
 ### Generated CRUD is the set of implemented Operations
 

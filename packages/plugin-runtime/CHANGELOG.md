@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Package compatibility
+
+- The reviewed compiler field-value policy release publishes operations,
+  interface-web, compiler and documents at 0.2.2, plugin-runtime at 0.1.3,
+  and versioning at 0.1.2. Dependent packages receive new immutable versions
+  because their published workspace dependency ranges change.
+
 ### Changed
 
 - **Artifact owner is generic.** `RuntimeArtifactOwnerInput` is now

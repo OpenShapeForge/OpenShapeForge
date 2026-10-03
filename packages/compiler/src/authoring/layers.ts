@@ -43,14 +43,16 @@
  *
  * With a single layer and no patches the layer directory is used directly
  * (fast path, byte-identical to the pre-layer behavior). Otherwise the merged
- * tree is materialized deterministically under `.authoring-build/` at the
- * repo root so the resolved input is inspectable, exactly like running
- * `kustomize build`.
+ * tree is materialized in an owned snapshot under `.authoring-build/` at the
+ * repo root. Concurrent compiler processes cannot replace each other's inputs;
+ * emitted provenance still uses the deterministic `.authoring-build/` prefix.
  */
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -124,6 +126,20 @@ export const AUTHORING_CONFIG_FILENAME = "authoring.config.yaml";
 export const AUTHORING_LOCAL_CONFIG_FILENAME = "authoring.config.local.yaml";
 const DEFAULT_LAYER = "packages/compiler/config/authoring";
 const BUILD_DIR = ".authoring-build";
+const materializedAuthoringDirs = new Set<string>();
+
+function discardMaterializedAuthoringDir(directory: string): void {
+  materializedAuthoringDirs.delete(directory);
+  try {
+    rmSync(directory, { recursive: true, force: true });
+  } catch {
+    // Cleanup is best-effort and must not hide a compile error or block exit.
+  }
+}
+
+process.once("exit", () => {
+  for (const directory of materializedAuthoringDirs) discardMaterializedAuthoringDir(directory);
+});
 
 function readConfigFile(
   path: string,
@@ -1112,10 +1128,23 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
     return layerDirs[0]!;
   }
 
-  const buildDir = join(repoRoot, BUILD_DIR);
-  rmSync(buildDir, { recursive: true, force: true });
-  mkdirSync(buildDir, { recursive: true });
+  const buildRoot = join(repoRoot, BUILD_DIR);
+  const existingBuildRoot = lstatSync(buildRoot, { throwIfNoEntry: false });
+  if (existingBuildRoot && !existingBuildRoot.isDirectory()) {
+    throw new Error(`Authoring build root ${buildRoot} must be a directory, not a symbolic link or another file type.`);
+  }
+  mkdirSync(buildRoot, { recursive: true });
+  const buildDir = mkdtempSync(join(buildRoot, `process-${process.pid}-`));
+  materializedAuthoringDirs.add(buildDir);
+  try {
+    return materializeAuthoringLayers(buildDir, layerDirs);
+  } catch (error) {
+    discardMaterializedAuthoringDir(buildDir);
+    throw error;
+  }
+}
 
+function materializeAuthoringLayers(buildDir: string, layerDirs: string[]): string {
   // relativePath -> { sourceLayer, contents } for plain files;
   // entity slugs are tracked separately so patches can target them by slug.
   const files = new Map<string, { layer: string; path: string }>();

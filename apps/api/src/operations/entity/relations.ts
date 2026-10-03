@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { columnFieldPolicy, hasUnreadableField } from "./field-policy.js";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DbSessionInput } from "../../db/session.js";
 import { sql } from "kysely";
@@ -128,6 +129,6 @@ function readableDefaultSort(table: GeneratedCrudTable, session: DbSessionInput)
   if (!sort) return undefined;
   const column = fieldColumnMap(table).get(sort.field);
   if (column && isElicitedOutputColumn(table, column)) return undefined;
-  if (canReadClassifiedColumns(table.source?.authorization, session)) return sort;
-  return column?.classification ? undefined : sort;
+  const classified = canReadClassifiedColumns(table.source?.authorization, session);
+  return column && hasUnreadableField(columnFieldPolicy(column), session, classified) ? undefined : sort;
 }

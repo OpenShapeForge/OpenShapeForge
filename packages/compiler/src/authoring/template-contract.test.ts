@@ -15,7 +15,7 @@ const entries = [...slugs, ...definitionSlugs].map((slug) => {
 });
 
 describe("the authored template chain", () => {
-  test("uses only field relationships and preserves administrator writes", () => {
+  test("uses only field relationships and preserves template manager writes", () => {
     for (const slug of slugs) {
       const entity = loadEntity(authoring, slug).coreEntity;
       expect(entity.schemaVersion).toBe(3);

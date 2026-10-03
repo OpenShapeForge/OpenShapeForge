@@ -13,6 +13,33 @@ export interface DerivedOnCreateBinding {
   maxLength?: number;
 }
 
+interface CompiledIndex {
+  name: string;
+  columns: string[];
+  unique?: boolean;
+  where?: string;
+}
+
+/** A suffix identifier stays unique even outside an authored partial index. */
+export function ensureDerivedIdentifierIndexes(
+  tableName: string,
+  indexes: readonly CompiledIndex[],
+  bindings: readonly DerivedOnCreateBinding[],
+): CompiledIndex[] {
+  const result = [...indexes];
+  for (const binding of bindings) {
+    if (result.some((index) => index.unique && !index.where && equalFields(index.columns, binding.conflictColumns))) {
+      continue;
+    }
+    const name = `${tableName}_${binding.targetColumn}_derived_uidx`;
+    if (result.some((index) => index.name === name)) {
+      throw new Error(`Generated derived-identifier index "${name}" collides with an authored index.`);
+    }
+    result.push({ name, columns: [...binding.conflictColumns], unique: true });
+  }
+  return result;
+}
+
 function numericMaxLength(field: CompiledField): number | undefined {
   const configured = field.validation?.maxLength;
   const value = typeof configured === "object" ? configured.value : configured;

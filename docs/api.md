@@ -981,10 +981,14 @@ generate` before first compose up. `--import-realm` imports every file in the
 import directory, and the compose file mounts one bind per realm.
 
 `keycloak/openshapeforge-realm.json` (realm `openshapeforge`) is the **tenant**
-realm. The repository's test-only authoring layer adds neutral identities
+realm. The development-identity authoring layer
+(`test/fixtures/authoring/development-identities`) adds neutral identities
 (password `test`) with a `tid` tenant attribute: `tenant-a-admin`,
 `tenant-a-user`, `tenant-a-no-access` (tenant `11111111-…`) and
-`tenant-b-user` (tenant `33333333-…`). The interactive client is
+`tenant-b-user` (tenant `33333333-…`). The root `authoring.config.yaml` mounts
+that layer, so these users are in every generated tenant realm, not only the
+local one: a production realm keeps them with passwords read from the
+environment instead of `test`. The interactive client is
 `openshapeforge-gateway` (secret `dev-secret`) — the e2e suite uses it for the
 password-grant bearer test.
 

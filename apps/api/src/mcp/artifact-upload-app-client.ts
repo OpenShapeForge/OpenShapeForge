@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+declare const __OSF_SOFTWARE_VERSION__: string;
 import { App } from "@modelcontextprotocol/ext-apps/app-with-deps";
 
 const message = document.getElementById("upload-message")!;
@@ -8,7 +9,7 @@ const progress = document.getElementById(
 ) as HTMLProgressElement;
 let uploadUrl = "";
 
-const app = new App({ name: "Document upload", version: "1.0.0" });
+const app = new App({ name: "Document upload", version: __OSF_SOFTWARE_VERSION__ });
 app.ontoolresult = (result) => {
   const meta = result._meta as { uploadUrl?: unknown } | undefined;
   if (typeof meta?.uploadUrl !== "string") {

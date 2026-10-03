@@ -6,6 +6,7 @@
  * in-band form, and a form rendering that masks secrets and escapes
  * everything person-controlled.
  */
+import { API_BUILD_IDENTITY } from "../../config/build-identity.js";
 import { describe, expect, it } from "bun:test";
 import {
   consumeConfiguration,
@@ -149,6 +150,7 @@ describe("storeSubmission", () => {
 describe("renderConfigurationForm", () => {
   it("bundles the official MCP App without embedding a handoff URL", async () => {
     const html = await renderConfigurationApp();
+    expect(html).toContain(API_BUILD_IDENTITY.version);
     expect(html).toContain('id="configuration-frame"');
     expect(html).toContain("ui/initialize");
     expect(html).toContain("Secure configuration");

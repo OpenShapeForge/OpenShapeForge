@@ -5,6 +5,7 @@
  * configuration-handoff.ts, verbatim.
  */
 
+import { API_BUILD_IDENTITY } from "../config/build-identity.js";
 import { fileURLToPath } from "node:url";
 import { renderNoticePage } from "./browser-pages.js";
 
@@ -29,6 +30,7 @@ export async function bundledConfigurationApp(): Promise<string> {
         ),
       ],
       target: "browser",
+      define: { __OSF_SOFTWARE_VERSION__: JSON.stringify(API_BUILD_IDENTITY.version) },
       minify: true,
       sourcemap: "none",
     });

@@ -6,6 +6,7 @@
  * routes, messaging/whatsapp webhooks, realtime dirty
  * worker, and entity-event fanout wiring are intentionally absent.
  */
+import { API_BUILD_IDENTITY } from "../config/build-identity.js";
 import rateLimit from "@fastify/rate-limit";
 import { registerEntityOperationAvailability } from "../operations/entity/availability.js";
 import {
@@ -234,6 +235,11 @@ export function createApiApp(options: {
     // A first segment that is one of the server's own names, or not a
     // well-formed alias, is left alone — see RESERVED_ROOT_SEGMENTS.
     rewriteUrl: (request) => rewriteShortAddress(request.url) ?? request.url ?? "/",
+  });
+
+  app.addHook("onSend", async (_request, reply, payload) => {
+    reply.header("x-software-version", API_BUILD_IDENTITY.version);
+    return payload;
   });
 
   // The alias a short address named, for the session resolver (see
@@ -500,6 +506,7 @@ export function createApiApp(options: {
     routes.get("/api/health", async () => ({
       status: "ok",
       role: "api",
+      ...API_BUILD_IDENTITY,
     }));
 
     const readinessChecks = createApiReadinessChecks(

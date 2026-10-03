@@ -18,6 +18,7 @@ import { getGeneratedCrudTables } from "../operations/entity/catalog.js";
 import { type DerivedToolsCatalogEntry } from "./derived-tools.js";
 import { type ElicitOnCreateEntry } from "./elicitation.js";
 import { listConnectorContracts } from "../connectors/catalog.js";
+import { API_BUILD_IDENTITY } from "../config/build-identity.js";
 
 export type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 
@@ -214,7 +215,7 @@ export const OPERATION_ROLE = {
 
 export const SERVER_INFO = {
   name: "openshapeforge",
-  version: "1",
+  version: API_BUILD_IDENTITY.version,
 } as const;
 
 // The fixed instruction texts (INSTRUCTIONS, the data acquisition order,

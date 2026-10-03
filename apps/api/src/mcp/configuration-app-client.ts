@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+declare const __OSF_SOFTWARE_VERSION__: string;
 import { App } from "@modelcontextprotocol/ext-apps/app-with-deps";
 
 const title = document.getElementById("configuration-title")!;
@@ -9,7 +10,7 @@ let formUrl = "";
 
 const app = new App({
   name: "Secure configuration",
-  version: "1.0.0",
+  version: __OSF_SOFTWARE_VERSION__,
 });
 app.ontoolresult = (result) => {
   const meta = result._meta as

@@ -41,9 +41,8 @@ exposes a non-replaceable `platform.artifacts` service to runtime modules.
   that is still unlinked at expiry — `platform.jobs.enqueue` joins the
   staging transaction, so the row and the job commit together. A linked
   file's deletion belongs in the canonical Operation that decides the file
-  goes, enqueued inside its own transaction; no in-tree Operation does that
-  yet, so deleting a Document today leaves its linked bytes in storage. Jobs
-  run as the person who enqueued them.
+  goes, enqueued inside its own transaction; no in-tree Operation enqueues
+  one yet. Jobs run as the person who enqueued them.
 
 A provider selected by compiled YAML must have exactly one matching runtime
 contribution. A missing, disabled, mismatched or duplicate contribution fails

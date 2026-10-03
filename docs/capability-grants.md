@@ -5,8 +5,9 @@ someone *without an account* invoke a fixed set of Operations on exactly one
 record: a customer who receives a link, opens a document and accepts or signs
 it; a contact who answers a request. The plugin that owns the record decides
 which Operations a recipient gets; core owns the token, its resolution, the
-attempt limits and the audit trail. Nothing a plugin does with a grant can
-widen it.
+attempt limits and the audit trail. Once issued, nothing a plugin does with a
+grant can widen it; what it reaches is decided at issue time, including the
+subject, which core does not check against the issuer (see below).
 
 The pieces, in the order a request meets them:
 
@@ -65,8 +66,10 @@ returned exactly once, by `platform.grants.issue`, and is never stored: the
 row keeps `token_hash`, the SHA-256 of the secret half. The id locates the
 row by primary key, so an attacker cannot make the database compare against
 every hash, and the secret is compared in constant time (`timingSafeEqual`).
-An unknown id costs the same comparison against a decoy hash as a wrong
-secret does.
+An unknown id still performs a comparison against a decoy hash, so the
+comparison itself reveals nothing; the outcome does differ, because only a
+known id counts failed attempts and can lock (below). Treat the grant id as
+public.
 
 The token is presented as **`Authorization: Grant <token>`**. A header rather
 than a query parameter, for the same reason bearer tokens are ("bearer
@@ -169,7 +172,9 @@ edit leases have ([plugins.md](plugins.md#canonical-operations)).
 
 `CAPABILITY_GRANT_ATTEMPT_POLICY`: five wrong secrets inside a fifteen-minute
 window lock the grant for fifteen minutes. The window starts at the first
-failure and restarts when it has elapsed; a correct secret clears it. The
+failure and restarts when it has elapsed; a correct secret clears it, except
+while the grant is locked, when the secret is not compared at all. Because the
+grant id is not secret, anyone who knows it can keep a grant locked. The
 policy is global; per-grant policies are deliberately absent until a
 consumer needs one.
 

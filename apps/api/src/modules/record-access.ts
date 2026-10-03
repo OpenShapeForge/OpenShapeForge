@@ -186,9 +186,10 @@ export class RecordAccessRuntime {
         }
 
         const authorize = async (trx: Transaction<DB>): Promise<void> => {
-          // A grant's record permissions were the issuer's, proven at issue
-          // time; the grant id itself owns no record. Only the tenant fence
-          // is re-checked here, so a record deleted since is still refused.
+          // A grant session carries no record permissions: its delegated
+          // records were checked against the issuer at issue time, its
+          // subject was not (requireGrantedRecord). Only the tenant fence is
+          // re-checked here, so a record deleted since is still refused.
           const permissions = session.credential === "grant" ? [] : (operation.authorization.recordPermissions ?? []);
           if (permissions.length === 0) {
             await assertVisibleRecord(trx, session, table, input.id);

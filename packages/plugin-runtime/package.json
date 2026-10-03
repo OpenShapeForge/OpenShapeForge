@@ -27,11 +27,11 @@
   },
   "dependencies": {
     "@openshapeforge/operations": "workspace:*",
-    "fastify": "^5.8.2",
-    "kysely": "^0.29.4"
+    "fastify": "^5.12.5",
+    "kysely": "^0.29.6"
   },
   "devDependencies": {
-    "@types/bun": "^1.3.5",
+    "@types/bun": "^1.4.2",
     "typescript": "^5.9.0"
   },
   "publishConfig": {

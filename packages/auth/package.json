@@ -34,7 +34,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "jose": "^6.2.1"
+    "jose": "^6.2.12"
   },
   "//peerDependencies": [
     "Only the ./session subpath (the Keycloak-backed NextAuth session on Redis that apps/web and apps/admin share) needs these; the root export does not. Peers rather than dependencies so the apps and this package resolve one next-auth, not two."
@@ -45,7 +45,7 @@
   },
   "devDependencies": {
     "typescript": "^5.9.0",
-    "@types/bun": "^1.3.5",
+    "@types/bun": "^1.4.2",
     "@types/node": "^26"
   }
 }

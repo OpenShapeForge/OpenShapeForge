@@ -32,10 +32,10 @@
   "dependencies": {
     "@openshapeforge/operations": "workspace:*",
     "@openshapeforge/versioning": "workspace:*",
-    "yaml": "^2.8.3"
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@types/bun": "^1.3.5",
+    "@types/bun": "^1.4.2",
     "typescript": "^5.9.0"
   },
   "publishConfig": {

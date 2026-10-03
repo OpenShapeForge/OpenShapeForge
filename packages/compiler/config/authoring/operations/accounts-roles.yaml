@@ -226,6 +226,14 @@ interfaces:
       addRolePermission: { method: POST, path: /api/accounts/add-role-permission, response: { status: 200, kind: json } }
       removeRolePermission: { method: POST, path: /api/accounts/remove-role-permission, response: { status: 200, kind: json } }
       clearUnavailablePermissions: { method: POST, path: /api/accounts/clear-unavailable-role-permissions, response: { status: 200, kind: json } }
+  mcp:
+    operations:
+      listRoles: { name: list_account_roles }
+      getRole: false
+      createRole: false
+      addRolePermission: false
+      removeRolePermission: false
+      clearUnavailablePermissions: false
   web:
     entities:
       AccessRole:

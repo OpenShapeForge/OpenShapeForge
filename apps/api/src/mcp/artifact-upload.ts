@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Private MCP App/browser handoff for the core artifact transport. */
+import { API_BUILD_IDENTITY } from "../config/build-identity.js";
 import { fileURLToPath } from "node:url";
 import type { SecretKeyring } from "../connectors/secrets.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
@@ -91,6 +92,7 @@ async function bundledArtifactUploadApp(): Promise<string> {
         ),
       ],
       target: "browser",
+      define: { __OSF_SOFTWARE_VERSION__: JSON.stringify(API_BUILD_IDENTITY.version) },
       minify: true,
       sourcemap: "none",
     });

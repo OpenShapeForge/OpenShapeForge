@@ -18,6 +18,7 @@
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { OperationFailure } from "@openshapeforge/operations";
+import { API_BUILD_IDENTITY } from "../config/build-identity.js";
 import openApiSpec from "../generated/rest/openapi.json" with { type: "json" };
 import { DECIMAL_PATTERN, INTEGER_TEXT_PATTERN } from "@openshapeforge/operations";
 
@@ -346,6 +347,7 @@ export function registerGeneratedRestRoutes(
   // The generated spec is a build artifact of the same manifest that drives
   // these routes; serve it unauthenticated like the health endpoints.
   const projectedSpec = structuredClone(openApiSpec);
+  projectedSpec.info.version = API_BUILD_IDENTITY.version;
   const schemas = projectedSpec.components.schemas as Record<string, Record<string, unknown>>;
   for (const table of getGeneratedCrudTables()) {
     const typeName = table.source?.graphql?.typeName;

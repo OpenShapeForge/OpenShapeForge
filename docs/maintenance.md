@@ -133,3 +133,12 @@ Registered seed roles are the union of the stable operation contracts, including
 required transitive business reads. These are trusted seed authority, not browser
 credentials. The outward executor remains bounded by the immutable contribution
 allowlist, while ordinary authorization and business guards still run.
+
+A trusted installed contribution can register `storeConnection: "application"`
+for bounded maintenance SQL whose existing policies apply only to the application
+role, such as identity/link tables. Core owns that connection and its audited
+system session; no session or connection factory is exported. The default store
+remains the migration connection. Both must refer to the same actual database,
+and the application role must remain non-superuser without `BYPASSRLS`. This does
+not add role membership or widen database policies. Normal tenant sessions retain
+their existing RLS restrictions after the maintenance transaction ends.

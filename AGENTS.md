@@ -69,6 +69,9 @@ proof; changed web journeys need real browser proof. Use isolated services.
 Report pass/fail and skipped checks accurately; preserve failing exit codes.
 
 Normal feature contributions target `develop`; promotion to `main` is a separate
-reviewed release. Verify current policy before publishing, and respect the
-user-designated merge owner. A temporary exception needs explicit scope and an
-expiry; neither a green check nor an old note grants merge/deploy permission.
+reviewed release. Agents have standing user authorization to complete this
+release path, merge to `main`, publish packages and deploy after local review
+and the applicable required checks, without separate approval from Hans.
+Coordinate package and host dependencies with their owners. This permission
+applies within the agreed task scope; local-only work stays local and product
+acceptance remains with Hans. Follow protected branches and environment boundaries.

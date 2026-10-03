@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { liveMaintenanceRunner } from "../modules/maintenance.js";
 import { blueprintOperationHandler } from "./entity/blueprints.js";
 import { TRANSITIONS_PLUGIN, transitionAvailabilityHandler, transitionOperationHandler } from "./entity/transitions.js";
 import { CONTROL_PLUGIN, controlOperationHandler } from "../control/operations.js";
@@ -525,6 +526,7 @@ export function runtimeStaticOperationRegistrations(
 export type BoundOperation = {
   operation: OperationContract;
   handler: ModuleOperationHandler;
+  maintenanceOwner?: RuntimeModule;
   availability?: ModuleOperationAvailabilityHandler;
 };
 type Bound = BoundOperation;
@@ -663,7 +665,7 @@ export function bindOperationHandlers(
       operation.target?.scope !== "record" || !operation.target.inputField)) {
       throw new Error(`Operation "${operation.key}" availability requires an authenticated tenant record target.`);
     }
-    bound.set(operation.key, { operation, handler, ...(availability ? { availability } : {}) });
+    bound.set(operation.key, { operation, handler, maintenanceOwner: module, ...(availability ? { availability } : {}) });
   }
   for (const module of modules) {
     const moduleOperations = knownOperations.filter((operation) => !operation.implementation && operation.plugin === module.name);
@@ -1213,7 +1215,7 @@ export async function invokeOperation(
   inputValue: unknown,
   context: Omit<
     Parameters<ModuleOperationHandler>[1],
-    "invokeHostOperation" | "invokeDeclarativeService"
+    "invokeHostOperation" | "invokeDeclarativeService" | "runSeed"
   > & Partial<Pick<
     Parameters<ModuleOperationHandler>[1],
     "invokeHostOperation" | "invokeDeclarativeService"
@@ -1462,9 +1464,12 @@ export async function invokeOperation(
   return withModuleOperationSession(
     context.platform,
     context.session,
-    (session) => run({
+    (session) => {
+      const runSeed = bound.maintenanceOwner ? liveMaintenanceRunner(bound.maintenanceOwner, context.platform, session) : undefined;
+      return run({
       ...context,
       ...(session ? { session } : {}),
+      ...(runSeed ? { runSeed } : {}),
       invokeHostOperation: (request, options) => invokeModuleHostOperation(
         context.platform,
         session,
@@ -1478,7 +1483,8 @@ export async function invokeOperation(
           request,
           options,
         ),
-    }),
+    });
+    },
   );
 }
 

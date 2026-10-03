@@ -26,7 +26,7 @@ const moduleSeeds = modules.loaded.flatMap((module) => module.seeds ?? []);
 
 const runtime = createDatabaseRuntime({ databaseUrl: readMigrateDatabaseUrl() });
 try {
-  const result = await runMigrationChainLocked(runtime.db, { moduleSeeds });
+  const result = await runMigrationChainLocked(runtime.db, { moduleSeeds, maintenanceModules: modules.loaded });
   console.log(JSON.stringify(renderMigrationReport(result, modules.failures), null, 2));
 } finally {
   await runtime.close();

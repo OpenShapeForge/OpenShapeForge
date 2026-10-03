@@ -8,6 +8,7 @@ import type {
   CompiledStaticEntityOperation,
   JsonSchema,
   PluginBaseContext,
+  PluginOperationAuth,
   PluginOperationContract,
   PluginOperationError,
 } from "./plugins.js";
@@ -386,6 +387,18 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
       `${where} recordPermission requires a record target with inputField.`,
     );
   }
+  if (operation.auth.mode === "session") {
+    const restricted = operation.auth.roles !== undefined || operation.auth.roleGroups !== undefined;
+    if (operation.auth.anyAuthenticatedSession !== undefined &&
+        (operation.auth.anyAuthenticatedSession !== true || restricted)) {
+      throw new Error(`${where} auth.anyAuthenticatedSession must be true and cannot be combined with roles or roleGroups.`);
+    }
+    if (!restricted && operation.auth.anyAuthenticatedSession !== true) {
+      throw new Error(
+        `${where} session auth must declare roles or roleGroups, or admit every authenticated session with anyAuthenticatedSession: true.`,
+      );
+    }
+  }
   if (operation.auth.mode === "session" && operation.auth.roleGroups !== undefined) {
     if (!Array.isArray(operation.auth.roleGroups) || operation.auth.roleGroups.length === 0 ||
         operation.auth.roleGroups.some(group => !Array.isArray(group) || group.length === 0 || group.some(role => typeof role !== "string" || !role.trim()))) {
@@ -627,6 +640,13 @@ export function collectPluginOperations(
   return collectOperationContracts(plugins, context, false);
 }
 
+/** The runtime reads an omitted role list as the opt-in's rule, so only the compiler needs the opt-in. */
+function compiledAuth(auth: PluginOperationAuth): PluginOperationAuth {
+  if (auth.mode !== "session" || auth.anyAuthenticatedSession === undefined) return auth;
+  const { anyAuthenticatedSession: _optIn, ...compiled } = auth;
+  return compiled;
+}
+
 /** Authored canonical identity is separate from the bound implementation owner. */
 function collectOperationContracts(
   plugins: readonly CompilerPlugin[],
@@ -691,6 +711,7 @@ function collectOperationContracts(
       if (typescriptKey) typescript.add(typescriptKey);
       const compiled: CompiledPluginOperation = {
         ...operation,
+        auth: compiledAuth(operation.auth),
         plugin: plugin.name,
         id: operation.key,
         intent: "invoke",

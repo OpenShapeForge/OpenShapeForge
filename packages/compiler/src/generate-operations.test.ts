@@ -59,7 +59,7 @@ describe("first-class plugin operations", () => {
   test("distinguishes authenticated-session auth from an explicit deny-all role list", () => {
     const authenticated = {
       ...operation,
-      auth: { mode: "session" as const },
+      auth: { mode: "session" as const, anyAuthenticatedSession: true as const },
     } satisfies PluginOperationContract;
     const denied = {
       ...operation,
@@ -75,6 +75,54 @@ describe("first-class plugin operations", () => {
       .toEqual({ mode: "session" });
     expect(collectPluginOperations([{ name: "demo", operations: [denied] }], context)[0]!.auth)
       .toEqual({ mode: "session", roles: [] });
+  });
+
+  test("refuses a session Operation that omits its roles without opting in", () => {
+    const omitted = { ...operation, auth: { mode: "session" as const } } satisfies PluginOperationContract;
+    expect(() => collectPluginOperations([{ name: "demo", operations: [omitted] }], context))
+      .toThrow(/session auth must declare roles or roleGroups/);
+
+    const contradictory = {
+      ...operation,
+      auth: { mode: "session" as const, roles: ["seller"], anyAuthenticatedSession: true as const },
+    } satisfies PluginOperationContract;
+    expect(() => collectPluginOperations([{ name: "demo", operations: [contradictory] }], context))
+      .toThrow(/anyAuthenticatedSession must be true and cannot be combined/);
+
+    const grouped = {
+      ...operation,
+      auth: { mode: "session" as const, roleGroups: [["seller"]] },
+    } satisfies PluginOperationContract;
+    expect(collectPluginOperations([{ name: "demo", operations: [grouped] }], context)[0]!.auth)
+      .toEqual({ mode: "session", roleGroups: [["seller"]] });
+
+    const catalog = (auth: OperationCatalogDefinition["operations"][string]["auth"]) => ({
+      schemaVersion: 1,
+      kind: "operationCatalog",
+      plugin: "demo",
+      operations: {
+        publish: {
+          name: "Publish quote",
+          description: "Publishes a quote.",
+          implementation: { type: "plugin", plugin: "demo", handler: "publishQuote" },
+          input: { schema: { type: "object", properties: {}, additionalProperties: false } },
+          output: { schema: { type: "object", properties: {}, additionalProperties: false } },
+          errors: [],
+          auth,
+          tenancy: { mode: "required" },
+          effects: { data: "write", external: "none" },
+          reliability: { idempotency: { mode: "none" } },
+          confirmation: { mode: "none" },
+        },
+      },
+      interfaces: { rest: { operations: {} } },
+    }) as unknown as OperationCatalogDefinition;
+    expect(() => collectAuthoredModulePluginOperations([catalog({ mode: "session" })], context))
+      .toThrow(/session auth must declare roles or roleGroups/);
+    expect(collectAuthoredModulePluginOperations(
+      [catalog({ mode: "session", anyAuthenticatedSession: true })],
+      context,
+    )[0]!.auth).toEqual({ mode: "session" });
   });
 
   test("derives custom write controls once for every adapter input schema", () => {

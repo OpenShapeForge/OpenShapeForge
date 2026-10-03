@@ -652,7 +652,7 @@
           "properties": {
             "mode": { "const": "session" },
             "roles": {
-              "description": "Optional operation-role allow-list. Omit for any authenticated session; an explicit empty list denies every role.",
+              "description": "Optional operation-role allow-list. An explicit empty list denies every role. Without roles or roleGroups the Operation must declare anyAuthenticatedSession: true.",
               "type": "array",
               "uniqueItems": true,
               "items": { "type": "string", "minLength": 1 }
@@ -676,6 +676,10 @@
             "recordPermission": {
               "enum": ["view", "edit", "delete"],
               "description": "Required permission on the current record target, in addition to roles and scopes."
+            },
+            "anyAuthenticatedSession": {
+              "const": true,
+              "description": "Admits every authenticated tenant session. Required when neither roles nor roleGroups is declared, and refused alongside them."
             }
           }
         }

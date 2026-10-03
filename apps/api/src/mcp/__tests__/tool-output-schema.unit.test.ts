@@ -113,4 +113,62 @@ describe("MCP wire output schemas", () => {
     const absent = { name: "untyped", inputSchema: { type: "object" } } as Tool;
     expect(toolWithFailureOutputSchema(absent)).toBe(absent);
   });
+
+  for (const [identity, schema] of [
+    ["empty root", {
+      $id: "", type: "object", required: ["value"], additionalProperties: false,
+      properties: { value: { $ref: "#/$defs/Value" } }, $defs: { Value: { type: "integer" } },
+    }],
+    ["relative root", {
+      $id: "example", type: "object", required: ["value"], additionalProperties: false,
+      properties: { value: { $ref: "#/$defs/Value" } }, $defs: { Value: { type: "integer" } },
+    }],
+    ["nested relative", {
+      type: "object", required: ["value", "copy"], additionalProperties: false,
+      properties: { value: { $id: "nested", type: "integer" }, copy: { $ref: "nested" } },
+    }],
+  ] as const) {
+    test(`keeps ${identity} schema identities and refs strict after repeated listing`, () => {
+      const tool = { name: "identities", inputSchema: { type: "object" }, outputSchema: schema } as Tool;
+      const original = JSON.stringify(tool);
+      const projected = toolWithFailureOutputSchema(tool);
+      const validator = new AjvJsonSchemaValidator();
+      const success = identity === "nested relative" ? { value: 3, copy: 4 } : { value: 3 };
+      for (let n = 0; n < 2; n++) {
+        // Each tools/list response is fresh JSON, while the SDK validator is reused.
+        const wireSchema = JSON.parse(JSON.stringify(projected.outputSchema)) as NonNullable<Tool["outputSchema"]>;
+        const check = validator.getValidator(legacySchema(wireSchema));
+        expect(check(success).valid).toBe(true);
+        expect(check({ value: "3", ...(identity === "nested relative" ? { copy: "4" } : {}) }).valid).toBe(false);
+        expect(check({ ...success, extra: true }).valid).toBe(false);
+        expect(check({ error: { code: "NOT_FOUND", message: "Absent", retryable: false } }).valid).toBe(true);
+        expect(check({ error: { code: "NOT_FOUND", message: "Absent", retryable: "false" } }).valid).toBe(false);
+        expect(check({ error: { code: "NOT_FOUND", message: "Absent", retryable: false, extra: true } }).valid).toBe(false);
+        if (identity === "nested relative") expect(check({ value: 3, copy: "4" }).valid).toBe(false);
+      }
+      expect(JSON.stringify(tool)).toBe(original);
+      expect(toolWithFailureOutputSchema(tool)).toEqual(projected);
+      if (identity === "relative root") {
+        expect((projected.outputSchema!.anyOf as Record<string, unknown>[])[0]!.$id).toBe("example");
+      }
+    });
+  }
+
+  test("isolates identical nested relative ids across different success schemas", () => {
+    const validator = new AjvJsonSchemaValidator();
+    for (const type of ["integer", "string"] as const) {
+      const projected = toolWithFailureOutputSchema({ name: type, inputSchema: { type: "object" }, outputSchema: {
+        type: "object", required: ["value", "copy"], additionalProperties: false,
+        properties: { value: { $id: "nested", type }, copy: { $ref: "nested" } },
+      } });
+      for (let n = 0; n < 2; n++) {
+        const wireSchema = JSON.parse(JSON.stringify(projected.outputSchema)) as NonNullable<Tool["outputSchema"]>;
+        const check = validator.getValidator(legacySchema(wireSchema));
+        const value = type === "integer" ? 3 : "three";
+        const invalid = type === "integer" ? "three" : 3;
+        expect(check({ value, copy: value }).valid).toBe(true);
+        expect(check({ value, copy: invalid }).valid).toBe(false);
+      }
+    }
+  });
 });

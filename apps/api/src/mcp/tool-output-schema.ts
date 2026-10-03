@@ -40,7 +40,9 @@ export function toolWithFailureOutputSchema(tool: Tool): Tool {
   if (!tool.outputSchema) return tool;
   const original = tool.outputSchema;
   // A resource boundary keeps local refs (#, $defs, anchors) rooted at success.
-  const success = { ...original, $id: original.$id ?? `urn:osf:mcp:success:${schemaIdentity(original)}` };
+  // Hierarchical bases also isolate relative ids inside each schema's hash path.
+  const success = { ...original, $id: (original.$id === "" ? undefined : original.$id) ??
+    `https://openshapeforge.invalid/mcp/schema/success/${schemaIdentity(original)}/schema.json` };
   const outputSchema = {
     type: "object" as const,
     anyOf: [success, failureSchema],
@@ -48,6 +50,6 @@ export function toolWithFailureOutputSchema(tool: Tool): Tool {
   return {
     ...tool,
     // Stable outer identity also makes repeated legacy SDK listTools cache-safe.
-    outputSchema: { ...outputSchema, $id: `urn:osf:mcp:output:${schemaIdentity(outputSchema)}` },
+    outputSchema: { ...outputSchema, $id: `https://openshapeforge.invalid/mcp/schema/output/${schemaIdentity(outputSchema)}/schema.json` },
   };
 }

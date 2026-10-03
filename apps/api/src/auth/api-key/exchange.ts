@@ -15,6 +15,7 @@
  */
 import type { SecretKeyring } from "../../platform/secrets.js";
 import { decryptSecret, type StoredSecret } from "../../platform/secrets.js";
+import { REQUEST_TIMEOUT_MS } from "../../control/keycloak-service-account.js";
 
 export type ExchangeConfig = {
   /** Keycloak issuer, e.g. https://keycloak.example/realms/openshapeforge */
@@ -117,6 +118,7 @@ async function performExchange(
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: body.toString(),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
   if (!response.ok) {

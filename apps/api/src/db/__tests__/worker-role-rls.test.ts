@@ -40,8 +40,7 @@
  *   set -o pipefail; bun test src/db/__tests__/worker-role-rls.test.ts 2>&1
  */
 import { describe, expect, test } from "bun:test";
-import { randomUUID } from "node:crypto";
-import { generateKeyPairSync, sign } from "node:crypto";
+import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { SQL } from "bun";
 import { sql, type Kysely } from "kysely";
 import type { DB } from "../../generated/db/types.js";

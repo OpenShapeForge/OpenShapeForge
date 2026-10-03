@@ -100,8 +100,9 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
     $fn$;
 
     -- A verified service credential already fixes the tenant. The worker has
-    -- no direct access to platform.tenants; disclose only whether its scoped
-    -- tenant has the matching realm and an organization bound back to it.
+    -- no direct access to platform.tenants; return only the requested UUID
+    -- when its realm and organization agree. The tenant GUC is caller-set
+    -- defense in depth; credential verification supplies the tenant boundary.
     create or replace function app.tenant_for_scoped_service(
       tenant uuid,
       realm text

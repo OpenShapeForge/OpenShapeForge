@@ -876,6 +876,13 @@ database read and at most a bounded local signature check.
 | subject | issuer + `sub` of a bearer token whose **signature and issuer verify** and whose `aud` names this API or an organization resource | `API_RATE_LIMIT_MAX_SUBJECT` |
 | service | issuer + `azp` of such a token from a **configured** organization service identity (`OPENSHAPEFORGE_ORGANIZATION_SERVICE_IDENTITIES`, `preferred_username` = `service-account-<azp>`) | `API_RATE_LIMIT_MAX_SERVICE` |
 
+`API_TRUST_PROXY` defaults to one reverse-proxy hop. A hop count trusts the
+immediate socket peer: use it only when every route to the API passes through
+the trusted ingress. A direct peer can otherwise supply its own forwarded IP.
+Where ingress addresses are known, prefer the supported IP/CIDR allowlist.
+`0` or `false` uses the socket address; hops beyond the configured count remain
+untrusted.
+
 Sending the identity headers without a valid signature does not buy the higher
 tier — it falls back to the IP-keyed anonymous budget. Trusted callers are keyed
 per tenant+user rather than per service, so one runaway integration cannot

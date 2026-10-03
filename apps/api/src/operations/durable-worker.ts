@@ -64,9 +64,9 @@ function safeToRepeat(definition: RuntimeOperationDefinition): boolean {
     (definition.effects.data === "read" && definition.effects.external !== "write");
 }
 
+type WorkerIdentityVerifier = (token: string) => Promise<{ tenantId: string | null; userId: string | null; serviceIdentityId: string | null }>;
+
 export type DurableWorkerBrokerOptions = {
-  /** Worker connection used for tenant-scoped service identity registry checks. */
-  db?: OpenShapeForgeDatabase;
   /** Bound by core to the actual registered module's persisted claim resolver. */
   resolveWork(reference: RuntimeDurableWorkReference): Promise<RuntimeResolvedOperationWork | undefined>;
   /** Bound to the same module; atomically pins under the exact live claim. */
@@ -80,9 +80,12 @@ export type DurableWorkerBrokerOptions = {
   now?: () => number;
   /** Backoff for transient token/catalog/limiter answers within one claim (#885). */
   transientRetry?: TransientRetryPolicy;
-  /** Tests only. Production uses the ordinary pinned bearer verifier. */
-  verify?: (token: string) => Promise<{ tenantId: string | null; userId: string | null; serviceIdentityId: string | null }>;
-};
+} & (
+  /** Production requires the worker connection for scoped registry checks. */
+  | { db: OpenShapeForgeDatabase; verify?: WorkerIdentityVerifier }
+  /** Tests may provide an identity verifier instead of a database connection. */
+  | { db?: OpenShapeForgeDatabase; verify: WorkerIdentityVerifier }
+);
 
 export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): RuntimeWorkerOperationBroker {
   const api = serviceIdentityEndpoint(options.apiUrl, "Canonical Operation API");

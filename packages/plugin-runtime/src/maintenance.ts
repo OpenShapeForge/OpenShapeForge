@@ -22,7 +22,11 @@ export type MaintenanceContext = {
   };
 };
 export type MaintenanceRequest = { contribution: string; tenantSlug: string; reason: string };
-export type RunMaintenanceSeed = <T>(request: MaintenanceRequest, work: (context: MaintenanceContext) => Promise<T>) => Promise<T>;
+export type RunMaintenanceSeed = {
+  <T>(request: MaintenanceRequest, work: (context: MaintenanceContext) => Promise<T>): Promise<T>;
+  /** Headless owners only: explicitly acknowledge an owned failed run after reconciliation. */
+  acknowledgeFailure?(job: Promise<unknown>): void;
+};
 export type RuntimeMaintenanceContribution = {
   name: string;
   actorId: string;

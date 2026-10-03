@@ -1003,14 +1003,6 @@ export class ModulePlatformRuntime {
     this.#servers.delete(server);
   }
 
-  /**
-   * Activate one immutable session capability while core invokes a canonical
-   * operation handler. An existing live MCP capability keeps its exact identity;
-   * other transports receive an invocation-scoped capability. A nested dispatch
-   * inherits the outer capability, so its caller-supplied session cannot widen
-   * authority. AsyncLocalStorage keeps concurrent requests disjoint, while the
-   * live set makes continuations retained past completion fail closed.
-   */
   async assertRestrictedOperationConnection(expectedDatabase?: OpenShapeForgeDatabase): Promise<void> {
     if (expectedDatabase) await assertSameDatabase(this.#db, expectedDatabase);
     const result = await sql<{ rolbypassrls: boolean; rolsuper: boolean }>`select rolbypassrls, rolsuper from pg_roles where rolname = current_user`.execute(this.#db);
@@ -1024,6 +1016,14 @@ export class ModulePlatformRuntime {
     }
   }
 
+  /**
+   * Activate one immutable session capability while core invokes a canonical
+   * operation handler. An existing live MCP capability keeps its exact identity;
+   * other transports receive an invocation-scoped capability. A nested dispatch
+   * inherits the outer capability, so its caller-supplied session cannot widen
+   * authority. AsyncLocalStorage keeps concurrent requests disjoint, while the
+   * live set makes continuations retained past completion fail closed.
+   */
   async withActiveOperationSession<T>(
     verifiedSession: TrustedSessionContext,
     work: (session: TrustedSessionContext) => Promise<T>,

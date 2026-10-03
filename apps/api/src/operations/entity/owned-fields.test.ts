@@ -36,6 +36,7 @@ test("a handler cannot move its owned writer by mutating input or operation meta
   const operation = {
     key: "notifications.respond",
     plugin: "notifications",
+    effects: { data: "write" },
     target: { entityName: "Notification", scope: "record", inputField: "id" },
   };
   const target = captureOwnedTarget(operation, input);
@@ -49,4 +50,18 @@ test("a handler cannot move its owned writer by mutating input or operation meta
     target: { entityName: "Notification" },
     id: "authorized",
   });
+});
+test("a non-write declaration cannot mint an owned-field writer", () => {
+  for (const data of ["read", "none", "delete"]) {
+    const operation = {
+      key: "notifications.respond",
+      plugin: "notifications",
+      effects: { data },
+      target: { entityName: "Notification", scope: "record", inputField: "id" },
+    };
+    const target = captureOwnedTarget(operation, { id: "authorized" });
+    operation.effects.data = "write";
+    expect(target).toBeUndefined();
+    expect(() => assertOwnedTarget(target, "authorized")).toThrow();
+  }
 });

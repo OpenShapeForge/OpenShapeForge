@@ -14,6 +14,7 @@ export function captureOwnedTarget(
   operation: {
     key: string;
     plugin: string;
+    effects: { data: string };
     target?: { scope: string; entityName: string; inputField?: string };
   },
   input: Record<string, unknown>,
@@ -21,6 +22,7 @@ export function captureOwnedTarget(
   const target = operation.target;
   const id = target && input[target.inputField ?? "id"];
   if (
+    operation.effects.data !== "write" ||
     operation.plugin === "entity" ||
     target?.scope !== "record" ||
     typeof id !== "string" ||

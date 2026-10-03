@@ -87,14 +87,6 @@ function describeMcpField(field: CompiledField): string | undefined {
 
 const MCP_FIELD_SCHEMA_OPTIONS = { describeField: describeMcpField };
 
-const ENTITY_OPERATION_INTENTS = [
-  "list",
-  "get",
-  "create",
-  "update",
-  "delete",
-] as const;
-
 function canonicalOutputDefinitions(): JsonObject {
   return {
     OperationReference: {
@@ -103,7 +95,9 @@ function canonicalOutputDefinitions(): JsonObject {
       required: ["id", "intent"],
       properties: {
         id: { type: "string" },
-        intent: { type: "string", enum: [...ENTITY_OPERATION_INTENTS] },
+        // Offers can reference plugin and relationship Operations as well as CRUD.
+        // The canonical OperationReference contract leaves intent extensible.
+        intent: { type: "string" },
       },
     },
     OperationError: {

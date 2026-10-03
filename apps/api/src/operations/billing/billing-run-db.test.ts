@@ -301,12 +301,17 @@ describe("the milestone billing run against PostgreSQL", () => {
     const { agreementId } = await agreement(tenantId);
     const other = await agreement(tenantId);
     const id = await milestone(session, agreementId, 9, "pending");
-    // The column is immutable: the write policy never lets an update carry it (the caller-facing
-    // transports refuse it by name — see the REST suite), so the agreement stays what it was.
+    // The canonical field policy refuses the whole caller update before any
+    // writable sibling or record version can change.
     const table = billingTable("AgreementMilestone");
     expect(table.columns.find((column) => column.name === "agreement_id")).toMatchObject({ immutable: true });
-    await updateGeneratedEntity(restricted.db, session, { table: table.name, id, values: { agreementId: other.agreementId, description: "Moved?" } });
-    expect((await sql<{ agreement_id: string; description: string }>`select agreement_id::text as agreement_id, description from erp.agreement_milestones where id = ${id}::uuid`.execute(privileged.db)).rows[0])
-      .toEqual({ agreement_id: agreementId, description: "Moved?" });
+    const before = (await sql`select * from erp.agreement_milestones where id = ${id}::uuid`.execute(privileged.db)).rows[0]!;
+    await expect(updateGeneratedEntity(restricted.db, session, {
+      table: table.name, id, values: { agreementId: other.agreementId, description: "Moved?" },
+    })).rejects.toMatchObject({ operationError: {
+      code: "BAD_USER_INPUT", message: 'Protected field "agreementId" cannot be changed or removed.', retryable: false,
+    } });
+    expect((await sql`select * from erp.agreement_milestones where id = ${id}::uuid`.execute(privileged.db)).rows[0]).toEqual(before);
+    expect(before.agreement_id).toBe(agreementId);
   }, 60_000);
 });

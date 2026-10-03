@@ -32,7 +32,7 @@
  *   - Template placeholders form a closed vocabulary: connection value keys
  *     and operation inputs. An unresolved placeholder fails the call.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { allPagesPlan, collectMappedPages } from "./declarative-pagination.js";
 import { HttpError } from "../rest/http-error.js";
 import { applyResponseTransforms } from "./response-transforms.js";
@@ -1722,11 +1722,16 @@ export async function executeBindingStep(
   for (const mapping of mappings) {
     if (typeof mapping.to === "string") collected[mapping.to] = [];
   }
-  for (const item of items) {
+  for (const [index, item] of items.entries()) {
     input.signal?.throwIfAborted();
     const outputs = await executeBinding({
       ...input,
       serviceInputs: { ...input.serviceInputs, [localName]: item },
+      // Each item is its own request: one shared key would make a provider
+      // that honours it answer every item with the first item's response.
+      ...(input.idempotencyKey
+        ? { idempotencyKey: createHash("sha256").update(`${input.idempotencyKey}\0${index}`).digest("hex") }
+        : {}),
     });
     for (const [key, value] of Object.entries(outputs)) {
       if (!Array.isArray(collected[key])) collected[key] = [];

@@ -14,6 +14,7 @@ import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 
 const RATE_LIMIT_MAX_ENV = "API_RATE_LIMIT_MAX";
 const originalMax = process.env[RATE_LIMIT_MAX_ENV];
+const originalTrustProxy = process.env.API_TRUST_PROXY;
 const originalContextSecret =
   process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
 let app: FastifyInstance | undefined;
@@ -23,6 +24,8 @@ afterEach(async () => {
   app = undefined;
   if (originalMax === undefined) delete process.env[RATE_LIMIT_MAX_ENV];
   else process.env[RATE_LIMIT_MAX_ENV] = originalMax;
+  if (originalTrustProxy === undefined) delete process.env.API_TRUST_PROXY;
+  else process.env.API_TRUST_PROXY = originalTrustProxy;
   if (originalContextSecret === undefined)
     delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
   else
@@ -30,6 +33,43 @@ afterEach(async () => {
 });
 
 describe("API rate limiting", () => {
+  test.each([
+    ["default", undefined, 1], ["one", "1", 1], ["two", "2", 2],
+  ])("%s trusted proxy hops isolate client budgets and ignore addresses beyond the trusted chain", async (_label, setting, hops) => {
+    process.env[RATE_LIMIT_MAX_ENV] = "2";
+    if (setting === undefined) delete process.env.API_TRUST_PROXY;
+    else process.env.API_TRUST_PROXY = setting;
+    app = createApiApp({ cors: false });
+    void app.register(async (scope) => {
+      scope.get("/test/client-ip", (request) => ({ ip: request.ip }));
+    });
+    const forwarded = (client: string, spoof?: string) => [spoof, client, ...(hops === 2 ? ["192.0.2.10"] : [])]
+      .filter(Boolean).join(", ");
+    const call = (client: string, spoof?: string) => app!.inject({
+      method: "GET", url: "/test/client-ip", remoteAddress: "10.0.0.1",
+      headers: { "x-forwarded-for": forwarded(client, spoof) },
+    });
+    expect((await call("203.0.113.7")).json<{ ip: string }>()).toEqual({ ip: "203.0.113.7" });
+    expect((await call("203.0.113.7", "198.51.100.1")).statusCode).toBe(200);
+    expect((await call("203.0.113.7", "198.51.100.2")).statusCode).toBe(429);
+    expect((await call("203.0.113.8")).statusCode).toBe(200);
+  });
+
+  test.each(["0", "false"])("%s proxy trust keeps forwarded addresses in the socket's shared budget", async (setting) => {
+    process.env[RATE_LIMIT_MAX_ENV] = "1";
+    process.env.API_TRUST_PROXY = setting;
+    app = createApiApp({ cors: false });
+    void app.register(async (scope) => {
+      scope.get("/test/client-ip", (request) => ({ ip: request.ip }));
+    });
+    const call = (client: string) => app!.inject({
+      method: "GET", url: "/test/client-ip", remoteAddress: "10.0.0.1",
+      headers: { "x-forwarded-for": client },
+    });
+    expect((await call("203.0.113.7")).json<{ ip: string }>()).toEqual({ ip: "10.0.0.1" });
+    expect((await call("203.0.113.8")).statusCode).toBe(429);
+  });
+
   test("throttles a non-exempt route with 429 + Retry-After once the budget is spent", async () => {
     process.env[RATE_LIMIT_MAX_ENV] = "3";
     app = createApiApp({ cors: false });

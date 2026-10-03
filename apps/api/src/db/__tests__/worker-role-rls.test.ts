@@ -41,6 +41,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, sign } from "node:crypto";
 import { SQL } from "bun";
 import { sql, type Kysely } from "kysely";
 import type { DB } from "../../generated/db/types.js";
@@ -54,6 +55,10 @@ import {
 } from "../migrations/worker-role.js";
 import { claimJobs } from "../../jobs/store.js";
 import { JOB_WORKER_ROLE, withJobWorkerSession } from "../../jobs/worker.js";
+import { withDbSession } from "../session.js";
+import { __resetSessionResolverForTests } from "../../auth/identity.js";
+import { configuredDurableWorkerBroker } from "../../operations/durable-worker.js";
+import type { RuntimeResolvedOperationWork } from "@openshapeforge/plugin-runtime";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -170,6 +175,109 @@ async function seed(db: Kysely<DB>): Promise<Fixture> {
 }
 
 describe("worker-role RLS axis", () => {
+  test("a restricted worker verifies host service authority without reading the tenant registry", async () => {
+    await withScratchDb(async (name) => {
+      const fixture = await withDb(scratchAdminUrl(name), async (db) => {
+        await db.connection().execute((conn) => runMigrationChain(conn));
+        const fixture = await seed(db);
+        for (const [tenant, organization] of [[fixture.tenantA, "org-a"], [fixture.tenantB, "org-b"]]) {
+          await sql`update platform.tenants set keycloak_realm = 'host', keycloak_organization_id = ${organization}
+            where id = ${tenant}::uuid`.execute(db);
+        }
+        return fixture;
+      });
+      const issuer = "https://identity.example.test/realms/host";
+      const clientId = "scoped-worker";
+      const subject = randomUUID();
+      const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
+      const publicKey = { ...keys.publicKey.export({ format: "jwk" }), kid: "worker-key", alg: "RS256" };
+      const input = [JSON.stringify({ alg: "RS256", kid: "worker-key" }), JSON.stringify({
+        iss: issuer, aud: "api", sub: subject, tid: fixture.tenantA, azp: clientId,
+        preferred_username: `service-account-${clientId}`,
+        iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 300,
+      })].map((part) => Buffer.from(part).toString("base64url")).join(".");
+      const token = `${input}.${sign("RSA-SHA256", Buffer.from(input), keys.privateKey).toString("base64url")}`;
+      let dispatched = 0;
+      const server = Bun.serve({ port: 0, fetch: (request) => {
+        const path = new URL(request.url).pathname;
+        if (path === "/jwks") return Response.json({ keys: [publicKey] });
+        if (path === "/token") return Response.json({ access_token: token });
+        if (path.endsWith("/execute")) {
+          dispatched++;
+          return Response.json({ data: { id: "created" }, operations: [] });
+        }
+        return Response.json({ id: "Note.create", intent: "Note.create", effects: { data: "write", external: "none" },
+          reliability: { idempotency: { mode: "keyed" } } });
+      } });
+      const env: NodeJS.ProcessEnv = {
+        OPENSHAPEFORGE_ORGANIZATION_CONTEXT: "host",
+        OPENSHAPEFORGE_ORGANIZATION_SERVICE_IDENTITIES: JSON.stringify([
+          { tenantId: fixture.tenantA, clientId, clientSecret: "synthetic-worker-secret" },
+        ]),
+        OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER: issuer,
+        OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI: new URL("/jwks", server.url).href,
+        OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE: "api",
+        OPENSHAPEFORGE_API_VERIFY_BEARER_AUTHORIZED_PARTIES: undefined,
+      };
+      const saved = new Map(Object.keys(env).map((key) => [key, process.env[key]]));
+      for (const [key, value] of Object.entries(env)) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+      __resetSessionResolverForTests();
+      try {
+        await withDb(scratchWorkerUrl(name), async (db) => {
+          const identity = await sql<{ who: string; is_superuser: string }>`
+            select current_user as who, current_setting('is_superuser') as is_superuser
+          `.execute(db);
+          expect(identity.rows[0]).toEqual({ who: WORKER_ROLE, is_superuser: "off" });
+          await expect(sql`select 1 from platform.tenants limit 1`.execute(db))
+            .rejects.toThrow(/permission denied for (table|schema)/);
+          await expect(sql`select 1 from erp.relations limit 1`.execute(db))
+            .rejects.toThrow(/permission denied for (table|schema)/);
+
+          await withDbSession(db, { tenantId: fixture.tenantA, userId: subject, roles: [], scope: "self" }, async (trx) => {
+            for (const [tenant, realm, expected] of [
+              [fixture.tenantA, "host", fixture.tenantA],
+              [fixture.tenantA, "other", null],
+              [fixture.tenantB, "host", null],
+            ]) {
+              const result = await sql<{ tenant_id: string | null }>`
+                select app.tenant_for_scoped_service(${tenant}::uuid, ${realm}) as tenant_id
+              `.execute(trx);
+              expect(result.rows[0]?.tenant_id).toBe(expected);
+            }
+          });
+          const unbound = await sql<{ tenant_id: string | null }>`
+            select app.tenant_for_scoped_service(${fixture.tenantA}::uuid, 'host') as tenant_id
+          `.execute(db);
+          expect(unbound.rows[0]?.tenant_id).toBeNull();
+
+          let work: RuntimeResolvedOperationWork = { tenantId: fixture.tenantA, serviceIdentityId: clientId,
+            operation: { id: "Note.create", idempotencyKey: "stable-key" } };
+          const broker = configuredDurableWorkerBroker(db, async () => work,
+            async (_reference, operationContractFingerprint) => { work = { ...work, operationContractFingerprint }; },
+            { ...env, OPENSHAPEFORGE_OPERATION_API_URL: server.url.href,
+              OPENSHAPEFORGE_SERVICE_IDENTITY_TOKEN_URL: new URL("/token", server.url).href });
+          const reference = { workId: "command-1", attempt: 1, workerId: "worker-1" };
+          expect(await broker.execute(await broker.authorize(reference))).toEqual({ data: { id: "created" }, operations: [] });
+          expect(dispatched).toBe(1);
+          const retained = await broker.authorize(reference);
+          await withDb(scratchAdminUrl(name), async (adminDb) => {
+            await sql`update platform.tenants set keycloak_realm = 'other' where id = ${fixture.tenantA}::uuid`.execute(adminDb);
+          });
+          expect(await broker.execute(retained)).toMatchObject({ error: { code: "SERVICE_IDENTITY_MISMATCH" } });
+          expect(dispatched).toBe(1);
+        });
+      } finally {
+        server.stop(true);
+        for (const [key, value] of saved) {
+          if (value === undefined) delete process.env[key]; else process.env[key] = value;
+        }
+        __resetSessionResolverForTests();
+      }
+    });
+  }, TEST_TIMEOUT);
+
   test(
     "a worker connected as openshapeforge_worker claims the queue across tenants and can read nothing else",
     async () => {

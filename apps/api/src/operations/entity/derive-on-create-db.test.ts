@@ -17,7 +17,7 @@ const tenantId = randomUUID();
 const actor = {
   tenantId,
   userId: randomUUID(),
-  roles: ["Organization.All.ReadWrite"],
+  roles: ["Templates.Manage"],
   groups: [],
   scope: "self" as const,
 };

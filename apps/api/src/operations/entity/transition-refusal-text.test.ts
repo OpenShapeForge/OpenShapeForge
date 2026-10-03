@@ -20,16 +20,16 @@ describe("refusals a person reads, in both languages (#887, #932)", () => {
   });
 
   test("the entity role guard keeps its English message and adds the entity's Dutch label", () => {
-    const table = getGeneratedCrudTables().find((candidate) => candidate.source?.authoringEntityName === "SalesProcess")!;
+    const table = getGeneratedCrudTables().find((candidate) => candidate.source?.authoringEntityName === "Task")!;
     expect(notAuthorizedRefusal(table, "update")).toEqual({
       code: "FORBIDDEN",
-      message: "Not authorized to update SalesProcess.",
-      data: { localized: { en: "Not authorized to update Sales process.", nl: "Geen toestemming om Verkoopproces te wijzigen." } },
+      message: "Not authorized to update Task.",
+      data: { localized: { en: "Not authorized to update Task.", nl: "Geen toestemming om Taak te wijzigen." } },
     });
-    expect(notAuthorizedRefusal(table, "list").data.localized.nl).toBe("Geen toestemming om Verkoopproces te bekijken.");
+    expect(notAuthorizedRefusal(table, "list").data.localized.nl).toBe("Geen toestemming om Taak te bekijken.");
     // The record-permission guard refuses with the same shape for its own actions.
-    expect(notAuthorizedRefusal(table, "edit").data.localized).toEqual({ en: "Not authorized to edit Sales process.", nl: "Geen toestemming om Verkoopproces te wijzigen." });
-    expect(notAuthorizedRefusal(table, "view").message).toBe("Not authorized to view SalesProcess.");
+    expect(notAuthorizedRefusal(table, "edit").data.localized).toEqual({ en: "Not authorized to edit Task.", nl: "Geen toestemming om Taak te wijzigen." });
+    expect(notAuthorizedRefusal(table, "view").message).toBe("Not authorized to view Task.");
   });
 
   test("a rule that stamps the acting Relation is refused up front for an unlinked session, in both languages", () => {

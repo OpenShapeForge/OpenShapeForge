@@ -34,7 +34,8 @@ import { getGeneratedCrudTables } from "./catalog.js";
 const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
 const SECRET = "transitions-actor-relation-test-secret";
 /** The realm this deployment trusts: what a trusted-context session's identity is issued by. */
-const ISSUER = "https://issuer.test/realms/test";
+// Use the actual authored realm so its invited member role is declared.
+const ISSUER = "https://issuer.test/realms/openshapeforge";
 const OTHER_ISSUER = "https://other.test/realms/other";
 const scratchName = `actor_relation_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
 const ROLES = ["Agreements.All.Read", "Agreements.All.ReadWrite"];

@@ -3,6 +3,7 @@
 import { expect, test } from "bun:test";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { __resetSessionResolverForTests, resolveSessionContext } from "./identity.js";
+import { DummyDriver, Kysely, PostgresAdapter, PostgresIntrospector, PostgresQueryCompiler } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 
 test("real JWT verification admits only a configured service client without person enrollment", async () => {
@@ -15,7 +16,27 @@ test("real JWT verification admits only a configured service client without pers
   const server = Bun.serve({ port: 0, fetch: () => Response.json({ keys: [{ ...jwk, kid: "automatic-test", alg: "RS256", use: "sig" }] }) });
   const tenant = "11111111-1111-4111-8111-111111111111";
   let personStoreAccess = 0;
-  const db = new Proxy({}, { get() { personStoreAccess++; throw new Error("Person enrollment store must not be accessed for the configured automatic account."); } }) as OpenShapeForgeDatabase;
+  let memberAccessChecks = 0;
+  const driver = new DummyDriver();
+  const acquire = driver.acquireConnection.bind(driver);
+  driver.acquireConnection = async () => {
+    const connection = await acquire();
+    connection.executeQuery = async (query) => {
+      if (query.sql.includes("set_config(")) return { rows: [] };
+      if (query.sql.includes("select ir.access_blocked")) {
+        memberAccessChecks++;
+        return { rows: [] };
+      }
+      personStoreAccess++;
+      throw new Error("Person enrollment store must not be accessed for the configured automatic account.");
+    };
+    return connection;
+  };
+  const db = new Kysely({ dialect: {
+    createAdapter: () => new PostgresAdapter(), createDriver: () => driver,
+    createIntrospector: database => new PostgresIntrospector(database),
+    createQueryCompiler: () => new PostgresQueryCompiler(),
+  } }) as OpenShapeForgeDatabase;
   try {
     process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI = server.url.href;
     process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = "https://issuer.example.test";
@@ -37,6 +58,7 @@ test("real JWT verification admits only a configured service client without pers
     expect(session.roles).toContain("Relations.All.ReadWrite");
     expect(session.relation).toBeNull();
     expect(personStoreAccess).toBe(0);
+    expect(memberAccessChecks).toBe(1);
     // A person goes through the enrollment store — and when that store fails,
     // the answer is 503, not a session built from the token alone.
     await expect(
@@ -44,6 +66,7 @@ test("real JWT verification admits only a configured service client without pers
     ).rejects.toMatchObject({ status: 503, code: "AUTHENTICATION_UNAVAILABLE" });
     expect(personStoreAccess).toBeGreaterThan(0);
   } finally {
+    await db.destroy();
     server.stop(true);
     for (const key of keys) { if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key]; }
     __resetSessionResolverForTests();

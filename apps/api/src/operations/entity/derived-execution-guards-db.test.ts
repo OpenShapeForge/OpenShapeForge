@@ -33,7 +33,7 @@ const session = {
   tenantId: tenant,
   userId: actor,
   scope: "self" as const,
-  roles: ["General.All.Read", "General.All.ReadWrite", "Organization.All.ReadWrite"],
+  roles: ["General.All.Read", "General.All.ReadWrite", "Templates.Manage"],
 };
 const column = (name: string, type: string, extra: Partial<GeneratedCrudColumn> = {}): GeneratedCrudColumn => ({
   name, type, required: true, primaryKey: name === "id", generated: null, ...extra,

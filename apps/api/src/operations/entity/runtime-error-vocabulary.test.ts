@@ -25,6 +25,7 @@ const RUNTIME_MODULES = [
   "catalog.ts",
   "collection-policy.ts",
   "edit-leases.ts",
+  "edit-lease-locked.ts",
   "confirmation-challenges.ts",
   "../../db/database-refusals.ts",
 ];
@@ -41,6 +42,8 @@ const NOT_A_REQUEST_REFUSAL = new Set([
   "INVALID_TYPE",
   "INVALID_DATETIME",
   "REQUIRED",
+  // Availability offer diagnostics accompany a successful read, not a refused CRUD request.
+  "OPERATION_UNAVAILABLE",
 ]);
 
 function thrownCodes(): Set<string> {

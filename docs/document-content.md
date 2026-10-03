@@ -138,7 +138,7 @@ renaming a role renames the policy and no migration restates a role name.
 | Subject | Template-owned blocks | Document-owned blocks |
 |---|---|---|
 | `Templates.Read`, `General.All.Read/ReadWrite` | read | no access |
-| `Organization.All.ReadWrite` | read, generic `Block.create/update`, `TemplateVariant.*Block` | no access |
+| `Templates.Manage` (held by `org_admin`) | read, generic `Block.create/update`, `TemplateVariant.*Block` | no access on its own (see below for combined roles) |
 | `CaseFile.All.Read` | no access | read (`DocumentVariant.get/list`, `Block.get/list`; the policy hides template-owned rows) |
 | `CaseFile.All.ReadWrite` | no access (may link a published version through `Document.linkTemplate`) | read, and write only through `DocumentVariant.insertBlock/updateBlock/moveBlock/removeBlock` |
 
@@ -146,7 +146,13 @@ renaming a role renames the policy and no migration restates a role name.
   list a variant's blocks through the generic `Block.list`; the restrictive
   policy `blocks_owner_read` decides which rows such a session sees. `Block`
   **write** roles are unchanged (template roles), so generic `Block.create/update`
-  refuse a document editor. `DocumentVariant.blocks` is authored with
+  refuse a session that holds only document roles. The table describes each
+  role on its own; a session holding both `Templates.Manage` and a document
+  read role sees document-owned blocks too, and generic `Block.update` is not
+  limited to template-owned rows. It checks `Block`'s own roles only: the owning
+  `DocumentVariant`'s `update` role, its version and a block's `locked` flag
+  are checked by the `DocumentVariant.*Block` Operations, not by the generic
+  update. `DocumentVariant.blocks` is authored with
   `childAuthorization: owner`: only then do the owner's collection Operations
   lend the owner's `update` roles to its owned children
   (`apps/api/src/operations/entity/collection-mutations.ts`, `safeOperation`

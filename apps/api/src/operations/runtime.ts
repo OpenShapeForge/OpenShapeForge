@@ -1476,7 +1476,10 @@ export async function invokeOperation(
     context.platform,
     context.session,
     (session) => {
-      const runSeed = bound.maintenanceOwner ? liveMaintenanceRunner(bound.maintenanceOwner, context.platform, session) : undefined;
+      // Only the module's Control handlers receive live maintenance
+      // (docs/maintenance.md), whatever session another of its Operations runs under.
+      const runSeed = bound.maintenanceOwner && bound.operation.auth.mode === "control"
+        ? liveMaintenanceRunner(bound.maintenanceOwner, context.platform, session) : undefined;
       return run({
       ...context,
       ...(session ? { session } : {}),

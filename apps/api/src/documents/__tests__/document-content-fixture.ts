@@ -34,11 +34,11 @@ export const actor = randomUUID();
 export type Session = { tenantId: string; userId: string; credential: "bearer"; roles: string[]; groups: never[]; scope: "tenant" };
 const session = (roles: string[]): Session => ({ tenantId: tenant, userId: actor, credential: "bearer", roles, groups: [], scope: "tenant" });
 /** Full editor: documents, templates and organization writes. */
-export const editor = session(["CaseFile.All.ReadWrite", "Organization.All.ReadWrite", "Templates.Read", "General.All.Read"]);
+export const editor = session(["CaseFile.All.ReadWrite", "Organization.All.ReadWrite", "Templates.Manage", "Templates.Read", "General.All.Read"]);
 /** Document editor without any template role. */
 export const caseUser = session(["CaseFile.All.ReadWrite"]);
 /** Template publisher without any document role. */
-export const publisher = session(["Organization.All.ReadWrite", "Templates.Read"]);
+export const publisher = session(["Organization.All.ReadWrite", "Templates.Manage", "Templates.Read"]);
 /** Template reader without any document role. */
 export const templateUser = session(["Templates.Read"]);
 /** Document reader without any template role. */

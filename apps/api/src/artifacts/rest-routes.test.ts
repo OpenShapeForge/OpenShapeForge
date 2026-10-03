@@ -5,6 +5,7 @@ import Fastify from "fastify";
 import { __resetSessionResolverForTests } from "../auth/identity.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { registerArtifactRestRoutes } from "./rest-routes.js";
+import { limitUploadBody } from "./upload-limit.js";
 
 const SECRET = "artifact-route-test-secret";
 const ARTIFACT_ID = "1658ad0b-e44b-4ef3-86ca-953dc6783885";
@@ -73,6 +74,8 @@ describe("artifact REST adapter", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toBe("download");
     expect(response.headers["content-disposition"]).toContain('filename="rapport.pdf"');
+    expect(response.headers["x-content-type-options"]).toBe("nosniff");
+    expect(response.headers["cache-control"]).toBe("private, no-store");
     expect(owner).toEqual({ artifactId: ARTIFACT_ID, owner: { entity: "Document", id: DOCUMENT_ID } });
     await app.close();
   });
@@ -92,5 +95,19 @@ describe("artifact REST adapter", () => {
     expect(response.json().error.code).toBe("UNAUTHENTICATED");
     expect(called).toBeFalse();
     await app.close();
+  });
+
+  test("enforces the upload limit the route declares", async () => {
+    async function* chunks(...sizes: number[]) {
+      for (const size of sizes) yield new Uint8Array(size);
+    }
+    async function drain(source: AsyncIterable<Uint8Array>): Promise<number> {
+      let total = 0;
+      for await (const chunk of source) total += chunk.byteLength;
+      return total;
+    }
+    expect(await drain(limitUploadBody(chunks(4, 4), "8", 8))).toBe(8);
+    expect(() => limitUploadBody(chunks(1), "9", 8)).toThrow("exceeds the upload limit");
+    await expect(drain(limitUploadBody(chunks(4, 4, 1), undefined, 8))).rejects.toMatchObject({ status: 413, code: "ARTIFACT_TOO_LARGE" });
   });
 });

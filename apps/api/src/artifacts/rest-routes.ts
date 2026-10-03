@@ -7,6 +7,7 @@ import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
+import { ARTIFACT_UPLOAD_LIMIT_BYTES, limitUploadBody } from "./upload-limit.js";
 
 export const ARTIFACT_STAGE_PATH = "/api/artifacts";
 export const ARTIFACT_CONTENTS_PATH = "/api/artifacts/:artifactId/contents";
@@ -76,7 +77,7 @@ export function registerArtifactRestRoutes(
       void reply.status(projected.status).send(projected.body);
     });
 
-    instance.post(ARTIFACT_STAGE_PATH, { bodyLimit: 64 * 1024 * 1024 }, async (request, reply) => {
+    instance.post(ARTIFACT_STAGE_PATH, { bodyLimit: ARTIFACT_UPLOAD_LIMIT_BYTES }, async (request, reply) => {
       const verified = await session(request, options.db);
       const source = request.body as AsyncIterable<Uint8Array> | undefined;
       if (!source || typeof source[Symbol.asyncIterator] !== "function") {
@@ -85,7 +86,7 @@ export function registerArtifactRestRoutes(
       const descriptor = await options.artifacts.stage(verified, {
         purpose: "record-upload",
         fileName: fileName(request),
-        source,
+        source: limitUploadBody(source, request.headers["content-length"]),
       });
       return reply.status(201).send({ data: descriptor, operations: [] });
     });
@@ -101,6 +102,10 @@ export function registerArtifactRestRoutes(
         .header("content-type", result.descriptor.mediaType)
         .header("content-length", String(result.bytes.byteLength))
         .header("content-disposition", contentDisposition(result.descriptor.fileName))
+        // Stored bytes are served as the declared type and never cached:
+        // a later permission change must not be answered from a cache.
+        .header("x-content-type-options", "nosniff")
+        .header("cache-control", "private, no-store")
         .send(Buffer.from(result.bytes));
     });
   });

@@ -11,6 +11,7 @@ import {
   renderArtifactUploadPage,
 } from "./artifact-upload.js";
 import { HttpError } from "../rest/http-error.js";
+import { ARTIFACT_UPLOAD_LIMIT_BYTES, limitUploadBody } from "../artifacts/upload-limit.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { callbackOrigin, elicitedKeyring } from "./handoff-config.js";
 import { type McpRouteContext } from "./route-context.js";
@@ -38,7 +39,7 @@ export async function registerArtifactUploadRoutes(
     });
     instance.post(
       `${ARTIFACT_UPLOAD_PATH}/:token`,
-      { bodyLimit: 64 * 1024 * 1024 },
+      { bodyLimit: ARTIFACT_UPLOAD_LIMIT_BYTES },
       async (request, reply) => {
         const keyring = elicitedKeyring();
         if (!keyring) {
@@ -69,10 +70,11 @@ export async function registerArtifactUploadRoutes(
         if (!fileName || fileName.length > 255 || /[\r\n\0/\\]/.test(fileName)) {
           throw new HttpError(400, "BAD_USER_INPUT", "The file name is invalid.");
         }
-        const source = request.body as AsyncIterable<Uint8Array> | undefined;
-        if (!source || typeof source[Symbol.asyncIterator] !== "function") {
+        const body = request.body as AsyncIterable<Uint8Array> | undefined;
+        if (!body || typeof body[Symbol.asyncIterator] !== "function") {
           throw new HttpError(400, "BAD_USER_INPUT", "A file body is required.");
         }
+        const source = limitUploadBody(body, request.headers["content-length"]);
         const uploadSession: TrustedSessionContext = {
           tenantId: pending.tenantId,
           userId: pending.userId,

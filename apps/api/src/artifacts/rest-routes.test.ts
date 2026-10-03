@@ -114,7 +114,9 @@ describe("artifact REST adapter", () => {
   test("refuses file names that would display differently than they are", () => {
     expect(() => assertUploadFileName("bewijs.pdf")).not.toThrow();
     expect(() => assertUploadFileName("Offerte 2026 – définitief (v2).pdf")).not.toThrow();
-    for (const name of ["", "a/b.pdf", "a\\b.pdf", "a\nb.pdf", "a\tb.pdf", "invoice\u202Efdp.exe", "a\u2066b.pdf", "a\u0085b.pdf", "x".repeat(256)]) {
+    expect(() => assertUploadFileName("a\tb.pdf")).not.toThrow();
+    for (const name of ["", "a/b.pdf", "a\\b.pdf", "a\nb.pdf", "a\u001bb.pdf", "invoice\u202Efdp.exe", "a\u2066b.pdf", "a\u200Fb.pdf",
+      "a\u061Cb.pdf", "a\u2028b.pdf", "a\u0085b.pdf", "x".repeat(256)]) {
       expect(() => assertUploadFileName(name)).toThrow("The file name is invalid.");
     }
   });

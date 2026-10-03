@@ -38,10 +38,11 @@ export function limitUploadBody(
 
 /**
  * A stored file name is shown to every reader of the owning record, so it may
- * not carry line breaks, path separators, control characters or bidi
- * overrides — `invoice\u202Efdp.exe` would display as `invoiceexe.pdf`.
+ * not carry line breaks (including U+2028/U+2029), path separators, control
+ * characters other than tab, or bidi marks, overrides and isolates —
+ * `invoice\u202Efdp.exe` would display as `invoiceexe.pdf`.
  */
-const UNSAFE_FILE_NAME = /[\x00-\x1f\x7f-\x9f/\\\u202a-\u202e\u2066-\u2069]/;
+const UNSAFE_FILE_NAME = /[\x00-\x08\x0a-\x1f\x7f-\x9f/\\\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
 
 export function assertUploadFileName(name: string): void {
   if (!name || name.length > 255 || UNSAFE_FILE_NAME.test(name)) {

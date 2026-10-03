@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { afterEach, describe, expect, test } from "bun:test";
 import type { FastifyInstance } from "fastify";
+import { API_BUILD_IDENTITY } from "../../config/build-identity.js";
 import { createApiApp } from "../api.js";
 
 const originalAliases = process.env.OPENSHAPEFORGE_ROUTE_ALIASES;
@@ -31,7 +32,7 @@ describe("canonical operational routes", () => {
     app = createApiApp({ cors: false });
     const canonical = await app.inject({ method: "GET", url: "/api/health" });
     expect(canonical.statusCode).toBe(200);
-    expect(canonical.json() as unknown).toEqual({ status: "ok", role: "api" });
+    expect(canonical.json() as unknown).toEqual({ status: "ok", role: "api", ...API_BUILD_IDENTITY });
     expect((await app.inject({ method: "GET", url: "/healthz" })).statusCode).toBe(404);
     expect((await app.inject({ method: "GET", url: "/api/graphql/health" })).statusCode).toBe(404);
   });

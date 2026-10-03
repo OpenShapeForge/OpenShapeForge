@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { API_BUILD_IDENTITY } from "../../config/build-identity.js";
 import { describe, expect, it } from "bun:test";
 import {
   ARTIFACT_UPLOAD_APP_URI,
@@ -10,6 +11,7 @@ import {
 describe("artifact upload MCP App", () => {
   it("bundles a private file picker without an upload credential", async () => {
     const html = await renderArtifactUploadApp();
+    expect(html).toContain(API_BUILD_IDENTITY.version);
     expect(ARTIFACT_UPLOAD_APP_URI).toBe("ui://openshapeforge/artifact-upload");
     expect(ARTIFACT_UPLOAD_TOOL_NAME).toBe("upload_document_file");
     expect(html).toContain('id="upload-file"');

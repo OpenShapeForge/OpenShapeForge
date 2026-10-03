@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { API_BUILD_IDENTITY } from "../../config/build-identity.js";
 import { describe, expect, test } from "bun:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import type { Icon } from "@modelcontextprotocol/server";
@@ -65,7 +66,7 @@ describe("MCP initialize presentation", () => {
     try {
       await server.connect(serverTransport);
       await client.connect(clientTransport);
-      expect(client.getServerVersion()).toMatchObject({ name: "openshapeforge", version: "1", icons: [icon] });
+      expect(client.getServerVersion()).toMatchObject({ name: "openshapeforge", version: API_BUILD_IDENTITY.version, icons: [icon] });
     } finally {
       await client.close();
       await server.close();

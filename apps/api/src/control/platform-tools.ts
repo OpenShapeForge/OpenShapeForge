@@ -22,8 +22,9 @@ import { connectedViaLabel, type McpClientInfo } from "../mcp/session-client.js"
 import { PLATFORM_OPERATOR_ROLE } from "./authorization.js";
 import type { PlatformAdministrator } from "./platform-admin.js";
 import { listPlatformTenants, type PlatformCatalogDeps } from "./platform-catalog.js";
+import { API_BUILD_IDENTITY } from "../config/build-identity.js";
 
-export const PLATFORM_SERVER_INFO = { name: "openshapeforge-platform", version: "1" } as const;
+export const PLATFORM_SERVER_INFO = { name: "openshapeforge-platform", version: API_BUILD_IDENTITY.version } as const;
 
 export const PLATFORM_SERVER_INSTRUCTIONS =
   "Platform administration for an OpenShapeForge deployment: tenant lifecycle, " +

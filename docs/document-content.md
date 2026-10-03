@@ -301,7 +301,7 @@ Which tables `publish` reads and writes is bound by the compiler into the head
 table's manifest source (`source.versioning.storage`) and served to the
 runtime as `platform.schemas.versioning`; nothing is derived from the entity
 name, so a plugin entity in its own schema publishes the same way
-([plugins.md](plugins.md#shipped-example-3-notebook)). The walk itself follows
+([plugins.md](plugins.md#shipped-example-2-notebook)). The walk itself follows
 `storage.owned`, the tree of authored `ownership: owned` collections under the
 head (`snapshot.ownedRelationships: recursive`), version table excluded at
 every level; it never consults the catalog, so a cascading foreign key from a

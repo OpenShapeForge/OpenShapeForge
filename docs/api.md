@@ -104,7 +104,7 @@ Engine semantics (`src/graphql/generated-crud.ts`):
 
 `src/rest/generated-rest-routes.ts` is the REST counterpart of the GraphQL
 schema builder. Entities opt in per entity with an `interfaces.rest` block in their YAML
-(see [authoring.md](authoring.md#rest-generated-rest-exposure)); the compiler
+(see [authoring.md](authoring.md#interfacesrest--generated-rest-exposure)); the compiler
 bridges it to `source.rest` in the manifest, and every such table gets routes
 under `/api/rest/v1/<basePath>`:
 

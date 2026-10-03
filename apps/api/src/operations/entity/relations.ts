@@ -95,7 +95,7 @@ export async function listGeneratedEntityRelation(
     const columnTable = belongsTo ? parent : target;
     const column = columnTable.columns.find((column) => column.name === relationship.foreignKey);
     if (!column) throw generatedCrudError("Relationship foreign-key metadata is invalid.", "INTERNAL_SERVER_ERROR");
-    assertClassifiedQueryAllowed(columnTable, session, { filter: { [fieldNameForColumn(column)]: parentId } });
+    assertClassifiedQueryAllowed(columnTable, session, { filter: { [fieldNameForColumn(column)]: parentId } }, true);
     if (isElicitedOutputColumn(columnTable, column)) throw generatedCrudError("Secure input cannot be traversed as a relationship.", "FORBIDDEN");
     const join = belongsTo
       ? sql`${sql.id("relation_parent", column.name)} = ${sql.id("row_source", target.primaryKey)}`

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { standaloneOperationFixture } from "./authoring/standalone-operation.fixtures.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { collectAllArtifacts } from "./index.js";
-import { loadActivePlatformCompile } from "./active-manifest.js";
+import { loadActivePlatformCompile, resolveActiveAuthoringDir } from "./active-manifest.js";
 import { buildWebManifest } from "./authoring/web-manifest.js";
+import { corpusWebOperations } from "./authoring/corpus-web.fixtures.js";
 import { resolveEntityInputSources } from "./entity-input-sources.js";
 
 type JsonObject = Record<string, unknown>;
@@ -93,7 +93,7 @@ test("canonical entity input sources reach every generated operation interface",
     // A host can generate its frontend directly from the public compile API,
     // before (or without) running the all-artifact generator.
     const active = await loadActivePlatformCompile(root);
-    const directWeb = buildWebManifest(active.entities, {}, standaloneOperationFixture());
+    const directWeb = buildWebManifest(active.entities, {}, corpusWebOperations(resolveActiveAuthoringDir(root)));
     const directCreate = object(JSON.parse(JSON.stringify(directWeb.entities.Document!.operations.create)));
     expect(object(directCreate.input).kind).toBe("json-schema");
     assertCanonicalDocumentInput(object(object(directCreate.input).schema));

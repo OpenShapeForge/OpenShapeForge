@@ -151,7 +151,7 @@ export function projectRows(
   entityValues = generatedEntityValues,
 ): GeneratedEntityRow[] {
   const hasClassification = table.columns.some(
-    (column) => column.classification,
+    (column) => column.classification || column.fieldPolicy,
   );
   const hasElicitedOutput =
     table.source?.secureInputOnCreate !== undefined ||

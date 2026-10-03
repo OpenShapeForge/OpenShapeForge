@@ -76,6 +76,30 @@ function valueFixture(allowed = ["Include", "Text"], parameterBindings = false) 
   };
   return { ...f, registry, context: { registry, tables: [f.parent, f.child] } };
 }
+function protectedObjectFixture() {
+  const f = fixture();
+  const detailsSchema = { type: "object", properties: {
+    public: { type: "string" }, secret: { type: "string" }, locked: { type: "string" },
+  }, additionalProperties: false };
+  f.child.columns.push(column("payload", "jsonb", {
+    sourceField: "details", required: false,
+    fieldPolicy: {
+      children: { secret: { writeRoles: ["Synthetic.Policy.Write"] }, locked: { immutable: true } },
+      valueSchema: { ...detailsSchema, required: ["public", "secret", "locked"] },
+    },
+  }));
+  f.operations.find((op) => op.entityName === "Block" && op.intent === "create")!.inputSchema = {
+    type: "object", properties: { values: { type: "object", properties: {
+      title: { type: "string", minLength: 1 }, parent: { type: "string", format: "uuid" }, details: detailsSchema,
+    }, required: ["title", "parent"], additionalProperties: false } },
+  };
+  f.operations.find((op) => op.entityName === "Block" && op.intent === "update")!.inputSchema = {
+    type: "object", properties: { values: { type: "object", properties: {
+      title: { type: "string", minLength: 1 }, details: detailsSchema,
+    }, additionalProperties: false } },
+  };
+  return f;
+}
 async function insertValue(f: ReturnType<typeof valueFixture>, parentId: string, values: Record<string, unknown>, definitionKey = "Include", actorSession = session) {
   return createGeneratedEntityForTable(restricted!.db, actorSession, f.child, { title: "Typed child", parent: parentId, parentIdPosition: 0, definitionKey, values }, f.context);
 }
@@ -180,6 +204,43 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
     await expect(f.execute(restricted!.db, session, binding, { id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "x" } })).rejects.toMatchObject({ operationError: { code: "VALIDATION", violations: [{ field: "title", code: "TOO_SHORT" }] } });
     const result = await f.execute(restricted!.db, session, binding, { id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "Valid child" } });
     expect(result.orderedIds).toEqual([result.childId]);
+  });
+  test("collection public object edits preserve stored protected siblings and forbidden edits leave the transaction unchanged", async () => {
+    const f = protectedObjectFixture(), seeded = await seed(1);
+    const childId = seeded.children[0]!;
+    const initial = { public: "Before", secret: "Stored secret", locked: "Permanent" };
+    await sql`update erp.blocks set payload=${jsonbLiteral(initial)} where id=${childId}::uuid`.execute(privileged!.db);
+    await f.execute(restricted!.db, session, { ...binding, action: "update" }, {
+      id: seeded.id, expectedVersion: seeded.expectedVersion, childId, values: { details: { public: "After" } },
+    });
+    const accepted = await storedValue(childId);
+    expect(accepted.payload).toEqual({ ...initial, public: "After" });
+    const acceptedState = await state(seeded.id);
+    expect(acceptedState.version).not.toBe(seeded.expectedVersion);
+    expect(acceptedState.events).toBe(2);
+    for (const [details, code, message] of [
+      [{ secret: "Changed" }, "FORBIDDEN", 'Not authorized to change field "details.secret".'],
+      [{ locked: "Changed" }, "BAD_USER_INPUT", 'Protected field "details.locked" cannot be changed or removed.'],
+    ] as const) {
+      await expect(f.execute(restricted!.db, session, { ...binding, action: "update" }, {
+        id: seeded.id, expectedVersion: acceptedState.version, childId, values: { details },
+      })).rejects.toMatchObject({ operationError: { code, message } });
+      expect(await storedValue(childId)).toEqual(accepted);
+      expect(await state(seeded.id)).toEqual(acceptedState);
+    }
+  });
+  test("collection inserts refuse caller-restricted top-level and nested fields without writing or auditing", async () => {
+    const f = protectedObjectFixture(), seeded = await seed(0);
+    const before = await state(seeded.id);
+    await expect(f.execute(restricted!.db, session, binding, {
+      id: seeded.id, expectedVersion: seeded.expectedVersion,
+      values: { title: "Valid", details: { public: "Public", secret: "Denied", locked: "Permanent" } },
+    })).rejects.toMatchObject({ operationError: { code: "FORBIDDEN", message: 'Not authorized to change field "details.secret".' } });
+    f.child.columns.find((column) => column.name === "title")!.fieldPolicy = { writeRoles: ["Synthetic.Policy.Write"] };
+    await expect(f.execute(restricted!.db, session, binding, {
+      id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "Denied" },
+    })).rejects.toMatchObject({ operationError: { code: "FORBIDDEN", message: 'Not authorized to change field "title".' } });
+    expect(await state(seeded.id)).toEqual(before);
   });
   test("moves existing IDs to before another child and to the end", async () => {
     const { execute } = fixture(), seeded = await seed(3);

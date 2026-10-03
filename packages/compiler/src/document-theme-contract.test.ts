@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { standaloneOperationFixture } from "./authoring/standalone-operation.fixtures.js";
 import { expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { loadActivePlatformCompile } from "./active-manifest.js";
 import { buildWebManifest } from "./authoring/web-manifest.js";
+import { resolveActiveAuthoringDir } from "./active-manifest.js";
+import { corpusWebOperations } from "./authoring/corpus-web.fixtures.js";
 
 test("document themes are tenant-owned, selected on templates, and projected generically", async () => {
   const root = fileURLToPath(new URL("../../../", import.meta.url));
@@ -78,7 +79,7 @@ test("document themes are tenant-owned, selected on templates, and projected gen
   const block = compile.entities.find((entity) => entity.contract.entity.name === "Block")!.contract;
   expect(block.model.fields.some((field) => /theme|color|font|css/i.test(field.key))).toBe(false);
 
-  const web = buildWebManifest(compile.entities, {}, standaloneOperationFixture());
+  const web = buildWebManifest(compile.entities, {}, corpusWebOperations(resolveActiveAuthoringDir(root)));
   expect(web.entities.DocumentTheme?.views.collection.route).toBe("/document-themes");
   expect(web.entities.DocumentTheme?.views.record?.routes.create).toBe("/document-themes/new");
   expect(web.entities.DocumentTheme?.operations.setDefault).toMatchObject({ target: { scope: "record" } });

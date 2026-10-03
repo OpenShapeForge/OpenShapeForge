@@ -35,7 +35,10 @@ import { resolveModelFields } from "./compiler/model.js";
 import { normalizeEntityFields } from "./entity-fields.js";
 import { assertEntityValueDefinition, compileEntityValueStorage, entityValueDefinitionNames } from "./entity-values.js";
 import type { EntityValueRegistry } from "./entity-value-types.js";
-import { resolveDerivedOnCreateBindings } from "./compiler/derive-on-create.js";
+import { ensureDerivedIdentifierIndexes, resolveDerivedOnCreateBindings } from "./compiler/derive-on-create.js";
+import { compileFieldValuePolicy, fieldValuePolicySchema } from "./field-value-policy.js";
+import { compiledFieldSchema } from "../field-json-schema.js";
+import type { CoreReferentiedataSnapshot } from "../core-referentiedata-artifacts.js";
 import { assertDefaultSatisfiesContract, fieldValueCheckConstraints } from "./field-value-checks.js";
 import { TENANT_IDENTITY_CHECK_EXPRESSION, hasTenantIdentityCheck, tenantIdentityCheckName } from "../tenant-bound-references.js";
 
@@ -75,6 +78,8 @@ export type CompileAuthoringBackendManifestOptions = {
   relationshipRegister?: RelationshipRegisterEntry[];
   generatedCrudAllowlist?: string[];
   domainInternalEntities?: string[];
+  /** Same current catalog snapshot used by the canonical Operation schemas. */
+  referentiedata?: CoreReferentiedataSnapshot;
   /** Observe each compiled candidate (slug, provenance, contract) — used to
       build the plugin context without recompiling entities. */
   onCandidate?: (candidate: {
@@ -360,9 +365,10 @@ const RESTRICTING_SENSITIVITIES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Flatten compiled fields (including nested `children`/`item`) into a
+ * Collect top-level compiled fields into a
  * field-key → restricting-sensitivity map. Used to stamp each storage column
- * with the classification of the authoring field that backs it.
+ * with the classification of the authoring field that backs it. Nested
+ * protections retain their structure separately in fieldPolicy.
  */
 function collectFieldSensitivities(
   fields: CompiledField[] | undefined,
@@ -373,16 +379,12 @@ function collectFieldSensitivities(
     if (sensitivity && RESTRICTING_SENSITIVITIES.has(sensitivity) && !result.has(field.key)) {
       result.set(field.key, sensitivity as ColumnSensitivity);
     }
-    collectFieldSensitivities(field.children, result);
-    if (field.item) {
-      collectFieldSensitivities([field.item], result);
-    }
   }
   return result;
 }
 
 /**
- * Flatten compiled fields into the set of keys authored `immutable: true`.
+ * Collect top-level keys authored `immutable: true`.
  * Used to stamp each backing column so the runtime's writability rule can
  * refuse the field on update (#177) — the same route `classification` takes,
  * for the same reason: an authored flag is worth nothing until the manifest
@@ -394,16 +396,12 @@ function collectImmutableFieldKeys(
 ): Set<string> {
   for (const field of fields ?? []) {
     if (field.immutable) result.add(field.key);
-    collectImmutableFieldKeys(field.children, result);
-    if (field.item) {
-      collectImmutableFieldKeys([field.item], result);
-    }
   }
   return result;
 }
 
 /**
- * Flatten compiled fields into field key → the operation keys authored in
+ * Collect top-level fields into field key → the operation keys authored in
  * `writtenBy`. Stamped onto the backing column so the transports can leave the
  * field out of their create/update schemas and refuse it when a caller sends
  * it anyway. Same route as `immutable`, for the same reason: an authored flag
@@ -416,10 +414,6 @@ function collectFieldWriters(
   for (const field of fields ?? []) {
     if (field.writtenBy && field.writtenBy.length > 0 && !result.has(field.key)) {
       result.set(field.key, [...field.writtenBy]);
-    }
-    collectFieldWriters(field.children, result);
-    if (field.item) {
-      collectFieldWriters([field.item], result);
     }
   }
   return result;
@@ -1322,11 +1316,20 @@ export function compileAuthoringBackendManifest(
     // so no transport offers them on create/update and the CRUD layer can name
     // the operation that may set them.
     const fieldWriters = collectFieldWriters(candidate.contract.model.fields);
+    const fieldPolicies = new Map(candidate.contract.model.fields.map((field) =>
+      [field.key, (() => {
+        const policy = compileFieldValuePolicy(field);
+        return policy && (policy.children || policy.item)
+          ? { ...policy, valueSchema: fieldValuePolicySchema(
+            compiledFieldSchema(field, options.referentiedata ?? {}, { includeDefault: false }), policy,
+          ) } : policy;
+      })()]));
 
     for (const storageColumn of candidate.contract.storage.columns) {
       const field = candidate.fieldsByKey.get(storageColumn.field);
       const primaryKey = storageColumn.column === "id";
       const sensitivity = fieldSensitivities.get(storageColumn.field);
+      const policy = fieldPolicies.get(storageColumn.field);
       const column: ColumnDefinition = {
         name: storageColumn.column,
         // Storage compilation is the single field-to-SQL type authority. Do
@@ -1336,6 +1339,8 @@ export function compileAuthoringBackendManifest(
         ...(primaryKey ? { primaryKey: true } : {}),
         ...(primaryKey || !storageColumn.nullable ? { required: true } : {}),
         sourceField: storageColumn.field,
+        ...(policy && (policy.readRoles || policy.children || policy.item)
+          ? { fieldPolicy: policy } : {}),
         ...(sensitivity ? { classification: sensitivity } : {}),
         ...(immutableFields.has(storageColumn.field) ? { immutable: true as const } : {}),
         ...(fieldWriters.has(storageColumn.field)
@@ -1387,8 +1392,7 @@ export function compileAuthoringBackendManifest(
     const columnsByNameWithOperational = new Map(columns.map((column) => [column.name, column]));
     const retention = compileRetention(candidate, columnsByField, columnsByNameWithOperational);
 
-    const compiledIndexes = compileEntityIndexes(candidate, tenantScoped, columnsByField);
-    for (const binding of resolveDerivedOnCreateBindings({
+    const derivedBindings = resolveDerivedOnCreateBindings({
       entityName: candidate.contract.entity.name,
       fields: candidate.contract.model.fields,
       columns: candidate.contract.storage.columns,
@@ -1396,7 +1400,10 @@ export function compileAuthoringBackendManifest(
         ? { indexes: candidate.contract.entity.indexes }
         : {}),
       tenantScoped,
-    })) {
+    });
+    const compiledIndexes = ensureDerivedIdentifierIndexes(name,
+      compileEntityIndexes(candidate, tenantScoped, columnsByField), derivedBindings);
+    for (const binding of derivedBindings) {
       const target = columnsByField.get(binding.targetField)!;
       target.deriveOnCreate = {
         sourceField: binding.sourceField,

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
+import { canonicalRepoRelativePath } from "../packaged-config.js";
 import {
   authoringLayerDirs,
   loadAuthoringConfig,
@@ -219,7 +220,7 @@ describe("resolveAuthoringLayers", () => {
     configureLayers(root, ["base", "overlay"]);
 
     const resolved = resolveAuthoringLayers(root);
-    expect(resolved).toBe(join(root, ".authoring-build"));
+    expect(canonicalRepoRelativePath(root, resolved)).toBe(".authoring-build");
     const merged = YAML.parse(
       readFileSync(join(resolved, "entities/core/widget.yaml"), "utf8"),
     );
@@ -549,16 +550,128 @@ describe("resolveAuthoringLayers", () => {
       title: "Patched",
     });
     configureLayers(root, ["base", "overlay"]);
-    const first = readFileSync(
-      join(resolveAuthoringLayers(root), "entities/core/widget.yaml"),
-      "utf8",
-    );
-    const second = readFileSync(
-      join(resolveAuthoringLayers(root), "entities/core/widget.yaml"),
-      "utf8",
-    );
+    const firstDirectory = resolveAuthoringLayers(root);
+    const first = readFileSync(join(firstDirectory, "entities/core/widget.yaml"), "utf8");
+    const secondDirectory = resolveAuthoringLayers(root);
+    const second = readFileSync(join(secondDirectory, "entities/core/widget.yaml"), "utf8");
     expect(first).toBe(second);
+    expect(secondDirectory).not.toBe(firstDirectory);
+    expect(readFileSync(join(firstDirectory, "entities/core/widget.yaml"), "utf8")).toBe(first);
+    expect(canonicalRepoRelativePath(root, join(firstDirectory, "entities/core/widget.yaml")))
+      .toBe(".authoring-build/entities/core/widget.yaml");
+    expect(canonicalRepoRelativePath(root, secondDirectory)).toBe(".authoring-build");
   });
+
+  test("a failed resolution removes only its own snapshot", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/entities/core/widget.yaml", baseEntity);
+    mkdirSync(join(root, "overlay"));
+    configureLayers(root, ["base", "overlay"]);
+    const retained = resolveAuthoringLayers(root);
+    const before = readdirSync(join(root, ".authoring-build"));
+    writeYaml(root, "overlay/entities/core/missing.yaml", { kind: "entityPatch", title: "Missing" });
+    expect(() => resolveAuthoringLayers(root)).toThrow(/no earlier layer defines/);
+    expect(readdirSync(join(root, ".authoring-build"))).toEqual(before);
+    expect(existsSync(join(retained, "entities/core/widget.yaml"))).toBe(true);
+  });
+
+  test("materialization refuses a symbolic link or non-directory build root without touching its target", () => {
+    const external = makeRepo();
+    writeFileSync(join(external, "keep.txt"), "unowned");
+    for (const symbolicLink of [true, false]) {
+      const root = makeRepo();
+      writeYaml(root, "base/entities/core/widget.yaml", baseEntity);
+      mkdirSync(join(root, "overlay"));
+      configureLayers(root, ["base", "overlay"]);
+      const buildRoot = join(root, ".authoring-build");
+      if (symbolicLink) symlinkSync(external, buildRoot, "dir");
+      else writeFileSync(buildRoot, "unowned file");
+      expect(() => resolveAuthoringLayers(root)).toThrow(/not a symbolic link or another file type/);
+      expect(readdirSync(external)).toEqual(["keep.txt"]);
+      expect(readFileSync(join(external, "keep.txt"), "utf8")).toBe("unowned");
+      if (!symbolicLink) expect(readFileSync(buildRoot, "utf8")).toBe("unowned file");
+    }
+  });
+
+  test("separate compiler processes retain isolated inputs and emit identical artifacts", async () => {
+    const root = makeRepo();
+    mkdirSync(join(root, "overlay"));
+    for (const [directory, name] of [["documents-plugin", "documents"], ["versioning-plugin", "core-versioning"]]) {
+      mkdirSync(join(root, directory!));
+      writeFileSync(join(root, directory!, "index.ts"), `export default { name: ${JSON.stringify(name)} };\n`);
+      writeFileSync(join(root, directory!, "runtime.ts"), `export default { name: ${JSON.stringify(name)}, operationHandlers: {} };\n`);
+    }
+    writeYaml(root, "authoring.config.yaml", {
+      layers: ["packages/compiler/config/authoring", "overlay"],
+      plugins: ["./documents-plugin/index.ts", "./versioning-plugin/index.ts"],
+    });
+    const foreignDirectory = join(root, ".authoring-build", "unowned");
+    mkdirSync(foreignDirectory, { recursive: true });
+    writeFileSync(join(foreignDirectory, "keep.txt"), "retained");
+    const runner = join(root, "compile.ts");
+    writeFileSync(runner, `
+      import { existsSync, readFileSync, writeFileSync } from "node:fs";
+      import { basename, join } from "node:path";
+      import { createHash } from "node:crypto";
+      import { resolveActiveAuthoringDir } from ${JSON.stringify(resolve(import.meta.dir, "../active-manifest.ts"))};
+      import { collectAllArtifacts } from ${JSON.stringify(resolve(import.meta.dir, "../index.ts"))};
+      const [root, label] = Bun.argv.slice(2);
+      const directory = resolveActiveAuthoringDir(root!);
+      writeFileSync(join(directory, ".retained-by-" + label), label!);
+      writeFileSync(join(root!, label + ".resolved"), directory);
+      const deadline = Date.now() + 20000;
+      while (!existsSync(join(root!, "continue"))) {
+        if (Date.now() > deadline) throw new Error("resolve barrier timed out");
+        await Bun.sleep(10);
+      }
+      readFileSync(join(directory, ".retained-by-" + label));
+      const { all } = await collectAllArtifacts(root!);
+      const hash = createHash("sha256");
+      for (const artifact of all.toSorted((a, b) => a.path.localeCompare(b.path))) {
+        hash.update(artifact.path); hash.update("\\0"); hash.update(artifact.contents); hash.update("\\0");
+      }
+      const manifest = JSON.parse(all.find((artifact) => artifact.path.endsWith("db/manifest.json"))!.contents);
+      console.log(JSON.stringify({ directory, hash: hash.digest("hex"), count: all.length,
+        sources: manifest.tables.flatMap((table) => table.source?.path ? [table.source.path] : []),
+        leakedPath: all.some((artifact) => artifact.contents.includes(directory) || artifact.contents.includes(basename(directory))),
+      }));
+    `);
+    const spawnCompiler = (label: string) => Bun.spawn([process.execPath, runner, root, label], {
+      stdout: "pipe", stderr: "pipe",
+    });
+    const children: ReturnType<typeof spawnCompiler>[] = [];
+    try {
+      for (const label of ["first", "second"]) {
+        children.push(spawnCompiler(label));
+        const deadline = Date.now() + 20000;
+        while (!existsSync(join(root, label + ".resolved"))) {
+          if (Date.now() > deadline) throw new Error(`${label} compiler did not resolve its inputs`);
+          await Bun.sleep(10);
+        }
+      }
+      writeFileSync(join(root, "continue"), "go");
+      const results = await Promise.all(children.map(async (child) => {
+        const [exitCode, stdout, stderr] = await Promise.all([
+          child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+        ]);
+        expect(exitCode, stderr).toBe(0);
+        return JSON.parse(stdout.trim().split("\n").at(-1)!);
+      }));
+      expect(results[0].directory).not.toBe(results[1].directory);
+      expect(results[0].hash).toBe(results[1].hash);
+      expect(results[0].count).toBeGreaterThan(0);
+      expect(results[0].sources.length).toBeGreaterThan(0);
+      for (const result of results) {
+        expect(result.sources.every((source: string) => source.startsWith(".authoring-build/entities/"))).toBe(true);
+        expect(result.leakedPath).toBe(false);
+        expect(existsSync(result.directory)).toBe(false);
+      }
+      expect(readFileSync(join(foreignDirectory, "keep.txt"), "utf8")).toBe("retained");
+    } finally {
+      for (const child of children) if (child.exitCode === null) child.kill();
+      await Promise.all(children.map((child) => child.exited));
+    }
+  }, 60_000);
 });
 
 // ---------------------------------------------------------------------------

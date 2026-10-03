@@ -33,6 +33,9 @@
  * declared operation/field permission model layered on top.
  */
 import { operationFailure } from "@openshapeforge/operations";
+import { columnFieldPolicy, hasUnreadableField, redactFieldValue } from "../operations/entity/field-policy.js";
+import { canReadClassifiedColumns } from "../operations/entity/classification.js";
+export { canReadClassifiedColumns } from "../operations/entity/classification.js";
 import type {
   GeneratedCrudAuthorization,
   GeneratedCrudOperation,
@@ -42,6 +45,7 @@ type Column = {
   name: string;
   classification?: "confidential" | "pii" | "bsn";
   sourceField?: string;
+  fieldPolicy?: import("@openshapeforge/operations").FieldValuePolicy;
 };
 
 type QuerySort = { field?: string | null; direction?: string | null } | null | undefined;
@@ -108,27 +112,6 @@ export function assertOperationAllowed(
 }
 
 /**
- * Whether the session may read data-classified (pii/bsn/confidential) columns
- * of this entity. A caller with a write grant (any role listed under
- * create/update/delete — the entity's "ReadWrite" tier) may read sensitive
- * columns; a read-only caller may not.
- */
-export function canReadClassifiedColumns(
-  authorization: GeneratedCrudAuthorization | undefined,
-  session: AuthzSession,
-): boolean {
-  if (!authorization?.roles) return false;
-  // A manifest that predates an operation key (stale artifacts) must degrade to
-  // "no write grant", not to a TypeError on a request path.
-  const writeRoles = [
-    ...(authorization.roles.create ?? []),
-    ...(authorization.roles.update ?? []),
-    ...(authorization.roles.delete ?? []),
-  ];
-  return intersects(session?.roles ?? [], writeRoles);
-}
-
-/**
  * Prevent a reader who cannot see classified values from using them as an
  * oracle through list filters or ordering. Unknown fields are intentionally
  * ignored here so the existing generated CRUD validation can continue to
@@ -144,8 +127,8 @@ export function assertClassifiedQueryFieldsAllowed(
 ): void {
   // Every list request runs this; entities without a classified column (the
   // common case) must not pay for the role intersection.
-  if (!columns.some((column) => column.classification)) return;
-  if (canReadClassifiedColumns(authorization, session)) return;
+  if (!columns.some((column) => column.classification || column.fieldPolicy)) return;
+  const classified = canReadClassifiedColumns(authorization, session);
 
   const requestedFields = [
     ...Object.keys(filter ?? {}).map((field) => ({
@@ -157,7 +140,7 @@ export function assertClassifiedQueryFieldsAllowed(
       : []),
   ];
   const classifiedField = requestedFields
-    .find(({ column }) => column?.classification);
+    .find(({ column }) => column && hasUnreadableField(columnFieldPolicy(column), session, classified));
 
   if (!classifiedField?.column) return;
   const { field } = classifiedField;
@@ -179,12 +162,13 @@ export function redactRow<T extends Record<string, unknown>>(
   authorization: GeneratedCrudAuthorization | undefined,
   session: AuthzSession,
 ): T {
-  const classified = columns.filter((column) => column.classification);
-  if (classified.length === 0) return row;
-  if (canReadClassifiedColumns(authorization, session)) return row;
+  const classified = canReadClassifiedColumns(authorization, session);
+  const restricted = columns.filter((column) =>
+    (column.classification || column.fieldPolicy) && hasUnreadableField(columnFieldPolicy(column), session, classified));
+  if (restricted.length === 0) return row;
   const redacted: Record<string, unknown> = { ...row };
-  for (const column of classified) {
-    redacted[column.name] = null;
+  for (const column of restricted) {
+    redacted[column.name] = redactFieldValue(row[column.name], columnFieldPolicy(column), session, classified);
   }
   return redacted as T;
 }

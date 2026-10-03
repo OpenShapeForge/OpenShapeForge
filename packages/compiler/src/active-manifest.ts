@@ -20,7 +20,12 @@ import {
   type LoadedCompilerPlugin,
 } from "./plugins.js";
 import type { PlatformSchemaManifest, TableDefinition } from "./schema.js";
-import { buildCoreReferentiedataSnapshot, loadCoreReferentiedataCatalog } from "./core-referentiedata-artifacts.js";
+import {
+  buildCoreReferentiedataSnapshot,
+  loadCoreReferentiedataCatalog,
+  type CoreReferentiedataCatalog,
+  type CoreReferentiedataSnapshot,
+} from "./core-referentiedata-artifacts.js";
 import { materializeEntityInputSources } from "./entity-input-sources.js";
 import { ensureCompositeReferenceKeys } from "./tenant-bound-references.js";
 
@@ -94,6 +99,9 @@ export function mergePromotedTables(
 
 export type ActivePlatformCompile = {
   manifest: PlatformSchemaManifest;
+  /** Current source catalog and value snapshot shared by every projection. */
+  referentiedataCatalog: CoreReferentiedataCatalog;
+  referentiedata: CoreReferentiedataSnapshot;
   /** Compiled entity contracts, in deterministic allowlist order. */
   entities: CompiledEntityInfo[];
   /** Compiled connector contracts, sorted by slug. */
@@ -143,6 +151,8 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
 
       const authoringEntitySlugs = listAuthoringEntitySlugs(authoringDir);
       const entities: CompiledEntityInfo[] = [];
+      const referentiedataCatalog = await loadCoreReferentiedataCatalog(repoRoot);
+      const referentiedata = buildCoreReferentiedataSnapshot(referentiedataCatalog);
       const promotedManifest = compileAuthoringBackendManifest(
         authoringDir,
         {
@@ -152,23 +162,30 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
           schemaByModule: { core: "erp" },
           relationshipRegister: baseManifest.relationshipRegister ?? [],
           generatedCrudAllowlist: authoringEntitySlugs,
+          referentiedata,
           onCandidate: (candidate) => entities.push(candidate),
         },
       );
 
       // Public compile consumers must receive executable schemas too, not just
       // consumers of collectAllArtifacts. Resolve once before caching contracts.
-      const referentiedata = buildCoreReferentiedataSnapshot(await loadCoreReferentiedataCatalog(repoRoot));
       materializeEntityInputSources(entities.map(entity => entity.contract), referentiedata);
 
       return {
         manifest: mergePromotedTables(baseManifest, promotedManifest),
+        referentiedataCatalog,
+        referentiedata,
         entities,
         connectors: compileActiveConnectors(authoringDir, canonicalRepoRelativePath(repoRoot, authoringDir)),
         plugins,
         pluginEntries,
       };
-    })();
+    })().catch((error) => {
+      // A repaired input must be re-resolved, including a materialized overlay.
+      compileCache.delete(repoRoot);
+      resolvedAuthoringDirs.delete(repoRoot);
+      throw error;
+    });
     compileCache.set(repoRoot, cached);
   }
   return cached;

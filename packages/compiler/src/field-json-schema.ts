@@ -17,6 +17,7 @@ import type {
 } from "./authoring/types.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import { resolveModelFields } from "./authoring/compiler/model.js";
+import { osfTypeDefinitionOf } from "./authoring/entity-fields.js";
 import fieldDefinitionAuthoringSchema from "../config/schemas/field-definition.schema.json" with {
   type: "json",
 };
@@ -30,6 +31,7 @@ import {
   objectSchema,
   operationFieldObjectSchema,
   operationFieldSchema,
+  resolveFields,
   type DescribeFieldOptions,
   type OperationFieldDefinition,
   type OperationFieldSchemaOptions,
@@ -215,9 +217,39 @@ export function createFieldSchemaCompiler(input: {
   referentiedata?: CoreReferentiedataSnapshot;
 }): FieldSchemaCompiler {
   const registry = runtimeFieldSchemaRegistry(input);
+  // Preserve compiler-only metadata while using the same type, cardinality
+  // and validation normalization as field() and object(). Model resolution
+  // needs these defaults before it chooses renderers, including nested ones.
+  const normalizeModelFields = (
+    fields: readonly FieldDefinition[],
+    resolved: readonly ResolvedOperationField[],
+  ): Field[] => fields.map((field, index) => {
+    const normalized = resolved[index]!;
+    const semantic = osfTypeDefinitionOf(field.osfType, input.osfTypes ?? {});
+    const result: Field = {
+      ...field,
+      baseType: normalized.baseType,
+      cardinality: normalized.cardinalityBounds ?? normalized.cardinality,
+      required: normalized.required,
+      ...(normalized.validation ? { validation: normalized.validation as NonNullable<Field["validation"]> } : {}),
+    };
+    const children = field.shape ?? field.children ?? semantic?.shape ?? semantic?.children;
+    if (children && normalized.children) {
+      result.children = normalizeModelFields(children, normalized.children);
+      if (field.shape) result.shape = result.children;
+    }
+    const item = field.item ?? semantic?.item;
+    if (item && normalized.item) {
+      result.item = normalizeModelFields([item], [normalized.item])[0]!;
+    }
+    return result;
+  });
   const compile = (fields: readonly FieldDefinition[]) =>
     resolveModelFields(
-      fields.map((field) => field as Field),
+      normalizeModelFields(
+        fields,
+        resolveFields(fields as unknown as readonly OperationFieldDefinition[], registry),
+      ),
       input.componentCatalog,
       input.osfTypes,
     );

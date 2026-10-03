@@ -5,7 +5,7 @@ import { collectJobOperations } from "./job-operations.js";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { pruneGeneratedUiShards } from "./prune-generated-ui-shards.js";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve, win32 } from "node:path";
 import {
   generateAuthoringUiArtifacts,
 } from "./authoring/generate-ui-artifacts.js";
@@ -33,9 +33,7 @@ import {
   resolveActiveAuthoringDir,
 } from "./active-manifest.js";
 import {
-  buildCoreReferentiedataSnapshot,
   generateCoreReferentiedataArtifacts,
-  loadCoreReferentiedataCatalog,
   type CoreReferentiedataSnapshot,
 } from "./core-referentiedata-artifacts.js";
 import { generateArtifacts } from "./generate.js";
@@ -354,7 +352,7 @@ export async function collectAllArtifacts(
   repoRoot: string = defaultRepoRoot,
 ): Promise<ArtifactCollection> {
   const authoringConfig = loadAuthoringConfig(repoRoot);
-  const { manifest, entities, connectors, plugins, pluginEntries } =
+  const { manifest, entities, connectors, plugins, pluginEntries, referentiedataCatalog, referentiedata } =
     await loadActivePlatformCompile(repoRoot);
   const settingsPolicy = loadSettingsPolicy(repoRoot, authoringConfig, pluginEntries);
   validateRelationshipConstraints(entities);
@@ -369,8 +367,6 @@ export async function collectAllArtifacts(
   // artifacts are written only after every generator has produced its contents.
   // Referenced-precondition `in` values are checked against this snapshot when
   // the field is a referentiedata field.
-  const referentiedataCatalog = await loadCoreReferentiedataCatalog(repoRoot);
-  const referentiedata = buildCoreReferentiedataSnapshot(referentiedataCatalog);
   assertTransitionReferencedPreconditions(contracts, referentiedata);
   // The member of an owned collection learns it here, where every owner is
   // compiled: its generic writes then declare the collection refusal.
@@ -645,6 +641,13 @@ export async function collectAllArtifacts(
   ];
   const seenPaths = new Set<string>();
   for (const artifact of all) {
+    // Check the spelling before joining: aliases bypass collision detection,
+    // and parent segments can write outside the host checkout.
+    if (typeof artifact.path !== "string" || isAbsolute(artifact.path) ||
+        win32.isAbsolute(artifact.path) || /[\\\x00]/.test(artifact.path) ||
+        artifact.path.split("/").some((part) => part === "" || part === "." || part === "..")) {
+      throw new Error(`Artifact path must be a canonical repo-relative path: ${JSON.stringify(artifact.path)}.`);
+    }
     if (seenPaths.has(artifact.path)) {
       throw new Error(`Artifact path collision: ${artifact.path} emitted twice.`);
     }
@@ -685,9 +688,12 @@ if (import.meta.main) {
   // OPENSHAPEFORGE_REPO_ROOT); without either, the compiler assumes it lives at
   // <repoRoot>/packages/compiler inside its own monorepo.
   const flagIndex = process.argv.indexOf("--repo-root");
+  if (flagIndex >= 0 && (!process.argv[flagIndex + 1] || process.argv[flagIndex + 1]!.startsWith("--"))) {
+    throw new Error("--repo-root requires a directory path.");
+  }
   const repoRoot =
     flagIndex >= 0
-      ? resolve(process.argv[flagIndex + 1] ?? ".")
+      ? resolve(process.argv[flagIndex + 1]!)
       : process.env.OPENSHAPEFORGE_REPO_ROOT
         ? resolve(process.env.OPENSHAPEFORGE_REPO_ROOT)
         : undefined;

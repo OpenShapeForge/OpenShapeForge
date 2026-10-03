@@ -406,7 +406,10 @@ export function loadCompilerPluginEntries(
         loaded.push({ plugin, spec, modulePath });
       }
       return loaded;
-    })();
+    })().catch((error) => {
+      pluginCache.delete(repoRoot);
+      throw error;
+    });
     pluginCache.set(repoRoot, cached);
   }
   return cached;

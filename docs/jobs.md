@@ -242,7 +242,13 @@ and projected to REST, MCP and GraphQL:
 resets the attempt budget, `done` closes the job as delivered when the effect
 was confirmed elsewhere. Anything else answers `409 CONFLICT`. The views omit
 the payload and actor: a payload may carry personal data, and the operator's
-question is what happened, not what was sent.
+question is what happened, not what was sent. They are not free of personal
+data, though: `lastError` carries the handler's error text as it was thrown,
+and a mail delivery that the SMTP server refuses names the recipient address
+there. The worker also logs that error text when a job does not end `done`,
+and `failed`, `dead` and `outcome_unknown` rows are not swept (see
+[Retention](#retention)). Treat `Platform.Jobs.Manage` and the worker log as
+access to recipient addresses.
 
 ## Retention
 

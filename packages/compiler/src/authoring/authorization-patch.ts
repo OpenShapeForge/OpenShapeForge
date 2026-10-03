@@ -129,6 +129,9 @@ function baseClientIds(base: JsonObject): string[] {
 
 function renameKeys(map: JsonValue | undefined, rename: ClientRename): JsonValue | undefined {
   if (!isPlainObject(map)) return map;
+  if (Object.hasOwn(map, rename.from) && Object.hasOwn(map, rename.to)) {
+    throw new Error(`Authorization client references contain both "${rename.from}" and its renamed key "${rename.to}"; author one client key explicitly.`);
+  }
   const result: JsonObject = {};
   for (const [key, value] of Object.entries(map)) {
     result[key === rename.from ? rename.to : key] = value;
@@ -195,6 +198,12 @@ export function renameClientReferences(base: JsonObject, rename: ClientRename, o
     );
   }
 
+  return rewriteAuthorizationClientReferences(base, rename);
+}
+
+/** Apply an already validated earlier-layer rename to a later contribution. */
+export function rewriteAuthorizationClientReferences(base: JsonObject, rename: ClientRename): JsonObject {
+  const keycloak = isPlainObject(base.keycloak) ? base.keycloak : {};
   const renamedKeycloak: JsonObject = { ...keycloak };
   if (renamedKeycloak.entityRoleClient === rename.from) renamedKeycloak.entityRoleClient = rename.to;
   if (renamedKeycloak.client === rename.from) renamedKeycloak.client = rename.to;

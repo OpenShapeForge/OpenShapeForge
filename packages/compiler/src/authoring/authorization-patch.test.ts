@@ -381,6 +381,49 @@ describe("resolveAuthoringLayers — authorizationPatch", () => {
     },
   };
 
+  test("plugin contributions after a host rename target the renamed client", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/authorization.yaml", baseRealm());
+    writeYaml(root, "host/authorization.yaml", hostPatch);
+    writeYaml(root, "plugin/authorization.yaml", {kind: "authorizationPatch",
+      clientRoles: {"erp-provider": ["Plugin.Read"]},
+      realmRoles: {plugin_reader: {composites: {"erp-provider": ["Plugin.Read"]}}},
+    });
+    configureLayers(root, ["base", "host", "plugin"]);
+    const merged = YAML.parse(readFileSync(join(resolveAuthoringLayers(root), "authorization.yaml"), "utf8"));
+    expect(merged.clientRoles["erp-provider"]).toBeUndefined();
+    expect(merged.clientRoles["application-api"]).toContain("Plugin.Read");
+    expect(merged.realmRoles.plugin_reader.composites).toEqual({"application-api": ["Plugin.Read"]});
+  });
+
+  test("later contributions refuse ambiguous old and renamed client keys", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/authorization.yaml", baseRealm());
+    writeYaml(root, "host/authorization.yaml", hostPatch);
+    writeYaml(root, "plugin/authorization.yaml", { kind: "authorizationPatch",
+      clientRoles: { "erp-provider": ["Plugin.Read"], "application-api": ["Other.Read"] },
+    });
+    configureLayers(root, ["base", "host", "plugin"]);
+    expect(() => resolveAuthoringLayers(root)).toThrow('both "erp-provider" and its renamed key "application-api"');
+  });
+
+  test("later contributions follow validated chained renames in layer order", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/authorization.yaml", baseRealm());
+    writeYaml(root, "host/authorization.yaml", hostPatch);
+    writeYaml(root, "second/authorization.yaml", { kind: "authorizationPatch", renameClient: { from: "application-api", to: "final-api" } });
+    writeYaml(root, "plugin/authorization.yaml", { kind: "authorizationPatch",
+      clientRoles: { "erp-provider": ["Plugin.Read"] },
+      realmRoles: { plugin_reader: { composites: { "erp-provider": ["Plugin.Read"] } } },
+    });
+    configureLayers(root, ["base", "host", "second", "plugin"]);
+    const merged = YAML.parse(readFileSync(join(resolveAuthoringLayers(root), "authorization.yaml"), "utf8"));
+    expect(merged.clientRoles["erp-provider"]).toBeUndefined();
+    expect(merged.clientRoles["application-api"]).toBeUndefined();
+    expect(merged.clientRoles["final-api"]).toContain("Plugin.Read");
+    expect(merged.realmRoles.plugin_reader.composites).toEqual({ "final-api": ["Plugin.Read"] });
+  });
+
   test("a host layer renames the entity-role client through to the generated realm export", () => {
     const root = makeRepo();
     writeYaml(root, "base/authorization.yaml", baseRealm());

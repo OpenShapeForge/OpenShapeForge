@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type {
   ComponentCatalog,
   Field,
-  SemanticTypeDefinition,
+  OsfTypeDefinition,
 } from "../types.js";
 import { resolveModelFields } from "./model.js";
 
@@ -15,25 +15,57 @@ const catalog: ComponentCatalog = {
   components: {},
 };
 
+describe("choice resolution", () => {
+  const osfTypes: Record<string, OsfTypeDefinition> = {
+    accountId: { kind: "entityId", entity: "Account", label: { en: "Account" }, baseType: "string", validation: { format: "uuid" }, optionSource: { type: "entity", source: "Account", valueField: "id" } },
+    referenceDataCode: { label: { en: "Code" }, baseType: "string" },
+  };
+
+  test("an inline identifier value picks from the alias's optionSource; the entity's own primary key does not", () => {
+    const [id, holder] = resolveModelFields([
+      { key: "id", osfType: "accountId" },
+      { key: "meta", osfType: "object", children: [{ key: "ownerId", osfType: "accountId" }] },
+    ], catalog, osfTypes);
+    expect(id!.options).toBeUndefined();
+    expect(holder!.children![0]!.options).toEqual({ type: "entity", source: "Account", valueField: "id" });
+    const [authored] = resolveModelFields([
+      { key: "meta", osfType: "object", children: [{ key: "ownerId", osfType: "accountId", options: { type: "static", items: [{ value: "x", label: { en: "X" } }] } }] },
+    ], catalog, osfTypes);
+    expect(authored!.children![0]!.options).toMatchObject({ type: "static" });
+  });
+
+  test("the select component's render prop is the same referentiedata group, folded into options", () => {
+    const [folded, agreeing] = resolveModelFields([
+      { key: "status", osfType: "referenceDataCode", render: { component: "ReferenceSelect", props: { referentieGroep: "STATUS" } } },
+      { key: "kind", osfType: "referenceDataCode", options: { type: "referentiedata", referentieGroep: "KIND" }, render: { component: "ReferenceSelect", props: { referentieGroep: "KIND" } } },
+    ], catalog, osfTypes);
+    expect(folded!.options).toEqual({ type: "referentiedata", referentieGroep: "STATUS" });
+    expect(agreeing!.options).toEqual({ type: "referentiedata", referentieGroep: "KIND" });
+    expect(() => resolveModelFields([
+      { key: "kind", osfType: "referenceDataCode", options: { type: "referentiedata", referentieGroep: "KIND" }, render: { component: "ReferenceSelect", props: { referentieGroep: "OTHER" } } },
+    ], catalog, osfTypes)).toThrow("kind: render.props.referentieGroep OTHER contradicts options.referentieGroep KIND.");
+  });
+});
+
 describe("semantic renderer mapping", () => {
   test("retains authored and semantic collection bounds after normalization", () => {
-    const semanticTypes: Record<string, SemanticTypeDefinition> = {
+    const osfTypes: Record<string, OsfTypeDefinition> = {
       boundedTags: {
         label: { en: "Tags" },
-        valueType: "string",
+        baseType: "string",
         cardinality: { min: 1, max: 3 },
       },
     };
 
     const [semantic, authored] = resolveModelFields([
-      { key: "tags", valueType: "string", semanticType: "boundedTags" },
+      { key: "tags", osfType: "boundedTags" },
       {
         key: "steps",
-        valueType: "object",
+        osfType: "object",
         cardinality: { min: 2, max: "unbounded" },
-        item: { key: "step", valueType: "object" },
+        item: { key: "step", osfType: "object" },
       },
-    ], catalog, semanticTypes);
+    ], catalog, osfTypes);
 
     expect(semantic).toMatchObject({
       cardinality: "collection",
@@ -46,22 +78,21 @@ describe("semantic renderer mapping", () => {
   });
 
   test("resolves input component and props centrally while preserving field options", () => {
-    const semanticTypes: Record<string, SemanticTypeDefinition> = {
+    const osfTypes: Record<string, OsfTypeDefinition> = {
       referenceDataCode: {
         label: { en: "Reference value", nl: "Referentiewaarde" },
-        valueType: "string",
+        baseType: "string",
         render: { display: "TextDisplay", input: "ReferenceSelect" },
         props: { clearable: false },
       },
     };
     const fields: Field[] = [{
       key: "status",
-      valueType: "string",
-      semanticType: "referenceDataCode",
+      osfType: "referenceDataCode",
       options: { type: "referentiedata", referentieGroep: "DOCUMENTVERSIONSTATUS" },
     }];
 
-    expect(resolveModelFields(fields, catalog, semanticTypes)[0]).toMatchObject({
+    expect(resolveModelFields(fields, catalog, osfTypes)[0]).toMatchObject({
       key: "status",
       render: { component: "ReferenceSelect", props: { clearable: false } },
       options: { type: "referentiedata", referentieGroep: "DOCUMENTVERSIONSTATUS" },
@@ -69,10 +100,10 @@ describe("semantic renderer mapping", () => {
   });
 
   test("uses the semantic display renderer for a read-only companion field", () => {
-    const semanticTypes: Record<string, SemanticTypeDefinition> = {
+    const osfTypes: Record<string, OsfTypeDefinition> = {
       fileStorageLocation: {
         label: { en: "File", nl: "Bestand" },
-        valueType: "string",
+        baseType: "string",
         render: { display: "TextDisplay", input: "FileUpload" },
         props: {
           fileNameField: "fileName",
@@ -84,10 +115,9 @@ describe("semantic renderer mapping", () => {
 
     expect(resolveModelFields([{
       key: "storageLocation",
-      valueType: "string",
-      semanticType: "fileStorageLocation",
+      osfType: "fileStorageLocation",
       readOnly: true,
-    }], catalog, semanticTypes)[0]?.render).toEqual({
+    }], catalog, osfTypes)[0]?.render).toEqual({
       component: "TextDisplay",
       props: {
         fileNameField: "fileName",
@@ -101,11 +131,11 @@ describe("semantic renderer mapping", () => {
 test("inherits semantic choices recursively while explicit options win", () => {
   const options = { type: "static" as const, items: [{ value: "first", label: { en: "First" } }] };
   const fields = resolveModelFields([
-    { key: "choice", semanticType: "choice", valueType: "string" },
-    { key: "override", semanticType: "choice", valueType: "string", options: { type: "static", items: [] } },
-    { key: "nested", valueType: "object", children: [{ key: "choice", semanticType: "choice", valueType: "string" }] },
-    { key: "items", valueType: "string", cardinality: "collection", item: { key: "choice", semanticType: "choice", valueType: "string" } },
-  ], catalog, { choice: { label: { en: "Choice" }, valueType: "string", options } });
+    { key: "choice", osfType: "choice" },
+    { key: "override", osfType: "choice", options: { type: "static", items: [] } },
+    { key: "nested", osfType: "object", children: [{ key: "choice", osfType: "choice" }] },
+    { key: "items", osfType: "string", cardinality: "collection", item: { key: "choice", osfType: "choice" } },
+  ], catalog, { choice: { label: { en: "Choice" }, baseType: "string", options } });
   expect(fields[0]!.options).toEqual(options);
   expect(fields[1]!.options?.items).toEqual([]);
   expect(fields[2]!.children?.[0]?.options).toEqual(options);

@@ -3,11 +3,13 @@
  * Message selection for the e2e drift preflight.
  *
  * The preflight's value is not that it fails — it is that the reader knows
- * what to do next. Two situations produce the same checksum mismatch and take
- * opposite remedies: a database BEHIND the manifest, which `bun run db:migrate`
- * rolls forward, and a database carrying schema this branch does not declare,
- * which migrate can only refuse because rolling forward cannot drop a table.
- * Telling the second reader to run migrate costs them a round trip that cannot
+ * what to do next. Three situations produce a checksum mismatch and take
+ * different next commands: an empty database, which `bun run db:migrate`
+ * builds; a database built from another manifest, which `bun run db:reset`
+ * rebuilds because nothing rolls a built database forward; and a database
+ * carrying schema this branch does not declare, which is another worktree's
+ * build and is best left alone for a scratch database. Telling the reader
+ * to run migrate on a built database costs them a round trip that cannot
  * succeed, so which message is chosen is worth a test of its own.
  *
  * These are pure: `describeGeneratedSchemaDrift` takes the drift status and the
@@ -36,15 +38,16 @@ function drift(
 
 const nothingUndeclared: UndeclaredDatabaseSchema = { tables: [], columns: [] };
 
-describe("describeGeneratedSchemaDrift — database behind the manifest", () => {
-  test('"behind" with nothing undeclared points at db:migrate', () => {
+describe("describeGeneratedSchemaDrift — database built from another manifest", () => {
+  test('"behind" with nothing undeclared points at db:reset, never db:migrate', () => {
     const remediation = describeGeneratedSchemaDrift(drift("behind"), nothingUndeclared, {
       databaseName: "openshapeforge_dev",
     });
 
-    expect(remediation.kind).toBe("migrate");
-    expect(remediation.message).toContain('database "openshapeforge_dev" is behind the bundled manifest');
-    expect(remediation.message).toContain("bun run db:migrate");
+    expect(remediation.kind).toBe("reset");
+    expect(remediation.message).toContain('database "openshapeforge_dev" was built from another manifest');
+    expect(remediation.message).toContain("bun run db:reset");
+    expect(remediation.message).not.toContain("  bun run db:migrate");
     // The reader must not be told the branch's schema is foreign to the DB.
     expect(remediation.message).not.toContain("does not declare");
   });
@@ -62,13 +65,38 @@ describe("describeGeneratedSchemaDrift — database behind the manifest", () => 
     expect(remediation.message).toContain("bun run db:migrate");
   });
 
-  test("the migrate case still offers the scratch-database escape", () => {
+  test('"unmigrated" with leftover tables is the chain\'s refusal, not a db:migrate hint', () => {
+    const remediation = describeGeneratedSchemaDrift(drift("unmigrated", null), nothingUndeclared, {
+      databaseName: "openshapeforge_dev",
+      liveTables: ["erp.relations", "platform.tenants"],
+    });
+
+    expect(remediation.kind).toBe("reset");
+    expect(remediation.message).toContain("has no recorded generated-schema migration but is not empty");
+    expect(remediation.message).toContain("- table  erp.relations");
+    expect(remediation.message).toContain("- table  platform.tenants");
+    expect(remediation.message).toContain("builds an empty database only and refuses this one");
+    expect(remediation.message).toContain("bun run db:reset");
+    expect(remediation.message).not.toContain("  bun run db:migrate");
+  });
+
+  test("both the migrate and the reset case offer the scratch-database escape", () => {
+    for (const status of ["behind", "unmigrated"] as const) {
+      const message = describeGeneratedSchemaDrift(drift(status), nothingUndeclared).message;
+      expect(message).toContain("OPENSHAPEFORGE_MIGRATE_DATABASE_URL");
+      expect(message).toContain(
+        'DATABASE_URL="${DATABASE_URL%/*}/openshapeforge_e2e" bun run test:e2e',
+      );
+    }
+  });
+
+  test("the reset case names no database and echoes no password", () => {
     const message = describeGeneratedSchemaDrift(drift("behind"), nothingUndeclared).message;
 
-    expect(message).toContain("OPENSHAPEFORGE_MIGRATE_DATABASE_URL");
     expect(message).toContain(
-      'DATABASE_URL="${DATABASE_URL%/*}/openshapeforge_e2e" bun run test:e2e',
+      'OPENSHAPEFORGE_RESET_DATABASE_CONFIRMATION="${DATABASE_URL##*/}" bun run db:reset',
     );
+    expect(message).not.toContain("postgres://");
   });
 });
 
@@ -86,7 +114,7 @@ describe("describeGeneratedSchemaDrift — database ahead of the branch", () => 
     );
     expect(remediation.message).toContain("- table  platform.api_keys");
     // The whole point: it must say migrate cannot help, and offer a real step.
-    expect(remediation.message).toContain("`bun run db:migrate` cannot fix this and will refuse");
+    expect(remediation.message).toContain("`bun run db:migrate` cannot fix this and refuses it whatever the checksum");
     expect(remediation.message).toContain("create database openshapeforge_e2e");
     expect(remediation.message).toContain(
       'DATABASE_URL="${DATABASE_URL%/*}/openshapeforge_e2e" bun run test:e2e',

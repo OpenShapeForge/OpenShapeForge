@@ -27,13 +27,13 @@ profiles:
       layout: true
       persistence: true
 
-  workflowInputField:
+  caseVariable:
     label:
-      nl: Workflow-inputveld
-      en: Workflow input field
+      nl: Zaakvariabele
+      en: Case variable
     description:
-      nl: Velddefinitie voor input die een workflow moet verzamelen of ontvangen.
-      en: Field definition for input a workflow must collect or receive.
+      nl: Velddefinitie voor het variabelencontract van een zaak of zaaksjabloon.
+      en: Field definition for the variable contract of a case or case template.
     keyBehavior: hiddenGeneratedStable
     excludedFieldTypes: []
     typePickerUsage: requestInput
@@ -48,94 +48,6 @@ profiles:
       render: false
       aiHint: true
       defaultValue: true
-      value: false
-      validation: true
-      layout: false
-      persistence: false
-
-  workflowStartVariable:
-    label:
-      nl: Workflow-startvariabele
-      en: Workflow start variable
-    description:
-      nl: Velddefinitie voor data die bij het starten van een workflow beschikbaar is.
-      en: Field definition for data available when a workflow starts.
-    keyBehavior: hiddenGeneratedStable
-    excludedFieldTypes: []
-    typePickerUsage: requestInput
-    controls:
-      label: true
-      description: true
-      type: combined
-      cardinality: false
-      sortable: false
-      shape: true
-      options: true
-      render: false
-      aiHint: true
-      defaultValue: true
-      value: false
-      validation: true
-      layout: false
-      persistence: false
-
-  workflowOutputField:
-    label:
-      nl: Workflow-outputveld
-      en: Workflow output field
-    description:
-      nl: Velddefinitie voor publieke output die een eindnode teruggeeft.
-      en: Field definition for public output returned by an end node.
-    keyBehavior: hiddenGeneratedStable
-    excludedFieldTypes: []
-    typePickerUsage: requestInput
-    controls:
-      label: true
-      description: true
-      type: combined
-      cardinality: false
-      sortable: false
-      shape: true
-      options: true
-      render: false
-      aiHint: true
-      defaultValue: false
-      value: true
-      validation: true
-      layout: false
-      persistence: false
-    lockedVisibleProperties:
-      - value
-    valueAuthoring:
-      label:
-        nl: Waarde
-        en: Value
-      description:
-        nl: Runtime-waarde of expressie die deze workflow via dit outputveld teruggeeft.
-        en: Runtime value or expression this workflow returns through this output field.
-      component: OutputFieldValueEditor
-
-  workflowProcessVariable:
-    label:
-      nl: Procesvariabele
-      en: Process variable
-    description:
-      nl: Compacte velddefinitie voor workflowstatus; initializers staan buiten de definitie.
-      en: Compact field definition for workflow state; initializers live outside the definition.
-    keyBehavior: hiddenGeneratedStable
-    excludedFieldTypes: []
-    typePickerUsage: workflowConfig
-    controls:
-      label: true
-      description: true
-      type: combined
-      cardinality: false
-      sortable: false
-      shape: true
-      options: false
-      render: false
-      aiHint: true
-      defaultValue: false
       value: false
       validation: true
       layout: false

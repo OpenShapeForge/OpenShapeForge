@@ -1,15 +1,19 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: CaseTemplate
 title: Case Template
-description: A reusable case template that defines the expected case steps, roles, variables, and structure. Functional administrators author templates; the system instantiates them when a case is started.
+description: A reusable case template that defines the expected case steps, roles, variables, and structure. Functional
+  administrators author templates; the system instantiates them when a case is started.
 language: en
 displayTemplate: "{{name}}"
 filterField: name
 labels:
   en: Case Template
   nl: Zaaksjabloon
+pluralLabels:
+  en: Case templates
+  nl: Zaaksjablonen
 domains:
   - cases
   - workflow
@@ -29,7 +33,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -41,7 +45,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -53,7 +57,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -63,13 +66,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 2000
+    osfType: multilineText
   - key: caseType
-    valueType: string
     required: true
     label:
       en: Case type
@@ -77,13 +75,12 @@ fields:
     persisted:
       column: case_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASETYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: CASETYPE
+    osfType: referenceDataCode
   - key: version
-    valueType: integer
+    osfType: integer
     required: true
     label:
       en: Version
@@ -93,7 +90,6 @@ fields:
       column: version
       storageClass: core
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -101,13 +97,12 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASETEMPLATESTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: CASETEMPLATESTATUS
+    osfType: referenceDataCode
   - key: isDefault
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Default for case type
@@ -120,7 +115,7 @@ fields:
       column: is_default
       storageClass: core
   - key: allowAdHocSteps
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Allow ad-hoc steps
@@ -133,7 +128,7 @@ fields:
       column: allow_ad_hoc_steps
       storageClass: core
   - key: estimatedDurationHours
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Estimated duration (hours)
@@ -145,31 +140,28 @@ fields:
       column: estimated_duration_hours
       storageClass: core
   - key: defaultWorkQueueId
-    valueType: string
     required: false
-    semanticType: workQueueId
+    osfType: WorkQueue
     label:
       en: Default work queue
       nl: Standaard werkqueue
     description:
       en: Default triage queue for cases created from this template. Step templates can override this queue.
-      nl: Standaard triagequeue voor zaken die vanuit dit sjabloon worden gemaakt. Stapdefinities kunnen deze queue overschrijven.
+      nl: Standaard triagequeue voor zaken die vanuit dit sjabloon worden gemaakt. Stapdefinities kunnen deze queue
+        overschrijven.
     validation:
       format: uuid
-    options:
-      type: remote
-      remoteUrl: /api/workflow/designer/core-entity-options?entity=work-queue
-    render:
-      component: OptionVariablePicker
-      props:
-        valueMode: selectId
     persisted:
       column: default_work_queue_id
       storageClass: core
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      ownership: reference
   - key: completionApprovalGroupId
-    valueType: string
     required: false
-    semanticType: relationGroupId
+    osfType: RelationGroup
     label:
       en: Completion approval group
       nl: Afrondingsgoedkeuringsgroep
@@ -178,19 +170,15 @@ fields:
       nl: Relatiegroep waarvan leden zaakstappen met handmatige goedkeuring mogen afronden.
     validation:
       format: uuid
-    options:
-      type: remote
-      remoteUrl: /api/workflow/designer/core-entity-options?entity=relation-group
-    render:
-      component: OptionVariablePicker
-      props:
-        valueMode: selectId
-        clearable: true
     persisted:
       column: completion_approval_group_id
       storageClass: core
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      ownership: reference
   - key: fieldDefinitions
-    valueType: object
     label:
       en: Case variables
       nl: Zaakvariabelen
@@ -203,38 +191,112 @@ fields:
     layoutFraction: 1
     cardinality:
       min: 0
-      max: "unbounded"
-    semanticType: fieldDefinition
+      max: unbounded
+    osfType: fieldDefinition
     authoring:
-      profile: workflowInputField
-relationships:
-  - key: steps
-    kind: hasMany
-    target: CaseStepTemplate
-    foreignKey: case_template_id
-    label:
-      en: Case step templates
-      nl: Zaakstapsjablonen
-  - key: defaultWorkQueue
-    kind: belongsTo
-    target: WorkQueue
-    foreignKey: default_work_queue_id
-    label:
-      en: Default work queue
-      nl: Standaard werkqueue
-  - key: completionApprovalGroup
-    kind: belongsTo
-    target: RelationGroup
-    foreignKey: completion_approval_group_id
-    label:
-      en: Completion approval group
-      nl: Afrondingsgoedkeuringsgroep
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
-      wait: true
+      profile: caseVariable
+operations:
+  list:
+    name: List Case Template
+    description: List CaseTemplate records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Case Template
+    description: Get CaseTemplate records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Case Template
+    description: Create CaseTemplate records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Case Template
+    description: Update CaseTemplate records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Case Template
+    description: Delete CaseTemplate records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 2000
+      caseType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASETYPE
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASETEMPLATESTATUS
+            clearable: false
+      defaultWorkQueueId:
+        render:
+          component: OptionVariablePicker
+          props:
+            valueMode: selectId
+      completionApprovalGroupId:
+        render:
+          component: OptionVariablePicker
+          props:
+            valueMode: selectId
+            clearable: true

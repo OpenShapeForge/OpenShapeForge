@@ -5,6 +5,7 @@ export type { JsonObject, JsonPrimitive, JsonValue } from "./json.js";
 export { materializeTemplateContent } from "./materialize.js";
 export type * from "./types.js";
 export {
+  contentLanguage,
   defineContentTemplateVersion,
   resolveTemplateParameters,
   selectContentTemplateVariant,

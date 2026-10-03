@@ -12,6 +12,7 @@ import {
   type CompiledContentBlockRegistry,
   type ContentBlock,
   type ContentResolvers,
+  type ContentTemplateVariant,
   type ContentTemplateVersion,
   type JsonObject,
   type MaterializeTemplateContentInput,
@@ -22,17 +23,17 @@ const metadata: CompiledContentBlockRegistry = {
   TextSection: {
     entityName: "TextSection",
     schemaVersion: 3,
-    fields: { body: { semanticType: "richText", valueType: "string", required: true } },
+    fields: { body: { osfType: "richText", baseType: "string", required: true } },
     renderers: { document: "richText", email: "emailText", whatsapp: "plainText" },
   },
   RecordSummary: {
     entityName: "RecordSummary",
     schemaVersion: 3,
     fields: {
-      heading: { valueType: "string", required: true },
+      heading: { baseType: "string", required: true },
       record: {
-        semanticType: "ExampleRecord",
-        valueType: "string",
+        osfType: "ExampleRecord",
+        baseType: "string",
         cardinality: { min: 1, max: 1 },
         relationship: { target: "ExampleRecord" },
       },
@@ -43,8 +44,8 @@ const metadata: CompiledContentBlockRegistry = {
     entityName: "TemplateSlot",
     schemaVersion: 3,
     fields: {
-      version: { valueType: "string", required: true, relationship: { target: "TemplateVersion" } },
-      parameters: { valueType: "object" },
+      version: { baseType: "string", required: true, relationship: { target: "TemplateVersion" } },
+      parameters: { baseType: "object" },
     },
     renderers: {},
     composition: { templateVersionField: "version", parametersField: "parameters" },
@@ -74,7 +75,7 @@ function version(id: string, blocks: readonly ContentBlock[]): ContentTemplateVe
     tenantId,
     templateId: `${id}-template`,
     versionNumber: 1,
-    parameters: { name: { valueType: "string", defaultValue: "Reader" } },
+    parameters: { name: { baseType: "string", defaultValue: "Reader" } },
     variants: ["document", "email", "whatsapp"].map((channel) => ({
       id: `${id}-${channel}`,
       channel,
@@ -139,6 +140,24 @@ async function rejectsCode(work: Promise<unknown>, code: TemplateContentError["c
 }
 
 describe("canonical content snapshots", () => {
+  test("resolves typed symbolic entity arguments while preserving template provenance", async () => {
+    const block: ContentBlock = { id: "summary", definitionKey: "RecordSummary", schemaVersion: 3, values: { heading: "Summary" }, references: { record: { parameter: "record" } } };
+    const f = fixture([block]);
+    f.versions.root = { ...f.versions.root!, parameters: { record: { baseType: "string", required: true, relationship: { target: "ExampleRecord" } } } };
+    const run = () => materializeTemplateContent({ ...f.request, parameters: { record: "record-one" } }, f.registry, f.resolvers);
+    const snapshot = await run();
+    expect(f.calls.entity).toBe(1);
+    expect(snapshot.templates[0]!.version.variants[0]!.blocks[0]!.references.record).toEqual({ parameter: "record" });
+    f.versions.root = { ...f.versions.root, parameters: { record: { baseType: "string", relationship: { target: "OtherRecord" } } } };
+    await rejectsCode(run(), "DEPENDENCY_INVALID");
+    expect(f.calls.entity).toBe(1);
+  });
+
+  test("rejects entity arguments whose target record is inaccessible", async () => {
+    const f = fixture([{ id: "summary", definitionKey: "RecordSummary", schemaVersion: 3, values: { heading: "Summary" }, references: { record: { parameter: "record" } } }]);
+    f.versions.root = { ...f.versions.root!, parameters: { record: { baseType: "string", required: true, relationship: { target: "ExampleRecord" } } } };
+    await expect(materializeTemplateContent({ ...f.request, parameters: { record: "record-one" } }, f.registry, { ...f.resolvers, resolveEntity: () => null })).rejects.toBeInstanceOf(TemplateContentError);
+  });
   test("canonicalization sorts objects but preserves collection order", async () => {
     expect(canonicalJson({ z: 1, a: [2, 1] })).toBe('{"a":[2,1],"z":1}');
     expect(await hashCanonicalJson({ b: true, a: 1 })).toBe(
@@ -236,7 +255,7 @@ describe("template variants and local/global variables", () => {
     },
   );
 
-  test("does not silently fall back to a different channel or locale", async () => {
+  test("does not silently fall back to a different channel or language", async () => {
     const f = fixture();
     await rejectsCode(
       materializeTemplateContent({ ...f.request, channel: "sms" }, f.registry, f.resolvers),
@@ -246,6 +265,46 @@ describe("template variants and local/global variables", () => {
       materializeTemplateContent({ ...f.request, locale: "nl" }, f.registry, f.resolvers),
       "UNSUPPORTED_LOCALE",
     );
+  });
+
+  test("serves the variant of the requested language, then the channel's default variant", async () => {
+    const f = fixture();
+    const [document] = f.versions.root!.variants;
+    const withVariants = (variants: ContentTemplateVariant[]) => {
+      f.versions.root = { ...f.versions.root!, variants };
+    };
+    // nl-NL is served by the nl variant: the language subtag decides.
+    withVariants([{ ...document!, id: "root-nl", locale: "nl" }]);
+    let snapshot = await materializeTemplateContent({ ...f.request, locale: "nl-NL" }, f.registry, f.resolvers);
+    expect(snapshot.templates[0]!.variantId).toBe("root-nl");
+    expect(snapshot.locale).toBe("nl-NL");
+    // The exact locale wins over the bare language, which wins over another region.
+    withVariants([{ ...document!, id: "root-nl-BE", locale: "nl-BE" }, { ...document!, id: "root-nl", locale: "nl" }, { ...document!, id: "root-nl-NL", locale: "nl-NL" }]);
+    snapshot = await materializeTemplateContent({ ...f.request, locale: "nl-NL" }, f.registry, f.resolvers);
+    expect(snapshot.templates[0]!.variantId).toBe("root-nl-NL");
+    snapshot = await materializeTemplateContent({ ...f.request, locale: "nl-AW" }, f.registry, f.resolvers);
+    expect(snapshot.templates[0]!.variantId).toBe("root-nl");
+    // Among regions of the same language, the authored default wins, else the lowest locale, whatever the order given.
+    withVariants([{ ...document!, id: "root-nl-NL", locale: "nl-NL" }, { ...document!, id: "root-nl-BE", locale: "nl-BE", default: true }]);
+    snapshot = await materializeTemplateContent({ ...f.request, locale: "nl-AW" }, f.registry, f.resolvers);
+    expect(snapshot.templates[0]!.variantId).toBe("root-nl-BE");
+    withVariants([{ ...document!, id: "root-nl-NL", locale: "nl-NL" }, { ...document!, id: "root-nl-BE", locale: "nl-BE" }]);
+    snapshot = await materializeTemplateContent({ ...f.request, locale: "nl-AW" }, f.registry, f.resolvers);
+    expect(snapshot.templates[0]!.variantId).toBe("root-nl-BE");
+    withVariants([{ ...document!, id: "root-nl-BE", locale: "nl-BE" }, { ...document!, id: "root-nl-NL", locale: "nl-NL" }]);
+    snapshot = await materializeTemplateContent({ ...f.request, locale: "nl-AW" }, f.registry, f.resolvers);
+    expect(snapshot.templates[0]!.variantId).toBe("root-nl-BE");
+    // A language the template lacks is served by the channel's default variant.
+    withVariants([{ ...document!, id: "root-en", locale: "en", default: true }, { ...document!, id: "root-fr", locale: "fr" }]);
+    snapshot = await materializeTemplateContent({ ...f.request, locale: "nl" }, f.registry, f.resolvers);
+    expect(snapshot.templates[0]!.variantId).toBe("root-en");
+    expect(snapshot.templates[0]!.version.variants).toEqual([{ ...document!, id: "root-en", locale: "en", default: true }]);
+    // Without a default, the existing refusal.
+    withVariants([{ ...document!, id: "root-en", locale: "en" }, { ...document!, id: "root-fr", locale: "fr" }]);
+    await rejectsCode(materializeTemplateContent({ ...f.request, locale: "nl" }, f.registry, f.resolvers), "UNSUPPORTED_LOCALE");
+    // Two defaults on one channel are refused as a definition error.
+    withVariants([{ ...document!, id: "root-en", locale: "en", default: true }, { ...document!, id: "root-fr", locale: "fr", default: true }]);
+    await rejectsCode(materializeTemplateContent({ ...f.request, locale: "nl" }, f.registry, f.resolvers), "DUPLICATE");
   });
 
   test("rejects duplicate channels/locales, variant ids and block ids", () => {
@@ -259,8 +318,8 @@ describe("template variants and local/global variables", () => {
 
   test("validates defaults, required parameters, unknown parameters and enum values", () => {
     const definitions = {
-      count: { valueType: "integer" as const, required: true },
-      tone: { valueType: "string" as const, enum: ["formal"], defaultValue: "formal" },
+      count: { baseType: "integer" as const, required: true },
+      tone: { baseType: "string" as const, enum: ["formal"], defaultValue: "formal" },
     };
     expect(resolveTemplateParameters(definitions, { count: 2 })).toEqual({
       count: 2,
@@ -290,16 +349,16 @@ describe("template variants and local/global variables", () => {
       entityName: "Numbers",
       schemaVersion: 3,
       fields: {
-        amount: { valueType: "number" },
-        counts: { valueType: "integer", cardinality: { min: 1, max: 3 } },
+        amount: { baseType: "number" },
+        counts: { baseType: "integer", cardinality: { min: 1, max: 3 } },
       },
       renderers: { document: "numbers" },
     };
     f.versions.root = {
       ...f.versions.root!,
       parameters: {
-        amount: { valueType: "number", defaultValue: 2.5 },
-        counts: { valueType: "integer", cardinality: "collection", defaultValue: [2, 1] },
+        amount: { baseType: "number", defaultValue: 2.5 },
+        counts: { baseType: "integer", cardinality: "collection", defaultValue: [2, 1] },
       },
     };
     const snapshot = await f.run();
@@ -327,6 +386,18 @@ describe("template variants and local/global variables", () => {
     );
     f.versions.root = version("root", [text("missing", "{{local.notProvided}}")]);
     await rejectsCode(f.run(), "MISSING_VARIABLE");
+  });
+
+  test("a variable filled into a Markdown field is escaped text, other fields keep the raw value", async () => {
+    const f = fixture([text("md", "**Client:** {{local.name}}"), text("whole", "{{local.name}}"), text("plain", "Plain {{local.name}}")]);
+    f.registry.TextSection = { ...f.registry.TextSection!, fields: { body: { osfType: "markdown", baseType: "string", required: true } } };
+    const escaped = await materializeTemplateContent({ ...f.request, parameters: { name: "Bouw*Groep* _Acme_ 2*3\\4" } }, f.registry, f.resolvers);
+    expect(escaped.blocks.map((block) => block.values.body)).toEqual([
+      "**Client:** Bouw\\*Groep\\* \\_Acme\\_ 2\\*3\\\\4", "Bouw\\*Groep\\* \\_Acme\\_ 2\\*3\\\\4", "Plain Bouw\\*Groep\\* \\_Acme\\_ 2\\*3\\\\4",
+    ]);
+    const g = fixture([text("rich", "Rich {{local.name}}")]);
+    const raw = await materializeTemplateContent({ ...g.request, parameters: { name: "Bouw*Groep*" } }, g.registry, g.resolvers);
+    expect(raw.blocks[0]!.values.body).toBe("Rich Bouw*Groep*");
   });
 
   test("resolved values are data, not recursively evaluated template expressions", async () => {
@@ -583,13 +654,13 @@ describe("compiled entity block definitions and typed relationships", () => {
   });
 
   test("validates nested object metadata and single/collection cardinality defaults", () => {
-    const shape = { amount: { valueType: "integer" as const, cardinality: { min: 1 } } };
+    const shape = { amount: { baseType: "integer" as const, cardinality: { min: 1 } } };
     expect(resolveTemplateParameters(shape, { amount: 2 })).toEqual({ amount: 2 });
     expect(() => resolveTemplateParameters(shape, { amount: [2] })).toThrow("integer");
     const nested = {
       person: {
-        valueType: "object" as const,
-        fields: { age: { valueType: "integer" as const, required: true } },
+        baseType: "object" as const,
+        fields: { age: { baseType: "integer" as const, required: true } },
       },
     };
     expect(() => resolveTemplateParameters(nested, { person: { age: "2" } })).toThrow("integer");
@@ -597,7 +668,7 @@ describe("compiled entity block definitions and typed relationships", () => {
       "unsupported",
     );
     expect(() =>
-      resolveTemplateParameters({ date: { valueType: "date" } }, { date: "2026-02-30" }),
+      resolveTemplateParameters({ date: { baseType: "date" } }, { date: "2026-02-30" }),
     ).toThrow("date");
   });
 

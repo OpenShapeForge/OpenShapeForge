@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { Field } from "@/generated/compiler/field-contract";
 import { normalizePhoneSemanticValue } from "@/features/renderer/runtime/phone-normalization";
-import { isFieldCollection } from "@/lib/field-contract/field-v2";
+import { isFieldCollection, fieldValueType } from "@/lib/field-contract/field-v2";
 
 export function formatRendererValue(field: Field, value: unknown) {
   const component = field.render?.component;
@@ -48,7 +48,7 @@ export function coerceRendererValue(field: Field, rawValue: unknown) {
   if (
     component === "NumberInput" ||
     (!isFieldCollection(field) &&
-      (field.valueType === "integer" || field.valueType === "number"))
+      (fieldValueType(field) === "integer" || fieldValueType(field) === "number"))
   ) {
     const parsed = Number(rawValue);
     return Number.isNaN(parsed) ? rawValue : parsed;

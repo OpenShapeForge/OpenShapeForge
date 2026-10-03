@@ -5,7 +5,7 @@ entity instead of repeating those records in a static enum:
 
 ```yaml
 - key: categoryCode
-  valueType: string
+  osfType: string
   options:
     type: entity
     source: Category
@@ -36,7 +36,7 @@ facilities that belong to one configured portfolio:
 
 ```yaml
 - key: facilityId
-  semanticType: Facility
+  osfType: Facility
   cardinality: single
   required: true
   persisted: { column: facility_id, storageClass: core }

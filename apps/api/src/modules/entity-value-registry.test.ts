@@ -7,7 +7,7 @@ const fixture = () => ({ version: 1, carriers: [{
   schema: "erp", table: "blocks", valuesColumn: "values", definitionColumn: "definition_key",
   definitions: {
     Include: {
-      entityName: "Include", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "version", valueType: "string" }],
+      entityName: "Include", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "version", osfType: "string" }],
       valueSchema: { type: "object", properties: {} },
       references: [{ fieldKey: "version", targetEntity: "TemplateVersion", schema: "erp", table: "template_versions", column: "include_version_id", required: true }],
     },
@@ -35,6 +35,11 @@ describe("generated entity-value metadata", () => {
     const invalid = fixture();
     invalid.carriers[0]!.definitions.Include.references[0]!.column = 'id" from secrets --';
     expect(() => createEntityValueRegistry(invalid)).toThrow("invalid");
+    for (const parameterColumn of ["values", "id", "include_version_id"]) {
+      const collision = fixture();
+      Object.assign(collision.carriers[0]!.definitions.Include.references[0]!, { parameterColumn });
+      expect(() => createEntityValueRegistry(collision)).toThrow("invalid");
+    }
   });
   test("rejects unknown allowed definitions, duplicate collections and missing fingerprints", () => {
     const unknown = fixture();

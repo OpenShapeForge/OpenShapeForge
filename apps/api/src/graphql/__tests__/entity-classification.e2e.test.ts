@@ -48,6 +48,10 @@ import {
 
 registerSuiteLifecycle();
 
+test("the classification suite has a redactable manifest column", () => {
+  expect(tables.filter(redactableColumnFor).length).toBeGreaterThan(0);
+});
+
 for (const table of tables) {
   const graphql = table.source!.graphql!;
   const typeName = graphql.typeName;

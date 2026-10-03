@@ -11,6 +11,7 @@ import {
   deriveToolName,
   derivedToolsFromRows,
   inputSchemaFromStoredFields,
+  derivedHelperAvailable,
   sessionInAudience,
 } from "../derived-tools.js";
 import { resolveLocale } from "../locale.js";
@@ -29,7 +30,7 @@ describe("inputSchemaFromStoredFields", () => {
     const schema = inputSchemaFromStoredFields([
       {
         key: "query",
-        valueType: "string",
+        osfType: "string",
         required: true,
         label: { en: "Query" },
         description: { en: "Free-text search." },
@@ -37,12 +38,12 @@ describe("inputSchemaFromStoredFields", () => {
       },
       {
         key: "status",
-        valueType: "string",
+        osfType: "string",
         options: { items: [{ value: "open" }, { value: "closed" }] },
       },
       {
         key: "tags",
-        valueType: "string",
+        osfType: "string",
         cardinality: "collection",
       },
     ]);
@@ -70,7 +71,7 @@ describe("inputSchemaFromStoredFields", () => {
       properties: {},
       additionalProperties: false,
     });
-    expect(inputSchemaFromStoredFields([{ valueType: "string" }])).toEqual({
+    expect(inputSchemaFromStoredFields([{ osfType: "string" }])).toEqual({
       type: "object",
       properties: {},
       additionalProperties: false,
@@ -85,6 +86,45 @@ describe("sessionInAudience", () => {
     expect(sessionInAudience(entry, ["other"])).toBe(false);
     expect(sessionInAudience(entry, undefined)).toBe(false);
     expect(sessionInAudience(entry, null)).toBe(false);
+  });
+});
+
+describe("sessionInAudience with an authored audience", () => {
+  it("admits a role of the record's audience that holds no read on the definition entity", () => {
+    // The catalogue entry's roles are the record's `audience` when the
+    // plugin names one (generate-mcp.ts); the entity's read roles do not
+    // enter the check, so a user who may not read the definitions may
+    // still be listed and execute the tools — the integration case that
+    // answered OPERATION_NOT_FOUND while the roles were the read roles.
+    const entry = { roles: ["integration_user", "integration_admin"] };
+    expect(sessionInAudience(entry, ["integration_user"])).toBe(true);
+    expect(sessionInAudience(entry, ["Integrations.All.Read"])).toBe(false);
+    expect(sessionInAudience({ roles: ["Integrations.All.Read"] }, ["integration_user"])).toBe(false);
+  });
+});
+
+describe("derivedHelperAvailable", () => {
+  const entry = {
+    roles: ["integration_user", "integration_admin"],
+    connect: { name: "connect_service", description: "", roles: ["integration_admin"] },
+    dryRun: { name: "dry_run_service", description: "", roles: ["integration_admin"] },
+    personalization: { entity: "P", table: "t", serviceRef: "s", instructionField: "i", set: { name: "set_my_preferences", description: "" } },
+    execution: {} as never,
+  };
+  it("gates connect and dry run on the audience AND the helper's own roles, preferences on the audience", () => {
+    // A user of the tools: preferences yes, connect and dry run no.
+    expect(derivedHelperAvailable(entry, "personalization", ["integration_user"])).toBe(true);
+    expect(derivedHelperAvailable(entry, "connect", ["integration_user"])).toBe(false);
+    expect(derivedHelperAvailable(entry, "dryRun", ["integration_user"])).toBe(false);
+    // An administrator: all three.
+    for (const helper of ["connect", "dryRun", "personalization"] as const) {
+      expect(derivedHelperAvailable(entry, helper, ["integration_admin"])).toBe(true);
+    }
+    // The helper's role without the audience is not enough either.
+    expect(derivedHelperAvailable({ ...entry, roles: ["Integrations.All.Read"] }, "connect", ["integration_admin"])).toBe(false);
+    // Connect and dry run need an execution contract; preferences do not.
+    expect(derivedHelperAvailable({ ...entry, execution: undefined }, "connect", ["integration_admin"])).toBe(false);
+    expect(derivedHelperAvailable({ ...entry, execution: undefined }, "personalization", ["integration_admin"])).toBe(true);
   });
 });
 
@@ -106,7 +146,7 @@ describe("derivedToolsFromRows", () => {
         key: "find-tickets",
         name: "Find tickets",
         description: "Find tickets.",
-        inputFields: [{ key: "query", valueType: "string", required: true }],
+        inputFields: [{ key: "query", osfType: "string", required: true }],
       },
       { id: "b", key: "reserved_name", name: "x", description: "y", inputFields: [] },
       { id: "c", key: "Bad Key", name: "x", description: "y", inputFields: [] },
@@ -188,7 +228,7 @@ describe("the language a Service is projected in", () => {
     inputFields: [
       {
         key: "decision",
-        valueType: "string",
+        osfType: "string",
         required: true,
         label: { en: "Decision", nl: "Besluit" },
         description: { en: "What the client said.", nl: "Wat de klant heeft gezegd." },
@@ -244,8 +284,8 @@ describe("the language a Service is projected in", () => {
       [
         {
           key: "client",
-          valueType: "object",
-          children: [{ key: "name", valueType: "string", label: { en: "Name", nl: "Naam" } }],
+          osfType: "object",
+          children: [{ key: "name", osfType: "string", label: { en: "Name", nl: "Naam" } }],
         },
       ],
       nl,

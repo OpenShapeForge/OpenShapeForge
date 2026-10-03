@@ -5,14 +5,15 @@
  * A worker is its own process rather than a timer inside the API. A poll loop
  * and a request path have unrelated failure modes and unrelated scaling needs,
  * and a wedged worker must not take GraphQL down with it. It is also what keeps
- * the database sessions distinct: the workflow worker connects as
+ * the database sessions distinct: a worker connects as
  * `openshapeforge_worker` and presents `app.worker_role`, and the queue
  * policies check both — the first is what the database can verify, the second
  * says which worker it is (see docs/api.md#the-worker-axis).
  *
- * Which worker runs is `OPENSHAPEFORGE_ROLE`. No worker is hardcoded here —
- * `apps/api` names none of them, exactly as it names none of the contributed
- * GraphQL types.
+ * Which worker runs is `OPENSHAPEFORGE_ROLE`. No plugin worker is hardcoded
+ * here — `apps/api` names none of them, exactly as it names none of the
+ * contributed GraphQL types. The one exception is core's own `job-worker`
+ * (jobs/module.ts), which drains the outbox every plugin enqueues into.
  *
  * Fail-closed where the API role degrades:
  *   - no OPENSHAPEFORGE_WORKER_DATABASE_URL is fatal, and it never falls back
@@ -27,6 +28,7 @@
  */
 import { createDatabaseRuntime, type DatabaseRuntime } from "../db/connection.js";
 import { WORKER_ROLE } from "../db/migrations/worker-role.js";
+import { createJobsRuntimeModule } from "../jobs/module.js";
 import { configuredDurableWorkerBroker } from "../operations/durable-worker.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../modules/field-schemas.js";
 import { runtimeSettings } from "../modules/settings.js";
@@ -181,12 +183,16 @@ export async function startWorkerRole(
   try {
     databaseRuntime = createDatabaseRuntime({ databaseUrl });
 
-    // `init` is not optional for a worker. The workflow module hydrates its node
-    // catalog and registers its node bridges there; a worker that skipped it
-    // would claim commands and then fail every one of them with NO_BRIDGE —
-    // burning the retry bound on a configuration problem.
+    // `init` is not optional for a worker. A module that hydrates a catalog or
+    // registers handlers there would otherwise have its worker claim work it
+    // cannot resolve, burning the retry bound on a configuration problem.
     initialised = await initRuntimeModules(registry, { db: databaseRuntime.db });
-    const workers = indexModuleWorkers(initialised);
+    // The core jobs module is not in the generated registry — nothing can
+    // drop it — and joins the loaded plugins here so `job-worker` is indexed
+    // like any contributed role and drains every module's job kinds.
+    const loadedModules = initialised.loaded;
+    const jobsModule = createJobsRuntimeModule({ modules: () => loadedModules, env: options.env ?? process.env });
+    const workers = indexModuleWorkers({ loaded: [jobsModule, ...loadedModules], failures: initialised.failures });
     const resolved = workers.get(role);
 
     if (!resolved) {
@@ -220,11 +226,13 @@ export async function startWorkerRole(
           "Durable execution cannot run without both an exact claim resolver and an atomic contract pin.",
       );
     }
+    const marker = resolved.worker.markOperationDispatch;
     const durableOperations = resolver && pinner
       ? configuredDurableWorkerBroker(
           (reference) => resolver(context, reference),
           (reference, fingerprint) => pinner(context, reference, fingerprint),
           options.env,
+          marker ? (reference, state) => marker(context, reference, state) : undefined,
         )
       : undefined;
     const handle: ModuleWorkerHandle = await resolved.worker.start({

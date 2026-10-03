@@ -28,9 +28,11 @@
  *
  * The module is written against a small environment interface so the
  * checklist and the tools are unit-tested without a database or a server;
- * `onboardingEnvironment()` binds the real one for generated-mcp-server.ts,
+ * `onboardingEnvironment()` binds the real one for the MCP server (session-surface.ts),
  * which wires this in with a few delimited hunks.
  */
+import { ownedByActingRelation } from "../db/acting-relation.js";
+import { IDENTITY_LINK_ADMIN_ROLE } from "../auth/organization-roles.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { sql } from "kysely";
 import type { IdentityLinkState } from "../auth/identity-link.js";
@@ -43,12 +45,13 @@ import {
 } from "../graphql/generated-crud.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import {
+  connectionCreateCall,
   connectionFieldsOf,
   connectionNeedsOf,
   missingRequiredConnectionValues,
   type ConnectionField,
 } from "./connection-guidance.js";
-import { orderedBindings } from "./declarative-execution.js";
+import { MAX_BINDINGS_PER_OWNER, loadOrderedBindings } from "./execution-bindings.js";
 import {
   sessionInAudience,
   type DerivedTool,
@@ -196,6 +199,10 @@ export type OrganizationConnectionFact = {
   /** Display name of the Adapter. */
   adapter: string;
   adapterId: string;
+  /** Stable non-secret identity fields for the Connection create call. */
+  connectionEntity: string;
+  connectionKey: string | null;
+  connectionName: string;
   /** The tool that creates the Connection, e.g. create_connection. */
   createTool: string;
   /** The create tool's argument naming the Adapter, e.g. adapterId. */
@@ -212,8 +219,10 @@ export type OrganizationConnectionFact = {
 
 /** Everything the checklist is computed from. Gathered by `gatherOnboardingFacts`. */
 export type OnboardingFacts = {
+  /** What signed in: an integration (API key) is never onboarded, whatever its link says. */
+  credential: TrustedSessionContext["credential"];
   /** The session's identity link; null when the session carries no person. */
-  relation: Pick<IdentityLinkState, "status" | "candidateRelationId"> | null;
+  relation: Pick<IdentityLinkState, "identityId" | "status" | "candidateRelationId"> | null;
   /**
    * For an organization administrator: every Adapter in the organization
    * that needs an organization-level Connection, with whether it has a
@@ -239,7 +248,7 @@ export type OnboardingFacts = {
 
 function stepIdentity(facts: OnboardingFacts): OnboardingStep {
   const title = ONBOARDING_STEP_TITLES.identity;
-  if (!facts.relation) {
+  if (!facts.relation || facts.credential === "api-key") {
     return {
       key: "identity",
       title,
@@ -256,7 +265,7 @@ function stepIdentity(facts: OnboardingFacts): OnboardingStep {
     status: "todo",
     howTo: facts.relation.candidateRelationId
       ? "Run confirm_my_link to confirm you are the Relation this organization already has under your e-mail address."
-      : "Ask an organization administrator to run link_identity with your e-mail address and your Relation.",
+      : `Ask an organization administrator to run link_identity with your e-mail address (or your identity id ${facts.relation.identityId}) and your Relation.`,
   };
 }
 
@@ -267,8 +276,22 @@ function describeOrganizationConnection(entry: OrganizationConnectionFact): stri
   const parts = [
     entry.missingValues.length > 0
       ? `The ${entry.adapter} connection is incomplete (missing: ${entry.missingValues.join(", ")}); ` +
-        `delete it and run ${entry.createTool} { ${entry.adapterArgument}: ${JSON.stringify(entry.adapterId)}, key, name } again.`
-      : `Run ${entry.createTool} { ${entry.adapterArgument}: ${JSON.stringify(entry.adapterId)}, key, name } for ${entry.adapter}.`,
+        `delete it and run ${connectionCreateCall({
+          createTool: entry.createTool,
+          connectionEntity: entry.connectionEntity,
+          connectionKey: entry.connectionKey ?? undefined,
+          connectionName: entry.connectionName,
+          adapterArgument: entry.adapterArgument,
+          adapterId: entry.adapterId,
+        })} again.`
+      : `Run ${connectionCreateCall({
+          createTool: entry.createTool,
+          connectionEntity: entry.connectionEntity,
+          connectionKey: entry.connectionKey ?? undefined,
+          connectionName: entry.connectionName,
+          adapterArgument: entry.adapterArgument,
+          adapterId: entry.adapterId,
+        })} for ${entry.adapter}.`,
   ];
   if (fields) parts.push(`The secure form asks for: ${fields}.`);
   if (entry.redirectUri) {
@@ -429,7 +452,9 @@ export function computeOnboarding(
   facts: OnboardingFacts,
   options: { skipPreferences?: boolean } = {},
 ): OnboardingSummary {
-  if (!facts.relation && !facts.record) {
+  // An API key is an integration, not a person: it records an identity so an
+  // administrator can link it, but it is never onboarded.
+  if ((!facts.relation || facts.credential === "api-key") && !facts.record) {
     return {
       status: "Not applicable",
       version: ONBOARDING_VERSION,
@@ -508,7 +533,7 @@ const ROLE_INTEGRATION_ADMIN = "integration_admin";
 
 export function isOrganizationAdministrator(roles: readonly string[] | null | undefined): boolean {
   const granted = new Set(roles ?? []);
-  return granted.has(ROLE_ADMIN) || granted.has("Organization.All.ReadWrite");
+  return granted.has(ROLE_ADMIN) || granted.has(IDENTITY_LINK_ADMIN_ROLE);
 }
 
 /** The process for the assistant, worded for the caller's role. */
@@ -543,8 +568,8 @@ export function onboardingGuideText(roles: readonly string[] | null | undefined)
     "   choices): each tool with onboarding asks at its first call - its result carries the",
     "   questions and set_my_preferences {tool, assistanceLevel, choices} stores the answers;",
     "   get_my_preferences shows what is stored for which tool.",
-    "5. guide — read every role guide the step names (pentest_guide, provider_setup_guide) and",
-    "   follow it from then on.",
+    "5. guide — read every role guide the step names (its howTo names the tool) and follow",
+    "   it from then on.",
     "",
     "Never ask for secrets, tokens, passwords or keys in chat: sign-ins go through the URL",
     "connect_service returns, organization credentials through the secure form or the",
@@ -566,9 +591,15 @@ export function onboardingGuideText(roles: readonly string[] | null | undefined)
       "   For an OAuth provider, register the redirect URL from the step on the provider's OAuth",
       "   client before entering the values. Then verify with test_connection.",
       "b. then your own personal sign-in (connections), c. then preferences.",
-      "To add a new employee or colleague, run invite_employee {email, role}: it sends them a",
-      "Keycloak invitation and the role you pick is applied automatically the moment they accept",
-      "and sign in for the first time. list_invitations shows who is still pending;",
+      "To add an employee or colleague, run invite_employee {email, role}. It creates their",
+      "admission and reports what happened: someone not yet in the Keycloak organization receives an",
+      "invitation e-mail; an existing member receives no redundant mail and can sign in again;",
+      "an existing pending invitation is reused without being resent. The selected role is",
+      "applied automatically when they sign in. In your reply, use the tool's delivery and",
+      "nextStep exactly. For delivery not_required, say no e-mail was sent and ask the existing",
+      "member to sign out and back in; never tell them to accept an invitation. A pending",
+      "status means the role awaits sign-in, not that a mail was sent. list_invitations shows",
+      "pending role admissions, including existing members who received no mail;",
       "revoke_invitation cancels one that has not been accepted yet. For someone who has ALREADY",
       "signed in without being invited first (they show up unlinked or pending), use",
       "link_identity instead to link their login to a Relation and assign roles by hand.",
@@ -583,10 +614,10 @@ export function onboardingGuideText(roles: readonly string[] | null | undefined)
       "    field (relation_update) is then readable by any session through osf://organization/",
       "    profile — a one-time \"what does this company do\" instead of re-explaining it every",
       "    conversation. Distinct from that Relation's notes field, which stays internal.",
-      "e. Anyone who signs in without a matching invitation still gets a Relation automatically",
-      "   on their first session, but starts with read-only access only. Call list_pending_members",
-      "   regularly to see who is waiting, and set_member_role {identityId or relationId, role:",
-      "   \"org_admin\" | \"org_employee\"} to grant them their real role — their next session picks it up.",
+      "e. A sign-in without a matching invitation or existing link is refused; it does not",
+      "   grant read-only access. Use invite_employee for the exact e-mail address, then ask",
+      "   the person to sign in again. For an existing unlinked identity, inspect",
+      "   list_pending_members and use link_identity when manual linking is needed.",
     );
   }
   if (integrationAdministrator) {
@@ -701,10 +732,6 @@ export type OnboardingEnvironment = {
     filter: Record<string, unknown>,
     limit?: number,
   ) => Promise<Record<string, unknown>[]>;
-  /** The role guide tools this session is shown. */
-  guideTools: () => ReadonlyArray<{ name: string }>;
-  /** Guides read in THIS session (the server's per-session set). */
-  guidesCalled: ReadonlySet<string>;
   store: OnboardingStore;
   /**
    * The connection entity's create contract: how its configuration is
@@ -726,6 +753,37 @@ export type OnboardingEnvironment = {
   /** The OAuth redirect URL to register at providers; null when no public origin is configured. */
   redirectUri: () => string | null;
 };
+
+type OnboardingProjectedTool = Pick<DerivedTool, "name" | "table" | "rowId">;
+
+/**
+ * Join the ordinary row-derived tools with runtime Operation projections.
+ * Compatibility-backed Operations still identify the canonical entity row,
+ * so onboarding can reason about the same Service that tools/list exposes.
+ */
+export function onboardingToolProjection(
+  entries: readonly DerivedToolsCatalogEntry[],
+  projected: readonly OnboardingProjectedTool[],
+  runtime: ReadonlyArray<{
+    name: string;
+    entityName?: string | undefined;
+    entityId?: string | undefined;
+  }>,
+): OnboardingProjectedTool[] {
+  const tools = [...projected];
+  const seen = new Set(tools.map((tool) => `${tool.table}\u0000${tool.rowId}\u0000${tool.name}`));
+  for (const tool of runtime) {
+    if (!tool.entityName || !tool.entityId) continue;
+    for (const entry of entries) {
+      if (!entry.compatibility || entry.entity !== tool.entityName) continue;
+      const identity = `${entry.table}\u0000${tool.entityId}\u0000${tool.name}`;
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      tools.push({ name: tool.name, table: entry.table, rowId: tool.entityId });
+    }
+  }
+  return tools;
+}
 
 type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 
@@ -797,7 +855,7 @@ export function onboardingStore(
 
 /**
  * Bind the real environment. The server passes its own per-session builders
- * so the checklist sees exactly the tools and guides `tools/list` would show.
+ * so the checklist sees exactly the tools `tools/list` would show.
  */
 export function onboardingEnvironment(input: {
   db: OpenShapeForgeDatabase;
@@ -805,8 +863,6 @@ export function onboardingEnvironment(input: {
   tables: Map<string, GeneratedTable>;
   derivedEntries: readonly DerivedToolsCatalogEntry[];
   projectedTools: () => Promise<Array<Pick<DerivedTool, "name" | "table" | "rowId">>>;
-  guideTools: () => ReadonlyArray<{ name: string }>;
-  guidesCalled: ReadonlySet<string>;
   connectionContract: OnboardingEnvironment["connectionContract"];
   tenantConnection: OnboardingEnvironment["tenantConnection"];
   redirectUri: OnboardingEnvironment["redirectUri"];
@@ -816,8 +872,6 @@ export function onboardingEnvironment(input: {
     session,
     derivedEntries: input.derivedEntries,
     projectedTools: input.projectedTools,
-    guideTools: input.guideTools,
-    guidesCalled: input.guidesCalled,
     connectionContract: input.connectionContract,
     tenantConnection: input.tenantConnection,
     redirectUri: input.redirectUri,
@@ -842,7 +896,7 @@ export function onboardingEnvironment(input: {
 
 /**
  * Whether a provider's connections are per-employee. Mirrors
- * connectionScopeOf in generated-mcp-server.ts: explicit auth.connectionScope
+ * connectionScopeOf in mcp/catalog.ts: explicit auth.connectionScope
  * wins; absent, personal sign-in (oauth2AuthorizationCode) implies "user".
  */
 export function providerNeedsPersonalSignIn(auth: unknown): boolean {
@@ -888,7 +942,20 @@ async function personalSignInsFor(
       if (!row) continue;
       let bindings: Record<string, unknown>[];
       try {
-        bindings = orderedBindings(row, execution.bindingsField);
+        bindings = await loadOrderedBindings(
+          execution,
+          row,
+          async (table, filter, options) => ({
+            // Request one past the cap so a 201-binding owner overflows
+            // instead of looking complete when this reader never pages.
+            rows: await env.rowsByFilter(
+              table,
+              filter,
+              (options?.limit ?? MAX_BINDINGS_PER_OWNER) + 1,
+            ),
+            nextCursor: null,
+          }),
+        );
       } catch {
         continue; // a malformed definition cannot block onboarding
       }
@@ -908,7 +975,7 @@ async function personalSignInsFor(
           known = {
             provider: typeof provider.name === "string" ? provider.name : providerId,
             connected: connections.some(
-              (connection) => connection.ownerUserId === env.session.userId,
+              (connection) => ownedByActingRelation(connection.ownerUserId, env.session),
             ),
             tools: [],
           };
@@ -945,9 +1012,11 @@ async function organizationConnectionsFor(
   env: OnboardingEnvironment,
 ): Promise<OnboardingFacts["organizationConnections"]> {
   if (!isOrganizationAdministrator(env.session.roles)) return null;
+  const projectedTables = new Set((await env.projectedTools()).map((tool) => tool.table));
   const seen = new Set<string>();
   const facts: OrganizationConnectionFact[] = [];
   for (const entry of env.derivedEntries) {
+    if (!projectedTables.has(entry.table)) continue;
     const execution = entry.execution;
     if (!execution || seen.has(execution.providerTable)) continue;
     seen.add(execution.providerTable);
@@ -975,6 +1044,9 @@ async function organizationConnectionsFor(
       facts.push({
         adapter: typeof provider.name === "string" ? provider.name : providerId,
         adapterId: providerId,
+        connectionEntity: execution.connectionEntity,
+        connectionKey: typeof provider.key === "string" ? provider.key : null,
+        connectionName: typeof provider.name === "string" ? provider.name : providerId,
         createTool: contract.createTool,
         adapterArgument: contract.elicit.sourceField,
         configured: connection !== null && missingValues.length === 0,
@@ -995,7 +1067,7 @@ async function preferencesFor(env: OnboardingEnvironment): Promise<OnboardingFac
   let count = 0;
   for (const entry of entries) {
     const rows = await env.rowsByFilter(entry.personalization!.table, {});
-    count += rows.filter((row) => row.ownerUserId === env.session.userId).length;
+    count += rows.filter((row) => ownedByActingRelation(row.ownerUserId, env.session)).length;
   }
   return { offered: true, count };
 }
@@ -1003,20 +1075,20 @@ async function preferencesFor(env: OnboardingEnvironment): Promise<OnboardingFac
 export async function gatherOnboardingFacts(env: OnboardingEnvironment): Promise<OnboardingFacts> {
   const relation = env.session.relation ?? null;
   const record = await env.store.read();
-  const guidesRead = new Set([...(record?.guidesRead ?? []), ...env.guidesCalled]);
   const [organizationConnections, personalSignIns, preferences] = await Promise.all([
     organizationConnectionsFor(env),
     personalSignInsFor(env),
     preferencesFor(env),
   ]);
   return {
+    credential: env.session.credential,
     relation: relation
-      ? { status: relation.status, candidateRelationId: relation.candidateRelationId }
+      ? { identityId: relation.identityId, status: relation.status, candidateRelationId: relation.candidateRelationId }
       : null,
     organizationConnections,
     personalSignIns,
     preferences,
-    guides: env.guideTools().map((guide) => ({ name: guide.name, read: guidesRead.has(guide.name) })),
+    guides: [],
     record,
   };
 }

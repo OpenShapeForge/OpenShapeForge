@@ -96,6 +96,10 @@ export function readTrustProxyEnv(
 export type RateLimitTierBudgets = {
   anonymous: number;
   trusted: number;
+  /** Per verified person (bearer subject); defaults to the anonymous budget. */
+  subject: number;
+  /** Per organization service identity (the workflow worker); defaults to the trusted budget. */
+  service: number;
 };
 
 export type ApiLimits = {
@@ -142,6 +146,11 @@ export function readApiLimits(env: NodeJS.ProcessEnv = process.env): ApiLimits {
     DEFAULT_RATE_LIMIT_MAX,
     env,
   );
+  const trusted = readPositiveIntEnv(
+    "API_RATE_LIMIT_MAX_TRUSTED",
+    anonymous * DEFAULT_TRUSTED_RATE_LIMIT_MULTIPLIER,
+    env,
+  );
   const redisUrl = env.API_RATE_LIMIT_REDIS_URL?.trim();
   return {
     rateLimitMax: anonymous,
@@ -152,11 +161,9 @@ export function readApiLimits(env: NodeJS.ProcessEnv = process.env): ApiLimits {
     ),
     rateLimitTiers: {
       anonymous,
-      trusted: readPositiveIntEnv(
-        "API_RATE_LIMIT_MAX_TRUSTED",
-        anonymous * DEFAULT_TRUSTED_RATE_LIMIT_MULTIPLIER,
-        env,
-      ),
+      trusted,
+      subject: readPositiveIntEnv("API_RATE_LIMIT_MAX_SUBJECT", anonymous, env),
+      service: readPositiveIntEnv("API_RATE_LIMIT_MAX_SERVICE", trusted, env),
     },
     ...(redisUrl ? { rateLimitRedisUrl: redisUrl } : { rateLimitRedisUrl: undefined }),
     requestTimeoutMs: readNonNegativeIntEnv(

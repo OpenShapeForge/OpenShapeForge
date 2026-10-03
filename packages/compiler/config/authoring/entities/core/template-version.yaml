@@ -5,53 +5,126 @@ entity: TemplateVersion
 title: Template version
 language: en
 labels: { en: Template version, nl: Template version }
+pluralLabels: { en: Template versions, nl: Templateversies }
 domains: [documents]
 authorization:
   roles:
-    read: [General.All.Read, General.All.ReadWrite, Organization.All.ReadWrite]
-    create: [Organization.All.ReadWrite]
-    update: [Organization.All.ReadWrite]
-    delete: [Organization.All.ReadWrite]
+    read: [Templates.Read, General.All.Read, General.All.ReadWrite, Templates.Manage]
+    create: [Templates.Manage]
+    update: [Templates.Manage]
+    delete: [Templates.Manage]
 displayTemplate: "{{versionNumber}}"
 indexes:
   - { name: template_versions_tenant_number_uidx, fields: [tenantId, template, versionNumber], unique: true }
 fields:
   - key: template
-    semanticType: Template
+    osfType: Template
     required: true
     immutable: true
+    relationship:
+      inverse:
+        key: versions
+        label:
+          en: Versions
+          nl: Versies
+        ownership: owned
   - key: versionNumber
-    valueType: integer
+    osfType: integer
     required: true
     immutable: true
     validation: { min: 1 }
     label: { en: Version, nl: Versie }
     persisted: { column: version_number, storageClass: core }
   - key: status
-    valueType: string
+    osfType: string
     required: true
-    defaultValue: draft
-    # Publication must be an immutable-version Operation, not a writable status.
-    options: { type: static, items: [{ value: draft, label: { en: Draft, nl: Concept } }] }
+    immutable: true
+    defaultValue: published
+    options: { type: static, items: [{ value: published, label: { en: Published, nl: Gepubliceerd } }] }
     persisted: { column: status, storageClass: core }
-  - key: parameters
-    valueType: object
-    semanticType: fieldDefinition
-    cardinality: collection
-    label: { en: Local parameters, nl: Lokale parameters }
-    persisted: { column: parameters, storageClass: core }
-  - key: variants
-    semanticType: TemplateVariant
-    cardinality: collection
-    relationship: { inverse: version, ownership: owned }
+  - key: snapshot
+    osfType: object
+    required: true
+    immutable: true
+    label: { en: Frozen content, nl: Vastgelegde inhoud }
+    persisted: { column: snapshot, storageClass: core }
+  - key: contentHash
+    osfType: string
+    required: true
+    immutable: true
+    validation: { pattern: "^[a-f0-9]{64}$" }
+    label: { en: Content checksum, nl: Inhoudschecksum }
+    persisted: { column: content_hash, storageClass: core }
+  - key: publishedBy
+    osfType: string
+    required: true
+    immutable: true
+    validation: { format: uuid }
+    label: { en: Published by, nl: Gepubliceerd door }
+    persisted: { column: published_by, storageClass: core }
+  - key: publishedAt
+    osfType: datetime
+    required: true
+    immutable: true
+    label: { en: Published at, nl: Gepubliceerd op }
+    persisted: { column: published_at, storageClass: core }
 operations:
-  insertVariant:
-    name: { en: Add channel variant, nl: Kanaalvariant toevoegen }
-    description: Create an owned channel and language variant atomically.
-    implementation: { type: collection, action: insert, field: variants }
-    effects: { data: write, external: none }
-    reliability: { idempotency: { mode: none } }
-    concurrency: { version: { mode: required, field: updatedAt } }
+  renderSnapshot:
+    name: { en: Render frozen content, nl: Vastgelegde inhoud weergeven }
+    description:
+      en: Render a supplied immutable content snapshot to plain text for its selected channel without reading templates or
+        source records. A checksum proves consistency, not approval or permission to deliver.
+      nl: Geef een aangeleverde onveranderlijke inhoudssnapshot weer als tekst voor het gekozen kanaal, zonder templates of
+        bronrecords te lezen. Een checksum bewijst consistentie, niet goedkeuring of toestemming voor verzending.
+    implementation: { type: plugin, plugin: documents, handler: renderSnapshot }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [snapshot]
+        properties:
+          snapshot:
+            type: object
+            x-osf-i18n: { title: { en: Frozen content, nl: Vastgelegde inhoud } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [channel, locale, mediaType, body, snapshotHash, renderingVersion, contentHash]
+        properties:
+          channel:
+            type: string
+            enum: [document, email, whatsapp]
+            x-osf-i18n:
+              title: { en: Channel, nl: Kanaal }
+              enum:
+                {
+                  document: { en: Document, nl: Document },
+                  email: { en: Email, nl: E-mail },
+                  whatsapp: { en: WhatsApp, nl: WhatsApp }
+                }
+          locale:
+            type: string
+            x-osf-i18n: { title: { en: Language, nl: Taal } }
+          mediaType: { type: string, const: text/plain }
+          body:
+            type: string
+            x-osf-i18n: { title: { en: Content, nl: Inhoud } }
+          snapshotHash:
+            type: string
+            pattern: "^[a-f0-9]{64}$"
+            x-osf-i18n: { title: { en: Snapshot checksum, nl: Snapshotchecksum } }
+          renderingVersion: { type: string, const: osf-entity-fields-text-v1 }
+          contentHash:
+            type: string
+            pattern: "^[a-f0-9]{64}$"
+            x-osf-i18n: { title: { en: Content checksum, nl: Inhoudschecksum } }
+    errors: []
+    auth: { mode: session, roles: [Templates.Read, General.All.Read, General.All.ReadWrite, Templates.Manage] }
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
     confirmation: { mode: none }
   materialize:
     name: { en: Preview template, nl: Template bekijken }
@@ -73,7 +146,12 @@ operations:
             enum: [document, email, whatsapp]
             x-osf-i18n:
               title: { en: Channel, nl: Kanaal }
-              enum: { document: { en: Document, nl: Document }, email: { en: Email, nl: E-mail }, whatsapp: { en: WhatsApp, nl: WhatsApp } }
+              enum:
+                {
+                  document: { en: Document, nl: Document },
+                  email: { en: Email, nl: E-mail },
+                  whatsapp: { en: WhatsApp, nl: WhatsApp }
+                }
           locale:
             type: string
             pattern: "^[a-z]{2}(-[A-Z]{2})?$"
@@ -83,7 +161,7 @@ operations:
             x-osf-i18n: { title: { en: Parameters, nl: Parameters } }
     output: { schema: { type: object } }
     errors: []
-    auth: { mode: session, roles: [General.All.Read, General.All.ReadWrite, Organization.All.ReadWrite] }
+    auth: { mode: session, roles: [Templates.Read, General.All.Read, General.All.ReadWrite, Templates.Manage] }
     tenancy: { mode: required }
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }
@@ -117,7 +195,12 @@ operations:
             enum: [document, email, whatsapp]
             x-osf-i18n:
               title: { en: Channel, nl: Kanaal }
-              enum: { document: { en: Document, nl: Document }, email: { en: Email, nl: E-mail }, whatsapp: { en: WhatsApp, nl: WhatsApp } }
+              enum:
+                {
+                  document: { en: Document, nl: Document },
+                  email: { en: Email, nl: E-mail },
+                  whatsapp: { en: WhatsApp, nl: WhatsApp }
+                }
           locale:
             type: string
             pattern: "^[a-z]{2}(-[A-Z]{2})?$"
@@ -133,7 +216,24 @@ operations:
           document:
             x-osf-entityInput:
               entity: Document
-              fields: [code, title, description, documentType, status, confidentiality, source, author, isExternal, registeredAt, receivedAt, publishedAt, caseFileId, caseId, relationId]
+              fields:
+                [
+                  code,
+                  title,
+                  description,
+                  documentType,
+                  status,
+                  confidentiality,
+                  source,
+                  author,
+                  isExternal,
+                  registeredAt,
+                  receivedAt,
+                  publishedAt,
+                  caseFileId,
+                  caseId,
+                  relationId
+                ]
             x-osf-i18n: { title: { en: New document, nl: Nieuw document } }
           version:
             x-osf-entityInput:
@@ -149,7 +249,18 @@ operations:
       schema:
         type: object
         additionalProperties: false
-        required: [documentId, documentVersionId, artifactId, artifactVersion, fileName, mediaType, checksum, byteSize, compositionHash]
+        required:
+          [
+            documentId,
+            documentVersionId,
+            artifactId,
+            artifactVersion,
+            fileName,
+            mediaType,
+            checksum,
+            byteSize,
+            compositionHash
+          ]
         properties:
           documentId: { type: string, format: uuid, x-osf-i18n: { title: { en: Document, nl: Document } } }
           documentVersionId: { type: string, format: uuid, x-osf-i18n: { title: { en: Document version, nl: Documentversie } } }
@@ -159,14 +270,19 @@ operations:
           mediaType: { type: string, const: application/json, x-osf-i18n: { title: { en: Media type, nl: Bestandstype } } }
           checksum: { type: string, pattern: "^[a-f0-9]{64}$", x-osf-i18n: { title: { en: Checksum, nl: Controlesom } } }
           byteSize: { type: integer, minimum: 0, x-osf-i18n: { title: { en: File size, nl: Bestandsgrootte } } }
-          compositionHash: { type: string, pattern: "^[a-f0-9]{64}$", x-osf-i18n: { title: { en: Content fingerprint, nl: Inhoudsvingerafdruk } } }
+          compositionHash:
+            {
+              type: string,
+              pattern: "^[a-f0-9]{64}$",
+              x-osf-i18n: { title: { en: Content fingerprint, nl: Inhoudsvingerafdruk } }
+            }
     errors:
       - { status: 400, code: VALIDATION, description: The document or template input is invalid. }
       - { status: 403, code: FORBIDDEN, description: The source or destination is not accessible. }
       - { status: 503, code: STORAGE_UNAVAILABLE, description: Artifact storage is unavailable. }
       - { status: 503, code: OPERATION_UNAVAILABLE, description: A required canonical Operation is unavailable. }
       - { status: 409, code: ALREADY_EXISTS, description: The document version label already exists. }
-    auth: { mode: session, roles: [CaseFile.All.ReadWrite, Organization.All.ReadWrite] }
+    auth: { mode: session, roles: [CaseFile.All.ReadWrite, Templates.Manage] }
     tenancy: { mode: required }
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: keyed, inputField: idempotencyKey } }
@@ -185,26 +301,17 @@ operations:
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: none }
-  create:
-    name: Create template version
-    description: Create a template version record.
-    implementation: { type: entity, action: create }
-    effects: { data: write, external: none }
-    reliability: { idempotency: { mode: none } }
-    confirmation: { mode: none }
-  update:
-    name: Update template version
-    description: Update a template version draft.
-    implementation: { type: entity, action: update }
-    effects: { data: write, external: none }
-    reliability: { idempotency: { mode: none } }
-    concurrency: { version: { mode: required, field: updatedAt } }
-    confirmation: { mode: none }
 interfaces:
   rest:
     operations:
       materialize: { method: POST, path: "/api/template-content/versions/:templateVersionId/materialize" }
-      createDocument: { method: POST, path: "/api/template-content/versions/:templateVersionId/create-document", response: { status: 201, kind: json } }
+      createDocument:
+        {
+          method: POST,
+          path: "/api/template-content/versions/:templateVersionId/create-document",
+          response: { status: 201, kind: json }
+        }
+      renderSnapshot: { method: POST, path: /api/template-content/render-snapshot }
   graphql: {}
   mcp: { tools: generic }
   web:
@@ -216,21 +323,17 @@ interfaces:
         title: { en: Template versions, nl: Templateversies }
         columns: [{ key: versionNumber }, { key: status }]
       record:
-        routes: { read: "/template-versions/:id", create: /template-versions/new }
+        routes: { read: "/template-versions/:id" }
         title: "{{versionNumber}}"
         actions: [materialize, createDocument]
         layout:
           tabs:
-            - id: parameters
-              label: { en: Parameters, nl: Parameters }
-              groups: [{ title: { en: Version, nl: Versie }, fields: [template, versionNumber, status, parameters] }]
-            - id: variants
-              label: { en: Variants, nl: Varianten }
-              relationship: variants
-        modes:
-          create:
-            title: { en: Create, nl: Toevoegen }
-            groups: [{ title: { en: Version, nl: Versie }, fields: [template, versionNumber, parameters] }]
-          update:
-            title: { en: Edit, nl: Bewerken }
-            groups: [{ title: { en: Parameters, nl: Parameters }, fields: [parameters] }]
+            - id: version
+              label: { en: Published version, nl: Gepubliceerde versie }
+              groups:
+                [
+                  {
+                      title: { en: Version, nl: Versie },
+                      fields: [template, versionNumber, status, publishedAt, publishedBy, contentHash]
+                    }
+                ]

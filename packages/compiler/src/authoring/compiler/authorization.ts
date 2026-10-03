@@ -39,6 +39,8 @@ import type {
 import { fieldSqlType, isCollectionField } from "./helpers.js";
 import { buildCrud } from "./crud.js";
 
+const OWNER_SESSIONS = new Set(["app.current_user_id", "app.current_relation_id"]);
+
 /**
  * Derive a kebab-case slug from a PascalCase entity name. Used internally as
  * the artifact key — never as a granted role name.
@@ -198,9 +200,9 @@ export function buildAuthorization(
       const persistedField = allAuthoringFields.find(
         (f) => f.persisted?.column === col,
       );
-      const matchingRelationship = (coreEntity.relationships ?? []).find(
-        (r) => r.kind === "belongsTo" && r.foreignKey === col,
-      );
+      const matchingRelationship = allAuthoringFields.find((field) => field.persisted?.column === col &&
+        field.relationship?.kind === "belongsTo" && field.relationship.target &&
+        fieldSqlType(field) === "uuid")?.relationship;
       if (!persistedField && !matchingRelationship) {
         throw new AuthorizationCompileError(
           coreEntity.entity,
@@ -214,11 +216,11 @@ export function buildAuthorization(
       // Group axes retain their relationship-only contract.
       const scalarSessionOwner = axis === "owner" && persistedField &&
         fieldSqlType(persistedField) === "uuid";
-      if (persistedField && !scalarSessionOwner) {
+      if (persistedField && !scalarSessionOwner && !(matchingRelationship && fieldSqlType(persistedField) === "uuid")) {
         throw new AuthorizationCompileError(
           coreEntity.entity,
           `authorization.rowAccess.${axis}.column "${col}" must reference a belongsTo foreignKey (auto-emitted as uuid) — ` +
-            `the persisted field "${col}" has valueType "${persistedField.valueType}". ` +
+            `the persisted field "${col}" has baseType "${persistedField.baseType}". ` +
             (axis === "owner"
               ? "A session owner may instead be a scalar string with validation.format: uuid."
               : "Model the group as a belongsTo relationship."),
@@ -230,15 +232,16 @@ export function buildAuthorization(
 
     if (owner) {
       validateAxisColumn(owner.column, "owner");
-      // The owner axis maps to `rowScope.userColumns`, whose emitter hardcodes
-      // `= app.current_user_id()` (generate.ts). The runtime only ever sets the
-      // `app.user_id` GUC — no code populates an arbitrary per-account session
-      // var — so we constrain owner.session to the identity user id at compile
-      // time rather than shipping a dead GUC surface.
-      if (owner.session !== "app.current_user_id") {
+      // The owner axis compares against one of the two identities the
+      // runtime writes per session (applyDbSession): the login
+      // (`app.current_user_id`, rowScope.userColumns) or the Relation it acts
+      // as (`app.current_relation_id`, rowScope.relationColumns) — the owner
+      // of a person-owned record. No other session var is ever populated, so
+      // anything else would compile to a dead policy.
+      if (!OWNER_SESSIONS.has(owner.session)) {
         throw new AuthorizationCompileError(
           coreEntity.entity,
-          `authorization.rowAccess.owner.session must be "app.current_user_id" — the runtime only exposes the current user id GUC. Per-account session vars are not supported.`,
+          `authorization.rowAccess.owner.session must be "app.current_user_id" or "app.current_relation_id" — the runtime only exposes those session identities.`,
         );
       }
     }
@@ -260,7 +263,7 @@ export function buildAuthorization(
         );
       }
       if (
-        field.valueType !== "object" ||
+        field.baseType !== "object" ||
         isCollectionField(field) ||
         field.required !== true ||
         !field.persisted?.column
@@ -331,6 +334,26 @@ export function buildAuthorization(
     rowAccess = undefined;
   }
 
+  let ownerAxis: CompiledAuthorization["ownerAxis"];
+  if (authConfig.ownerAxis) {
+    for (const key of authConfig.ownerAxis.fields) {
+      // Ownership is the derived inverse collection's; the backend manifest checks it once the target is known.
+      const field = coreEntity.fields.find((candidate) => candidate.key === key);
+      if (!field?.relationship || field.relationship.kind !== "belongsTo" || isCollectionField(field) || field.required) {
+        throw new AuthorizationCompileError(
+          coreEntity.entity,
+          `authorization.ownerAxis.fields "${key}" must be an optional single entity reference.`,
+        );
+      }
+    }
+    ownerAxis = {
+      fields: [...authConfig.ownerAxis.fields],
+      ...(authConfig.ownerAxis.command
+        ? { command: { setting: authConfig.ownerAxis.command.setting, values: [...authConfig.ownerAxis.command.values] } }
+        : {}),
+    };
+  }
+
   return {
     entitySlug: slug,
     roles,
@@ -338,6 +361,7 @@ export function buildAuthorization(
     fieldAuthorizations,
     profileAuthorizations,
     rowAccess,
+    ...(ownerAxis ? { ownerAxis } : {}),
   };
 }
 

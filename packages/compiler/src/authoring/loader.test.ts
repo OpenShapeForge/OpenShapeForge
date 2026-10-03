@@ -7,7 +7,7 @@ import {
   assertPartialProfileHasNoCrud,
   validateEntityContentIdentifiers,
   loadEntity,
-  loadSemanticTypes,
+  loadOsfTypes,
   resolveEntityFilePath,
 } from "./loader.js";
 import type { CoreEntity } from "./types.js";
@@ -24,14 +24,14 @@ const baseEntity = (): CoreEntity =>
     title: "Widget",
     language: "en",
     fields: [
-      { key: "id", valueType: "string" },
-      { key: "displayName", valueType: "string" },
+      { key: "id", osfType: "string" },
+      { key: "displayName", osfType: "string" },
+      { key: "ownerId", osfType: "User" },
     ],
-    relationships: [{ key: "owner", kind: "belongsTo", target: "User" }],
   }) as CoreEntity;
 
 describe("validateEntityContentIdentifiers", () => {
-  it("accepts a conforming entity, field keys, and relationship key/target", () => {
+  it("accepts a conforming entity and field keys", () => {
     expect(() =>
       validateEntityContentIdentifiers(baseEntity(), "test.yaml"),
     ).not.toThrow();
@@ -58,7 +58,7 @@ describe("validateEntityContentIdentifiers", () => {
   it("rejects a hostile field key that would restructure a generated GraphQL selection set", () => {
     const hostile = baseEntity();
     // Interpolated raw into the query literal in actions.ts.ejs / pages.ts.
-    hostile.fields = [{ key: "id } evil: someOtherResolver { secret", valueType: "string" }];
+    hostile.fields = [{ key: "id } evil: someOtherResolver { secret", osfType: "string" }];
     expect(() =>
       validateEntityContentIdentifiers(hostile, "hostile.yaml"),
     ).toThrow(/field key/);
@@ -66,7 +66,7 @@ describe("validateEntityContentIdentifiers", () => {
 
   it("rejects a field key containing a backtick (template-literal break-out)", () => {
     const hostile = baseEntity();
-    hostile.fields = [{ key: "id`;evil()", valueType: "string" }];
+    hostile.fields = [{ key: "id`;evil()", osfType: "string" }];
     expect(() =>
       validateEntityContentIdentifiers(hostile, "hostile.yaml"),
     ).toThrow(/field key/);
@@ -77,8 +77,8 @@ describe("validateEntityContentIdentifiers", () => {
     hostile.fields = [
       {
         key: "address",
-        valueType: "object",
-        children: [{ key: "street } x { y", valueType: "string" }],
+        osfType: "object",
+        children: [{ key: "street } x { y", osfType: "string" }],
       },
     ] as CoreEntity["fields"];
     expect(() =>
@@ -86,44 +86,32 @@ describe("validateEntityContentIdentifiers", () => {
     ).toThrow(/field key/);
   });
 
-  it("rejects a hostile relationship key", () => {
-    const hostile = baseEntity();
-    hostile.relationships = [
-      { key: "owner } x", kind: "belongsTo", target: "User" },
-    ] as NonNullable<CoreEntity["relationships"]>;
+  it("refuses an entity-level relationships block by name", () => {
+    const legacy = baseEntity() as CoreEntity & { relationships?: unknown };
+    legacy.relationships = [{ key: "owner", kind: "belongsTo", target: "User" }];
     expect(() =>
-      validateEntityContentIdentifiers(hostile, "hostile.yaml"),
-    ).toThrow(/relationship key/);
+      validateEntityContentIdentifiers(legacy, "legacy.yaml"),
+    ).toThrow(/Widget declares relationships \(owner\); relationships are fields/);
   });
 
-  it("rejects a hostile relationship target", () => {
-    const hostile = baseEntity();
-    hostile.relationships = [
-      { key: "owner", kind: "belongsTo", target: 'User") ; evil ; ("' },
-    ] as NonNullable<CoreEntity["relationships"]>;
-    expect(() =>
-      validateEntityContentIdentifiers(hostile, "hostile.yaml"),
-    ).toThrow(/relationship target/);
-  });
-
-  it("accepts a conforming rest basePath and the boolean/absent forms", () => {
+  it("accepts a conforming rest basePath and the absent form", () => {
     const withBasePath = baseEntity();
-    withBasePath.rest = { basePath: "custom-widgets" };
+    withBasePath.interfaces = { rest: { basePath: "custom-widgets" } };
     expect(() =>
       validateEntityContentIdentifiers(withBasePath, "test.yaml"),
     ).not.toThrow();
 
-    const shorthand = baseEntity();
-    shorthand.rest = true;
+    const absent = baseEntity();
+    absent.interfaces = { rest: {} };
     expect(() =>
-      validateEntityContentIdentifiers(shorthand, "test.yaml"),
+      validateEntityContentIdentifiers(absent, "test.yaml"),
     ).not.toThrow();
   });
 
   it("rejects a hostile rest basePath that would break out of a route/OpenAPI path", () => {
     for (const hostile of ["a/../b", "widgets/{id}", 'x" onload="evil', "Upper"]) {
       const entity = baseEntity();
-      entity.rest = { basePath: hostile };
+      entity.interfaces = { rest: { basePath: hostile } };
       expect(() =>
         validateEntityContentIdentifiers(entity, "hostile.yaml"),
       ).toThrow(/rest basePath/);
@@ -141,18 +129,36 @@ describe("loadEntity content validation (integration)", () => {
     expect(resolveEntityFilePath(authoringDir, "relation")).toContain("relation");
     expect(() => loadEntity(authoringDir, "relation")).not.toThrow();
   });
+  it("a context catalog may add osf types but never redefine a core one", () => {
+    const root = mkdtempSync(join(tmpdir(), "entity-catalog-add-only-"));
+    try {
+      mkdirSync(join(root, "catalogs"));
+      mkdirSync(join(root, "contexts/vera"), { recursive: true });
+      const write = (path: string, types: Record<string, unknown>) =>
+        writeFileSync(join(root, path), JSON.stringify({ types }));
+      write("catalogs/osf-types.yaml", { example: { label: { en: "Example" }, baseType: "string" } });
+      write("contexts/vera/osf-types.yaml", { extra: { label: { en: "Extra" }, baseType: "integer" } });
+      expect(Object.keys(loadOsfTypes(root)).sort()).toEqual(["example", "extra"]);
+      write("contexts/vera/osf-types.yaml", { example: { label: { en: "Example" }, baseType: "integer" } });
+      expect(() => loadOsfTypes(root)).toThrow(
+        "Osf type example in contexts/vera/osf-types.yaml redefines the entry from core; osf-type catalogs are add-only.",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
   it("does not share mutable parsed YAML or keep stale source bytes", () => {
     const root = mkdtempSync(join(tmpdir(), "entity-catalog-cache-"));
     try {
       mkdirSync(join(root, "catalogs"));
-      const path = join(root, "catalogs/semantic-types.yaml");
-      const write = (valueType: string) => writeFileSync(path, JSON.stringify({ types: { example: { label: { en: "Example" }, valueType } } }));
+      const path = join(root, "catalogs/osf-types.yaml");
+      const write = (baseType: string) => writeFileSync(path, JSON.stringify({ types: { example: { label: { en: "Example" }, baseType } } }));
       write("string");
-      const first = loadSemanticTypes(root);
+      const first = loadOsfTypes(root);
       first.example!.label.en = "Changed by caller";
-      expect(loadSemanticTypes(root).example!.label.en).toBe("Example");
+      expect(loadOsfTypes(root).example!.label.en).toBe("Example");
       write("number");
-      expect(loadSemanticTypes(root).example!.valueType).toBe("number");
+      expect(loadOsfTypes(root).example!.baseType).toBe("number");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

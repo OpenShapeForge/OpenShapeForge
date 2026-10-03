@@ -5,7 +5,7 @@
  * ── WHAT THE SCOPE IS FOR ───────────────────────────────────────────────────
  *
  * The runtime serves one MCP resource per Keycloak Organization,
- * `<origin>/api/mcp/organizations/<alias>` (`mcp/organization-resource.ts`),
+ * `<origin>/<alias>` (`mcp/organization-resource.ts`),
  * and `auth/organization-binding.ts` admits a token there only when its `aud`
  * names that exact URL. Keycloak 26 does not turn the OAuth `resource`
  * parameter into an audience, so the audience has to come from a static client
@@ -30,7 +30,7 @@
  *   - client scope `mcp-resource:<alias>` exists (`include.in.token.scope`,
  *     hidden from consent and from the provider metadata);
  *   - it carries exactly one audience mapper per configured resource origin,
- *     value `<origin>/api/mcp/organizations/<alias>` — mappers for origins no
+ *     value `<origin>/<alias>` — mappers for origins no
  *     longer configured are removed, so an origin change converges;
  *   - it is an OPTIONAL scope of every configured client. It is deliberately
  *     NOT a realm default: a realm can serve multiple Organizations and a

@@ -22,7 +22,7 @@ export type EntityFieldConfig = {
   description?: LocalizedText;
   required?: boolean;
   readOnly?: boolean;
-  semanticType?: string;
+  osfType?: string;
   options?: StaticOption[] | (Partial<FieldOptions> & {
     items?: StaticOption[];
     /** When `items` is empty, labels/options are resolved from the VERA snapshot (same Soort as CSV). */
@@ -69,12 +69,11 @@ function toRendererField(field: EntityFieldConfig | undefined): Field | undefine
 
   return {
     key: field.key,
-    valueType: "string",
+    osfType: field.osfType ?? "string",
     label: field.label,
     description: field.description,
     required: field.required,
     readOnly: field.readOnly,
-    semanticType: field.semanticType,
     options: (Array.isArray(field.options)
       ? { type: "static", items: field.options }
       : field.options) as Field["options"],

@@ -26,6 +26,14 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
       select nullif(current_setting('app.user_id', true), '')::uuid
     $$;
 
+    -- The Relation the session acts as (identity.actingParty), written by
+    -- applyDbSession from the verified identity link. Owner-axis policies of
+    -- person-owned records compare against it (rowAccess.owner.session).
+    create or replace function app.current_relation_id() returns uuid
+    language sql stable parallel safe as $$
+      select nullif(current_setting('app.relation_id', true), '')::uuid
+    $$;
+
     create or replace function app.current_groups() returns uuid[]
     language sql stable parallel safe as $$
       select case
@@ -79,6 +87,13 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
     language sql stable parallel safe as $$
       select coalesce(current_setting('app.bypass_rls', true) = 'true', false)
     $$;
+
+    -- Whether the session holds any of the roles; the compiler's owner-axis
+    -- read policies (authorization.ownerAxis) call it with the role names the
+    -- manifest carries.
+    create or replace function app.has_any_role(candidates text[]) returns boolean
+    language sql stable
+    as $$ select app.bypass_rls() or coalesce(string_to_array(current_setting('app.roles', true), ',') && candidates, false) $$;
 
     create or replace function app.current_worker_role() returns text
     language sql stable parallel safe as $$
@@ -181,47 +196,19 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
       end
     $$;
 
-    -- The one registry read that happens BEFORE a session has a tenant: turning
-    -- a verified Keycloak Organization membership into the tenant it belongs
-    -- to (apps/api src/auth/identity.ts). platform.tenants is fenced by
-    -- app.bypass_rls() OR id = app.current_tenant(), and a session that is
-    -- still resolving its tenant satisfies neither, so this function carries
-    -- the bypass GUC only for its lookup and restores the caller's value.
-    -- Function-level SET on a custom GUC requires superuser/parameter grants
-    -- unavailable to managed-database migrators. The exception block rolls
-    -- back the local setting if the lookup raises; normal return restores it
-    -- explicitly. Configuration mutation makes this VOLATILE/PARALLEL UNSAFE.
-    --
-    -- Deliberately a point lookup and not a registry read: it answers ONE
-    -- tenant id for ONE (realm, organization id) pair the caller already
-    -- proved membership of through a signed token, never a list. It is not an
-    -- operator bypass session and writes no system_bypass_audit row for the
-    -- same reason withCredentialResolutionSession does not — it grants no
-    -- cross-tenant reach. plpgsql rather than sql so the body is not resolved
-    -- against platform.tenants at definition time: this helper step runs
-    -- before the generated schema step on a fresh database.
+    -- The body is replaced, privilege-scoped and transferred to the dedicated
+    -- identity-resolver role by identity-link.ts after the generated registry
+    -- tables exist. Keeping this early placeholder preserves migration order:
+    -- callers and later invariant DDL can rely on the function name existing
+    -- without resolving platform.tenants on a fresh database yet.
     create or replace function app.tenant_for_keycloak_organization(
       realm text,
       organization_id text
     ) returns uuid
-    language plpgsql volatile parallel unsafe
+    language plpgsql stable parallel safe
     as $$
-    declare
-      previous_bypass text := current_setting('app.bypass_rls', true);
-      tenant_id uuid;
     begin
-      perform set_config('app.bypass_rls', 'true', true);
-      tenant_id := (
-        select t.id
-          from platform.tenants t
-         where t.keycloak_realm = realm
-           and t.keycloak_organization_id = organization_id
-         limit 1
-      );
-      perform set_config('app.bypass_rls', coalesce(previous_bypass, ''), true);
-      return tenant_id;
-    exception when others then
-      raise;
+      raise exception 'identity registry lookup is not initialized';
     end
     $$;
   `.execute(db);

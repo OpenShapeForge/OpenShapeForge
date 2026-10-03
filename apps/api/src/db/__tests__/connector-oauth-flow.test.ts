@@ -16,6 +16,7 @@
  * Runs in the db-tests job (`bun test src/db`), which is the job that has a
  * database. The connector unit suites are not currently run by any CI job.
  */
+import type { FetchLike } from "@openshapeforge/plugin-runtime/connector";
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
@@ -37,6 +38,7 @@ import {
   writeOAuthTokens,
 } from "../../connectors/oauth.js";
 import {
+  connectionTokenSecretScope,
   contractSecrets,
   decryptSecret,
   encryptSecret,
@@ -44,7 +46,6 @@ import {
 } from "../../connectors/secrets.js";
 import { readSecrets } from "../../connectors/store.js";
 import type { ConnectorContract } from "../../connectors/catalog.js";
-import type { FetchLike } from "../../connectors/executor.js";
 import { refreshConnectionRowLocked } from "../../mcp/connection-token-refresh.js";
 import { selectOAuthConnectionRow } from "../../mcp/generated-mcp-server.js";
 
@@ -905,7 +906,7 @@ describe("authored connection token lifecycle", () => {
           const tenantRowId = randomUUID();
           const foreignUserId = randomUUID();
           const providerId = randomUUID();
-          const secretScope = "oauth_authored_connection_test:personal";
+          const secretScope = connectionTokenSecretScope("oauth_authored_connection_test");
           const initial = {
             accessToken: encryptSecret(KEYRING, secretScope, "accessToken", "access-1"),
             refreshToken: encryptSecret(KEYRING, secretScope, "refreshToken", "refresh-1"),

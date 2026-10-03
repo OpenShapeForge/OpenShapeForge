@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 "use client";
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 
 import { Field as FieldFrame } from "@/features/renderer/components/field";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/features/renderer/edit/controls/basic/select";
@@ -23,7 +24,7 @@ export function FieldSchemaValueEditor({
   onChange: (value: unknown) => void;
 }) {
   const staticOptions =
-    field.valueType === "string" &&
+    fieldValueType(field) === "string" &&
     !isFieldCardinalityCollection(field.cardinality) &&
     field.options?.type === "static" &&
     Array.isArray(field.options.items)
@@ -40,42 +41,7 @@ export function FieldSchemaValueEditor({
             ))
       : [];
 
-  if (
-    profile.id === "workflowOutputField" &&
-    field.key === "status" &&
-    staticOptions.length > 0
-  ) {
-    return (
-      <FieldFrame
-        label={lang === "nl" ? "Waarde" : "Value"}
-        description={
-          lang === "nl"
-            ? "Kies de publieke workflowstatus die deze eindnode teruggeeft."
-            : "Choose the public workflow status returned by this end node."
-        }
-      >
-        {() => (
-          <Select
-            value={typeof value === "string" ? value : "success"}
-            onValueChange={(nextValue) => onChange(nextValue)}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {staticOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {translateText(option.label, lang) || option.value}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </FieldFrame>
-    );
-  }
-
-  if (field.valueType === "object" || isFieldCardinalityCollection(field.cardinality)) {
+  if (fieldValueType(field) === "object" || isFieldCardinalityCollection(field.cardinality)) {
     return (
       <JsonFieldEditor
         label={lang === "nl" ? "Waarde (JSON)" : "Value (JSON)"}
@@ -92,7 +58,7 @@ export function FieldSchemaValueEditor({
     );
   }
 
-  if (field.valueType === "number" || field.valueType === "integer" || field.valueType === "boolean") {
+  if (fieldValueType(field) === "number" || fieldValueType(field) === "integer" || fieldValueType(field) === "boolean") {
     return (
       <JsonFieldEditor
         label={lang === "nl" ? "Waarde" : "Value"}

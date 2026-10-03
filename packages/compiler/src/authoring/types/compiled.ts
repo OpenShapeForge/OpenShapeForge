@@ -15,7 +15,7 @@ import type {
   VisibilityConfig,
   ComputedField,
   FieldOptions,
-  SemanticTypeLookupDefinition,
+  OsfTypeLookupDefinition,
   DataClassification,
   RetentionPolicy,
   ContextHints,
@@ -25,7 +25,8 @@ import type {
   ViewActionDefinition,
   ViewRowAction,
 } from "./common.js";
-import type { FieldDefinitionDeriveOnCreate } from "./field-definition.js";
+import type { FieldDefinitionDeriveOnCreate, FieldDefinitionValueType } from "./field-definition.js";
+import type { OsfTypeSchemaReference } from "./authoring.js";
 import type {
   ListColumn,
   ListFilter,
@@ -54,7 +55,6 @@ import type {
   RestOperationKey,
   ThirdPartyApiEndpoint,
 } from "./authoring.js";
-import type { CanonicalCompilerKernel } from "../compiler/canonical/index.js";
 
 export interface CompiledViewRender {
   component: string;
@@ -76,14 +76,12 @@ export interface CompiledRender {
 
 export interface CompiledField {
   key: string;
-  valueType:
-    | "string"
-    | "integer"
-    | "number"
-    | "boolean"
-    | "date"
-    | "datetime"
-    | "object";
+  /** The authored type axis: a base type, a osf-type key or an entity name. */
+  osfType: string;
+  /** Ordered plugin transformations, executed by an explicit owning Operation. */
+  transform?: readonly { use: string; profile?: string }[];
+  /** Derived from `osfType`: the base every transport maps to storage, GraphQL and JSON Schema. */
+  baseType: FieldDefinitionValueType;
   cardinality: "single" | "collection";
   /** Exact authored collection bounds retained after cardinality normalization. */
   cardinalityBounds?: {
@@ -92,11 +90,15 @@ export interface CompiledField {
   };
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
-  entityValue?: { definitionField: string };
+  entityValue?: { definitionField: string; parameterBindings?: boolean };
   allowedDefinitions?: string[];
+  childAuthorization?: "owner";
+  childLock?: string;
   required: boolean;
   /** Presentation only — picks the display component over the input one. */
   readOnly?: boolean;
+  /** Explicit authoring decision: readOnly is presentation-only; callers still write it. */
+  writeSource?: "caller";
   /**
    * API contract: settable at create, refused on update by every generated
    * transport. Reaches the runtime through the manifest column, the way
@@ -115,7 +117,6 @@ export interface CompiledField {
   description?: LocalizedText;
   help?: LocalizedText;
   render: CompiledRender;
-  semanticType?: string;
   unit?: string;
   defaultValue?: unknown;
   validation?: FieldValidation;
@@ -123,7 +124,9 @@ export interface CompiledField {
   computed?: ComputedField;
   graphqlType?: string;
   options?: FieldOptions;
-  lookup?: SemanticTypeLookupDefinition;
+  /** The catalog-declared value schema of the field's type, when it has one. */
+  schema?: OsfTypeSchemaReference;
+  lookup?: OsfTypeLookupDefinition;
   permissions?: FieldPermissions;
   authorization?: FieldAuthorizationConfig;
   classification?: DataClassification;
@@ -139,19 +142,28 @@ export interface CompiledField {
 }
 
 export interface CompiledRelationship {
+  through?: { field: string; column: string; target: string };
   key: string;
   fieldKey?: string;
   inverse?: string;
   ownership?: "owned" | "reference";
   cardinality?: import("./field-definition.js").FieldDefinitionCardinality;
   sortable?: boolean;
+  /** Owner-scoped collection Operations authorize the children through the owner. */
+  childAuthorization?: "owner";
+  /** Boolean child field that makes the owner's update, move and remove refuse that child. */
+  childLock?: string;
+  /** Single reference to a versioned target: pinned to one immutable version, or the current head (default). */
+  version?: "pinned" | "current";
   unique?: boolean;
-  kind: "belongsTo" | "hasMany" | "manyToMany";
+  kind: "belongsTo" | "hasMany";
   target: string;
   foreignKey?: string;
   via?: string;
   label?: LocalizedText;
   constraints?: import("./field-definition.js").FieldDefinitionRelationshipConstraints;
+  /** The target is provider-backed: no storage, no foreign key; its Operations resolve the records. */
+  provider?: import("./field-definition.js").FieldDefinitionProvider;
 }
 
 export interface GraphQLField {
@@ -167,6 +179,7 @@ export interface GraphQLField {
 }
 
 export interface GraphQLRelationship {
+  through?: { field: string; column: string; target: string };
   name: string;
   target: string;
   type: string;
@@ -185,7 +198,7 @@ export interface GraphQLProfileType {
     column?: string;
     label?: LocalizedText;
     description?: string;
-    semanticType?: string;
+    osfType?: string;
     render?: CompiledRender;
     displayRender?: CompiledRender;
     validation?: FieldValidation;
@@ -231,13 +244,11 @@ export interface McpSection {
   tools: McpToolStyle;
   operations: Record<McpOperationKey, boolean>;
   /**
-   * Authored per-operation tool name/description overrides (`dedicated`
-   * style only). generate-mcp.ts consumes these when it emits the catalog;
-   * an absent entry means the compiler-composed default applies.
+   * Authored per-operation tool name overrides (`dedicated` style only).
+   * generate-mcp.ts consumes these when it emits the catalog; an absent entry
+   * means the compiler-composed default name applies.
    */
-  toolOverrides?: Partial<
-    Record<McpOperationKey, { name?: string; description?: string }>
-  >;
+  toolOverrides?: Partial<Record<McpOperationKey, { name: string }>>;
   /** MCP-only guidance refining the canonical v2 operation description. */
   operationInstructions?: Partial<Record<McpOperationKey, string | LocalizedText>>;
   /**
@@ -251,18 +262,6 @@ export interface McpSection {
     description?: string;
     templateDescription?: string;
   };
-  /** Authored playbook tool, validated at compile. */
-  guide?: {
-    name: string;
-    description: string;
-    roles: string[];
-    content: string;
-    requireBeforeCreate?: boolean;
-  };
-  /** Authored schema-discovery tool, validated at compile. */
-  discovery?: { name: string; description?: string };
-  /** Authored elicited-values verification tool, validated at compile. */
-  test?: { name: string; description?: string };
   /** Authored create-time elicitation config, validated at compile. */
   elicitOnCreate?: {
     sourceField: string;
@@ -270,37 +269,6 @@ export interface McpSection {
     definitionsField: string;
     into: string;
     message?: string;
-  };
-  /** Authored row-to-tool projection config, validated at compile. */
-  derivedTools?: {
-    roles: string[];
-    keyField: string;
-    titleField?: string;
-    descriptionField: string;
-    inputFieldsField: string;
-    outputFieldsField?: string;
-    versionField?: string;
-    execution?: {
-      bindingsField: string;
-      operationRef: string;
-      operationEntity: string;
-      providerRef: string;
-      providerEntity: string;
-      connectionEntity: string;
-      connectionProviderRef: string;
-      connectionValuesField: string;
-    };
-    visibleWhen?: { field: string; equals: string };
-    visibleToRolesField?: string;
-    internalOnlyField?: string;
-    connect?: { name: string; description?: string; roles: string[] };
-    dryRun?: { name: string; description?: string; roles: string[] };
-    personalization?: {
-      entity: string;
-      serviceRef: string;
-      instructionField: string;
-      set: { name: string; description?: string };
-    };
   };
 }
 
@@ -359,8 +327,11 @@ export type CompiledEntityOperation = OperationReference<EntityOperationIntent> 
   target?:
     | { entityId: string; entityName: string; scope: "collection" }
     | { entityId: string; entityName: string; scope: "record"; inputField: string };
-  /** Declared handler failures; platform failures remain core-owned. */
-  errors?: EntityOperationDefinition["errors"];
+  /**
+   * Every failure the Operation can answer: the refusals the generic runtime
+   * derives from the policy flags, plus a plugin handler's declared ones.
+   */
+  errors: NonNullable<EntityOperationDefinition["errors"]>;
   /** Interface aliases retained without creating a second Operation. */
   interfaces?: {
     rest?: false | EntityRestOperationProjectionConfig;
@@ -370,6 +341,8 @@ export type CompiledEntityOperation = OperationReference<EntityOperationIntent> 
   };
   guidance?: { assistant?: string | LocalizedText };
   prerequisites?: readonly OperationPrerequisite[];
+  /** Trusted values injected by the shared entity Operation runtime. */
+  stamps?: readonly import("./authoring.js").EntityOperationStamp[];
   input: EntityOperationInput;
   output: EntityOperationOutput;
   authorization: {
@@ -449,6 +422,18 @@ export interface CompiledViewGroup {
   groups?: CompiledViewGroup[];
   timeline?: CompiledTimelineConfig;
 }
+
+export type CompiledEntityWebNamedViewDefinition =
+  | { kind: "record"; detail: NonNullable<CompiledViewContext["detail"]>; context?: { fields: string[]; relationships?: string[] } }
+  /** Previously compiled contracts may still contain fields or tab layouts. */
+  | { kind: "record"; fields: string[] }
+  | {
+      kind: "record";
+      title?: string;
+      layout: { tabs: CompiledViewGroup[] };
+    }
+  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string }
+  | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
 
 export interface CompiledViewAction extends ViewAction {}
 
@@ -638,14 +623,15 @@ export interface CompiledAuthorization {
   compositeRoles: CompiledAuthorizationRole[];
   fieldAuthorizations: CompiledFieldAuthorization[];
   profileAuthorizations: Record<string, { readRoles: string[] }>;
+  /** Owning references whose target's read roles gate the rows they carry; lowered to a restrictive policy in the backend manifest. */
+  ownerAxis?: { fields: string[]; command?: { setting: string; values: string[] } };
   rowAccess?: {
     enabled: boolean;
     empty: "public" | "restricted";
     /**
-     * When set, the generated RLS policy adds `"<column>" = app.current_user_id()`
-     * (owner axis). The backend manifest maps this to `rowScope.userColumns`.
-     * `owner.session` is constrained to `"app.current_user_id"` at compile time
-     * — the runtime only exposes the current user id GUC.
+     * When set, the generated RLS policy adds `"<column>" = <owner.session>()`
+     * (owner axis): `app.current_user_id` (the login, `rowScope.userColumns`)
+     * or `app.current_relation_id` (the acting Relation, `rowScope.relationColumns`).
      */
     owner?: {
       column: string;
@@ -676,10 +662,37 @@ export interface CompiledBlueprint {
   operations: { list: string; status: string; reset: string; publish: string };
 }
 
+/** One status field lowered from `transitions`; the rule table the runtime handler and the interfaces read. */
+export interface CompiledTransitionField {
+  field: string;
+  /** The status field's own label, and each state's, for the refusal a person reads. */
+  label?: LocalizedText;
+  values?: Record<string, LocalizedText>;
+  initial: string;
+  rules: Array<{
+    key: string;
+    /** Canonical Operation id, `<Entity>.<key>`. */
+    operation: string;
+    from: string[];
+    to: string;
+    label: LocalizedText;
+    /** Record permission the rule checks on an entity with record-level permissions. */
+    recordPermission?: "edit";
+    preconditions?: Array<{ field: string; present?: boolean; via?: string; in?: Array<string | number | boolean>; refusal?: LocalizedText }>;
+    /** Input fields the rule may set; `agreesOn` names fields the referenced record must share with this one. */
+    writes?: Array<{ field: string; required: boolean; agreesOn?: string[] }>;
+    stamps?: Array<{ field: string; value: "now" | "actor"; actor?: "relation" | "user" }>;
+  }>;
+}
+
 export interface CompiledEntityContract {
+  source?: { kind: "operations"; query?: { filterFields: string[]; sortFields: string[] } };
   blueprint?: CompiledBlueprint;
+  /** Status state machines declared on fields; absent when the entity has none. */
+  transitions?: CompiledTransitionField[];
   workerAccess?: string;
-  authoringVersion: 1 | 2 | 3;
+  /** The one authored entity shape (entity-model.ts); kept on the contract for readers that check it. */
+  authoringVersion: 3;
   contractVersion: number;
   kind: "compiledEntityContract";
   entity: {
@@ -707,6 +720,16 @@ export interface CompiledEntityContract {
     fields: CompiledField[];
     relationships: CompiledRelationship[];
   };
+  versioning?: {
+    strategy: "publishedSnapshot";
+    versionEntity: string;
+    versionsField: string;
+    snapshot: { ownedRelationships: "recursive" };
+    publishOperation: string;
+    /** The head field every content edit resets, and the value it resets to (the draft rule). */
+    onEdit: { field: string; value: string };
+  };
+  hardDelete?: { requireNeverPublished: true };
   /** Common upper bound for generated CRUD across every transport. */
   crud: CrudSection;
   /** Canonical generated operations projected by REST, MCP, web and GraphQL. */
@@ -728,6 +751,8 @@ export interface CompiledEntityContract {
   /** Explicit v2 interface exposure; v1 contracts keep using legacy projections. */
   interfaces?: {
     web?: {
+      namedViews?: Record<string, CompiledEntityWebNamedViewDefinition>;
+      recordPreset?: "main" | "inbox-main-context";
       fields?: Record<string, { render: import("./common.js").FieldRender }>;
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];
@@ -749,10 +774,7 @@ export interface CompiledEntityContract {
     entity?: RetentionPolicy;
     policies?: Record<string, RetentionPolicy>;
   };
-  hooks?: EntityHooks;
-  permissions?: EntityPermissions;
   authorization: CompiledAuthorization;
   views: Record<string, CompiledViewContext>;
-  canonical: CanonicalCompilerKernel;
   profiles: Record<string, CompiledProfile>;
 }

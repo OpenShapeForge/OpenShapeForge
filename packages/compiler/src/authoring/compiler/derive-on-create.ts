@@ -65,11 +65,15 @@ export function resolveDerivedOnCreateBindings(input: {
     const source = input.fields.find((field) => field.key === derivation.from);
     const targetColumn = input.columns.find((column) => column.field === target.key);
     const sourceColumn = input.columns.find((column) => column.field === derivation.from);
+    // The compiler leads every unique index on a tenant-scoped entity with
+    // tenant_id (compileEntityIndexes), so the author may write the pair or
+    // the bare target; both resolve to the same per-tenant conflict columns.
     const expectedIndexFields = input.tenantScoped
       ? ["tenantId", target.key]
       : [target.key];
     const uniqueIndex = input.indexes?.find(
-      (index) => index.unique === true && equalFields(index.fields, expectedIndexFields),
+      (index) => index.unique === true &&
+        (equalFields(index.fields, expectedIndexFields) || (input.tenantScoped && equalFields(index.fields, [target.key]))),
     );
 
     if (!source) {
@@ -82,7 +86,7 @@ export function resolveDerivedOnCreateBindings(input: {
         `Entity "${input.entityName}" field "${target.key}" cannot derive from itself.`,
       );
     }
-    if (target.valueType !== "string" || target.cardinality !== "single" || !target.required || !targetColumn) {
+    if (target.baseType !== "string" || target.cardinality !== "single" || !target.required || !targetColumn) {
       throw new Error(
         `Entity "${input.entityName}" field "${target.key}" with deriveOnCreate must be a required persisted single string.`,
       );
@@ -93,7 +97,7 @@ export function resolveDerivedOnCreateBindings(input: {
       );
     }
     if (
-      source.valueType !== "string" ||
+      source.baseType !== "string" ||
       source.cardinality !== "single" ||
       !source.required ||
       !sourceColumn ||
@@ -125,7 +129,7 @@ export function resolveDerivedOnCreateBindings(input: {
       sourceColumn: sourceColumn.column,
       transform: derivation.transform,
       onConflict: derivation.onConflict,
-      conflictColumns: uniqueIndex.fields.map((field) =>
+      conflictColumns: expectedIndexFields.map((field) =>
         field === "tenantId"
           ? "tenant_id"
           : input.columns.find((column) => column.field === field)!.column,

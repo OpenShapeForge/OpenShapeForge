@@ -10,8 +10,10 @@ import {
   runtimeOperationError,
 } from "../runtime.js";
 import { getGeneratedCrudTables, projectGeneratedEntityRow } from "./catalog.js";
+import { decimalText } from "@openshapeforge/operations";
 import { fieldNameForColumn } from "./columns.js";
 import { assertCreateRecordPermissions } from "./record-permissions.js";
+import { assertNoForeignOperationWrittenValues } from "./write-policy.js";
 import type { EntityOperationContract, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
 
 type Executor = (
@@ -74,8 +76,15 @@ function authoredHead(table: GeneratedCrudTable, value: unknown): Record<string,
   const head: Record<string, unknown> = {};
   for (const column of table.columns) {
     const field = fieldNameForColumn(column);
-    if (Object.hasOwn(source, field)) head[field] = source[field];
-    else if (Object.hasOwn(source, column.name)) head[field] = source[column.name];
+    const stored = Object.hasOwn(source, field)
+      ? source[field]
+      : Object.hasOwn(source, column.name) ? source[column.name] : undefined;
+    if (stored === undefined) continue;
+    // A handler computes amounts as numbers; the record crosses every
+    // transport as the decimal text the schema declares.
+    head[field] = (column.type === "numeric" || column.type === "bigint") && stored !== null
+      ? decimalText(stored)
+      : stored;
   }
   for (const computed of table.source?.computedFields ?? []) {
     if (Object.hasOwn(source, computed.field)) head[computed.field] = source[computed.field];
@@ -147,6 +156,12 @@ export function createEntityPluginExecutor(options: {
       });
     }
     const table = targetTable(bound.operation);
+    // The write policy speaks before the plugin's own contract, on every
+    // interface: a field an Operation writes is refused as such, naming the
+    // Operation to call, not as a property the authored input does not know.
+    if (entityOperation.intent !== "delete") {
+      assertNoForeignOperationWrittenValues(table, input, entityOperation.id);
+    }
     let result: Awaited<ReturnType<typeof invokeOperation>>;
     try {
       result = await invokeOperation(

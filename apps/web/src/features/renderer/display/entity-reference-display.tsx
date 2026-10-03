@@ -4,7 +4,6 @@
 import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import type { Field } from "@/generated/compiler/field-contract";
-import { getFieldSemanticTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
 import { useRemoteOptionSourceData } from "@/features/renderer/hooks/use-remote-options";
 import { TextDisplay } from "@/features/renderer/display/text-display";
 
@@ -27,24 +26,13 @@ function displayValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/**
+ * The field whose option source names the referenced record: the field's own
+ * `options`, else its identity alias's `optionSource` (the entity's records),
+ * else a declared remote endpoint. A web route is never a source.
+ */
 function entityReferenceField(field: Field): Field {
-  const semanticType = getFieldSemanticTypeDefinition(field);
-  const remoteUrl =
-    field.options?.type === "remote"
-      ? field.options.remoteUrl
-      : semanticType?.options?.type === "remote"
-        ? semanticType.options.remoteUrl
-        : semanticType?.listUrl;
-
-  return remoteUrl
-    ? {
-        ...field,
-        options: {
-          type: "remote",
-          remoteUrl,
-        },
-      }
-    : field;
+  return field;
 }
 
 export function EntityReferenceDisplay({

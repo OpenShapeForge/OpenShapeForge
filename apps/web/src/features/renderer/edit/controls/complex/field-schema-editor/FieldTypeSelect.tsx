@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Check, ChevronDown, Search } from "lucide-react";
 import {
   Popover,
@@ -9,33 +9,22 @@ import {
   PopoverTrigger,
 } from "@/components/ui/overlay/popover";
 import { fieldShellClasses } from "@/components/ui/forms/field-shell-variants";
+import {
+  FIELD_DEFINITION_COLLECTION_VALUE,
+  fieldTypeOptions,
+  findFieldTypeOption,
+  type FieldTypeOption,
+} from "@/lib/field-authoring/field-type-options";
 import { cn } from "@/lib/utils";
 
-type FieldTypeCardinality =
-  | "single"
-  | "collection"
-  | {
-      min?: number;
-      max?: number | "unbounded";
-    };
-
-export type FieldTypeOption = {
-  value: string;
-  kind: "base" | "semantic";
-  label: string;
-  description?: string;
-  baseType: string;
-  valueType: string;
-  cardinality?: FieldTypeCardinality;
-  semanticType?: string;
-  icon?: string;
-};
+export type { FieldTypeOption } from "@/lib/field-authoring/field-type-options";
 
 type FieldTypeSelectProps = {
   value?: string;
   cardinality?: "single" | "collection";
-  semanticType?: string;
-  usage?: "requestInput" | "workflowConfig" | "entityMapping" | "internalSchema";
+  osfType?: string;
+  /** Authoring-profile type keys this picker withholds. */
+  excludedFieldTypes?: readonly string[];
   lang: "nl" | "en";
   disabled?: boolean;
   placeholder?: string;
@@ -45,12 +34,11 @@ type FieldTypeSelectProps = {
   onSelectionChange: (selection: {
     valueType: string;
     cardinality: "single" | "collection";
-    semanticType?: string;
+    osfType?: string;
   }) => void;
 };
 
-const FIELD_DEFINITION_SEMANTIC_TYPE = "fieldDefinition";
-const FIELD_DEFINITION_COLLECTION_VALUE = "semantic:fieldDefinition:collection";
+const FIELD_DEFINITION_OSF_TYPE = "fieldDefinition";
 const FIELD_DEFINITION_COLLECTION_LABELS: Record<"nl" | "en", string> = {
   nl: "Velddefinities",
   en: "Field definitions",
@@ -67,8 +55,8 @@ const BASE_LABELS: Record<string, { nl: string; en: string }> = {
   array: { nl: "Lijst", en: "List" },
 };
 
-function selectedValue(type?: string, cardinality?: "single" | "collection", semanticType?: string) {
-  const semantic = semanticType?.trim();
+function selectedValue(type?: string, cardinality?: "single" | "collection", osfType?: string) {
+  const semantic = osfType?.trim();
   if (semantic) {
     return cardinality === "collection"
       ? `semantic:${semantic}:collection`
@@ -83,22 +71,22 @@ function selectedValue(type?: string, cardinality?: "single" | "collection", sem
 function isFieldDefinitionCollectionSelection(
   type: string | undefined,
   cardinality: "single" | "collection" | undefined,
-  semanticType: string | undefined,
+  osfType: string | undefined,
 ) {
   return (
     cardinality === "collection" &&
-    (semanticType?.trim() === FIELD_DEFINITION_SEMANTIC_TYPE ||
-      (semanticType?.trim() ? false : type === "object"))
+    (osfType?.trim() === FIELD_DEFINITION_OSF_TYPE ||
+      (osfType?.trim() ? false : type === "object"))
   );
 }
 
 function selectedFallbackLabel(
   type: string | undefined,
   cardinality: "single" | "collection" | undefined,
-  semanticType: string | undefined,
+  osfType: string | undefined,
   lang: "nl" | "en",
 ) {
-  const semantic = semanticType?.trim();
+  const semantic = osfType?.trim();
   if (isFieldDefinitionCollectionSelection(type, cardinality, semantic)) {
     return FIELD_DEFINITION_COLLECTION_LABELS[lang];
   }
@@ -110,7 +98,7 @@ function selectedFallbackLabel(
   return BASE_LABELS[baseType]?.[lang] ?? baseType;
 }
 
-function normalizeOptionCardinality(cardinality: FieldTypeCardinality | undefined): "single" | "collection" {
+function normalizeOptionCardinality(cardinality: FieldTypeOption["cardinality"]): "single" | "collection" {
   if (cardinality === "collection") return "collection";
   if (cardinality && typeof cardinality === "object") {
     return cardinality.max === 1 ? "single" : "collection";
@@ -128,8 +116,8 @@ function groupOptions(options: FieldTypeOption[]) {
 export function FieldTypeSelect({
   value,
   cardinality,
-  semanticType,
-  usage = "requestInput",
+  osfType,
+  excludedFieldTypes,
   lang,
   disabled = false,
   placeholder,
@@ -138,56 +126,21 @@ export function FieldTypeSelect({
 }: FieldTypeSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [options, setOptions] = useState<FieldTypeOption[]>([]);
-  const [loading, setLoading] = useState(false);
-  const currentValue = selectedValue(value, cardinality, semanticType);
+  const currentValue = selectedValue(value, cardinality, osfType);
 
-  useEffect(() => {
-    const timeout = window.setTimeout(() => setDebouncedQuery(query), 180);
-    return () => window.clearTimeout(timeout);
-  }, [query]);
-
-  useEffect(() => {
-    let active = true;
-    const params = new URLSearchParams({
-      lang,
-      usage,
-      limit: open ? "50" : "20",
-    });
-    const semantic = semanticType?.trim();
-    const search = open ? debouncedQuery.trim() : semantic;
-    if (search) params.set("search", search);
-
-    if (!open && !semantic) {
-      params.set("limit", "12");
-    }
-
-    setLoading(true);
-    fetch(`/api/workflow/designer/field-type-options?${params.toString()}`)
-      .then((response) => response.json())
-      .then((data: unknown) => {
-        if (!active) return;
-        setOptions(Array.isArray(data) ? (data as FieldTypeOption[]) : []);
-      })
-      .catch(() => {
-        if (active) setOptions([]);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [debouncedQuery, lang, open, semanticType, usage]);
+  // The options come from the compiled contract, synchronously; the search
+  // narrows them in place.
+  const options = useMemo(
+    () => fieldTypeOptions(lang, { search: query, excludedFieldTypes, limit: 50 }),
+    [excludedFieldTypes, lang, query],
+  );
 
   const selectedLabel = useMemo(() => {
     return (
-      options.find((option) => option.value === currentValue)?.label ??
-      selectedFallbackLabel(value, cardinality, semanticType, lang)
+      findFieldTypeOption(lang, currentValue)?.label ??
+      selectedFallbackLabel(value, cardinality, osfType, lang)
     );
-  }, [cardinality, currentValue, lang, options, semanticType, value]);
+  }, [cardinality, currentValue, lang, osfType, value]);
 
   const grouped = useMemo(() => groupOptions(options), [options]);
   const hasOptions = grouped.base.length > 0 || grouped.semantic.length > 0;
@@ -196,13 +149,12 @@ export function FieldTypeSelect({
     onSelectionChange({
       valueType: option.valueType ?? option.baseType,
       cardinality: normalizeOptionCardinality(option.cardinality),
-      ...(option.semanticType
-        ? { semanticType: option.semanticType }
+      ...(option.osfType
+        ? { osfType: option.osfType }
         : {}),
     });
     setOpen(false);
     setQuery("");
-    setDebouncedQuery("");
   }
 
   return (
@@ -210,10 +162,7 @@ export function FieldTypeSelect({
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) {
-          setQuery("");
-          setDebouncedQuery("");
-        }
+        if (!next) setQuery("");
       }}
     >
       <PopoverTrigger asChild disabled={disabled}>
@@ -250,11 +199,6 @@ export function FieldTypeSelect({
           </div>
         </div>
         <div className="max-h-72 overflow-y-auto p-1">
-          {loading && !hasOptions ? (
-            <p className="px-2 py-3 text-center text-sm text-muted-foreground">
-              {lang === "nl" ? "Laden..." : "Loading..."}
-            </p>
-          ) : null}
           {hasOptions ? (
             <>
               <OptionGroup
@@ -270,11 +214,11 @@ export function FieldTypeSelect({
                 onSelect={select}
               />
             </>
-          ) : !loading ? (
+          ) : (
             <p className="px-2 py-3 text-center text-sm text-muted-foreground">
               {lang === "nl" ? "Geen types gevonden." : "No types found."}
             </p>
-          ) : null}
+          )}
         </div>
       </PopoverContent>
     </Popover>

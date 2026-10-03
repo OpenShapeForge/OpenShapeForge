@@ -11,7 +11,7 @@
  *
  *   1. the caller reached this module at all, which means the control MCP
  *      admitted them — a control-realm bearer from an allow-listed client
- *      holding the `platform_admin` realm role (control/platform-admin.ts).
+ *      holding the `platform-operator` realm role (control/platform-admin.ts).
  *      That role is the deployment's own, separate from every tenant role and
  *      from `platform-operator`; a tenant's org_admin cannot reach this
  *      surface at all, and its MCP lists no tool that writes here.

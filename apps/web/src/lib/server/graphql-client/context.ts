@@ -155,31 +155,35 @@ export async function buildGraphqlGatewayRequestContext(input?: {
     throw new GraphqlProxyError("Not authenticated for GraphQL access.", 401);
   }
 
+  // The person's own token whenever the session holds one: the API's bearer
+  // path is where a person is admitted (the identity ↔ Relation link, the
+  // invitation, the just-in-time Relation) and a trusted-context bundle
+  // cannot carry that. The bundle remains for token-less server calls — a
+  // development identity, a dev tenant fallback — which the API reads as a
+  // session that cannot be admitted here. OPENSHAPEFORGE_GRAPHQL_FORWARD_
+  // ACCESS_TOKEN=true makes a missing token an error instead of a fallback.
+  if (session.accessToken) {
+    headers.set("Authorization", `Bearer ${session.accessToken}`);
+    return { headers, session };
+  }
+  if (shouldForwardGraphqlAccessToken()) {
+    throw new GraphqlProxyError("Not authenticated for GraphQL access.", 401);
+  }
+  if (!hasTrustedContextSecret()) {
+    throw new GraphqlProxyError("GraphQL trusted context is not configured.", 500);
+  }
   applyTrustedContextHeaders(headers, {
     ...session,
     tenantId,
     sub: userId,
     roles,
   });
-
-  const shouldForwardToken = shouldForwardGraphqlAccessToken();
-  if (!shouldForwardToken && !hasTrustedContextSecret()) {
-    throw new GraphqlProxyError("GraphQL trusted context is not configured.", 500);
-  }
   if (
-    !shouldForwardToken &&
-    (!headers.get("x-tenant-id") ||
-      !headers.get("x-user-id") ||
-      !headers.get("x-openshapeforge-context-signature"))
+    !headers.get("x-tenant-id") ||
+    !headers.get("x-user-id") ||
+    !headers.get("x-openshapeforge-context-signature")
   ) {
     throw new GraphqlProxyError("GraphQL trusted context is incomplete.", 500);
-  }
-
-  if (shouldForwardToken) {
-    if (!session.accessToken) {
-      throw new GraphqlProxyError("Not authenticated for GraphQL access.", 401);
-    }
-    headers.set("Authorization", `Bearer ${session.accessToken}`);
   }
 
   return { headers, session };

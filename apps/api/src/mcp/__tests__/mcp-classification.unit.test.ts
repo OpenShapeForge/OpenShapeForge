@@ -204,6 +204,7 @@ const session = (...roles: string[]) =>
 const table = (columns: AnyRecord[] = []) =>
   ({
     name: "erp.payment_details",
+    generatedCrudEligible: true,
     columns,
     source: {
       crud: {
@@ -290,7 +291,7 @@ describe("entity schema resource classification", () => {
     fields: [
       {
         key: "accountHolder",
-        valueType: "string",
+        osfType: "string",
         cardinality: "single",
         required: true,
         readOnly: false,
@@ -299,7 +300,7 @@ describe("entity schema resource classification", () => {
       },
       {
         key: "iban",
-        valueType: "string",
+        osfType: "string",
         cardinality: "single",
         required: true,
         readOnly: false,
@@ -340,7 +341,7 @@ describe("entity schema resource classification", () => {
 describe("entity schema resource relationships", () => {
   const relatedField = {
     key: "relationId",
-    valueType: "string",
+    osfType: "string",
     cardinality: "single",
     required: true,
     readOnly: false,

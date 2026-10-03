@@ -1,6 +1,6 @@
 {
   "name": "@openshapeforge/plugin-runtime",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Stable runtime contracts for OpenShapeForge plugins.",
   "repository": {
     "type": "git",
@@ -11,6 +11,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./connector": "./src/connector.ts",
+    "./language": "./src/language.ts",
+    "./acting-relation": "./src/acting-relation.ts",
     "./secrets": "./src/secrets.ts",
     "./package.json": "./package.json"
   },

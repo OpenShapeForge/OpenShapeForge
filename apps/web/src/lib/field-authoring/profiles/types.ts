@@ -17,12 +17,9 @@ export type FieldWithAuthoringMetadata = Field & {
 
 export type FieldAuthoringProfileId =
   | "fullFieldDefinition"
-  | "workflowInputField"
-  | "workflowStartVariable"
-  | "workflowProcessVariable"
+  | "caseVariable"
   | "runtimeNotificationParameter"
   | "templateParameter"
-  | "workflowOutputField"
   | "formDefinitionField";
 
 type FieldValueAuthoringConfig = {

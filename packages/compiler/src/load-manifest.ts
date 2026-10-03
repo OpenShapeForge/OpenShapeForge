@@ -2,6 +2,7 @@
 import { readFile } from "node:fs/promises";
 import YAML from "yaml";
 import type {
+  OwnerAxisPolicy,
   PlatformSchemaManifest,
   RetentionAction,
   RetentionDefinition,
@@ -14,19 +15,8 @@ import type {
   RowScopePolicy,
   ScalarType,
 } from "./schema.js";
+import { isScalarType } from "@openshapeforge/operations";
 
-const scalarTypes = new Set<ScalarType>([
-  "uuid",
-  "text",
-  "boolean",
-  "integer",
-  "bigint",
-  "numeric",
-  "date",
-  "timestamptz",
-  "jsonb",
-  "text[]",
-]);
 
 const retentionActions = new Set<RetentionAction>([
   "retain",
@@ -65,6 +55,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function assertIdentifier(value: unknown, label: string): asserts value is string {
   if (typeof value !== "string" || !/^[a-z][a-z0-9_]*$/.test(value)) {
     throw new Error(`${label} must be a lower_snake_case identifier.`);
+  }
+}
+
+/**
+ * `localColumns`/`targetColumns` widen a reference to a compound key; both
+ * name the same number of distinct identifiers, the local list includes the
+ * declaring column and only names columns of its table. Whether the pair
+ * binds the tenant is decided against the merged manifest in
+ * generateArtifacts, where the target table is known.
+ */
+function assertCompositeReference(
+  reference: Record<string, unknown>,
+  columnName: string,
+  columnNames: Set<string>,
+  label: string,
+): void {
+  const { localColumns, targetColumns } = reference;
+  if (localColumns === undefined && targetColumns === undefined) return;
+  if (!Array.isArray(localColumns) || !Array.isArray(targetColumns)) {
+    throw new Error(`${label}.references must declare localColumns and targetColumns together.`);
+  }
+  for (const [list, name] of [[localColumns, "localColumns"], [targetColumns, "targetColumns"]] as const) {
+    list.forEach((entry, index) => assertIdentifier(entry, `${label}.references.${name}[${index}]`));
+    if (new Set(list).size !== list.length) {
+      throw new Error(`${label}.references.${name} repeats a column.`);
+    }
+  }
+  if (localColumns.length === 0 || localColumns.length !== targetColumns.length) {
+    throw new Error(`${label}.references.localColumns and targetColumns must pair the same number of columns.`);
+  }
+  if (!localColumns.includes(columnName)) {
+    throw new Error(`${label}.references.localColumns must include ${columnName}.`);
+  }
+  for (const entry of localColumns) {
+    if (!columnNames.has(entry)) {
+      throw new Error(`${label}.references.localColumns names unknown column ${entry}.`);
+    }
   }
 }
 
@@ -186,7 +213,13 @@ function loadRetentionLegalHold(
   if (typeof value.suspendDestruction !== "boolean") {
     throw new Error(`${label}.suspendDestruction must be a boolean.`);
   }
-  return { suspendDestruction: value.suspendDestruction };
+  if (value.activeColumn !== undefined && typeof value.activeColumn !== "string") {
+    throw new Error(`${label}.activeColumn must be text.`);
+  }
+  return {
+    suspendDestruction: value.suspendDestruction,
+    ...(value.activeColumn === undefined ? {} : { activeColumn: value.activeColumn }),
+  };
 }
 
 function loadRetentionErasure(
@@ -310,9 +343,23 @@ function loadRetention(
     if (rule.disposition !== undefined && typeof rule.disposition !== "string") {
       throw new Error(`${label}.rules[${index}].disposition must be text.`);
     }
+    if (!isRecord(rule.duration)) {
+      throw new Error(`${label}.rules[${index}].duration must be an object.`);
+    }
+    const authoredDuration = rule.duration;
+    const duration = Object.fromEntries(
+      (["minimum", "default", "maximum"] as const).flatMap((bound) =>
+        authoredDuration[bound] === undefined
+          ? []
+          : [[bound, loadRetentionDuration(authoredDuration[bound], `${label}.rules[${index}].duration.${bound}`)]],
+      ),
+    );
+    if (Object.keys(duration).length === 0) {
+      throw new Error(`${label}.rules[${index}].duration must include minimum, default, or maximum.`);
+    }
     return {
       id: rule.id,
-      after: loadRetentionDuration(rule.after, `${label}.rules[${index}].after`),
+      duration,
       action: rule.action as RetentionAction,
       ...(rule.disposition === undefined
         ? {}
@@ -328,6 +375,12 @@ function loadRetention(
   }
 
   const legalHold = loadRetentionLegalHold(value.legalHold, `${label}.legalHold`);
+  if (legalHold?.activeColumn) {
+    assertIdentifier(legalHold.activeColumn, `${label}.legalHold.activeColumn`);
+    if (columnsByName.get(legalHold.activeColumn) !== "boolean") {
+      throw new Error(`${label}.legalHold.activeColumn must reference a boolean column.`);
+    }
+  }
   const erasure = loadRetentionErasure(value.erasure, `${label}.erasure`);
 
   return {
@@ -344,6 +397,31 @@ function loadRetention(
 }
 
 const groupExpansionModes = new Set(["descendants", "ancestors", "exact"]);
+
+/** An owner-axis policy: at least two owner columns, each with the role names it lends, and an optional command setting. */
+function loadOwnerAxis(value: unknown, label: string, columnNames: Set<string>): OwnerAxisPolicy {
+  if (!isRecord(value) || !Array.isArray(value.axes) || value.axes.length < 2) {
+    throw new Error(`${label} must declare at least two owner axes.`);
+  }
+  const axes = value.axes.map((axis, index) => {
+    if (!isRecord(axis)) throw new Error(`${label}.axes[${index}] must be an object.`);
+    assertIdentifier(axis.column, `${label}.axes[${index}].column`);
+    if (!columnNames.has(axis.column)) throw new Error(`${label}.axes[${index}] references unknown column ${axis.column}.`);
+    if (!Array.isArray(axis.roles) || axis.roles.length === 0 || axis.roles.some((role) => typeof role !== "string" || !/^[A-Za-z][A-Za-z0-9._-]*$/.test(role))) {
+      throw new Error(`${label}.axes[${index}].roles must be a non-empty list of role names.`);
+    }
+    return { column: axis.column, roles: [...(axis.roles as string[])] };
+  });
+  let command: OwnerAxisPolicy["command"];
+  if (value.command !== undefined) {
+    if (!isRecord(value.command) || typeof value.command.setting !== "string" || !/^app\.[a-z_]+$/.test(value.command.setting) ||
+        !Array.isArray(value.command.values) || value.command.values.length === 0 || value.command.values.some((entry) => typeof entry !== "string" || !/^[a-z_]+$/.test(entry))) {
+      throw new Error(`${label}.command must name an app.* setting and its values.`);
+    }
+    command = { setting: value.command.setting, values: [...(value.command.values as string[])] };
+  }
+  return { axes, ...(command ? { command } : {}) };
+}
 
 function loadRowScope(
   value: unknown,
@@ -377,19 +455,19 @@ function loadRowScope(
     };
   }
 
-  if (value.userColumns !== undefined) {
-    if (!Array.isArray(value.userColumns) || value.userColumns.length === 0) {
-      throw new Error(`${label}.userColumns must be a non-empty array.`);
+  for (const axis of ["userColumns", "relationColumns"] as const) {
+    const columns = value[axis];
+    if (columns === undefined) continue;
+    if (!Array.isArray(columns) || columns.length === 0) {
+      throw new Error(`${label}.${axis} must be a non-empty array.`);
     }
-    for (const [index, column] of value.userColumns.entries()) {
-      assertIdentifier(column, `${label}.userColumns[${index}]`);
+    for (const [index, column] of columns.entries()) {
+      assertIdentifier(column, `${label}.${axis}[${index}]`);
       if (!columnNames.has(column)) {
-        throw new Error(
-          `${label}.userColumns[${index}] references unknown column ${column}.`,
-        );
+        throw new Error(`${label}.${axis}[${index}] references unknown column ${column}.`);
       }
     }
-    policy.userColumns = [...value.userColumns];
+    policy[axis] = [...columns];
   }
 
   if (value.bypassRoles !== undefined) {
@@ -404,9 +482,9 @@ function loadRowScope(
     policy.bypassRoles = [...value.bypassRoles];
   }
 
-  if (!policy.group && !policy.userColumns) {
+  if (!policy.group && !policy.userColumns && !policy.relationColumns) {
     throw new Error(
-      `${label} must declare at least one of group or userColumns; declaring rowScope without any axis is meaningless.`,
+      `${label} must declare at least one of group, userColumns or relationColumns; declaring rowScope without any axis is meaningless.`,
     );
   }
 
@@ -447,23 +525,9 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
     ) {
       throw new Error(`tables[${tableIndex}].generatedCrudEligible must be boolean.`);
     }
-    if (
-      table.generatedCrud !== undefined &&
-      typeof table.generatedCrud !== "boolean"
-    ) {
-      throw new Error(`tables[${tableIndex}].generatedCrud must be boolean.`);
-    }
-    if (
-      table.domainInternal === true &&
-      (table.generatedCrudEligible === true || table.generatedCrud === true)
-    ) {
+    if (table.domainInternal === true && table.generatedCrudEligible === true) {
       throw new Error(
         `Domain-internal table ${currentTableKey} cannot enable generated CRUD.`,
-      );
-    }
-    if (table.generatedCrudEligible === false && table.generatedCrud === true) {
-      throw new Error(
-        `Table ${currentTableKey} cannot set legacy generatedCrud when generatedCrudEligible is false.`,
       );
     }
     if (!Array.isArray(table.columns) || table.columns.length === 0) {
@@ -491,10 +555,10 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
       if (column.name === "tenant_id") {
         hasTenantId = true;
       }
-      if (typeof column.type !== "string" || !scalarTypes.has(column.type as ScalarType)) {
+      if (typeof column.type !== "string" || !isScalarType(column.type)) {
         throw new Error(`${currentTableKey}.${column.name} has unsupported type.`);
       }
-      columnsByName.set(column.name, column.type as ScalarType);
+      columnsByName.set(column.name, column.type);
       if (column.primaryKey === true) {
         primaryKeys += 1;
       }
@@ -523,6 +587,11 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
       }
     }
     tableColumns.set(currentTableKey, columnNames);
+    for (const column of table.columns) {
+      if (isRecord(column) && isRecord(column.references)) {
+        assertCompositeReference(column.references, String(column.name), columnNames, `${currentTableKey}.${column.name}`);
+      }
+    }
     if (!hasTenantId) {
       throw new Error(`Tenant-scoped table ${currentTableKey} must include tenant_id.`);
     }
@@ -582,6 +651,11 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
         `${currentTableKey}.rowScope`,
         columnNames,
       );
+    }
+
+    if (table.ownerAxis !== undefined) {
+      if (!table.tenantScoped) throw new Error(`${currentTableKey}.ownerAxis requires tenantScoped: true.`);
+      table.ownerAxis = loadOwnerAxis(table.ownerAxis, `${currentTableKey}.ownerAxis`, columnNames);
     }
 
     // workerAccess names the worker role permitted to read this table ACROSS
@@ -689,19 +763,19 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
 
       const targetTableKey = tableKey(column.references.schema, column.references.table);
       const crossModule = table.schema !== column.references.schema;
+      const key = referenceKey({
+        from: {
+          schema: table.schema,
+          table: table.name,
+          column: column.name,
+        },
+        to: {
+          schema: column.references.schema,
+          table: column.references.table,
+          column: column.references.column,
+        },
+      });
       if (crossModule) {
-        const key = referenceKey({
-          from: {
-            schema: table.schema,
-            table: table.name,
-            column: column.name,
-          },
-          to: {
-            schema: column.references.schema,
-            table: column.references.table,
-            column: column.references.column,
-          },
-        });
         if (!relationshipRegisterKeys.has(key)) {
           throw new Error(
             `${sourceTableKey}.${column.name} crosses module boundary to ${targetTableKey}.${column.references.column} but is not listed in relationshipRegister.`,
@@ -711,14 +785,14 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
 
       const targetColumns = tableColumns.get(targetTableKey);
       if (!targetColumns) {
-        // A registered cross-module reference may point at a table this file
+        // An explicitly registered reference may point at a table this file
         // does not declare: the authoring layer promotes its entities into the
         // same manifest later (active-manifest.ts), which is how a platform
-        // bookkeeping row links to a Relation. The reference is checked again
+        // bookkeeping or retained legacy row links to a Relation. The reference is checked again
         // against the merged manifest in generateArtifacts, where the target
-        // either exists or the build fails naming it; a same-schema reference
-        // has no later layer to wait for and is refused here.
-        if (crossModule) continue;
+        // either exists or the build fails naming it. An unregistered missing
+        // target is refused, even when it is within the same schema.
+        if (relationshipRegisterKeys.has(key)) continue;
         throw new Error(`${sourceTableKey}.${column.name} references unknown table ${targetTableKey}.`);
       }
       if (!targetColumns.has(column.references.column)) {

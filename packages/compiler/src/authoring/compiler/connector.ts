@@ -27,7 +27,7 @@ import type {
   ConnectorOperation,
 } from "../types/connector.js";
 import { CONNECTOR_EGRESS_PATTERN } from "../connector-loader.js";
-import { buildOperationSchemas, connectorObjectSchema } from "./connector-schemas.js";
+import { type ConnectorOsfTypes, buildOperationSchemas, connectorObjectSchema } from "./connector-schemas.js";
 import { deriveToolPrefix } from "./mcp.js";
 
 /**
@@ -260,7 +260,7 @@ function buildExposure(
   const exposure = definition.exposure ?? {};
 
   // GraphQL is the native surface, as it is for entities; REST and MCP are
-  // opt-in, matching the per-entity `rest:` / `mcp:` blocks.
+  // opt-in, matching the per-entity interface projections.
   const graphql = exposure.graphql !== false;
 
   const restAuthored = exposure.rest;
@@ -500,6 +500,8 @@ export function buildConnector(
   definition: ConnectorDefinition,
   slug: string,
   origin: string,
+  /** The osf-type catalog the connector's fields resolve their base types through. */
+  osfTypes: ConnectorOsfTypes = {},
 ): CompiledConnectorContract {
   if (definition.schemaVersion !== 1) {
     throw new Error(
@@ -556,6 +558,23 @@ export function buildConnector(
   if (operations.length > 0 && !capabilities.includes("operations")) {
     throw new Error(
       `Connector ${origin} declares operations without the "operations" capability.`,
+    );
+  }
+
+  const readRole = expectNonEmptyString(
+    definition.authorization?.roles?.read,
+    "authorization.roles.read",
+    origin,
+  );
+  const writeRole = expectNonEmptyString(
+    definition.authorization?.roles?.write,
+    "authorization.roles.write",
+    origin,
+  );
+  if (readRole === writeRole) {
+    throw new Error(
+      `Connector ${origin}: authorization.roles.read and authorization.roles.write ` +
+        `must be distinct permissions (both are ${JSON.stringify(readRole)}).`,
     );
   }
 
@@ -640,22 +659,6 @@ export function buildConnector(
     );
     expectArray(operation.input ?? [], `operation "${operation.key}" input`, origin);
 
-    const roles = expectArray(
-      operation.authorization?.roles?.invoke ?? [],
-      `operation "${operation.key}" authorization.roles.invoke`,
-      origin,
-    ) as string[];
-    for (const role of roles) {
-      expectNonEmptyString(role, `operation "${operation.key}" invoke role`, origin);
-    }
-    if (roles.length === 0) {
-      throw new Error(
-        `Operation "${operation.key}" in connector ${origin} declares no invoke roles. ` +
-          "Authorization is fail-closed: an operation nobody is allowed to call is a " +
-          "configuration error, not an open one.",
-      );
-    }
-
     const typeBase = `${definition.connector}${toPascal(operation.key)}`;
     return {
       key: operation.key,
@@ -675,10 +678,10 @@ export function buildConnector(
       ...(exposure.mcp && mcpOperationFlags[operation.key] !== false
         ? { mcp: { toolName: `${exposure.mcp.toolPrefix}_${toSnake(operation.key)}` } }
         : {}),
-      roles: { invoke: [...new Set(roles)].sort() },
+      roles: { invoke: [operation.kind === "query" ? readRole : writeRole] },
       input: operation.input ?? [],
       output: operation.output,
-      schemas: buildOperationSchemas(operation.input ?? [], operation.output),
+      schemas: buildOperationSchemas(operation.input ?? [], operation.output, osfTypes),
       reliability: buildReliability(operation, origin),
     };
   });
@@ -705,6 +708,7 @@ export function buildConnector(
     capabilities: [...capabilities].sort(),
     implementation: definition.implementation,
     availability: entitlement === undefined ? {} : { entitlement },
+    authorization: { roles: { read: readRole, write: writeRole } },
     configuration: {
       instances: definition.configuration?.instances ?? "single",
       verify: definition.configuration?.verify === true,
@@ -713,7 +717,7 @@ export function buildConnector(
         .filter((field) => field.secret === true)
         .map((field) => field.key)
         .sort(),
-      schema: connectorObjectSchema(configFields),
+      schema: connectorObjectSchema(configFields, osfTypes),
     },
     ...(auth ? { auth } : {}),
     network: { egress: egressAllowlist },

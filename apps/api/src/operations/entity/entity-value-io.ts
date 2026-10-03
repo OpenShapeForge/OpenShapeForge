@@ -11,22 +11,31 @@ import { fieldNameForColumn } from "./columns.js";
 import { generatedCrudError, getGeneratedCrudTables, isGeneratedCrudOperationEnabled, requireEntityOperation } from "./catalog.js";
 import { assertRecordPermissionInTransaction } from "./record-permissions.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
+import type { DerivedToolsCatalogEntry } from "../../mcp/derived-tools.js";
 
 /** Server-owned injection only; never accepted in a request body. */
-export type EntityValueIOContext = { registry?: RuntimeEntityValueRegistry; tables?: readonly GeneratedCrudTable[] };
+export type EntityValueIOContext = {
+  registry?: RuntimeEntityValueRegistry;
+  tables?: readonly GeneratedCrudTable[];
+  derivedTools?: readonly DerivedToolsCatalogEntry[];
+};
 
 /** Same unsupported policies as the compiler, including inherited/nested fields. */
+const BASE_TYPES = new Set(["string", "integer", "number", "boolean", "date", "datetime", "object"]);
+
 export function assertEntityValueFieldPolicy(
   field: Readonly<Record<string, unknown>>,
-  semanticTypes: Readonly<Record<string, unknown>> = fieldSchemaRegistry.semanticTypes,
+  osfTypes: Readonly<Record<string, unknown>> = fieldSchemaRegistry.osfTypes,
   depth = 0,
 ): void {
   const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
   const invalid = (): never => { throw generatedCrudError("Guarded or malformed entity-value fields require a dedicated adapter.", "INVALID_DEFINITION"); };
   if (!record(field) || depth > 32) invalid();
-  if (field.semanticType !== undefined && typeof field.semanticType !== "string") invalid();
-  const semantic = typeof field.semanticType === "string" && Object.hasOwn(semanticTypes, field.semanticType) ? semanticTypes[field.semanticType] : undefined;
-  if (typeof field.semanticType === "string" && semantic === undefined) invalid();
+  if (typeof field.osfType !== "string") invalid();
+  const osfType = field.osfType as string;
+  const baseType = BASE_TYPES.has(osfType);
+  const semantic = !baseType && Object.hasOwn(osfTypes, osfType) ? osfTypes[osfType] : undefined;
+  if (!baseType && semantic === undefined) invalid();
   if (semantic !== undefined && !record(semantic)) invalid();
   if (depth > 0 && (field.relationship !== undefined || record(semantic) && semantic.kind === "entity")) invalid();
   for (const key of ["classification", "authorization", "permissions", "writtenBy", "secureInput", "immutable"]) {
@@ -41,12 +50,12 @@ export function assertEntityValueFieldPolicy(
       if (!Array.isArray(node[key])) invalid();
       for (const child of node[key] as unknown[]) {
         if (!record(child)) invalid();
-        assertEntityValueFieldPolicy(child as Record<string, unknown>, semanticTypes, depth + 1);
+        assertEntityValueFieldPolicy(child as Record<string, unknown>, osfTypes, depth + 1);
       }
     }
     if (node.item !== undefined) {
       if (!record(node.item)) invalid();
-      assertEntityValueFieldPolicy(node.item as Record<string, unknown>, semanticTypes, depth + 1);
+      assertEntityValueFieldPolicy(node.item as Record<string, unknown>, osfTypes, depth + 1);
     }
   }
 }
@@ -72,6 +81,12 @@ export function entityValueCarriers(table: GeneratedCrudTable, registry = genera
         if (!physical || physical.type !== "uuid" || physical.sourceField || physical.immutable || physical.writtenBy?.length || protectedColumns.has(physical.name)) {
           throw generatedCrudError("Entity-value reference storage metadata is invalid.", "INVALID_DEFINITION");
         }
+        if (reference.parameterColumn) {
+          const parameter = table.columns.find(column => column.name === reference.parameterColumn);
+          if (!parameter || parameter.type !== "text" || parameter.sourceField || parameter.immutable || parameter.writtenBy?.length || protectedColumns.has(parameter.name)) {
+            throw generatedCrudError("Entity-value parameter storage metadata is invalid.", "INVALID_DEFINITION");
+          }
+        }
       }
     }
   }
@@ -79,7 +94,7 @@ export function entityValueCarriers(table: GeneratedCrudTable, registry = genera
 }
 
 export function entityValuePhysicalColumns(table: GeneratedCrudTable, registry = generatedEntityValues): Set<string> {
-  return new Set(entityValueCarriers(table, registry).flatMap((carrier) => Object.values(carrier.definitions).flatMap((definition) => definition.references.map((reference) => reference.column))));
+  return new Set(entityValueCarriers(table, registry).flatMap((carrier) => Object.values(carrier.definitions).flatMap((definition) => definition.references.flatMap((reference) => [reference.column, ...(reference.parameterColumn ? [reference.parameterColumn] : [])]))));
 }
 
 /** Called before normalization, so protected inputs cannot be silently discarded. */

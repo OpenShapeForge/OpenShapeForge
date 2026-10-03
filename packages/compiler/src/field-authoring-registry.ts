@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import type { SemanticTypeDefinition } from "./authoring/types.js";
+import type { OsfTypeDefinition } from "./authoring/types.js";
 import type {
   FieldAuthoringProfile,
 } from "./authoring/loader.js";
@@ -21,19 +21,19 @@ export const FIELD_AUTHORING_REGISTRY_PATH =
 export type FieldAuthoringRegistry = {
   version: 1;
   fieldAuthoringProfiles: Record<string, FieldAuthoringProfile>;
-  semanticTypes: Record<string, SemanticTypeDefinition>;
+  osfTypes: Record<string, OsfTypeDefinition>;
   referentiedata: Record<string, CoreReferentiedataCatalogGroup>;
 };
 
 export function buildFieldAuthoringRegistry(input: {
   fieldAuthoringProfiles: Record<string, FieldAuthoringProfile>;
-  semanticTypes: Record<string, SemanticTypeDefinition>;
+  osfTypes: Record<string, OsfTypeDefinition>;
   referentiedataCatalog: CoreReferentiedataCatalog;
 }): FieldAuthoringRegistry {
   return {
     version: 1,
     fieldAuthoringProfiles: input.fieldAuthoringProfiles,
-    semanticTypes: input.semanticTypes,
+    osfTypes: input.osfTypes,
     referentiedata: input.referentiedataCatalog.groepen ?? {},
   };
 }

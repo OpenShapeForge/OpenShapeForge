@@ -21,7 +21,6 @@ import {
 import { connectedViaLabel, type McpClientInfo } from "../mcp/session-client.js";
 import { PLATFORM_OPERATOR_ROLE } from "./authorization.js";
 import type { PlatformAdministrator } from "./platform-admin.js";
-import { PLATFORM_ADMIN_ROLE } from "./platform-admin.js";
 import { listPlatformTenants, type PlatformCatalogDeps } from "./platform-catalog.js";
 
 export const PLATFORM_SERVER_INFO = { name: "openshapeforge-platform", version: "1" } as const;
@@ -29,9 +28,8 @@ export const PLATFORM_SERVER_INFO = { name: "openshapeforge-platform", version: 
 export const PLATFORM_SERVER_INSTRUCTIONS =
   "Platform administration for an OpenShapeForge deployment: tenant lifecycle, " +
   "organization structure, identity reconciliation, and the integration catalog " +
-  "that is installed per tenant. Each Operation is role-filtered: platform-operator " +
-  "changes tenant lifecycle and organization state, while platform_admin manages " +
-  "the catalog, notices and audit; both may inspect shared platform state. Use only " +
+  "that is installed per tenant. Every Operation requires the single " +
+  "platform-operator role. Use only " +
   "the tools offered in this session. " +
   "Catalog writes act for EVERY tenant at once — a publish or retirement reaches " +
   "all of them in one call. Read platform_guide before changing anything, " +
@@ -39,17 +37,19 @@ export const PLATFORM_SERVER_INSTRUCTIONS =
   "publish, retirement or forced update with the administrator before " +
   "calling it. Inspect tenant and organization state before mutating it, and inspect " +
   "get_reconciliation_report before reapplying drift. When offered, use invite_first_tenant_admin " +
-  "to invite the first organization " +
-  "administrator for one existing tenant by email; this never makes you a tenant member. " +
+  "to admit the first organization " +
+  "administrator of one existing tenant; this never makes you a tenant member. " +
   "Use list_tenant_invitations to inspect outstanding invitations, " +
-  "revoke_tenant_invitation to withdraw one, and resend_tenant_invitation only for an explicit resend.";
+  "revoke_tenant_invitation to withdraw one, and resend_tenant_invitation only for an explicit resend. " +
+  "Every invite result has a delivery outcome and a nextStep: relay the nextStep, and never say an e-mail " +
+  "is on its way unless delivery is email_sent. An existing account gets no e-mail; give them the signInUrl.";
 
 export const PLATFORM_SESSION_RESOURCE_URI = "osf://platform-session";
 
 export const PLATFORM_GUIDE = [
   "# Platform administration guide",
   "",
-  "You are acting in the control realm of this OpenShapeForge deployment, not as a member of any tenant. There is no 'current organization'. Every Operation is filtered by your realm roles: platform-operator changes tenant lifecycle, organization state and reconciliation; platform_admin manages catalog publication, notices and audit; both may inspect shared platform state. Use only the tools offered in this session.",
+  "You are acting in the control realm of this OpenShapeForge deployment, not as a member of any tenant. There is no 'current organization'. The single platform-operator role authorizes tenant lifecycle, organization state, reconciliation, catalog publication, notices and audit. Use only the tools offered in this session.",
   "",
   "## What the catalog is",
   "Integration definitions (Adapters, Capabilities, Services) are platform-level, versioned catalog entries identified by kind and key. Each tenant has an installed copy. A published version is immutable: changing a definition always means publishing version N+1.",
@@ -58,11 +58,11 @@ export const PLATFORM_GUIDE = [
   "publish_catalog_entry installs the new version for every tenant in the same call: a tenant that has not overridden the row is updated in place (its own renames and narrowed lists are kept); a tenant that overrode a marked field (input/output fields, bindings, mappings, operation) is only FLAGGED — its row keeps running unchanged and shows updateAvailable. The tenant's own integration administrator can apply the update (apply_catalog_update on their MCP), or you can force it with apply_catalog_update_for_tenant, which discards that tenant's overrides. Never force without the administrator's explicit go-ahead for that tenant.",
   "",
   "## Process",
-  "When create_tenant is offered, use it for a new tenant with its permanent URL slug and display name. It writes the authoritative registry first, then provisions the root Keycloak Organization and its MCP audience. Repeating the call safely repairs an incomplete projection. The slug cannot change later.",
+  "When create_tenant is offered, use it for a new tenant with its permanent URL slug and display name. It writes the authoritative registry first, provisions the root Keycloak Organization and its MCP audience, then installs the current runtime catalog. Repeating the call safely repairs an incomplete projection and installs missing catalog entries. The slug cannot change later.",
   "When update_tenant is offered, use it for display-name or lifecycle changes. Suspending or deactivating a tenant disables its root Organization and can interrupt access; confirm that consequence first. Use get_tenant_organization_tree before creating or moving a sub-organization, and pass only its opaque org-unit ids — never invent or accept a Keycloak Organization id.",
   "Use get_reconciliation_report to compare the authoritative registry with Keycloak. When reapply_reconciliation is offered, it pushes repairable registry state into Keycloak for one tenant or every affected tenant; it never deletes an unclaimed Organization. Confirm an all-tenant run first.",
   "",
-  "When invite_first_tenant_admin is offered, use it for an existing tenant without an organization administrator after confirming the exact slug and recipient email. The role is fixed to org_admin. Working SMTP on the tenant Keycloak realm is required; a pending invitation is not proof the person accepted. Repeating the same request does not resend mail. Use list_tenant_invitations to inspect current provider state. Revoke only an invitation id from that list; this invalidates the delivered link but never removes an accepted member. Resend only after explicit confirmation and never retry automatically after an uncertain response. Once an administrator exists, use that tenant administrator's invite_employee workflow. The control-realm user stays outside the tenant.",
+  "When invite_first_tenant_admin is offered, use it for an existing tenant without an organization administrator after confirming the exact slug and recipient email. The role is fixed to org_admin. Working SMTP on the tenant Keycloak realm is required only when an invitation e-mail has to be sent; a pending invitation is not proof the person accepted. Repeating the same request does not resend mail. The result's `delivery` says what happened and `nextStep` says what to tell the person: email_sent (the person follows the invitation e-mail), no_email_existing_account (they already have an account; no e-mail is sent, ever — they sign in at `signInUrl` and the role applies then), already_pending (an earlier e-mail is still outstanding; nothing new was sent) or already_accepted (already a member; nothing was sent). create_tenant_invitation answers the same way for a further member or a role for someone who has not signed in yet. Use list_tenant_invitations to inspect current provider state; an `unresolved` row with status awaiting_sign_in is that no-mail case working as intended, provider_missing is drift. Revoke only an invitation id from that list; this invalidates the delivered link but never removes an accepted member. Resend only after explicit confirmation and never retry automatically after an uncertain response. Once an administrator exists, use that tenant administrator's invite_employee workflow. The control-realm user stays outside the tenant.",
   "1. list_tenants and list_catalog_entries to see what exists and who overrode what.",
   "2. get_catalog_entry for the full current definition; start every change from it (publish takes the WHOLE definition, not a patch).",
   "3. Show the administrator the exact change and which tenants will be updated versus flagged; get confirmation.",
@@ -95,7 +95,7 @@ export const PLATFORM_SESSION_RESOURCE = {
 export type PlatformSessionInfo = {
   name: string | null;
   email: string | null;
-  role: "Platform administrator" | "Platform operator" | "Platform administrator and operator";
+  role: "Platform operator";
   scope: "platform";
   /** How many tenants the platform currently has; null when the registry is unreachable. */
   tenants: number | null;
@@ -129,13 +129,10 @@ export function buildPlatformSessionInfo(input: {
   nowMs?: number;
 }): PlatformSessionInfo {
   const { administrator, tenants, access } = input;
-  const administratorRole = input.roles.includes(PLATFORM_ADMIN_ROLE);
-  const operatorRole = input.roles.includes(PLATFORM_OPERATOR_ROLE);
-  const role = administratorRole && operatorRole
-    ? "Platform administrator and operator"
-    : operatorRole
-      ? "Platform operator"
-      : "Platform administrator";
+  if (!input.roles.includes(PLATFORM_OPERATOR_ROLE)) {
+    throw new Error(`Platform session info requires ${PLATFORM_OPERATOR_ROLE}.`);
+  }
+  const role = "Platform operator" as const;
   const nowMs = input.nowMs ?? Date.now();
   // Only what the label is derived from; the rest of the administrator's facts
   // are read straight from `administrator` below.
@@ -196,6 +193,6 @@ export function buildPlatformSessionInfo(input: {
 /** The tenant count for whoami; null rather than a failure when the registry cannot be read. */
 export function listPlatformTenantsCount(context: PlatformCatalogDeps): Promise<number | null> {
   return listPlatformTenants(context)
-    .then((rows) => rows.length)
+    .then((page) => page.totalCount)
     .catch(() => null);
 }

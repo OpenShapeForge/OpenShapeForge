@@ -107,7 +107,7 @@ export const LEGAL_ENTITY_FORM_DEFINITION: RendererFormDefinition = {
   fields: [
     {
       key: "name",
-      valueType: "string",
+      osfType: "string",
       required: true,
       label: {
         en: "Name",
@@ -144,7 +144,7 @@ export const LEGAL_ENTITY_FORM_DEFINITION: RendererFormDefinition = {
     },
     {
       key: "legalForm",
-      valueType: "string",
+      osfType: "string",
       label: {
         en: "Legal form",
         nl: "Rechtsvorm",
@@ -178,7 +178,7 @@ export const LEGAL_ENTITY_FORM_DEFINITION: RendererFormDefinition = {
     },
     {
       key: "registrationNumber",
-      valueType: "string",
+      osfType: "string",
       label: {
         en: "Registration number",
         nl: "KvK-nummer",
@@ -201,7 +201,7 @@ export const LEGAL_ENTITY_FORM_DEFINITION: RendererFormDefinition = {
     },
     {
       key: "vatNumber",
-      valueType: "string",
+      osfType: "string",
       label: {
         en: "VAT number",
         nl: "BTW-nummer",
@@ -224,7 +224,7 @@ export const LEGAL_ENTITY_FORM_DEFINITION: RendererFormDefinition = {
     },
     {
       key: "globalLocationNumber",
-      valueType: "string",
+      osfType: "string",
       label: {
         en: "Global Location Number",
         nl: "GLN-nummer",

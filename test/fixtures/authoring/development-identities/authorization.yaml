@@ -5,10 +5,6 @@
 # consuming host uses, with neutral names and synthetic tenants.
 kind: authorizationPatch
 
-clientRoles:
-  erp-provider:
-    - workflow-admin
-
 clientRoleComposites:
   erp-provider:
     Test.Admin:
@@ -31,7 +27,7 @@ clientRoleComposites:
           - Cases.All.ReadWrite
           - Relations.Bsn.Read
           - Platform.ApiKeys.Manage
-          - workflow-admin
+          - Platform.Jobs.Manage
         openshapeforge-support:
           - Support.Issues.All
         openshapeforge-audit:

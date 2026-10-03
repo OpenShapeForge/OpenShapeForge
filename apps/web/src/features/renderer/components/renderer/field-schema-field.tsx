@@ -38,12 +38,9 @@ type FieldWithAuthoringMetadata = Field & {
 
 function resolveFieldAuthoringProfileId(value: unknown): FieldAuthoringProfileId {
   return value === "fullFieldDefinition"
-    || value === "workflowInputField"
+    || value === "caseVariable"
     || value === "runtimeNotificationParameter"
     || value === "templateParameter"
-    || value === "workflowStartVariable"
-    || value === "workflowOutputField"
-    || value === "workflowProcessVariable"
     || value === "formDefinitionField"
     ? value
     : "fullFieldDefinition";

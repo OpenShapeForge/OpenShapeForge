@@ -32,7 +32,7 @@ export type CompiledEntityInfo = {
   slug: string;
   /** Repo-root-relative provenance path of the entity YAML. */
   path: string;
-  origin: "core" | "contextFull";
+  origin: "core";
   contract: CompiledEntityContract;
 };
 
@@ -44,9 +44,11 @@ export type PluginBaseContext = {
 
 /** A static plugin-backed Operation after compiler ownership is attached. */
 export type CompiledPluginOperation = PluginOperationContract & {
+  /** Compiler-owned adapter result normalization, never supplied by plugins. */
+  resultProjection?: { kind: "entity-record"; entityName: string; idField: string };
   /** Compiler-owned native dispatch; never accepted from plugin contributions. */
   implementation?:
-    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" }
+    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" | "update" | "remove" }
     | { type: "entity-type-list"; labels: Record<string, { en: string; nl: string }> }
     | {
         type: "constrained-reference-create";
@@ -119,8 +121,21 @@ export type PluginExecutionCompatibility = {
     visibleWhen?: { field: string; equals: string };
     visibleToRolesField?: string;
     internalOnlyField?: string;
+    /**
+     * The roles a session must hold for the rows to project as tools and to
+     * execute — the audience of the derived tools. Absent, the audience is
+     * the roles of the definition entity's canonical read, which ties "may
+     * use the tools" to "may read the definitions"; a plugin whose users
+     * may call what only its administrators may read names the wider set
+     * here. Every role must exist in the realm; the build fails otherwise.
+     */
+    audience?: string[];
     execution: {
-      bindingsField: string;
+      /**
+       * Owned hasMany collection on the owner whose target rows are the
+       * execution steps.
+       */
+      bindingsRelation: string;
       operationRef: string;
       operationEntity: string;
       providerRef: string;
@@ -204,6 +219,17 @@ export type PluginOperationAuth =
       recordPermission?: import("./authoring/types/common.js").RecordPermissionAction;
     }
   | {
+      /**
+       * A capability grant: a hashed, expiring, recipient-bound token that
+       * core resolves into a grant session before the handler runs. The
+       * grant names the exact Operation keys and the one record it covers;
+       * the handler reads them from `session.grant`. REST only, described by
+       * the platform-owned `capabilityGrant` security scheme; the grant
+       * errors are appended to the Operation's declared errors.
+       */
+      mode: "capability";
+    }
+  | {
       mode: "custom";
       /** OpenAPI components.securitySchemes key. */
       scheme: string;
@@ -232,6 +258,7 @@ export type PluginOperationContract = {
     entityName: string;
     scope: "collection" | "record";
     inputField?: string;
+    inputBindings?: Record<string, string>;
   };
   inputSchema: JsonSchema;
   outputSchema: JsonSchema;
@@ -248,12 +275,8 @@ export type PluginOperationContract = {
     inputField?: string;
     description?: string;
   };
-  /**
-   * Interface-neutral effects. Optional only for existing plugins; new
-   * contracts should declare it. The compiler keeps the historical HTTP
-   * method inference as a compatibility fallback until those plugins migrate.
-   */
-  effects?: {
+  /** Interface-neutral effects; every transport projection derives from them. */
+  effects: {
     data: "read" | "write" | "delete";
     external: "none" | "read" | "write";
   };
@@ -301,13 +324,17 @@ export type CompilerPlugin = {
    */
   contributePlatformTables?(context: PluginBaseContext): TableDefinition[];
   /**
-   * Versioned DDL for invariants that are not table constraints, such as
-   * functions and triggers. Applied after generated tables and checksum-locked
-   * in the shared migration ledger.
+   * Idempotent DDL for invariants that are not table constraints, such as
+   * functions and triggers. Applied after the generated tables on EVERY
+   * migrate — there is no ledger — so each statement must be safe to repeat
+   * (CREATE OR REPLACE, IF NOT EXISTS, a guarded DO block). The version is
+   * an ordering key within the plugin.
    */
   schemaMigrations?:
     | PluginSchemaMigration[]
     | ((context: PluginBaseContext) => PluginSchemaMigration[]);
+  /** Nonsecret, JSON-serializable build configuration bound to this runtime module. */
+  runtimeConfiguration?(context: Pick<PluginGenerateContext, "entities">): unknown;
   /** Emit artifacts; paths are repo-root-relative like all compiler output. */
   generate?(
     context: PluginGenerateContext,

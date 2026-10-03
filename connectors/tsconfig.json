@@ -10,9 +10,9 @@
     "real executor — so the program is rooted at the repo root rather than at",
     "connectors/.",
     "",
-    "No DOM lib, deliberately: a connector package declares its own ConnectorContext",
-    "structurally and depends on nothing, and keeping that honest is what caught",
-    "apps/api naming the ambient RequestInfo global in a module examples had to import."
+    "No DOM lib, deliberately: a connector package depends only on the published",
+    "@openshapeforge/plugin-runtime/connector contract, and keeping that honest is what",
+    "caught apps/api naming the ambient RequestInfo global in a module examples had to import."
   ],
   "extends": "../tsconfig.base.json",
   "compilerOptions": {

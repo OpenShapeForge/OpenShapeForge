@@ -11,14 +11,16 @@ journal, and manifest-derived e2e + load tests. Start with
 | [architecture.md](architecture.md) | The big picture: YAML → compiler → generated artifacts → runtimes; generated-vs-hand-written boundary; determinism gates |
 | [authoring.md](authoring.md) | Entity YAML anatomy, `_base.yaml`, slug rules, catalogs, `authorization.yaml`, adding an entity end-to-end |
 | [layers.md](layers.md) | `authoring.config.yaml`, overlays, `kind: entityPatch` strategic merge, catalog merging, `.authoring-build/` |
-| [plugins.md](plugins.md) | The `CompilerPlugin` contract, `ownedPaths`, determinism rules, and both shipped examples (entity-docs, workflow) |
+| [plugins.md](plugins.md) | The `CompilerPlugin` contract, `ownedPaths`, determinism rules, and both shipped examples (entity-docs, notebook) |
+| [jobs.md](jobs.md) | The durable job queue: `platform.jobs`, enqueue/claim/settle, `outcome_unknown`, the `job-worker` role, the `mail.deliver` kind and SMTP provider, the `jobs.*` Operations |
 | [connectors.md](connectors.md) | Connector contracts, licensing and entitlement, configuration and secrets, the execution trust model |
 | [identity-providers.md](identity-providers.md) | External identity providers: what OSF ships vs. what a host authors, the `keycloak.identityProviders` contract, Apple, validation rules, reconciling an existing realm, Keycloak/provider lockstep |
 | [api.md](api.md) | The generic CRUD engine, multi-tenancy + RLS, auth (Keycloak bearer / trusted-context HMAC), the entity-event journal, env + local stack |
 | [operations.md](operations.md) | CORS ownership, persisted web operations, metrics/error privacy, readiness, OpenTelemetry, and GraphiQL |
 | [mcp.md](mcp.md) | The generated MCP server: opting in, the tool catalog built from field definitions, per-session tool listing, classification handling |
 | [testing.md](testing.md) | Proof gates, the manifest-derived e2e suite, HTML reports, the k6 perf suite |
-| [migrations.md](migrations.md) | The reset model: the build chain, db:reset and the empty-database bootstrap, the additive roll-forward, drift signals, caveats |
+| [capability-grants.md](capability-grants.md) | Token-authorized Operations for recipients without an account: `auth.mode: capability`, the grant table, resolution into a grant session, attempt limits, issuing and revoking, audit |
+| [migrations.md](migrations.md) | The reset model: the build chain, db:reset and the empty-database bootstrap, the checksum refusal, drift signals, caveats |
 | [consuming.md](consuming.md) | Using the compiler from a host repo; the web app; current limitations |
 
 Also in this directory: **`entities.generated.md`** — the live reference of

@@ -61,7 +61,7 @@ export const helpers = {
     const base = gqlType.replace("!", "");
     const map: Record<string, string> = {
       ID: "string", String: "string", Referentiedata: "string",
-      Int: "number", Float: "number", Boolean: "boolean", JSON: "unknown",
+      Int: "number", Decimal: "string", Boolean: "boolean", JSON: "unknown",
     };
     return map[base] ?? "string";
   },

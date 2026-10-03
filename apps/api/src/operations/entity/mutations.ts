@@ -4,7 +4,7 @@ import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DB } from "../../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
 import { operationFailure } from "@openshapeforge/operations";
-import { collectionMutationError } from "./collection-policy.js";
+import { collectionMutationError, ownedCollectionsOf } from "./collection-policy.js";
 import { entityValueCarriers, prepareEntityValueWriteInTransaction, type EntityValueIOContext } from "./entity-value-io.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
@@ -36,9 +36,11 @@ import type {
 import {
   assertNoCallerElicitedOutput,
   assertNoOperationWrittenValues,
+  addTrustedOperationValues,
   normalizeWritableValues,
   writableColumnMap,
 } from "./write-policy.js";
+import { draftOwningHead, draftRule } from "./versioned-head.js";
 import {
   assertCreateRecordPermissions,
   assertRecordPermissionInTransaction,
@@ -50,6 +52,8 @@ import {
   maxDerivedIdentifierAttempts,
 } from "./derive-on-create.js";
 import { assertRelationshipConstraintsInTransaction } from "./relationship-constraints.js";
+import { assertPublishableRelatedMutationInTransaction } from "./derived-execution-guards.js";
+import { assertHardDeleteAllowedInTransaction } from "./deletion-guards.js";
 
 async function fetchGeneratedRowInTransaction(
   trx: Transaction<DB>,
@@ -174,6 +178,7 @@ export async function createGeneratedEntity(
   input: {
     table: string;
     values: Record<string, unknown>;
+    trusted?: { operation: string; values: Record<string, unknown> };
   },
 ): Promise<GeneratedEntityRow> {
   const table = readGeneratedCrudTable(input.table, "create", session);
@@ -183,7 +188,22 @@ export async function createGeneratedEntity(
   assertNoOperationWrittenValues(table, input.values);
   assertCreateRecordPermissions(table, session, input.values);
   const values = normalizeWritableValues(table, input.values, "create");
+  if (input.trusted) addTrustedOperationValues(table, values, input.trusted.operation, input.trusted.values);
   return insertGeneratedRow(db, session, table, values);
+}
+
+function fieldRow(table: GeneratedCrudTable, row: GeneratedEntityRow): Record<string, unknown> {
+  return Object.fromEntries(
+    table.columns.map((column) => [fieldNameForColumn(column), row[column.name]]),
+  );
+}
+
+function fieldValues(
+  prepared: Map<GeneratedCrudColumn, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    [...prepared.entries()].map(([column, value]) => [fieldNameForColumn(column), value]),
+  );
 }
 
 function insertGeneratedRow(
@@ -219,6 +239,13 @@ async function insertGeneratedRowInTransaction(
 ): Promise<GeneratedEntityRow> {
   const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, values, "create", undefined, entityValues);
   await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
+  await assertPublishableRelatedMutationInTransaction(trx, session, table, {
+    kind: "create",
+    values: fieldValues(prepared),
+  }, {
+    ...(entityValues.tables ? { tables: entityValues.tables } : {}),
+    ...(entityValues.derivedTools ? { entries: entityValues.derivedTools } : {}),
+  });
   const derivedColumn = derivedOnCreateColumn(table);
   const derivation = derivedColumn?.deriveOnCreate;
   const tenantColumn = table.columns.find((column) => column.name === "tenant_id");
@@ -268,6 +295,10 @@ async function insertGeneratedRowInTransaction(
       "INTERNAL_SERVER_ERROR",
     );
   }
+  // A new row under a versioned head is a content change of that head. The
+  // public create refuses an owned child (collectionMutationError), so this
+  // covers the in-transaction create the collection insert runs.
+  await draftOwningHead(trx, entityValues.tables ?? getGeneratedCrudTables(), table, row);
   await appendGeneratedCrudEvent(trx, table, {
     aggregateId: generatedCrudAggregateId(table, row),
     eventType: "created",
@@ -283,6 +314,7 @@ export async function updateGeneratedEntity(
     table: string;
     id: string;
     values: Record<string, unknown>;
+    trusted?: { operation: string; values: Record<string, unknown> };
     guard?: {
       operation: ChallengeProtectedOperation & LeaseProtectedOperation;
       expectedVersion: string;
@@ -299,6 +331,7 @@ export async function updateGeneratedEntity(
   assertNoOperationWrittenValues(table, input.values);
   assertUpdateRecordPermissions(table, input.values);
   const values = normalizeWritableValues(table, input.values, "update");
+  if (input.trusted) addTrustedOperationValues(table, values, input.trusted.operation, input.trusted.values);
   return applyGeneratedRowUpdate(db, session, table, input.id, values, input.guard);
 }
 
@@ -333,7 +366,7 @@ async function applyGeneratedRowUpdate(
   }
 
   return withDbSession(db, session, async (trx) => {
-    const current = carriers.length ? await fetchGeneratedRowInTransaction(trx, session, table, id, true) : undefined;
+    const current = await fetchGeneratedRowInTransaction(trx, session, table, id, true);
     if (carriers.length && !current) return null;
     if (table.source?.authorization?.recordPermissions) {
       await assertRecordPermissionInTransaction(trx, session, table, id, "edit");
@@ -379,10 +412,28 @@ async function applyGeneratedRowUpdate(
 
     const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, values, "update", current ?? undefined, entityValues);
     await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
+    if (current) {
+      await assertPublishableRelatedMutationInTransaction(trx, session, table, {
+        kind: "update",
+        id,
+        before: fieldRow(table, current),
+        values: fieldValues(prepared),
+      }, {
+        ...(entityValues.tables ? { tables: entityValues.tables } : {}),
+        ...(entityValues.derivedTools ? { entries: entityValues.derivedTools } : {}),
+      });
+    }
     const assignments = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} = ${value}`);
-    if (updatedAt) assignments.push(sql`${sql.id(updatedAt.name)} = ${carriers.length ? sql`greatest(clock_timestamp(), ${sql.id(updatedAt.name)} + interval '1 microsecond')` : sql`now()`}`);
+    // A write happens only when a content column actually changes, compared
+    // in the database against the locked row: a value supplied as stored, or
+    // no value at all, leaves the version token, the draft rule and the
+    // event journal alone and returns the row as it is.
+    const changes = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} is distinct from ${value}`);
+    const draft = assignments.length ? draftRule(table) : undefined;
+    if (draft) assignments.push(sql`${sql.id(draft.column)} = ${draft.value}`);
+    if (updatedAt && assignments.length) assignments.push(sql`${sql.id(updatedAt.name)} = ${carriers.length ? sql`greatest(clock_timestamp(), ${sql.id(updatedAt.name)} + interval '1 microsecond')` : sql`now()`}`);
 
-    if (assignments.length === 0) {
+    const unchangedRow = async (): Promise<GeneratedEntityRow | null> => {
       const unchanged = await sql<{ row: GeneratedEntityRow }>`
         select to_jsonb(${sql.id(table.table)}.*) as row
         from ${sql.id(table.schema, table.table)}
@@ -401,29 +452,21 @@ async function applyGeneratedRowUpdate(
         );
       }
       return null;
-    }
+    };
+    if (changes.length === 0) return unchangedRow();
     const result = await sql<{ row: GeneratedEntityRow }>`
       update ${sql.id(table.schema, table.table)}
       set ${sql.join(assignments)}
       where ${sql.id(table.primaryKey!)}::text = ${id}
         ${tenantWhere}
         ${expectedVersionWhere}
+        and (${sql.join(changes, sql` or `)})
       returning to_jsonb(${sql.id(table.table)}.*) as row
     `.execute(trx);
 
     const row = result.rows[0]?.row ?? null;
-    if (!row) {
-      const current = guard
-        ? await fetchGeneratedRowInTransaction(trx, session, table, id)
-        : null;
-      if (current) {
-        throw generatedCrudError(
-          "The record has changed since it was loaded. Reload it before saving.",
-          "VERSION_CONFLICT",
-        );
-      }
-      return null;
-    }
+    if (!row) return unchangedRow();
+    await draftOwningHead(trx, entityValues.tables ?? getGeneratedCrudTables(), table, row);
     await appendGeneratedCrudEvent(trx, table, {
       aggregateId: generatedCrudAggregateId(table, row),
       eventType: "updated",
@@ -433,6 +476,32 @@ async function applyGeneratedRowUpdate(
   }).catch((error) => {
     throw translateDatabaseError(table, error);
   });
+}
+
+/**
+ * An owner's generic delete never reaches its owned children: while any
+ * exist, removal is the owned-collection Operations' job (the FK would
+ * otherwise cascade silently). With none, the owner is an ordinary row.
+ */
+async function assertNoOwnedChildrenInTransaction(
+  trx: Transaction<DB>,
+  table: GeneratedCrudTable,
+  id: string,
+): Promise<void> {
+  for (const owned of ownedCollectionsOf(table, getGeneratedCrudTables())) {
+    const result = await sql<{ exists: boolean }>`
+      select exists(
+        select 1 from ${sql.id(owned.child.schema, owned.child.table)}
+        where ${sql.id(owned.column)}::text = ${id}
+      ) as exists
+    `.execute(trx);
+    if (result.rows[0]?.exists) {
+      throw generatedCrudError(
+        `Collection mutation of ${owned.key} is not supported by generic delete; an atomic collection Operation is required.`,
+        "RELATION_COLLECTION_MUTATION_UNSUPPORTED",
+      );
+    }
+  }
 }
 
 export async function deleteGeneratedEntity(
@@ -449,6 +518,7 @@ export async function deleteGeneratedEntity(
       confirmationAnswer?: string;
     };
   },
+  entityValues: EntityValueIOContext = {},
 ): Promise<boolean> {
   const table = readGeneratedCrudTable(input.table, "delete", session);
   const unsupported = collectionMutationError(table, "delete", getGeneratedCrudTables());
@@ -457,6 +527,26 @@ export async function deleteGeneratedEntity(
   return withDbSession(db, session, async (trx) => {
     if (table.source?.authorization?.recordPermissions) {
       await assertRecordPermissionInTransaction(trx, session, table, input.id, "delete");
+    }
+    await assertNoOwnedChildrenInTransaction(trx, table, input.id);
+    const current = await fetchGeneratedRowInTransaction(trx, session, table, input.id, true);
+    if (current) {
+      await assertHardDeleteAllowedInTransaction(
+        trx,
+        session,
+        table,
+        input.id,
+        current,
+        entityValues.tables ?? getGeneratedCrudTables(),
+      );
+      await assertPublishableRelatedMutationInTransaction(trx, session, table, {
+        kind: "delete",
+        id: input.id,
+        row: fieldRow(table, current),
+      }, {
+        ...(entityValues.tables ? { tables: entityValues.tables } : {}),
+        ...(entityValues.derivedTools ? { entries: entityValues.derivedTools } : {}),
+      });
     }
     if (input.guard?.operation.concurrency?.editLease) {
       if (!input.guard.leaseToken) {

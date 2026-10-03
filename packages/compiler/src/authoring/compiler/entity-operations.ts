@@ -3,11 +3,16 @@
 import type {
   CompiledAuthorization,
   CompiledEntityOperation,
+  CompiledRelationship,
   CrudSection,
   EntityOperationIntent,
 } from "../types.js";
 import type { CoreEntity } from "../types.js";
-import { isCoreEntityV2, v2OperationByAction } from "../entity-v2.js";
+import {
+  deriveEntityOperationErrors,
+  withDeclaredEntityOperationErrors,
+} from "./entity-operation-errors.js";
+import { operationByAction } from "../entity-model.js";
 
 const OPERATION_ORDER: readonly EntityOperationIntent[] = [
   "list",
@@ -22,6 +27,8 @@ type OperationSource = {
   coreEntity?: CoreEntity;
   crud: CrudSection;
   authorization: CompiledAuthorization;
+  /** The entity's compiled relationships; a collection field makes its generic writes refusable. */
+  relationships?: readonly Pick<CompiledRelationship, "kind">[];
 };
 
 function defaultEffects(intent: EntityOperationIntent) {
@@ -75,14 +82,26 @@ function compileOperation(
   intent: EntityOperationIntent,
 ): CompiledEntityOperation {
   const action = authorizationAction(intent);
-  const authored = source.coreEntity && isCoreEntityV2(source.coreEntity)
-    ? v2OperationByAction(source.coreEntity)[intent]
+  const authored = source.coreEntity
+    ? operationByAction(source.coreEntity)[intent]
     : undefined;
   const key = authored?.[0] ?? intent;
   const definition = authored?.[1];
   const pluginImplementation = definition?.implementation.type === "plugin"
     ? definition.implementation
     : undefined;
+  // A user-facing hard delete is never an unguarded CRUD shortcut. The
+  // canonical Operation adds these controls once, so REST, GraphQL, MCP and
+  // web all receive the same explicit acknowledgement and stale-row guard.
+  const concurrency = intent === "delete"
+    ? {
+        ...definition?.concurrency,
+        version: { mode: "required" as const, field: "updatedAt" as const },
+      }
+    : definition?.concurrency;
+  const confirmation = intent === "delete" && definition?.confirmation?.mode !== "challenge"
+    ? { mode: "acknowledgement" as const }
+    : definition?.confirmation ?? { mode: "none" as const };
   const shared = {
     id: definition?.id ?? `${source.entity.name}.${key}`,
     key,
@@ -107,7 +126,16 @@ function compileOperation(
           },
         }
       : {}),
-    ...(pluginImplementation && definition?.errors ? { errors: definition.errors } : {}),
+    errors: withDeclaredEntityOperationErrors(
+      deriveEntityOperationErrors(source.entity.name, intent, {
+        concurrency,
+        confirmation,
+        recordPermissions: source.authorization.rowAccess?.recordPermissions !== undefined,
+        secureInput: definition?.interaction !== undefined,
+        collections: (source.relationships ?? []).some((relationship) => relationship.kind === "hasMany"),
+      }),
+      pluginImplementation ? definition?.errors : undefined,
+    ),
     ...(pluginImplementation && source.coreEntity?.interfaces
       ? {
           interfaces: Object.fromEntries(
@@ -126,6 +154,7 @@ function compileOperation(
           receipt: { ...prerequisite.receipt },
         })) }
       : {}),
+    ...(definition?.stamps ? { stamps: definition.stamps.map((stamp) => ({ ...stamp })) } : {}),
     authorization: {
       action,
       roles: [...source.authorization.roles[action]],
@@ -136,9 +165,9 @@ function compileOperation(
     },
     effects: definition?.effects ?? defaultEffects(intent),
     reliability: definition?.reliability ?? defaultIdempotency(intent),
-    ...(definition?.concurrency ? { concurrency: definition.concurrency } : {}),
+    ...(concurrency ? { concurrency } : {}),
     interaction: {
-      confirmation: definition?.confirmation ?? { mode: "none" as const },
+      confirmation,
       ...(definition?.interaction ? { secureInput: definition.interaction } : {}),
     },
   };

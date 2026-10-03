@@ -39,12 +39,14 @@ import {
   SelectValue,
 } from "@/features/renderer/edit/controls/basic/select";
 import { cn } from "@/lib/utils";
+import { tryFieldValueType } from "@/lib/field-contract/field-v2";
 import { SECRET_SENTINEL, type ConnectorConfigField, type LocalizedText } from "./types";
 
 /** The page is a client component, so it carries the resolved language down. */
 export function localized(text: LocalizedText | undefined | null, lang: string): string {
   if (!text || typeof text !== "object") return "";
-  return text[lang] ?? text.en ?? Object.values(text)[0] ?? "";
+  const map = text as Partial<Record<string, string>>;
+  return map[lang] ?? map.en ?? Object.values(map).find((value) => typeof value === "string") ?? "";
 }
 
 export type ConnectorFieldControlProps = {
@@ -73,7 +75,8 @@ export function ConnectorFieldControl({
   const description = localized(field.description, lang);
   const help = localized(field.help, lang);
   const options = staticOptions(field);
-  const { component } = resolveFieldInputRender(field);
+  const typeResolution = tryFieldValueType(field);
+  const component = typeResolution.ok ? resolveFieldInputRender(field).component : null;
   const controlId = `connector-field-${field.key}`;
 
   // A stored secret reads back as a sentinel, never a value. So the control
@@ -90,7 +93,17 @@ export function ConnectorFieldControl({
         <p className="text-sm text-muted-foreground">{description}</p>
       ) : null}
 
-      {renderControl()}
+      {typeResolution.ok ? renderControl() : (
+        <div
+          role="alert"
+          data-unsupported-field={field.key}
+          className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+        >
+          {lang === "nl"
+            ? "Dit configuratieveld gebruikt een niet-ondersteund contract en kan niet worden gewijzigd."
+            : "This configuration field uses an unsupported contract and cannot be changed."}
+        </div>
+      )}
 
       {help ? <p className="text-xs text-muted-foreground">{help}</p> : null}
       {invalid ? (

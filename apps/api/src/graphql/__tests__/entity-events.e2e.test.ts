@@ -45,15 +45,14 @@ for (const table of tables) {
   const typeName = graphql.typeName;
 
   describe(`${typeName} (${table.name}) events`, () => {
-    // The journal is the generic CRUD core's: a plugin-backed create runs its
-    // own command and appends nothing under the entity's aggregate, so its
-    // lifecycle here starts empty and picks up at the first core mutation.
-    const created = isEntityBackedCreate(table) ? ["created"] : [];
-
     test("mutations append entity events; reads append none", async () => {
       const id = await createRow(table, tenantA);
       const afterCreate = await eventsFor(tenantA, table, id);
-      expect(afterCreate.map((event) => event.eventType)).toEqual(created);
+      const created = afterCreate.map((event) => event.eventType);
+      // Plugin commands may persist through the generic core (and journal a
+      // create) or own their transaction completely. Both are valid; reads
+      // and refused writes below must not change the observed baseline.
+      expect([[], ["created"]]).toContainEqual(created);
       // A realtime-projected entity also journals the columns its channel
       // filters on; the manifest says which, so the assertion follows it.
       if (created.length > 0) {

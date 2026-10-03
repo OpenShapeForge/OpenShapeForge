@@ -12,7 +12,7 @@ const input = { templateVersionId: ids.template, channel: "document", locale: "e
 const snapshot = {
   schemaVersion: 1, tenantId: ids.tenant, templateVersionId: ids.template, channel: "document", locale: "en",
   compositionHashVersion: "osf-template-content-v1", compositionHash: "a".repeat(64),
-  definitions: { Text: { source: { definitionHash: "b".repeat(64), fields: [{ key: "text", valueType: "string" }] } } },
+  definitions: { Text: { source: { definitionHash: "b".repeat(64), fields: [{ key: "text", osfType: "string", baseType: "string" }] } } },
   templates: [{ version: { id: ids.template, versionNumber: 1 }, parameters: { name: "Reader" } }],
   blocks: [{ id: "example-block", values: { text: "Hello Reader" }, references: { source: { entity: "Example", id: ids.document, versionId: "v1", value: { name: "Original" } } } }],
   globals: { brand: { sourceId: "example-brand", sourceVersionId: "v1", value: "Original" } }, compositions: [],
@@ -32,6 +32,7 @@ function fixture() {
   const stored = () => ({ id: ids.version, documentId: ids.document, artifactId: ids.artifact, artifactVersion: 2, mimeType: "application/json", checksum: controls.corruptBinding ? "c".repeat(64) : descriptor.sha256, byteSize: descriptor.byteSize, fileName: descriptor.fileName });
   const createOps = ["Document", "DocumentVersion"].map((entityName) => ({ id: `${entityName}.create`, entityName, intent: "create", input: { kind: "json-schema", schema: { type: "object" } }, effects: { data: "write", external: "none" } }));
   const get = { id: "DocumentVersion.get", entityName: "DocumentVersion", intent: "get", effects: { data: "read", external: "none" } };
+  const getDocument = { id: "Document.get", entityName: "Document", intent: "get", effects: { data: "read", external: "none" } };
   const materialize = { id: "TemplateVersion.materialize", effects: { data: "read", external: "none" } };
   const trx = { async executeQuery(query: { sql: string; parameters: unknown[] }) {
     expect(active).toBe(true);
@@ -44,7 +45,6 @@ function fixture() {
     if (query.sql.includes("append_version_with_artifact")) { events.push("append-version"); return { rows: [{ documentVersionId: ids.version }] }; }
     if (query.sql.includes("finalize_artifact_binding")) { events.push("finalize-binding"); return { rows: [] }; }
     if (query.sql.includes("from erp.document_versions")) return { rows: [stored()] };
-    if (query.sql.includes("from erp.documents")) return { rows: [{ id: ids.document, currentVersionId: ids.version }] };
     throw new Error(`Unexpected SQL ${query.sql}`);
   } };
   const context = {
@@ -77,12 +77,12 @@ function fixture() {
         },
         async bind(received: unknown, binding: unknown) {
           expect(received).toBe(context.session); expect(active).toBe(true);
-          expect(binding).toEqual({ artifactId: ids.artifact, documentVersionId: ids.version, expectedArtifactVersion: 1 });
+          expect(binding).toEqual({ artifactId: ids.artifact, owner: { entity: "Document", id: ids.document }, expectedArtifactVersion: 1 });
           events.push("bind"); return { ...descriptor, version: 2 };
         },
       },
       operations: {
-        list: async () => controls.hideCreate ? [get] : [...createOps, get],
+        list: async () => controls.hideCreate ? [get, getDocument] : [...createOps, get, getDocument],
         get: async () => materialize,
         async execute(received: unknown, request: { operation: { id: string }; input: Record<string, unknown>; idempotencyKey?: string }) {
           expect(received).toBe(context.session); expect(active).toBe(true); requests.push(request);
@@ -92,6 +92,7 @@ function fixture() {
             return { data: liveSnapshot, operations: [] };
           }
           if (request.operation.id === get.id) return { data: stored(), operations: [] };
+          if (request.operation.id === getDocument.id) return { data: { id: ids.document, currentVersionId: ids.version }, operations: [] };
           const handler = request.operation.id === "Document.create" ? createDocument : createDocumentVersion;
           const response = await handler(request.input, context as unknown as ModuleOperationContext);
           if ("value" in response) return { data: response.value, operations: [] };

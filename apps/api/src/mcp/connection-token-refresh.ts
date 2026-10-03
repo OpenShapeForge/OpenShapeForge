@@ -5,7 +5,7 @@
  * This is the storage adapter that binds `ensureOAuthTokenSet` — the one
  * lifecycle state machine every platform-owned token store shares — to a
  * Connection row: a `select ... for update` under the caller's session, the
- * `:personal` secret scope, the jsonb write-back and the two audit events.
+ * connection token secret scope, the jsonb write-back and the two audit events.
  *
  * It lives apart from the MCP server so that the OTHER reader of Connection
  * values, `modules/connection-secrets.ts` (the seam a socket koppeling such as

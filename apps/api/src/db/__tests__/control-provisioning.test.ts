@@ -222,7 +222,7 @@ describe("tenant provisioning", () => {
   test(
     "writes the registry row, links the organization, and audits both bypass sessions",
     async () => {
-      await migratedScratchDb(async (db) => {
+      await migratedScratchDb(async (db, name) => {
         const spi = fakeSpi();
         const result = await provisionTenant(depsFor(db, spi), {
           slug: "acme",
@@ -260,6 +260,40 @@ describe("tenant provisioning", () => {
             keycloak_realm: TENANT_REALM,
           },
         ]);
+
+        // The ERP registry row is the same tenant: id = tenant_id = the
+        // platform id, which is what CHECK (id = tenant_id) and every key
+        // into erp.tenants rely on.
+        const erp = await sql<{ id: string; tenant_id: string; slug: string; name: string }>`
+          select id::text as id, tenant_id::text as tenant_id, slug, name from erp.tenants
+        `.execute(db);
+        expect(erp.rows).toEqual([
+          { id: result.tenant.id, tenant_id: result.tenant.id, slug: "acme", name: "Acme Corporation" },
+        ]);
+
+        // Provisioning is the registry's only write path. A tenant session,
+        // as the restricted role, can read and update its own row through
+        // the Tenant contract but is refused an insert or a delete: the
+        // restrictive policies in core-invariants.ts hold below the interface
+        // layer, where the contract no longer offers create or delete.
+        await withDb(scratchUrl(name, true), async (app) => {
+          await app.connection().execute(async (conn) => {
+            await sql`select set_config('app.tenant_id', ${result.tenant.id}, false)`.execute(conn);
+            await sql`select set_config('app.user_id', ${randomUUID()}, false)`.execute(conn);
+            const own = await sql<{ slug: string }>`select slug from erp.tenants`.execute(conn);
+            expect(own.rows).toEqual([{ slug: "acme" }]);
+            await sql`update erp.tenants set name = 'Acme Corp' where id = ${result.tenant.id}`.execute(conn);
+            await expect(
+              sql`insert into erp.tenants (tenant_id, slug, name) values (${result.tenant.id}, 'again', 'Again')`.execute(conn),
+            ).rejects.toThrow(/row-level security policy/);
+            // A DELETE policy filters rather than raises: the row is simply
+            // not the session's to delete.
+            const deleted = await sql`delete from erp.tenants where id = ${result.tenant.id}`.execute(conn);
+            expect(Number(deleted.numAffectedRows)).toBe(0);
+          });
+        });
+        const survived = await sql<{ n: number }>`select count(*)::int as n from erp.tenants`.execute(db);
+        expect(survived.rows).toEqual([{ n: 1 }]);
 
         // Two bypass sessions, both completed: the row write and the link.
         expect(await completedAuditReasons(db)).toEqual([

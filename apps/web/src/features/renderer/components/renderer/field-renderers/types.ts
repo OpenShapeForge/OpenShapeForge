@@ -22,6 +22,7 @@ export interface FieldRenderContext {
   manualErrors: Record<string, string>;
   isSubmitting: boolean;
   fieldsByKey: Map<string, CompilerField>;
+  unsupportedFields?: ReadonlyMap<CompilerField, string>;
   fieldConfigByKey: Map<string, RendererFieldConfig>;
   validationFieldsByKey: Map<string, CompilerField>;
   /**

@@ -5,45 +5,64 @@ entity: Template
 title: Template
 language: en
 labels: { en: Template, nl: Template }
+pluralLabels: { en: Templates, nl: Templates }
 domains: [documents]
 authorization:
   roles:
-    read: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
-    create: [Organization.All.ReadWrite]
-    update: [Organization.All.ReadWrite]
-    delete: [Organization.All.ReadWrite]
+    read: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite]
+    create: [Templates.Manage]
+    update: [Templates.Manage]
+    delete: [Templates.Manage]
 displayTemplate: "{{name}}"
 filterField: name
 indexes:
   - { name: templates_tenant_key_uidx, fields: [tenantId, key], unique: true }
+versioning:
+  strategy: publishedSnapshot
+  versionEntity: TemplateVersion
+  versionsField: versions
+  snapshot: { ownedRelationships: recursive }
 fields:
   - key: key
     label: { en: Key, nl: Sleutel }
-    valueType: string
+    osfType: string
     required: true
     deriveOnCreate: { from: name, transform: slug, onConflict: suffix }
     validation: { pattern: "^[a-z][a-z0-9.-]*$", maxLength: 100 }
     persisted: { column: key, storageClass: core }
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label: { en: Name, nl: Naam }
     validation: { maxLength: 200 }
     persisted: { column: name, storageClass: core }
   - key: description
-    valueType: string
+    osfType: string
     label: { en: Description, nl: Omschrijving }
     persisted: { column: description, storageClass: core }
-  - key: versions
-    label: { en: Versions, nl: Versies }
-    semanticType: TemplateVersion
+  - key: documentThemeId
+    label: { en: Document theme, nl: Documentthema }
+    description:
+      en: Theme every variant and document from this template inherits. A new template without a choice receives the tenant default. Variants do not select a theme.
+      nl: Thema dat iedere variant en ieder document van deze template erft. Een nieuwe template zonder keuze krijgt het tenantstandaardthema. Varianten kiezen geen thema.
+    required: false
+    persisted: { column: document_theme_id, storageClass: core }
+    osfType: DocumentTheme
+    relationship:
+      ownership: reference
+      inverse:
+        key: templates
+        label: { en: Templates, nl: Templates }
+  - key: parameters
+    osfType: fieldDefinition
     cardinality: collection
-    relationship: { inverse: template, ownership: owned }
+    label: { en: Local variables, nl: Lokale variabelen }
+    persisted: { column: parameters, storageClass: core }
 operations:
-  insertVersion:
-    name: { en: Add version, nl: Versie toevoegen }
-    description: Create an owned template version atomically.
-    implementation: { type: collection, action: insert, field: versions }
+  insertVariant:
+    name: { en: Add channel variant, nl: Kanaalvariant toevoegen }
+    description: Create an owned channel and language variant in the editable template.
+    implementation: { type: collection, action: insert, field: variants }
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: none } }
     concurrency: { version: { mode: required, field: updatedAt } }
@@ -92,16 +111,24 @@ interfaces:
         title: "{{name}}"
         layout:
           tabs:
+            - id: variants
+              label: { en: Variants, nl: Varianten }
+              relationship: variants
+            - id: variables
+              label: { en: Variables, nl: Variabelen }
+              groups: [{ title: { en: Local variables, nl: Lokale variabelen }, fields: [parameters] }]
             - id: details
               label: { en: Details, nl: Details }
-              groups: [{ title: { en: Template, nl: Template }, fields: [name, description] }]
+              groups: [{ title: { en: Template, nl: Template }, fields: [name, description, documentThemeId, lifecycleStatus, publishedVersion] }]
             - id: versions
-              label: { en: Versions, nl: Versies }
+              label: { en: Version history, nl: Versiehistorie }
               relationship: versions
         modes:
           create:
             title: { en: Create, nl: Toevoegen }
-            groups: [{ title: { en: Template, nl: Template }, fields: [name, description] }]
+            groups: [{ title: { en: Template, nl: Template }, fields: [name, description, documentThemeId] }]
           update:
             title: { en: Edit, nl: Bewerken }
-            groups: [{ title: { en: Template, nl: Template }, fields: [name, description] }]
+            groups:
+              - { title: { en: Template, nl: Template }, fields: [name, description, documentThemeId] }
+              - { title: { en: Local variables, nl: Lokale variabelen }, fields: [parameters] }

@@ -32,7 +32,7 @@ import { withSystemSession } from "../db/session.js";
 import type { DB } from "../generated/db/types.js";
 import { tenantNotFound } from "./errors.js";
 import { hostTenantFilter } from "./host-tenant-filter.js";
-import { assertSlug } from "./organization-naming.js";
+import { assertSlug, ControlInputError } from "./organization-naming.js";
 import {
   systemSessionForAdministrator,
   type PlatformAdministrator,
@@ -104,6 +104,15 @@ export type TenantInstallationSummary = {
   updatesAvailable: number;
 };
 
+export type TenantCatalogInstallResult = {
+  tenantId: string;
+  installed: number;
+  updated: number;
+  flagged: number;
+  unchanged: number;
+  skipped: number;
+};
+
 /**
  * What a runtime module supplies to administer its catalog. `db` is the
  * control plane's transaction (a Kysely `Transaction`, which the plugin
@@ -132,6 +141,7 @@ export type PlatformCatalogProvider = {
     kind: string,
     key: string,
   ): Promise<ApplyCatalogUpdateResult>;
+  installForTenant(db: unknown, tenantId: string): Promise<TenantCatalogInstallResult>;
   installationSummary(db: unknown): Promise<TenantInstallationSummary[]>;
 };
 
@@ -199,6 +209,106 @@ export type PlatformTenant = {
   overriddenEntries: number;
   updatesAvailable: number;
 };
+
+const PLATFORM_TENANT_QUERY_FIELDS = [
+  "name", "slug", "status", "tenantKind", "organizationAlias", "relationLabel",
+] as const;
+type PlatformTenantQueryField = typeof PLATFORM_TENANT_QUERY_FIELDS[number];
+export type PlatformTenantListInput = Partial<Record<PlatformTenantQueryField, string>> & {
+  sortField?: PlatformTenantQueryField;
+  sortDirection?: "asc" | "desc";
+  first?: number;
+  after?: string;
+};
+export type PlatformTenantPage = {
+  tenants: PlatformTenant[];
+  totalCount: number;
+  nextCursor: string | null;
+};
+
+function tenantCursorOffset(cursor: string | undefined): number {
+  if (!cursor) return 0;
+  const decoded = Buffer.from(cursor, "base64url").toString("utf8");
+  const offset = /^\d+$/.test(decoded) ? Number(decoded) : Number.NaN;
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100_000) {
+    throw new ControlInputError("after must be a nextCursor returned by the tenant listing.");
+  }
+  return offset;
+}
+
+function tenantCursor(offset: number): string {
+  return Buffer.from(String(offset), "utf8").toString("base64url");
+}
+
+function tenantQueryValue(tenant: PlatformTenant, field: PlatformTenantQueryField): string | null {
+  const value = tenant[field];
+  return value === null ? null : String(value);
+}
+
+function platformTenantListInput(input: Record<string, unknown>): Required<Pick<PlatformTenantListInput, "sortField" | "sortDirection" | "first">>
+  & PlatformTenantListInput {
+  const sortField = input.sortField ?? "slug";
+  const sortDirection = input.sortDirection ?? "asc";
+  const first = input.first ?? 50;
+  if (typeof sortField !== "string" || !PLATFORM_TENANT_QUERY_FIELDS.includes(sortField as PlatformTenantQueryField)) {
+    throw new ControlInputError(`sortField must be one of ${PLATFORM_TENANT_QUERY_FIELDS.join(", ")}.`);
+  }
+  if (sortDirection !== "asc" && sortDirection !== "desc") {
+    throw new ControlInputError("sortDirection must be asc or desc.");
+  }
+  if (!Number.isInteger(first) || Number(first) < 1 || Number(first) > 100) {
+    throw new ControlInputError("first must be an integer from 1 through 100.");
+  }
+  const result: PlatformTenantListInput = {
+    sortField: sortField as PlatformTenantQueryField,
+    sortDirection,
+    first: Number(first),
+  };
+  if (input.after !== undefined) {
+    if (typeof input.after !== "string") throw new ControlInputError("after must be a string.");
+    result.after = input.after;
+  }
+  for (const field of PLATFORM_TENANT_QUERY_FIELDS) {
+    const value = input[field];
+    if (value === undefined || value === "") continue;
+    if (typeof value !== "string") throw new ControlInputError(`${field} must be a string.`);
+    result[field] = value;
+  }
+  return result as Required<Pick<PlatformTenantListInput, "sortField" | "sortDirection" | "first">> & PlatformTenantListInput;
+}
+
+/** Apply the list Operation's public query contract to already-authorized tenant summaries. */
+export function queryPlatformTenants(
+  tenants: readonly PlatformTenant[],
+  rawInput: Record<string, unknown> = {},
+): PlatformTenantPage {
+  const input = platformTenantListInput(rawInput);
+  const filtered = tenants.filter((tenant) => PLATFORM_TENANT_QUERY_FIELDS.every((field) => {
+    const query = input[field]?.trim().toLocaleLowerCase("en");
+    if (!query) return true;
+    return tenantQueryValue(tenant, field)?.toLocaleLowerCase("en").includes(query) ?? false;
+  }));
+  const direction = input.sortDirection === "desc" ? -1 : 1;
+  const sorted = [...filtered].sort((left, right) => {
+    const leftValue = tenantQueryValue(left, input.sortField);
+    const rightValue = tenantQueryValue(right, input.sortField);
+    if (leftValue === null || rightValue === null) {
+      if (leftValue === rightValue) return left.slug.localeCompare(right.slug, "en");
+      return leftValue === null ? 1 : -1;
+    }
+    const ordered = leftValue.localeCompare(rightValue, "en", { sensitivity: "base", numeric: true });
+    return ordered === 0 ? left.slug.localeCompare(right.slug, "en") : ordered * direction;
+  });
+  const offset = tenantCursorOffset(input.after);
+  if (offset > sorted.length) throw new ControlInputError("after points beyond the filtered tenant listing.");
+  const tenantsPage = sorted.slice(offset, offset + input.first);
+  const nextOffset = offset + tenantsPage.length;
+  return {
+    tenants: tenantsPage,
+    totalCount: sorted.length,
+    nextCursor: nextOffset < sorted.length ? tenantCursor(nextOffset) : null,
+  };
+}
 
 type TenantRow = {
   id: string;
@@ -271,13 +381,16 @@ function elevated<T>(
   return withSystemSession(deps.db, systemSessionForAdministrator(deps.administrator, reason), work);
 }
 
-/** Every tenant with its catalog installation counts. Empty counts without a provider. */
-export async function listPlatformTenants(deps: PlatformCatalogDeps): Promise<PlatformTenant[]> {
+/** Every authorized tenant page with its catalog installation counts. Empty counts without a provider. */
+export async function listPlatformTenants(
+  deps: PlatformCatalogDeps,
+  input: Record<string, unknown> = {},
+): Promise<PlatformTenantPage> {
   return elevated(deps, "control.list-tenants", async (trx) => {
     const rows = await tenantRows(trx);
     const summaries = deps.provider ? await deps.provider.installationSummary(trx) : [];
     const byTenant = new Map(summaries.map((summary) => [summary.tenantId, summary]));
-    return rows.map((row) => toPlatformTenant(row, byTenant.get(row.id)));
+    return queryPlatformTenants(rows.map((row) => toPlatformTenant(row, byTenant.get(row.id))), input);
   });
 }
 
@@ -291,6 +404,23 @@ export async function getPlatformTenant(deps: PlatformCatalogDeps, slug: string)
       : undefined;
     return toPlatformTenant(row, summary);
   });
+}
+
+/**
+ * Project the loaded module's current catalog into one tenant. Provider
+ * absence is a supported deployment shape, so tenant provisioning remains
+ * available when no runtime module owns a catalog.
+ */
+export async function installCurrentCatalogForTenant(
+  deps: PlatformCatalogDeps,
+  slug: string,
+  tenantId: string,
+): Promise<TenantCatalogInstallResult | null> {
+  if (!deps.provider) return null;
+  assertSlug(slug, "slug");
+  return elevated(deps, `control.create-tenant install current catalog tenant="${slug}"`, (trx) =>
+    deps.provider!.installForTenant(trx, tenantId),
+  );
 }
 
 // ── the catalog, with tenants named by slug ─────────────────────────────────

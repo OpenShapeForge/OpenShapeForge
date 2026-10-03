@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildRuntimeAuthMetadata,
   isGeneratedCrudUiEnabled,
+  resolveGeneratedCrudRoutes,
 } from "./generate-ui-artifacts.js";
 
 function contract(
@@ -30,6 +31,19 @@ describe("generated CRUD UI eligibility", () => {
       update: false,
       delete: false,
     }))).toBe(false);
+  });
+});
+
+describe("generated CRUD UI routes", () => {
+  test("uses compiled schema-3 routes when the legacy UI block is absent", () => {
+    const compiled = { list: { en: "/accounts", nl: "/accounts" } };
+    expect(resolveGeneratedCrudRoutes(undefined, compiled)).toEqual(compiled);
+  });
+
+  test("preserves legacy routes while schema-1 authoring remains supported", () => {
+    const legacy = { list: { en: "/legacy", nl: "/legacy" } };
+    const compiled = { list: { en: "/compiled", nl: "/compiled" } };
+    expect(resolveGeneratedCrudRoutes(legacy, compiled)).toEqual(legacy);
   });
 });
 

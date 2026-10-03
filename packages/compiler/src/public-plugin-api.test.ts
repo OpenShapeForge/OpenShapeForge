@@ -17,6 +17,7 @@ test("the package root exposes the compiler plugin contract", () => {
     auth: { mode: "session", roles: ["record:publish"] },
     tenancy: { mode: "required" },
     idempotency: { mode: "none" },
+    effects: { data: "write", external: "none" },
     transports: {
       rest: { method: "POST", path: "/records/:id/publish", response: { kind: "json" } },
       mcp: { enabled: false, reason: "Not part of this example." },

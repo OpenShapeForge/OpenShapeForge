@@ -1,20 +1,36 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { sql } from "kysely";
-import { memberRoleClientId } from "../auth/employee-invitations.js";
+/**
+ * Platform-operator administration of one tenant's members. Membership,
+ * credentials and passkey recovery are Keycloak's (the organization's
+ * members); a member's ROLES in the tenant are the tenant's own record,
+ * `platform.identity_relations.roles` (auth/identity-link.ts) — never a
+ * client role on the Keycloak user, which would be user-wide and apply in
+ * every organization the account is a member of. The `roles` a member is
+ * listed with here are read from that row, and assigning or removing them
+ * writes it; a member who has not signed in to the tenant yet has no row and
+ * receives their roles from the invitation on first sign-in.
+ */
+import { sql, type Transaction } from "kysely";
+import {
+  employeeInvitationRoleGrants,
+  isEmployeeInvitationRole,
+  type EmployeeInvitationRole,
+} from "../auth/employee-invitations.js";
+import { actingPartyColumns, actingPartyTable } from "../auth/identity-contract.js";
+import { invalidateIdentityLink } from "../auth/identity-link.js";
+import { confirmCandidateLink, writeMembershipRoles } from "../auth/identity-link-store.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
+import type { DB } from "../generated/db/types.js";
 import { withSystemSession } from "../db/session.js";
 import type { KeycloakTenantMemberAdminClient } from "./keycloak-organization-members.js";
-import type { MemberRoleAdminClient } from "./member-role-admin.js";
 import { systemSessionForAdministrator, type PlatformAdministrator } from "./platform-admin.js";
 import { ControlInputError } from "./organization-naming.js";
-
-const ALLOWED_ROLES = new Set(["org_admin", "org_employee"]);
+import { ControlOperationError } from "./errors.js";
 
 type Dependencies = {
   db: OpenShapeForgeDatabase;
   administrator: PlatformAdministrator;
   members: KeycloakTenantMemberAdminClient;
-  memberRoles: MemberRoleAdminClient;
 };
 
 type TenantIdentity = { id: string; slug: string; status: string; keycloak_organization_id: string | null };
@@ -25,55 +41,120 @@ function providerId(value: string, label: string): string {
 }
 
 async function withTenant<T>(deps: Dependencies, operation: string, slug: string, target: string | undefined,
-  work: (tenant: TenantIdentity) => Promise<T>): Promise<T> {
+  work: (tenant: TenantIdentity, trx: Transaction<DB>, afterCommit: (hook: () => void) => void) => Promise<T>): Promise<T> {
   if (!/^[a-z][a-z0-9-]*$/.test(slug)) throw new ControlInputError("slug must be a tenant slug.");
   const reason = `${operation} tenant="${slug}"${target ? ` ${target}` : ""}`;
-  return withSystemSession(deps.db, systemSessionForAdministrator(deps.administrator, reason), async (trx) => {
+  const hooks: Array<() => void> = [];
+  const result = await withSystemSession(deps.db, systemSessionForAdministrator(deps.administrator, reason), async (trx) => {
     const tenant = (await sql<TenantIdentity>`
       select id::text as id, slug, status, keycloak_organization_id
         from platform.tenants where slug = ${slug} for update
     `.execute(trx)).rows[0];
     if (!tenant) throw new ControlInputError("The tenant does not exist.");
     if (!tenant.keycloak_organization_id) throw new ControlInputError("The tenant has no linked Keycloak organization.");
-    return work(tenant);
+    return work(tenant, trx as Transaction<DB>, hook => hooks.push(hook));
   });
+  for (const hook of hooks) hook();
+  return result;
 }
 
-async function memberWithSummary(deps: Dependencies, organizationId: string, memberId: string) {
-  const member = await deps.members.getMember(organizationId, memberId, memberRoleClientId());
+type MembershipRow = {
+  identity_id: string; issuer: string; subject: string; roles: string[] | null;
+  status: "linked" | "pending_confirmation"; relation_name: string | null; candidate_relation_name: string | null;
+};
+
+/**
+ * The tenant's membership rows keyed by Keycloak user id (the token `sub`),
+ * with the (candidate) Relation by name. An identity is (issuer, subject), so
+ * one `sub` can in principle carry rows from two issuers: every key keeps all
+ * of its rows, and `membershipOf` refuses to pick one rather than act on the
+ * wrong person.
+ */
+async function membershipsBySubject(trx: Transaction<DB>, tenantId: string, subject?: string): Promise<Map<string, MembershipRow[]>> {
+  const party = actingPartyColumns();
+  const relations = sql.table(actingPartyTable());
+  const rows = await sql<MembershipRow>`
+    select ir.identity_id, i.issuer, i.subject, ir.roles, ir.status,
+           r.${sql.id(party.name)} as relation_name, c.${sql.id(party.name)} as candidate_relation_name
+      from platform.identity_relations ir
+      join platform.identities i on i.id = ir.identity_id
+      left join ${relations} r on r.${sql.id(party.id)} = ir.relation_id and r.${sql.id(party.tenantId)} = ir.tenant_id
+      left join ${relations} c on c.${sql.id(party.id)} = ir.candidate_relation_id and c.${sql.id(party.tenantId)} = ir.tenant_id
+     where ir.tenant_id = ${tenantId}::uuid${subject === undefined ? sql`` : sql` and i.subject = ${subject}`}
+  `.execute(trx);
+  const bySubject = new Map<string, MembershipRow[]>();
+  for (const row of rows.rows) bySubject.set(row.subject, [...(bySubject.get(row.subject) ?? []), row]);
+  return bySubject;
+}
+
+/** The member's one membership row here, none, or a refusal when the member id is ambiguous across issuers. */
+async function membershipOf(trx: Transaction<DB>, tenantId: string, memberId: string): Promise<MembershipRow | undefined> {
+  const rows = (await membershipsBySubject(trx, tenantId, memberId)).get(memberId) ?? [];
+  if (rows.length > 1) {
+    throw new ControlOperationError(409, "CONFLICT", "AMBIGUOUS_MEMBER_IDENTITY",
+      "Sign-ins from more than one identity provider carry this member id in the tenant; nothing was changed. Resolve the duplicate identity first.");
+  }
+  return rows[0];
+}
+
+/**
+ * How the member's sign-in stands in this tenant: `linked` to a Relation,
+ * `pending_confirmation` (with the candidate Relation the sign-in matched, by
+ * name, when there is one), or `null` — never signed in here, no row.
+ */
+function linkSummary(membership: MembershipRow | undefined) {
+  return {
+    roles: [...(membership?.roles ?? [])].sort(),
+    linkStatus: membership?.status ?? null,
+    relationName: membership?.status === "linked" ? membership.relation_name : null,
+    candidateRelationName: membership?.status === "pending_confirmation" ? membership.candidate_relation_name : null,
+  };
+}
+
+async function memberWithSummary(deps: Dependencies, trx: Transaction<DB>, tenant: TenantIdentity, memberId: string) {
+  const member = await deps.members.getMember(tenant.keycloak_organization_id!, memberId);
   if (!member) throw new ControlInputError("The member does not exist in this tenant.");
   const credentials = await deps.members.listCredentials(member.memberId);
+  const membership = await membershipOf(trx, tenant.id, memberId);
   return {
     ...member,
+    ...linkSummary(membership),
     credentialCount: credentials.length,
     credentialTypes: [...new Set(credentials.map((credential) => credential.type))].sort(),
   };
 }
 
+/** Listing only: an ambiguous member id shows no roles or link rather than one issuer's. */
+const unique = (rows: MembershipRow[] | undefined) => (rows?.length === 1 ? rows[0] : undefined);
+
 export async function listTenantMembers(deps: Dependencies, slug: string) {
-  return withTenant(deps, "control.list-tenant-members", slug, undefined, async (tenant) => ({
-    tenantSlug: slug,
-    members: await Promise.all((await deps.members.listMembers(tenant.keycloak_organization_id!, memberRoleClientId()))
-      .map(async (member) => {
-        const credentials = await deps.members.listCredentials(member.memberId);
-        return { tenantSlug: slug, ...member, credentialCount: credentials.length,
-          credentialTypes: [...new Set(credentials.map((credential) => credential.type))].sort() };
-      })),
-  }));
+  return withTenant(deps, "control.list-tenant-members", slug, undefined, async (tenant, trx) => {
+    const memberships = await membershipsBySubject(trx, tenant.id);
+    return {
+      tenantSlug: slug,
+      members: await Promise.all((await deps.members.listMembers(tenant.keycloak_organization_id!))
+        .map(async (member) => {
+          const credentials = await deps.members.listCredentials(member.memberId);
+          return { tenantSlug: slug, ...member, ...linkSummary(unique(memberships.get(member.memberId))),
+            credentialCount: credentials.length,
+            credentialTypes: [...new Set(credentials.map((credential) => credential.type))].sort() };
+        })),
+    };
+  });
 }
 
 export async function getTenantMember(deps: Dependencies, slug: string, memberId: string) {
   providerId(memberId, "memberId");
-  return withTenant(deps, "control.get-tenant-member", slug, `member="${memberId}"`, async (tenant) => ({
+  return withTenant(deps, "control.get-tenant-member", slug, `member="${memberId}"`, async (tenant, trx) => ({
     tenantSlug: slug,
-    ...(await memberWithSummary(deps, tenant.keycloak_organization_id!, memberId)),
+    ...(await memberWithSummary(deps, trx, tenant, memberId)),
   }));
 }
 
 export async function listTenantCredentials(deps: Dependencies, slug: string, memberId: string) {
   providerId(memberId, "memberId");
-  return withTenant(deps, "control.list-tenant-credentials", slug, `member="${memberId}"`, async (tenant) => {
-    await memberWithSummary(deps, tenant.keycloak_organization_id!, memberId);
+  return withTenant(deps, "control.list-tenant-credentials", slug, `member="${memberId}"`, async (tenant, trx) => {
+    await memberWithSummary(deps, trx, tenant, memberId);
     return { tenantSlug: slug, memberId, credentials: (await deps.members.listCredentials(memberId))
       .map((credential) => ({ tenantSlug: slug, memberId, ...credential })) };
   });
@@ -82,46 +163,126 @@ export async function listTenantCredentials(deps: Dependencies, slug: string, me
 export async function getTenantCredential(deps: Dependencies, slug: string, memberId: string, credentialId: string) {
   providerId(memberId, "memberId");
   providerId(credentialId, "credentialId");
-  return withTenant(deps, "control.get-tenant-credential", slug, `member="${memberId}" credential="${credentialId}"`, async (tenant) => {
-    await memberWithSummary(deps, tenant.keycloak_organization_id!, memberId);
+  return withTenant(deps, "control.get-tenant-credential", slug, `member="${memberId}" credential="${credentialId}"`, async (tenant, trx) => {
+    await memberWithSummary(deps, trx, tenant, memberId);
     const credential = (await deps.members.listCredentials(memberId)).find((item) => item.credentialId === credentialId);
     if (!credential) throw new ControlInputError("The credential does not exist for this member.");
     return { tenantSlug: slug, memberId, ...credential };
   });
 }
 
-function roles(input: unknown): string[] {
-  if (!Array.isArray(input) || input.length === 0 || input.some((role) => typeof role !== "string" || !ALLOWED_ROLES.has(role))) {
+function roles(input: unknown): EmployeeInvitationRole[] {
+  if (!Array.isArray(input) || input.length === 0 || input.some((role) => typeof role !== "string" || !isEmployeeInvitationRole(role))) {
     throw new ControlInputError("roles must contain only org_admin or org_employee.");
   }
-  return [...new Set(input as string[])];
+  return [...new Set(input as EmployeeInvitationRole[])];
 }
 
+/**
+ * Assign or remove personas on the member's membership row for THIS tenant.
+ * Written under the audited bypass session, which the column's trigger
+ * accepts; effective on the person's next request (the link cache entry is
+ * invalidated here, other replicas pick it up within a minute). No sign-out
+ * is needed: the token never carried these.
+ */
 export async function changeTenantMemberRoles(deps: Dependencies, slug: string, memberId: string, input: unknown, mode: "assign" | "remove") {
   providerId(memberId, "memberId");
-  return withTenant(deps, `control.${mode}-tenant-member-roles`, slug, `member="${memberId}"`, async (tenant) => {
-    await memberWithSummary(deps, tenant.keycloak_organization_id!, memberId);
+  return withTenant(deps, `control.${mode}-tenant-member-roles`, slug, `member="${memberId}"`, async (tenant, trx, afterCommit) => {
+    await memberWithSummary(deps, trx, tenant, memberId);
     const selected = roles(input);
-    if (mode === "assign") await deps.memberRoles.grantClientRoles(memberId, memberRoleClientId(), selected);
-    else await deps.memberRoles.revokeClientRoles(memberId, memberRoleClientId(), selected);
-    await deps.memberRoles.forceReauthentication(memberId).catch(() => undefined);
-    return { tenantSlug: slug, memberId, roles: selected, action: mode === "assign" ? "assigned" : "removed" };
+    const membership = await membershipOf(trx, tenant.id, memberId);
+    if (!membership) {
+      throw new ControlOperationError(
+        409,
+        "MEMBER_NOT_SIGNED_IN",
+        "MEMBER_NOT_SIGNED_IN",
+        "This person has an account but has not signed in to this tenant yet, so there is no membership to change. " +
+          "Call create_tenant_invitation with their e-mail and role: it sends no e-mail to an existing account and returns " +
+          "the sign-in URL; the role is applied when they sign in there.",
+      );
+    }
+    const grants = new Set(selected.flatMap((role) => employeeInvitationRoleGrants(role)));
+    const current = new Set(membership.roles ?? []);
+    const next = mode === "assign"
+      ? [...new Set([...current, ...grants])]
+      : [...current].filter((role) => !grants.has(role));
+    // Linked rows only, like canonical Account role Operations: roles on an unconfirmed link
+    // would be honoured the moment the person confirms a Relation nobody
+    // verified is theirs.
+    if (!(await writeMembershipRoles(trx, tenant.id, membership.identity_id, next))) throw memberLinkPending(membership);
+    afterCommit(() => invalidateIdentityLink(membership.issuer, membership.subject, tenant.id));
+    return { tenantSlug: slug, memberId, roles: [...next].sort(), action: mode === "assign" ? "assigned" : "removed" };
   });
 }
 
+function memberLinkPending(membership: MembershipRow): ControlOperationError {
+  const candidate = membership.candidate_relation_name;
+  const refusal = "The member's sign-in is not linked to a Relation in this tenant yet, so no roles can be written. ";
+  return candidate
+    ? new ControlOperationError(409, "MEMBER_LINK_PENDING", "MEMBER_LINK_PENDING", refusal +
+        `It is pending confirmation with the candidate Relation "${candidate}": confirm that link first ` +
+        "(confirm_tenant_member_link, or 'Confirm link' on the member page), then assign the roles.")
+    : new ControlOperationError(409, "MEMBER_NOT_LINKED", "MEMBER_NOT_LINKED", refusal +
+        "Their sign-in matched no Relation to confirm; an organization administrator of the tenant links them to their Relation first (link_identity).");
+}
+
+/**
+ * The platform operator confirms, for the member, the candidate Relation the
+ * member's own sign-in matched — the same step the member takes with
+ * confirm_my_link, and never another Relation. Explicit only: nothing calls
+ * this on its own, and roles are written only after it (see above).
+ */
+export async function confirmTenantMemberLink(deps: Dependencies, slug: string, memberId: string) {
+  providerId(memberId, "memberId");
+  const operation = "control.confirm-tenant-member-link";
+  return withTenant(deps, operation, slug, `member="${memberId}"`, async (tenant, trx, afterCommit) => {
+    await memberWithSummary(deps, trx, tenant, memberId);
+    const membership = await membershipOf(trx, tenant.id, memberId);
+    if (!membership || membership.status !== "pending_confirmation" || !membership.candidate_relation_name) {
+      throw new ControlOperationError(409, "CONFLICT", "NO_PENDING_LINK", membership?.status === "linked"
+        ? "The member is already linked to a Relation in this tenant."
+        : "The member has no pending link with a candidate Relation to confirm.");
+    }
+    const actor = systemSessionForAdministrator(deps.administrator, operation).actorSubject;
+    if (!(await confirmCandidateLink(trx, membership.identity_id, tenant.id, actor))) {
+      throw new ControlOperationError(409, "CONFLICT", "NO_PENDING_LINK", "The pending link changed while confirming it; reload the member.");
+    }
+    afterCommit(() => invalidateIdentityLink(membership.issuer, membership.subject, tenant.id));
+    return { tenantSlug: slug, ...(await memberWithSummary(deps, trx, tenant, memberId)) };
+  });
+}
+
+/**
+ * Remove a member from the tenant in both systems: the Keycloak Organization
+ * membership AND the tenant's membership row with its roles, so a later
+ * re-invitation starts from nothing rather than restoring the old persona.
+ * The row goes first, inside this transaction — if Keycloak then refuses,
+ * the transaction rolls back and nothing changed; if Keycloak already had no
+ * such member (a retry), the row is still removed and the call reports
+ * `removed: false` for the provider half. Idempotent either way. The link
+ * cache entry is dropped so an open session loses the membership on its
+ * next request.
+ */
 export async function removeTenantMembership(deps: Dependencies, slug: string, memberId: string) {
   providerId(memberId, "memberId");
-  return withTenant(deps, "control.remove-tenant-membership", slug, `member="${memberId}"`, async (tenant) => ({
-    tenantSlug: slug,
-    memberId,
-    removed: await deps.members.removeMember(tenant.keycloak_organization_id!, memberId),
-  }));
+  return withTenant(deps, "control.remove-tenant-membership", slug, `member="${memberId}"`, async (tenant, trx, afterCommit) => {
+    const membership = await membershipOf(trx, tenant.id, memberId);
+    if (membership) {
+      await sql`
+        delete from platform.identity_relations
+         where identity_id = ${membership.identity_id}::uuid and tenant_id = ${tenant.id}::uuid
+      `.execute(trx);
+    }
+    const removed = await deps.members.removeMember(tenant.keycloak_organization_id!, memberId);
+    if (membership) afterCommit(() => invalidateIdentityLink(membership.issuer, membership.subject, tenant.id));
+    return { tenantSlug: slug, memberId, removed, membershipRowRemoved: membership !== undefined };
+  });
 }
 
 export async function requestPasskeyRecovery(deps: Dependencies, slug: string, memberId: string) {
   providerId(memberId, "memberId");
-  return withTenant(deps, "control.request-passkey-recovery", slug, `member="${memberId}"`, async (tenant) => {
-    const member = await memberWithSummary(deps, tenant.keycloak_organization_id!, memberId);
+  return withTenant(deps, "control.request-passkey-recovery", slug, `member="${memberId}"`, async (tenant, trx) => {
+    const member = await memberWithSummary(deps, trx, tenant, memberId);
     if (!member.enabled || !member.email) throw new ControlInputError("Passkey recovery requires an enabled member with an email address.");
     await deps.members.sendPasskeyRecovery(memberId);
     return { tenantSlug: slug, memberId, email: member.email, action: "recovery_email_sent", expiresInSeconds: 900 };
@@ -131,8 +292,8 @@ export async function requestPasskeyRecovery(deps: Dependencies, slug: string, m
 export async function revokeTenantCredential(deps: Dependencies, slug: string, memberId: string, credentialId: string, recoveryConfirmed: boolean) {
   providerId(memberId, "memberId");
   providerId(credentialId, "credentialId");
-  return withTenant(deps, "control.revoke-tenant-credential", slug, `member="${memberId}" credential="${credentialId}"`, async (tenant) => {
-    await memberWithSummary(deps, tenant.keycloak_organization_id!, memberId);
+  return withTenant(deps, "control.revoke-tenant-credential", slug, `member="${memberId}" credential="${credentialId}"`, async (tenant, trx) => {
+    await memberWithSummary(deps, trx, tenant, memberId);
     const credentials = await deps.members.listCredentials(memberId);
     if (!credentials.some((credential) => credential.credentialId === credentialId)) throw new ControlInputError("The credential does not exist for this member.");
     if (credentials.length === 1 && !recoveryConfirmed) throw new ControlInputError("The last credential requires a confirmed recovery route.");

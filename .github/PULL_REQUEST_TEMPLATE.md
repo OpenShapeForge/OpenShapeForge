@@ -25,7 +25,8 @@ Closes #
       comments, commits, or this description.
 - [ ] Generated artifacts were **not** hand-edited — I changed the source
       (YAML / compiler / plugin) and ran `bun run generate`.
-- [ ] Gates pass (`set -o pipefail`; read the `N pass / N fail` lines):
+- [ ] Applicable gates pass (`set -o pipefail`; report results and explain
+      non-applicable checks, including documentation-only scope):
   - [ ] `bun run check:generated`
   - [ ] `bun run check:authoring-local`
   - [ ] `bun run check:notices:linux` (ran `bun run notices:linux` if I changed dependencies)
@@ -36,6 +37,8 @@ Closes #
   - [ ] `bun run test:perf` (only if touching the API hot path)
 - [ ] New entity? Bumped `expectedGeneratedCrudEntityCount` and ran
       `bun run db:migrate`.
-- [ ] Applied migrations are immutable — I did not edit one that already ran.
+- [ ] Greenfield replacement is complete: affected consumers, seeds and tests
+      are updated; obsolete code and compatibility layers are removed.
+      Database bootstrap/invariant setup remains reproducible.
 - [ ] Nothing a generator/plugin emits depends on time or randomness
       (determinism gate).

@@ -66,7 +66,10 @@ export function missingUiTranslations(value: unknown, path = ""): string[] {
 export function missingSchemaUiTranslations(schema: Record<string, unknown>, path: string): string[] {
   const missing = missingUiTranslations(schema, path);
   function visit(node: Record<string, unknown>, at: string) {
-    for (const [key, field] of Object.entries(node.properties ?? {}) as Array<[string, Record<string, unknown>]>) {
+    for (const [key, field] of Object.entries(node.properties ?? {}) as Array<[string, Record<string, unknown> | boolean]>) {
+      // A boolean property schema (`amount: true` inside an anyOf branch that
+      // restates a required name) describes no field a screen could render.
+      if (typeof field !== "object" || field === null) continue;
       const next = `${at}.properties.${key}`;
       if (field.const === undefined && !(field["x-osf-i18n"] as SchemaUiText | undefined)?.title) missing.push(`${next}.x-osf-i18n.title`);
       visit(field, next);

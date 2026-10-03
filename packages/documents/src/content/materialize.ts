@@ -118,11 +118,21 @@ export async function materializeTemplateContent(
     return parameters[key]!;
   }
 
-  async function interpolate(value: JsonValue, parameters: JsonObject): Promise<JsonValue> {
+  /**
+   * A variable filled into Markdown is text, not syntax: a client named
+   * `Bouw*Groep* BV` must not turn into emphasis (or lose its asterisks) where
+   * the template writes `**Klant:** {{local.clientName}}`. The inline
+   * delimiters and the escape character itself are backslash-escaped.
+   */
+  const markdownText = (text: string) => text.replace(/[\\*_]/g, (character) => `\\${character}`);
+
+  async function interpolate(value: JsonValue, parameters: JsonObject, markdown = false): Promise<JsonValue> {
     if (typeof value === "string") {
       const matches = [...value.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)];
-      if (matches.length === 1 && matches[0]![0] === value)
-        return variable(matches[0]![1]!, parameters);
+      if (matches.length === 1 && matches[0]![0] === value) {
+        const whole = await variable(matches[0]![1]!, parameters);
+        return markdown && typeof whole === "string" ? markdownText(whole) : whole;
+      }
       let result = "";
       let offset = 0;
       for (const match of matches) {
@@ -132,12 +142,10 @@ export async function materializeTemplateContent(
         const replacement = await variable(match[1]!, parameters);
         if (!["string", "number", "boolean"].includes(typeof replacement))
           contentError("INVALID_VALUE", "Inline text variables must resolve to scalar values.");
-        if (
-          result.length + literal.length + String(replacement).length >
-          CONTENT_LIMITS.stringCharacters
-        )
+        const text = markdown ? markdownText(String(replacement)) : String(replacement);
+        if (result.length + literal.length + text.length > CONTENT_LIMITS.stringCharacters)
           contentError("CONTENT_LIMIT_EXCEEDED", "Expanded text exceeds the size budget.");
-        result += literal + String(replacement);
+        result += literal + text;
         offset = match.index + match[0].length;
       }
       const remaining = value.slice(offset);
@@ -149,13 +157,13 @@ export async function materializeTemplateContent(
     }
     if (Array.isArray(value)) {
       const result: JsonValue[] = [];
-      for (const child of value) result.push(await interpolate(child, parameters));
+      for (const child of value) result.push(await interpolate(child, parameters, markdown));
       return result;
     }
     if (value && typeof value === "object") {
       const result: Record<string, JsonValue> = Object.create(null);
       for (const key of Object.keys(value).sort())
-        result[key] = await interpolate((value as JsonObject)[key]!, parameters);
+        result[key] = await interpolate((value as JsonObject)[key]!, parameters, markdown);
       return result;
     }
     return value;
@@ -214,7 +222,8 @@ export async function materializeTemplateContent(
       variantId: variant.id,
       parameters,
     });
-    for (const block of variant.blocks) {
+    for (const sourceBlock of variant.blocks) {
+      let block = sourceBlock;
       if (++visitedBlocks > CONTENT_LIMITS.blocks)
         contentError("CONTENT_LIMIT_EXCEEDED", "Expanded template contains too many blocks.");
       const definition = Object.hasOwn(registry, block.definitionKey)
@@ -238,11 +247,28 @@ export async function materializeTemplateContent(
       if (!renderer && (!definition.composition || Object.keys(definition.renderers).length > 0))
         contentError("UNSUPPORTED_CHANNEL", "Block has no renderer for the requested channel.");
       definitions[block.definitionKey] = definition;
+      const boundReferences = Object.fromEntries(Object.entries(block.references).map(([key, reference]) => {
+        if (reference && !Array.isArray(reference) && "parameter" in reference) {
+          const name = reference.parameter;
+          if (Object.keys(reference).length !== 1 || !/^[a-z][A-Za-z0-9]{0,127}$/.test(name)) contentError("INVALID_VALUE", "Invalid local parameter binding.");
+          const parameter = Object.hasOwn(version.parameters, name) ? version.parameters[name] : undefined;
+          const target = definition.fields[key]?.relationship?.target;
+          if (!target || parameter?.relationship?.target !== target || parameter.cardinality && parameter.cardinality !== "single") contentError("DEPENDENCY_INVALID", `Parameter ${name} does not match relationship ${key}.`);
+          if (!Object.hasOwn(parameters, name) || typeof parameters[name] !== "string") contentError("MISSING_VARIABLE", `Entity parameter ${name} is missing.`);
+          return [key, { entity: target, id: parameters[name] as string }];
+        }
+        return [key, reference];
+      }));
+      block = { ...block, references: boundReferences };
       validateContentBlockReferences(block, definition);
       const valueFields = Object.fromEntries(
         Object.entries(definition.fields).filter(([, field]) => !field.relationship),
       );
-      const values = (await interpolate(block.values, parameters)) as JsonObject;
+      // Markdown fields get their filled variables escaped; every other field keeps the raw value.
+      const values: Record<string, JsonValue> = Object.create(null);
+      for (const key of Object.keys(block.values).sort()) {
+        values[key] = await interpolate(block.values[key]!, parameters, definition.fields[key]?.osfType === "markdown");
+      }
       validateContentValues(values, valueFields, "block values");
       accountExpandedContent(values);
       await resolvers.validateBlockValues?.(block.definitionKey, immutableContent(values));

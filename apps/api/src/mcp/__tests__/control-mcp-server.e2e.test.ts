@@ -10,7 +10,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createSign, generateKeyPairSync, type KeyObject } from "node:crypto";
 import { __resetControlVerifiersForTests } from "../../control/authorization.js";
-import { PLATFORM_ADMIN_ROLE } from "../../control/platform-admin.js";
+import { PLATFORM_OPERATOR_ROLE } from "../../control/authorization.js";
 import { loadRuntimeModules } from "../../modules/registry.js";
 import { createApiApp } from "../../roles/api.js";
 import { CONTROL_MCP_METADATA_PATH, CONTROL_MCP_PATH } from "../control-mcp-server.js";
@@ -99,7 +99,7 @@ const adminToken = (overrides: Record<string, unknown> = {}) =>
     sub: "0b2a3f1e-8a6b-4f30-9d2f-5f1c7a8e9b10",
     azp: "codex-platform",
     preferred_username: "hubble-platform-admin",
-    realm_access: { roles: [PLATFORM_ADMIN_ROLE] },
+    realm_access: { roles: [PLATFORM_OPERATOR_ROLE] },
     ...overrides,
   });
 
@@ -162,7 +162,7 @@ if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP discovery", ()
 });
 
 if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP admission", () => {
-  test("a platform_admin token from the PKCE client is admitted (and only then reaches the database)", async () => {
+  test("a platform-operator token from the PKCE client is admitted (and only then reaches the database)", async () => {
     const response = await call(adminToken());
     expect(response.statusCode).toBe(503);
     expect(JSON.parse(response.body).error.code).toBe("DATABASE_NOT_CONFIGURED");
@@ -176,7 +176,7 @@ if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP admission", ()
       aud: ["hubble-api"],
       organization: { "zerocopter-dev": { id: "8ba94fb8-08d3-4907-9af3-5bd1e2018f46" } },
       resource_access: { "hubble-api": { roles: ["org_admin"] } },
-      realm_access: { roles: [PLATFORM_ADMIN_ROLE] },
+      realm_access: { roles: [PLATFORM_OPERATOR_ROLE] },
     });
     const refused = await call(tenantToken);
     const anonymous = await call();
@@ -187,12 +187,6 @@ if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP admission", ()
     expect(message).not.toContain("zerocopter");
     expect(message).not.toContain("openshapeforge-control");
     expect(message).not.toContain("issuer");
-  });
-
-  test("a platform-operator token is admitted too — which tools it reaches is the Operations' decision", async () => {
-    const response = await call(adminToken({ realm_access: { roles: ["platform-operator"] } }));
-    expect(response.statusCode).toBe(503);
-    expect(JSON.parse(response.body).error.code).toBe("DATABASE_NOT_CONFIGURED");
   });
 
   test("a control-realm token holding no platform role is 403", async () => {
@@ -217,7 +211,7 @@ if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP admission", ()
         accept: "application/json, text/event-stream",
         "content-type": "application/json",
         "x-openshapeforge-user-id": "0b2a3f1e-8a6b-4f30-9d2f-5f1c7a8e9b10",
-        "x-openshapeforge-roles": PLATFORM_ADMIN_ROLE,
+        "x-openshapeforge-roles": PLATFORM_OPERATOR_ROLE,
       },
       payload: { jsonrpc: "2.0", id: 1, method: "tools/list" },
     });

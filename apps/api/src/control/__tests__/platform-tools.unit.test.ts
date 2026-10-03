@@ -32,23 +32,23 @@ describe("the guide and the instructions", () => {
 });
 
 describe("buildPlatformSessionInfo", () => {
-  it("describes a platform administrator with platform scope and a tenant count, and no identifiers", () => {
+  it("describes a platform operator with platform scope and a tenant count, and no identifiers", () => {
     const info = buildPlatformSessionInfo({
       administrator,
-      roles: ["platform_admin"],
+      roles: ["platform-operator"],
       tenants: 3,
       access: { tools: 9, resources: 1 },
       sessionIdleDays: 14,
       nowMs: NOW,
     });
-    expect(info.role).toBe("Platform administrator");
+    expect(info.role).toBe("Platform operator");
     expect(info.scope).toBe("platform");
     expect(info.tenants).toBe(3);
     expect(info.signedInVia).toBe("Codex");
     expect(info.accessTokenExpiresIn).toBe("in 12 minutes");
     expect(info.sessionEndsAfterInactivity).toBe("14 days");
     expect(info.summary).toBe(
-      "You are Hubble Platform admin, a platform administrator of this deployment, signed in via Codex. " +
+      "You are Hubble Platform admin, a platform operator of this deployment, signed in via Codex. " +
         "You act for every tenant — there are 3 tenants — and for none in particular. " +
         "Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. " +
         "You can use 9 tools and 1 resource.",
@@ -61,7 +61,7 @@ describe("buildPlatformSessionInfo", () => {
   it("names the MCP client that opened the session, and stays silent without one", () => {
     const info = buildPlatformSessionInfo({
       administrator,
-      roles: ["platform_admin"],
+      roles: ["platform-operator"],
       tenants: 3,
       client: { name: "Claude Code", version: "2.1.0", capabilities: [] },
       access: { tools: 9, resources: 1 },
@@ -71,7 +71,7 @@ describe("buildPlatformSessionInfo", () => {
     expect(info.summary).toContain("signed in via Codex. Connected through Claude Code 2.1.0.");
     const silent = buildPlatformSessionInfo({
       administrator,
-      roles: ["platform_admin"],
+      roles: ["platform-operator"],
       tenants: 3,
       access: { tools: 9, resources: 1 },
       nowMs: NOW,
@@ -81,20 +81,32 @@ describe("buildPlatformSessionInfo", () => {
     expect(silent.summary).not.toContain("Connected through");
   });
 
-  it("names the admin gateway as the Hubble control plane and copes with an unreadable registry", () => {
-    const info = buildPlatformSessionInfo({
-      administrator: { ...administrator, authorizedParty: "openshapeforge-admin-gateway", expiresAtMs: null },
-      roles: ["platform_admin"],
-      tenants: null,
-      access: { tools: 9, resources: 1 },
-      nowMs: NOW,
-    });
-    expect(info.signedInVia).toBe("Hubble control plane");
-    expect(info.accessTokenExpiresAt).toBeUndefined();
-    expect(info.summary).toContain("could not be counted");
+  it("names the admin gateway after the product name and copes with an unreadable registry", () => {
+    const build = () =>
+      buildPlatformSessionInfo({
+        administrator: { ...administrator, authorizedParty: "openshapeforge-admin-gateway", expiresAtMs: null },
+        roles: ["platform-operator"],
+        tenants: null,
+        access: { tools: 9, resources: 1 },
+        nowMs: NOW,
+      });
+    // The default product name, then the configured one; the variable is restored.
+    const previous = process.env.OPENSHAPEFORGE_PRODUCT_NAME;
+    delete process.env.OPENSHAPEFORGE_PRODUCT_NAME;
+    try {
+      const info = build();
+      expect(info.signedInVia).toBe("OpenShapeForge control plane");
+      expect(info.accessTokenExpiresAt).toBeUndefined();
+      expect(info.summary).toContain("could not be counted");
+      process.env.OPENSHAPEFORGE_PRODUCT_NAME = "Atlas";
+      expect(build().signedInVia).toBe("Atlas control plane");
+    } finally {
+      if (previous === undefined) delete process.env.OPENSHAPEFORGE_PRODUCT_NAME;
+      else process.env.OPENSHAPEFORGE_PRODUCT_NAME = previous;
+    }
   });
 
-  it("distinguishes operator-only and combined control sessions", () => {
+  it("always projects the single accepted control role as platform operator", () => {
     const operator = buildPlatformSessionInfo({
       administrator,
       roles: ["platform-operator"],
@@ -104,15 +116,12 @@ describe("buildPlatformSessionInfo", () => {
     });
     expect(operator.role).toBe("Platform operator");
     expect(operator.summary).toContain("a platform operator of this deployment");
-
-    const combined = buildPlatformSessionInfo({
+    expect(() => buildPlatformSessionInfo({
       administrator,
-      roles: ["platform_admin", "platform-operator"],
+      roles: [],
       tenants: 1,
-      access: { tools: 23, resources: 1 },
+      access: { tools: 0, resources: 1 },
       nowMs: NOW,
-    });
-    expect(combined.role).toBe("Platform administrator and operator");
-    expect(combined.summary).toContain("a platform administrator and operator of this deployment");
+    })).toThrow("requires platform-operator");
   });
 });

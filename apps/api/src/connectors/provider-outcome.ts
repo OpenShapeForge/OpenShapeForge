@@ -522,6 +522,10 @@ export const HTTP_STATUS_BY_CODE = {
   CONFIRMATION_ALREADY_USED: 409,
   CONFIRMATION_EXPIRED: 409,
   CONFIRMATION_STALE: 409,
+  // A create whose secure input an interaction adapter has not collected yet.
+  INTERACTION_REQUIRED: 409,
+  // A generic write that would change a collection.
+  RELATION_COLLECTION_MUTATION_UNSUPPORTED: 409,
   TOO_MANY_REQUESTS: 429,
   INTERNAL_SERVER_ERROR: 500,
   GENERATED_CRUD_NOT_ENABLED: 404,

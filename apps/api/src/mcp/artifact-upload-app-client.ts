@@ -16,8 +16,10 @@ app.ontoolresult = (result) => {
     return;
   }
   uploadUrl = meta.uploadUrl;
+  // The page that embeds this script names the deployment (data-product-name).
+  const product = document.body.dataset.productName || "the application";
   message.textContent =
-    "Choose a file. Its bytes go directly to Hubble, not through the model.";
+    `Choose a file. Its bytes go directly to ${product}, not through the model.`;
   file.hidden = false;
 };
 

@@ -28,7 +28,7 @@ import type { ConnectorDefinition } from "./types/connector.js";
 import fieldDefinitionSchema from "../../config/schemas/field-definition.schema.json" with {
   type: "json",
 };
-import fieldV2Schema from "../../config/schemas/field-v2.schema.json" with { type: "json" };
+import coreEntitySchema from "../../config/schemas/core-entity.schema.json" with { type: "json" };
 import workflowInspectorSchema from "../../config/schemas/workflow-inspector.schema.json" with {
   type: "json",
 };
@@ -55,13 +55,18 @@ function connectorDefinition(
       provenance: "firstParty",
       license: { spdx: "LicenseRef-BatterAI-Commercial" },
     },
+    authorization: {
+      roles: {
+        read: "Connectors.ObjectStore.Read",
+        write: "Connectors.ObjectStore.Write",
+      },
+    },
     operations: [
       {
         key: "listObjects",
         kind: "query",
-        authorization: { roles: { invoke: ["Connectors.All.Read"] } },
-        input: [{ key: "prefix", valueType: "string" }],
-        output: { cardinality: "many", fields: [{ key: "key", valueType: "string" }] },
+        input: [{ key: "prefix", osfType: "string" }],
+        output: { cardinality: "many", fields: [{ key: "key", osfType: "string" }] },
       },
     ],
     ...overrides,
@@ -85,7 +90,6 @@ describe("the schema registry", () => {
     expect(validator.schemaFiles).toContain("core-entity.schema.json");
     expect(validator.schemaFiles).toContain("connector.schema.json");
     expect(validator.schemaFiles).toContain("field-definition.schema.json");
-    expect(validator.schemaFiles).toContain("field-v2.schema.json");
     expect(validator.schemaFiles).toContain("settings-definition.schema.json");
     expect(validator.schemaFiles).toContain("settings-provider.schema.json");
   });
@@ -98,76 +102,30 @@ describe("the schema registry", () => {
     }
   });
 
-  it("keeps the FieldV2 schema id as an equivalent compatibility entry point", () => {
-    const ajv = new Ajv2020.default({ strict: false });
-    ajv.addSchema(workflowInspectorSchema);
-    ajv.addSchema(fieldDefinitionSchema);
-    ajv.addSchema(fieldV2Schema);
-    const canonical = ajv.getSchema(fieldDefinitionSchema.$id)!;
-    const compatibility = ajv.getSchema(fieldV2Schema.$id)!;
-    const compatibilityDefinition = ajv.getSchema(
-      `${fieldV2Schema.$id}#/$defs/fieldV2`,
-    )!;
-    const compatibilityProperties = ajv.getSchema(
-      `${fieldV2Schema.$id}#/$defs/fieldV2Properties`,
-    )!;
-    const recursiveDefinition = {
-      key: "address",
-      valueType: "object",
-      children: [
-        { key: "street", valueType: "string" },
-        {
-          key: "residents",
-          valueType: "object",
-          cardinality: "collection",
-          item: { key: "resident", valueType: "object" },
-        },
-      ],
-    };
-
-    expect(canonical(recursiveDefinition)).toBe(true);
-    expect(compatibility(recursiveDefinition)).toBe(true);
-    expect(compatibilityDefinition(recursiveDefinition)).toBe(true);
-    expect(compatibilityProperties(recursiveDefinition)).toBe(true);
-    expect(canonical({ valueType: "string" })).toBe(false);
-    expect(compatibility({ valueType: "string" })).toBe(false);
-    expect(compatibilityDefinition({ valueType: "string" })).toBe(false);
-    expect(compatibilityProperties({ valueType: "string" })).toBe(false);
-
-    for (const definition of Object.keys(fieldV2Schema.$defs)) {
-      expect(ajv.getSchema(`${fieldV2Schema.$id}#/$defs/${definition}`)).toBeDefined();
-    }
-  });
-
   it("rejects a fieldDefinition semantic value with a second authored shape", () => {
     const ajv = new Ajv2020.default({ strict: false });
     ajv.addSchema(workflowInspectorSchema);
     ajv.addSchema(fieldDefinitionSchema);
-    ajv.addSchema(fieldV2Schema);
     const canonical = ajv.getSchema(fieldDefinitionSchema.$id)!;
-    const compatibility = ajv.getSchema(fieldV2Schema.$id)!;
 
     const semanticField = {
       key: "definition",
-      valueType: "object",
-      semanticType: "fieldDefinition",
+      osfType: "fieldDefinition",
     };
     expect(canonical(semanticField)).toBe(true);
-    expect(compatibility(semanticField)).toBe(true);
 
     for (const ambiguous of [
-      { ...semanticField, children: [{ key: "extra", valueType: "string" }] },
-      { ...semanticField, item: { key: "extra", valueType: "string" } },
+      { ...semanticField, children: [{ key: "extra", osfType: "string" }] },
+      { ...semanticField, item: { key: "extra", osfType: "string" } },
     ]) {
       expect(canonical(ambiguous)).toBe(false);
-      expect(compatibility(ambiguous)).toBe(false);
     }
 
     expect(
       canonical({
         key: "ordinaryObject",
-        valueType: "object",
-        children: [{ key: "extra", valueType: "string" }],
+        osfType: "object",
+        children: [{ key: "extra", osfType: "string" }],
       }),
     ).toBe(true);
   });
@@ -269,9 +227,9 @@ describe("the schema registry", () => {
 
 describe("a violation is rejected, with the offending path named", () => {
   it("rejects a core entity field in the superseded v1 shape", () => {
-    // `type` was the v1 spelling; the compiler has taken `valueType` for a long
-    // time, but core-entity.schema.json still required `type` — the exact drift
-    // that made every shipped entity fail its own schema.
+    // `type` was the v1 spelling, long superseded (first by `baseType`, now by
+    // `osfType`), but core-entity.schema.json still required `type` — the exact
+    // drift that made every shipped entity fail its own schema.
     expect(() =>
       validator.validate(
         {
@@ -298,7 +256,7 @@ describe("a violation is rejected, with the offending path named", () => {
           entity: "Widget",
           title: "Widget",
           language: "en",
-          fields: [{ key: "name", valueType: "string", notAThing: true }],
+          fields: [{ key: "name", osfType: "string", notAThing: true }],
         },
         "widget.yaml",
       ),
@@ -309,13 +267,15 @@ describe("a violation is rejected, with the offending path named", () => {
     expect(
       validator.validate(
         {
-          schemaVersion: 1,
+          schemaVersion: 3,
           kind: "coreEntity",
           module: "core",
           entity: "Widget",
           title: "Widget",
           language: "en",
-          fields: [{ key: "name", valueType: "string", required: true }],
+          fields: [{ key: "name", osfType: "string", required: true }],
+          operations: {},
+          interfaces: {},
         },
         "widget.yaml",
       ),
@@ -334,13 +294,26 @@ describe("connector contracts are validated at LOAD, not only in the corpus gate
     expect(loadFromDisk(definition)).toThrow(/connector\.schema\.json/);
   });
 
+  it("requires connector-level permissions and rejects the retired per-operation shape", () => {
+    const missing = { ...connectorDefinition() } as Record<string, unknown>;
+    delete missing.authorization;
+    expect(loadFromDisk(missing)).toThrow(/authorization/);
+
+    const legacy = connectorDefinition() as unknown as Record<string, unknown>;
+    const operations = legacy.operations as Array<Record<string, unknown>>;
+    operations[0]!.authorization = {
+      roles: { invoke: ["Connectors.ExampleObjectStore.Read"] },
+    };
+    expect(loadFromDisk(legacy)).toThrow(/authorization/);
+  });
+
   it("names the offending path", () => {
     const definition = connectorDefinition({
       operations: [
         {
           key: "listObjects",
           kind: "query",
-          output: { cardinality: "many", fields: [{ key: "key", valueType: "string" }] },
+          output: { cardinality: "many", fields: [{ key: "key", osfType: "string" }] },
           reliability: { retry: { eligible: true, backoff: "sideways" } },
         },
       ],
@@ -366,8 +339,7 @@ describe("connector contracts are validated at LOAD, not only in the corpus gate
         {
           key: "list`Objects",
           kind: "query",
-          authorization: { roles: { invoke: ["Connectors.All.Read"] } },
-          output: { cardinality: "many", fields: [{ key: "key", valueType: "string" }] },
+          output: { cardinality: "many", fields: [{ key: "key", osfType: "string" }] },
         },
       ],
     });
@@ -392,8 +364,7 @@ describe("schema and compiler agree", () => {
           {
             key: "listObjects",
             kind: "query",
-            authorization: { roles: { invoke: ["Connectors.All.Read"] } },
-            output: { cardinality: "many", fields: [{ key: "key", valueType: "string" }] },
+            output: { cardinality: "many", fields: [{ key: "key", osfType: "string" }] },
             reliability: { timeouts: { attemptMs: 10_000, totalMs: 30_000 } },
           },
         ],
@@ -406,9 +377,8 @@ describe("schema and compiler agree", () => {
           {
             key: "putObject",
             kind: "mutation",
-            authorization: { roles: { invoke: ["Connectors.All.ReadWrite"] } },
-            input: [{ key: "requestId", valueType: "string" }],
-            output: { cardinality: "one", fields: [{ key: "key", valueType: "string" }] },
+            input: [{ key: "requestId", osfType: "string" }],
+            output: { cardinality: "one", fields: [{ key: "key", osfType: "string" }] },
             reliability: {
               retry: { eligible: true, maxAttempts: 3, backoff: "exponential" },
               idempotency: { strategy: "key", keyInput: "requestId" },
@@ -422,8 +392,8 @@ describe("schema and compiler agree", () => {
       connectorDefinition({
         configuration: {
           fields: [
-            { key: "endpoint", valueType: "string", required: true },
-            { key: "accessKeyId", valueType: "string", required: true, secret: true },
+            { key: "endpoint", osfType: "string", required: true },
+            { key: "accessKeyId", osfType: "string", required: true, secret: true },
           ],
         },
       }),
@@ -449,13 +419,15 @@ describe("schema and compiler agree", () => {
 describe("coreEntity properties the compiler implements", () => {
   function coreEntity(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     return {
-      schemaVersion: 1,
+      schemaVersion: 3,
       kind: "coreEntity",
       module: "core",
       entity: "BillingRun",
       title: "Billing run",
       language: "en",
-      fields: [{ key: "idempotencyKey", valueType: "string" }],
+      fields: [{ key: "idempotencyKey", osfType: "string" }],
+      operations: {},
+      interfaces: {},
       ...overrides,
     };
   }
@@ -471,7 +443,7 @@ describe("coreEntity properties the compiler implements", () => {
 
   it("accepts strict v2 operation and interface authoring", () => {
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operations: { list: v2Operation("list"), get: v2Operation("get") },
       interfaces: {
         rest: {},
@@ -497,9 +469,132 @@ describe("coreEntity properties the compiler implements", () => {
     expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
   });
 
+  const webViews = (tabs: unknown) => coreEntity({
+    schemaVersion: 3,
+    operations: { list: v2Operation("list"), get: v2Operation("get") },
+    interfaces: { rest: {}, graphql: {}, mcp: { tools: "generic" }, web: { views: {
+      collection: { route: "/billing-runs", columns: [{ key: "idempotencyKey" }] },
+      record: { title: "{{idempotencyKey}}", layout: { tabs } },
+    } } },
+  });
+
+  it("accepts a FieldRef entry in a view group, as the compiler does", () => {
+    // FieldEntry is string | FieldRef in types/views.ts and web-manifest.ts
+    // reads render and fieldDisplayMode; the schema used to admit only the key.
+    const document = webViews([{ id: "main", fields: [
+      "idempotencyKey",
+      { key: "idempotencyKey", render: "TextDisplay" },
+      { key: "idempotencyKey", fieldDisplayMode: "hidden" },
+    ] }]);
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+    expect(() => validator.validate(webViews([{ id: "main", fields: [{ key: "idempotencyKey", hidden: true }] }]), "billing-run.yaml"))
+      .toThrow(/fields\/0/);
+    expect(() => validator.validate(webViews([{ id: "main", fields: [{ key: "idempotencyKey", fieldDisplayMode: "collapsed" }] }]), "billing-run.yaml"))
+      .toThrow(/fieldDisplayMode/);
+  });
+
+  it("marks every closed choice in interfaces.web with what it chooses from", () => {
+    // A schema-driven editor fills these from the entity (its fields,
+    // relationships, sortable fields, custom operations) or the host (its
+    // renderer registry, the component catalogue) — from the marker, never
+    // from a property's name or position. Every fieldKey reference and every
+    // operation, renderer or component key must carry one; a key that is an
+    // identifier of something else (a variable source) must not.
+    const defs = coreEntitySchema.$defs as Record<string, unknown>;
+    const kinds = new Set(["field", "sortableField", "relationship", "operation", "renderer", "component"]);
+    const unmarked: string[] = [];
+    const seen: string[] = [];
+    const visited = new Set<unknown>();
+    // A choice site: a field key reference, a renderer key, or a string whose
+    // name says it is an operation, renderer or component — the places an
+    // editor must not treat as free text.
+    const isChoiceSite = (schema: Record<string, unknown>, path: string) => {
+      if (path.includes("variableSources")) return false;
+      // A fixed enum is already a complete local choice list; x-osf-choice is
+      // only for choices an editor must resolve from entity or host metadata.
+      if (Array.isArray(schema.enum)) return false;
+      if (schema.$ref === "#/$defs/fieldKey" || schema.$ref === "#/$defs/webRendererKeyV2") return true;
+      // The last path element: an item of `actions` is `actions[]`, a map key is `<key>`.
+      const name = path.match(/(?:^|[.>|])([^.>|]+)$/)?.[1] ?? "";
+      const stringLike = schema.type === "string" || typeof schema.pattern === "string";
+      return stringLike && /^(actions\[\]|resultRenderer|component|render|<key>)$/.test(name) && !path.includes("i18n");
+    };
+    const walk = (node: unknown, path: string) => {
+      if (!node || typeof node !== "object" || Array.isArray(node)) return;
+      const schema = node as Record<string, unknown>;
+      const choice = schema["x-osf-choice"];
+      if (choice !== undefined) {
+        const kind = typeof choice === "string" ? choice : (choice as { kind?: string }).kind;
+        if (!kind || !kinds.has(kind)) unmarked.push(`${path} has an unknown x-osf-choice ${JSON.stringify(choice)}`);
+        seen.push(path);
+      } else if (isChoiceSite(schema, path)) unmarked.push(path);
+      // Follow refs once per target, so a recursive definition terminates; the
+      // render definition lives in field-definition.schema.json.
+      if (typeof schema.$ref === "string") {
+        const local = schema.$ref.match(/^#\/\$defs\/(.+)$/);
+        const external = schema.$ref.match(/field-definition\.schema\.json#\/\$defs\/(.+)$/);
+        const name = local?.[1] ?? external?.[1];
+        const target = local ? defs[name!] : external ? (fieldDefinitionSchema.$defs as Record<string, unknown>)[name!] : undefined;
+        if (target && !visited.has(target)) { visited.add(target); walk(target, `${path}->${name}`); }
+      }
+      for (const [key, child] of Object.entries((schema.properties as Record<string, unknown>) ?? {})) walk(child, `${path}.${key}`);
+      if (schema.additionalProperties && typeof schema.additionalProperties === "object") walk(schema.additionalProperties, `${path}.*`);
+      if (schema.propertyNames && typeof schema.propertyNames === "object") walk(schema.propertyNames, `${path}.<key>`);
+      if (schema.items) walk(schema.items, `${path}[]`);
+      for (const combinator of ["oneOf", "anyOf", "allOf"]) {
+        for (const [index, variant] of ((schema[combinator] as unknown[] | undefined) ?? []).entries()) walk(variant, `${path}|${combinator}${index}`);
+      }
+    };
+    walk((defs.entityInterfacesV2 as { properties: { web: unknown } }).properties.web, "web");
+    expect(unmarked).toEqual([]);
+    for (const expected of [
+      "web.views->webViewsV2.collection.columns[].key",
+      "web.views->webViewsV2.collection.defaultSort.key",
+      "web.views->webViewsV2.collection.actions[]",
+      "web.views->webViewsV2.record.actions[]",
+      "web.views->webViewsV2.record.badges[]",
+      "web.views->webViewsV2.record.layout.context.fields[]",
+      "web.views->webViewsV2.record.layout.context.relationships[]",
+      "web.fields.<key>",
+      "web.fields.*.render->render.component",
+      "web.operations->webInterfaceOperationsV2.<key>",
+      "web.operations->webInterfaceOperationsV2.*|oneOf1.resultRenderer",
+    ]) expect(seen).toContain(expected);
+    // Shared definitions can be visited first from a named view or a record.
+    // Assert the choice site independently of that traversal order.
+    expect(seen.some(path => path.endsWith("->webViewGroupV2.relationship"))).toBe(true);
+    expect(seen.some(path => path.endsWith("->webFieldEntryV2|oneOf1.render"))).toBe(true);
+    expect(seen.some((path) => path.includes("variableSources"))).toBe(false);
+  });
+
+  it("titles every interfaces.web schema node in both locales, for schema-driven editors", () => {
+    // A node is every object schema and every property under it; the enum
+    // members of a choice are titled too. Anything added later must be titled
+    // or this fails, so an editor built from the schema never shows raw keys.
+    const defs = coreEntitySchema.$defs as Record<string, unknown>;
+    const untitled: string[] = [];
+    const walk = (node: unknown, path: string) => {
+      if (!node || typeof node !== "object" || Array.isArray(node)) return;
+      const schema = node as Record<string, unknown>;
+      if ("$ref" in schema && Object.keys(schema).length === 1) return;
+      const i18n = schema["x-osf-i18n"] as { title?: { en?: string; nl?: string }; enum?: Record<string, { en?: string; nl?: string }> } | undefined;
+      if (!i18n?.title?.en || !i18n.title.nl) untitled.push(path);
+      for (const member of (schema.enum as string[] | undefined) ?? []) {
+        if (!i18n?.enum?.[member]?.en || !i18n.enum[member]?.nl) untitled.push(`${path}=${member}`);
+      }
+      for (const [key, child] of Object.entries((schema.properties as Record<string, unknown>) ?? {})) walk(child, `${path}.${key}`);
+      if (schema.additionalProperties && typeof schema.additionalProperties === "object") walk(schema.additionalProperties, `${path}.*`);
+      if (schema.items) walk(schema.items, `${path}[]`);
+      for (const [index, variant] of ((schema.oneOf as unknown[] | undefined) ?? []).entries()) walk(variant, `${path}|${index}`);
+    };
+    walk((defs.entityInterfacesV2 as { properties: { web: unknown } }).properties.web, "web");
+    for (const def of ["webViewsV2", "webNamedViewV2", "webViewGroupV2", "webWriteModeV2", "webFieldEntryV2", "webMatrixView"]) walk(defs[def], def);
+    expect(untitled).toEqual([]);
+  });
+
   it("accepts plugin-backed CRUD without a second authorization policy", () => {
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       authorization: {
         roles: {
           read: ["BillingRuns.Read"],
@@ -558,7 +653,7 @@ describe("coreEntity properties the compiler implements", () => {
 
   it("accepts plugin-backed delete only with its canonical destructive contract", () => {
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       authorization: {
         roles: {
           read: ["BillingRuns.Read", "BillingRuns.Delete"],
@@ -622,10 +717,10 @@ describe("coreEntity properties the compiler implements", () => {
 
   it("accepts action-specific record ACL authoring and plugin enforcement", () => {
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       fields: [{
         key: "authorization",
-        valueType: "object",
+        osfType: "object",
         required: true,
         defaultValue: {},
         persisted: { column: "authorization", storageClass: "core" },
@@ -686,7 +781,7 @@ describe("coreEntity properties the compiler implements", () => {
 
   it("rejects malformed strict v2 Web renderer registry keys", () => {
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operations: { list: v2Operation("list") },
       interfaces: {
         web: {
@@ -706,7 +801,7 @@ describe("coreEntity properties the compiler implements", () => {
 
   it("accepts false as an explicit interface Operation exclusion", () => {
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operations: { list: v2Operation("list"), get: v2Operation("get") },
       interfaces: {
         rest: { operations: { get: false } },
@@ -731,10 +826,10 @@ describe("coreEntity properties the compiler implements", () => {
       },
     };
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       fields: [
-        { key: "adapterId", valueType: "string" },
-        { key: "configurationValues", valueType: "object" },
+        { key: "adapterId", osfType: "string" },
+        { key: "configurationValues", osfType: "object" },
       ],
       operations: { create },
       interfaces: { rest: {}, graphql: {}, mcp: {} },
@@ -758,7 +853,7 @@ describe("coreEntity properties the compiler implements", () => {
       }],
     };
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operations: { create },
       interfaces: { rest: {}, graphql: {}, mcp: {} },
     });
@@ -775,13 +870,31 @@ describe("coreEntity properties the compiler implements", () => {
 
   it("rejects an unknown strict v2 MCP tool projection", () => {
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operations: { list: v2Operation("list") },
       interfaces: {
         mcp: { tools: "per-tenant", operations: { list: {} } },
       },
     });
     expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/tools/);
+  });
+
+  it("rejects the removed parallel entity-level MCP contract", () => {
+    const base = coreEntity({
+      schemaVersion: 3,
+      operations: { list: v2Operation("list") },
+      interfaces: { mcp: {} },
+    });
+    expect(() => validator.validate({ ...base, mcp: { enabled: true } }, "legacy.yaml"))
+      .toThrow(/mcp|additional/);
+    expect(() => validator.validate({
+      ...base,
+      interfaces: { mcp: { toolPrefix: "legacy" } },
+    }, "legacy.yaml")).toThrow(/toolPrefix|additional/);
+    expect(() => validator.validate({
+      ...base,
+      interfaces: { mcp: { derivedTools: {} } },
+    }, "legacy.yaml")).toThrow(/derivedTools|additional/);
   });
 
   it("accepts only the canonical server-issued, version-bound challenge shape", () => {
@@ -800,7 +913,7 @@ describe("coreEntity properties the compiler implements", () => {
       },
     };
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operations: { remove: challenged },
       interfaces: { rest: { operations: { remove: {} } } },
     });
@@ -816,7 +929,7 @@ describe("coreEntity properties the compiler implements", () => {
       confirmation: { mode: "acknowledgement" },
     };
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operations: { create },
       interfaces: { rest: { operations: { create: {} } } },
     });
@@ -840,10 +953,10 @@ describe("coreEntity properties the compiler implements", () => {
       },
     };
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       fields: [
-        { key: "updatedAt", valueType: "datetime", readOnly: true },
-        { key: "idempotencyKey", valueType: "string" },
+        { key: "updatedAt", osfType: "datetime", readOnly: true },
+        { key: "idempotencyKey", osfType: "string" },
       ],
       operations: { update },
       interfaces: { rest: { operations: { update: {} } } },
@@ -859,26 +972,20 @@ describe("coreEntity properties the compiler implements", () => {
     );
   });
 
-  it("keeps v1 and v2 closed instead of accepting mixed contracts", () => {
-    const v1WithOperations = coreEntity({
-      operations: { list: v2Operation("list") },
-      interfaces: { rest: { operations: { list: {} } } },
-    });
-    expect(() => validator.validate(v1WithOperations, "billing-run.yaml")).toThrow();
-
-    const v2WithLegacyRest = coreEntity({
-      schemaVersion: 2,
-      rest: true,
-      operations: { list: v2Operation("list") },
-      interfaces: { rest: { operations: { list: {} } } },
-    });
-    expect(() => validator.validate(v2WithLegacyRest, "billing-run.yaml")).toThrow();
+  it("admits only schemaVersion 3 and none of the retired top-level keys", () => {
+    for (const schemaVersion of [1, 2]) {
+      expect(() => validator.validate(coreEntity({ schemaVersion }), "billing-run.yaml")).toThrow(/schemaVersion/);
+    }
+    for (const retired of ["crud", "rest", "mcp", "ui", "hooks", "permissions"]) {
+      expect(() => validator.validate(coreEntity({ [retired]: {} }), "billing-run.yaml")).toThrow(new RegExp(retired));
+    }
+    expect(() => validator.validate(coreEntity({ operations: undefined }), "billing-run.yaml")).toThrow(/operations/);
   });
 
   it("rejects operation field projections until the compiler implements them", () => {
     const operation = { ...v2Operation("get"), output: { fields: ["idempotencyKey"] } };
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operations: { get: operation },
       interfaces: { rest: { operations: { get: {} } } },
     });
@@ -919,10 +1026,10 @@ describe("coreEntity properties the compiler implements", () => {
     // generators/pages.ts mirrors this onto the generated page field.
     const document = coreEntity({
       fields: [
-        { key: "entityType", valueType: "string" },
+        { key: "entityType", osfType: "string" },
         {
           key: "descriptionTemplate",
-          valueType: "string",
+          osfType: "string",
           variables: "template",
           suggestions: { sourceField: "entityType" },
         },
@@ -936,7 +1043,7 @@ describe("coreEntity properties the compiler implements", () => {
       fields: [
         {
           key: "descriptionTemplate",
-          valueType: "string",
+          osfType: "string",
           suggestions: { sourceEntity: "LabelRule" },
         },
       ],
@@ -944,110 +1051,4 @@ describe("coreEntity properties the compiler implements", () => {
     expect(() => validator.validate(document, "label-rule.yaml")).toThrow(/suggestions/);
   });
 
-  it("accepts a read-only common CRUD policy", () => {
-    const document = coreEntity({
-      crud: { operations: { create: false, update: false, delete: false } },
-    });
-    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
-  });
-
-  it("rejects unknown CRUD operations", () => {
-    const document = coreEntity({ crud: { operations: { publish: true } } });
-    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/crud/);
-  });
-
-  it("does not let derived execution rename the authored URL selector", () => {
-    const document = coreEntity({
-      fields: [
-        { key: "bindings", valueType: "object" },
-        { key: "version", valueType: "integer" },
-      ],
-      mcp: {
-        derivedTools: {
-          roles: ["viewer"],
-          keyField: "bindings",
-          descriptionField: "bindings",
-          inputFieldsField: "bindings",
-          versionField: "version",
-          execution: {
-            bindingsField: "bindings",
-            operationRef: "operationId",
-            operationEntity: "Operation",
-            providerRef: "adapterId",
-            providerEntity: "Adapter",
-            connectionEntity: "Connection",
-            connectionProviderRef: "adapterId",
-            connectionValuesField: "values",
-            baseUrlKeyField: "callerChoice",
-          },
-        },
-      },
-    });
-    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(
-      /baseUrlKeyField/,
-    );
-  });
-
-  it("accepts the optional derived-tool output definition field", () => {
-    const document = coreEntity({
-      fields: [
-        {
-          key: "inputs",
-          valueType: "object",
-          semanticType: "fieldDefinition",
-          cardinality: { min: 0, max: "unbounded" },
-        },
-        {
-          key: "outputs",
-          valueType: "object",
-          semanticType: "fieldDefinition",
-          cardinality: { min: 0, max: "unbounded" },
-        },
-      ],
-      mcp: {
-        derivedTools: {
-          roles: ["viewer"],
-          keyField: "inputs",
-          descriptionField: "inputs",
-          inputFieldsField: "inputs",
-          outputFieldsField: "outputs",
-        },
-      },
-    });
-    expect(validator.validate(document, "billing-run.yaml")).toBe(
-      "core-entity.schema.json",
-    );
-  });
-
-  it("does not let derived execution delegate a header name to caller input", () => {
-    const document = coreEntity({
-      fields: [
-        { key: "bindings", valueType: "object" },
-        { key: "version", valueType: "integer" },
-      ],
-      mcp: {
-        derivedTools: {
-          roles: ["viewer"],
-          keyField: "bindings",
-          descriptionField: "bindings",
-          inputFieldsField: "bindings",
-          versionField: "version",
-          execution: {
-            bindingsField: "bindings",
-            operationRef: "operationId",
-            operationEntity: "Operation",
-            providerRef: "adapterId",
-            providerEntity: "Adapter",
-            connectionEntity: "Connection",
-            connectionProviderRef: "adapterId",
-            connectionValuesField: "values",
-            requestHeaderNameField: "callerChoice",
-          },
-        },
-      },
-    });
-    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(
-      /requestHeaderNameField/,
-    );
-  });
 });

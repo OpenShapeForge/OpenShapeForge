@@ -5,8 +5,8 @@ import { translateRendererText } from "@/features/renderer/runtime/field-utils";
 import { resolveRendererReferenceItems } from "@/features/renderer/runtime/options-utils";
 import type { FieldControlProps } from "@/features/renderer/components/field";
 import type { Field } from "@/generated/compiler/field-contract";
-import { isFieldCollection } from "@/lib/field-contract/field-v2";
-import { getFieldSemanticTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
+import { isFieldCollection, fieldValueType } from "@/lib/field-contract/field-v2";
+import { getFieldOsfTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
 
 export function StaticCollectionSelectField({
   field,
@@ -49,9 +49,9 @@ export function StaticCollectionSelectField({
 
 export function shouldRenderStaticCollectionSelect(field: Field): boolean {
   return (
-    field.valueType === "string" &&
+    fieldValueType(field) === "string" &&
     isFieldCollection(field) &&
     (field.options?.type === "static" ||
-      getFieldSemanticTypeDefinition(field)?.options?.type === "static")
+      getFieldOsfTypeDefinition(field)?.options?.type === "static")
   );
 }

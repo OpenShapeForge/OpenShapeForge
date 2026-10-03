@@ -54,3 +54,24 @@ export function tenantNotFound(slug: string): ControlServiceError {
     `No tenant with slug "${slug}".`,
   );
 }
+
+/**
+ * A refusal a handler states in the Operation's own vocabulary, for the
+ * cases no service class covers: a state the service reports as `null`
+ * (a notice that does not exist), a process without a database, and a
+ * member whose link is still pending confirmation. Here rather than in
+ * operations.ts so a service module can throw it without importing the
+ * dispatcher that imports it.
+ */
+export class ControlOperationError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    /** The finer-grained code kept in the body for a client that branches on it. */
+    readonly detail: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ControlOperationError";
+  }
+}

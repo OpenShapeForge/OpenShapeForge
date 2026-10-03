@@ -15,10 +15,10 @@ describe("field authoring registry", () => {
           futureProfileProperty: { enabled: true },
         },
       },
-      semanticTypes: {
+      osfTypes: {
         exampleType: {
           label: { nl: "Voorbeeld", en: "Example" },
-          valueType: "string",
+          baseType: "string",
           kind: "scalar",
           props: { futureSemanticProperty: true },
         },
@@ -49,10 +49,10 @@ describe("field authoring registry", () => {
           futureProfileProperty: { enabled: true },
         },
       },
-      semanticTypes: {
+      osfTypes: {
         exampleType: {
           label: { nl: "Voorbeeld", en: "Example" },
-          valueType: "string",
+          baseType: "string",
           kind: "scalar",
           props: { futureSemanticProperty: true },
         },

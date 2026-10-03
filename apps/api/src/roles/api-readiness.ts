@@ -11,7 +11,10 @@ import { bootstrapIfEmpty } from "../db/bootstrap.js";
 import {
   checkGeneratedSchemaDrift,
   databaseNameFromUrl,
+  findLiveManifestSchemaTables,
+  findUndeclaredDatabaseSchema,
   type GeneratedSchemaDriftResult,
+  type UndeclaredDatabaseSchema,
 } from "../db/schema-drift.js";
 import type { ModuleSeed } from "../modules/contract.js";
 import type { ModuleRegistry } from "../modules/registry.js";
@@ -26,12 +29,14 @@ const CORE_READINESS_CHECK_NAMES = [
 
 /**
  * The schema dependency has one question in the reset model — was this
- * database built from the bundled manifest? — so these are the only codes
- * the schema check can raise.
+ * database built from the bundled manifest, and only from it? — so these
+ * are the only codes the schema check can raise: no record, another
+ * manifest's record, or objects beside the manifest.
  */
 export const API_READINESS_ERROR_CODES = new Set([
   "GENERATED_SCHEMA_BEHIND",
   "GENERATED_SCHEMA_UNMIGRATED",
+  "GENERATED_SCHEMA_FOREIGN",
 ]);
 
 function readinessError(code: string): Error {
@@ -64,16 +69,30 @@ function withTimeout<T>(
   });
 }
 
-function driftBanner(drift: GeneratedSchemaDriftResult): string {
+function isForeign(undeclared: UndeclaredDatabaseSchema): boolean {
+  return undeclared.tables.length > 0 || undeclared.columns.length > 0;
+}
+
+function driftBanner(
+  drift: GeneratedSchemaDriftResult,
+  undeclared: UndeclaredDatabaseSchema = { tables: [], columns: [] },
+): string {
+  const foreign = isForeign(undeclared);
   return [
     "============================================================================",
-    `GENERATED SCHEMA DRIFT DETECTED (status: ${drift.status})`,
-    drift.status === "unmigrated"
-      ? "The database has no applied generated-schema migration record (fresh DB?)."
-      : "The database's generated schema is BEHIND the manifest bundled in this build.",
+    `GENERATED SCHEMA DRIFT DETECTED (status: ${drift.status}${foreign ? ", foreign schema" : ""})`,
+    foreign
+      ? "The database carries schema the bundled manifest does not declare."
+      : drift.status === "unmigrated"
+        ? "The database has no applied generated-schema migration record (fresh DB?)."
+        : "The database was built from another manifest than the one bundled in this build.",
     `  recorded checksum: ${drift.recordedChecksum ?? "<none>"}`,
     `  bundled checksum:  ${drift.bundledChecksum}`,
-    "Run `bun run db:migrate` to bring the database up to date.",
+    ...undeclared.tables.map((name) => `  - table  ${name}`),
+    ...undeclared.columns.map((name) => `  - column ${name}`),
+    drift.status === "unmigrated" && !foreign
+      ? "Run `bun run db:migrate` to build the database."
+      : "Rebuild the database with `bun run db:reset`; a built database is never changed in place.",
     "============================================================================",
   ].join("\n");
 }
@@ -176,17 +195,33 @@ export async function enforceGeneratedSchemaFreshness(
     return;
   }
   if (drift.status === "ok") {
+    // A matching checksum says the build happened; the undeclared probe says
+    // nothing was added beside it since.
+    const undeclared = await withTimeout(
+      findUndeclaredDatabaseSchema(db),
+      DRIFT_CHECK_TIMEOUT_MS,
+      "undeclared schema probe",
+    );
+    if (isForeign(undeclared)) {
+      if (production) throw new Error(driftBanner(drift, undeclared));
+      log.warn(driftBanner(drift, undeclared));
+      return;
+    }
     log.debug(
       { checksum: drift.bundledChecksum },
       "Generated schema drift check: database matches the bundled manifest.",
     );
     return;
   }
-  if (production) throw new Error(driftBanner(drift));
-  if (drift.status === "unmigrated" && (await bootstrapEmptyDatabase(log, options))) {
+  // A database with no generated-schema row but live declared tables is a
+  // leftover the chain refuses; the banner must not send anyone to db:migrate.
+  const leftovers = drift.status === "unmigrated" ? await findLiveManifestSchemaTables(db) : [];
+  const leftoverSchema: UndeclaredDatabaseSchema = { tables: leftovers, columns: [] };
+  if (production) throw new Error(driftBanner(drift, leftoverSchema));
+  if (drift.status === "unmigrated" && leftovers.length === 0 && (await bootstrapEmptyDatabase(log, options))) {
     return;
   }
-  log.warn(driftBanner(drift));
+  log.warn(driftBanner(drift, leftoverSchema));
 }
 
 /** Re-run dependency checks on every probe so recovery needs no restart. */
@@ -216,6 +251,9 @@ export function createApiReadinessChecks(
               ? "GENERATED_SCHEMA_BEHIND"
               : "GENERATED_SCHEMA_UNMIGRATED",
           );
+        }
+        if (isForeign(await findUndeclaredDatabaseSchema(databaseRuntime.db))) {
+          throw readinessError("GENERATED_SCHEMA_FOREIGN");
         }
       },
     },

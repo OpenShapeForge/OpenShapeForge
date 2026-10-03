@@ -5,28 +5,30 @@ entity: YouTubeEmbed
 title: YouTube embed
 language: en
 labels: { en: YouTube video, nl: YouTube-video }
+pluralLabels: { en: YouTube videos, nl: "YouTube-video's" }
 domains: [documents]
 baseEntity: false
 displayTemplate: "{{title}}"
 authorization:
   roles:
-    read: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
+    read: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite]
 fields:
   - key: title
-    valueType: string
+    osfType: string
     required: true
     label: { en: Title, nl: Titel }
     validation: { minLength: 1, maxLength: 200 }
   - key: url
-    semanticType: url
+    osfType: url
     required: true
     label: { en: Video URL, nl: Video-URL }
     # An external URL is content, not a server-side instruction to fetch it.
     validation:
-      pattern: "^https://(?:www\\.)?(?:youtube\\.com/watch\\?v=[A-Za-z0-9_-]{11}|youtu\\.be/[A-Za-z0-9_-]{11})(?:[?&][A-Za-z0-9_=&%-]*)?$"
+      pattern: "^https://(?:www\\.)?(?:youtube\\.com/watch\\?v=[A-Za-z0-9_-]{11}|youtu\\.be/[A-Za-z0-9_-]{11})(?:[?&][A-Za-z0\
+        -9_=&%-]*)?$"
       maxLength: 2000
   - key: showControls
-    valueType: boolean
+    osfType: boolean
     defaultValue: true
     label: { en: Show player controls, nl: Spelerbediening tonen }
 operations:
@@ -53,7 +55,7 @@ operations:
           value:
             x-osf-entityInput: { entity: YouTubeEmbed, fields: [title, url, showControls] }
     errors: []
-    auth: { mode: session, roles: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite] }
+    auth: { mode: session, roles: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite] }
     tenancy: { mode: required }
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }

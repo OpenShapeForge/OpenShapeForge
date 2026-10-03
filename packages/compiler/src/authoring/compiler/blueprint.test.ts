@@ -4,7 +4,7 @@ import { buildBlueprint } from "./blueprint.js";
 import type { CoreEntity, CompiledField, CompiledColumn } from "../types.js";
 
 const entity = { entity: "Template", blueprint: { fields: ["name"] }, filterField: "name" } as CoreEntity;
-const field: CompiledField = { key: "name", valueType: "string", cardinality: "single", required: true, label: { en: "Name" }, render: { component: "Input" } };
+const field: CompiledField = { key: "name", osfType: "string", baseType: "string", cardinality: "single", required: true, label: { en: "Name" }, render: { component: "Input" } };
 const column: CompiledColumn = { field: "name", column: "name", type: "text", nullable: false, storageClass: "core" };
 describe("blueprint safe content", () => {
   test("opt-in carries stable core operation IDs", () => {
@@ -15,7 +15,7 @@ describe("blueprint safe content", () => {
     expect(buildBlueprint(plain, [field], [column])).toBeUndefined();
   });
   test("rejects protected and non-scalar data", () => {
-    for (const unsafe of [{ immutable: true }, { valueType: "object" as const }, { cardinality: "collection" as const }, { classification: { sensitivity: "pii" as const } }, { authorization: { roles: { read: ["private"] } } }, { writtenBy: ["rotate"] }]) {
+    for (const unsafe of [{ immutable: true }, { baseType: "object" as const }, { cardinality: "collection" as const }, { classification: { sensitivity: "pii" as const } }, { authorization: { roles: { read: ["private"] } } }, { writtenBy: ["rotate"] }]) {
       expect(() => buildBlueprint(entity, [{ ...field, ...unsafe }], [column])).toThrow("blueprint field");
     }
     for (const key of ["id", "externalId", "tenantId", "accessToken", "password"]) {

@@ -22,7 +22,7 @@ type GeneratedFormInteropOptions = {
   chrome?: NonNullable<RendererFormDefinition["presentation"]>["chrome"];
 };
 
-function normalizeValueType(valueType: string | undefined): Field["valueType"] {
+function normalizeValueType(valueType: string | undefined): NonNullable<Field["baseType"]> {
   switch (valueType) {
     case "string":
     case "integer":
@@ -65,7 +65,8 @@ function mapFieldOptions(options: GeneratedFieldOptions | undefined): FieldOptio
 function mapField(field: GeneratedFormFieldConfig): Field {
   return {
     key: field.key,
-    valueType: normalizeValueType(field.valueType),
+    osfType: field.osfType ?? field.baseType,
+    baseType: normalizeValueType(field.baseType),
     cardinality: field.cardinality ?? "single",
     variables: field.variables,
     sortable: field.sortable,
@@ -75,7 +76,6 @@ function mapField(field: GeneratedFormFieldConfig): Field {
     label: field.label,
     description: field.description,
     help: field.help,
-    semanticType: field.semanticType,
     layoutFraction: field.layoutFraction,
     validation: field.validation as FieldValidation | undefined,
     visibility: field.visibility as Field["visibility"],

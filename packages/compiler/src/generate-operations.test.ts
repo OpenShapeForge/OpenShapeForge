@@ -13,6 +13,8 @@ import {
   CORE_OPERATION_MODULES,
   operationOpenApiPaths,
   renderOperationCatalog,
+  CAPABILITY_GRANT_ERRORS,
+  CAPABILITY_GRANT_SECURITY_SCHEME,
 } from "./generate-operations.js";
 import type { CompiledPluginOperation } from "./generate-operations.js";
 import type { CompiledEntityOperation, OperationCatalogDefinition } from "./authoring/types.js";
@@ -42,6 +44,7 @@ const operation: PluginOperationContract = {
   auth: { mode: "session", roles: ["seller"], scopes: ["quotes:write"] },
   tenancy: { mode: "required" },
   idempotency: { mode: "idempotency-key", header: "Idempotency-Key", inputField: "idempotencyKey" },
+  effects: { data: "write", external: "none" },
   transports: {
     rest: { method: "POST", path: "/api/demo/quotes/:quoteId/publish", response: { status: 202, kind: "json" } },
     mcp: { enabled: true, name: "demo_publish_quote" },
@@ -165,6 +168,7 @@ describe("first-class plugin operations", () => {
   const entityOperation: CompiledEntityOperation = {
     key: "list",
     id: "Relation.list",
+    errors: [],
       entityId: "hubble.Relation",
     entityName: "Relation",
     name: "List Relation",
@@ -218,6 +222,7 @@ describe("first-class plugin operations", () => {
     const entityOperation: CompiledEntityOperation = {
       key: "remove",
       id: "Relation.remove",
+      errors: [],
       entityId: "hubble.Relation",
       entityName: "Relation",
       name: "Delete relation",
@@ -345,6 +350,7 @@ describe("first-class plugin operations", () => {
     const target: CompiledEntityOperation = {
       id: "Adapter.create",
       key: "create",
+      errors: [],
       intent: "create",
       entityId: "osf-integration.Adapter",
       entityName: "Adapter",
@@ -914,6 +920,71 @@ describe("first-class plugin operations", () => {
     );
   });
 
+  describe("capability auth", () => {
+    const capability = (overrides: Partial<PluginOperationContract> = {}): PluginOperationContract => ({
+      ...operation,
+      auth: { mode: "capability" },
+      transports: {
+        ...operation.transports,
+        mcp: { enabled: false, reason: "A grant token is presented on REST only." },
+        graphql: { enabled: false, reason: "A grant token is presented on REST only." },
+      },
+      ...overrides,
+    });
+
+    test("projects to REST only and requires a tenant", () => {
+      expect(() => collectPluginOperations([{ name: "demo", operations: [{
+        ...operation,
+        auth: { mode: "capability" },
+      }] }], context)).toThrow(/capability auth can only project to REST/);
+      expect(() => collectPluginOperations([{ name: "demo", operations: [
+        capability({ tenancy: { mode: "none" } }),
+      ] }], context)).toThrow(/capability auth requires tenancy mode required/);
+    });
+
+    test("appends the platform grant errors without overriding a declared pair", () => {
+      const [compiled] = collectPluginOperations([{ name: "demo", operations: [capability({
+        errors: [{ status: 401, code: "GRANT_INVALID", description: "Own wording." }],
+      })] }], context);
+      const pairs = compiled!.errors.map((error) => `${error.status} ${error.code}`);
+      expect(pairs).toEqual([
+        "401 GRANT_INVALID",
+        ...CAPABILITY_GRANT_ERRORS
+          .filter((error) => error.code !== "GRANT_INVALID")
+          .map((error) => `${error.status} ${error.code}`),
+      ]);
+      expect(compiled!.errors[0]!.description).toBe("Own wording.");
+      expect(pairs).toContain("423 GRANT_LOCKED");
+      expect(pairs).toContain("403 GRANT_SCOPE");
+    });
+
+    test("describes every capability Operation by the one platform security scheme", () => {
+      const compiled = collectPluginOperations([{ name: "demo", operations: [capability()] }], context);
+      const spec = JSON.parse(renderOpenApiSpec({ version: 1, tables: [] }, "fixture", {
+        operations: compiled,
+      })) as any;
+      expect(spec.paths["/api/demo/quotes/{quoteId}/publish"].post.security).toEqual([
+        { [CAPABILITY_GRANT_SECURITY_SCHEME]: [] },
+      ]);
+      expect(spec.components.securitySchemes[CAPABILITY_GRANT_SECURITY_SCHEME]).toMatchObject({
+        type: "http",
+        scheme: "grant",
+      });
+      expect(Object.keys(spec.paths["/api/demo/quotes/{quoteId}/publish"].post.responses)).toContain("423");
+    });
+
+    test("keeps the platform scheme name away from custom schemes", () => {
+      expect(() => collectPluginOperations([{ name: "demo", operations: [capability({
+        auth: {
+          mode: "custom",
+          scheme: CAPABILITY_GRANT_SECURITY_SCHEME,
+          description: "Not a grant",
+          securityScheme: { type: "apiKey", in: "header", name: "X-Token" },
+        },
+      })] }], context)).toThrow(/reserved for capability grants/);
+    });
+  });
+
   test("fails compilation when an operation plugin has no runtime module", () => {
     const collected = collectPluginOperations([{ name: "demo", operations: [operation] }], context);
     expect(() => assertOperationRuntimeModules(collected, [])).toThrow(/runtime module that is not registered: demo/);
@@ -1051,7 +1122,7 @@ describe("first-class plugin operations", () => {
         schema: "public",
         name: "legacy_quotes",
         tenantScoped: true,
-        generatedCrud: true,
+        generatedCrudEligible: true,
         columns: [{ name: "id", type: "uuid", primaryKey: true }],
         source: {
           rest: {
@@ -1139,7 +1210,7 @@ describe("first-class plugin operations", () => {
         schema: "demo",
         name: "quotes",
         tenantScoped: true,
-        generatedCrud: true,
+        generatedCrudEligible: true,
         columns: [{ name: "id", type: "uuid", primaryKey: true }],
         source: {
           graphql: {
@@ -1186,7 +1257,7 @@ const controlCatalog: OperationCatalogDefinition = {
       input: { schema: { type: "object", additionalProperties: false } },
       output: { schema: { type: "object", additionalProperties: true } },
       errors: [],
-      auth: { mode: "control", roles: ["platform_admin", "platform-operator"] },
+      auth: { mode: "control", roles: ["platform-operator"] },
       tenancy: { mode: "none" },
       effects: { data: "read", external: "none" },
       reliability: { idempotency: { mode: "natural" } },
@@ -1207,7 +1278,7 @@ const controlCatalog: OperationCatalogDefinition = {
       },
       output: { schema: { type: "object", additionalProperties: true } },
       errors: [{ status: 404, code: "NOT_FOUND", description: "The tenant does not exist." }],
-      auth: { mode: "control", roles: ["platform_admin", "platform-operator"] },
+      auth: { mode: "control", roles: ["platform-operator"] },
       tenancy: { mode: "none" },
       effects: { data: "read", external: "none" },
       reliability: { idempotency: { mode: "natural" } },
@@ -1291,7 +1362,7 @@ describe("control-realm operation catalogs", () => {
       plugin: "osf-control",
       handler: "listTenants",
       intent: "invoke",
-      auth: { mode: "control", roles: ["platform_admin", "platform-operator"] },
+      auth: { mode: "control", roles: ["platform-operator"] },
       tenancy: { mode: "none" },
       idempotency: { mode: "intrinsic" },
       transports: {

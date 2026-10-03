@@ -29,19 +29,56 @@ export async function applyUpdateNoticesMigration(db: OpenShapeForgeDatabase) {
     alter table platform.user_update_notices force row level security;
 
     drop policy if exists update_notices_readable on platform.update_notices;
+    drop policy if exists update_notices_insertable on platform.update_notices;
+    drop policy if exists update_notices_updatable on platform.update_notices;
+    drop policy if exists update_notices_deletable on platform.update_notices;
     create policy update_notices_readable on platform.update_notices
-      using (true)
+      for select
+      using (true);
+    create policy update_notices_insertable on platform.update_notices
+      for insert
       with check (app.bypass_rls());
+    create policy update_notices_updatable on platform.update_notices
+      for update
+      using (app.bypass_rls())
+      with check (app.bypass_rls());
+    create policy update_notices_deletable on platform.update_notices
+      for delete
+      using (app.bypass_rls());
 
     drop policy if exists user_update_notices_tenant_isolation
       on platform.user_update_notices;
+    drop policy if exists user_update_notices_insertable
+      on platform.user_update_notices;
+    drop policy if exists user_update_notices_updatable
+      on platform.user_update_notices;
+    drop policy if exists user_update_notices_deletable
+      on platform.user_update_notices;
     create policy user_update_notices_tenant_isolation
-      on platform.user_update_notices
+      on platform.user_update_notices for select
       using (
         app.bypass_rls()
         or tenant_id = app.current_tenant()
+      );
+    create policy user_update_notices_insertable
+      on platform.user_update_notices for insert
+      with check (
+        app.bypass_rls()
+        or (tenant_id = app.current_tenant() and user_id = app.current_user_id())
+      );
+    create policy user_update_notices_updatable
+      on platform.user_update_notices for update
+      using (
+        app.bypass_rls()
+        or (tenant_id = app.current_tenant() and user_id = app.current_user_id())
       )
       with check (
+        app.bypass_rls()
+        or (tenant_id = app.current_tenant() and user_id = app.current_user_id())
+      );
+    create policy user_update_notices_deletable
+      on platform.user_update_notices for delete
+      using (
         app.bypass_rls()
         or (tenant_id = app.current_tenant() and user_id = app.current_user_id())
       );

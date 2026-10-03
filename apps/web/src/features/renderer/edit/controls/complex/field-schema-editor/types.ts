@@ -55,7 +55,9 @@ export type FieldSectionProps = {
 };
 
 export type LocalizedFieldProperty = "description" | "placeholder" | "help" | "label";
-export type ValidationRuleKey = Exclude<keyof FieldValidation, "custom">;
+// The rules this editor offers: the scalar ones a message can accompany.
+// `custom` and `requires` (a cross-field row check) are authored in YAML.
+export type ValidationRuleKey = Exclude<keyof FieldValidation, "custom" | "requires">;
 
 export type LocalizedTextEditorProps = {
   label: string;

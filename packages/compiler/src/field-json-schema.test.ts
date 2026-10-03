@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
 import Ajv2020 from "ajv/dist/2020.js";
+import { operationI18nKeyword, operationReferenceKeyword, operationTypeKeyword } from "@openshapeforge/operations";
 import type { CompiledField } from "./authoring/types.js";
 import {
   compiledFieldSchema,
@@ -12,7 +13,7 @@ import {
 import type {
   ComponentCatalog,
   FieldDefinition,
-  FieldDefinitionSemanticTypeKind,
+  FieldDefinitionOsfTypeKind,
   McpDeclarativeAdapterUrls,
   McpDeclarativeOperationUrl,
   McpDeclarativeRequestMapping,
@@ -33,9 +34,9 @@ const componentCatalog: ComponentCatalog = {
 
 const packageRootFieldDefinition = {
   key: "definition",
-  valueType: "object",
+  osfType: "object",
 } satisfies FieldDefinition;
-const packageRootSemanticTypeKind: FieldDefinitionSemanticTypeKind = "object";
+const packageRootOsfTypeKind: FieldDefinitionOsfTypeKind = "object";
 const packageRootAdapterUrls = {
   baseUrlTemplate: "https://default.example.test",
   baseUrlTemplates: { secondary: "https://secondary.example.test" },
@@ -51,7 +52,8 @@ function field(overrides: Partial<CompiledField> & Pick<CompiledField, "key">): 
   const { key, ...rest } = overrides;
   return {
     key,
-    valueType: "string",
+    baseType: "string",
+    osfType: "string",
     cardinality: "single",
     required: false,
     label: { en: key },
@@ -61,6 +63,14 @@ function field(overrides: Partial<CompiledField> & Pick<CompiledField, "key">): 
 }
 
 describe("compiled field JSON Schema projection", () => {
+  it("carries enumeration values in the field's type and refuses one that does not convert exactly", () => {
+    const options = (value: string) => ({ type: "static" as const, items: [{ value, label: { en: value, nl: value } }] });
+    expect(compiledFieldSchema(field({ key: "priority", osfType: "integer", baseType: "integer", options: options("2") })).enum).toEqual([2]);
+    expect(compiledFieldSchema(field({ key: "flag", osfType: "boolean", baseType: "boolean", options: options("true") })).enum).toEqual([true]);
+    expect(compiledFieldSchema(field({ key: "code", osfType: "string", baseType: "string", options: options("2") })).enum).toEqual(["2"]);
+    expect(() => compiledFieldSchema(field({ key: "flag", osfType: "boolean", baseType: "boolean", options: options("yes") }))).toThrow("is not a boolean");
+    expect(() => compiledFieldSchema(field({ key: "priority", osfType: "integer", baseType: "integer", options: options("1.5") }))).toThrow("is not a safe integer");
+  });
   it("projects managed entity choices as a live reference, never a static enum", () => {
     const schema = compiledFieldSchema(field({
       key: "category", options: { type: "entity", source: "Category", valueField: "code" },
@@ -77,9 +87,65 @@ describe("compiled field JSON Schema projection", () => {
       groupMemberships: { any: { relationGroupId: { eq: "10000000-0000-4000-8000-000000000099" } } },
     };
     expect(compiledFieldSchema(field({
-      key: "customer", semanticType: "Relation",
+      key: "customer", osfType: "Relation",
       relationship: { kind: "belongsTo", target: "Relation", constraints },
     }))["x-osf-reference"]).toEqual({ entity: "Relation", valueField: "id", constraints });
+  });
+  it("what the compiler emits into x-osf-reference is what the runtime keyword accepts", () => {
+    // The keyword's meta-schema lives in packages/operations and every runtime
+    // validator registers it; a shape emitted here that it refuses makes Ajv
+    // throw for the whole operation schema (collection mutations, document
+    // create schemas). #592 added constraints to the emitter alone.
+    const ajv = new Ajv2020.default({ strict: false });
+    ajv.addKeyword(operationReferenceKeyword);
+    const compile = (schema: Record<string, unknown>) => () => ajv.compile({ type: "object", properties: { customer: schema } });
+    expect(compile(compiledFieldSchema(field({
+      key: "customer", osfType: "Relation",
+      relationship: { kind: "belongsTo", target: "Relation", constraints: {
+        relationType: { eq: "organization" }, active: { eq: true }, rank: { eq: 3 },
+        groupMemberships: { any: { relationGroupId: { eq: "10000000-0000-4000-8000-000000000099" } } },
+      } },
+    })))).not.toThrow();
+    expect(compile(compiledFieldSchema(field({ key: "category", options: { type: "entity", source: "Category", valueField: "code" } })))).not.toThrow();
+    // A constraint the runtime does not evaluate stays refused.
+    expect(compile({ type: "string", "x-osf-reference": { entity: "Relation", constraints: { relationType: { in: ["organization"] } } } })).toThrow(/x-osf-reference/);
+  });
+  it("what the projector emits into x-osf-i18n is what the runtime keyword accepts", () => {
+    // Stored definitions reach the same Ajv validators as compiled schemas. A
+    // label authored in one language is incomplete copy (a build-time lint),
+    // not an invalid schema that fails a form closed at runtime.
+    const ajv = new Ajv2020.default({ strict: false });
+    ajv.addKeyword(operationI18nKeyword);
+    const compile = (schema: Record<string, unknown>) => () => ajv.compile({ type: "object", properties: { code: schema } });
+    expect(compile(compiledFieldSchema(field({ key: "code", label: { en: "Code" } })))).not.toThrow();
+    expect(compile(compiledFieldSchema(field({ key: "code", label: { nl: "Code", fr: "Code" }, help: { en: "Help", nl: "Hulp" } })))).not.toThrow();
+    expect(compile({ type: "string", "x-osf-i18n": { title: {} } })).toThrow(/x-osf-i18n/);
+    expect(compile({ type: "string", "x-osf-i18n": { title: { de: "Code" } } })).toThrow(/x-osf-i18n/);
+  });
+
+  it("names the OSF type behind every property, and the runtime keyword accepts what it emits", () => {
+    // A form renders a property through the renderer registered for its type
+    // (#521); the JSON type beside it stays the only thing validated.
+    expect(compiledFieldSchema(field({ key: "customer", osfType: "Relation", relationship: { kind: "belongsTo", target: "Relation" } }))["x-osf-type"]).toBe("Relation");
+    expect(compiledFieldSchema(field({ key: "amount", osfType: "currency", baseType: "number" }))["x-osf-type"]).toBe("currency");
+    const ajv = new Ajv2020.default({ strict: false });
+    ajv.addKeyword(operationTypeKeyword);
+    expect(() => ajv.compile({ type: "object", properties: { amount: compiledFieldSchema(field({ key: "amount", osfType: "currency", baseType: "number" })) } })).not.toThrow();
+    for (const invalid of ["not a type", "field.definition", "field-definition", "field_definition", "9lives"]) {
+      expect(() => ajv.compile({ type: "number", "x-osf-type": invalid })).toThrow(/x-osf-type/);
+    }
+    // A collection is a use of the same type as its rows: the property carries it, and so does the row shape, explicit or not.
+    const outer = compiledFieldSchema(field({ key: "tags", osfType: "tag", cardinality: "collection" }));
+    expect(outer["x-osf-type"]).toBe("tag");
+    expect((outer.items as Record<string, unknown>)["x-osf-type"]).toBe("tag");
+    const explicit = compiledFieldSchema(field({ key: "codes", osfType: "string", cardinality: "collection", item: field({ key: "code", osfType: "code" }) }));
+    expect(explicit["x-osf-type"]).toBe("string");
+    // The row node names the row's type whether the item is explicit or not, so a reader never has to look inside allOf.
+    expect((explicit.items as Record<string, unknown>)["x-osf-type"]).toBe("code");
+    expect((explicit.items as { allOf: Record<string, unknown>[] }).allOf.map(branch => branch["x-osf-type"])).toEqual(["string", "code"]);
+    const nested = compiledFieldSchema(field({ key: "address", osfType: "address", baseType: "object", children: [field({ key: "street", osfType: "street" })] }));
+    expect(nested["x-osf-type"]).toBe("address");
+    expect((nested.properties as Record<string, Record<string, unknown>>).street!["x-osf-type"]).toBe("street");
   });
   it("rebases only refs and leaves matching prose untouched", () => {
     const source = {
@@ -97,7 +163,7 @@ describe("compiled field JSON Schema projection", () => {
 
   it("exports the complete canonical contract from the package root", () => {
     expect(packageRootFieldDefinition.key).toBe("definition");
-    expect(packageRootSemanticTypeKind).toBe("object");
+    expect(packageRootOsfTypeKind).toBe("object");
     expect(packageRootAdapterUrls.baseUrlTemplates.secondary).toBe(
       "https://secondary.example.test",
     );
@@ -115,6 +181,7 @@ describe("compiled field JSON Schema projection", () => {
         defaultValue: "active",
         relationship: { kind: "belongsTo", entity: "StatusDefinition" },
         hints: { aiInstructions: "Choose the closest status." },
+        options: { type: "referentiedata", referentieGroep: "STATUS" },
         render: { component: "ReferenceSelect", props: { referentieGroep: "STATUS" } },
       }),
       {
@@ -136,13 +203,14 @@ describe("compiled field JSON Schema projection", () => {
         "Allowed values: active (Active), closed (Closed).",
       default: "active",
       "x-osf-i18n": { title: { en: "status" }, description: { en: "Lifecycle status." }, enum: { active: { en: "Active", nl: "Actief" }, closed: { en: "Closed", nl: "Gesloten" } } },
+      "x-osf-type": "string",
     });
   });
 
   it("projects nested objects and collection item shapes recursively", () => {
     const action = field({
       key: "action",
-      valueType: "object",
+      baseType: "object", osfType: "object",
       children: [
         field({ key: "key", required: true, validation: { minLength: 1 } }),
         field({
@@ -161,7 +229,7 @@ describe("compiled field JSON Schema projection", () => {
     const schema = compiledFieldSchema(
       field({
         key: "actions",
-        valueType: "object",
+        baseType: "object", osfType: "object",
         cardinality: "collection",
         description: { en: "Ordered actions." },
         validation: { minItems: 1 },
@@ -208,9 +276,10 @@ describe("compiled field JSON Schema projection", () => {
 
     expect(schema.items).toEqual({
       allOf: [
-        { type: "string", maxLength: 8, enum: ["primary", "backup"] },
-        { type: "string", title: "Code", description: "Code", "x-osf-i18n": { title: { en: "Code" } } },
+        { type: "string", maxLength: 8, enum: ["primary", "backup"], "x-osf-type": "string" },
+        { type: "string", title: "Code", description: "Code", "x-osf-i18n": { title: { en: "Code" } }, "x-osf-type": "string" },
       ],
+      "x-osf-type": "string",
     });
     expect(schema.description).toContain("Allowed values: primary (Primary), backup (Backup).");
   });
@@ -233,7 +302,7 @@ describe("compiled field JSON Schema projection", () => {
     const schema = compiledFieldSchema(
       field({
         key: "metadata",
-        valueType: "object",
+        baseType: "object", osfType: "object",
         children: [field({ key: "source", required: true, defaultValue: "api" })],
       }),
       {},
@@ -258,8 +327,9 @@ describe("compiled field JSON Schema projection", () => {
     const schema = compiledFieldSchema(
       field({
         key: "definition",
-        valueType: "object",
-        semanticType: "fieldDefinition",
+        baseType: "object",
+        osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
       }),
     );
 
@@ -270,17 +340,17 @@ describe("compiled field JSON Schema projection", () => {
     expect(
       validate({
         key: "address",
-        valueType: "object",
+        osfType: "object",
         children: [
-          { key: "street", valueType: "string" },
+          { key: "street", osfType: "string" },
           {
             key: "residents",
-            valueType: "object",
+            osfType: "object",
             cardinality: "collection",
             item: {
               key: "resident",
-              valueType: "object",
-              children: [{ key: "name", valueType: "string" }],
+              osfType: "object",
+              children: [{ key: "name", osfType: "string" }],
             },
           },
         ],
@@ -289,8 +359,8 @@ describe("compiled field JSON Schema projection", () => {
     expect(
       validate({
         key: "address",
-        valueType: "object",
-        children: [{ valueType: "string" }],
+        osfType: "object",
+        children: [{ osfType: "string" }],
       }),
     ).toBe(false);
   });
@@ -299,8 +369,9 @@ describe("compiled field JSON Schema projection", () => {
     const schema = compiledFieldSchemaWithoutDefinitions(
       field({
         key: "definition",
-        valueType: "object",
-        semanticType: "fieldDefinition",
+        baseType: "object",
+        osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
         description: { en: "Definition" },
       }),
     );
@@ -317,14 +388,16 @@ describe("compiled field JSON Schema projection", () => {
       [
         field({
           key: "definition",
-          valueType: "object",
-          semanticType: "fieldDefinition",
+          baseType: "object",
+          osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
         }),
         field({
           key: "definitions",
-          valueType: "object",
+          baseType: "object",
           cardinality: "collection",
-          semanticType: "fieldDefinition",
+          osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
         }),
       ],
       {},
@@ -333,9 +406,33 @@ describe("compiled field JSON Schema projection", () => {
     const properties = schema.properties as Record<string, Record<string, unknown>>;
 
     expect(properties.definition?.$ref).toBe("#/$defs/fieldDefinition");
-    expect(properties.definitions?.items).toEqual({ $ref: "#/$defs/fieldDefinition" });
+    expect(properties.definitions?.items).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-type": "fieldDefinition" });
     expect(Object.keys(schema.$defs as object).filter((key) => key === "fieldDefinition")).toHaveLength(1);
     expect(() => new Ajv2020.default({ strict: false }).compile(schema)).not.toThrow();
+  });
+
+  it("projects a stored field of a catalog type through the schema that type declares, by contract not by name", () => {
+    const declared = createFieldSchemaCompiler({
+      componentCatalog,
+      osfTypes: { fieldDefinition: { baseType: "object", label: { en: "Field" }, schema: { $ref: "#/$defs/fieldDefinition" } } },
+    });
+    const schema = declared.object([{ key: "form", osfType: "object", children: [{ key: "fields", osfType: "fieldDefinition", cardinality: "collection" }] }]);
+    const form = (schema.properties as Record<string, Record<string, unknown>>).form!;
+    expect((form.properties as Record<string, Record<string, unknown>>).fields!.items).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-type": "fieldDefinition" });
+    expect(form.$defs).toBeUndefined();
+    expect(Object.keys(schema.$defs as object)).toContain("fieldDefinition");
+    const validate = new Ajv2020.default({ strict: false }).compile(schema);
+    expect(validate({ form: { fields: [{ key: "name", osfType: "string" }] } })).toBe(true);
+    expect(validate({ form: { fields: [{ osfType: "string" }] } })).toBe(false);
+    expect(declared.compile([{ key: "definition", osfType: "fieldDefinition" }])[0]).toMatchObject({ schema: { $ref: "#/$defs/fieldDefinition" } });
+
+    // The name carries nothing: the same key without a declared schema is a plain object.
+    const undeclared = createFieldSchemaCompiler({
+      componentCatalog,
+      osfTypes: { fieldDefinition: { baseType: "object", label: { en: "Field" } } },
+    });
+    expect(undeclared.field({ key: "definition", osfType: "fieldDefinition" })).toMatchObject({ type: "object" });
+    expect(undeclared.field({ key: "definition", osfType: "fieldDefinition" }).$ref).toBeUndefined();
   });
 
   it("gives compiler plugins the canonical recursive FieldDefinition projector", () => {
@@ -343,16 +440,16 @@ describe("compiled field JSON Schema projection", () => {
     const schema = fieldSchemas.object([
       {
         key: "actions",
-        valueType: "object",
+        osfType: "object",
         cardinality: { min: 2, max: 4 },
         required: true,
         item: {
           key: "action",
-          valueType: "object",
+          osfType: "object",
           children: [
             {
               key: "kind",
-              valueType: "string",
+              osfType: "string",
               required: true,
               validation: { maxLength: 12 },
               options: {
@@ -365,7 +462,7 @@ describe("compiled field JSON Schema projection", () => {
             },
             {
               key: "enabled",
-              valueType: "boolean",
+              osfType: "boolean",
               defaultValue: true,
             },
           ],

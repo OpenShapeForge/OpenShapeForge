@@ -6,17 +6,24 @@
  * column rules so the suite can never drift from the API.
  */
 import { expect } from "bun:test";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { sql } from "kysely";
 import {
   createGeneratedEntity,
+  getGeneratedEntity,
   getGeneratedCrudTables,
   isGeneratedCrudOperationEnabled,
+  isOperationWrittenColumn,
+  isTenantRegistryTable,
   isWritableColumn,
 } from "../../generated-crud.js";
+import fieldAuthoringRegistry from "../../../generated/compiler/field-authoring-registry.json" with { type: "json" };
+import { createGeneratedEntityForTable } from "../../../operations/entity/mutations.js";
 import { createDoc, expectOperationData } from "./gql-shapes.js";
 import {
   createdRows,
   getRuntime,
+  getSeedRuntime,
   gql,
   seed,
   type GeneratedTable,
@@ -66,16 +73,41 @@ export function fieldName(column: Column): string {
 }
 
 /**
- * Delegates to the engine's own predicate rather than restating it, so the
+ * Delegates to the engine's own predicates rather than restating them, so the
  * suite cannot drift from the API. `create` is the right default here: the
  * factory's job is building rows, and a column authored `immutable` is settable
- * exactly then (#177). Tests that build an update body ask for "update".
+ * exactly then (#177). Tests that build an update body ask for "update". A
+ * column written by a named Operation (a versioned head's lifecycle status)
+ * is never a caller's to set, whatever the intent.
  */
 export function isMutableColumn(
   column: Column,
   operation: "create" | "update" = "create",
 ): boolean {
-  return isWritableColumn(column, operation);
+  return isWritableColumn(column, operation) && !isOperationWrittenColumn(column);
+}
+
+/**
+ * The rows that reference `id` through a schema foreign key, as
+ * `table.column` names — what the database's on-delete rules will weigh when
+ * the record is deleted. Read from the database itself, so a sweep learns
+ * what a create actually left behind (a document's first version) rather
+ * than inferring it from the create's contract.
+ */
+export async function referencingRows(table: GeneratedTable, id: string, identity: Identity): Promise<string[]> {
+  const found: string[] = [];
+  for (const candidate of getGeneratedCrudTables()) {
+    for (const [column, target] of foreignKeyTargets(candidate)) {
+      if (target !== table.name) continue;
+      const tenantWhere = candidate.tenantScoped ? sql`and tenant_id = ${identity.tenantId}::uuid` : sql``;
+      const rows = await sql<{ count: string }>`
+        select count(*)::text as count from ${sql.id(candidate.schema, candidate.table)}
+        where ${sql.id(column)}::text = ${id} ${tenantWhere}
+      `.execute(getSeedRuntime().db);
+      if (Number(rows.rows[0]?.count ?? 0) > 0) found.push(`${candidate.name}.${column}`);
+    }
+  }
+  return found;
 }
 
 /** FK column name -> target table name (e.g. relation_group_id -> erp.relation_groups). */
@@ -140,6 +172,10 @@ type FieldSchema = {
   type?: string;
   format?: string;
   enum?: unknown[];
+  maxLength?: number;
+  pattern?: string;
+  minimum?: number;
+  maximum?: number;
   required?: string[];
   properties?: Record<string, FieldSchema>;
   "x-osf-reference"?: { entity: string; valueField?: string };
@@ -154,6 +190,81 @@ function createFieldSchema(table: GeneratedTable, field: string): FieldSchema | 
   const contract = operationContractFor(table, "create");
   const values = (contract?.inputSchema as FieldSchema | undefined)?.properties?.values;
   return values?.properties?.[field];
+}
+
+/**
+ * A sample the compiled write contract accepts: an allowed enum value, else the
+ * column sample made to fit the advertised pattern and length (a three-letter
+ * currency code cannot carry a marker). The runtime enforces what the contract
+ * advertises, on every interface, so a marker in an options field is refused.
+ */
+export function schemaSample(
+  column: Column,
+  schema: FieldSchema | undefined,
+  marker: string,
+): unknown {
+  if (Array.isArray(schema?.enum) && schema.enum.length > 0) return schema.enum[0];
+  if (schema?.type === "object" && schema.properties) {
+    return Object.fromEntries(
+      Object.entries(schema.properties).map(([key, property]) => [
+        key,
+        schemaSample(column, property, `${marker}:${key}`),
+      ]),
+    );
+  }
+  if (schema?.type === "integer" || schema?.type === "number") {
+    const min = typeof schema.minimum === "number" ? schema.minimum : 0;
+    const max = typeof schema.maximum === "number" ? schema.maximum : (schema.type === "integer" ? 400 : 11);
+    const preferred = schema.type === "integer" ? 400 : 1.5;
+    const value = Math.min(max, Math.max(min, preferred));
+    return schema.type === "integer" ? Math.round(value) : value;
+  }
+  if (schema?.type === "boolean") return true;
+  const rawSample = sampleValue(column, marker);
+  if (typeof rawSample !== "string") return rawSample;
+  let sample: string = rawSample;
+  if (schema?.pattern && !new RegExp(schema.pattern).test(sample)) {
+    // An identifier-shaped candidate first; then the marker's digest, which
+    // is what a checksum column (a content hash) is authored to hold; then a
+    // six-digit hex color derived from that digest.
+    const digest = createHash("sha256").update(`${marker}:${fieldName(column)}`).digest("hex");
+    const candidates = [
+      `e2e${marker.replace(/[^a-zA-Z0-9]/g, "")}${fieldName(column)}`,
+      digest,
+      `#${digest.slice(0, 6)}`,
+    ];
+    const fitting = candidates.find((candidate) => new RegExp(schema.pattern!).test(candidate));
+    if (fitting === undefined) {
+      throw new Error(`No deterministic sample satisfies ${fieldName(column)} pattern ${schema.pattern}.`);
+    }
+    sample = fitting;
+  }
+  return schema?.maxLength !== undefined ? sample.slice(0, schema.maxLength) : sample;
+}
+
+/**
+ * The authored value contract of a field on a table with no create of its
+ * own (a template's versions are made by its publish): the static options
+ * and pattern the compiler also turns into the column's CHECK, read from the
+ * compiled field registry the engine ships, so the runtime-owned seed of such
+ * a row satisfies the same rules a create would.
+ */
+function authoredFieldSchema(table: GeneratedTable, field: string): Pick<FieldSchema, "enum" | "maxLength" | "pattern"> | undefined {
+  const shape = (fieldAuthoringRegistry as { osfTypes?: Record<string, { shape?: Array<{ key: string; validation?: { pattern?: string; maxLength?: number }; options?: { type?: string; items?: Array<{ value: string }> } }> }> })
+    .osfTypes?.[table.source?.authoringEntityName ?? ""]?.shape?.find((entry) => entry.key === field);
+  if (!shape) return undefined;
+  const items = shape.options?.type === "static" ? shape.options.items?.map((item) => item.value) : undefined;
+  return {
+    ...(items?.length ? { enum: items } : {}),
+    ...(shape.validation?.pattern ? { pattern: shape.validation.pattern } : {}),
+    ...(shape.validation?.maxLength !== undefined ? { maxLength: shape.validation.maxLength } : {}),
+  };
+}
+
+/** `schemaSample` against the field's projected create schema on `table`, or its authored contract when there is no create. */
+export function contractSample(table: GeneratedTable, column: Column, marker: string): unknown {
+  const field = fieldName(column);
+  return schemaSample(column, createFieldSchema(table, field) ?? authoredFieldSchema(table, field), marker);
 }
 
 /**
@@ -190,12 +301,68 @@ export async function createRow(
     throw new Error(`FK dependency chain too deep while creating ${table.name}`);
   }
   const graphql = table.source?.graphql;
+  const createContract = operationContractFor(table, "create");
+  const needsRuntimeOwnedFixture =
+    createContract?.implementation?.type === "plugin" &&
+    table.columns.some(
+      (column) =>
+        column.required &&
+        isOperationWrittenColumn(column) &&
+        Object.prototype.hasOwnProperty.call(
+          createContract.inputSchema?.properties ?? {},
+          fieldName(column),
+        ) &&
+        !column.writtenBy?.some((writer) => writer.operation === createContract.id),
+    );
+
+  // A tenant registry (CHECK (id = tenant_id)) has one write path,
+  // provisioning, and the harness provisions each run's tenant row once
+  // (ensureTenantRows). The fixture for it IS that row: a second insert
+  // would collide on the tenant's own id.
+  if (isTenantRegistryTable(table)) {
+    return identity.tenantId;
+  }
+
+  if (needsRuntimeOwnedFixture) {
+    const foreignWriters = new Set(
+      table.columns.flatMap((column) =>
+        column.required && isOperationWrittenColumn(column)
+          ? (column.writtenBy ?? []).map((writer) => writer.operation)
+          : [],
+      ),
+    );
+    for (const owner of eligibleTables) {
+      const ownerTargets = foreignKeyTargets(owner);
+      const ownerColumn = owner.columns.find(
+        (column) =>
+          ownerTargets.get(column.name) === table.name &&
+          isOperationWrittenColumn(column) &&
+          column.writtenBy?.some((writer) => foreignWriters.has(writer.operation)),
+      );
+      if (!ownerColumn) continue;
+      const ownerId = await createRow(owner, identity, {}, depth + 1);
+      const ownerRow = await getGeneratedEntity(getRuntime().db, identity, {
+        table: owner.name,
+        id: ownerId,
+      });
+      const ownedId = ownerRow?.[ownerColumn.name];
+      if (typeof ownedId === "string" && ownedId) return ownedId;
+    }
+    throw new Error(
+      `No owning aggregate fixture can create ${table.source?.authoringEntityName ?? table.name}.`,
+    );
+  }
 
   // A plugin-backed create has an input contract of its own, and its
   // database may refuse a direct insert outright (a document must be created
   // atomically with its first version), so the fixture goes through the
   // Operation like any client's would.
-  if (graphql && graphql.operations?.create !== false && !isEntityBackedCreate(table)) {
+  if (
+    graphql &&
+    graphql.operations?.create !== false &&
+    !isEntityBackedCreate(table) &&
+    !needsRuntimeOwnedFixture
+  ) {
     const input = await pluginCreateInput(table, identity, overrides, depth);
     const created = await gql(identity, createDoc(table), { input });
     const id = expectOperationData(table, created, graphql.createMutationName)?.id as string;
@@ -204,13 +371,26 @@ export async function createRow(
     return id;
   }
 
-  const input = await columnInput(table, identity, overrides, depth);
+  const input = await columnInput(
+    table,
+    identity,
+    overrides,
+    depth,
+    needsRuntimeOwnedFixture,
+  );
 
-  if (!graphql || graphql.operations?.create === false) {
-    const row = await createGeneratedEntity(getRuntime().db, identity, {
-      table: table.name,
-      values: input,
-    });
+  if (
+    !graphql ||
+    graphql.operations?.create === false ||
+    !isGeneratedCrudOperationEnabled(table, "create")
+  ) {
+    // A table without a caller-facing create (a template's versions are made
+    // by its publish) is seeded through the runtime-owned path the engine's
+    // own Operations use: the same validation, tenant column and journal
+    // event, without the operation gate a caller would meet.
+    const row = isGeneratedCrudOperationEnabled(table, "create")
+      ? await createGeneratedEntity(getRuntime().db, identity, { table: table.name, values: input })
+      : await createGeneratedEntityForTable(getRuntime().db, identity, table, input);
     const id = String(row[table.primaryKey!]);
     expect(id).toBeTruthy();
     createdRows.push({ table, id, identity });
@@ -251,13 +431,14 @@ export async function columnInput(
   identity: Identity,
   overrides: Record<string, unknown> = {},
   depth = 0,
+  runtimeOwned = false,
 ): Promise<Record<string, unknown>> {
   const fkTargets = foreignKeyTargets(table);
   const input: Record<string, unknown> = {};
   const marker = nextMarker();
 
   for (const column of table.columns) {
-    if (!isMutableColumn(column)) continue;
+    if (!(runtimeOwned ? isWritableColumn(column, "create") : isMutableColumn(column))) continue;
     const field = fieldName(column);
     if (field in overrides) {
       input[field] = overrides[field];
@@ -280,7 +461,7 @@ export async function columnInput(
     const reference = createFieldSchema(table, field)?.["x-osf-reference"];
     input[field] = reference
       ? await referencedValue(reference, identity, depth)
-      : sampleValue(column, marker);
+      : contractSample(table, column, marker);
   }
   return input;
 }
@@ -308,13 +489,17 @@ export async function pluginCreateInput(
 
   const build = async (node: FieldSchema): Promise<Record<string, unknown>> => {
     const input: Record<string, unknown> = {};
+    // A contract that offers alternatives ("a fixed amount, or a basis with a
+    // percentage") states them as an anyOf of required lists; the first
+    // alternative is the one the factory satisfies.
+    const alternative = (node as { anyOf?: Array<{ required?: string[] }> }).anyOf?.[0]?.required ?? [];
     for (const [key, property] of Object.entries(node.properties ?? {})) {
       if (key in pending) {
         input[key] = pending[key];
         delete pending[key];
         continue;
       }
-      const required = node.required?.includes(key) === true;
+      const required = node.required?.includes(key) === true || alternative.includes(key);
       if (property.type === "object" && property.properties) {
         // An optional block (an artifact handle, say) is left out entirely:
         // its own required members only apply once the block is present.
@@ -388,13 +573,16 @@ export function textColumnFor(
 ): Column | undefined {
   // "update": callers plant a value at create and then change it, so the
   // column has to be writable in both directions — and settable by the
-  // create the factory drives.
-  const mutableText = table.columns.filter(
-    (column) =>
-      isMutableColumn(column, "update") &&
+  // create the factory drives. Free text only: callers plant markers, and a
+  // column whose contract is an options list, a pattern or a short code
+  // refuses one.
+  const mutableText = table.columns.filter((column) => {
+    const schema = createFieldSchema(table, fieldName(column));
+    return isMutableColumn(column, "update") &&
       column.type === "text" &&
-      isCreatableField(table, fieldName(column)),
-  );
+      isCreatableField(table, fieldName(column)) &&
+      !schema?.enum && !schema?.pattern && (schema?.maxLength ?? Infinity) >= 80;
+  });
   return mutableText.find((column) => fieldName(column) === preferredField) ?? mutableText[0];
 }
 

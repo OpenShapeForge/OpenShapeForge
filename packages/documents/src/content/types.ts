@@ -8,8 +8,8 @@ export type ContentCardinality =
 
 /** Resolved metadata, supplied by the compiler; semantic types are not re-registered here. */
 export type ContentValueShape = {
-  readonly semanticType?: string;
-  readonly valueType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
+  readonly osfType?: string;
+  readonly baseType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   readonly cardinality?: ContentCardinality;
   readonly required?: boolean;
   readonly nullable?: boolean;
@@ -24,6 +24,8 @@ export type ContentField = ContentValueShape & {
 export type CompiledContentBlockDefinition = {
   readonly entityName: string;
   readonly schemaVersion: number;
+  /** The compiler's fingerprint of the definition (fields, references, storage, Operations), frozen with every result. */
+  readonly definitionHash?: string;
   readonly fields: Readonly<Record<string, ContentField>>;
   /** Output-channel to renderer identifier. No renderer code is executed by this engine. */
   readonly renderers: Readonly<Record<string, string>>;
@@ -49,6 +51,7 @@ export type ContentEntityReference = {
 
 export type ContentReferenceValue =
   | ContentEntityReference
+  | { readonly parameter: string }
   | readonly ContentEntityReference[]
   | null;
 
@@ -60,12 +63,14 @@ export type ContentBlock = {
   readonly references: Readonly<Record<string, ContentReferenceValue>>;
 };
 
-export type TemplateParameter = ContentValueShape & { readonly defaultValue?: JsonValue };
+export type TemplateParameter = ContentValueShape & { readonly defaultValue?: JsonValue; readonly relationship?: { readonly target: string } };
 
 export type ContentTemplateVariant = {
   readonly id: string;
   readonly channel: string;
   readonly locale: string;
+  /** Served for its channel when no variant matches the requested language; at most one per channel. */
+  readonly default?: boolean;
   /** The owning collection's order is authoritative. No second position property exists. */
   readonly blocks: readonly ContentBlock[];
   readonly allowedDefinitions?: readonly string[];

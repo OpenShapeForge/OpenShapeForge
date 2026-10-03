@@ -26,7 +26,7 @@ import {
   fetchRecord,
   listDoc,
 } from "./e2e/gql-shapes.js";
-import { isEntityBackedCreate, placeholderControls } from "./e2e/operations.js";
+import { placeholderControls } from "./e2e/operations.js";
 
 registerSuiteLifecycle();
 
@@ -43,6 +43,7 @@ for (const table of tables) {
     if (table.tenantScoped) {
       test("rows are invisible to other tenants (RLS)", async () => {
         const id = await createRow(table, tenantA);
+        const before = await eventsFor(tenantA, table, id);
 
         expect(await fetchRecord(tenantB, table, id)).toBeNull();
 
@@ -70,12 +71,8 @@ for (const table of tables) {
 
         // The failed delete must not journal an event, and the journal itself
         // is tenant-isolated: tenant B sees no events for tenant A's row.
-        // (A plugin-backed create journals nothing through the generic core;
-        // see entity-events.)
         const ownerEvents = await eventsFor(tenantA, table, id);
-        expect(ownerEvents.map((event) => event.eventType)).toEqual(
-          isEntityBackedCreate(table) ? ["created"] : [],
-        );
+        expect(ownerEvents).toEqual(before);
         expect(await eventsFor(tenantB, table, id)).toEqual([]);
       });
     }

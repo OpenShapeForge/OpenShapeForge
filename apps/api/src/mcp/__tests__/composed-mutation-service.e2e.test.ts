@@ -5,13 +5,14 @@
  * is step 1's output — must take BOTH steps when a runtime module selects
  * the call's source in `default` mode. Before the composed selection, the
  * one-source-per-call rule ran step 1 and silently skipped step 2 (the
- * pentest plugin's record_finding_with_evidence found it).
+ * advies plugin's record_finding_with_evidence found it).
  *
  * Also pinned here: what happens when it cannot complete. A required step
  * without a usable source refuses BEFORE the first write; a step that fails
  * after an earlier step wrote comes back as `status: "partial"` naming what
  * was written and what was not — never as a silent half-success.
  */
+import accountsRuntime from "../../accounts/runtime.js";
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
@@ -19,6 +20,7 @@ import { sql, type Kysely } from "kysely";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import documentsPluginRuntime from "@openshapeforge/documents/runtime";
+import versioningPluginRuntime from "@openshapeforge/versioning/runtime";
 import type { DB } from "../../generated/db/types.js";
 import rawCatalog from "../../generated/mcp/tools.json" with { type: "json" };
 import { createDatabaseRuntime } from "../../db/connection.js";
@@ -94,7 +96,6 @@ function table(name: string, columns: ReturnType<typeof column>[]) {
     tenantScoped: true,
     domainInternal: false,
     generatedCrudEligible: true,
-    generatedCrud: true,
     primaryKey: "id",
     columns,
   };
@@ -134,8 +135,20 @@ describe("composed mutation Service on the native provider", () => {
               definition_version integer not null,
               status text not null,
               visible_roles jsonb not null,
-              internal_only boolean not null,
-              bindings jsonb not null
+              internal_only boolean not null
+            )
+          `.execute(trx);
+          await sql`
+            create table public.composed_binding_test (
+              id uuid primary key,
+              tenant_id uuid not null,
+              service_id uuid not null,
+              operation_id uuid not null,
+              "order" integer not null,
+              optional boolean,
+              "when" jsonb,
+              input_mapping jsonb,
+              output_mapping jsonb
             )
           `.execute(trx);
           await sql`
@@ -173,6 +186,7 @@ describe("composed mutation Service on the native provider", () => {
           `.execute(trx);
           for (const tableName of [
             "composed_service_test",
+            "composed_binding_test",
             "composed_operation_test",
             "composed_provider_test",
             "composed_connection_test",
@@ -202,14 +216,14 @@ describe("composed mutation Service on the native provider", () => {
         const disconnectedProviderId = randomUUID();
         const nativeConnectionId = randomUUID();
         const inputFields = JSON.stringify([
-          { key: "displayName", valueType: "string" },
-          { key: "relationType", valueType: "string" },
-          { key: "contactType", valueType: "string" },
-          { key: "contactValue", valueType: "string" },
+          { key: "displayName", osfType: "string" },
+          { key: "relationType", osfType: "string" },
+          { key: "contactType", osfType: "string" },
+          { key: "contactValue", osfType: "string" },
         ]);
         const outputFields = JSON.stringify([
-          { key: "relationId", valueType: "string" },
-          { key: "contactDetailId", valueType: "string" },
+          { key: "relationId", osfType: "string" },
+          { key: "contactDetailId", osfType: "string" },
         ]);
         const relationBinding = (order: number) => ({
           order,
@@ -238,17 +252,36 @@ describe("composed mutation Service on the native provider", () => {
           `.execute(trx);
           await sql`insert into public.composed_service_test
             (id, tenant_id, key, description, input_fields, output_fields, definition_version,
-             status, visible_roles, internal_only, bindings)
+             status, visible_roles, internal_only)
           values
             (${serviceId}::uuid, ${tenantId}::uuid, 'record_relation_with_contact',
              'Create a relation and its first contact detail in one call',
-             ${sql.lit(inputFields)}::jsonb, ${sql.lit(outputFields)}::jsonb, 1, 'published', '["reader"]'::jsonb, false,
-             ${sql.lit(JSON.stringify([relationBinding(1), contactBinding(2, contactOperationId)]))}::jsonb),
+             ${sql.lit(inputFields)}::jsonb, ${sql.lit(outputFields)}::jsonb, 1, 'published', '["reader"]'::jsonb, false),
             (${gappedServiceId}::uuid, ${tenantId}::uuid, 'record_relation_with_contact_elsewhere',
              'Create a relation here and its contact detail at a provider nobody connected',
-             ${sql.lit(inputFields)}::jsonb, ${sql.lit(outputFields)}::jsonb, 1, 'published', '["reader"]'::jsonb, false,
-             ${sql.lit(JSON.stringify([relationBinding(1), contactBinding(2, elsewhereOperationId)]))}::jsonb)
+             ${sql.lit(inputFields)}::jsonb, ${sql.lit(outputFields)}::jsonb, 1, 'published', '["reader"]'::jsonb, false)
           `.execute(trx);
+          const insertBinding = (
+            ownerId: string,
+            binding: {
+              order: number;
+              operationId: string;
+              inputMapping: unknown;
+              outputMapping: unknown;
+            },
+          ) => sql`insert into public.composed_binding_test
+            (id, tenant_id, service_id, operation_id, "order", optional, "when", input_mapping, output_mapping)
+            values (
+              ${randomUUID()}::uuid, ${tenantId}::uuid, ${ownerId}::uuid, ${binding.operationId}::uuid,
+              ${binding.order}, ${"optional" in binding ? (binding as { optional?: boolean }).optional ?? null : null},
+              null,
+              ${sql.lit(JSON.stringify(binding.inputMapping))}::jsonb,
+              ${sql.lit(JSON.stringify(binding.outputMapping))}::jsonb
+            )`.execute(trx);
+          await insertBinding(serviceId, relationBinding(1));
+          await insertBinding(serviceId, contactBinding(2, contactOperationId));
+          await insertBinding(gappedServiceId, relationBinding(1));
+          await insertBinding(gappedServiceId, contactBinding(2, elsewhereOperationId));
           await sql`insert into public.composed_operation_test
             (id, tenant_id, key, kind, provider_id, operation, response_mapping, required_scopes)
           values
@@ -291,7 +324,17 @@ describe("composed mutation Service on the native provider", () => {
             column("status", "status"),
             column("visible_roles", "visibleRoles", "jsonb"),
             column("internal_only", "internalOnly", "boolean"),
-            column("bindings", "bindings", "jsonb"),
+          ]),
+          table("composed_binding_test", [
+            column("id", "id", "uuid"),
+            column("tenant_id", "tenantId", "uuid"),
+            column("service_id", "serviceId", "uuid"),
+            column("operation_id", "operationId", "uuid"),
+            column("order", "order", "integer"),
+            column("optional", "optional", "boolean"),
+            column("when", "when", "jsonb"),
+            column("input_mapping", "inputMapping", "jsonb"),
+            column("output_mapping", "outputMapping", "jsonb"),
           ]),
           table("composed_operation_test", [
             column("id", "id", "uuid"),
@@ -335,7 +378,10 @@ describe("composed mutation Service on the native provider", () => {
           visibleToRolesField: "visibleRoles",
           internalOnlyField: "internalOnly",
           execution: {
-            bindingsField: "bindings",
+            bindingsRelation: "capabilityBindings",
+            bindingsEntity: "Binding",
+            bindingsTable: "public.composed_binding_test",
+            parentRef: "serviceId",
             operationRef: "operationId",
             operationEntity: "Capability",
             operationTable: "public.composed_operation_test",
@@ -391,12 +437,12 @@ describe("composed mutation Service on the native provider", () => {
           },
         };
 
-        // The shipped catalog binds a canonical workflow operation; the
+        // The shipped catalog binds a canonical notebook operation; the
         // server refuses to build without its module, so stub it.
-        const workflowModule: RuntimeModule = {
-          name: "workflow",
+        const notebookModule: RuntimeModule = {
+          name: "notebook",
           operationHandlers: {
-            startWebhook: async () => ({ value: { status: "accepted" } }),
+            importNotebook: async () => ({ value: { status: "accepted" } }),
           },
         };
 
@@ -411,7 +457,12 @@ describe("composed mutation Service on the native provider", () => {
             scope: "self",
             credential: "bearer",
           },
-          modules: [documentsPluginRuntime as unknown as RuntimeModule, workflowModule, module],
+          modules: [accountsRuntime,
+            documentsPluginRuntime as unknown as RuntimeModule,
+            versioningPluginRuntime as unknown as RuntimeModule,
+            notebookModule,
+            module,
+          ],
           modulePlatform: platform,
           egressOwner: module.egress,
           tables,

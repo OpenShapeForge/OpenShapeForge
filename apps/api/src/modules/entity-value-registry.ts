@@ -24,6 +24,7 @@ export function createEntityValueRegistry(value: unknown): RuntimeEntityValueReg
         !matches(item.definitionField, fieldKey) || !record(item.definitions) ||
         ![item.schema, item.table, item.valuesColumn, item.definitionColumn].every((name) => matches(name, identifier))) invalid();
     const carrier = item as Record<string, unknown>;
+    const columns = new Set([carrier.valuesColumn, carrier.definitionColumn, "id", "tenant_id", "created_at", "updated_at"]);
     for (const [name, definition] of Object.entries(carrier.definitions as Record<string, unknown>)) {
       if (!record(definition) || !entityName.test(name) || definition.entityName !== name ||
           definition.schemaVersion !== 1 || !matches(definition.definitionHash, /^[a-f0-9]{64}$/) ||
@@ -33,9 +34,14 @@ export function createEntityValueRegistry(value: unknown): RuntimeEntityValueReg
       for (const reference of (definition as Record<string, unknown>).references as unknown[]) {
         if (!record(reference) || !matches(reference.fieldKey, fieldKey) || !matches(reference.targetEntity, entityName) ||
             typeof reference.required !== "boolean" ||
+            (reference.parameterColumn !== undefined && !matches(reference.parameterColumn, identifier)) ||
             ![reference.schema, reference.table, reference.column].every((name) => matches(name, identifier)) ||
             keys.has(reference.fieldKey as string)) invalid();
         keys.add((reference as Record<string, unknown>).fieldKey as string);
+        for (const column of [(reference as Record<string, unknown>).column, (reference as Record<string, unknown>).parameterColumn].filter(value => value !== undefined)) {
+          if (columns.has(column)) invalid();
+          columns.add(column);
+        }
       }
     }
     const key = `${carrier.entityName}.${carrier.fieldKey}`;

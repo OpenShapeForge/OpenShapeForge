@@ -18,30 +18,42 @@ definition through another field:
 
 ```yaml
 - key: definitionKey
-  valueType: string
+  osfType: string
   required: true
   immutable: true
   persisted: { column: definition_key, storageClass: core }
 - key: values
-  semanticType: entityValue
+  osfType: entityValue
   entityValue: { definitionField: definitionKey }
   required: true
   persisted: { column: values, storageClass: core }
 ```
 
-The owner selects allowed definitions on its ordinary relation field:
+The owner's collection is derived from the block's reference to it; the
+reference declares the collection's key, ownership, ordering and allowed
+definitions:
 
 ```yaml
-- key: blocks
-  semanticType: Block
-  cardinality: collection
-  sortable: true
-  relationship: { inverse: variant, ownership: owned }
-  allowedDefinitions: [TextBlock, YouTubeEmbed, TemplateBlock]
+# on Block
+- key: variant
+  osfType: TemplateVariant
+  relationship:
+    inverse:
+      key: blocks
+      ownership: owned
+      sortable: true
+      allowedDefinitions: [TextBlock, YouTubeEmbed, TemplateBlock]
 ```
 
 These fragments use the schemaVersion 3 field contract. Entity semantic types
-are derived from loaded entity YAMLs, not repeated in the semantic-type catalog.
+are derived from loaded entity YAMLs, not repeated in the osf-type catalog.
+
+Two optional options of that `inverse` declaration shape how the owner's
+collection Operations treat the children: `childAuthorization: owner` lends
+the owner's update roles to them, and `childLock: <booleanField>` (a boolean
+field of the referencing entity) makes `update`, `move` and `remove` refuse a
+child whose flag is set. A document's blocks use both; see
+`docs/document-content.md`.
 
 ## Storage and logical fields
 
@@ -57,6 +69,20 @@ The logical API field remains one object. For example, a template inclusion has
 that shape using compiler metadata; clients never choose physical column names.
 Reference authorization belongs in the same transaction as the write. Metadata
 itself grants no access to the referenced records.
+
+An entity-value carrier may explicitly enable `parameterBindings: true` beside
+`definitionField`. A single relationship then accepts either a fixed UUID or
+`{ parameter: "record" }`. These are alternatives, not two simultaneous targets.
+The compiler retains the UUID foreign key and adds a separate parameter-name
+column plus an exclusive-storage check. A symbolic name is not a database record
+identity and is never stored in the UUID column or own-values JSON.
+
+At materialization, `record` must be a declared local parameter whose inferred
+entity semantic type matches the relationship target. The supplied UUID is
+validated by the parameter schema and resolved through the normal authorized
+entity read. Template snapshots preserve the symbolic binding; materialized
+references preserve the resolved record and its version. Parameters remain
+FieldDefinitions on the template version, not separately stored parameter entities.
 
 The generated `entityValues` registry contains resolved definition fields,
 JSON schemas, exact reference mappings, definition fingerprints, and owning
@@ -94,9 +120,13 @@ working mutations.
 ## Template materialization
 
 Templates have versions, and versions have explicit channel/locale variants.
-Materialization selects an exact variant; it does not silently fall back to
-another channel or language. Local parameters use `{{local.name}}`; shared Chip
-values use `{{chips.name}}`.
+Materialization selects the channel exactly and the locale by language: the
+exact locale, else a variant of the same language subtag, else the variant
+authored as the channel's default (`TemplateVariant.isDefault`); it never
+falls back to another channel, and a channel without a variant for the
+language or a default refuses (`docs/document-content.md`, "Which variant a
+locale gets"). Local parameters use `{{local.name}}`; shared Chip values use
+`{{chips.name}}`.
 
 The documents runtime reads authorized template, placement and Chip records,
 validates values, resolves typed references through canonical read Operations,

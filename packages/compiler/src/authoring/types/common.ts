@@ -20,6 +20,12 @@ export interface FieldValidation {
   max?: number | ValidationRule;
   pattern?: string | ValidationRule;
   format?: string;
+  /**
+   * Fields that must hold a value whenever this one does — an invoice number
+   * without the fiscal year that scopes it is no identity. Persisted as a
+   * database CHECK on the row, so no write path can leave the pair half set.
+   */
+  requires?: string[];
   custom?: {
     name: string;
     message?: LocalizedText;
@@ -113,9 +119,20 @@ export interface RowAccessConfig {
   recordPermissions?: RowAccessRecordPermissionsConfig;
 }
 
+/**
+ * Owner-axis read policy: the rows an owning reference carries are readable
+ * with the owner entity's read roles; a command marks its transaction to
+ * read every owner's rows. See docs/document-content.md.
+ */
+export interface OwnerAxisConfig {
+  fields: string[];
+  command?: { setting: string; values: string[] };
+}
+
 export interface AuthorizationConfig {
   roles: AuthorizationRoles;
   rowAccess?: RowAccessConfig;
+  ownerAxis?: OwnerAxisConfig;
 }
 
 export interface FieldAuthorizationConfig {
@@ -159,7 +176,7 @@ export interface FieldOptions {
   labelField?: string;
 }
 
-export interface SemanticTypeLookupDefinition {
+export interface OsfTypeLookupDefinition {
   provider: string;
   remoteUrl?: string;
   searchParam?: string;
@@ -204,6 +221,8 @@ export interface RetentionPolicy {
   };
   holds?: {
     suspendDestruction?: boolean;
+    /** Boolean entity field whose true value means a hold is active. */
+    activeField?: string;
   };
   tenantOverride?: {
     allowExtension?: boolean;
@@ -239,25 +258,6 @@ export interface ItemAction {
 }
 
 /**
- * Canonical form field definition — used in userInput and per-action formFields.
- * Single source of truth shared across compiler, workflow service, and web client.
- */
-export interface FormFieldDefinition {
-  key: string;
-  valueType: string;
-  cardinality?: "single" | "collection";
-  semanticType?: string;
-  label: LocalizedText;
-  required?: boolean;
-  description?: LocalizedText | null;
-  options?: Record<string, unknown>;
-  render?: Record<string, unknown>;
-  validation?: Record<string, unknown>;
-  children?: FormFieldDefinition[];
-  item?: FormFieldDefinition;
-}
-
-/**
  * Canonical action definition — single source of truth for all action shapes
  * across the platform: view actions, workflow awaitAction/userInput nodes,
  * and formDefinition action bars.
@@ -274,8 +274,8 @@ export interface ActionDefinition {
   visibleWhen?: VisibilityConfig;
   disabledWhen?: VisibilityConfig;
   disabledMessage?: LocalizedText;
-  /** Optional per-action form fields shown in a modal before triggering. */
-  formFields?: FormFieldDefinition[];
+  /** Optional per-action form fields shown in a modal before triggering: the one authored field contract. */
+  formFields?: import("./field-definition.js").FieldDefinition[];
 }
 
 /**

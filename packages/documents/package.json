@@ -1,6 +1,6 @@
 {
   "name": "@openshapeforge/documents",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "Canonical Document and DocumentVersion runtime commands for OpenShapeForge.",
   "repository": {
     "type": "git",
@@ -11,8 +11,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./artifact-authorization": "./src/artifact-authorization.ts",
     "./runtime": "./src/runtime.ts",
+    "./content-commands": "./src/content-commands.ts",
     "./content": "./src/content/index.ts",
     "./seed": "./src/seed.ts",
     "./package.json": "./package.json"
@@ -26,11 +26,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "peerDependencies": {
-    "@openshapeforge/compiler": ">=0.1.7 <0.2.0",
+    "@openshapeforge/compiler": ">=0.2.0 <0.3.0",
     "@openshapeforge/plugin-runtime": ">=0.1.0 <0.2.0"
   },
   "dependencies": {
     "@openshapeforge/operations": "workspace:*",
+    "@openshapeforge/versioning": "workspace:*",
     "yaml": "^2.8.3"
   },
   "devDependencies": {

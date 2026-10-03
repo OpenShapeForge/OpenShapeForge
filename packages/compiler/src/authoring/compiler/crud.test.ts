@@ -1,41 +1,48 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import type { CoreEntity } from "../types.js";
+import type { CoreEntity, CrudOperationKey } from "../types.js";
 import { buildCrud, limitCrudOperations } from "./crud.js";
 
-const entity = (crud?: CoreEntity["crud"]): CoreEntity => ({
-  schemaVersion: 1,
+/** An entity exposes exactly the CRUD intents its canonical Operations implement. */
+const entity = (actions: readonly CrudOperationKey[]): CoreEntity => ({
+  schemaVersion: 3,
   kind: "coreEntity",
   module: "core",
   entity: "Widget",
   title: "Widget",
   language: "en",
   fields: [],
-  ...(crud === undefined ? {} : { crud }),
-});
+  operations: Object.fromEntries(actions.map((action) => [action, {
+    name: action, description: `${action} widgets`,
+    implementation: { type: "entity", action },
+    effects: { data: action === "list" || action === "get" ? "read" : action === "delete" ? "delete" : "write", external: "none" },
+    reliability: { idempotency: { mode: "natural" } },
+    confirmation: { mode: "none" },
+  }])),
+  interfaces: {},
+} as CoreEntity);
 
 describe("buildCrud", () => {
-  test("preserves the historical all-operations default", () => {
-    expect(buildCrud(entity())).toEqual({
+  test("every implemented intent is exposed", () => {
+    expect(buildCrud(entity(["list", "get", "create", "update", "delete"]))).toEqual({
       operations: { list: true, get: true, create: true, update: true, delete: true },
     });
   });
 
-  test("supports a read-only entity", () => {
-    expect(buildCrud(entity({ operations: { create: false, update: false, delete: false } })))
-      .toEqual({
-        operations: { list: true, get: true, create: false, update: false, delete: false },
-      });
+  test("a read-only entity implements only its reads", () => {
+    expect(buildCrud(entity(["list", "get"]))).toEqual({
+      operations: { list: true, get: true, create: false, update: false, delete: false },
+    });
   });
 
-  test("false disables every operation", () => {
-    expect(buildCrud(entity(false))).toEqual({
+  test("no operations means no generated CRUD at all", () => {
+    expect(buildCrud(entity([]))).toEqual({
       operations: { list: false, get: false, create: false, update: false, delete: false },
     });
   });
 
   test("transport policies cannot widen the common policy", () => {
-    const policy = buildCrud(entity({ operations: { update: false, delete: false } }));
+    const policy = buildCrud(entity(["list", "get", "create"]));
     expect(limitCrudOperations(
       { list: true, get: false, create: true, update: true, delete: true },
       policy,

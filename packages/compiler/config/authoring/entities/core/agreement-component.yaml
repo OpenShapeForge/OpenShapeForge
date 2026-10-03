@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: AgreementComponent
@@ -10,12 +10,14 @@ filterField: description
 labels:
   en: Agreement component
   nl: Overeenkomstcomponent
+pluralLabels:
+  en: Agreement components
+  nl: Overeenkomstcomponenten
 domains:
   - finance
   - contracts
 fields:
   - key: description
-    valueType: string
     required: true
     label:
       en: Description
@@ -29,13 +31,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 2000
+    osfType: multilineText
   - key: startDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Start date
@@ -46,11 +44,8 @@ fields:
     persisted:
       column: start_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: endDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: End date
@@ -61,11 +56,8 @@ fields:
     persisted:
       column: end_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: nextProlongationDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Next prolongation date
@@ -76,11 +68,8 @@ fields:
     persisted:
       column: next_prolongation_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: endProlongationDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: End prolongation date
@@ -91,11 +80,8 @@ fields:
     persisted:
       column: end_prolongation_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: quantity
-    valueType: number
+    osfType: number
     required: false
     label:
       en: Quantity
@@ -107,7 +93,7 @@ fields:
       column: quantity
       storageClass: core
   - key: unitId
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Unit
@@ -121,7 +107,6 @@ fields:
       column: unit_id
       storageClass: core
   - key: unitAmount
-    valueType: number
     required: false
     label:
       en: Unit amount
@@ -129,12 +114,11 @@ fields:
     description:
       en: Amount per unit (excluding VAT).
       nl: Bedrag per eenheid (excl. BTW).
-    semanticType: currency
+    osfType: currency
     persisted:
       column: unit_amount
       storageClass: core
   - key: amountBase
-    valueType: number
     required: false
     label:
       en: Base amount
@@ -142,12 +126,11 @@ fields:
     description:
       en: Net amount excluding VAT for this component line.
       nl: Nettobedrag excl. BTW voor deze componentregel.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount_base
       storageClass: core
   - key: amountVat
-    valueType: number
     required: false
     label:
       en: VAT amount
@@ -155,12 +138,11 @@ fields:
     description:
       en: VAT amount for this component line.
       nl: BTW-bedrag voor deze componentregel.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount_vat
       storageClass: core
   - key: amountTotal
-    valueType: number
     required: false
     label:
       en: Total amount
@@ -168,12 +150,12 @@ fields:
     description:
       en: Total amount including VAT for this component line.
       nl: Totaalbedrag incl. BTW voor deze componentregel.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount_total
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -186,173 +168,36 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: agreement
-    kind: belongsTo
-    target: Agreement
-    foreignKey: agreement_id
+  - key: agreementId
     label:
       en: Agreement
       nl: Overeenkomst
-  - key: agreementComponentType
-    kind: belongsTo
-    target: AgreementComponentType
-    foreignKey: agreement_component_type_id
+    persisted:
+      column: agreement_id
+      storageClass: core
+    osfType: Agreement
+    relationship:
+      ownership: reference
+  - key: agreementComponentTypeId
     label:
       en: Component type
       nl: Componenttype
-  - key: vatRate
-    kind: belongsTo
-    target: VatRate
-    foreignKey: vat_rate_id
+    persisted:
+      column: agreement_component_type_id
+      storageClass: core
+    osfType: AgreementComponentType
+    relationship:
+      ownership: reference
+  - key: vatRateId
     label:
       en: VAT rate
       nl: BTW-tarief
-ui:
-  routes:
-    list:
-      en: /agreement-components
-      nl: /overeenkomstcomponenten
-    detail:
-      en: /agreement-components/:id
-      nl: /overeenkomstcomponenten/:id
-    create:
-      en: /agreement-components/create
-      nl: /overeenkomstcomponenten/aanmaken
-    edit:
-      en: /agreement-components/:id/edit
-      nl: /overeenkomstcomponenten/:id/bewerken
-    delete:
-      en: /agreement-components/:id/delete
-      nl: /overeenkomstcomponenten/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Agreement components
-        nl: Overeenkomstcomponenten
-      columns:
-        - key: description
-          sortable: true
-        - key: startDate
-          sortable: true
-        - key: endDate
-          sortable: true
-        - key: amountTotal
-          sortable: true
-      defaultSort:
-        key: startDate
-        direction: desc
-      rowLink:
-        en: /agreement-components/:id
-        nl: /overeenkomstcomponenten/:id
-    detail:
-      header:
-        title: "{{description}}"
-        subtitle: "{{amountTotal}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Component details
-                nl: Componentgegevens
-              fields:
-                - description
-                - startDate
-                - endDate
-                - quantity
-                - unitId
-                - unitAmount
-            - title:
-                en: Amounts
-                nl: Bedragen
-              fields:
-                - amountBase
-                - amountVat
-                - amountTotal
-            - title:
-                en: Prolongation
-                nl: Prolongatie
-              fields:
-                - nextProlongationDate
-                - endProlongationDate
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create agreement component
-            nl: Overeenkomstcomponent aanmaken
-          groups:
-            - title:
-                en: Component details
-                nl: Componentgegevens
-              fields:
-                - description
-                - startDate
-                - endDate
-                - quantity
-                - unitId
-                - unitAmount
-            - title:
-                en: Amounts
-                nl: Bedragen
-              fields:
-                - amountBase
-                - amountVat
-                - amountTotal
-            - title:
-                en: Prolongation
-                nl: Prolongatie
-              fields:
-                - nextProlongationDate
-                - endProlongationDate
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit agreement component
-            nl: Overeenkomstcomponent bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: vat_rate_id
+      storageClass: core
+    osfType: VatRate
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -367,3 +212,221 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Agreement Component
+    description: List AgreementComponent records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Agreement Component
+    description: Get AgreementComponent records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Agreement Component
+    description: Create AgreementComponent records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update AgreementComponent records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /agreement-components
+          nl: /overeenkomstcomponenten
+        columns:
+          - key: description
+            sortable: true
+          - key: startDate
+            sortable: true
+          - key: endDate
+            sortable: true
+          - key: amountTotal
+            sortable: true
+        title:
+          en: Agreement components
+          nl: Overeenkomstcomponenten
+        defaultSort:
+          key: startDate
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /agreement-components/:id
+            nl: /overeenkomstcomponenten/:id
+          create:
+            en: /agreement-components/create
+            nl: /overeenkomstcomponenten/aanmaken
+        title: "{{description}}"
+        subtitle: "{{amountTotal}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Component details
+                    nl: Componentgegevens
+                  fields:
+                    - description
+                    - startDate
+                    - endDate
+                    - quantity
+                    - unitId
+                    - unitAmount
+                - title:
+                    en: Amounts
+                    nl: Bedragen
+                  fields:
+                    - amountBase
+                    - amountVat
+                    - amountTotal
+                - title:
+                    en: Prolongation
+                    nl: Prolongatie
+                  fields:
+                    - nextProlongationDate
+                    - endProlongationDate
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create agreement component
+              nl: Overeenkomstcomponent aanmaken
+            groups:
+              - title:
+                  en: Component details
+                  nl: Componentgegevens
+                fields:
+                  - description
+                  - startDate
+                  - endDate
+                  - quantity
+                  - unitId
+                  - unitAmount
+              - title:
+                  en: Amounts
+                  nl: Bedragen
+                fields:
+                  - amountBase
+                  - amountVat
+                  - amountTotal
+              - title:
+                  en: Prolongation
+                  nl: Prolongatie
+                fields:
+                  - nextProlongationDate
+                  - endProlongationDate
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit agreement component
+              nl: Overeenkomstcomponent bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 2000
+      startDate:
+        render:
+          component: DatePicker
+          props: {}
+      endDate:
+        render:
+          component: DatePicker
+          props: {}
+      nextProlongationDate:
+        render:
+          component: DatePicker
+          props: {}
+      endProlongationDate:
+        render:
+          component: DatePicker
+          props: {}

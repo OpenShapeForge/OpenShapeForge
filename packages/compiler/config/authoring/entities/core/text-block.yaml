@@ -5,16 +5,17 @@ entity: TextBlock
 title: Text block
 language: en
 labels: { en: Text, nl: Tekst }
+pluralLabels: { en: Texts, nl: Teksten }
 domains: [documents]
 # The Block placement supplies identity. This definition supplies its fields.
 baseEntity: false
-displayTemplate: "{{text}}"
+displayTemplate: "{{markdown}}"
 authorization:
   roles:
-    read: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
+    read: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite]
 fields:
-  - key: text
-    semanticType: multilineText
+  - key: markdown
+    osfType: markdown
     required: true
     variables: template
     label: { en: Text, nl: Tekst }
@@ -41,9 +42,9 @@ operations:
         properties:
           kind: { type: string, const: block }
           value:
-            x-osf-entityInput: { entity: TextBlock, fields: [text] }
+            x-osf-entityInput: { entity: TextBlock, fields: [markdown] }
     errors: []
-    auth: { mode: session, roles: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite] }
+    auth: { mode: session, roles: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite] }
     tenancy: { mode: required }
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }

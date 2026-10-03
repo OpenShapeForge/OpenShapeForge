@@ -225,3 +225,24 @@ describe("control-realm operation catalogs with web pages", () => {
     )))).toThrow(/page "billing" has no operations/);
   });
 });
+
+describe("shipped control identity read contracts", () => {
+  test("single-record reads reuse the same closed non-secret schemas as their list siblings", () => {
+    const control = loadOperationCatalogs(
+      join(import.meta.dir, "../../config/authoring"),
+    ).find(({ document }) => document.plugin === "osf-control")!.document;
+
+    for (const [listKey, collectionKey, getKey] of [
+      ["listTenantMembers", "members", "getTenantMember"],
+      ["listTenantInvitations", "invitations", "getTenantInvitation"],
+      ["listTenantCredentials", "credentials", "getTenantCredential"],
+    ] as const) {
+      const listSchema = control.operations[listKey]!.output!.schema as {
+        properties: Record<string, { items?: Record<string, unknown> }>;
+      };
+      const itemSchema = listSchema.properties[collectionKey]!.items!;
+      expect(itemSchema.additionalProperties).toBe(false);
+      expect(control.operations[getKey]!.output!.schema).toEqual(itemSchema);
+    }
+  });
+});

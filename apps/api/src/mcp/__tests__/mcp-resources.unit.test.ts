@@ -10,10 +10,12 @@
  * Runs without a database, so it holds the line even while no shipped entity
  * authors an `mcp.resource` block.
  */
+import accountsRuntime from "../../accounts/runtime.js";
 import { describe, expect, it } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import documentsPluginRuntime from "@openshapeforge/documents/runtime";
+import versioningPluginRuntime from "@openshapeforge/versioning/runtime";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import rawCatalog from "../../generated/mcp/tools.json" with { type: "json" };
 import type { RuntimeModule } from "../../modules/contract.js";
@@ -25,6 +27,7 @@ import {
 
 const READ = "Widgets.All.Read";
 const documentsRuntime = documentsPluginRuntime as unknown as RuntimeModule;
+const versioningRuntime = versioningPluginRuntime as unknown as RuntimeModule;
 
 const session = (...roles: string[]) =>
   ({
@@ -37,6 +40,7 @@ const session = (...roles: string[]) =>
 
 const table = {
   name: "erp.widgets",
+  generatedCrudEligible: true,
   columns: [],
   source: {
     crud: { operations: { list: true, get: true, create: true, update: true, delete: true } },
@@ -122,10 +126,10 @@ describe("resourcesForSession", () => {
     const server = __buildGeneratedMcpServerForTests({
       db,
       session: session(READ),
-      modules: [documentsRuntime, {
-        name: "workflow",
+      modules: [accountsRuntime,documentsRuntime, versioningRuntime, {
+        name: "notebook",
         operationHandlers: {
-          startWebhook: async () => ({ value: undefined }),
+          importNotebook: async () => ({ value: undefined }),
         },
       }, module],
       modulePlatform: platform,
@@ -173,10 +177,10 @@ describe("resourcesForSession", () => {
     const server = __buildGeneratedMcpServerForTests({
       db,
       session: session("Other.Role"),
-      modules: [documentsRuntime, {
-        name: "workflow",
+      modules: [accountsRuntime,documentsRuntime, versioningRuntime, {
+        name: "notebook",
         operationHandlers: {
-          startWebhook: async () => ({ value: undefined }),
+          importNotebook: async () => ({ value: undefined }),
         },
       }, module],
       modulePlatform: platform,
@@ -237,10 +241,10 @@ describe("resourcesForSession", () => {
     const server = __buildGeneratedMcpServerForTests({
       db,
       session: session("Other.Role"),
-      modules: [documentsRuntime, {
-        name: "workflow",
+      modules: [accountsRuntime,documentsRuntime, versioningRuntime, {
+        name: "notebook",
         operationHandlers: {
-          startWebhook: async () => ({ value: undefined }),
+          importNotebook: async () => ({ value: undefined }),
         },
       }, module],
       modulePlatform: platform,

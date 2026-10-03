@@ -1,18 +1,20 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ProcessStep
 title: Process Step
-description: A business-visible process step within the current technical process-step table, separate from technical workflow nodes.
+description: A business-visible step of a runtime case step container.
 language: en
 displayTemplate: "{{name}}"
 filterField: name
 labels:
   en: Process Step
   nl: Processtap
+pluralLabels:
+  en: Process steps
+  nl: Processtappen
 domains:
   - cases
-  - workflow
 authorization:
   roles:
     read:
@@ -29,7 +31,7 @@ authorization:
     empty: public
 fields:
   - key: key
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Key
@@ -41,7 +43,7 @@ fields:
       column: key
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -53,7 +55,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -63,13 +64,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    osfType: multilineText
   - key: stepType
-    valueType: string
     required: true
     label:
       en: Step type
@@ -77,13 +73,11 @@ fields:
     persisted:
       column: step_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PROCESSSTEPTYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: PROCESSSTEPTYPE
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -91,13 +85,12 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PROCESSSTEPSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: PROCESSSTEPSTATUS
+    osfType: referenceDataCode
   - key: sequenceNumber
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Sequence number
@@ -106,7 +99,7 @@ fields:
       column: sequence_number
       storageClass: core
   - key: isMilestone
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Is milestone
@@ -116,7 +109,7 @@ fields:
       column: is_milestone
       storageClass: core
   - key: isBlocking
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Is blocking
@@ -125,77 +118,11 @@ fields:
     persisted:
       column: is_blocking
       storageClass: core
-  - key: workflowNodeRef
-    valueType: string
-    required: false
-    label:
-      en: Workflow node reference
-      nl: Workflow-node referentie
-    validation:
-      maxLength: 200
-    persisted:
-      column: workflow_node_ref
-      storageClass: core
-  - key: workflowRunRef
-    valueType: string
-    required: false
-    label:
-      en: Workflow run reference
-      nl: Workflow-run referentie
-    validation:
-      maxLength: 200
-    persisted:
-      column: workflow_run_ref
-      storageClass: core
-  - key: workflowInstanceId
-    valueType: string
-    required: false
-    readOnly: true
-    label:
-      en: Workflow instance ID
-      nl: Workflowinstantie-ID
-    description:
-      en: Durable workflow instance currently executing this process step.
-      nl: Duurzame workflowinstantie die deze processtap uitvoert.
-    validation:
-      maxLength: 200
-    persisted:
-      column: workflow_instance_id
-      storageClass: core
-  - key: workflowNodeInstanceId
-    valueType: string
-    required: false
-    readOnly: true
-    label:
-      en: Workflow node instance ID
-      nl: Workflow-nodeinstantie-ID
-    description:
-      en: Current waiting node within the workflow instance, when the process step is paused.
-      nl: Huidige wachtende node binnen de workflowinstantie wanneer de processtap gepauzeerd is.
-    validation:
-      maxLength: 200
-    persisted:
-      column: workflow_node_instance_id
-      storageClass: core
-  - key: workflowWaitId
-    valueType: string
-    required: false
-    readOnly: true
-    label:
-      en: Workflow wait ID
-      nl: Workflow-wacht-ID
-    description:
-      en: Durable wait token that can be resumed by another orchestrator.
-      nl: Duurzame wait-token die door een andere orchestrator hervat kan worden.
-    validation:
-      maxLength: 200
-    persisted:
-      column: workflow_wait_id
-      storageClass: core
   - key: requiredInput
-    valueType: object
+    osfType: object
     required: false
     readOnly: true
+    writeSource: caller
     label:
       en: Required input
       nl: Benodigde input
@@ -205,10 +132,8 @@ fields:
     persisted:
       column: required_input
       storageClass: core
-    render:
-      component: JsonEditor
   - key: startedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Started at
@@ -216,11 +141,8 @@ fields:
     persisted:
       column: started_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: dueAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Due at
@@ -228,11 +150,8 @@ fields:
     persisted:
       column: due_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: completedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Completed at
@@ -240,26 +159,26 @@ fields:
     persisted:
       column: completed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: completedByAccountId
-    valueType: string
     required: false
-    semanticType: accountId
+    osfType: Relation
     label:
       en: Completed by
       nl: Afgerond door
     description:
-      en: Account that manually completed this process step.
-      nl: Account dat deze processtap handmatig heeft afgerond.
+      en: The person (their Relation) who manually completed this process step.
+      nl: De persoon (diens relatie) die deze processtap handmatig heeft afgerond.
     validation:
       format: uuid
     persisted:
       column: completed_by_account_id
       storageClass: core
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      inverse: false
   - key: completionApprovalComment
-    valueType: string
     required: false
     label:
       en: Completion approval comment
@@ -269,13 +188,9 @@ fields:
     persisted:
       column: completion_approval_comment
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 2000
+    osfType: multilineText
   - key: waitReason
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Wait reason
@@ -286,7 +201,7 @@ fields:
       column: wait_reason
       storageClass: core
   - key: resultCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Result code
@@ -297,7 +212,6 @@ fields:
       column: result_code
       storageClass: core
   - key: note
-    valueType: string
     required: false
     label:
       en: Note
@@ -307,13 +221,9 @@ fields:
     persisted:
       column: note
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    osfType: multilineText
   - key: isAdHoc
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Ad-hoc step
@@ -326,7 +236,7 @@ fields:
       column: is_ad_hoc
       storageClass: core
   - key: templateStepKey
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Process step template key
@@ -339,55 +249,172 @@ fields:
     persisted:
       column: template_step_key
       storageClass: core
-relationships:
-  - key: process
-    kind: belongsTo
-    target: Process
-    foreignKey: process_id
+  - key: processId
     label:
       en: Process
       nl: Proces
-  - key: owner
-    kind: belongsTo
-    target: Account
-    foreignKey: owner_account_id
+    persisted:
+      column: process_id
+      storageClass: core
+    osfType: Process
+    relationship:
+      ownership: reference
+      inverse:
+        key: steps
+  - key: ownerId
     label:
       en: Owner
       nl: Eigenaar
-  - key: assignedGroup
-    kind: belongsTo
-    target: RelationGroup
-    foreignKey: assigned_group_id
+    persisted:
+      column: owner_account_id
+      storageClass: core
+    osfType: Relation
+    relationship:
+      ownership: reference
+      inverse: false
+  - key: assignedGroupId
     label:
       en: Assigned group
       nl: Toegewezen groep
-  - key: predecessorStep
-    kind: belongsTo
-    target: ProcessStep
-    foreignKey: predecessor_step_id
+    persisted:
+      column: assigned_group_id
+      storageClass: core
+    osfType: RelationGroup
+    relationship:
+      ownership: reference
+  - key: predecessorStepId
     label:
       en: Predecessor step
       nl: Vorige stap
-  - key: nextSteps
-    kind: hasMany
-    target: ProcessStep
-    foreignKey: predecessor_step_id
-    label:
-      en: Next steps
-      nl: Vervolgstappen
-  - key: tasks
-    kind: hasMany
-    target: Task
-    foreignKey: case_step_id
-    label:
-      en: Tasks
-      nl: Taken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
-      wait: true
+    persisted:
+      column: predecessor_step_id
+      storageClass: core
+    osfType: ProcessStep
+    relationship:
+      ownership: reference
+      inverse:
+        key: nextSteps
+        label:
+          en: Next steps
+          nl: Vervolgstappen
+operations:
+  list:
+    name: List Process Step
+    description: List ProcessStep records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Process Step
+    description: Get ProcessStep records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Process Step
+    description: Create ProcessStep records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Process Step
+    description: Update ProcessStep records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Process Step
+    description: Delete ProcessStep records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000
+      stepType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PROCESSSTEPTYPE
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PROCESSSTEPSTATUS
+            clearable: false
+      requiredInput:
+        render:
+          component: JsonEditor
+      startedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      dueAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      completedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      completionApprovalComment:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 2000
+      note:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000

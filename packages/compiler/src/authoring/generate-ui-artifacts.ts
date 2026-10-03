@@ -4,9 +4,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import YAML from "yaml";
 import {
-  discoverContextEntities,
   listEntityFiles,
-  loadContextEntity,
   loadEntity,
 } from "./loader.js";
 import { compile } from "./compiler/index.js";
@@ -17,6 +15,7 @@ import { normalizeKeycloakRoleName } from "./generators/keycloak.js";
 import type { EntityManifestEntryData } from "./generators/app.js";
 import type { RuntimeMetadataData } from "./generators/manifest.js";
 import type { ViewDefinition } from "./types.js";
+import { generateWebContractModules, type ComposedEntity } from "./generators/web-contract.js";
 import { generatePersistedOperationArtifacts } from "../persisted-operations.js";
 import { buildWebManifest, renderWebManifest, type WebStandaloneOperationsInput } from "./web-manifest.js";
 
@@ -32,9 +31,6 @@ type CompiledAuthoringEntity = {
   routes?: ViewDefinition["routes"] | undefined;
 };
 
-// Workflow artifact prefixes (api/workflow/, workflow/contract/,
-// workflow/generated/, features/**) moved with the workflow generators to the
-// example workflow plugin (examples/plugins/workflow), which maps them itself.
 const generatedArtifactPathMappings = [
   { oldPrefix: "actions/generated/", servicePrefix: "apps/web/src/actions/generated/" },
   { oldPrefix: "app/", servicePrefix: "apps/web/src/app/" },
@@ -206,6 +202,13 @@ export function isGeneratedCrudUiEnabled(contract: CompiledAuthoringEntity["cont
   return Object.values(contract.crud.operations).every(Boolean);
 }
 
+export function resolveGeneratedCrudRoutes(
+  legacyRoutes: ViewDefinition["routes"] | undefined,
+  compiledRoutes: ViewDefinition["routes"] | undefined,
+): ViewDefinition["routes"] | undefined {
+  return legacyRoutes ?? compiledRoutes;
+}
+
 function isGeneratedCrudUiEnabledForEntityName(
   entityName: string | undefined,
   contractByName: Map<string, CompiledAuthoringEntity["contract"]>,
@@ -371,25 +374,20 @@ export async function generateAuthoringUiArtifacts(
 ): Promise<AuthoringUiArtifact[]> {
   const entityNames = listEntityFiles(authoringDir).map((file) => file.slug);
   const compiled: CompiledAuthoringEntity[] = [];
+  const composedEntities: ComposedEntity[] = [];
 
   for (const entityName of entityNames) {
     const loaded = loadEntity(authoringDir, entityName);
+    const contract = compile(loaded);
+    composedEntities.push({ entity: loaded.coreEntity, profiles: loaded.profiles });
     compiled.push({
       name: entityName,
-      contract: compile(loaded),
+      contract,
       appShell: loaded.appShell,
-      routes: loaded.coreEntity.ui?.routes,
-    });
-  }
-
-  for (const contextEntity of discoverContextEntities(authoringDir).sort((a, b) =>
-    `${a.context}/${a.name}`.localeCompare(`${b.context}/${b.name}`),
-  )) {
-    const loaded = loadContextEntity(authoringDir, contextEntity.context, contextEntity.name);
-    compiled.push({
-      name: contextEntity.name,
-      contract: compile(loaded),
-      appShell: loaded.appShell,
+      routes: resolveGeneratedCrudRoutes(
+        loaded.coreEntity.ui?.routes,
+        contract.views.core?.routes,
+      ),
     });
   }
 
@@ -498,6 +496,12 @@ export async function generateAuthoringUiArtifacts(
   const routeFiles = generateDynamicRoutes(manifestEntries, runtimeMetadata);
   for (const [path, contents] of routeFiles) {
     generatedFiles.set(path, contents);
+  }
+
+  // The renderer's contract modules: the web app types every rendered field
+  // against these rather than importing the compiler package.
+  for (const [name, contents] of generateWebContractModules(authoringDir, composedEntities)) {
+    generatedFiles.set(`generated/web/compiler/${name}`, contents);
   }
 
   generatedFiles.set(

@@ -26,7 +26,7 @@ import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
 import { withDbSession } from "../session.js";
 import { decryptSecret, encryptSecret, keyringFromEnv } from "../../connectors/secrets.js";
-import { connectionTokenSecretScope } from "../../mcp/entity-oauth.js";
+import { connectionTokenSecretScope } from "../../connectors/secrets.js";
 import { resolveConnectionValues } from "../../modules/connection-secrets.js";
 
 const ADMIN_URL =

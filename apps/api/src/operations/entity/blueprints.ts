@@ -2,6 +2,7 @@
 import { sql } from "kysely";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
+import { entityColumnName, entityTableName } from "../../db/manifest-lookup.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
 import type { ModuleOperationHandler } from "../../modules/contract.js";
 import { getGeneratedCrudTables, generatedCrudError, requireEntityOperation } from "./catalog.js";
@@ -39,12 +40,19 @@ async function readPublished(db: OpenShapeForgeDatabase, session: DbSessionInput
     select * from app.read_blueprints(${nameOf(table)}, ${blueprintId}, ${search}, ${limit}, ${offset})
   `.execute(trx)).rows);
 }
-export async function createFromBlueprint(db: OpenShapeForgeDatabase, session: DbSessionInput, table: GeneratedCrudTable, blueprintId: string, values: Record<string, unknown>) {
+/**
+ * `validate` sees the merged record (blueprint values under the caller's) as a
+ * full create, so a stored value the contract no longer allows fails as
+ * VALIDATION naming the field rather than at a database CHECK.
+ */
+export async function createFromBlueprint(db: OpenShapeForgeDatabase, session: DbSessionInput, table: GeneratedCrudTable, blueprintId: string, values: Record<string, unknown>, validate: (merged: Record<string, unknown>) => void = () => {}, trusted?: { operation: string; values: Record<string, unknown> }) {
   requireEntityOperation(table, "create", session);
   return withDbSession(db, session, async trx => {
     const source = (await readPublished(db, session, table, blueprintId))[0];
     if (!source) throw generatedCrudError("Blueprint is unavailable.", "NOT_FOUND");
-    const row = await createGeneratedEntity(db, session, { table: table.name, values: { ...allowedValues(table, source.values_json), ...values } });
+    const merged = { ...allowedValues(table, source.values_json), ...values };
+    validate(merged);
+    const row = await createGeneratedEntity(db, session, { table: table.name, values: merged, ...(trusted ? { trusted } : {}) });
     await sql`insert into platform.blueprint_copies (tenant_id, entity_name, record_id, blueprint_tenant_id, blueprint_id, source_version)
       values (${session.tenantId}::uuid, ${nameOf(table)}, ${String(row[table.primaryKey!])}::uuid, ${source.tenant_id}::uuid, ${source.blueprint_id}, ${source.version})`.execute(trx);
     return row;
@@ -79,12 +87,18 @@ async function reset(db: OpenShapeForgeDatabase, session: DbSessionInput, table:
     return serializeEntityRow(table, row);
   });
 }
+/**
+ * The operator role is the publish Operation's `auth.roles` (compiler,
+ * blueprint-operations.ts) and the runtime refuses the session before this
+ * handler runs (runtime.ts, sessionOperationRolesAllow); the insert policy
+ * blueprint_versions_publish checks it a third time inside Postgres.
+ */
 async function publish(db: OpenShapeForgeDatabase, session: DbSessionInput, table: GeneratedCrudTable, input: Record<string, unknown>) {
-  if (!session.roles?.includes("platform-operator")) throw generatedCrudError("Blueprint publication requires a platform administrator.", "FORBIDDEN");
   const blueprint = policy(table);
   return withDbSession(db, session, async trx => {
-    const tenant = (await sql<{ tenant_kind: string }>`select tenant_kind from erp.tenants where tenant_id = ${session.tenantId}::uuid`.execute(trx)).rows[0];
-    if (tenant?.tenant_kind !== "blueprint") throw generatedCrudError("Only blueprint tenants can publish.", "FORBIDDEN");
+    const tenant = (await sql<{ kind: string }>`select ${sql.ref(entityColumnName("Tenant", "tenantKind"))} as kind from ${sql.table(entityTableName("Tenant"))} where tenant_id = ${session.tenantId}::uuid`.execute(trx)).rows[0];
+    // "blueprint" is the Tenant.tenantKind value of a blueprint tenant.
+    if (tenant?.kind !== "blueprint") throw generatedCrudError("Only blueprint tenants can publish.", "FORBIDDEN");
     const row = await getGeneratedEntity(db, session, { table: table.name, id: text(input, "id") });
     if (!row) throw generatedCrudError("Record not found.", "NOT_FOUND");
     const fields = Object.fromEntries(table.columns.map(column => [fieldNameForColumn(column), row[column.name]]));

@@ -1,23 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
-export type ScalarType =
-  | "uuid"
-  | "text"
-  | "boolean"
-  | "integer"
-  | "bigint"
-  | "numeric"
-  | "date"
-  | "timestamptz"
-  | "jsonb"
-  /**
-   * A text array, spelled the way Postgres spells it because the manifest
-   * type doubles as the SQL type token (the roll-forward migrator renders
-   * `ADD COLUMN` from it verbatim). Platform bookkeeping only: no authoring
-   * field maps onto it, so no generated CRUD, GraphQL or MCP surface has to
-   * render one — the runtime tables that hold a role list or a read-guides
-   * list are the reason it exists.
-   */
-  | "text[]";
+/**
+ * The storage scalars a manifest column may carry; every projection of one
+ * (DDL, Kysely, GraphQL, JSON Schema) is a row of SCALAR_PROJECTION in
+ * @openshapeforge/operations. `text[]` is platform bookkeeping only: no
+ * authoring field maps onto it.
+ */
+import type { ScalarType } from "@openshapeforge/operations";
+export type { ScalarType };
 
 export type ReferenceDefinition = {
   schema: string;
@@ -50,22 +39,16 @@ export type IndexDefinition = {
 /**
  * A table-level invariant contributed by a compiler plugin.
  *
- * Each constraint is a versioned schema change rather than inline `CREATE
- * TABLE` text. The generated runtime applies it after every contributed table
- * exists and records the SQL checksum in `platform.schema_migrations`. Editing
- * an applied definition therefore fails loudly; evolve it with a new plugin
- * schema migration instead.
+ * Rendered as idempotent DDL (added when absent by name) that the migrate
+ * chain applies after every contributed table exists, on every run. The
+ * constraint is part of the manifest, so editing one moves the manifest
+ * checksum and a built database is refused until it is rebuilt with
+ * `db:reset` — there is no in-place evolution.
  */
 export type TableConstraintDefinition = {
-  /** Compiler invariants use the existing migration ledger without impersonating a plugin. */
+  /** Compiler invariants are registered under `osf-compiler` rather than a plugin. */
   compilerOwned?: boolean;
-  /**
-   * Reconcile a compiler-owned CHECK whose expression is content-addressed in
-   * its version. The generated migration drops the previous same-name
-   * constraint before adding the current definition.
-   */
-  replaceExisting?: boolean;
-  /** Plugin-local immutable migration version, e.g. `0001_request-pkey`. */
+  /** Plugin-local ordering key, e.g. `0001_request-pkey`; unique per plugin. */
   version: string;
   /** Explicit PostgreSQL constraint name. */
   name: string;
@@ -93,6 +76,7 @@ export type TableConstraintDefinition = {
  *   tenant : tenant_id = app.current_tenant() (always required)
  *   group  : group column = ANY(app.current_groups())
  *   user   : user columns = app.current_user_id()
+ *   party  : relation columns = app.current_relation_id() (the acting Relation)
  *
  * Plus an outermost `app.bypass_rls()` short-circuit and an
  * `app.has_scope('tenant')` shortcut for bypass-role users.
@@ -101,6 +85,18 @@ export type TableConstraintDefinition = {
  * composite index emitted in the same migration. The compiler emits those
  * indexes automatically (see deriveRowScopeIndexes).
  */
+/**
+ * A restrictive select policy for a table owned through several references:
+ * a row is readable with the read roles of the entity its set owner column
+ * references. Lowered from `authorization.ownerAxis`; the emitter renders it
+ * beside the tenant policy and never derives a role name itself.
+ */
+export type OwnerAxisPolicy = {
+  axes: Array<{ column: string; roles: string[] }>;
+  /** A transaction-local setting whose listed values admit every owner's rows (server-side commands). */
+  command?: { setting: string; values: string[] };
+};
+
 export type RowScopePolicy = {
   /**
    * The group axis. Optional — entities that only use tenant + user axes
@@ -127,6 +123,12 @@ export type RowScopePolicy = {
    * is visible if ANY listed column equals the current user id.
    */
   userColumns?: string[];
+  /**
+   * The acting-party axis: a row is visible if ANY listed column equals the
+   * Relation the session acts as (`app.current_relation_id()`). Person-owned
+   * records reference the acting party, not the login.
+   */
+  relationColumns?: string[];
   /**
    * Owner/group columns whose NULL rows are visible tenant-wide (the
    * `empty: public` semantics). Each column listed here emits an extra
@@ -187,7 +189,12 @@ export type RetentionReviewGate = {
 
 export type RetentionRuleDefinition = {
   id: string;
-  after: RetentionDuration;
+  /** Distinct policy bounds; never flatten these into one execution date. */
+  duration: {
+    minimum?: RetentionDuration;
+    default?: RetentionDuration;
+    maximum?: RetentionDuration;
+  };
   action: RetentionAction;
   /** Authored disposition before {@link RetentionAction} coarsening. */
   disposition?: RetentionDisposition;
@@ -204,12 +211,14 @@ export type RetentionRuleDefinition = {
 };
 
 /**
- * Legal-hold / litigation-hold control plane. When `suspendDestruction` is
- * true a retention executor MUST NOT run any destructive disposition for the
- * table, regardless of clock expiry, until the hold is lifted.
+ * Legal-hold capability. `suspendDestruction` says the policy supports hold
+ * suspension; `activeColumn` resolves whether an individual record is
+ * actually under hold.
  */
 export type RetentionLegalHold = {
   suspendDestruction: boolean;
+  /** Boolean record column whose true value represents an actual active hold. */
+  activeColumn?: string;
 };
 
 /**
@@ -319,14 +328,59 @@ export type LocalizedTextManifest = {
   fr?: string;
 };
 
+/** Compiler-bound storage of a published-snapshot pair; consumed verbatim by the versioning runtime. */
+/**
+ * One owned child table of a snapshot: the child's foreign-key columns and
+ * the parent columns they reference, plus the child's own owned children.
+ */
+export type VersioningOwnedChild = {
+  schema: string;
+  table: string;
+  childColumns: string[];
+  parentColumns: string[];
+  children: VersioningOwnedChild[];
+};
+
+export type VersioningStorageBinding = {
+  head: { schema: string; table: string };
+  version: { schema: string; table: string; headColumn: string };
+  /**
+   * The owned-relationship tree under the head, as authored
+   * (`relationship.inverse.ownership: owned`), version table excluded. A
+   * snapshot walks exactly this: a cascading foreign key from a bookkeeping
+   * table is not content and never enters one.
+   */
+  owned: VersioningOwnedChild[];
+};
+
 export type TableSourceDefinition = {
   blueprint?: import("./authoring/types/compiled.js").CompiledBlueprint;
+  /** Status state machines the core transition runtime executes for this table. */
+  transitions?: import("./authoring/types/compiled.js").CompiledTransitionField[];
   path?: string;
   authoringEntityName?: string;
   authoringEntitySlug?: string;
-  /** Present for strict entity authoring; absence means legacy v1. */
-  authoringVersion?: 2 | 3;
   generatedCrudEligibility?: "explicitly_enabled" | "explicitly_disabled";
+  versioning?: {
+    strategy: "publishedSnapshot";
+    versionEntity: string;
+    versionsField: string;
+    snapshot: { ownedRelationships: "recursive" };
+    publishOperation: string;
+    onEdit: { field: string; value: string };
+    /**
+     * Exact storage of both sides, bound here so the versioning runtime never
+     * derives a schema or table name: the head is this table, the version
+     * table holds the snapshots and `headColumn` is its foreign key back to
+     * the head (the persisted `versionsField` inverse).
+     */
+    storage: VersioningStorageBinding;
+  };
+  /** Narrow hard-delete eligibility compiled from the entity contract. */
+  hardDelete?: {
+    /** Refuse deletion once durable version history exists. */
+    requireNeverPublished: true;
+  };
   /**
    * Authored localized labels for the entity (e.g. `{ en: "Contact Moment",
    * nl: "Contactmoment" }`). Surfaced for service-side consumers that render
@@ -363,6 +417,7 @@ export type TableSourceDefinition = {
       delete: boolean;
     };
     relationships: Array<{
+      through?: { field: string; column: string; target: string };
       name: string;
       target: string;
       type: string;
@@ -427,7 +482,7 @@ export type TableSourceDefinition = {
     };
   };
   /**
-   * Opt-in generated MCP exposure for this table (entity YAML `mcp:` block).
+   * Opt-in generated MCP exposure for this table (`interfaces.mcp`).
    * Present only when the entity declared one AND the table is generated-CRUD
    * enabled — the backend manifest fails compilation on the mismatch, exactly
    * as it does for `rest`.
@@ -502,16 +557,11 @@ export type TableDefinition = {
   tenantScoped: boolean;
   domainInternal?: boolean;
   /**
-   * Current generated-CRUD eligibility marker. New runtimes use this exact
-   * boolean; when absent they fall back to the legacy `generatedCrud` flag.
+   * Whether the generic entity runtime may serve this table at all; which of
+   * the five common operations it serves is `source.crud.operations`.
+   * Absent means false.
    */
   generatedCrudEligible?: boolean;
-  /**
-   * Legacy all-or-nothing runtime marker. New manifests set this only when all
-   * five common operations are enabled, so an older runtime fails closed for
-   * partial policies it cannot understand.
-   */
-  generatedCrud?: boolean;
   columns: ColumnDefinition[];
   indexes?: IndexDefinition[];
   /** Compiler-owned storage for a field's collection references (never standalone CRUD). */
@@ -535,6 +585,8 @@ export type TableDefinition = {
    * the supporting composite indexes. Requires `tenantScoped: true`.
    */
   rowScope?: RowScopePolicy;
+  /** Owner-axis read restriction (`authorization.ownerAxis`); requires `tenantScoped: true`. */
+  ownerAxis?: OwnerAxisPolicy;
   /**
    * The worker role permitted to reach this table ACROSS tenants — rendered as
    * an extra disjunct in the emitted policy, next to the existing
@@ -617,7 +669,7 @@ export type TableDefinition = {
    * every manifest-covered schema (db/migrations/app-role.ts), so a policyless
    * cross-tenant registry is readable in full by any raw-SQL path reachable from
    * an ordinary tenant session. Nothing exposes one today — the table is
-   * `generatedCrud: false` — but "no query happens to do it yet" is not a
+   * `generatedCrudEligible: false` — but "no query happens to do it yet" is not a
    * boundary, and a cross-tenant registry is a materially different table from
    * the global configuration catalogs that legitimately have no policy.
    *
@@ -638,12 +690,9 @@ export type TableDefinition = {
 };
 
 export function isGeneratedCrudEligible(
-  table: Pick<TableDefinition, "domainInternal" | "generatedCrudEligible" | "generatedCrud">,
+  table: Pick<TableDefinition, "domainInternal" | "generatedCrudEligible">,
 ): boolean {
-  if (table.domainInternal === true) return false;
-  return table.generatedCrudEligible === undefined
-    ? table.generatedCrud === true
-    : table.generatedCrudEligible === true;
+  return table.domainInternal !== true && table.generatedCrudEligible === true;
 }
 
 export type RelationshipRegisterEntry = {

@@ -5,25 +5,32 @@ entity: TemplateVariant
 title: Template variant
 language: en
 labels: { en: Template variant, nl: Template variant }
+pluralLabels: { en: Template variants, nl: Templatevarianten }
 domains: [documents]
 authorization:
   roles:
-    read: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
-    create: [Organization.All.ReadWrite]
-    update: [Organization.All.ReadWrite]
-    delete: [Organization.All.ReadWrite]
+    read: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite]
+    create: [Templates.Manage]
+    update: [Templates.Manage]
+    delete: [Templates.Manage]
 displayTemplate: "{{channel}} · {{locale}}"
 indexes:
-  - { name: template_variants_tenant_channel_locale_uidx, fields: [tenantId, version, channel, locale], unique: true }
+  - { name: template_variants_tenant_channel_locale_uidx, fields: [tenantId, template, channel, locale], unique: true }
+  # At most one default variant per channel of a template.
+  - { name: template_variants_tenant_channel_default_uidx, fields: [tenantId, template, channel], unique: true, where: { field: isDefault, equals: true } }
 fields:
-  - key: version
-    label: { en: Template version, nl: Templateversie }
-    semanticType: TemplateVersion
+  - key: template
+    label: { en: Template, nl: Template }
+    osfType: Template
     required: true
     immutable: true
+    relationship:
+      inverse:
+        key: variants
+        ownership: owned
   - key: channel
     label: { en: Channel, nl: Kanaal }
-    valueType: string
+    osfType: string
     required: true
     options:
       type: static
@@ -33,19 +40,21 @@ fields:
         - { value: whatsapp, label: { en: WhatsApp, nl: WhatsApp } }
     persisted: { column: channel, storageClass: core }
   - key: locale
-    valueType: string
+    osfType: string
     required: true
     defaultValue: nl
     validation: { pattern: "^[a-z]{2}(-[A-Z]{2})?$" }
     label: { en: Content language, nl: Inhoudstaal }
     persisted: { column: locale, storageClass: core }
-  - key: blocks
-    label: { en: Blocks, nl: Blokken }
-    semanticType: Block
-    cardinality: collection
-    sortable: true
-    relationship: { inverse: variant, ownership: owned }
-    allowedDefinitions: [TextBlock, YouTubeEmbed, TemplateBlock]
+  - key: isDefault
+    label: { en: Default for channel, nl: Standaard voor kanaal }
+    description:
+      en: Served for this channel when no variant matches the requested language. At most one per channel.
+      nl: Wordt voor dit kanaal geleverd als geen variant de gevraagde taal heeft. Hoogstens één per kanaal.
+    osfType: boolean
+    required: true
+    defaultValue: false
+    persisted: { column: is_default, storageClass: core }
 operations:
   insertBlock:
     name: { en: Add block, nl: Blok toevoegen }
@@ -59,6 +68,22 @@ operations:
     name: { en: Move block, nl: Blok verplaatsen }
     description: Move a block within this variant atomically.
     implementation: { type: collection, action: move, field: blocks }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  updateBlock:
+    name: { en: Edit block, nl: Blok bewerken }
+    description: Change the values of one block of this variant, authorized through the variant.
+    implementation: { type: collection, action: update, field: blocks }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  removeBlock:
+    name: { en: Remove block, nl: Blok verwijderen }
+    description: Remove one block from this variant, authorized through the variant.
+    implementation: { type: collection, action: remove, field: blocks }
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: none } }
     concurrency: { version: { mode: required, field: updatedAt } }
@@ -109,14 +134,14 @@ interfaces:
           tabs:
             - id: variant
               label: { en: Variant, nl: Variant }
-              groups: [{ title: { en: Variant, nl: Variant }, fields: [version, channel, locale] }]
+              groups: [{ title: { en: Variant, nl: Variant }, fields: [template, channel, locale, isDefault] }]
             - id: blocks
               label: { en: Blocks, nl: Blokken }
               relationship: blocks
         modes:
           create:
             title: { en: Create, nl: Toevoegen }
-            groups: [{ title: { en: Variant, nl: Variant }, fields: [version, channel, locale] }]
+            groups: [{ title: { en: Variant, nl: Variant }, fields: [template, channel, locale, isDefault] }]
           update:
             title: { en: Edit, nl: Bewerken }
-            groups: [{ title: { en: Variant, nl: Variant }, fields: [channel, locale] }]
+            groups: [{ title: { en: Variant, nl: Variant }, fields: [channel, locale, isDefault] }]

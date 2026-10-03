@@ -21,7 +21,7 @@ import type {
   VariableSuggestionResolver,
 } from "@/features/renderer/runtime/variable-sources";
 import type { VariableSuggestion } from "@/features/renderer/runtime/variable-suggestions";
-import { fieldRuntimeKind, isFieldCollection, isFieldObject } from "@/lib/field-contract/field-v2";
+import { fieldRuntimeKind, fieldValueType, isFieldCollection, isFieldObject } from "@/lib/field-contract/field-v2";
 
 type NormalizedLang = "en" | "nl";
 
@@ -42,9 +42,9 @@ function resolveLabel(
   return label?.nl ?? label?.en ?? fallbackKey;
 }
 
-function fieldValueType(field: Field): VariableSuggestion["valueType"] {
+function suggestionValueType(field: Field): VariableSuggestion["valueType"] {
   if (isFieldCollection(field)) return "array";
-  switch (field.valueType) {
+  switch (fieldValueType(field)) {
     case "integer":
     case "number":
       return "number";
@@ -88,10 +88,10 @@ function flattenTemplateFields(
       sourceNodeId: "template",
       sourceNodeLabel: templateLabel,
       fieldType: fieldRuntimeKind(field),
-      valueType: fieldValueType(field),
-      semanticType:
-        typeof field.semanticType === "string" && field.semanticType.trim().length > 0
-          ? field.semanticType.trim()
+      valueType: suggestionValueType(field),
+      osfType:
+        typeof field.osfType === "string" && field.osfType.trim().length > 0
+          ? field.osfType.trim()
           : undefined,
     });
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // SPDX-License-Identifier: BUSL-1.1
 import { collectBlueprintOperations } from "./blueprint-operations.js";
+import { collectJobOperations } from "./job-operations.js";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { pruneGeneratedUiShards } from "./prune-generated-ui-shards.js";
@@ -8,7 +9,24 @@ import { dirname, join, resolve } from "node:path";
 import {
   generateAuthoringUiArtifacts,
 } from "./authoring/generate-ui-artifacts.js";
-import { generateAuthoringKeycloakArtifacts } from "./authoring/generate-keycloak-artifacts.js";
+import {
+  generateAuthoringKeycloakArtifacts,
+  loadAuthorizationConfigs,
+} from "./authoring/generate-keycloak-artifacts.js";
+import {
+  buildRoleComposites,
+  realmRoleNames,
+  renderRoleComposites,
+  ROLE_COMPOSITES_PATH,
+  tenantRealmName,
+} from "./authoring/role-composites.js";
+import { buildRoleLabels, renderRoleLabels, ROLE_LABELS_PATH } from "./authoring/role-labels.js";
+import { buildAccessPolicy } from "./authoring/access-policy.js";
+import {
+  buildIdentityContract,
+  IDENTITY_CONTRACT_PATH,
+  renderIdentityContract,
+} from "./authoring/identity-contract.js";
 import {
   activeManifestSource,
   loadActivePlatformCompile,
@@ -22,6 +40,7 @@ import {
 } from "./core-referentiedata-artifacts.js";
 import { generateArtifacts } from "./generate.js";
 import { renderConnectorCatalog } from "./generate-connectors.js";
+import { connectorMcpTools } from "@openshapeforge/operations";
 import { renderGraphqlDocumentationCatalog } from "./generate-graphql.js";
 import {
   collectPluginMigrationRegistry,
@@ -32,6 +51,8 @@ import { buildModuleRegistry, MODULE_REGISTRY_PATH, renderModuleRegistry } from 
 import { MAX_DEDICATED_TOOLS, renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
 import { loadAuthoringConfig } from "./authoring/layers.js";
 import { loadOperationCatalogs } from "./authoring/operation-catalog.js";
+import { assertTransitionAgreements, assertTransitionReferencedPreconditions } from "./authoring/compiler/transitions-corpus.js";
+import { withOwnedChildErrors } from "./authoring/compiler/entity-operation-errors.js";
 import {
   auditOperationSurfaceCollisions,
   assertOperationRuntimeModules,
@@ -77,14 +98,13 @@ export type {
   FieldDefinitionRelationship,
   FieldDefinitionRelationshipConstraints,
   FieldDefinitionRuntimeMetadata,
-  FieldDefinitionSemanticType,
-  FieldDefinitionSemanticTypeKind,
+  FieldDefinitionOsfType,
+  FieldDefinitionOsfTypeKind,
   FieldDefinitionSuggestions,
   FieldDefinitionValidation,
   FieldDefinitionValueType,
   FieldDefinitionVariableMode,
   FieldDefinitionWorkflowInspector,
-  FieldV2,
   CompiledField,
   CompiledEntityOperation,
   ComponentCatalog,
@@ -92,7 +112,7 @@ export type {
   McpDeclarativeOperationUrl,
   McpDeclarativeRequestHeaderMapping,
   McpDeclarativeRequestMapping,
-  SemanticTypeDefinition,
+  OsfTypeDefinition,
 } from "./authoring/types.js";
 export type {
   CompilerPlugin,
@@ -112,9 +132,12 @@ export type {
   PluginSchemaMigration,
   StaticOperationCatalog,
 } from "./plugins.js";
-export { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
+export type { TableDefinition } from "./schema.js";
+export { buildWebManifest, renderWebManifest, hasWebRestCollection } from "./authoring/web-manifest.js";
 export { collectPluginSeedFixtures, prepareRuntimeModules } from "./prepare-runtime.js";
 export { resolveModelFields } from "./authoring/compiler/model.js";
+export { BASE_TYPES, isBaseType, resolveBaseType, osfTypeDefinitionOf, withBaseTypes } from "./authoring/entity-fields.js";
+export { defaultInverseKey, defaultInverseLabel, deriveInverseCollections } from "./authoring/inverse-collections.js";
 export {
   entityOperationControlSchema,
   entityOperationJsonSchemas,
@@ -148,6 +171,26 @@ export {
   renderSettingsPolicy,
   SETTINGS_POLICY_PATH,
 } from "./settings.js";
+export {
+  buildIdentityContract,
+  IDENTITY_CONTRACT_PATH,
+  renderIdentityContract,
+  type IdentityContract,
+} from "./authoring/identity-contract.js";
+export {
+  buildRoleComposites,
+  renderRoleComposites,
+  ROLE_COMPOSITES_PATH,
+  type RealmRoleComposites,
+  type RoleCompositeMember,
+  type RoleCompositesByRealm,
+} from "./authoring/role-composites.js";
+export {
+  buildRoleLabels,
+  renderRoleLabels,
+  ROLE_LABELS_PATH,
+  type RoleLabelTable,
+} from "./authoring/role-labels.js";
 export type {
   AuthoringConfig,
   AuthoringSettingValue,
@@ -215,7 +258,7 @@ export type ArtifactCollection = {
  * `schema.table` string the MCP runtime dispatches on is by construction the
  * same one the CRUD layer keys its table map on. An entity whose table did not
  * make it into the manifest is skipped — the backend manifest already fails
- * the build for an `mcp:` block without generated CRUD, so this is a guard
+ * the build for `interfaces.mcp` without generated CRUD, so this is a guard
  * against surprises, not an expected path.
  */
 function mcpCatalogInputs(
@@ -239,10 +282,10 @@ function mcpCatalogInputs(
 }
 
 /**
- * Every referentiedata group an entity points at, from either authoring
- * spelling: the documented `options.referentieGroep`, and the
- * `render.props.referentieGroep` the UI select components consume. Walks
- * nested children/item so a group referenced inside an object field counts.
+ * Every referentiedata group an entity points at, through `options` (the
+ * model compiler folds the select component's `render.props.referentieGroep`
+ * into it). Walks nested children/item so a group referenced inside an
+ * object field counts.
  */
 function collectReferentieGroepReferences(
   fields: readonly CompiledField[] | undefined,
@@ -250,15 +293,11 @@ function collectReferentieGroepReferences(
   entityName: string,
 ): Map<string, Set<string>> {
   for (const field of fields ?? []) {
-    const fromOptions =
-      field.options?.type === "referentiedata" ? field.options.referentieGroep : undefined;
-    const fromRender = field.render?.props?.referentieGroep;
-    for (const groep of [fromOptions, fromRender]) {
-      if (typeof groep === "string" && groep.length > 0) {
-        const where = into.get(groep) ?? new Set<string>();
-        where.add(`${entityName}.${field.key}`);
-        into.set(groep, where);
-      }
+    const groep = field.options?.type === "referentiedata" ? field.options.referentieGroep : undefined;
+    if (typeof groep === "string" && groep.length > 0) {
+      const where = into.get(groep) ?? new Set<string>();
+      where.add(`${entityName}.${field.key}`);
+      into.set(groep, where);
     }
     collectReferentieGroepReferences(field.children, into, entityName);
     if (field.item) collectReferentieGroepReferences([field.item], into, entityName);
@@ -319,6 +358,23 @@ export async function collectAllArtifacts(
     await loadActivePlatformCompile(repoRoot);
   const settingsPolicy = loadSettingsPolicy(repoRoot, authoringConfig, pluginEntries);
   validateRelationshipConstraints(entities);
+  // Every compiled entity, core and plugin alike: a transition's agreesOn
+  // and referenced preconditions reach across entities, so they are checked
+  // here where all of them are. A reference no compiled entity answers to
+  // is refused, never skipped.
+  const contracts = entities.map((entity) => entity.contract);
+  assertTransitionAgreements(contracts);
+  // Built once, as a value, and shared by everything that needs it. Reading the
+  // emitted snapshot back off disk would see the PREVIOUS run's file, since
+  // artifacts are written only after every generator has produced its contents.
+  // Referenced-precondition `in` values are checked against this snapshot when
+  // the field is a referentiedata field.
+  const referentiedataCatalog = await loadCoreReferentiedataCatalog(repoRoot);
+  const referentiedata = buildCoreReferentiedataSnapshot(referentiedataCatalog);
+  assertTransitionReferencedPreconditions(contracts, referentiedata);
+  // The member of an owned collection learns it here, where every owner is
+  // compiled: its generic writes then declare the collection refusal.
+  withOwnedChildErrors(entities.map((entity) => entity.contract));
   const authoringDir = resolveActiveAuthoringDir(repoRoot);
   // Web UI artifacts (CRUD pages, entity manifests, actions, workflow
   // contract) are only generated when the repo actually has a web app. A
@@ -326,11 +382,6 @@ export async function collectAllArtifacts(
   // re-enables generation without compiler changes.
   const webPresent = existsSync(join(repoRoot, "apps/web"));
   const productWebPresent = existsSync(join(repoRoot, "apps/product-web"));
-  // Built once, as a value, and shared by everything that needs it. Reading the
-  // emitted snapshot back off disk would see the PREVIOUS run's file, since
-  // artifacts are written only after every generator has produced its contents.
-  const referentiedataCatalog = await loadCoreReferentiedataCatalog(repoRoot);
-  const referentiedata = buildCoreReferentiedataSnapshot(referentiedataCatalog);
   assertReferentieGroepsResolve(entities, referentiedata);
   const pluginMigrationRegistry = collectPluginMigrationRegistry(manifest, plugins, {
     repoRoot,
@@ -346,6 +397,7 @@ export async function collectAllArtifacts(
     .map(({ document }) => document);
   const operations = [
     ...collectBlueprintOperations(entities),
+    ...collectJobOperations(),
     ...collectPluginOperations(plugins, operationContext),
     ...collectAuthoredEntityPluginOperations(entities, operationContext, referentiedata),
     ...collectAuthoredModulePluginOperations(moduleOperationCatalogs, operationContext),
@@ -359,7 +411,7 @@ export async function collectAllArtifacts(
     }
   }
   const entityOperations = collectEntityOperations(entities);
-  const moduleRegistry = buildModuleRegistry(repoRoot, pluginEntries);
+  const moduleRegistry = buildModuleRegistry(repoRoot, pluginEntries, { entities });
   assertOperationRuntimeModules(operations, [
     ...CORE_OPERATION_MODULES,
     ...moduleRegistry.modules.map((module) => module.name),
@@ -402,6 +454,7 @@ export async function collectAllArtifacts(
       : plugin.executionCompatibility;
     return authored ? [{ plugin: plugin.name, contribution: authored }] : [];
   });
+  const keycloakArtifacts = generateAuthoringKeycloakArtifacts(authoringDir);
   const groups: ArtifactCollection["groups"] = {
     db: generateArtifacts(manifest, {
       source: activeManifestSource,
@@ -437,6 +490,13 @@ export async function collectAllArtifacts(
           operations,
           executionCompatibility,
           operationToolProjection,
+          // The connector tools share the listing, so they share its byte budget.
+          connectorMcpTools(connectors),
+          // An execution compatibility record's audience must name roles the
+          // TENANT realm knows — the realm the tenant API and its derived
+          // tools serve; a control-realm role is no audience for them. The
+          // realm export is what Keycloak will import.
+          realmRoleNames(keycloakArtifacts, tenantRealmName(loadAuthorizationConfigs(authoringDir))),
         ),
       },
     ],
@@ -448,7 +508,7 @@ export async function collectAllArtifacts(
       {
         path: "apps/api/src/generated/operations/field-schema-registry.json",
         contents: renderRuntimeFieldSchemaRegistry({
-          semanticTypes: fieldCompilationCatalogs.semanticTypes,
+          osfTypes: fieldCompilationCatalogs.osfTypes,
           referentiedata,
         }),
       },
@@ -456,7 +516,7 @@ export async function collectAllArtifacts(
         path: FIELD_AUTHORING_REGISTRY_PATH,
         contents: renderFieldAuthoringRegistry(buildFieldAuthoringRegistry({
           fieldAuthoringProfiles,
-          semanticTypes: fieldCompilationCatalogs.semanticTypes,
+          osfTypes: fieldCompilationCatalogs.osfTypes,
           referentiedataCatalog,
         })),
       },
@@ -497,8 +557,48 @@ export async function collectAllArtifacts(
           ],
     settings: [
       {
+        path: "apps/api/src/generated/compiler/access-policy.json",
+        contents: JSON.stringify(buildAccessPolicy(loadAuthorizationConfigs(authoringDir), keycloakArtifacts), null, 2) + "\n",
+      },
+      {
         path: SETTINGS_POLICY_PATH,
         contents: renderSettingsPolicy(settingsPolicy),
+      },
+      // What each realm role expands to, so the API can expand a person's
+      // recorded organization roles the way Keycloak expands a token's.
+      {
+        path: ROLE_COMPOSITES_PATH,
+        contents: renderRoleComposites(buildRoleComposites(keycloakArtifacts)),
+      },
+      // What each role means to its holder, authored on the role, so the MCP
+      // session describes a person's roles in the deployment's own words.
+      {
+        path: ROLE_LABELS_PATH,
+        contents: renderRoleLabels(buildRoleLabels(loadAuthorizationConfigs(authoringDir))),
+      },
+      // Who a login is, in entity terms, so the auth layer names entities and
+      // fields through the contract instead of tables and columns by hand.
+      {
+        path: IDENTITY_CONTRACT_PATH,
+        contents: renderIdentityContract(
+          buildIdentityContract(
+            loadAuthorizationConfigs(authoringDir),
+            entities.map((entity) => entity.contract),
+            {
+              // The platform schema's own references to the acting party:
+              // authored there because it is loaded before the entities are
+              // compiled, and held to the contract here.
+              platformPartyReferences: (manifest.relationshipRegister ?? [])
+                .filter((entry) => entry.from.schema === "platform" &&
+                  ["tenants.relation_id", "identity_relations.relation_id", "identity_relations.candidate_relation_id"].includes(`${entry.from.table}.${entry.from.column}`))
+                .map((entry) => ({
+                  from: `${entry.from.schema}.${entry.from.table}.${entry.from.column}`,
+                  to: `${entry.to.schema}.${entry.to.table}`,
+                })),
+              schemaByModule: { core: "erp" },
+            },
+          ),
+        ),
       },
     ],
     referentiedata: await generateCoreReferentiedataArtifacts(repoRoot, referentiedata),
@@ -519,7 +619,7 @@ export async function collectAllArtifacts(
           }]
         : []),
     ],
-    keycloak: generateAuthoringKeycloakArtifacts(authoringDir),
+    keycloak: keycloakArtifacts,
     plugins: [],
   };
 

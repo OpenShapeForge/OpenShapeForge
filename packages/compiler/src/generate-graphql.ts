@@ -118,6 +118,26 @@ export function buildGraphqlDocumentationCatalog(
         });
       }
 
+      for (const relationship of contract.graphql.relationships) {
+        const normalized = contract.model.relationships.find(
+          (candidate) => candidate.key === relationship.name,
+        );
+        if (!normalized?.fieldKey || fields.has(relationship.name)) continue;
+        const compiled = coreFieldsByName.get(normalized.fieldKey);
+        if (compiled && isRestricted(compiled)) continue;
+        const rawDescription = compiled
+          ? localizedText(compiled.description)
+          : undefined;
+        const description = rawDescription
+          ? sanitizeGraphqlDescription(rawDescription)
+          : undefined;
+        fields.set(relationship.name, {
+          name: relationship.name,
+          description:
+            description ?? `References the ${relationship.target} entity.`,
+        });
+      }
+
       for (const profile of Object.values(contract.graphql.profileTypes)) {
         for (const field of profile.fields) {
           // A context field may add documentation, but it must never replace

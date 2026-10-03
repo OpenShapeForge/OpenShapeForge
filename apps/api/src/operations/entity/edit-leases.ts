@@ -14,6 +14,7 @@ import {
 import { normalizeTimestampToken } from "../../db/timestamps.js";
 import { appendScopedEntityEventInTransaction } from "../../platform/entity-events.js";
 import { fieldNameForColumn } from "./columns.js";
+import { lockedError } from "./edit-lease-locked.js";
 import type { GeneratedCrudTable } from "./types.js";
 
 export type EditLeaseRequirement = {
@@ -167,19 +168,6 @@ export async function validateEntityVersionInTransaction(
       detail: "Reload the record before trying again.",
     });
   }
-}
-
-function lockedError(row: LeaseRow): OperationError {
-  const owner = row.owner_display_name?.trim() || "another user";
-  const expiresAt = new Date(row.expires_at).toISOString();
-  return {
-    code: "LOCKED",
-    message: `This record is currently being edited by ${owner}.`,
-    detail: `Their edit lease remains valid until ${expiresAt}.`,
-    retryable: true,
-    retryAt: expiresAt,
-    data: { ownerDisplayName: owner },
-  };
 }
 
 export async function editLeaseErrorsByTarget(

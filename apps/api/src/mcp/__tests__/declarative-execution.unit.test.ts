@@ -21,7 +21,7 @@ import {
   mergeOutputs,
   operationBaseUrlTemplate,
   extractPath,
-  orderedBindings,
+  orderedBindingRecords,
   providerUrlTemplates,
   requestHeaderMappings,
   resolveTemplate,
@@ -299,8 +299,8 @@ describe("mapping helpers", () => {
   it("validates fixed authored header targets against declared scalar inputs", () => {
     const operation = {
       inputFields: [
-        { key: "version", valueType: "string" },
-        { key: "sequence", valueType: "integer", cardinality: "single" },
+        { key: "version", osfType: "string" },
+        { key: "sequence", osfType: "integer", cardinality: "single" },
       ],
       requestMapping: {
         headers: [
@@ -317,7 +317,7 @@ describe("mapping helpers", () => {
 
   it("refuses hostile or caller-directed authored header metadata", () => {
     const operation = (headers: unknown, inputFields: unknown = [
-      { key: "version", valueType: "string" },
+      { key: "version", osfType: "string" },
     ]) => ({ inputFields, requestMapping: { headers } });
 
     expect(() => requestHeaderMappings(operation("not-an-array"), undefined))
@@ -334,7 +334,7 @@ describe("mapping helpers", () => {
     expect(() =>
       requestHeaderMappings(
         operation([{ field: "version", header: "If-Match" }], [
-          { key: "version", valueType: "object" },
+          { key: "version", osfType: "object" },
         ]),
         undefined,
       ),
@@ -342,7 +342,7 @@ describe("mapping helpers", () => {
     expect(() =>
       requestHeaderMappings(
         operation([{ field: "version", header: "If-Match" }], [
-          { key: "version", valueType: "string", cardinality: "collection" },
+          { key: "version", osfType: "string", cardinality: "collection" },
         ]),
         undefined,
       ),
@@ -400,31 +400,24 @@ describe("mapping helpers", () => {
     expect(extractPath({ a: 1 }, undefined)).toEqual({ a: 1 });
   });
 
-  it("orders bindings and refuses an empty set", () => {
+  it("orders binding records and refuses an empty or colliding set", () => {
     expect(
-      orderedBindings(
-        {
-          bindings: [
-            { order: 2, id: "b" },
-            { order: 1, id: "a" },
-          ],
-        },
-        "bindings",
-      ).map((binding) => binding.id),
+      orderedBindingRecords([
+        { order: 2, id: "b" },
+        { order: 1, id: "a" },
+      ]).map((binding) => binding.id),
     ).toEqual(["a", "b"]);
-    expect(() => orderedBindings({ bindings: [] }, "bindings")).toThrow(
-      /no bindings/,
+    expect(() => orderedBindingRecords([])).toThrow(/no bindings/);
+    // A row of the owned binding entity carries NULL for an unset forEach
+    // column; the record reads it as absent, so no consumer has to.
+    const [projected] = orderedBindingRecords([{ order: 1, id: "a", forEach: null }]);
+    expect(projected!.forEach).toBeUndefined();
+    expect("forEach" in projected!).toBe(true);
+    expect(() => orderedBindingRecords([{ order: 1 }, { order: 1 }])).toThrow(
+      /unique integer order/,
     );
-    expect(() =>
-      orderedBindings(
-        { bindings: [{ order: 1 }, { order: 1 }] },
-        "bindings",
-      ),
-    ).toThrow(/unique integer order/);
     for (const order of [undefined, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
-      expect(() =>
-        orderedBindings({ bindings: [{ order }] }, "bindings"),
-      ).toThrow(/unique integer order/);
+      expect(() => orderedBindingRecords([{ order }])).toThrow(/unique integer order/);
     }
   });
 });
@@ -803,10 +796,10 @@ describe("executeBinding", () => {
   it("composes If-Match through conditional update and delete execution", async () => {
     const spy = fetchSpy();
     const inputFields = [
-      { key: "id", valueType: "string" },
-      { key: "version", valueType: "string" },
-      { key: "title", valueType: "string" },
-      { key: "notify", valueType: "boolean" },
+      { key: "id", osfType: "string" },
+      { key: "version", osfType: "string" },
+      { key: "title", osfType: "string" },
+      { key: "notify", osfType: "boolean" },
     ];
     const requestMapping = {
       headers: [{ field: "version", header: "If-Match" }],
@@ -875,7 +868,7 @@ describe("executeBinding", () => {
       binding: {},
       operationRow: {
         operation: { method: "DELETE", pathTemplate: "/records/1" },
-        inputFields: [{ key: "version", valueType: "string" }],
+        inputFields: [{ key: "version", osfType: "string" }],
         requestMapping: {
           headers: [{ field: "version", header: "If-Match" }],
         },
@@ -901,7 +894,7 @@ describe("executeBinding", () => {
       const spy = fetchSpy();
       const operation = (header: string) => ({
         operation: { method: "DELETE", pathTemplate: "/records/1" },
-        inputFields: [{ key: "value", valueType: "string" }],
+        inputFields: [{ key: "value", osfType: "string" }],
         requestMapping: { headers: [{ field: "value", header }] },
       });
       for (const header of [
@@ -1562,7 +1555,7 @@ describe("composeBindingRequest (describe mode)", () => {
   const operationRow = {
     key: "create-thing",
     operation: { method: "POST", pathTemplate: "/api/things" },
-    inputFields: [{ key: "version", valueType: "string" }],
+    inputFields: [{ key: "version", osfType: "string" }],
     requestMapping: {
       headers: [{ field: "version", header: "If-Match" }],
     },
@@ -1891,6 +1884,22 @@ describe("executeBindingStep", () => {
     operation: { method: "GET", pathTemplate: "/records/{providerId}" },
     responseMapping: { fieldPaths: [{ field: "record", path: "$" }] },
   };
+
+  it("runs a row whose forEach column is NULL as a plain binding", async () => {
+    // The row as the owned binding entity delivers it, through the one
+    // projection that turns rows into binding records.
+    const [plain] = orderedBindingRecords([{ ...binding, forEach: null, inputMapping: [] }]);
+    const outputs = await executeBindingStep({
+      binding: plain!,
+      operationRow: { ...operationRow, operation: { method: "GET", pathTemplate: "/records/one" } },
+      providerRow,
+      connectionValues: {},
+      serviceInputs: {},
+      secretScope: "unused",
+      fetchImpl: (async () => Response.json({ id: "one", title: "Title one" })) as unknown as typeof fetch,
+    });
+    expect(outputs).toEqual({ records: { id: "one", title: "Title one" } });
+  });
 
   it("fans a query out over an earlier collection and preserves its order", async () => {
     const calls: string[] = [];

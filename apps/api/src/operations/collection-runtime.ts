@@ -13,7 +13,7 @@ export function nativeCollectionBinding(operation: OperationContract): Readonly<
   if (!binding || binding.type !== "collection" ||
       operation.plugin !== "core" || operation.handler !== "collectionMutation" ||
       !/^[A-Z][A-Za-z0-9]*$/.test(binding.entityName) || !/^[a-z][A-Za-z0-9]*$/.test(binding.field) ||
-      !["insert", "move"].includes(binding.action) || operation.target?.entityName !== binding.entityName ||
+      !["insert", "move", "update", "remove"].includes(binding.action) || operation.target?.entityName !== binding.entityName ||
       operation.target.scope !== "record" || operation.target.inputField !== "id" ||
       operation.auth.mode !== "session" || !operation.auth.roles?.length || operation.tenancy.mode !== "required" ||
       operation.effects?.data !== "write" || operation.effects.external !== "none" ||

@@ -1,22 +1,20 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { blueprintOperationHandler } from "./entity/blueprints.js";
+import { TRANSITIONS_PLUGIN, transitionAvailabilityHandler, transitionOperationHandler } from "./entity/transitions.js";
 import { CONTROL_PLUGIN, controlOperationHandler } from "../control/operations.js";
+import { JOBS_PLUGIN, jobsOperationHandler } from "../jobs/operations.js";
 import {
   bearerIssuerOf,
   controlSessionHttpError,
   resolveControlSession,
 } from "../control/control-session.js";
-import Ajv2020, { type ValidateFunction } from "ajv/dist/2020.js";
-import addFormats from "ajv-formats";
-import { operationReferenceKeyword, operationI18nKeyword } from "@openshapeforge/operations";
+import { type ValidateFunction } from "ajv/dist/2020.js";
 import { GraphQLError } from "graphql";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Transaction } from "kysely";
 import rawCatalog from "../generated/operations/catalog.json" with { type: "json" };
-import {
-  resolveSessionContext,
-  SessionAuthenticationUnavailableError,
-} from "../auth/identity.js";
+import { resolveSessionContext } from "../auth/identity.js";
+import { SessionAuthenticationUnavailableError } from "../auth/session-unavailable.js";
 import { usesHostOrganizationContext } from "../config/host-organization.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { GraphqlContext } from "../graphql/context.js";
@@ -59,6 +57,8 @@ import {
   validateEntityVersionInTransaction,
 } from "./entity/edit-leases.js";
 import { getGeneratedCrudTables } from "./entity/catalog.js";
+import { getEntityOperationOffers } from "./entity/runtime.js";
+import { entityBusinessUnavailability } from "./entity/availability.js";
 import type { EntityOperationContract, GeneratedCrudTable } from "./entity/types.js";
 import {
   assertRecordPermission,
@@ -70,18 +70,30 @@ import { HttpError, toHttpError } from "../rest/http-error.js";
 import { issueOperationPrerequisiteReceipt } from "./prerequisite-receipts.js";
 import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "./session-authorization.js";
 import { operationContractFingerprint } from "./contract-fingerprint.js";
+import { createOperationAjv } from "./operation-ajv.js";
 import { executeKeyedOperation } from "./execution-receipts.js";
 import type { DB } from "../generated/db/types.js";
 import { evaluateOperationAvailability } from "./availability.js";
 import { nativeEntityTypeListHandler } from "./entity-type-list.js";
+import { GRANTS_PLUGIN, grantsOperationHandler } from "./grants-operations.js";
+import { SOURCE_SYNC_PLUGIN, sourceSyncOperationHandler } from "./source-sync-operations.js";
+import { BILLING_PLUGIN, billingOperationHandler } from "./billing/module.js";
+import {
+  capabilityGrantRefusal,
+  consumeCapabilityGrantInTransaction,
+  resolveCapabilityGrantSession,
+} from "./capability-grant-resolution.js";
+import { grantTokenFromAuthorization } from "./capability-grant-token.js";
 import { nativeCollectionHandler } from "./collection-runtime.js";
 import { nativeConstrainedReferenceCreateHandler } from "./constrained-reference-create.js";
 
 export type OperationContract = {
+  /** Compiler-owned source-adapter normalization. No shape guessing or authored override. */
+  resultProjection?: { kind: "entity-record"; entityName: string; idField: string };
   key: string;
   /** Built-in executor selected only by the compiler, never request input. */
   implementation?:
-    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" }
+    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" | "update" | "remove" }
     | { type: "entity-type-list"; labels: Record<string, { en: string; nl: string }> }
     | { type: "constrained-reference-create"; targetEntityName: string; collectionEntityName?: string; parentField?: string; targetValues: Record<string, string | number | boolean>; childValues?: Record<string, string | number | boolean> };
   /** Static Operations default to invoke; Entity-backed handlers retain CRUD intent. */
@@ -95,6 +107,7 @@ export type OperationContract = {
     entityName: string;
     scope: "collection" | "record";
     inputField?: string;
+    inputBindings?: Record<string, string>;
   };
   inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown>;
@@ -116,10 +129,11 @@ export type OperationContract = {
         recordPermission?: RecordPermissionAction;
         recordPermissions?: readonly RecordPermissionAction[];
       }
+    | { mode: "capability" }
     | { mode: "custom"; scheme: string; description: string; securityScheme: Record<string, unknown> };
   tenancy: { mode: "required" | "derived" | "none"; description?: string };
   idempotency: { mode: "none" | "intrinsic" | "idempotency-key"; header?: string; inputField?: string; description?: string };
-  effects?: {
+  effects: {
     data: "read" | "write" | "delete";
     external: "none" | "read" | "write";
   };
@@ -139,20 +153,8 @@ const catalog = rawCatalog as unknown as {
   operations: OperationContract[];
   entityOperations?: EntityOperationContract[];
 };
-function operationAjv(coerceTypes = false) {
-  const instance = new Ajv2020.default({ strict: true, allErrors: true, coerceTypes });
-  (addFormats as unknown as (target: typeof instance) => unknown)(instance);
-  // Presentation-only binding used by generated forms. It does not validate
-  // or authorize a value, but strict AJV must recognize the canonical keyword.
-  instance.addKeyword({ keyword: "x-osf-sourceField", schemaType: "string", valid: true });
-  instance.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });
-  instance.addKeyword(operationReferenceKeyword);
-  instance.addKeyword(operationI18nKeyword);
-  return instance;
-}
-
-const ajv = operationAjv();
-const queryAjv = operationAjv(true);
+const ajv = createOperationAjv();
+const queryAjv = createOperationAjv(true);
 const queryValidators = new WeakMap<OperationContract, ValidateFunction>();
 const defaultErrorSchema = {
   type: "object",
@@ -383,7 +385,6 @@ function operationIntent(
 }
 
 function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
-  const method = entry.operation.transports.rest.method;
   return {
     id: entry.operation.key,
     key: entry.operation.key,
@@ -396,14 +397,7 @@ function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
     ...(entry.operation.target ? { target: entry.operation.target } : {}),
     input: { kind: "json-schema", schema: entry.operation.inputSchema },
     output: { kind: "json-schema", schema: entry.operation.outputSchema },
-    effects: {
-      data: entry.operation.effects?.data ?? (method === "GET"
-        ? "read"
-        : method === "DELETE"
-          ? "delete"
-          : "write"),
-      external: entry.operation.effects?.external ?? (method === "GET" ? "read" : "write"),
-    },
+    effects: entry.operation.effects,
     reliability: {
       idempotency: {
         mode: entry.operation.idempotency.mode === "intrinsic"
@@ -416,6 +410,11 @@ function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
     ...(entry.operation.prerequisites
       ? { prerequisites: entry.operation.prerequisites }
       : {}),
+    errors: entry.operation.errors.map((error) => ({
+      status: error.status,
+      code: error.code,
+      description: error.description,
+    })),
     ...(entry.operation.concurrency
       ? { concurrency: entry.operation.concurrency }
       : {}),
@@ -589,12 +588,53 @@ export function bindOperationHandlers(
       bound.set(operation.key, { operation, handler: blueprintOperationHandler(operation.handler) });
       continue;
     }
+    // Status transitions declared on entity fields are core too: one generic
+    // handler plus the offer policy that hides a rule whose `from` does not
+    // hold, so what a caller is offered is what the write will accept.
+    if (operation.plugin === TRANSITIONS_PLUGIN) {
+      if (modulesByName.has(TRANSITIONS_PLUGIN)) throw new Error("The core transition runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, {
+        operation,
+        handler: transitionOperationHandler(operation),
+        availability: transitionAvailabilityHandler(operation),
+      });
+      continue;
+    }
     // The platform's own administration is core too: its handlers ship with
     // the runtime (control/operations.ts) and bind in every process, so a
     // core-only deployment administers itself without an operation module.
     if (operation.plugin === CONTROL_PLUGIN) {
       if (modulesByName.has(CONTROL_PLUGIN)) throw new Error("The core control runtime cannot be replaced by a plugin.");
       bound.set(operation.key, { operation, handler: controlOperationHandler(operation) });
+      continue;
+    }
+    // The durable job queue is core as well: its handlers (jobs/operations.ts)
+    // bind in every process, so a deployment administers its outbox without
+    // an operation module.
+    if (operation.plugin === JOBS_PLUGIN) {
+      if (modulesByName.has(JOBS_PLUGIN)) throw new Error("The core jobs runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: jobsOperationHandler(operation) });
+      continue;
+    }
+    if (operation.plugin === GRANTS_PLUGIN) {
+      if (modulesByName.has(GRANTS_PLUGIN)) throw new Error("The core capability grant runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: grantsOperationHandler(operation) });
+      continue;
+    }
+    // Importing records from an external source system by their base source
+    // fields is core: it writes through the entities' own CRUD, so it binds
+    // wherever those entities do (operations/source-sync-operations.ts).
+    if (operation.plugin === SOURCE_SYNC_PLUGIN) {
+      if (modulesByName.has(SOURCE_SYNC_PLUGIN)) throw new Error("The core source-sync runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: sourceSyncOperationHandler(operation) });
+      continue;
+    }
+    // Billing is core as well: the milestone run and the milestone create
+    // (operations/billing) bind in every process, entity-authored plugin
+    // Operations included, so the ERP entities carry their own behaviour.
+    if (operation.plugin === BILLING_PLUGIN) {
+      if (modulesByName.has(BILLING_PLUGIN)) throw new Error("The core billing runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: billingOperationHandler(operation) });
       continue;
     }
     if (operation.implementation?.type === "entity-type-list") {
@@ -659,12 +699,23 @@ export function requireOperationAuthorization(
     }
     return;
   }
+  // A capability Operation takes the grant session core resolved from the
+  // presented token and nothing else; the grant's own Operation list is the
+  // whole authorization, there are no roles to consult.
+  if (operation.auth.mode === "capability") {
+    if (!session || session.credential !== "grant" || !session.grant || !session.tenantId) {
+      throw capabilityGrantRefusal("GRANT_INVALID");
+    }
+    if (!session.grant.operations.includes(operation.key)) throw capabilityGrantRefusal("GRANT_SCOPE");
+    return;
+  }
   if (operation.auth.mode !== "session") return;
   // The mirror image: a platform operator has no tenant and is not a session
-  // on this surface, whatever roles the control realm gave them.
+  // on this surface, whatever roles the control realm gave them — and a grant
+  // session covers its listed capability Operations only.
   if (
     !session || session.credential === "none" || session.credential === "control-bearer" ||
-    !session.userId
+    session.credential === "grant" || !session.userId
   ) {
     throw new HttpError(401, "UNAUTHENTICATED", "Operation requires an authenticated bearer session.");
   }
@@ -730,7 +781,7 @@ function targetTable(operation: OperationContract): GeneratedCrudTable {
   if (!table?.primaryKey) {
     throw operationFailure({
       code: "INTERNAL_SERVER_ERROR",
-      message: "The Operation target is not available.",
+      message: "The Operation target has no generated CRUD table for record authorization.",
     });
   }
   return table;
@@ -789,7 +840,7 @@ function protectedCustomOperation(
   if (!operation.target || intent === "create") {
     throw operationFailure({
       code: "INTERNAL_SERVER_ERROR",
-      message: "The Operation target is not available.",
+      message: "The protected Operation has no valid record target.",
     });
   }
   return {
@@ -820,6 +871,39 @@ function customHandlerInput(
 }
 
 async function invokeCustomOperationWithControls(
+  bound: Bound,
+  input: Readonly<Record<string, unknown>>,
+  context: Parameters<ModuleOperationHandler>[1],
+  invokeHandler: (handlerInput: Record<string, unknown>) => Promise<ModuleOperationSuccessResult>,
+): Promise<ModuleOperationSuccessResult> {
+  const operation = bound.operation;
+  if (operation.auth.mode === "capability") {
+    // The grant is used in the handler's transaction: a handler that fails
+    // leaves it usable, a single-use grant that succeeded is spent for good.
+    // Any further guard below joins this same transaction.
+    const session = context.session;
+    if (!session || session.credential !== "grant" || !context.platform) {
+      throw capabilityGrantRefusal("GRANT_INVALID");
+    }
+    return withModuleOperationTransaction(context.platform, session, async (trx) => {
+      await consumeCapabilityGrantInTransaction(trx, session, operation.key);
+      return invokeGuardedCustomOperation(bound, input, context, invokeHandler);
+    });
+  }
+  // Data-writing plugin handlers need the same owning Operation transaction
+  // even when their invoke contract has no record/version/confirmation guard.
+  // This joins a keyed receipt transaction and keeps artifact binding and
+  // canonical data changes atomic. Control handlers own audited system
+  // transactions: their verified operator session deliberately has no tenant.
+  // Unhosted contract tests may have no platform.
+  if (operation.auth.mode !== "control" && operation.effects.data === "write" && context.platform && context.session) {
+    return withModuleOperationTransaction(context.platform, context.session, () =>
+      invokeGuardedCustomOperation(bound, input, context, invokeHandler));
+  }
+  return invokeGuardedCustomOperation(bound, input, context, invokeHandler);
+}
+
+async function invokeGuardedCustomOperation(
   bound: Bound,
   input: Readonly<Record<string, unknown>>,
   context: Parameters<ModuleOperationHandler>[1],
@@ -906,12 +990,16 @@ async function invokeCustomOperationWithControls(
   const leaseToken = operation.concurrency?.editLease
     ? requireStringControl(input, "leaseToken")
     : undefined;
-  const table = targetTable(operation);
+  // Source-backed record Operations can have business availability without a
+  // generated CRUD table. Only platform-owned record guards require one.
+  const table = recordPermissions.length > 0 || expectedVersion || confirmation.mode === "challenge"
+    ? targetTable(operation)
+    : undefined;
   for (const permission of recordPermissions) {
     await assertRecordPermission(
       context.db,
       context.session,
-      table,
+      table!,
       targetValue,
       permission,
     );
@@ -936,7 +1024,7 @@ async function invokeCustomOperationWithControls(
       }
       const error = await issueEntityConfirmationChallenge(context.db, context.session, {
         operation: protectedOperation,
-        table,
+        table: table!,
         targetId: targetValue,
         expectedVersion,
         ...(leaseToken ? { leaseToken } : {}),
@@ -960,7 +1048,7 @@ async function invokeCustomOperationWithControls(
         await assertRecordPermissionInTransaction(
           trx,
           context.session!,
-          table,
+          table!,
           targetValue,
           permission,
         );
@@ -968,7 +1056,7 @@ async function invokeCustomOperationWithControls(
       if (expectedVersion) {
         await validateEntityVersionInTransaction(trx, context.session!, {
           operation: protectedOperation,
-          table,
+          table: table!,
           targetId: targetValue,
           expectedVersion,
         });
@@ -1226,6 +1314,22 @@ export async function invokeOperation(
         throw new DeclaredOperationError(declaration, result);
       }
       let success = result as ModuleOperationSuccessResult;
+      if (bound.operation.resultProjection) {
+        const projection = bound.operation.resultProjection;
+        const record = success.value as Record<string, unknown> | undefined;
+        const id = record?.[projection.idField];
+        if (success.resultKind || !record || typeof record !== "object" || Array.isArray(record) ||
+            typeof id !== "string" || id !== input[bound.operation.target?.inputField ?? "id"]) {
+          throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "The source adapter must return the requested record, not an envelope or another target.");
+        }
+        const visible = getEntityOperationOffers(projection.entityName, activeContext.session!, [], {}, { id, row: record });
+        const unavailable = activeContext.db && activeContext.session
+          ? (await entityBusinessUnavailability(activeContext.db, activeContext.session,
+              [{ id, operationIds: visible.map(offer => offer.operation.id) }])).get(id) ?? {}
+          : {};
+        success = { ...success, resultKind: "operation-envelope", value: { data: record,
+          operations: getEntityOperationOffers(projection.entityName, activeContext.session!, [], unavailable, { id, row: record }) } };
+      }
       if (options.prepareSuccess) {
         success = await options.prepareSuccess(success, activeContext);
         if (!success || typeof success !== "object" || Array.isArray(success)) {
@@ -1472,11 +1576,12 @@ function sendOperationRestFailure(
 export function operationRestInput(
   request: FastifyRequest,
   operation: OperationContract,
+  bind: (input: Record<string, unknown>) => Record<string, unknown> = (input) => input,
 ): Record<string, unknown> {
   let body: Record<string, unknown> = {};
   if (request.body instanceof Uint8Array) {
     if (request.body.byteLength === 0) {
-      return operationRestInputFromParts(request, operation, body);
+      return operationRestInputFromParts(request, operation, body, bind);
     }
     try {
       const parsed = JSON.parse(new TextDecoder().decode(request.body));
@@ -1490,13 +1595,14 @@ export function operationRestInput(
   } else if (request.body && typeof request.body === "object" && !Array.isArray(request.body)) {
     body = request.body as Record<string, unknown>;
   }
-  return operationRestInputFromParts(request, operation, body);
+  return operationRestInputFromParts(request, operation, body, bind);
 }
 
 function operationRestInputFromParts(
   request: FastifyRequest,
   operation: OperationContract,
   body: Record<string, unknown>,
+  bind: (input: Record<string, unknown>) => Record<string, unknown>,
 ): Record<string, unknown> {
   const query = request.query && typeof request.query === "object" ? request.query as Record<string, unknown> : {};
   const params = request.params && typeof request.params === "object" ? request.params as Record<string, unknown> : {};
@@ -1523,7 +1629,10 @@ function operationRestInputFromParts(
       throw new HttpError(400, "BAD_USER_INPUT", `Declared operation input must not be supplied through query parameters: ${collisions.sort().join(", ")}.`);
     }
   }
-  const input = readsInputFromQuery ? { ...query, ...params } : { ...body, ...params };
+  // Server-supplied input (a capability grant's subject) joins before the
+  // query is validated: a GET whose record target the grant names must not be
+  // refused for leaving out the field the caller may not choose.
+  const input = bind(readsInputFromQuery ? { ...query, ...params } : { ...body, ...params });
   if (operation.idempotency.mode === "idempotency-key") {
     const field = operation.idempotency.inputField!;
     if (field in input) {
@@ -1573,6 +1682,42 @@ async function resolveControlRestSession(
   }
 }
 
+/**
+ * A capability Operation is authenticated by its grant token alone: no bearer
+ * is consulted, and the database is required because the grant row is the
+ * credential.
+ */
+async function resolveCapabilityRestSession(
+  request: FastifyRequest,
+  context: ModuleRuntimeContext,
+  operation: OperationContract,
+): Promise<TrustedSessionContext> {
+  if (!context.db) throw new HttpError(503, "DATABASE_NOT_CONFIGURED", "Capability grants require a database.");
+  const header = request.headers.authorization;
+  const token = grantTokenFromAuthorization(Array.isArray(header) ? header[0] : header);
+  return resolveCapabilityGrantSession(context.db, token, {
+    key: operation.key,
+    ...(operation.target ? { target: { entityName: operation.target.entityName } } : {}),
+  });
+}
+
+/**
+ * The grant names the one record; when the Operation declares a record
+ * target the runtime supplies it, so the caller cannot point the Operation
+ * at another record than the grant was issued for.
+ */
+function bindGrantSubject(
+  operation: OperationContract,
+  session: TrustedSessionContext | undefined,
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  if (operation.auth.mode !== "capability" || !session?.grant) return input;
+  const field = operation.target?.inputField;
+  if (!field) return input;
+  if (field in input && input[field] !== session.grant.subject.id) throw capabilityGrantRefusal("GRANT_SCOPE");
+  return { ...input, [field]: session.grant.subject.id };
+}
+
 export function registerOperationRestRoutes(
   app: FastifyInstance,
   modules: readonly RuntimeModule[],
@@ -1585,24 +1730,19 @@ export function registerOperationRestRoutes(
     const handler = async (request: FastifyRequest, reply: FastifyReply) => {
       let session: TrustedSessionContext | undefined;
       try {
-        const declaresAuthenticationUnavailable = entry.operation.errors.some((error) =>
-          error.status === 503 && error.code === "AUTHENTICATION_UNAVAILABLE"
-        );
         session = entry.operation.auth.mode === "custom"
           ? undefined
           : entry.operation.auth.mode === "control"
           ? await resolveControlRestSession(request, context)
-          : await resolveSessionContext(headersFromFastify(request.headers), {
-              db: context.db,
-              failOnUnavailable:
-                entry.operation.auth.mode === "session" && declaresAuthenticationUnavailable,
-            });
+          : entry.operation.auth.mode === "capability"
+          ? await resolveCapabilityRestSession(request, context, entry.operation)
+          : await resolveSessionContext(headersFromFastify(request.headers), { db: context.db });
       } catch (error) {
         return sendOperationRestFailure(reply, entry.operation, error, true);
       }
       let input: Record<string, unknown>;
       try {
-        input = operationRestInput(request, entry.operation);
+        input = operationRestInput(request, entry.operation, (parts) => bindGrantSubject(entry.operation, session, parts));
       } catch (error) {
         return sendOperationRestFailure(reply, entry.operation, error, false);
       }
@@ -1660,11 +1800,14 @@ export function registerRuntimeOperationRestRoutes(
       try {
         controlSession = await resolveControlSession(headers, control);
       } catch (error) {
-        // Only host-organization mode deliberately gives control and tenant
-        // credentials one issuer. In a separate-realm deployment this token
-        // was unambiguously routed to the control verifier, so preserve its
-        // refusal instead of retrying it against an unrelated tenant realm.
-        if (!usesHostOrganizationContext()) throw controlSessionHttpError(error);
+        // A deployment can share an issuer between control and tenant clients
+        // before enabling host-organization mode. Only retry when the tenant
+        // verifier is configured for that same issuer; it still checks the
+        // signature, audience and admitted client independently.
+        if (!usesHostOrganizationContext() &&
+          control.operator.issuer !== process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER) {
+          throw controlSessionHttpError(error);
+        }
       }
     }
     // Host-organization deployments intentionally use one issuer for both
@@ -1791,7 +1934,10 @@ export function operationGraphqlContribution(
   modules: readonly RuntimeModule[],
   runtime: ModuleRuntimeContext,
 ): RuntimeModule | undefined {
-  const activePlugins = new Set(modules.map((module) => module.name));
+  // The core jobs, transition and billing Operations project in every
+  // process, as their REST and MCP surfaces do: the handlers ship with the
+  // runtime, not with a module.
+  const activePlugins = new Set([...modules.map((module) => module.name), JOBS_PLUGIN, TRANSITIONS_PLUGIN, BILLING_PLUGIN]);
   const projected = catalog.operations.filter((operation) =>
     activePlugins.has(operation.plugin) && operation.transports.graphql.enabled
   );

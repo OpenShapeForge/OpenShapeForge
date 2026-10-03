@@ -260,7 +260,7 @@ components:
       - maxSizeMb
       - multiple
 
-  RichTextEditor:
+  MarkdownText:
     kind: field
     description: Rich text editor for formatted content.
     props:

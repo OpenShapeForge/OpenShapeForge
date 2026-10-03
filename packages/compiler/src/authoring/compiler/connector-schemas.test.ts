@@ -3,15 +3,22 @@ import { describe, expect, it } from "bun:test";
 import {
   buildOperationSchemas,
   connectorFieldSchema,
+  connectorObjectSchema,
 } from "./connector-schemas.js";
-import { constraintsForField } from "../../field-json-schema.js";
+import { constrainedType } from "@openshapeforge/operations";
 import type { FieldDefinition } from "../types/field-definition.js";
+import type { OsfTypeDefinition } from "../types/authoring.js";
+
+/** A catalog type that declares its own value schema, the way `fieldDefinition` does. */
+const catalog: Record<string, OsfTypeDefinition> = {
+  fieldDefinition: { baseType: "object", label: { en: "Field definition" }, schema: { $ref: "#/$defs/fieldDefinition" } },
+};
 
 describe("connector field schemas", () => {
   it("maps authored validation bounds into the schema", () => {
     const field = {
       key: "prefix",
-      valueType: "string",
+      osfType: "string",
       validation: {
         minLength: 1,
         maxLength: { value: 100 },
@@ -24,7 +31,17 @@ describe("connector field schemas", () => {
       minLength: 1,
       maxLength: 100,
       pattern: "^[a-z/]+$",
+      "x-osf-type": "string",
     });
+  });
+
+  it("resolves a catalog osf type through the catalog and refuses one it cannot resolve", () => {
+    const osfTypes = { amount: { baseType: "number" as const, label: { en: "Amount" } } };
+    const field = { key: "total", osfType: "amount", validation: { min: 0 } } as FieldDefinition;
+    expect(connectorFieldSchema(field, osfTypes)).toEqual({ type: "number", minimum: 0, "x-osf-type": "amount" });
+    // Without the catalog the base is unknown; a silent string would misdescribe the wire contract.
+    expect(() => connectorFieldSchema(field)).toThrow("Connector field total: unknown osfType amount.");
+    expect(() => buildOperationSchemas([field], { cardinality: "one", fields: [] })).toThrow("unknown osfType amount");
   });
 
   it("maps value types and formats", () => {
@@ -36,9 +53,9 @@ describe("connector field schemas", () => {
       ["datetime", { type: "string", format: "date-time" }],
       ["object", { type: "object" }],
     ];
-    for (const [valueType, expected] of cases) {
-      expect(connectorFieldSchema({ key: "f", valueType } as FieldDefinition)).toEqual(
-        expected,
+    for (const [osfType, expected] of cases) {
+      expect(connectorFieldSchema({ key: "f", osfType } as FieldDefinition)).toEqual(
+        { ...expected, "x-osf-type": osfType },
       );
     }
   });
@@ -46,7 +63,7 @@ describe("connector field schemas", () => {
   it("turns static options into an enum", () => {
     const field = {
       key: "mode",
-      valueType: "string",
+      osfType: "string",
       options: {
         type: "static",
         items: [{ value: "fast" }, { value: "safe" }],
@@ -60,7 +77,7 @@ describe("connector field schemas", () => {
   it("ignores referentiedata options", () => {
     const field = {
       key: "kind",
-      valueType: "string",
+      osfType: "string",
       options: { type: "referentiedata", referentieGroep: "RELATIESOORT" },
     } as FieldDefinition;
     expect(connectorFieldSchema(field).enum).toBeUndefined();
@@ -69,27 +86,43 @@ describe("connector field schemas", () => {
   it("wraps collections as arrays and lifts the description out of items", () => {
     const field = {
       key: "keys",
-      valueType: "string",
+      osfType: "string",
       cardinality: "collection",
       description: { en: "Object keys" },
       validation: { minItems: 1, maxLength: 50 },
     } as FieldDefinition;
 
+    // The collection is a use of the same type as its rows: both carry it.
     expect(connectorFieldSchema(field)).toEqual({
       type: "array",
-      items: { type: "string", maxLength: 50 },
+      items: { type: "string", maxLength: 50, "x-osf-type": "string" },
+      "x-osf-type": "string",
       description: "Object keys",
       minItems: 1,
     });
   });
 
-  it("reuses the canonical recursive schema for field-definition values", () => {
+  it("honours object cardinality: exact bounds make a bounded array and a lower bound of one makes the field required", () => {
+    expect(connectorFieldSchema({ key: "tags", osfType: "string", cardinality: { min: 1, max: 5 } } as FieldDefinition)).toEqual({
+      type: "array", items: { type: "string", "x-osf-type": "string" }, "x-osf-type": "string", minItems: 1, maxItems: 5,
+    });
+    expect(connectorFieldSchema({ key: "note", osfType: "string", cardinality: { min: 0, max: 1 } } as FieldDefinition)).toEqual({ type: "string", "x-osf-type": "string" });
+    const input = connectorObjectSchema([
+      { key: "tags", osfType: "string", cardinality: { min: 1, max: "unbounded" } },
+      { key: "note", osfType: "string", cardinality: { min: 1, max: 1 } },
+      { key: "extra", osfType: "string", cardinality: { max: 3 } },
+    ] as FieldDefinition[]);
+    expect(input.required).toEqual(["tags", "note"]);
+    expect(() => connectorFieldSchema({ key: "bad", osfType: "string", cardinality: { min: 2, max: 1 } } as FieldDefinition))
+      .toThrow("Connector field bad: invalid cardinality bounds.");
+  });
+
+  it("projects a catalog type that declares its schema through that schema, bundled at the root", () => {
     const schema = connectorFieldSchema({
       key: "definitions",
-      valueType: "object",
       cardinality: "collection",
-      semanticType: "fieldDefinition",
-    });
+      osfType: "fieldDefinition",
+    }, catalog);
 
     expect(schema).toMatchObject({
       type: "array",
@@ -101,24 +134,23 @@ describe("connector field schemas", () => {
   it("does not bundle definitions that the connector projection never references", () => {
     const schema = connectorFieldSchema({
       key: "wrapper",
-      valueType: "object",
+      osfType: "object",
       children: [
         {
           key: "definition",
-          valueType: "object",
-          semanticType: "fieldDefinition",
+          osfType: "fieldDefinition",
         },
       ],
-    });
+    }, catalog);
 
-    expect(schema).toEqual({ type: "object" });
+    expect(schema).toEqual({ type: "object", "x-osf-type": "object" });
   });
 });
 
 describe("operation schemas", () => {
   const input = [
-    { key: "prefix", valueType: "string" },
-    { key: "limit", valueType: "integer", required: true },
+    { key: "prefix", osfType: "string" },
+    { key: "limit", osfType: "integer", required: true },
   ] as FieldDefinition[];
 
   it("builds an input object that rejects unknown properties", () => {
@@ -138,7 +170,7 @@ describe("operation schemas", () => {
       [
         {
           key: "region",
-          valueType: "string",
+          osfType: "string",
           required: true,
           defaultValue: "eu",
         },
@@ -152,14 +184,14 @@ describe("operation schemas", () => {
     const { output } = buildOperationSchemas(input, {
       cardinality: "many",
       fields: [
-        { key: "key", valueType: "string", required: true },
+        { key: "key", osfType: "string", required: true },
       ] as FieldDefinition[],
     });
     expect(output).toEqual({
       type: "array",
       items: {
         type: "object",
-        properties: { key: { type: "string" } },
+        properties: { key: { type: "string", "x-osf-type": "string" } },
         required: ["key"],
         additionalProperties: false,
       },
@@ -172,11 +204,10 @@ describe("operation schemas", () => {
       fields: [
         {
           key: "definition",
-          valueType: "object",
-          semanticType: "fieldDefinition",
+          osfType: "fieldDefinition",
         },
       ],
-    });
+    }, catalog);
     const row = output.items as Record<string, unknown>;
     const definition = (row.properties as Record<string, Record<string, unknown>>).definition;
 
@@ -188,7 +219,7 @@ describe("operation schemas", () => {
   it("leaves a one-cardinality output as the bare object", () => {
     const { output } = buildOperationSchemas([], {
       cardinality: "one",
-      fields: [{ key: "key", valueType: "string" }] as FieldDefinition[],
+      fields: [{ key: "key", osfType: "string" }] as FieldDefinition[],
     });
     expect(output).toMatchObject({
       type: "object",
@@ -197,19 +228,19 @@ describe("operation schemas", () => {
   });
 });
 
-// The reason field-json-schema.ts exists: if the two surfaces mapped
-// constraints differently, a value could be advertised as acceptable on one and
-// rejected on the other. This asserts they share the mapping rather than
-// happening to agree today.
+// If the connector surface and the MCP catalog mapped constraints differently,
+// a value could be advertised as acceptable on one and rejected on the other.
+// This asserts they share the mapping in @openshapeforge/operations rather
+// than happening to agree today.
 describe("shared constraint mapping", () => {
   it("derives connector constraints from the same core the MCP catalog uses", () => {
     const field = {
       key: "amount",
-      valueType: "integer",
+      osfType: "integer",
       validation: { min: 1, max: 10, format: "int64" },
     } as FieldDefinition;
 
-    const shared = constraintsForField(field);
+    const shared = constrainedType({ baseType: "integer", validation: field.validation! });
     const connectorSchema = connectorFieldSchema(field);
 
     for (const [key, value] of Object.entries(shared)) {

@@ -4,6 +4,7 @@
  * in-memory environment. No database, no server.
  */
 import { describe, expect, it } from "bun:test";
+import { IDENTITY_LINK_ADMIN_ROLE } from "../../auth/organization-roles.js";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import type { DerivedToolsCatalogEntry } from "../derived-tools.js";
 import {
@@ -17,7 +18,9 @@ import {
   ONBOARDING_STATUS_TOOL,
   ONBOARDING_VERSION,
   onboardingGuideText,
+  isOrganizationAdministrator,
   onboardingIndex,
+  onboardingToolProjection,
   onboardingToolsForSession,
   providerNeedsPersonalSignIn,
   withOnboarding,
@@ -40,12 +43,11 @@ const linked = {
   status: "linked" as const,
   relationId: RELATION_ID,
   relationType: "person" as const,
-  displayName: "Hans Dev",
+  displayName: "Alex Dev",
   candidateRelationId: null,
   linkedBy: "jit",
   needsRoleAssignment: false,
-  invitedRoles: [],
-  linkedAtMs: null,
+  roles: [],
 };
 
 const session = (overrides: Partial<TrustedSessionContext> = {}): TrustedSessionContext => ({
@@ -60,7 +62,8 @@ const session = (overrides: Partial<TrustedSessionContext> = {}): TrustedSession
 });
 
 const facts = (overrides: Partial<OnboardingFacts> = {}): OnboardingFacts => ({
-  relation: { status: "linked", candidateRelationId: null },
+  credential: "bearer",
+  relation: { identityId: IDENTITY_ID, status: "linked", candidateRelationId: null },
   organizationConnections: null,
   personalSignIns: null,
   preferences: { offered: true, count: 0 },
@@ -83,15 +86,27 @@ describe("computeOnboarding", () => {
     expect(step(computeOnboarding(facts()), "identity").status).toBe("done");
 
     const pending = computeOnboarding(
-      facts({ relation: { status: "pending_confirmation", candidateRelationId: RELATION_ID } }),
+      facts({ relation: { identityId: IDENTITY_ID, status: "pending_confirmation", candidateRelationId: RELATION_ID } }),
     );
     expect(step(pending, "identity").status).toBe("todo");
     expect(step(pending, "identity").howTo).toContain("confirm_my_link");
 
     const noCandidate = computeOnboarding(
-      facts({ relation: { status: "pending_confirmation", candidateRelationId: null } }),
+      facts({ relation: { identityId: IDENTITY_ID, status: "pending_confirmation", candidateRelationId: null } }),
     );
     expect(step(noCandidate, "identity").howTo).toContain("link_identity");
+    // A web-only login has no e-mail on its identity yet: the identity id is the other handle.
+    expect(step(noCandidate, "identity").howTo).toContain(IDENTITY_ID);
+  });
+
+  it("is not applicable for an API key even though its first session recorded a pending link", () => {
+    const summary = computeOnboarding(facts({
+      credential: "api-key",
+      relation: { identityId: IDENTITY_ID, status: "pending_confirmation", candidateRelationId: null },
+      record: null,
+    }));
+    expect(summary.status).toBe("Not applicable");
+    expect(summary.steps).toEqual([]);
   });
 
   it("makes connections not applicable without personal-sign-in Services", () => {
@@ -153,16 +168,16 @@ describe("computeOnboarding", () => {
 
   it("follows the role guides read", () => {
     expect(step(computeOnboarding(facts({ guides: [] })), "guide").status).toBe("not_applicable");
-    const unread = computeOnboarding(facts({ guides: [{ name: "pentest_guide", read: false }] }));
+    const unread = computeOnboarding(facts({ guides: [{ name: "advies_guide", read: false }] }));
     expect(step(unread, "guide").status).toBe("todo");
-    expect(step(unread, "guide").howTo).toContain("pentest_guide");
-    const read = computeOnboarding(facts({ guides: [{ name: "pentest_guide", read: true }] }));
+    expect(step(unread, "guide").howTo).toContain("advies_guide");
+    const read = computeOnboarding(facts({ guides: [{ name: "advies_guide", read: true }] }));
     expect(step(read, "guide").status).toBe("done");
   });
 
   it("derives the overall status from the steps and the record", () => {
     const notStarted = computeOnboarding(
-      facts({ relation: { status: "pending_confirmation", candidateRelationId: null } }),
+      facts({ relation: { identityId: IDENTITY_ID, status: "pending_confirmation", candidateRelationId: null } }),
     );
     expect(notStarted.status).toBe("Not started");
 
@@ -209,6 +224,12 @@ describe("computeOnboarding", () => {
 });
 
 describe("guide text and instructions", () => {
+  it("uses the authored access administrator permission, not people-management authority", () => {
+    expect(isOrganizationAdministrator([IDENTITY_LINK_ADMIN_ROLE])).toBe(true);
+    expect(isOrganizationAdministrator(["org_admin"])).toBe(true);
+    expect(isOrganizationAdministrator(["people_manager"])).toBe(false);
+    expect(isOrganizationAdministrator([])).toBe(false);
+  });
   it("words the guide for the role", () => {
     const employee = onboardingGuideText(["org_employee"]);
     expect(employee).toContain("ask an organization administrator to run link_identity");
@@ -347,7 +368,10 @@ const SERVICE_ENTRY: DerivedToolsCatalogEntry = {
     set: { name: "set_my_preferences", description: "" },
   },
   execution: {
-    bindingsField: "capabilityBindings",
+    bindingsRelation: "capabilityBindings",
+    bindingsEntity: "ServiceCapabilityBinding",
+    bindingsTable: "integration.service_capability_bindings",
+    parentRef: "serviceId",
     operationRef: "capabilityId",
     operationEntity: "Capability",
     operationTable: "integration.capabilities",
@@ -358,7 +382,7 @@ const SERVICE_ENTRY: DerivedToolsCatalogEntry = {
     connectionTable: "integration.connections",
     connectionProviderRef: "adapterId",
     connectionValuesField: "configurationValues",
-  } as NonNullable<DerivedToolsCatalogEntry["execution"]>,
+  },
 };
 
 const GOOGLE = "google-adapter";
@@ -370,16 +394,15 @@ function tenantRows(overrides: Partial<Rows> = {}): Rows {
   return {
     "integration.services": [
       // The narrow tool sorts first alphabetically; the entry point binds more.
-      { id: "svc-cancel", key: "afspraak-annuleren", capabilityBindings: [{ order: 1, capabilityId: "cap-google-calendar" }] },
-      {
-        id: "svc-google",
-        key: "google-koppelen",
-        capabilityBindings: [
-          { order: 1, capabilityId: "cap-google-mail" },
-          { order: 2, capabilityId: "cap-google-calendar" },
-        ],
-      },
-      { id: "svc-slack", key: "post-message", capabilityBindings: [{ order: 1, capabilityId: "cap-slack" }] },
+      { id: "svc-cancel", key: "afspraak-annuleren" },
+      { id: "svc-google", key: "google-koppelen" },
+      { id: "svc-slack", key: "post-message" },
+    ],
+    "integration.service_capability_bindings": [
+      { id: "b-cancel", serviceId: "svc-cancel", order: 1, capabilityId: "cap-google-calendar" },
+      { id: "b-google-1", serviceId: "svc-google", order: 1, capabilityId: "cap-google-mail" },
+      { id: "b-google-2", serviceId: "svc-google", order: 2, capabilityId: "cap-google-calendar" },
+      { id: "b-slack", serviceId: "svc-slack", order: 1, capabilityId: "cap-slack" },
     ],
     "integration.capabilities": [
       { id: "cap-google-mail", adapterId: GOOGLE },
@@ -389,6 +412,7 @@ function tenantRows(overrides: Partial<Rows> = {}): Rows {
     "integration.adapters": [
       {
         id: GOOGLE,
+        key: "google-gmail",
         name: "Google Workspace",
         auth: { profile: "oauth2AuthorizationCode" },
         configurationFields: [
@@ -401,7 +425,7 @@ function tenantRows(overrides: Partial<Rows> = {}): Rows {
           },
         ],
       },
-      { id: SLACK, name: "Slack", auth: { profile: "apiKey", scheme: "bearer", tokenFrom: "token" } },
+      { id: SLACK, key: "slack", name: "Slack", auth: { profile: "apiKey", scheme: "bearer", tokenFrom: "token" } },
     ],
     "integration.connections": [
       {
@@ -444,9 +468,8 @@ function environment(input: {
   session?: TrustedSessionContext;
   rows?: Rows;
   record?: OnboardingRecord | null;
-  guides?: string[];
-  guidesCalled?: string[];
   entries?: DerivedToolsCatalogEntry[];
+  projectedTools?: OnboardingEnvironment["projectedTools"];
 }) {
   const rows = input.rows ?? tenantRows();
   const memory = memoryStore(
@@ -457,18 +480,16 @@ function environment(input: {
   const env: OnboardingEnvironment = {
     session: input.session ?? session(),
     derivedEntries: input.entries ?? [SERVICE_ENTRY],
-    projectedTools: async () =>
+    projectedTools: input.projectedTools ?? (async () =>
       (rows["integration.services"] ?? []).map((row) => ({
         name: String(row.key).replace(/-/g, "_"),
         table: "integration.services",
         rowId: String(row.id),
-      })),
+      }))),
     rowsByFilter: async (table, filter, limit = 100) =>
       (rows[table] ?? [])
         .filter((row) => Object.entries(filter).every(([key, value]) => row[key] === value))
         .slice(0, limit),
-    guideTools: () => (input.guides ?? []).map((name) => ({ name })),
-    guidesCalled: new Set(input.guidesCalled ?? []),
     store: memory.store,
     connectionContract: (connectionTable) =>
       connectionTable === "integration.connections"
@@ -496,6 +517,9 @@ describe("the organization_connections step", () => {
   const google = (overrides: Partial<OrganizationConnectionFact> = {}): OrganizationConnectionFact => ({
     adapter: "Google",
     adapterId: "adapter-google",
+    connectionEntity: "Connection",
+    connectionKey: "google-gmail",
+    connectionName: "Google",
     createTool: "create_connection",
     adapterArgument: "adapterId",
     configured: false,
@@ -531,7 +555,7 @@ describe("the organization_connections step", () => {
     const todo = step(summary, "organization_connections");
     expect(todo.status).toBe("todo");
     expect(todo.howTo).toContain(
-      'Run create_connection { adapterId: "adapter-google", key, name } for Google.',
+      'Run create_connection { key: "google-gmail", name: "Google", adapterId: "adapter-google" } for Google.',
     );
     expect(todo.howTo).toContain(
       "The secure form asks for: OAuth client ID, OAuth client secret (secret).",
@@ -560,13 +584,44 @@ describe("the organization_connections step", () => {
     );
     expect(todo.howTo).toContain(
       "The Google connection is incomplete (missing: clientSecret); delete it and run " +
-        'create_connection { adapterId: "adapter-google", key, name } again.',
+        'create_connection { key: "google-gmail", name: "Google", adapterId: "adapter-google" } again.',
     );
     expect(todo.howTo).not.toContain("redirect URL");
   });
 });
 
 describe("gatherOnboardingFacts", () => {
+  it("keeps compatibility-backed runtime Services in both connection steps", async () => {
+    const compatibilityEntry: DerivedToolsCatalogEntry = {
+      ...SERVICE_ENTRY,
+      compatibility: {
+        plugin: "integration-runtime",
+        providerId: "integration-runtime",
+        connectOperation: "integration.service.connect",
+      },
+    };
+    const projected = onboardingToolProjection(
+      [compatibilityEntry],
+      [],
+      [
+        { name: "google_koppelen", entityName: "Service", entityId: "svc-google" },
+        { name: "unrelated", entityName: "Other", entityId: "svc-google" },
+      ],
+    );
+    expect(projected).toEqual([
+      { name: "google_koppelen", table: "integration.services", rowId: "svc-google" },
+    ]);
+
+    const { env } = environment({
+      session: session({ roles: ["org_admin", "integration_admin", "integration_user"] }),
+      entries: [compatibilityEntry],
+      projectedTools: async () => projected,
+    });
+    const summary = computeOnboarding(await gatherOnboardingFacts(env));
+    expect(step(summary, "organization_connections").status).toBe("todo");
+    expect(step(summary, "connections").status).toBe("todo");
+  });
+
   it("lists organization connections for an administrator only, judged by required values", async () => {
     const employee = environment({});
     expect((await gatherOnboardingFacts(employee.env)).organizationConnections).toBeNull();
@@ -577,6 +632,9 @@ describe("gatherOnboardingFacts", () => {
       {
         adapter: "Google Workspace",
         adapterId: GOOGLE,
+        connectionEntity: "Connection",
+        connectionKey: "google-gmail",
+        connectionName: "Google Workspace",
         createTool: "create_connection",
         adapterArgument: "adapterId",
         configured: false,
@@ -590,6 +648,9 @@ describe("gatherOnboardingFacts", () => {
       {
         adapter: "Slack",
         adapterId: SLACK,
+        connectionEntity: "Connection",
+        connectionKey: "slack",
+        connectionName: "Slack",
         createTool: "create_connection",
         adapterArgument: "adapterId",
         configured: true,
@@ -629,10 +690,10 @@ describe("gatherOnboardingFacts", () => {
       rows: tenantRows({
         "integration.connections": [
           { id: "conn-google-other", adapterId: GOOGLE, ownerUserId: OTHER_USER_ID },
-          { id: "conn-google-mine", adapterId: GOOGLE, ownerUserId: USER_ID },
+          { id: "conn-google-mine", adapterId: GOOGLE, ownerUserId: RELATION_ID },
         ],
         "integration.personal_instructions": [
-          { id: "pref-1", ownerUserId: USER_ID, instruction: "Plan only within working hours" },
+          { id: "pref-1", ownerUserId: RELATION_ID, instruction: "Plan only within working hours" },
           { id: "pref-2", ownerUserId: OTHER_USER_ID, instruction: "Not mine" },
         ],
       }),
@@ -653,23 +714,6 @@ describe("gatherOnboardingFacts", () => {
     expect((await gatherOnboardingFacts(outside.env)).preferences.offered).toBe(false);
   });
 
-  it("counts a guide as read from this session or from the record", async () => {
-    const fromSession = environment({ guides: ["pentest_guide"], guidesCalled: ["pentest_guide"] });
-    expect((await gatherOnboardingFacts(fromSession.env)).guides).toEqual([
-      { name: "pentest_guide", read: true },
-    ]);
-    const fromRecord = environment({
-      guides: ["pentest_guide"],
-      record: { completedAt: null, version: null, preferencesSkipped: false, guidesRead: ["pentest_guide"] },
-    });
-    expect((await gatherOnboardingFacts(fromRecord.env)).guides).toEqual([
-      { name: "pentest_guide", read: true },
-    ]);
-    const unread = environment({ guides: ["pentest_guide"] });
-    expect((await gatherOnboardingFacts(unread.env)).guides).toEqual([
-      { name: "pentest_guide", read: false },
-    ]);
-  });
 });
 
 describe("the onboarding tools", () => {
@@ -688,18 +732,17 @@ describe("the onboarding tools", () => {
   });
 
   it("refuses to complete while steps are missing, naming them", async () => {
-    const { env, memory } = environment({ guides: ["pentest_guide"] });
+    const { env, memory } = environment({});
     const result = await callOnboardingTool(COMPLETE_ONBOARDING_TOOL, {}, env);
     expect(result?.isError).toBe(true);
     const body = result!.structuredContent as {
       error: { code: string; message: string; missing: { key: string }[] };
     };
     expect(body.error.code).toBe("ONBOARDING_INCOMPLETE");
-    expect(body.error.message).toBe("3 steps still to do: connections, preferences, guide.");
+    expect(body.error.message).toBe("2 steps still to do: connections, preferences.");
     expect(body.error.missing.map((entry) => entry.key)).toEqual([
       "connections",
       "preferences",
-      "guide",
     ]);
     expect(memory.record?.completedAt).toBeNull();
   });
@@ -707,10 +750,8 @@ describe("the onboarding tools", () => {
   it("completes once every step is done or skipped, and stays completed", async () => {
     const { env, memory } = environment({
       rows: tenantRows({
-        "integration.connections": [{ id: "conn-google-mine", adapterId: GOOGLE, ownerUserId: USER_ID }],
+        "integration.connections": [{ id: "conn-google-mine", adapterId: GOOGLE, ownerUserId: RELATION_ID }],
       }),
-      guides: ["pentest_guide"],
-      guidesCalled: ["pentest_guide"],
     });
     const refused = await callOnboardingTool(COMPLETE_ONBOARDING_TOOL, {}, env);
     expect(refused?.isError).toBe(true);
@@ -728,21 +769,20 @@ describe("the onboarding tools", () => {
       "not_applicable",
       "done",
       "done",
-      "done",
+      "not_applicable",
     ]);
     expect(memory.record).toEqual({
       completedAt: "2026-09-04T10:00:00.000Z",
       version: ONBOARDING_VERSION,
       preferencesSkipped: true,
-      guidesRead: ["pentest_guide"],
+      guidesRead: [],
     });
 
-    // A new session: guidesCalled is empty, but the record remembers.
+    // A new session keeps the completed record.
     const later = environment({
       rows: tenantRows({
-        "integration.connections": [{ id: "conn-google-mine", adapterId: GOOGLE, ownerUserId: USER_ID }],
+        "integration.connections": [{ id: "conn-google-mine", adapterId: GOOGLE, ownerUserId: RELATION_ID }],
       }),
-      guides: ["pentest_guide"],
       record: memory.record,
     });
     const status = await callOnboardingTool(ONBOARDING_STATUS_TOOL, {}, later.env);

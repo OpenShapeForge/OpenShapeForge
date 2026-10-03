@@ -66,6 +66,8 @@ async function readMemberships(
         and identity.subject = ${identityReference.subject}
         and membership.tenant_id = ${session.tenantId}::uuid
         and membership.status = 'active'
+        and (membership.start_date is null or membership.start_date <= current_date)
+        and (membership.end_date is null or membership.end_date >= current_date)
         and relation_group.status = 'active'
       limit ${MAX_RELATION_GROUPS + 1}
     `.execute(trx);

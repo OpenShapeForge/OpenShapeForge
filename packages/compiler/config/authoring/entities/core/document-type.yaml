@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: DocumentType
@@ -10,15 +10,25 @@ filterField: name
 labels:
   en: Document Type
   nl: Documenttype
+pluralLabels:
+  en: Document types
+  nl: Documenttypen
 domains:
   - cases
   - governance
+versioning:
+  strategy: publishedSnapshot
+  versionEntity: DocumentTypeVersion
+  versionsField: versions
+  snapshot: { ownedRelationships: recursive }
+hardDelete:
+  requireNeverPublished: true
 indexes:
   - name: document_types_tenant_code_uidx
-    fields: [tenantId, code]
+    fields: [ tenantId, code ]
     unique: true
   - name: document_types_tenant_identity_uidx
-    fields: [tenantId, id]
+    fields: [ tenantId, id ]
     unique: true
 authorization:
   roles:
@@ -37,7 +47,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -49,7 +59,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -61,8 +71,7 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
-    semanticType: multilineText
+    osfType: multilineText
     required: false
     label:
       en: Description
@@ -73,8 +82,7 @@ fields:
       column: description
       storageClass: core
   - key: defaultConfidentiality
-    valueType: string
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
     required: false
     label:
       en: Default confidentiality
@@ -84,7 +92,7 @@ fields:
       storageClass: core
     options: { type: referentiedata, referentieGroep: DOCUMENTCONFIDENTIALITY }
   - key: requiresRegistration
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Requires registration
@@ -94,7 +102,7 @@ fields:
       column: requires_registration
       storageClass: core
   - key: allowsExternalPublication
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Allows external publication
@@ -134,11 +142,12 @@ operations:
     confirmation: { mode: none }
   delete:
     name: { en: Delete document type, nl: Documenttype verwijderen }
-    description: Deletes an unreferenced document type with the separate delete right.
+    description: Deletes a never-published, unreferenced document type with the separate delete right.
     implementation: { type: entity, action: delete }
     effects: { data: delete, external: none }
     reliability: { idempotency: { mode: natural } }
-    confirmation: { mode: none }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: acknowledgement }
 interfaces:
   rest: {}
   graphql: {}
@@ -160,19 +169,22 @@ interfaces:
         subtitle: "{{code}}"
         layout:
           context:
-            fields: [defaultConfidentiality, requiresRegistration, allowsExternalPublication]
+            fields: [ defaultConfidentiality, requiresRegistration, allowsExternalPublication, lifecycleStatus, publishedVersion ]
             relationships: []
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Document type, nl: Documenttype }
-                  fields: [code, name, description]
+                  fields: [ code, name, description ]
                 - title: { en: Registration and access, nl: Registratie en toegang }
-                  fields: [defaultConfidentiality, requiresRegistration, allowsExternalPublication]
+                  fields: [ defaultConfidentiality, requiresRegistration, allowsExternalPublication ]
+            - id: versions
+              label: { en: Version history, nl: Versiehistorie }
+              relationship: versions
         modes:
           create:
             title: { en: Create document type, nl: Documenttype aanmaken }
             groups:
               - title: { en: Document type, nl: Documenttype }
-                fields: [code, name, description, defaultConfidentiality, requiresRegistration, allowsExternalPublication]
+                fields: [ code, name, description, defaultConfidentiality, requiresRegistration, allowsExternalPublication ]

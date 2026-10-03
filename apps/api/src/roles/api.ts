@@ -3,7 +3,7 @@
  * API role: fastify server hosting the GraphQL endpoint at /api/graphql.
  *
  * Trimmed from the full apps/api service — the metrics route, erp document
- * routes, messaging/whatsapp webhooks, workflow node bridges, realtime dirty
+ * routes, messaging/whatsapp webhooks, realtime dirty
  * worker, and entity-event fanout wiring are intentionally absent.
  */
 import rateLimit from "@fastify/rate-limit";
@@ -22,7 +22,11 @@ import type { GraphqlCorsPolicy } from "@openshapeforge/observability/yoga";
 import Fastify from "fastify";
 import { readApiLimits } from "../config/limits.js";
 import { readGraphqlCorsPolicy } from "../config/graphql-cors.js";
-import { rewriteShortAddress } from "../mcp/organization-resource.js";
+import {
+  ORGANIZATION_ADDRESS_HEADER,
+  organizationAddressOf,
+  rewriteShortAddress,
+} from "../mcp/organization-resource.js";
 import { assertProductionEnv } from "../config/production-guard.js";
 import {
   createDatabaseRuntime,
@@ -42,14 +46,14 @@ import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
 import { createControlRuntime } from "../control/runtime.js";
 import { CONTROL_PLUGIN } from "../control/operations.js";
 import { registerControlMcpServer } from "../mcp/control-mcp-server.js";
-import { registerAgreementMilestoneRestRoutes } from "../billing/rest-routes.js";
-import { registerDocumentRestRoutes } from "../documents/rest-routes.js";
 import { registerArtifactRestRoutes } from "../artifacts/rest-routes.js";
+import {
+  registerGeneratedMcpServer,
+} from "../mcp/generated-mcp-server.js";
 import {
   createRuntimeDeclarativeServiceExecutor,
   createRuntimeHostOperationExecutor,
-  registerGeneratedMcpServer,
-} from "../mcp/generated-mcp-server.js";
+} from "../mcp/runtime-executors.js";
 import {
   registerAuthorizationServerMetadataAliases,
   registerProtectedResourceMetadata,
@@ -67,12 +71,17 @@ import {
 } from "../modules/registry.js";
 import type { ModuleRuntimeContext } from "../modules/contract.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
+import { composeJobHandlers } from "../jobs/handlers.js";
+import { createJobsRuntimeModule } from "../jobs/module.js";
 import {
   classifyRequest,
   createRateLimitMetrics,
   createRedisRateLimitStore,
   type RateLimitMetrics,
 } from "./rate-limit.js";
+import { limitKey, limitPolicyFromEnv, tierOfKey } from "./rate-limit-subject.js";
+import { getBearerVerifier } from "../auth/bearer-verifier.js";
+import { RATE_LIMITED_CODE } from "../operations/durable-worker-http.js";
 import {
   API_READINESS_ERROR_CODES,
   createApiReadinessChecks,
@@ -193,14 +202,15 @@ export function createApiApp(options: {
       },
       ...(options.logStream ? { stream: options.logStream } : {}),
     },
-    trustProxy: limits.trustProxy,
+    // Fastify 5.12 refuses numeric-only proxy trust; preserve that fail-closed behavior.
+    trustProxy: typeof limits.trustProxy === "number" ? false : limits.trustProxy,
     requestTimeout: limits.requestTimeoutMs,
     // Browser handoff tokens (`/api/entity-configuration/<token>`,
     // mcp/handoff-store.ts) are `<tenant>.<handoff>.<secret>` — 117
     // characters — and the router's default of 100 answered them with 414
     // before the route ever ran (found live). Generous but bounded.
     maxParamLength: 512,
-    // Short addresses: `https://hubble.com/zerocopter/...`.
+    // Short addresses: `https://app.example.test/acme/...`.
     //
     // One organization, one prefix, every surface underneath it —
     // `/<alias>` and `/<alias>/mcp` are the MCP resource, `/<alias>/api/...`
@@ -218,6 +228,16 @@ export function createApiApp(options: {
     // A first segment that is one of the server's own names, or not a
     // well-formed alias, is left alone — see RESERVED_ROOT_SEGMENTS.
     rewriteUrl: (request) => rewriteShortAddress(request.url) ?? request.url ?? "/",
+  });
+
+  // The alias a short address named, for the session resolver (see
+  // ORGANIZATION_ADDRESS_HEADER). Set from the ORIGINAL URL on every request
+  // and deleted otherwise, so the header is the server's and never the
+  // client's.
+  app.addHook("onRequest", async (request) => {
+    const alias = organizationAddressOf(request.originalUrl);
+    if (alias) request.headers[ORGANIZATION_ADDRESS_HEADER] = alias;
+    else delete request.headers[ORGANIZATION_ADDRESS_HEADER];
   });
 
   // Request-rate boundary, before GraphQL/REST execution — that ordering is
@@ -250,30 +270,32 @@ export function createApiApp(options: {
     );
   }
 
+  const limitPolicy = limitPolicyFromEnv(() => getBearerVerifier(false, true));
   void app.register(rateLimit, {
     // Per-request budget, so a trusted service-to-service caller does not
     // compete with anonymous traffic for one allowance.
-    max: (request) =>
-      limits.rateLimitTiers[classifyRequest(request, contextSecret).tier],
-    keyGenerator: (request) => classifyRequest(request, contextSecret).key,
+    // The key carries its tier, so the budget follows what the key generator
+    // proved (trusted context, verified bearer subject, or IP) — #886.
+    max: (_request, key) => limits.rateLimitTiers[tierOfKey(key)],
+    keyGenerator: (request) => limitKey(request, contextSecret, limitPolicy),
     timeWindow: limits.rateLimitWindowMs,
     allowList: (request) => isRateLimitExempt(request.url),
     ...(sharedStore ? { store: sharedStore.Store as never } : {}),
     // A store outage must not become an API outage: the request proceeds
     // uncounted, and createRedisRateLimitStore records it in storeErrors.
     skipOnError: true,
-    onExceeding: (request) => {
-      rateLimitMetrics.allowed[classifyRequest(request, contextSecret).tier] +=
-        1;
+    onExceeding: (_request, key) => {
+      rateLimitMetrics.allowed[tierOfKey(key)] += 1;
     },
-    onExceeded: (request) => {
-      rateLimitMetrics.throttled[
-        classifyRequest(request, contextSecret).tier
-      ] += 1;
+    onExceeded: (_request, key) => {
+      rateLimitMetrics.throttled[tierOfKey(key)] += 1;
     },
     // 429 with Retry-After (added by the plugin); body carries no limiter internals.
     errorResponseBuilder: () => ({
       statusCode: 429,
+      // Names the limiter, so a caller can tell this refusal (answered before
+      // any handler ran) from an Operation's own 429 (durable-worker-http.ts).
+      code: RATE_LIMITED_CODE,
       error: "Too Many Requests",
       message: "Rate limit exceeded. Please retry later.",
     }),
@@ -353,6 +375,10 @@ export function createApiApp(options: {
     };
     const initialised = await initRuntimeModules(modules, moduleContext);
     initialisedModules = initialised.loaded;
+    // A job kind two modules both register is refused here, at API boot, and
+    // not only in the worker: the worker may not be running, and the API is
+    // what would enqueue jobs into a queue nothing can drain unambiguously.
+    composeJobHandlers([createJobsRuntimeModule({ modules: () => initialised.loaded }), ...initialised.loaded]);
     // The control plane the `osf-control` Operations run against: its
     // configuration, Keycloak clients and the loaded module that administers
     // a catalog. Assembled after init so a module that failed to initialise
@@ -543,7 +569,6 @@ export function createApiApp(options: {
     registerEntityChangeStream(routes, dbOptions);
     registerRuntimeOperationRestRoutes(routes, moduleContext);
     registerEditLeaseRestRoutes(routes, dbOptions);
-    registerDocumentRestRoutes(routes, dbOptions);
     if (modulePlatform) {
       registerArtifactRestRoutes(routes, {
         ...dbOptions,
@@ -560,7 +585,6 @@ export function createApiApp(options: {
         },
       });
     }
-    registerAgreementMilestoneRestRoutes(routes, dbOptions);
     registerConnectorRestRoutes(routes, {
       ...dbOptions,
       config: readConnectorRuntimeConfig(),
@@ -590,7 +614,11 @@ export function createApiApp(options: {
     // The platform administrator MCP (`/api/control/mcp`): the control realm,
     // its own small server (mcp/control-mcp-server.ts) over the same bound
     // control Operations the REST routes below serve under /api/control/v1.
-    registerControlMcpServer(routes, { context: moduleContext, operations: operationContracts });
+    registerControlMcpServer(routes, {
+      context: moduleContext,
+      modules: initialised.loaded,
+      operations: operationContracts,
+    });
 
     for (const module of initialised.loaded) {
       module.restRoutes?.(routes, moduleContext);

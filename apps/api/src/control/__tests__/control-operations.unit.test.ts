@@ -42,7 +42,7 @@ const administrator: PlatformAdministrator = {
   authorizedParty: "codex-platform",
   expiresAtMs: null,
 };
-const session = controlSessionFor(administrator, ["platform_admin", "platform-operator"]);
+const session = controlSessionFor(administrator, ["platform-operator"]);
 
 /** A database that would explode if touched: the point is that it is not. */
 const untouchable = new Proxy({}, { get: () => { throw new Error("database touched"); } }) as never;
@@ -85,11 +85,11 @@ async function refusal(
 describe("binding the control catalog", () => {
   it("has exactly one handler per authored handler name, and no extras", () => {
     const authored = controlOperationContracts().map((operation) => operation.handler).sort();
-    expect(authored).toHaveLength(37);
+    expect(authored).toHaveLength(38);
     expect(controlOperationHandlerNames()).toEqual(authored);
   });
 
-  it("binds all 37 in a process without any operation module, as core", () => {
+  it("binds all 38 in a process without any operation module, as core", () => {
     const bound = bindOperationHandlers([], controlOperationContracts());
     expect([...bound.keys()].sort()).toEqual(controlOperationContracts().map((operation) => operation.key).sort());
     expect([...bound.values()].every(({ operation }) => operation.plugin === CONTROL_PLUGIN)).toBe(true);

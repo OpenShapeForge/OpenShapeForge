@@ -254,3 +254,31 @@ describe("getOrganizationProfile", () => {
     TEST_TIMEOUT,
   );
 });
+
+describe("platform.tenants.relation_id key", () => {
+  test(
+    "is bound to the tenant's own id and clears only relation_id when the Relation is deleted",
+    async () => {
+      await withScratchDb(async (_appDb, adminDb) => {
+        await seedTenants(adminDb);
+        const orgRelation = await relation(adminDb, tenantA, "Acme BV", "organization");
+        const foreign = await relation(adminDb, tenantB, "Other Co", "organization");
+        // (id, relation_id) -> erp.relations(tenant_id, id): another tenant's
+        // Relation is not refused by a check, it is unexpressible.
+        await expect(
+          sql`update platform.tenants set relation_id = ${foreign} where id = ${tenantA}`.execute(adminDb),
+        ).rejects.toThrow(/tenants_relation_id_fkey/);
+        await sql`update platform.tenants set relation_id = ${orgRelation} where id = ${tenantA}`.execute(adminDb);
+
+        // ON DELETE SET NULL is scoped to relation_id: the registry row and
+        // its primary key survive the Relation's deletion.
+        await sql`delete from erp.relations where id = ${orgRelation}`.execute(adminDb);
+        const rows = await sql<{ id: string; relation_id: string | null }>`
+          select id::text as id, relation_id::text as relation_id from platform.tenants where id = ${tenantA}
+        `.execute(adminDb);
+        expect(rows.rows).toEqual([{ id: tenantA, relation_id: null }]);
+      });
+    },
+    TEST_TIMEOUT,
+  );
+});

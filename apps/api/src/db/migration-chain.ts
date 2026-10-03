@@ -25,8 +25,9 @@
  *      every policy references.
  *   2.  generated schema      — schema.sql from the ONE declaration of every
  *      table (platform-schema.yaml + the authoring layers), the runtime-owned
- *      platform bookkeeping included; on a built database, the checksum
- *      no-op or an additive roll-forward (migrations/generated-schema.ts).
+ *      platform bookkeeping included; on a built database, a checksum no-op —
+ *      or a refusal when the checksum differs, because a database is rebuilt
+ *      with db:reset rather than migrated (migrations/generated-schema.ts).
  *   3.  core invariants       — what the manifest cannot express on manifest
  *      tables and the core owns: the org-unit closure trigger, the document
  *      authority guards and compound keys, the logical document commands,
@@ -36,15 +37,16 @@
  *      platform.identity_relations: checks, an expression index,
  *      app.identity_subject() and the bespoke policies. Before the plugin
  *      invariants because plugin DDL may reference the function.
- *   3b. plugin invariants     — immutable compiler-plugin constraints,
- *      functions, triggers and other DDL, ledgered per plugin and version
- *      (migrations/generated-plugin-migrations.ts), after contributed tables
- *      exist.
+ *   3b. plugin invariants     — compiler-plugin constraints, functions,
+ *      triggers and other DDL, idempotent and applied on every run with no
+ *      ledger (migrations/generated-plugin-migrations.ts), after contributed
+ *      tables exist.
  *   3c–3f. the other runtime invariants the manifest cannot express, one file
  *      per table family, each idempotent on every run: employee invitations
  *      (checks, the one-pending-per-address partial expression index,
  *      policy), the tenant's organization-Relation write policy, update
- *      notices (policies), execution receipts (checks, policy), blueprints
+ *      notices (policies), execution receipts (checks, policy), jobs (the
+ *      status vocabulary and per-status shape of the core outbox), blueprints
  *      (checks, compound provenance reference, policies, the SECURITY
  *      DEFINER read function and its ownership transfer).
  *   4.  grants                — sweep DML grants over ALL now-existing tables
@@ -77,12 +79,19 @@ import { applyAppRoleMigration, applyAppRoleGrants } from "./migrations/app-role
 import { applyWorkerRoleMigration, applyWorkerRoleGrants } from "./migrations/worker-role.js";
 import { applyAppHelpersMigration } from "./migrations/app-helpers.js";
 import { applyCoreInvariants } from "./migrations/core-invariants.js";
+import { applyDocumentContentGuards } from "./migrations/document-content.js";
+import { applyRelationGroupRolesMigration } from "./migrations/relation-group-roles.js";
+import { applyOrganizationAccessMigration } from "./migrations/organization-access.js";
 import { applyIdentityLinkMigration } from "./migrations/identity-link.js";
+import { applyMemberAccessStateMigration } from "./migrations/member-access-state.js";
 import { applyEmployeeInvitationsMigration } from "./migrations/employee-invitations.js";
+import { applyCapabilityGrantsMigration } from "./migrations/capability-grants.js";
+import { applyApiKeysMigration } from "./migrations/api-keys.js";
 import { applyOrganizationRelationLinkMigration } from "./migrations/organization-relation-link.js";
 import { applyUpdateNoticesMigration } from "./migrations/update-notices.js";
 import { applyBlueprintsMigration, applyBlueprintsGrants } from "./migrations/blueprints.js";
 import { applyOperationExecutionReceiptsMigration } from "./migrations/operation-execution-receipts.js";
+import { applyJobsMigration } from "./migrations/jobs.js";
 import {
   applyGeneratedSchemaMigration,
   type GeneratedSchemaMigrationResult,
@@ -133,19 +142,25 @@ export async function runMigrationChain(
   await applyAppHelpersMigration(db);
   const generated = await applyGeneratedSchemaMigration(db, options.appliedBy);
   await applyCoreInvariants(db);
+  await applyDocumentContentGuards(db);
   // The identity-link invariants (app.identity_subject() above all) may be
   // referenced by a plugin's invariant DDL, so they land before the plugin
   // migrations run.
   await applyIdentityLinkMigration(db);
+  await applyMemberAccessStateMigration(db);
+  await applyRelationGroupRolesMigration(db);
+  await applyOrganizationAccessMigration(db);
   const pluginMigrations = await applyGeneratedPluginMigrations(
     db,
     options.pluginMigrations ?? (await loadGeneratedPluginMigrations()),
-    options.appliedBy,
   );
   await applyEmployeeInvitationsMigration(db);
+  await applyCapabilityGrantsMigration(db);
+  await applyApiKeysMigration(db);
   await applyOrganizationRelationLinkMigration(db);
   await applyUpdateNoticesMigration(db);
   await applyOperationExecutionReceiptsMigration(db);
+  await applyJobsMigration(db);
   await applyBlueprintsMigration(db);
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);

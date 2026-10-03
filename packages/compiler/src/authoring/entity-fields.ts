@@ -1,9 +1,34 @@
 // SPDX-License-Identifier: BUSL-1.1
-import type { CoreEntity, Field, SemanticTypeDefinition } from "./types.js";
-import { deriveTableName, fieldCardinality } from "./compiler/helpers.js";
+import type { CoreEntity, Field, OperationCatalogDefinition, OsfTypeDefinition } from "./types.js";
+import type { FieldDefinitionValueType } from "./types/field-definition.js";
+import { fieldCardinality } from "./compiler/helpers.js";
+import { cardinalityOf } from "@openshapeforge/operations";
+import { type InverseCollectionSource, defaultInverseLabel, deriveInverseCollections, withInverseCollections } from "./inverse-collections.js";
 
 const snake = (value: string) => value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
 const slug = (value: string) => snake(value).replaceAll("_", "-");
+
+/** The seven types every other osf type resolves to. */
+export const BASE_TYPES: readonly FieldDefinitionValueType[] = ["string", "integer", "number", "boolean", "date", "datetime", "object"];
+
+export function isBaseType(osfType: string | undefined): osfType is FieldDefinitionValueType {
+  return (BASE_TYPES as readonly string[]).includes(osfType ?? "");
+}
+
+/** The catalog entry behind an osf type; base types have none. */
+export function osfTypeDefinitionOf(
+  osfType: string | undefined,
+  catalog: Record<string, OsfTypeDefinition>,
+): OsfTypeDefinition | undefined {
+  return osfType && !isBaseType(osfType) && Object.hasOwn(catalog, osfType) ? catalog[osfType] : undefined;
+}
+
+export function resolveBaseType(
+  osfType: string | undefined,
+  catalog: Record<string, OsfTypeDefinition>,
+): FieldDefinitionValueType | undefined {
+  return isBaseType(osfType) ? osfType : osfTypeDefinitionOf(osfType, catalog)?.baseType;
+}
 
 /** Embedded values need a policy adapter before any protected leaf may be used. */
 export function assertEntityValueFieldPolicies(field: object, path: string, semantic?: object): void {
@@ -16,176 +41,385 @@ export function assertEntityValueFieldPolicies(field: object, path: string, sema
   }
 }
 
+function inverseSource(entity: Pick<CoreEntity, "entity" | "labels" | "pluralLabels" | "title" | "fields" | "baseEntity">): InverseCollectionSource {
+  return {
+    entity: entity.entity,
+    labels: entity.labels,
+    pluralLabels: entity.pluralLabels,
+    title: entity.title,
+    fields: entity.fields,
+    valueDefinition: entity.baseEntity === false && !entity.fields.some((field) => field.key === "id"),
+  };
+}
+
+/** Inverse collections are derived; an authored one is a modelling error, not a second way to say it. */
+function assertNoAuthoredCollections(entity: Pick<CoreEntity, "entity" | "fields">, isEntityType: (osfType: string) => boolean): void {
+  for (const field of entity.fields) {
+    if (!isEntityType(field.osfType) || fieldCardinality(field) !== "collection" || field.relationship?.via) continue;
+    throw new Error(
+      `${entity.entity}.${field.key}: inverse collections are derived from the referencing field; ` +
+      `declare relationship.inverse on the ${field.osfType} field that references ${entity.entity} (or via for a read-only traversal).`,
+    );
+  }
+}
+
 /** Entity types are projections of the loaded entity corpus, never catalog copies. */
-export function deriveEntitySemanticTypes(
+export function deriveEntityOsfTypes(
   entities: readonly CoreEntity[],
-  catalog: Record<string, SemanticTypeDefinition>,
-): Record<string, SemanticTypeDefinition> {
+  catalog: Record<string, OsfTypeDefinition>,
+): Record<string, OsfTypeDefinition> {
   const result = { ...catalog };
+  for (const key of Object.keys(catalog)) {
+    if (isBaseType(key)) throw new Error(`Osf type ${key} shadows a base type.`);
+    if (!/^[a-z][A-Za-z0-9]*$/.test(key)) throw new Error(`Osf type ${key} must be camelCase; PascalCase names are entities.`);
+  }
+  const names = new Set(entities.map((entity) => entity.entity));
+  const isEntityType = (osfType: string) => names.has(osfType) && !entities.find(entity => entity.entity === osfType)?.source;
+  const sources = entities.filter(entity => !entity.source).map(inverseSource);
   for (const entity of entities) {
-    if (!/^[A-Z][A-Za-z0-9]*$/.test(entity.entity)) throw new Error(`Invalid entity semantic type name: ${entity.entity}.`);
-    if (result[entity.entity]) throw new Error(`Semantic type ${entity.entity} duplicates a loaded entity.`);
+    if (!/^[A-Z][A-Za-z0-9]*$/.test(entity.entity)) throw new Error(`Invalid entity osf type name: ${entity.entity}.`);
+    if (result[entity.entity]) throw new Error(`Osf type ${entity.entity} duplicates a loaded entity.`);
+    if (entity.source) for (const owner of entities) for (const field of owner.fields) {
+      if (field.osfType === entity.entity && !field.provider && !field.relationship?.provider) {
+        throw new Error(`${owner.entity}.${field.key}: Operation-backed source ${entity.entity} cannot silently replace a stored entity reference. Preserve/migrate existing columns explicitly; new references require provider.bindings.`);
+      }
+    }
+    assertNoAuthoredCollections(entity, isEntityType);
     result[entity.entity] = {
-      kind: "entity",
+      kind: entity.source ? "provider" : "entity",
       entity: entity.entity,
       entityIdentity: entity.baseEntity !== false || entity.fields.some((field) => field.key === "id"),
-      valueType: "string",
-      validation: { format: "uuid" },
+      baseType: entity.source ? "object" : "string",
+      ...(entity.source ? {} : { validation: { format: "uuid" } }),
       label: entity.labels ?? { en: entity.title ?? entity.entity },
-      shape: entity.fields,
+      pluralLabel: defaultInverseLabel(entity),
+      shape: withInverseCollections(entity.entity, entity.fields, deriveInverseCollections(entity.entity, sources, isEntityType)),
       render: { input: "EntityReferenceSelect", display: "EntityReferenceDisplay" },
+      ...(entity.versioning ? { versioned: true } : {}),
     };
     const identityKey = `${entity.entity[0]!.toLowerCase()}${entity.entity.slice(1)}Id`;
     if (result[entity.entity]!.entityIdentity === false) continue;
-    const route = entity.interfaces?.web?.views?.collection?.route;
+    if (Object.hasOwn(catalog, identityKey)) {
+      throw new Error(`Osf type ${identityKey} is the identity alias of entity ${entity.entity}; it is derived, not authored.`);
+    }
+    if (result[identityKey]) throw new Error(`Osf type ${identityKey} duplicates the identity alias of entity ${entity.entity}.`);
+    // Enumerating the records is the entity's own list Operation; there is no
+    // separate options endpoint to point at. Navigation (the localized web
+    // routes) stays on the entity's web interface, not on the type.
+    const enumerable = Object.values(entity.operations ?? {}).some((operation) =>
+      operation.implementation.type !== "collection" && operation.implementation.action === "list");
     // The identity alias is distinct from a relationship to that entity: an
-    // entity's own primary key must never acquire a self-referencing FK.
-    result[identityKey] ??= {
-      kind: "entityId", entity: slug(entity.entity), valueType: "string",
+    // entity's own primary key must never acquire a self-referencing FK. It
+    // carries no classification: `internal` restricts nothing (only
+    // confidential/pii/bsn do) and no consumer reads a category, so the
+    // authored `{ sensitivity: internal, category: workflow }` was noise.
+    result[identityKey] = {
+      kind: "entityId", entity: entity.entity, baseType: "string",
       label: entity.labels ?? { en: entity.title ?? entity.entity },
-      validation: { format: "uuid" },
-      listUrl: (typeof route === "string" ? route : route?.en ?? route?.nl) ?? `/${deriveTableName(entity.entity).replaceAll("_", "-")}`,
+      ...(entity.source ? (entity.fields.find(field => field.key === "id")?.validation
+        ? { validation: entity.fields.find(field => field.key === "id")!.validation } : {}) : { validation: { format: "uuid" } }),
+      ...(enumerable ? { optionSource: { type: "entity", source: entity.entity, valueField: "id" } } : {}),
       displayTemplate: entity.displayTemplate ?? "{{id}}",
       filterField: entity.filterField ?? "id",
       icon: "file",
       render: { input: "EntityReferenceSelect", display: "EntityReferenceDisplay" },
     };
   }
+  for (const entity of entities) {
+    const versionEntity = entity.versioning?.versionEntity;
+    if (!versionEntity) continue;
+    const target = result[versionEntity];
+    if (target?.kind !== "entity") throw new Error(`${entity.entity}: versioning.versionEntity ${versionEntity} is not a loaded entity.`);
+    target.versionEntityOf = entity.entity;
+  }
+  for (const [key, definition] of Object.entries(catalog)) {
+    if (!definition.entity) continue;
+    const target = result[definition.entity];
+    if (!target || target.kind !== "entity" || definition.baseType !== "string") {
+      throw new Error(`Osf type ${key}: entity must refine a loaded entity reference with baseType string.`);
+    }
+    result[key] = { ...target, ...definition, validation: { ...definition.validation, format: "uuid" }, kind: "entity", entity: definition.entity };
+  }
   return result;
+}
+
+/** The inverse collections `entity` receives, read from the entity projections in the catalog. */
+export function inverseCollectionsFor(entity: string, catalog: Record<string, OsfTypeDefinition>): Field[] {
+  const isEntityType = (osfType: string) => catalog[osfType]?.kind === "entity";
+  const sources: InverseCollectionSource[] = Object.entries(catalog)
+    .filter(([, definition]) => definition.kind === "entity" && definition.shape)
+    .map(([name, definition]) => ({
+      entity: name,
+      labels: definition.label,
+      pluralLabels: definition.pluralLabel,
+      fields: definition.shape!,
+      valueDefinition: definition.entityIdentity === false,
+    }));
+  return deriveInverseCollections(entity, sources, isEntityType);
+}
+
+/**
+ * Provider-backed entities are projections of the loaded Operation catalogs:
+ * relationship targets without storage, resolved by their own Operations.
+ */
+export function deriveProviderOsfTypes(
+  catalogs: readonly OperationCatalogDefinition[],
+  catalog: Record<string, OsfTypeDefinition>,
+): Record<string, OsfTypeDefinition> {
+  const result = { ...catalog };
+  for (const definition of catalogs) {
+    for (const [name, entity] of Object.entries(definition.interfaces?.web?.entities ?? {})) {
+      if (!/^[A-Z][A-Za-z0-9]*$/.test(name)) throw new Error(`Invalid provider entity osf type name: ${name}.`);
+      // A loaded entity of the same name owns the type, as it owns the route in
+      // the web manifest; the provider projection stays reachable only there.
+      if (result[name]?.kind === "entity") continue;
+      if (result[name]) throw new Error(`Osf type ${name} duplicates a loaded entity or provider entity.`);
+      result[name] = { kind: "provider", entity: name, baseType: "object", label: entity.title };
+    }
+  }
+  return result;
+}
+
+/**
+ * Profile (partial) fields extend an entity with columns on a profile table.
+ * They resolve their base type, catalog validation and cardinality the way
+ * entity fields do, but they never go through relationship normalization:
+ * a profile table carries no foreign keys, so a field that names an entity
+ * would silently compile to a bare text column. It is refused; the
+ * relationship belongs on the entity, added with an entityPatch. The one
+ * exception is an entity-value definition, whose profile fields are its own
+ * fields and are normalized as such by the compiler.
+ */
+export function withBaseTypes(
+  fields: readonly Field[],
+  catalog: Record<string, OsfTypeDefinition>,
+  path = "",
+  options: { entityReferences?: "refuse" | "normalizedLater" } = {},
+): Field[] {
+  return fields.map((field) => {
+    const origin = path ? `${path}.${field.key}` : field.key;
+    const semantic = osfTypeDefinitionOf(field.osfType, catalog);
+    const baseType = field.baseType ?? resolveBaseType(field.osfType, catalog);
+    if (!baseType) throw new Error(`${origin}: unknown osfType ${field.osfType}.`);
+    const references = semantic?.kind === "entity" || semantic?.kind === "entityId" || semantic?.kind === "provider";
+    if (references && options.entityReferences !== "normalizedLater") {
+      throw new Error(
+        `${origin}: a profile field cannot reference entity ${semantic.entity ?? field.osfType}; ` +
+          "profile tables carry no relationships. Add the field to the entity itself (kind: entityPatch).",
+      );
+    }
+    const result: Field = { ...field, baseType };
+    if (semantic?.validation || field.validation) result.validation = { ...semantic?.validation, ...field.validation };
+    const cardinality = field.cardinality ?? semantic?.cardinality;
+    if (cardinality) result.cardinality = cardinality;
+    if (cardinalityOf(cardinality, origin).required) result.required = true;
+    return result;
+  });
 }
 
 /** Normalize once, before storage, Operations and interface projections diverge. */
 export function normalizeEntityFields(
   entity: CoreEntity,
-  catalog: Record<string, SemanticTypeDefinition>,
+  catalog: Record<string, OsfTypeDefinition>,
 ): CoreEntity {
-  if (entity.schemaVersion === 3 && entity.relationships !== undefined) {
-    throw new Error(`${entity.entity}: relationships belong on fields in schemaVersion 3.`);
-  }
+  const identityKey = `${entity.entity[0]!.toLowerCase()}${entity.entity.slice(1)}Id`;
   const normalize = (field: Field, nested = false, ancestry: readonly string[] = []): Field => {
-    const semantic = field.semanticType && Object.hasOwn(catalog, field.semanticType) ? catalog[field.semanticType] : undefined;
+    const path = `${entity.entity}.${field.key}`;
+    if (!field.osfType) throw new Error(`${path}: osfType is required.`);
+    const semantic = osfTypeDefinitionOf(field.osfType, catalog);
     if (entity.baseEntity === false && !entity.fields.some((field) => field.key === "id")) {
-      assertEntityValueFieldPolicies(field, `${entity.entity}.${field.key}`, semantic);
+      assertEntityValueFieldPolicies(field, path, semantic);
     }
-    if (entity.schemaVersion === 3 && field.semanticType && !semantic) {
-      throw new Error(`${entity.entity}.${field.key}: unknown semanticType ${field.semanticType}.`);
+    const baseType = isBaseType(field.osfType) ? field.osfType : semantic?.baseType;
+    if (!baseType) throw new Error(`${path}: unknown osfType ${field.osfType}.`);
+    // Inline identifier values (for example arguments in a stored template)
+    // are not entity relationships. Preserve their scalar semantic type;
+    // only an EntityName osf type requests relational storage. A nested
+    // value cannot claim its own persisted column or relationship metadata.
+    if (nested && semantic?.kind === "entityId" && (field.persisted || field.relationship)) {
+      throw new Error(`${path}: inline identifier values cannot declare relational storage.`);
     }
-    if (entity.schemaVersion === 3 && semantic?.kind === "entityId" &&
-      (field.key !== "id" || field.semanticType !== `${entity.entity[0]!.toLowerCase()}${entity.entity.slice(1)}Id`)) {
-      throw new Error(`${entity.entity}.${field.key}: identity aliases identify primary keys; use the entity semanticType for a relationship.`);
+    if (!nested && semantic?.kind === "entityId" && (field.key !== "id" || field.osfType !== identityKey)) {
+      throw new Error(`${path}: identity aliases identify primary keys; use the entity osfType for a relationship.`);
     }
-    const valueType = field.valueType ?? semantic?.valueType;
-    if (!valueType) throw new Error(`${entity.entity}.${field.key}: valueType cannot be inferred from semanticType.`);
-    if (entity.schemaVersion === 3 && semantic && field.valueType && field.valueType !== semantic.valueType) {
-      throw new Error(`${entity.entity}.${field.key}: valueType conflicts with its semanticType ${field.semanticType}.`);
-    }
-    const result: Field = { ...field, valueType };
+    const result: Field = { ...field, baseType };
     if (semantic?.validation || field.validation) result.validation = { ...semantic?.validation, ...field.validation };
     const inlineShape = field.shape ?? field.children ?? (semantic?.kind !== "entity" ? semantic?.shape ?? semantic?.children : undefined);
     const item = field.item ?? semantic?.item;
     if (inlineShape || item) {
-      if (field.semanticType && ancestry.includes(field.semanticType)) throw new Error(`${entity.entity}.${field.key}: cyclic inline semantic type ${field.semanticType}.`);
-      const nextAncestry = field.semanticType ? [...ancestry, field.semanticType] : ancestry;
+      if (semantic && ancestry.includes(field.osfType)) throw new Error(`${path}: cyclic inline osf type ${field.osfType}.`);
+      const nextAncestry = semantic ? [...ancestry, field.osfType] : ancestry;
       if (inlineShape) result.children = inlineShape.map((child) => normalize(child, true, nextAncestry));
       if (field.shape && result.children) result.shape = result.children;
       if (item) result.item = normalize(item, true, nextAncestry);
     }
     const cardinality = field.cardinality ?? semantic?.cardinality;
     if (cardinality) result.cardinality = cardinality;
-    if (typeof cardinality === "object") {
-      const min = cardinality.min ?? 0;
-      const max = cardinality.max ?? 1;
-      if (!Number.isInteger(min) || min < 0 || (max !== "unbounded" && (!Number.isInteger(max) || max < min))) {
-        throw new Error(`${entity.entity}.${field.key}: invalid cardinality bounds.`);
-      }
-      if (min > 0) result.required = true;
-    }
+    if (cardinalityOf(cardinality, path).required) result.required = true;
     const collection = fieldCardinality(result) === "collection";
-    if (field.entityValue || field.allowedDefinitions) {
-      if (entity.schemaVersion !== 3 || nested) throw new Error(`${entity.entity}.${field.key}: entityValue and allowedDefinitions require a top-level schemaVersion 3 field.`);
+    if ((field.entityValue || field.allowedDefinitions) && nested) {
+      throw new Error(`${path}: entityValue and allowedDefinitions require a top-level field.`);
     }
     if (field.entityValue) {
-      if (field.semanticType !== "entityValue" || valueType !== "object" || collection || field.relationship || inlineShape || item) {
-        throw new Error(`${entity.entity}.${field.key}: entityValue requires a single entityValue object without inline fields or a relationship.`);
+      if (field.osfType !== "entityValue" || baseType !== "object" || collection || field.relationship || inlineShape || item) {
+        throw new Error(`${path}: entityValue requires a single entityValue object without inline fields or a relationship.`);
       }
       const discriminator = entity.fields.find((candidate) => candidate.key === field.entityValue!.definitionField);
-      const discriminatorSemantic = discriminator?.semanticType ? catalog[discriminator.semanticType] : undefined;
-      const discriminatorType = discriminator?.valueType ?? discriminatorSemantic?.valueType;
-      if (!discriminator || discriminator === field || discriminatorType !== "string" || !discriminator.required || !discriminator.persisted || fieldCardinality({ cardinality: discriminator.cardinality ?? discriminatorSemantic?.cardinality ?? "single" }) !== "single" || discriminator.relationship || ["entity", "entityId"].includes(discriminatorSemantic?.kind ?? "")) {
-        throw new Error(`${entity.entity}.${field.key}: definitionField must name a required persisted scalar string field.`);
+      const discriminatorSemantic = osfTypeDefinitionOf(discriminator?.osfType, catalog);
+      if (!discriminator || discriminator === field || resolveBaseType(discriminator.osfType, catalog) !== "string" || !discriminator.required || !discriminator.persisted || fieldCardinality({ cardinality: discriminator.cardinality ?? discriminatorSemantic?.cardinality ?? "single" }) !== "single" || discriminator.relationship || ["entity", "entityId"].includes(discriminatorSemantic?.kind ?? "")) {
+        throw new Error(`${path}: definitionField must name a required persisted scalar string field.`);
       }
-      if (!field.persisted) throw new Error(`${entity.entity}.${field.key}: entityValue requires a persisted values column.`);
-    } else if (field.semanticType === "entityValue") {
-      throw new Error(`${entity.entity}.${field.key}: entityValue requires definitionField metadata.`);
+      if (!field.persisted) throw new Error(`${path}: entityValue requires a persisted values column.`);
+    } else if (field.osfType === "entityValue") {
+      throw new Error(`${path}: entityValue requires definitionField metadata.`);
     }
     if (field.allowedDefinitions) {
       if (!collection || semantic?.kind !== "entity" || !Array.isArray(field.allowedDefinitions) || !field.allowedDefinitions.length || new Set(field.allowedDefinitions).size !== field.allowedDefinitions.length) {
-        throw new Error(`${entity.entity}.${field.key}: allowedDefinitions requires a nonempty unique definition list on an entity collection.`);
+        throw new Error(`${path}: allowedDefinitions requires a nonempty unique definition list on an entity collection.`);
       }
       for (const definition of field.allowedDefinitions) {
-        if (!Object.hasOwn(catalog, definition) || catalog[definition]?.kind !== "entity") throw new Error(`${entity.entity}.${field.key}: unknown allowed definition ${definition}.`);
+        if (!Object.hasOwn(catalog, definition) || catalog[definition]?.kind !== "entity") throw new Error(`${path}: unknown allowed definition ${definition}.`);
       }
     }
-    if (field.sortable && !collection) throw new Error(`${entity.entity}.${field.key}: sortable requires a collection.`);
-    if (semantic?.kind !== "entity") {
-      if (field.relationship) {
-        throw new Error(`${entity.entity}.${field.key}: relationship requires a loaded entity semanticType.`);
-      }
+    if (field.sortable && !collection) throw new Error(`${path}: sortable requires a collection.`);
+    if (field.childAuthorization && (!collection || field.relationship?.ownership !== "owned")) throw new Error(`${path}: childAuthorization requires an owned collection.`);
+    if (semantic?.kind === "provider") {
+      result.relationship = providerRelationshipOf(entity, field, result, semantic, nested, collection);
       return result;
     }
-    if (entity.schemaVersion === 1) {
-      throw new Error(`${entity.entity}.${field.key}: entity relationship fields require schemaVersion 2 or 3.`);
+    if (field.provider) throw new Error(`${path}: provider requires an osfType that names a provider-backed entity.`);
+    if (field.childLock !== undefined) {
+      if (!collection || field.relationship?.ownership !== "owned") throw new Error(`${path}: childLock requires an owned collection.`);
+      const lock = semantic?.shape?.find((candidate) => candidate.key === field.childLock);
+      if (!lock || resolveBaseType(lock.osfType, catalog) !== "boolean" || fieldCardinality(lock) !== "single") throw new Error(`${path}: childLock must name a single boolean field of ${semantic?.entity ?? field.osfType}.`);
     }
-    if (semantic.entityIdentity === false) throw new Error(`${entity.entity}.${field.key}: identity-less entity ${semantic.entity} is a value definition, not a relationship target.`);
-    if (nested) throw new Error(`${entity.entity}.${field.key}: entity references must be relational fields, not IDs inside JSON values.`);
-    const target = semantic.entity!;
-    const metadata = field.relationship ?? {};
-    if (!collection && metadata.ownership === "owned") {
-      throw new Error(`${entity.entity}.${field.key}: single owned references require a single-storage ownership contract; use an owned inverse collection until supported.`);
+    if (field.relationship?.version) {
+      if (collection || field.relationship.ownership === "owned") throw new Error(`${path}: version applies to a single reference only.`);
+      if (!["pinned", "current"].includes(field.relationship.version)) throw new Error(`${path}: version must be pinned or current.`);
+      if (field.relationship.version === "pinned" && !semantic?.versionEntityOf) throw new Error(`${path}: version: pinned requires a target that is the version entity of a versioned entity.`);
+      if (field.relationship.version === "current" && !semantic?.versioned) throw new Error(`${path}: version: current requires a target that declares versioning.`);
     }
-    const inverse = metadata.inverse;
-    let foreignKey: string | undefined;
-    let unique = false;
-    if (inverse) {
-      const inverseField = semantic.shape?.find((candidate) => candidate.key === inverse);
-      if (!inverseField || inverseField.semanticType !== entity.entity) {
-        throw new Error(`${entity.entity}.${field.key}: inverse ${target}.${inverse} must refer to ${entity.entity}.`);
-      }
-      const opposite = inverseField.relationship?.inverse;
-      if (opposite && opposite !== field.key) {
-        throw new Error(`${entity.entity}.${field.key}: inverse ${target}.${inverse} points to ${opposite}.`);
-      }
-      if (collection) {
-        if (fieldCardinality(inverseField) === "collection") {
-          throw new Error(`${entity.entity}.${field.key}: bidirectional collections require an explicit association entity.`);
-        }
-        foreignKey = inverseField.persisted?.column ?? `${snake(inverse)}_id`;
-      } else {
-        unique = fieldCardinality(inverseField) === "single";
-        if (unique) throw new Error(`${entity.entity}.${field.key}: bidirectional one-to-one fields require a single foreign-key owner; use an explicit association until supported.`);
-      }
+    if (semantic?.kind !== "entity") {
+      if (field.relationship) throw new Error(`${path}: relationship requires a loaded entity osfType.`);
+      return result;
     }
-    if (collection && field.persisted) {
-      throw new Error(`${entity.entity}.${field.key}: entity collections use a relation, never a JSON column.`);
+    if (semantic.entityIdentity === false) throw new Error(`${path}: identity-less entity ${semantic.entity} is a value definition, not a relationship target.`);
+    if (nested) throw new Error(`${path}: entity references must be relational fields, not IDs inside JSON values.`);
+    result.relationship = relationshipOf(entity, field, result, semantic, catalog, collection);
+    return result;
+  };
+  const fields = withInverseCollections(entity.entity, entity.fields, inverseCollectionsFor(entity.entity, catalog));
+  return { ...entity, fields: fields.map((field) => normalize(field)) };
+}
+
+/**
+ * A reference to a provider-backed entity: nothing is stored on this entity,
+ * the target's Operations resolve the records from the bound field values.
+ * The field is read-only on every interface; only the relationship is projected.
+ */
+function providerRelationshipOf(
+  entity: CoreEntity,
+  field: Field,
+  result: Field,
+  semantic: OsfTypeDefinition,
+  nested: boolean,
+  collection: boolean,
+): NonNullable<Field["relationship"]> {
+  const path = `${entity.entity}.${field.key}`;
+  const target = semantic.entity!;
+  if (nested) throw new Error(`${path}: provider-backed references are top-level fields, not values inside JSON.`);
+  if (field.persisted) throw new Error(`${path}: a provider-backed reference has no storage of its own; the ${target} Operations resolve it.`);
+  // Normalization runs more than once (loader, then compile): a relationship
+  // this function derived earlier is not authored metadata.
+  if (field.relationship && !field.relationship.provider) {
+    throw new Error(`${path}: a provider-backed reference declares provider.bindings, not relationship metadata.`);
+  }
+  const bindings = field.provider?.bindings ?? field.relationship?.provider?.bindings;
+  if (!bindings || Object.keys(bindings).length === 0) {
+    throw new Error(`${path}: provider.bindings maps ${target} Operation input fields to fields of ${entity.entity}.`);
+  }
+  for (const [input, own] of Object.entries(bindings)) {
+    if (!entity.fields.some((candidate) => candidate.key === own)) {
+      throw new Error(`${path}: provider.bindings.${input} names unknown field ${entity.entity}.${own}.`);
     }
-    if (!collection) {
-      foreignKey = field.persisted?.column ?? `${snake(field.key)}_id`;
-      result.persisted = field.persisted ?? { column: foreignKey, storageClass: "core" };
-      result.validation = { ...semantic.validation, ...field.validation, format: "uuid" };
-    }
-    result.relationship = {
-      kind: collection ? (inverse ? "hasMany" : "manyToMany") : "belongsTo",
+  }
+  result.readOnly = true;
+  return {
+    kind: collection ? "hasMany" : "belongsTo",
+    entity: slug(target),
+    target,
+    fieldKey: field.key,
+    ownership: "reference",
+    provider: { bindings: { ...bindings } },
+  };
+}
+
+function relationshipOf(
+  entity: CoreEntity,
+  field: Field,
+  result: Field,
+  semantic: OsfTypeDefinition,
+  catalog: Record<string, OsfTypeDefinition>,
+  collection: boolean,
+): NonNullable<Field["relationship"]> {
+  const path = `${entity.entity}.${field.key}`;
+  const target = semantic.entity!;
+  const metadata = field.relationship ?? {};
+  if (!collection && metadata.ownership === "owned") {
+    throw new Error(`${path}: single owned references require a single-storage ownership contract; use an owned inverse collection until supported.`);
+  }
+  if (!collection) {
+    if (typeof metadata.inverse === "string") throw new Error(`${path}: a single reference declares its inverse collection as an object ({ key, label }), not as a field key.`);
+    const foreignKey = field.persisted?.column ?? `${snake(field.key)}_id`;
+    result.persisted = field.persisted ?? { column: foreignKey, storageClass: "core" };
+    if (entity.authorization && result.persisted.column === "tenant_id") result.readOnly = true;
+    result.validation = { ...semantic.validation, ...field.validation, format: "uuid" };
+    return {
+      kind: "belongsTo",
       entity: slug(target),
       target,
       fieldKey: field.key,
       ownership: metadata.ownership ?? "reference",
-      ...(inverse ? { inverse } : {}),
-      ...(foreignKey ? { foreignKey } : {}),
-      ...(unique ? { unique: true } : {}),
+      foreignKey,
       ...(metadata.displayField ? { displayField: metadata.displayField } : {}),
+      ...(metadata.version ? { version: metadata.version } : {}),
       ...(metadata.constraints ? { constraints: structuredClone(metadata.constraints) } : {}),
     };
-    return result;
+  }
+  if (field.persisted) throw new Error(`${path}: entity collections use a relation, never a JSON column.`);
+  const inverse = metadata.inverse;
+  if (typeof inverse !== "string") throw new Error(`${path}: a collection names the referencing field on ${target} as its inverse.`);
+  let inverseTarget = entity.entity;
+  let through: { field: string; column: string; target: string } | undefined;
+  if (metadata.via) {
+    const via = entity.fields.find((candidate) => candidate.key === metadata.via);
+    const viaType = osfTypeDefinitionOf(via?.osfType, catalog);
+    if (metadata.ownership === "owned" || field.sortable || !via || via === field || viaType?.kind !== "entity" ||
+      viaType.entityIdentity === false || fieldCardinality(via) !== "single" || via.relationship?.via) {
+      throw new Error(`${path}: via requires a read-only inverse collection through a direct, single entity reference.`);
+    }
+    inverseTarget = viaType.entity!;
+    through = { field: via.key, column: via.persisted?.column ?? `${snake(via.key)}_id`, target: inverseTarget };
+    result.readOnly = true;
+  }
+  const inverseField = semantic.shape?.find((candidate) => candidate.key === inverse);
+  if (!inverseField || inverseField.osfType !== inverseTarget) {
+    throw new Error(`${path}: inverse ${target}.${inverse} must refer to ${inverseTarget}.`);
+  }
+  if (fieldCardinality(inverseField) === "collection") {
+    throw new Error(`${path}: bidirectional collections require an explicit association entity.`);
+  }
+  const foreignKey = inverseField.persisted?.column ?? `${snake(inverse)}_id`;
+  return {
+    kind: "hasMany",
+    entity: slug(target),
+    target,
+    fieldKey: field.key,
+    ownership: metadata.ownership ?? "reference",
+    inverse,
+    ...(through ? { via: metadata.via!, through } : {}),
+    foreignKey,
+    ...(metadata.displayField ? { displayField: metadata.displayField } : {}),
+    ...(metadata.constraints ? { constraints: structuredClone(metadata.constraints) } : {}),
   };
-  return { ...entity, fields: entity.fields.map((field) => normalize(field)) };
 }

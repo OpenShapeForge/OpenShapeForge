@@ -7,6 +7,7 @@ import {
 } from "../generated-crud.js";
 import {
   executeCanonicalGraphqlOperation,
+  generatedEntityMutationFields,
   generatedEntityTypeDefs,
   renderGeneratedMutationFields,
   renderGeneratedQueryFields,
@@ -14,7 +15,6 @@ import {
   renderQueryFields,
   renderTypeDefinition,
   splitCanonicalGraphqlMutationInput,
-  usesCanonicalGraphqlOperations,
 } from "../generated-entity-schema.js";
 
 type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
@@ -55,21 +55,19 @@ describe("generated GraphQL CRUD exposure", () => {
       delete: false,
     });
     table.generatedCrudEligible = true;
-    table.generatedCrud = false;
     expect(isGeneratedCrudTableEligible(table)).toBe(true);
     expect(isGeneratedCrudOperationEnabled(table, "list")).toBe(true);
     expect(isGeneratedCrudOperationEnabled(table, "create")).toBe(false);
   });
 
-  test("current runtimes preserve explicit legacy full-CRUD manifests", () => {
-    const legacy = {
+  test("an eligible table without a per-operation policy serves nothing", () => {
+    const unpoliced = {
       ...base,
-      generatedCrud: true,
-      generatedCrudEligible: undefined,
+      generatedCrudEligible: true,
       source: { ...base.source, crud: undefined },
     } as unknown as GeneratedTable;
-    expect(isGeneratedCrudTableEligible(legacy)).toBe(true);
-    expect(isGeneratedCrudOperationEnabled(legacy, "delete")).toBe(true);
+    expect(isGeneratedCrudTableEligible(unpoliced)).toBe(true);
+    expect(isGeneratedCrudOperationEnabled(unpoliced, "delete")).toBe(false);
   });
 
   test("a read-only entity emits queries but no mutations", () => {
@@ -161,7 +159,6 @@ describe("generated GraphQL CRUD exposure", () => {
       delete: true,
     });
 
-    expect(usesCanonicalGraphqlOperations(table)).toBe(true);
     expect(renderQueryFields(table)).toContain("relation(id: ID!): RelationOperationResult");
     expect(renderQueryFields(table)).toContain(
       "relations(filter: RelationFilter, sort: RelationSort, first: Int, after: String): RelationCollectionOperationResult",
@@ -247,7 +244,7 @@ describe("generated GraphQL CRUD exposure", () => {
     });
   });
 
-  test("legacy GraphQL keeps its direct CRUD response shape", () => {
+  test("every generated entity projects the canonical envelope, whatever its authoring version", () => {
     const table = withOperations({
       list: true,
       get: true,
@@ -255,13 +252,27 @@ describe("generated GraphQL CRUD exposure", () => {
       update: true,
       delete: true,
     });
-    const { authoringVersion: _authoringVersion, ...legacySource } = table.source!;
-    table.source = legacySource;
-
-    expect(usesCanonicalGraphqlOperations(table)).toBe(false);
-    expect(renderGeneratedQueryFields(table)[0]).toContain(": Relation");
+    expect(renderGeneratedQueryFields(table)[0]).toContain(": RelationOperationResult");
     expect(renderGeneratedMutationFields(table)).toContain(
-      "      deleteRelation(id: ID!): Boolean!",
+      "      deleteRelation(input: DeleteRelationInput!): RelationDeleteOperationResult",
     );
+  });
+});
+
+describe("the Tenant registry on GraphQL", () => {
+  // The registry row is provisioned (control/provisioning.ts); the contract
+  // offers only get and list. Name/status changes use the separate control
+  // Operations and never the tenant-facing generic CRUD runtime.
+  const tenants = getGeneratedCrudTables().find((table) => table.name === "erp.tenants")!;
+
+  test("renders no tenant-facing mutation", () => {
+    const mutations = renderGeneratedMutationFields(tenants).join("\n");
+    expect(mutations).not.toMatch(/createTenant\(|updateTenant\(|deleteTenant\(/);
+    expect(renderMutationFields(tenants)).not.toMatch(/createTenant\(|updateTenant\(|deleteTenant\(/);
+    // The whole schema's Mutation block: what a client can call. The
+    // Create/Delete input types are rendered per entity regardless, as for
+    // every partial policy, and are not callable without a field.
+    expect(generatedEntityMutationFields).not.toMatch(/\bcreateTenant\(|\bupdateTenant\(|\bdeleteTenant\(/);
+    expect(renderGeneratedQueryFields(tenants).join("\n")).toMatch(/\btenant\(|\btenants\(/);
   });
 });

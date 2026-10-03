@@ -10,20 +10,18 @@ import { collectAllArtifacts } from "../packages/compiler/src/index.ts";
 import {
   compilerOwnedGeneratedFiles,
   compilerOwnedGeneratedRoots,
+  orphanCompilerGeneratedFiles,
 } from "./compiler-generated-artifact-paths.mjs";
 
 const repoRoot = process.cwd();
 const webPresent = existsSync(join(repoRoot, "apps/web"));
-// AgreementMilestone, the schemaVersion 2 Quote/QuoteLine pair and Relation aggregate
-// (Relation, RelationGroup, RelationGroupMembership, ContactDetail and
-// PaymentDetail) withhold part of
+// Entities with invariant-rich or aggregate-owned writes withhold part of
 // generic CRUD. The stock full-CRUD web UI is intentionally not generated for
 // these entities (isGeneratedCrudUiEnabled requires every operation to be
-// true). The aggregate is instead projected through WebManifest for hosts, as
-// are the other schemaVersion 2 entities (Agreement, Address, AgreementParty);
-// every v1 -> v2 conversion therefore lowers this count by one.
-// Strict operation-authored entities use the Web manifest rather than v1 shards.
-const expectedGeneratedCrudEntityCount = 105;
+// true). Schema-3 entities with an explicit complete CRUD and Web contract do
+// retain their generated pages; partial contracts use the Web manifest only.
+// Account now uses canonical account Operations rather than generated CRUD.
+const expectedGeneratedCrudEntityCount = 115;
 
 /**
  * The realms this repository authors, by name.
@@ -308,7 +306,7 @@ const existingOwnedFiles = (
 )
   .flat()
   .sort();
-const orphanGeneratedFiles = existingOwnedFiles.filter((path) => !artifactPathSet.has(path));
+const orphanGeneratedFiles = orphanCompilerGeneratedFiles(existingOwnedFiles, artifactPathSet);
 if (orphanGeneratedFiles.length > 0) {
   coverageFailures.push("compiler-owned generated roots contain orphan files");
   console.error("\nCompiler-owned generated roots contain orphan files:");

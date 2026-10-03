@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { cardinalityOf, type ResolvedCardinality } from "@openshapeforge/operations";
 import { contentError } from "./errors.js";
 import {
   canonicalJson,
@@ -47,27 +48,27 @@ function exactKeys(record: object, allowed: readonly string[], field: string) {
   }
 }
 
+/**
+ * The one reading of `cardinality` (`cardinalityOf` in operations), with the
+ * shape's own `required` folded into the lower bound. Every check in this
+ * engine takes the bounds from here, so a value the entity would refuse is
+ * refused in a template too.
+ */
 export function contentCardinality(shape: ContentValueShape) {
-  const bounds = shape.cardinality;
-  if (bounds === "collection")
-    return { collection: true, min: shape.required ? 1 : 0, max: Infinity };
-  if (bounds === undefined || bounds === "single")
-    return { collection: false, min: shape.required ? 1 : 0, max: 1 };
-  if (!bounds || typeof bounds !== "object")
-    contentError("INVALID_VALUE", "Invalid field cardinality.");
-  const min = bounds.min ?? 0;
-  const max = bounds.max ?? 1;
-  if (
-    !Number.isSafeInteger(min) ||
-    min < 0 ||
-    (max !== "unbounded" && (!Number.isSafeInteger(max) || max < Math.max(1, min)))
-  ) {
-    contentError("INVALID_VALUE", "Invalid field cardinality.");
+  let resolved: ResolvedCardinality;
+  try {
+    resolved = cardinalityOf(shape.cardinality);
+  } catch {
+    return contentError("INVALID_VALUE", "Invalid field cardinality.");
   }
+  const bounds = typeof shape.cardinality === "object" ? shape.cardinality : undefined;
+  const required = shape.required || resolved.required;
   return {
-    collection: max === "unbounded" || max > 1,
-    min: Math.max(min, shape.required ? 1 : 0),
-    max: max === "unbounded" ? Infinity : max,
+    collection: resolved.cardinality === "collection",
+    min: Math.max(bounds?.min ?? 0, required ? 1 : 0),
+    max: resolved.cardinality !== "collection"
+      ? 1
+      : bounds === undefined || bounds.max === "unbounded" ? Infinity : bounds.max ?? 1,
   };
 }
 
@@ -75,14 +76,14 @@ function validateShape(shape: ContentValueShape) {
   assertContentRecord(shape, "field metadata");
   if (
     !["string", "integer", "number", "boolean", "date", "datetime", "object"].includes(
-      shape.valueType,
+      shape.baseType,
     )
   ) {
-    contentError("INVALID_VALUE", "Field metadata requires a resolved base valueType.");
+    contentError("INVALID_VALUE", "Field metadata requires a resolved baseType.");
   }
   contentCardinality(shape);
   if (shape.fields) {
-    if (shape.valueType !== "object")
+    if (shape.baseType !== "object")
       contentError("INVALID_VALUE", "Only object fields may declare nested fields.");
     assertContentRecord(shape.fields, "nested field metadata");
     for (const nested of Object.values(shape.fields)) validateShape(nested);
@@ -98,23 +99,23 @@ function validateScalar(value: JsonValue, shape: ContentValueShape, field: strin
     Number.isFinite(Date.parse(value)) &&
     new Date(value).toISOString().slice(0, 10) === value;
   const valid =
-    shape.valueType === "object"
+    shape.baseType === "object"
       ? typeof value === "object" && value !== null && !Array.isArray(value)
-      : shape.valueType === "integer"
+      : shape.baseType === "integer"
         ? Number.isSafeInteger(value)
-        : shape.valueType === "number"
+        : shape.baseType === "number"
           ? typeof value === "number" && Number.isFinite(value)
-          : shape.valueType === "date"
+          : shape.baseType === "date"
             ? typeof value === "string" && validDate(value)
-            : shape.valueType === "datetime"
+            : shape.baseType === "datetime"
               ? typeof value === "string" &&
                 validDate(value.slice(0, 10)) &&
                 /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
                   value,
                 ) &&
                 Number.isFinite(Date.parse(value))
-              : typeof value === shape.valueType;
-  if (!valid) contentError("INVALID_VALUE", `${field} must have base type ${shape.valueType}.`);
+              : typeof value === shape.baseType;
+  if (!valid) contentError("INVALID_VALUE", `${field} must have base type ${shape.baseType}.`);
   if (shape.enum && !shape.enum.some((item) => canonicalJson(item) === canonicalJson(value))) {
     contentError("INVALID_VALUE", `${field} is not an allowed value.`);
   }
@@ -186,6 +187,9 @@ export function validateContentRegistry(
     if (!Number.isSafeInteger(definition.schemaVersion) || definition.schemaVersion < 1) {
       contentError("INVALID_VALUE", "Definition schemaVersion must be a positive integer.");
     }
+    if (definition.definitionHash !== undefined && !/^[a-f0-9]{64}$/.test(definition.definitionHash)) {
+      contentError("INVALID_VALUE", "Definition definitionHash must be a SHA-256 hex digest.");
+    }
     assertContentRecord(definition.fields, "definition fields");
     for (const [name, shape] of Object.entries(definition.fields)) {
       assertContentName(name, "field name");
@@ -211,7 +215,7 @@ export function validateContentRegistry(
         if (
           !parameters ||
           parameters.relationship ||
-          parameters.valueType !== "object" ||
+          parameters.baseType !== "object" ||
           contentCardinality(parameters).collection
         ) {
           contentError("INVALID_VALUE", "Composition parameters must be an embedded object field.");
@@ -306,18 +310,26 @@ export function defineContentTemplateVersion(
     );
   const ids = new Set<string>();
   const keys = new Set<string>();
+  const defaults = new Set<string>();
   for (const variant of version.variants) {
     assertContentRecord(variant, "variant");
-    exactKeys(variant, ["id", "channel", "locale", "blocks", "allowedDefinitions"], "variant");
+    exactKeys(variant, ["id", "channel", "locale", "default", "blocks", "allowedDefinitions"], "variant");
     assertContentName(variant.id, "variant id");
     assertContentName(variant.channel, "variant channel");
     assertContentName(variant.locale, "variant locale");
+    if (variant.default !== undefined && typeof variant.default !== "boolean")
+      contentError("INVALID_VALUE", "Variant default must be a boolean.");
     const key = canonicalJson([variant.channel, variant.locale]);
     if (ids.has(variant.id) || keys.has(key))
       contentError(
         "DUPLICATE",
         "Variant ids and channel/locale pairs must be unique within a version.",
       );
+    if (variant.default) {
+      if (defaults.has(variant.channel))
+        contentError("DUPLICATE", "A channel has at most one default variant.");
+      defaults.add(variant.channel);
+    }
     ids.add(variant.id);
     keys.add(key);
     if (!Array.isArray(variant.blocks) || variant.blocks.length > CONTENT_LIMITS.blocks)
@@ -351,6 +363,20 @@ export function defineContentTemplateVersion(
   return version;
 }
 
+/** The language subtag of a locale: `nl-NL` and `nl_NL` are both `nl`. */
+export function contentLanguage(locale: string): string {
+  return locale.trim().replace(/_/g, "-").split("-")[0]!.toLowerCase();
+}
+
+/**
+ * The variant a channel serves for a locale: the exact locale, else a variant
+ * of the same language (`nl` for `nl-NL`: the bare language first, then the
+ * authored default if it is one of them, then the lowest locale), else the
+ * channel's authored default. The choice depends on the variants alone, never
+ * on the order they arrived in, so a frozen template and a live document
+ * agree. A channel without any of those is an error, never a silent switch
+ * to another language; another channel never is.
+ */
 export function selectContentTemplateVariant(
   version: ContentTemplateVersion,
   channel: string,
@@ -358,7 +384,16 @@ export function selectContentTemplateVariant(
 ) {
   const channels = version.variants.filter((variant) => variant.channel === channel);
   if (!channels.length) contentError("UNSUPPORTED_CHANNEL", `Template has no ${channel} variant.`);
-  const variant = channels.find((variant) => variant.locale === locale);
-  if (!variant) contentError("UNSUPPORTED_LOCALE", `Template has no ${channel}/${locale} variant.`);
+  const language = contentLanguage(locale);
+  const sameLanguage = channels
+    .filter((variant) => contentLanguage(variant.locale) === language)
+    .sort((left, right) => left.locale.localeCompare(right.locale, "en"));
+  const variant =
+    channels.find((variant) => variant.locale === locale) ??
+    sameLanguage.find((variant) => variant.locale === language) ??
+    sameLanguage.find((variant) => variant.default) ??
+    sameLanguage[0] ??
+    channels.find((variant) => variant.default);
+  if (!variant) contentError("UNSUPPORTED_LOCALE", `Template has no ${channel}/${locale} variant and no default ${channel} variant.`);
   return variant;
 }

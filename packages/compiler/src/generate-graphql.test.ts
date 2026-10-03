@@ -13,7 +13,8 @@ function field(
 ): CompiledField {
   return {
     key,
-    valueType: "string",
+    baseType: "string",
+    osfType: overrides.baseType ?? "string",
     cardinality: "single",
     required: false,
     label: { en: key },
@@ -37,9 +38,19 @@ const contract = {
       field("classifiedCore", {
         classification: { sensitivity: "confidential" },
       }),
+      field("reviewerId", {
+        osfType: "Relation",
+        relationship: { ownership: "reference" },
+      }),
     ],
     relationships: [
       { key: "owner", kind: "belongsTo", target: "Relation" },
+      {
+        key: "reviewerId",
+        fieldKey: "reviewerId",
+        kind: "belongsTo",
+        target: "Relation",
+      },
     ],
   },
   graphql: {
@@ -50,6 +61,14 @@ const contract = {
       { name: "status", type: "String", source: "core" },
       { name: "ownerId", type: "ID", source: "core" },
       { name: "classifiedCore", type: "String", source: "core" },
+    ],
+    relationships: [
+      {
+        name: "reviewerId",
+        target: "Relation",
+        type: "Relation",
+        resolve: "belongsTo",
+      },
     ],
     profileTypes: {
       sector: {
@@ -90,6 +109,7 @@ describe("generated GraphQL documentation", () => {
       substringFilterDescription: "Lifecycle state.",
     });
     expect(fields.get("ownerId")?.description).toBe("References the Relation entity.");
+    expect(fields.get("reviewerId")?.description).toBe("References the Relation entity.");
     expect(fields.get("sectorNote")).toEqual({
       name: "sectorNote",
       description: "Sector-specific note.",

@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import {
+  connectionCreateCall,
   connectionFieldsOf,
   connectionNeedsOf,
   connectionProblemError,
@@ -139,6 +140,9 @@ describe("connection problems", () => {
     kind: "organization_missing" as const,
     adapter: "Google",
     adapterId: "adapter-google",
+    connectionEntity: "Connection",
+    connectionKey: "google-gmail",
+    connectionName: "Google",
     createTool: "create_connection",
     adapterArgument: "adapterId",
   };
@@ -156,7 +160,7 @@ describe("connection problems", () => {
   it("tells an administrator the exact call, plus the browser link when one was minted", () => {
     expect(connectionProblemMessage({ ...organization, administrator: true })).toBe(
       "The organization's Google connection is not set up. As an organization administrator, " +
-        'set it up with create_connection { adapterId: "adapter-google" }.',
+        'set it up with create_connection { key: "google-gmail", name: "Google", adapterId: "adapter-google" }.',
     );
     expect(
       connectionProblemMessage({
@@ -167,9 +171,15 @@ describe("connection problems", () => {
       }),
     ).toBe(
       "The organization's Google connection is not set up. As an organization administrator, " +
-        'set it up with create_connection { adapterId: "adapter-google" }, or open ' +
+        'set it up with create_connection { key: "google-gmail", name: "Google", adapterId: "adapter-google" }, or open ' +
         "http://127.0.0.1:3271/api/entity-configuration/tok in a browser and enter the values " +
         "there (link valid until 2026-09-05T10:30:00.000Z); they never pass through the chat.",
+    );
+  });
+
+  it("includes the entity discriminator required by the generic create tool", () => {
+    expect(connectionCreateCall({ ...organization, createTool: "osf_create" })).toBe(
+      'osf_create { entity: "Connection", key: "google-gmail", name: "Google", adapterId: "adapter-google" }',
     );
   });
 

@@ -14,7 +14,8 @@ function entity(defaultValue: unknown = {}): CoreEntity {
     fields: [
       {
         key: "authorization",
-        valueType: "object",
+        osfType: "object",
+        baseType: "object",
         required: true,
         defaultValue,
         persisted: { column: "authorization", storageClass: "core" },

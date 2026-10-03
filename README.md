@@ -34,7 +34,7 @@ docker compose -f docker-compose.local.yml up -d --build   # Postgres :5434, Key
 
 bun run generate           # compile YAML -> schema.sql, manifest, realm, CRUD pages, plugin artifacts
 bun run db:provision-roles # once per Postgres cluster/volume; uses the administrator connection
-bun run db:migrate         # apply the schema (roll-forward, additive-safe)
+bun run db:migrate         # build the schema (a built database with another checksum needs db:reset)
 bun run dev:api       # http://127.0.0.1:3001/api/graphql (GraphiQL in dev)
 bun run dev:web       # http://localhost:3000 — the generated CRUD app
 

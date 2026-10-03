@@ -30,6 +30,7 @@ import { readdirSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { authoringLayerDirs } from "../packages/compiler/src/authoring/layers.ts";
+import { checkCoreEntityV3, readYamlCorpus } from "./core-entity-v3.ts";
 import {
   createAuthoringValidator,
   SCHEMA_BY_KIND,
@@ -37,6 +38,12 @@ import {
 } from "../packages/compiler/src/authoring/schema-validation.ts";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+const versionGate = checkCoreEntityV3(readYamlCorpus(repoRoot));
+if (versionGate.failures.length) {
+  console.error(`coreEntity v3 cutover: ${versionGate.old} old YAMLs, ${versionGate.failures.length} violations\n${versionGate.failures.join("\n")}`);
+  process.exit(1);
+}
 
 /**
  * Authoring files each mapped schema is expected to validate, exactly.
@@ -57,24 +64,28 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   // connectors/<slug>/authoring layer.
   "connector.schema.json": 5,
   // The core ERP catalog under packages/compiler/config/authoring/entities/,
-  // excluding `_base.yaml` — a baseEntity, and so unschemad by design.
-  "core-entity.schema.json": 153,
+  // excluding `_base.yaml` — a baseEntity, and so unschemad by design — plus
+  // the two entities of the notebook example plugin's authoring layer.
+  "core-entity.schema.json": 157,
   // The platform's own administration (operations/control.yaml): the 23
-  // control-realm Operations behind /api/control/v1 and the control MCP.
-  "operation-catalog.schema.json": 1,
+  // control-realm Operations behind /api/control/v1 and the control MCP —
+  // and the operator side of capability grants (operations/grants.yaml),
+  // plus accounts, members, groups, permissions, roles and source-sync catalogs.
+  "operation-catalog.schema.json": 8,
   "settings-definition.schema.json": 0,
   "settings-provider.schema.json": 0,
   "retention-policy-catalog.schema.json": 1,
-  "semantic-type-catalog.schema.json": 1,
+  "osf-type-catalog.schema.json": 1,
   "transform-catalog.schema.json": 1,
-  "workflow-node.schema.json": 44,
   // Zero on purpose: the compiler reads these kinds, but no layer in this
-  // repository authors one today. Stated rather than inferred — an inferred
+  // repository authors one today (workflow nodes are authored by the workflow
+  // plugin a host composes, and validated at load like any packaged layer). Stated rather than inferred — an inferred
   // zero is indistinguishable from a corpus that went missing, which is the
   // whole failure this map exists to close.
   "entity-mapping.schema.json": 0,
   "entity-profile.schema.json": 0,
   "view.schema.json": 0,
+  "workflow-node.schema.json": 0,
 });
 
 /**

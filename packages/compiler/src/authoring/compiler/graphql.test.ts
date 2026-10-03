@@ -16,7 +16,8 @@ describe("GraphQL authoring projection", () => {
           fields: [
             {
               key: "sectorNote",
-              valueType: "string",
+              osfType: "string",
+              baseType: "string",
               description: { en: "Sector-specific note." },
             },
           ],

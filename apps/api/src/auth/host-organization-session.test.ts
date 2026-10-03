@@ -19,8 +19,10 @@ import { mintApiKey } from "./api-key/format.js";
 import { __resetExchangeCacheForTests } from "./api-key/exchange.js";
 import { encryptSecret, keyringFromEnv } from "../platform/secrets.js";
 import {
-  __resetSessionResolverForTests, __setTenantForOrganizationForTests, resolveSessionContext,
+  __resetSessionResolverForTests, __setIdentityLinkForTests, resolveSessionContext,
 } from "./identity.js";
+import { __setTenantForOrganizationForTests } from "./tenant-resolution.js";
+import { stubLinkedMembershipForTests } from "./identity-link.test-support.js";
 
 const ISSUER = "https://identity.example.test/realms/host";
 const RESOURCE = "https://api.example.test/api/mcp";
@@ -69,6 +71,7 @@ beforeEach(() => {
   process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI = new URL("/jwks", server.url).href;
   process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = "api";
   __resetSessionResolverForTests();
+  stubLinkedMembershipForTests();
   __resetExchangeCacheForTests();
   exchangeCalls = 0;
   lookups.length = 0;
@@ -182,15 +185,40 @@ describe("host organization binding through real bearer verification and resolve
     expect((await resolveSessionContext(request)).tenantId).toBe(TENANT_A);
   });
 
-  test("host roles exclude sibling clients and never flatten organization-local grants", async () => {
+  test("a person cannot be admitted on a surface without a database, in either mode", async () => {
+    // A client role on the Keycloak user is user-wide: whatever organization
+    // the token selects, it would be there. A person's organization roles come
+    // from the membership row (auth/identity-link.ts), which needs a database;
+    // without one there is no session at all — never one from the token.
+    __setIdentityLinkForTests(null);
     const request = await headers({
       realm_access: { roles: ["realm-reader"] },
       resource_access: { api: { roles: ["Records.Read"] }, sibling: { roles: ["Records.Admin"] } },
       organization: { alpha: { id: "org-a", realm_access: { roles: ["nested-admin"] } } },
     });
-    expect((await resolveSessionContext(request)).roles).toEqual(["Records.Read", "realm-reader"]);
+    await expect(resolveSessionContext(request)).rejects.toMatchObject({ status: 503, code: "AUTHENTICATION_UNAVAILABLE" });
     process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "off";
-    expect((await resolveSessionContext(request)).roles).toEqual(["Records.Admin", "Records.Read", "realm-reader"]);
+    await expect(resolveSessionContext(request)).rejects.toMatchObject({ status: 503, code: "AUTHENTICATION_UNAVAILABLE" });
+  });
+
+  test("a service-account token is not a person: it keeps its client roles and never enters admission", async () => {
+    // Keycloak names a client-credentials principal service-account-<clientId>
+    // and makes that client the authorized party — verified claims, both.
+    process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "off";
+    __setIdentityLinkForTests(null);
+    const request = await headers({
+      organization: undefined, tid: TENANT_A, azp: "automation", preferred_username: "service-account-automation",
+      realm_access: { roles: ["realm-reader"] },
+      resource_access: { api: { roles: ["Records.Read"] } },
+    });
+    const session = await resolveSessionContext(request);
+    expect(session.tenantId).toBe(TENANT_A);
+    expect(session.roles).toEqual(["Records.Read", "realm-reader"]);
+    expect(session.relation).toBeNull();
+    // The same shape with a person's username is a person, and is refused here.
+    await expect(
+      resolveSessionContext(await headers({ organization: undefined, tid: TENANT_A, azp: "automation", preferred_username: "hans" })),
+    ).rejects.toMatchObject({ status: 503 });
   });
 
   test("strict mode refuses signed trusted context, including with an invalid bearer", async () => {
@@ -217,6 +245,7 @@ describe("host organization binding through real bearer verification and resolve
     expect((await resolveSessionContext(await headers(), { requiredAudience: RESOURCE })).tenantId).toBe(TENANT_A);
     process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = RESOURCE;
     __resetSessionResolverForTests();
+    stubLinkedMembershipForTests();
     __setTenantForOrganizationForTests(async () => TENANT_A);
     expect((await resolveSessionContext(await headers({ aud: RESOURCE }), { requiredAudience: RESOURCE })).tenantId).toBe(TENANT_A);
     expect((await resolveSessionContext(await headers({ aud: "api" }), { requiredAudience: "api" })).credential).toBe("none");
@@ -225,6 +254,7 @@ describe("host organization binding through real bearer verification and resolve
   test("dynamic client azp is accepted only in host mode with a verified required resource audience", async () => {
     process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUTHORIZED_PARTIES = "web";
     __resetSessionResolverForTests();
+    stubLinkedMembershipForTests();
     __setTenantForOrganizationForTests(async () => TENANT_A);
     const dynamic = await headers({ azp: "dynamically-registered-client" });
     expect((await resolveSessionContext(dynamic, { requiredAudience: RESOURCE })).tenantId).toBe(TENANT_A);
@@ -246,7 +276,7 @@ describe("host organization binding through real bearer verification and resolve
 
   test("required audience rejects API keys before key configuration or database access", async () => {
     expect((await resolveSessionContext(new Headers({ authorization: `Bearer ${mintApiKey().token}` }), {
-      requiredAudience: RESOURCE, failOnUnavailable: true,
+      requiredAudience: RESOURCE,
     })).credential).toBe("none");
   });
 });
@@ -295,7 +325,9 @@ describe("explicit service credentials in host mode", () => {
     expect(lookups).toEqual([["host", "org-a"]]);
     expect(queries.some((q) => q.sql.includes("set_config('app.tenant_id'") && q.parameters.includes(TENANT_A))).toBe(true);
     expect(queries.some((q) => q.sql.includes("from platform.tenants") && q.parameters.includes(TENANT_A))).toBe(true);
-    expect(queries.some((q) => q.sql.includes("bypass_rls"))).toBe(false);
+    expect(queries.some((q) =>
+      q.sql.includes("set_config('app.bypass_rls', 'false', true)")
+    )).toBe(true);
     await db.destroy();
   });
 
@@ -313,6 +345,7 @@ describe("explicit service credentials in host mode", () => {
       auth: { mode: "session", roles: ["Records.Read"] },
       tenancy: { mode: "required" },
       idempotency: { mode: "none" },
+      effects: { data: "write", external: "none" },
       transports: {
         rest: { method: "GET", path: "/api/records", response: { status: 200, kind: "json" } },
         mcp: { enabled: false, reason: "REST discovery test." },
@@ -355,10 +388,10 @@ describe("explicit service credentials in host mode", () => {
       expect(response.statusCode).toBe(200);
       expect((response.json() as { id: string }).id).toBe(operation.key);
 
-      // Outside host mode an issuer match identifies a control credential;
-      // its control-role refusal must not be retried as a tenant session.
+      // Even before host mode is enabled, a shared issuer can mint tenant
+      // credentials for a different client than the control client.
       process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "off";
-      const separateRealmResponse = await app.inject({
+      const sharedRealmResponse = await app.inject({
         method: "GET",
         url: `/api/operations/${operation.key}`,
         headers: Object.fromEntries(await headers({
@@ -367,7 +400,9 @@ describe("explicit service credentials in host mode", () => {
           resource_access: { api: { roles: ["Records.Read"] } },
         })),
       });
-      expect(separateRealmResponse.statusCode).toBe(401);
+      // The fixture has no tenant role for discovery, so authorization now
+      // reaches operation visibility and hides this definition with 404.
+      expect(sharedRealmResponse.statusCode).toBe(404);
     } finally {
       await app.close();
       await db.destroy();
@@ -399,18 +434,33 @@ describe("explicit service credentials in host mode", () => {
     const secret = encryptSecret(keyringFromEnv(keyMaterial)!, integrationId, "clientSecret", "synthetic-secret");
     const issuer = new URL("/realms/host", server.url).href;
     process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = issuer;
+    const identityId = "66666666-6666-4666-8666-666666666666";
+    let linkRecorded = false;
     // The database credential, not the deployment service allowlist, grants this client access.
     delete process.env.OPENSHAPEFORGE_ORGANIZATION_SERVICE_IDENTITIES;
     const credentialRows = (query: CompiledQuery) => {
+      // The store's first read: which tenant the lookup id belongs to, before
+      // it opens the tenant-fenced session for the row itself.
+      if (query.sql.includes("app.api_key_tenant(")) return [{ tenant_id: TENANT_A }];
       if (query.sql.includes("from platform.api_keys")) return [{
         id: "55555555-5555-4555-8555-555555555555", tenant_id: TENANT_A,
         integration_id: integrationId, secret_hash: apiKey.secretHash,
         role_subset: ["Records.Read"], expires_at: null, revoked_at: null,
       }];
       if (query.sql.includes("from platform.api_key_integrations")) return [{
-        keycloak_client_id: clientId, status: "active", client_secret_ciphertext: secret.ciphertext,
+        keycloak_client_id: clientId, display_name: "Scoped worker", status: "active", client_secret_ciphertext: secret.ciphertext,
         client_secret_key_id: secret.keyId, client_secret_algorithm: secret.algorithm,
       }];
+      // The service account's first session records its own identity row and
+      // an empty pending link (identity-link-session.ts); the fixture answers
+      // both writes and the read-back of the pending row.
+      if (query.sql.includes("insert into platform.identities")) return [{ id: identityId }];
+      const pendingRow = {
+        identity_id: identityId, issuer, subject: "service-user", status: "pending_confirmation", relation_id: null,
+        candidate_relation_id: null, linked_by: null, display_name: null, relation_type: null, needs_role_assignment: false, roles: [],
+      };
+      if (query.sql.includes("insert into platform.identity_relations")) { linkRecorded = true; return [pendingRow]; }
+      if (query.sql.includes("from platform.identity_relations ir")) return linkRecorded ? [pendingRow] : [];
       return undefined;
     };
     const request = new Headers({ authorization: `Bearer ${apiKey.token}` });
@@ -430,6 +480,13 @@ describe("explicit service credentials in host mode", () => {
       if (scenario.allowed) {
         expect(session.tenantId).toBe(TENANT_A);
         expect(session.roles).toEqual(["Records.Read"]);
+        // The session names its identity and recorded it: a pending link, nothing linked yet.
+        expect(session).toMatchObject({ issuer, userDisplayName: "Scoped worker", relation: { identityId, status: "pending_confirmation", relationId: null } });
+        expect(queries.some((q) => q.sql.includes("insert into platform.identities") && q.parameters.includes(issuer))).toBe(true);
+        expect(queries.some((q) => q.sql.includes("insert into platform.identity_relations"))).toBe(true);
+        // Let the fire-and-forget use-timestamp write settle before counting,
+        // so the refusal below is measured on its own.
+        await new Promise((resolve) => setImmediate(resolve));
         const count = queries.length;
         expect((await resolveSessionContext(request, { db, requiredAudience: RESOURCE })).credential).toBe("none");
         expect(queries).toHaveLength(count);

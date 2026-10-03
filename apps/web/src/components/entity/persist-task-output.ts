@@ -17,8 +17,19 @@ export async function persistTaskOutput(
   id: string,
   output: Record<string, unknown>,
 ): Promise<void> {
-  await executeGraphqlRequest<{ updateTask?: { id?: string } | null }>({
-    query: `mutation PersistTaskOutput($input: UpdateTaskInput!) { updateTask(input: $input) { id } }`,
+  const result = await executeGraphqlRequest<{
+    updateTask?: {
+      data?: { id?: string } | null;
+      error?: { code?: string; message?: string } | null;
+    } | null;
+  }>({
+    query: `mutation PersistTaskOutput($input: UpdateTaskInput!) { updateTask(input: $input) { data { id } error { code message } } }`,
     variables: { input: { id, output } },
   });
+  const error = result.updateTask?.error;
+  if (error) {
+    throw new Error(
+      `${error.code ?? "OPERATION_FAILED"}: ${error.message ?? "Operation failed."}`,
+    );
+  }
 }

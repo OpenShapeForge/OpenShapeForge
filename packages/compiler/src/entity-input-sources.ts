@@ -76,8 +76,8 @@ export function materializeEntityInputSources(
         const target = byName.get(field.options.source ?? "");
         const valueField = field.options.valueField ?? "id";
         const targetField = target?.model.fields.find(candidate => candidate.key === valueField);
-        const targetType = valueField === "id" ? "string" : targetField?.valueType;
-        if (!target || !targetType || targetType !== field.valueType ||
+        const targetType = valueField === "id" ? "string" : targetField?.baseType;
+        if (!target || !targetType || targetType !== field.baseType ||
           !["string", "integer", "number"].includes(targetType) || targetField?.cardinality === "collection") {
           throw new Error(`Invalid entity option source for ${field.key}: ${field.options.source}.${valueField}.`);
         }

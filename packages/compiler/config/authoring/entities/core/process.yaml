@@ -1,19 +1,21 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Process
 title: Case Step Container
-description: Technical container for runtime case steps. Kept on the existing process table until the runtime tables are renamed.
+description: Runtime container of the case steps a case is working through.
 language: en
 displayTemplate: "{{name}}"
 filterField: name
 labels:
   en: Case Step Container
   nl: Zaakstapcontainer
+pluralLabels:
+  en: Case step containers
+  nl: Zaakstapcontainers
 domains:
   - cases
   - records
-  - workflow
 authorization:
   roles:
     read:
@@ -30,7 +32,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -42,7 +44,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -54,7 +56,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -64,13 +65,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    osfType: multilineText
   - key: processType
-    valueType: string
     required: true
     label:
       en: Process type
@@ -78,13 +74,11 @@ fields:
     persisted:
       column: process_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PROCESSTYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: PROCESSTYPE
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -92,13 +86,12 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PROCESSSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: PROCESSSTATUS
+    osfType: referenceDataCode
   - key: phase
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Phase
@@ -109,7 +102,7 @@ fields:
       column: phase
       storageClass: core
   - key: currentStepKey
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Current step key
@@ -120,7 +113,7 @@ fields:
       column: current_step_key
       storageClass: core
   - key: currentStepLabel
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Current step label
@@ -130,30 +123,7 @@ fields:
     persisted:
       column: current_step_label
       storageClass: core
-  - key: workflowTemplate
-    valueType: string
-    required: false
-    label:
-      en: Workflow template
-      nl: Workflowtemplate
-    validation:
-      maxLength: 200
-    persisted:
-      column: workflow_template
-      storageClass: core
-  - key: workflowInstanceRef
-    valueType: string
-    required: false
-    label:
-      en: Workflow instance reference
-      nl: Workflow-instance referentie
-    validation:
-      maxLength: 200
-    persisted:
-      column: workflow_instance_ref
-      storageClass: core
   - key: priority
-    valueType: string
     required: false
     label:
       en: Priority
@@ -161,13 +131,12 @@ fields:
     persisted:
       column: priority
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEPRIORITY
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASEPRIORITY
+    osfType: referenceDataCode
   - key: startedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Started at
@@ -175,11 +144,8 @@ fields:
     persisted:
       column: started_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: dueAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Due at
@@ -187,11 +153,8 @@ fields:
     persisted:
       column: due_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: completedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Completed at
@@ -199,26 +162,26 @@ fields:
     persisted:
       column: completed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: completedByAccountId
-    valueType: string
     required: false
-    semanticType: accountId
+    osfType: Relation
     label:
       en: Completed by
       nl: Afgerond door
     description:
-      en: Account that manually completed this case step container.
-      nl: Account dat deze zaakstapcontainer handmatig heeft afgerond.
+      en: The person (their Relation) who manually completed this case step container.
+      nl: De persoon (diens relatie) die deze zaakstapcontainer handmatig heeft afgerond.
     validation:
       format: uuid
     persisted:
       column: completed_by_account_id
       storageClass: core
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      inverse: false
   - key: completionApprovalComment
-    valueType: string
     required: false
     label:
       en: Completion approval comment
@@ -228,13 +191,9 @@ fields:
     persisted:
       column: completion_approval_comment
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 2000
+    osfType: multilineText
   - key: cancelledAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Cancelled at
@@ -242,11 +201,7 @@ fields:
     persisted:
       column: cancelled_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: note
-    valueType: string
     required: false
     label:
       en: Note
@@ -256,67 +211,196 @@ fields:
     persisted:
       column: note
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
-relationships:
-  - key: template
-    kind: belongsTo
-    target: CaseTemplate
-    foreignKey: case_template_id
+    osfType: multilineText
+  - key: templateId
     label:
       en: Template
       nl: Sjabloon
-  - key: case
-    kind: belongsTo
-    target: Case
-    foreignKey: case_id
+    persisted:
+      column: case_template_id
+      storageClass: core
+    osfType: CaseTemplate
+    relationship:
+      ownership: reference
+  - key: caseId
     label:
       en: Case
       nl: Zaak
-  - key: caseFile
-    kind: belongsTo
-    target: CaseFile
-    foreignKey: case_file_id
+    persisted:
+      column: case_id
+      storageClass: core
+    osfType: Case
+    relationship:
+      ownership: reference
+      inverse:
+        label:
+          en: Steps
+          nl: Stappen
+  - key: caseFileId
     label:
       en: Case file
       nl: Dossier
-  - key: owner
-    kind: belongsTo
-    target: Account
-    foreignKey: owner_account_id
+    persisted:
+      column: case_file_id
+      storageClass: core
+    osfType: CaseFile
+    relationship:
+      ownership: reference
+      inverse:
+        label:
+          en: Processes
+          nl: Processen
+  - key: ownerId
     label:
       en: Owner
       nl: Proceseigenaar
-  - key: parentProcess
-    kind: belongsTo
-    target: Process
-    foreignKey: parent_process_id
+    persisted:
+      column: owner_account_id
+      storageClass: core
+    osfType: Relation
+    relationship:
+      ownership: reference
+      inverse: false
+  - key: parentProcessId
     label:
       en: Parent process
       nl: Hoofdproces
-  - key: childProcesses
-    kind: hasMany
-    target: Process
-    foreignKey: parent_process_id
-    label:
-      en: Child processes
-      nl: Deelprocessen
-  - key: steps
-    kind: hasMany
-    target: ProcessStep
-    foreignKey: process_id
-    label:
-      en: Process steps
-      nl: Processtappen
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
-      wait: true
+    persisted:
+      column: parent_process_id
+      storageClass: core
+    osfType: Process
+    relationship:
+      ownership: reference
+      inverse:
+        key: childProcesses
+        label:
+          en: Child processes
+          nl: Deelprocessen
+operations:
+  list:
+    name: List Case Step Container
+    description: List Process records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Case Step Container
+    description: Get Process records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Case Step Container
+    description: Create Process records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Case Step Container
+    description: Update Process records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Case Step Container
+    description: Delete Process records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000
+      processType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PROCESSTYPE
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PROCESSSTATUS
+            clearable: false
+      priority:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEPRIORITY
+            clearable: true
+      startedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      dueAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      completedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      completionApprovalComment:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 2000
+      cancelledAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      note:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000

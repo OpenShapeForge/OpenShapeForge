@@ -3,4 +3,5 @@ export {
   compilerOwnedGeneratedFiles,
   compilerGeneratedAppShellFiles,
   compilerOwnedGeneratedRoots,
+  orphanCompilerGeneratedFiles,
 } from "../packages/compiler/src/generated-artifact-paths.ts";

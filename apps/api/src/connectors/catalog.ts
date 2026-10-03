@@ -55,6 +55,8 @@ export type ConnectorContract = {
     license: { spdx: string; url?: string; notice?: string };
   };
   availability: { entitlement?: string };
+  /** Invocation permissions only; connector configuration and secrets are separately authorized. */
+  authorization: { roles: { read: string; write: string } };
   configuration: {
     instances: "single" | "multiple";
     verify: boolean;

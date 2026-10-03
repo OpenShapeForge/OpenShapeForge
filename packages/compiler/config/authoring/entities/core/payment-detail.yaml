@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: PaymentDetail
@@ -9,6 +9,9 @@ displayTemplate: "{{iban}}"
 filterField: iban
 labels:
   en: Payment Detail
+  nl: Betaalgegevens
+pluralLabels:
+  en: Payment details
   nl: Betaalgegevens
 domains:
   - relations
@@ -37,7 +40,7 @@ retention:
       - validFrom
 fields:
   - key: type
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Type
@@ -55,7 +58,6 @@ fields:
       type: referentiedata
       referentieGroep: PAYMENTDETAILTYPE
   - key: iban
-    valueType: string
     required: false
     label:
       en: IBAN
@@ -63,7 +65,7 @@ fields:
     description:
       en: International Bank Account Number.
       nl: Internationaal bankrekeningnummer (IBAN).
-    semanticType: iban
+    osfType: iban
     validation:
       maxLength: 34
     persisted:
@@ -81,7 +83,7 @@ fields:
       disposition:
         action: anonymize
   - key: bic
-    valueType: string
+    osfType: string
     required: false
     label:
       en: BIC
@@ -95,7 +97,7 @@ fields:
       column: bic
       storageClass: core
   - key: accountHolder
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Account holder
@@ -109,7 +111,7 @@ fields:
       column: account_holder
       storageClass: core
   - key: status
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Status
@@ -123,7 +125,7 @@ fields:
       column: status
       storageClass: core
   - key: isPrimary
-    valueType: boolean
+    osfType: boolean
     required: false
     label:
       en: Primary
@@ -135,7 +137,7 @@ fields:
       column: is_primary
       storageClass: core
   - key: validFrom
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid from
@@ -147,7 +149,7 @@ fields:
       column: valid_from
       storageClass: core
   - key: validUntil
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid until
@@ -159,11 +161,7 @@ fields:
       column: valid_until
       storageClass: core
   - key: relationId
-    valueType: string
     required: false
-    # The provenance link to the owning relation. Settable when the payment
-    # detail is created; refused afterwards, so bank details cannot be
-    # re-pointed at a different subject inside the tenant (#177).
     immutable: true
     label:
       en: Relation ID
@@ -171,20 +169,17 @@ fields:
     description:
       en: Identifier of the related relation instance.
       nl: Identifier van de gerelateerde relatie-instantie.
-    semanticType: relationId
+    osfType: Relation
     persisted:
       column: relation_id
       storageClass: core
     validation:
       format: uuid
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
-    label:
-      en: Relation
-      nl: Relatie
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      ownership: reference
 operations:
   list:
     name: { en: List payment details, nl: Betaalgegevens tonen }
@@ -247,7 +242,7 @@ operations:
         kind: type-current-field
         field: type
         issuedBy: server
-        bindTo: [subject, tenant, operation, target.id, target.version]
+        bindTo: [ subject, tenant, operation, target.id, target.version ]
         expiresAfter: PT5M
         singleUse: true
 
@@ -270,7 +265,8 @@ interfaces:
           nl: Vraag eerst een bewerkingslease aan en stuur het token mee met de versie uit get.
       delete:
         instructions:
-          en: Acquire an edit lease first; request the confirmation challenge and answer it with the exact current payment-detail type.
+          en: Acquire an edit lease first; request the confirmation challenge and answer it with the exact current payment-detail
+            type.
           nl: Vraag eerst een bewerkingslease en bevestigingsvraag aan en beantwoord die met exact het actuele type betaalgegeven.
     resource:
       uri: app://payment-details
@@ -300,24 +296,24 @@ interfaces:
           create: { en: /payment-details/new, nl: /betaalgegevens/nieuw }
         title: "{{iban}}"
         subtitle: "{{accountHolder}}"
-        actions: [update, delete]
+        actions: [ update, delete ]
         layout:
           context:
-            fields: [type, status, isPrimary, validUntil]
-            relationships: [relation]
+            fields: [ type, status, isPrimary, validUntil ]
+            relationships: [ relationId ]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Payment information, nl: Betaalinformatie }
-                  fields: [type, iban, bic, accountHolder]
+                  fields: [ type, iban, bic, accountHolder ]
                 - title: { en: Usage and validity, nl: Gebruik en geldigheid }
-                  fields: [status, isPrimary, validFrom, validUntil]
+                  fields: [ status, isPrimary, validFrom, validUntil ]
         modes:
           create:
             title: { en: Create payment detail, nl: Betaalgegeven aanmaken }
             groups:
               - title: { en: Payment information, nl: Betaalinformatie }
-                fields: [relationId, type, iban, bic, accountHolder, status, isPrimary, validFrom, validUntil]
+                fields: [ relationId, type, iban, bic, accountHolder, status, isPrimary, validFrom, validUntil ]
           update:
             title: { en: Update payment detail, nl: Betaalgegeven wijzigen }

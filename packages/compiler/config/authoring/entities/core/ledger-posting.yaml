@@ -1,20 +1,24 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: LedgerPosting
 title: Ledger Posting
-description: Journal entry header. Groups one or more LedgerPostingLine rows that together form a balanced posting in the general ledger.
+description: Journal entry header. Groups one or more LedgerPostingLine rows that together form a balanced posting in
+  the general ledger.
 language: en
 displayTemplate: "{{description}}"
 filterField: description
 labels:
   en: Ledger posting
   nl: Boeking
+pluralLabels:
+  en: Ledger postings
+  nl: Boekingen
 domains:
   - finance
 fields:
   - key: postingDate
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Posting date
@@ -25,11 +29,8 @@ fields:
     persisted:
       column: posting_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: description
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Description
@@ -43,7 +44,6 @@ fields:
       column: description
       storageClass: core
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -54,13 +54,12 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: LEDGERPOSTINGSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: LEDGERPOSTINGSTATUS
+    osfType: referenceDataCode
   - key: sourceType
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Source type
@@ -74,7 +73,7 @@ fields:
       column: source_type
       storageClass: core
   - key: sourceId
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Source ID
@@ -88,7 +87,7 @@ fields:
     validation:
       format: uuid
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -101,148 +100,29 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: fiscalPeriod
-    kind: belongsTo
-    target: FiscalPeriod
-    foreignKey: fiscal_period_id
+  - key: fiscalPeriodId
     label:
       en: Fiscal period
       nl: Boekjaarperiode
-  - key: reversalOf
-    kind: belongsTo
-    target: LedgerPosting
-    foreignKey: reversal_of_id
+    persisted:
+      column: fiscal_period_id
+      storageClass: core
+    osfType: FiscalPeriod
+    relationship:
+      ownership: reference
+  # System-written by the reversal that creates this posting, not an input.
+  - key: reversalOfId
+    readOnly: true
+    writeSource: caller
     label:
       en: Reversal of
       nl: Tegenboeking van
-ui:
-  routes:
-    list:
-      en: /ledger-postings
-      nl: /boekingen
-    detail:
-      en: /ledger-postings/:id
-      nl: /boekingen/:id
-    create:
-      en: /ledger-postings/create
-      nl: /boekingen/aanmaken
-    edit:
-      en: /ledger-postings/:id/edit
-      nl: /boekingen/:id/bewerken
-    delete:
-      en: /ledger-postings/:id/delete
-      nl: /boekingen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Ledger postings
-        nl: Boekingen
-      columns:
-        - key: postingDate
-          sortable: true
-        - key: description
-          sortable: true
-        - key: status
-          sortable: true
-        - key: sourceType
-          sortable: true
-      defaultSort:
-        key: postingDate
-        direction: desc
-      rowLink:
-        en: /ledger-postings/:id
-        nl: /boekingen/:id
-    detail:
-      header:
-        title: "{{description}}"
-        subtitle: "{{postingDate}}"
-        badges:
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Posting details
-                nl: Boekingsgegevens
-              fields:
-                - postingDate
-                - description
-                - status
-            - title:
-                en: Source
-                nl: Bron
-              fields:
-                - sourceType
-                - sourceId
-            - title:
-                en: Provenance
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create ledger posting
-            nl: Boeking aanmaken
-          groups:
-            - title:
-                en: Posting details
-                nl: Boekingsgegevens
-              fields:
-                - postingDate
-                - description
-                - status
-            - title:
-                en: Source
-                nl: Bron
-              fields:
-                - sourceType
-                - sourceId
-            - title:
-                en: Provenance
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit ledger posting
-            nl: Boeking bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: reversal_of_id
+      storageClass: core
+    osfType: LedgerPosting
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -257,3 +137,191 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Ledger Posting
+    description: List LedgerPosting records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Ledger Posting
+    description: Get LedgerPosting records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Ledger Posting
+    description: Create LedgerPosting records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update LedgerPosting records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /ledger-postings
+          nl: /boekingen
+        columns:
+          - key: postingDate
+            sortable: true
+          - key: description
+            sortable: true
+          - key: status
+            sortable: true
+          - key: sourceType
+            sortable: true
+        title:
+          en: Ledger postings
+          nl: Boekingen
+        defaultSort:
+          key: postingDate
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /ledger-postings/:id
+            nl: /boekingen/:id
+          create:
+            en: /ledger-postings/create
+            nl: /boekingen/aanmaken
+        title: "{{description}}"
+        subtitle: "{{postingDate}}"
+        badges:
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Posting details
+                    nl: Boekingsgegevens
+                  fields:
+                    - postingDate
+                    - description
+                    - status
+                - title:
+                    en: Source
+                    nl: Bron
+                  fields:
+                    - sourceType
+                    - sourceId
+                - title:
+                    en: Provenance
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create ledger posting
+              nl: Boeking aanmaken
+            groups:
+              - title:
+                  en: Posting details
+                  nl: Boekingsgegevens
+                fields:
+                  - postingDate
+                  - description
+                  - status
+              - title:
+                  en: Source
+                  nl: Bron
+                fields:
+                  - sourceType
+                  - sourceId
+              - title:
+                  en: Provenance
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit ledger posting
+              nl: Boeking bewerken
+    fields:
+      postingDate:
+        render:
+          component: DatePicker
+          props: {}
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: LEDGERPOSTINGSTATUS
+            clearable: false

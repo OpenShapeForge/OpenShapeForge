@@ -6,9 +6,9 @@
  *
  * Any other value is looked up among the worker roles the loaded runtime
  * modules contribute (see `roles/worker.ts`). `apps/api` deliberately names
- * none of them: the workflow plugin contributes `workflow-worker`, and a repo
- * that drops the plugin loses the role with it rather than keeping a dangling
- * import here.
+ * none of them beyond core's `job-worker`: a plugin contributes its own, and a
+ * repo that drops the plugin loses the role with it rather than keeping a
+ * dangling import here.
  */
 import {
   bootstrapOpenTelemetry,

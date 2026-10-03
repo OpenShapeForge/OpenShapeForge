@@ -35,14 +35,14 @@ import type {
 import type { RendererCustomFieldRenderProps } from "@/features/renderer/components/renderer/field-renderers";
 import { RendererDefaultsProvider } from "@/features/renderer/components/renderer-defaults-context";
 import { translateRendererText } from "@/features/renderer/runtime/field-utils";
+import { prepareRuntimeFields } from "@/features/renderer/runtime/runtime-field-contract";
 import { useFormVariableSuggestions } from "@/features/renderer/runtime/use-form-variable-suggestions";
-import { useEntityFieldSuggestionsVersion } from "@/features/renderer/runtime/use-entity-field-suggestions-version";
-import { isFieldCollection } from "@/lib/field-contract/field-v2";
+import { isFieldCollection, fieldValueType } from "@/lib/field-contract/field-v2";
 import type { Field as CompilerField } from "@/generated/compiler/field-contract";
 
 function fieldUsesImplicitChipVariableSource(field: CompilerField): boolean {
   if (
-    field.valueType === "string" &&
+    fieldValueType(field) === "string" &&
     !isFieldCollection(field) &&
     field.render?.props?.variableTokens === true &&
     field.render?.props?.type !== "password"
@@ -50,7 +50,7 @@ function fieldUsesImplicitChipVariableSource(field: CompilerField): boolean {
     return true;
   }
   return (
-    field.semanticType === "condition" ||
+    field.osfType === "condition" ||
     field.render?.component === "ConditionBuilder"
   );
 }
@@ -135,8 +135,20 @@ export function Renderer({
   renderCustomField,
   fieldDirection,
 }: RendererProps) {
+  const prepared = useMemo(
+    () => prepareRuntimeFields(definition.fields),
+    [definition.fields],
+  );
+  const runtimeDefinition = useMemo(
+    () => ({ ...definition, fields: prepared.fields }),
+    [definition, prepared.fields],
+  );
+  const originalFieldsByKey = useMemo(
+    () => new Map(definition.fields.map((field) => [field.key, field] as const)),
+    [definition.fields],
+  );
   const rendererForm = useRendererForm({
-    definition,
+    definition: runtimeDefinition,
     lang,
     initialData,
     action,
@@ -146,6 +158,16 @@ export function Renderer({
     externalFieldErrors,
     onSubmit,
   });
+
+  useEffect(() => {
+    for (const [field, message] of prepared.unsupported) {
+      console.error("Unsupported runtime field contract.", {
+        fieldKey: field.key,
+        osfType: field.osfType,
+        message,
+      });
+    }
+  }, [prepared.unsupported]);
 
   const structuredValuesSnapshot = useMemo(
     () => JSON.stringify(rendererForm.structuredValues),
@@ -159,6 +181,9 @@ export function Renderer({
   const previousInitialDataSnapshot = useRef(initialDataSnapshot);
   const lastEmittedSnapshot = useRef<string | null>(structuredValuesSnapshot);
   useEffect(() => {
+    if (prepared.unsupported.size > 0) {
+      return;
+    }
     if (!onChange) {
       previousInitialDataSnapshot.current = initialDataSnapshot;
       lastEmittedSnapshot.current = structuredValuesSnapshot;
@@ -191,6 +216,7 @@ export function Renderer({
     onChange,
     rendererForm.structuredValues,
     structuredValuesSnapshot,
+    prepared.unsupported,
   ]);
 
   const topLevelInterpretation = getGroupInterpretation(
@@ -227,6 +253,7 @@ export function Renderer({
   const showActionBar =
     definition.mode !== "display" &&
     (definition.presentation?.chrome?.showActionBar ?? true);
+  const hasUnsupportedFields = prepared.unsupported.size > 0;
 
   const activeTabGroup =
     usesTopLevelTabs
@@ -234,8 +261,8 @@ export function Renderer({
       : null;
 
   const variableSources = useMemo(
-    () => withImplicitChipVariableSource(definition),
-    [definition],
+    () => withImplicitChipVariableSource(runtimeDefinition),
+    [runtimeDefinition],
   );
 
   const resolvedVariableSources = useFormVariableSuggestions(
@@ -243,13 +270,6 @@ export function Renderer({
     rendererForm.structuredValues,
     lang,
   );
-
-  // Re-render when the entity field-suggestion cache fills. The legacy
-  // `suggestions.sourceField` path and the workflow trigger-condition builder
-  // read suggestions synchronously via getEntityFieldSuggestions /
-  // getEntityConditionFilterFields, which fetch on a cache miss; this
-  // subscription surfaces the loaded data without each call site needing a hook.
-  useEntityFieldSuggestionsVersion();
 
   const surface = definition.presentation?.surface;
   // Inspector / workspace / embedded surfaces show fields in a narrow column
@@ -268,7 +288,8 @@ export function Renderer({
     structuredValues: rendererForm.structuredValues,
     manualErrors: rendererForm.manualErrors,
     isSubmitting: rendererForm.isSubmitting,
-    fieldsByKey: rendererForm.fieldsByKey,
+    fieldsByKey: originalFieldsByKey,
+    unsupportedFields: prepared.unsupported,
     fieldConfigByKey: rendererForm.fieldConfigByKey,
     validationFieldsByKey: rendererForm.validationFieldsByKey,
     resolvedVariableSources,
@@ -297,6 +318,13 @@ export function Renderer({
       {rendererForm.form.formError ? (
         <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {rendererForm.form.formError}
+        </p>
+      ) : null}
+      {hasUnsupportedFields ? (
+        <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive" role="alert">
+          {lang === "nl"
+            ? "Dit formulier bevat een niet-ondersteund veldcontract. Opslaan is geblokkeerd om gegevensverlies te voorkomen."
+            : "This form contains an unsupported field contract. Saving is blocked to prevent data loss."}
         </p>
       ) : null}
       {usesTopLevelTabs ? (
@@ -331,7 +359,7 @@ export function Renderer({
         <div className="flex justify-end border-t border-border/60 pt-4">
           <Button
             type={rendersFormElement ? "submit" : "button"}
-            disabled={rendererForm.isSubmitting}
+            disabled={rendererForm.isSubmitting || hasUnsupportedFields}
             onClick={
               rendersFormElement
                 ? undefined
@@ -375,7 +403,9 @@ export function Renderer({
         <form
           noValidate
           className="space-y-6"
-          onSubmit={rendererForm.handleSubmit}
+          onSubmit={hasUnsupportedFields
+            ? (event) => event.preventDefault()
+            : rendererForm.handleSubmit}
         >
           {formContent}
         </form>

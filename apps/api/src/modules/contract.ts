@@ -47,19 +47,26 @@ import type {
   RuntimeFieldSchemaCompiler,
   RuntimeJsonSchemaValidator,
   RuntimeEntityValueRegistry,
+  RuntimeVersioningRegistry,
   RuntimeModuleContract,
   RuntimeArtifactServices,
   RuntimeArtifactStorageContribution,
+  RuntimeCapabilityGrantServices,
   RuntimeWorkerContextContract,
   RuntimeWorkerContract,
   RuntimeWorkerHandle,
   RuntimeWorkerLogger,
+  RuntimeJobHandlerContextContract,
+  RuntimeJobHandlerContract,
+  RuntimeJobEnqueueInput,
+  RuntimeJobEnqueueResult,
 } from "@openshapeforge/plugin-runtime";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Kysely, Transaction } from "kysely";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type {
   CallToolResult,
+  Icon,
   ReadResourceResult,
   Resource,
   ResourceTemplate,
@@ -312,10 +319,14 @@ export type ModulePlatformServices = {
       fn: (trx: Transaction<DB>) => Promise<T>,
     ): Promise<T>;
   };
+  readonly jobs: {
+    enqueue(session: TrustedSessionContext, input: RuntimeJobEnqueueInput): Promise<RuntimeJobEnqueueResult>;
+  };
   schemas: {
     fields: RuntimeFieldSchemaCompiler;
     json: RuntimeJsonSchemaValidator;
     entityValues?: RuntimeEntityValueRegistry;
+    versioning?: RuntimeVersioningRegistry;
   };
   events: {
     append(
@@ -328,6 +339,7 @@ export type ModulePlatformServices = {
       },
     ): Promise<void>;
   };
+  grants: RuntimeCapabilityGrantServices<TrustedSessionContext>;
   errors: {
     classifyDatabase(cause: unknown): OperationError | undefined;
   };
@@ -420,6 +432,11 @@ export type McpToolCallSource =
   | "module";
 
 export type RuntimeMcpContribution = {
+  /** Project presentation metadata through one active, tenant-bound capability. */
+  serverIcons?(ctx: {
+    session: TrustedSessionContext;
+    platform: ModulePlatformServices;
+  }): Promise<readonly Icon[] | undefined>;
   /**
    * Refine core authorization or claim a registered module-owned MCP surface.
    * Return `undefined` to abstain. This hook deliberately receives no platform
@@ -515,6 +532,10 @@ export type ModuleWorkerHandle = RuntimeWorkerHandle;
  */
 export type ModuleWorker = RuntimeWorkerContract<ModuleWorkerContext>;
 
+/** A job handler as the host calls it: the tenant session is a typed transaction. */
+export type ModuleJobHandlerContext = RuntimeJobHandlerContextContract<Transaction<DB>>;
+export type ModuleJobHandler = RuntimeJobHandlerContract<ModuleJobHandlerContext>;
+
 export type ModuleOperationSuccessResult = PublicModuleOperationSuccessResult<
   CallToolResult["content"]
 >;
@@ -550,7 +571,8 @@ export type RuntimeModule = RuntimeModuleContract<
   RuntimeOperationProvider,
   ModuleWorker,
   ModuleOperationAvailabilityHandler,
-  RuntimeArtifactStorageContribution<TrustedSessionContext, Transaction<DB>>
+  RuntimeArtifactStorageContribution<TrustedSessionContext, Transaction<DB>>,
+  ModuleJobHandler
 > & {
   graphql?(context: ModuleRuntimeContext): ModuleGraphqlContribution;
   /** Dynamic MCP projection and invocation hooks, evaluated per request. */

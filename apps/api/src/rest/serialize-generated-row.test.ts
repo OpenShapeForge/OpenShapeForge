@@ -9,7 +9,7 @@ const table: GeneratedCrudTable = {
   table: "examples",
   tenantScoped: true,
   domainInternal: false,
-  generatedCrud: true,
+  generatedCrudEligible: true,
   primaryKey: "id",
   columns: [
     {

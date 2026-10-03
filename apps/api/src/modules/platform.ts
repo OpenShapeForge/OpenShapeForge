@@ -5,7 +5,8 @@ import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession } from "../db/session.js";
-import { appendEntityEvent, appendScopedEntityEventInTransaction } from "../platform/entity-events.js";
+import { enqueueJob } from "../jobs/store.js";
+import { appendEntityEventInTransaction } from "../platform/entity-events.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { DB, Json } from "../generated/db/types.js";
 import type {
@@ -41,6 +42,7 @@ import { connectSocket } from "./socket-egress.js";
 import { classifyDatabaseError } from "../db/database-refusals.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "./field-schemas.js";
 import { generatedEntityValues } from "./entity-value-registry.js";
+import { generatedVersioning } from "./versioning-registry.js";
 import { organizationServiceIdentities } from "../auth/organization-service-identities.js";
 import { operationContractFingerprint } from "../operations/contract-fingerprint.js";
 import { executeKeyedOperation } from "../operations/execution-receipts.js";
@@ -48,6 +50,14 @@ import { operationErrorOf } from "@openshapeforge/operations";
 import { ArtifactStorageRuntime } from "./artifact-storage.js";
 import { runtimeSettings } from "./settings.js";
 import { RecordAccessRuntime } from "./record-access.js";
+import {
+  generatedCapabilityOperations,
+  issueCapabilityGrantInTransaction,
+  listCapabilityGrantsInTransaction,
+  revokeCapabilityGrantInTransaction,
+} from "../operations/capability-grants.js";
+import { CapabilityGrantNotFoundError } from "../operations/grants-operations.js";
+import { actingRelationId } from "../db/acting-relation.js";
 
 function contractPreconditionFailure(
   definition: RuntimeOperationDefinition,
@@ -248,6 +258,18 @@ export function createModuleSessionCapability(
     configurable: false,
     get: () => Object.freeze([...(session.relationGroupIds ?? [])]),
   });
+  // The acting Relation is request-scoped on a stateful MCP session too (a
+  // getter there); a copy taken when the capability was minted would be the
+  // Relation of no request, and person-owned rows would be written as nobody.
+  Object.defineProperty(capability, "relation", {
+    enumerable: true,
+    configurable: false,
+    // A frozen copy per read: a plugin can never rewrite whom core acts as.
+    get: () => {
+      const link = session.relation;
+      return link ? Object.freeze({ ...link, roles: Object.freeze([...(link.roles ?? [])]) }) : link;
+    },
+  });
   return Object.freeze(capability) as unknown as TrustedSessionContext;
 }
 
@@ -280,44 +302,71 @@ export class ModulePlatformRuntime {
     session: TrustedSessionContext;
     trx: Transaction<DB>;
   }>();
+  // Temporary object registry and expiry outbox must survive an enclosing
+  // Operation rollback; bytes already written outside SQL still need GC.
+  readonly #artifactStageTransactionStorage = new AsyncLocalStorage<{
+    session: TrustedSessionContext;
+    trx: Transaction<DB>;
+  }>();
   readonly #recordAccessTransactionStorage = new AsyncLocalStorage<{
     session: TrustedSessionContext;
     trx: Transaction<DB>;
   }>();
+
+  /**
+   * The one transaction a call is inside, if any: the Operation's, or else
+   * the one an artifact stage or read opened. Every platform service that
+   * writes — module database work, the outbox, entity events, the record
+   * oracle — joins it, so a provider staging a file and scheduling its
+   * collection, or an Operation nested in that stage, commits with the
+   * row or not at all. A different session inside it is a bug, not a case.
+   */
+  #activeTransaction(session: TrustedSessionContext, what: string): Transaction<DB> | undefined {
+    const active = this.#artifactStageTransactionStorage.getStore() ??
+      this.#operationTransactionStorage.getStore() ?? this.#recordAccessTransactionStorage.getStore();
+    if (!active) return undefined;
+    if (active.session !== session) throw new Error(`${what} belongs to another session.`);
+    return active.trx;
+  }
   #declarativeServiceExecutor: ModuleDeclarativeServiceExecutor | undefined;
   #hostOperationExecutor: ModuleHostOperationExecutor | undefined;
 
-  constructor(db: OpenShapeForgeDatabase) {
+  readonly #capabilityOperations: ReadonlySet<string> | undefined;
+
+  constructor(
+    db: OpenShapeForgeDatabase,
+    options: {
+      /** Keys of the `auth.mode: capability` Operations a grant may name; defaults to the generated catalog. */
+      capabilityOperations?: ReadonlySet<string>;
+    } = {},
+  ) {
     this.#db = db;
+    this.#capabilityOperations = options.capabilityOperations;
     const records = new RecordAccessRuntime({
       acceptsSession: (session) => this.#acceptsScopedSession(session),
-      currentTransaction: (session) => {
-        const active = this.#operationTransactionStorage.getStore() ??
-          this.#recordAccessTransactionStorage.getStore();
-        return active?.session === session ? active.trx : undefined;
-      },
+      currentTransaction: (session) => this.#activeTransaction(session, "Record authorization transaction"),
       withSession: (session, work) => {
-        const active = this.#operationTransactionStorage.getStore() ??
-          this.#recordAccessTransactionStorage.getStore();
-        if (active) {
-          if (active.session !== session) throw new Error("Record authorization transaction belongs to another session.");
-          return work(active.trx);
-        }
-        return withDbSession(this.#db, session, work);
+        const active = this.#activeTransaction(session, "Record authorization transaction");
+        return active ? work(active) : withDbSession(this.#db, session, work);
       },
     });
     this.#artifactStorage = new ArtifactStorageRuntime({
+      withStageTransaction: (session, work) => withDbSession(this.#db, session, trx =>
+        this.#artifactStageTransactionStorage.run({ session, trx }, () => work(trx)), { independent: true }),
+      records: records.services,
       acceptsSession: (session) => this.#acceptsScopedSession(session),
       currentTransaction: (session) => {
         const active = this.#operationTransactionStorage.getStore();
         return active?.session === session ? active.trx : undefined;
       },
+      // Joins the Operation transaction when there is one, else the read
+      // transaction an enclosing artifact call opened: a download's oracle
+      // check and the provider's read are then one transaction, so the record
+      // the session was found to reach is the record the bytes are read
+      // against. `currentTransaction` (bind) stays on the Operation one alone.
       withTransaction: (session, work) => {
-        const active = this.#operationTransactionStorage.getStore();
-        if (active) {
-          if (active.session !== session) throw new Error("Artifact transaction belongs to another session.");
-          return work(active.trx);
-        }
+        const active = this.#activeTransaction(session, "Artifact transaction");
+        if (active) return work(active);
         return withDbSession(this.#db, session, async (trx) =>
           this.#recordAccessTransactionStorage.run({ session, trx }, () => work(trx))
         );
@@ -342,20 +391,45 @@ export class ModulePlatformRuntime {
           if (!this.#acceptsScopedSession(session)) {
             throw new Error("Module database work requires a live verified session.");
           }
-          const active = this.#operationTransactionStorage.getStore();
-          if (active) {
-            if (active.session !== session) {
-              throw new Error("Module database transaction belongs to another session.");
-            }
-            return fn(active.trx);
+          const active = this.#activeTransaction(session, "Module database transaction");
+          return active ? fn(active) : withDbSession(this.#db, session, fn);
+        },
+      },
+      jobs: {
+        // The outbox: inside the active transaction when there is one — the
+        // Operation's, so the job commits exactly when the handler's own
+        // writes do, or an artifact stage's, so a provider that stages a
+        // file and schedules its collection commits the row and the job
+        // together.
+        enqueue: (session, input) => {
+          if (!this.#acceptsScopedSession(session)) {
+            throw new Error("Job enqueue requires a live verified session.");
           }
-          return withDbSession(this.#db, session, fn);
+          if (!session.tenantId || !session.userId) {
+            throw new Error("Job enqueue requires an authenticated tenant session.");
+          }
+          const tenantId = session.tenantId;
+          const actorId = session.userId;
+          // The whole effective session goes on the row: the job runs later
+          // as this person, with what this request could reach — not more.
+          const actorSession = {
+            roles: session.roles,
+            groups: session.groups,
+            relationGroupIds: session.relationGroupIds ?? [],
+            ...(actingRelationId(session) ? { relationId: actingRelationId(session)! } : {}),
+            scope: session.scope,
+          };
+          // One path in: the module session join (or open) is what fences the tenant.
+          return this.services.db.withSession(session, (trx) =>
+            enqueueJob(trx, { ...input, tenantId, actorId, actorSession }),
+          );
         },
       },
       schemas: {
         fields: generatedRuntimeFieldSchemas,
         json: runtimeJsonSchemas,
         entityValues: generatedEntityValues,
+        versioning: generatedVersioning,
       },
       events: {
         append: async (session, event) => {
@@ -363,16 +437,47 @@ export class ModulePlatformRuntime {
             throw new Error("Module event append requires a live verified session.");
           }
           assertSecretFree(event.payload);
-          const active = this.#operationTransactionStorage.getStore();
-          if (active) {
-            if (active.session !== session) throw new Error("Module event belongs to another session.");
-            await appendScopedEntityEventInTransaction(active.trx, { ...event, payload: event.payload as Json });
-            return;
+          if (!session.tenantId) throw new Error("Module event append requires an authenticated tenant session.");
+          const tenantId = session.tenantId;
+          // The same join-or-open as every module write, and the same tenant
+          // check on both: the session's tenant must be the transaction's.
+          await this.services.db.withSession(session, (trx) =>
+            appendEntityEventInTransaction(trx, { ...event, tenantId, payload: event.payload as Json }),
+          );
+        },
+      },
+      grants: {
+        issue: (session, input) => {
+          if (!this.#acceptsScopedSession(session)) {
+            throw new Error("Issuing a capability grant requires a live verified session.");
           }
-          await appendEntityEvent(this.#db, session, {
-            ...event,
-            payload: event.payload as Json,
+          if (session.credential === "grant") {
+            throw new Error("A grant session cannot issue capability grants.");
+          }
+          return this.services.db.withSession(session, (trx) =>
+            issueCapabilityGrantInTransaction(trx, session, input, {
+              capabilityOperations: this.#capabilityOperations ?? generatedCapabilityOperations(),
+              // The issuer's own access, through the same oracle a handler
+              // uses: a delegated record is one the issuer could reach.
+              assertIssuerAccess: (record) => this.services.records.assertAccess(session, record),
+            })
+          );
+        },
+        revoke: (session, input) => {
+          if (!this.#acceptsScopedSession(session)) {
+            throw new Error("Revoking a capability grant requires a live verified session.");
+          }
+          return this.services.db.withSession(session, async (trx) => {
+            const summary = await revokeCapabilityGrantInTransaction(trx, input);
+            if (!summary) throw new CapabilityGrantNotFoundError(input.id);
+            return summary;
           });
+        },
+        list: (session, subject) => {
+          if (!this.#acceptsScopedSession(session)) {
+            throw new Error("Listing capability grants requires a live verified session.");
+          }
+          return this.services.db.withSession(session, (trx) => listCapabilityGrantsInTransaction(trx, subject));
         },
       },
       errors: {
@@ -936,7 +1041,9 @@ export class ModulePlatformRuntime {
   /**
    * Keep canonical mutation guards and every plugin database write in one
    * transaction. A handler's platform.db.withSession call reuses this exact
-   * transaction and cannot substitute another session.
+   * transaction and cannot substitute another session. An Operation invoked
+   * inside an artifact stage or read runs its guards on that transaction
+   * rather than opening a second one next to it.
    */
   async withOperationTransaction<T>(
     session: TrustedSessionContext,
@@ -945,12 +1052,16 @@ export class ModulePlatformRuntime {
     if (!this.#acceptsScopedSession(session)) {
       throw new Error("Module Operation transaction requires a live verified session.");
     }
-    const active = this.#operationTransactionStorage.getStore();
-    if (active) {
-      if (active.session !== session) {
+    const operation = this.#operationTransactionStorage.getStore();
+    if (operation) {
+      if (operation.session !== session) {
         throw new Error("Module Operation transaction belongs to another session.");
       }
-      return work(active.trx);
+      return work(operation.trx);
+    }
+    const artifact = this.#activeTransaction(session, "Module Operation transaction");
+    if (artifact) {
+      return this.#operationTransactionStorage.run({ session, trx: artifact }, () => work(artifact));
     }
     return withDbSession(this.#db, session, async (trx) =>
       this.#operationTransactionStorage.run({ session, trx }, () => work(trx))

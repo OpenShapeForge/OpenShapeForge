@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { collectionManagedFields, collectionMutationError, withoutCollectionInputs } from "./collection-policy.js";
+import { collectionManagedFields, collectionMutationError, ownedCollectionsOf, withoutCollectionInputs } from "./collection-policy.js";
 import type { GeneratedCrudTable } from "./types.js";
 
 const columns = (keys: string[]) => keys.map((name) => ({ name, type: "uuid", primaryKey: name === "id", required: false, generated: null }));
 const parent: GeneratedCrudTable = {
-  name: "erp.pages", schema: "erp", table: "pages", tenantScoped: true, domainInternal: false, generatedCrud: true, primaryKey: "id",
+  name: "erp.pages", schema: "erp", table: "pages", tenantScoped: true, domainInternal: false, generatedCrudEligible: true, primaryKey: "id",
   columns: columns(["id", "tenant_id"]),
-  source: { authoringVersion: 3, graphql: {
+  source: { graphql: {
     typeName: "Page", singleQueryName: "page", listQueryName: "pages", createMutationName: "createPage", updateMutationName: "updatePage", deleteMutationName: "deletePage",
     relationships: [{ name: "blocks", fieldKey: "blocks", target: "Block", type: "[Block!]!", resolve: "hasMany", kind: "hasMany", ownership: "owned", foreignKey: "page_id", sortable: true, positionColumn: "page_id_position", cardinality: { min: 1, max: 5 } }],
   } },
@@ -15,7 +15,7 @@ const parent: GeneratedCrudTable = {
 const child: GeneratedCrudTable = {
   ...parent, name: "erp.blocks", table: "blocks",
   columns: [...columns(["id", "tenant_id"]), { ...columns(["page_id"])[0]!, sourceField: "page" }, { ...columns(["page_id_position"])[0]!, type: "integer", required: true }],
-  source: { authoringVersion: 3, graphql: { ...parent.source!.graphql!, typeName: "Block", relationships: [] } },
+  source: { graphql: { ...parent.source!.graphql!, typeName: "Block", relationships: [] } },
 };
 
 describe("unsupported collection mutation boundary", () => {
@@ -30,10 +30,19 @@ describe("unsupported collection mutation boundary", () => {
   });
   test("required collections cannot be created empty and collection-affecting deletes are refused", () => {
     expect(collectionMutationError(parent, "create", [parent, child])?.code).toBe("RELATION_COLLECTION_MUTATION_UNSUPPORTED");
-    expect(collectionMutationError(parent, "delete", [parent, child])?.code).toBe("RELATION_COLLECTION_MUTATION_UNSUPPORTED");
+    // An owner's delete is decided per row (owned children present or not); an owned child's never is.
+    expect(collectionMutationError(parent, "delete", [parent, child])).toBeUndefined();
+    expect(ownedCollectionsOf(parent, [parent, child]).map((owned) => [owned.key, owned.child.table, owned.column])).toEqual([["blocks", child.table, "page_id"]]);
     expect(collectionMutationError(child, "delete", [parent, child])?.code).toBe("RELATION_COLLECTION_MUTATION_UNSUPPORTED");
     expect(collectionMutationError(parent, "update", [parent, child], { title: "Safe scalar update" })).toBeUndefined();
     expect(collectionMutationError(parent, "get", [parent, child])).toBeUndefined();
+  });
+  test("reference collections do not take ownership of standalone child mutations", () => {
+    const referenceParent = structuredClone(parent);
+    referenceParent.source!.graphql!.relationships![0]!.ownership = "reference";
+    expect([...collectionManagedFields(child, [referenceParent, child])]).toEqual([]);
+    expect(collectionMutationError(child, "create", [referenceParent, child])).toBeUndefined();
+    expect(collectionMutationError(child, "delete", [referenceParent, child])).toBeUndefined();
   });
   test("transport projection removes unsupported properties and required entries without mutating input", () => {
     const schema = { type: "object", properties: { values: { type: "object", properties: { blocks: { type: "array" }, title: { type: "string" } }, required: ["blocks", "title"], additionalProperties: false } } };
@@ -41,9 +50,9 @@ describe("unsupported collection mutation boundary", () => {
     expect(result).toEqual({ type: "object", properties: { values: { type: "object", properties: { title: { type: "string" } }, required: ["title"], additionalProperties: false } } });
     expect(schema.properties.values.properties.blocks).toBeDefined();
   });
-  test("legacy scalar updates remain unchanged", () => {
-    const legacy = { ...parent, source: { authoringVersion: 2 as const } };
-    expect(collectionMutationError(legacy, "create", [legacy], { title: "Example" })).toBeUndefined();
+  test("scalar updates on an entity without collections pass untouched", () => {
+    const plain = { ...parent, source: {} };
+    expect(collectionMutationError(plain, "create", [plain], { title: "Example" })).toBeUndefined();
     const schema = { type: "object" };
     expect(withoutCollectionInputs(schema, new Set())).toBe(schema);
   });

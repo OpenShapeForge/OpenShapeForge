@@ -130,11 +130,11 @@ describe("canonical storage type propagation", () => {
 });
 
 describe("rowAccess fail-closed compile guards (§B.1, §C)", () => {
-  it("owner.session other than app.current_user_id throws (§B.1)", () => {
+  it("owner.session other than the two session identities throws (§B.1)", () => {
     expect(() =>
       compileFixtures(["rowaccess-bad-session", "rowaccess-owner-target"]),
     ).toThrow(
-      'authorization.rowAccess.owner.session must be "app.current_user_id"',
+      'authorization.rowAccess.owner.session must be "app.current_user_id" or "app.current_relation_id"',
     );
   });
 
@@ -337,7 +337,7 @@ describe("retention compilation fail-closed guards (M-07)", () => {
 
   it("throws (does not silently default to 7y) on an unparseable ISO-8601 duration, naming the entity + value", () => {
     expect(() => compileFixtures(["rowaccess-retention-baddur"])).toThrow(
-      /Entity "RowAccessRetentionBadDuration" retention has an unparseable ISO-8601 duration "P1W"/,
+      /Entity "RowAccessRetentionBadDuration" retention has an unparseable ISO-8601 default duration "P1W"/,
     );
   });
 
@@ -349,7 +349,7 @@ describe("retention compilation fail-closed guards (M-07)", () => {
       rules: [
         {
           id: "rowaccess_retention_ok_retention",
-          after: { years: 3 },
+          duration: { default: { years: 3 } },
           action: "delete",
           disposition: "delete",
           reason: "Test fixture retention",
@@ -357,6 +357,13 @@ describe("retention compilation fail-closed guards (M-07)", () => {
       ],
       source: "authoring-entity-retention",
     });
+  });
+
+  it("preserves minimum, default and maximum as separate retention bounds", () => {
+    const manifest = compileFixtures(["rowaccess-retention-ok"]);
+    const rule = tableByName(manifest, "row_access_retention_oks")?.retention?.rules[0];
+    expect(rule?.duration).toEqual({ default: { years: 3 } });
+    expect(rule?.disposition).toBe("delete");
   });
 });
 
@@ -402,7 +409,6 @@ describe("generated REST exposure (source.rest bridge)", () => {
     const table = tableByName(manifest, "crud_read_onlies");
     const expected = { list: true, get: true, create: false, update: false, delete: false };
     expect(table?.generatedCrudEligible).toBe(true);
-    expect(table?.generatedCrud).toBe(false);
     expect(table?.source?.crud?.operations).toEqual(expected);
     expect(table?.source?.rest?.operations).toEqual(expected);
     expect(table?.source?.mcp?.operations).toEqual(expected);

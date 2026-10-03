@@ -51,13 +51,13 @@ async function withDb<T>(url: string, fn: (db: Kysely<DB>) => Promise<T>): Promi
 }
 
 async function readScopeState<TDatabase>(trx: import("kysely").Transaction<TDatabase>) {
-  const scopeRow = await sql<{ scope: string }>`
-    select current_setting('app.scope') as scope
+  const scopeRow = await sql<{ scope: string; bypass: boolean }>`
+    select current_setting('app.scope') as scope, app.bypass_rls() as bypass
   `.execute(trx);
   const hasRow = await sql<{ has: boolean }>`
     select app.has_scope('tenant') as has
   `.execute(trx);
-  return { scope: scopeRow.rows[0]?.scope, has: hasRow.rows[0]?.has };
+  return { scope: scopeRow.rows[0]?.scope, bypass: scopeRow.rows[0]?.bypass, has: hasRow.rows[0]?.has };
 }
 
 describe("withDbSession applies app.scope (F5)", () => {
@@ -72,6 +72,10 @@ describe("withDbSession applies app.scope (F5)", () => {
         await withDb(scratchAdminUrl(name), async (db) => {
           const tenantId = randomUUID();
           const userId = randomUUID();
+          // Deliberately contaminate the one-connection pool as a previous
+          // privileged caller could. An ordinary request must revoke that
+          // state inside its own transaction before doing any work.
+          await sql`select set_config('app.bypass_rls', 'true', false)`.execute(db);
           const tenantResult = await withDbSession(
             db,
             { tenantId, userId, roles: [], groups: [], scope: "tenant" },
@@ -79,6 +83,7 @@ describe("withDbSession applies app.scope (F5)", () => {
           );
           expect(tenantResult.scope).toBe("tenant");
           expect(tenantResult.has).toBe(true);
+          expect(tenantResult.bypass).toBe(false);
 
           const defaultResult = await withDbSession(
             db,
@@ -87,6 +92,7 @@ describe("withDbSession applies app.scope (F5)", () => {
           );
           expect(defaultResult.scope).toBe("self");
           expect(defaultResult.has).toBe(false);
+          expect(defaultResult.bypass).toBe(false);
         });
       });
     },

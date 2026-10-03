@@ -279,6 +279,15 @@ describe("settings source ownership", () => {
       join(root, "documents-plugin", "runtime.ts"),
       'export default { name: "documents", operationHandlers: {} };\n',
     );
+    mkdirSync(join(root, "versioning-plugin"), { recursive: true });
+    writeFileSync(
+      join(root, "versioning-plugin", "index.ts"),
+      'export default { name: "core-versioning" };\n',
+    );
+    writeFileSync(
+      join(root, "versioning-plugin", "runtime.ts"),
+      'export default { name: "core-versioning", operationHandlers: {} };\n',
+    );
     const plugin = join(root, "adapter", "index.ts");
     writeYaml(join(root, "adapter", "authoring", "settings", "artifacts.yaml"), allDefinitions().document);
     writeYaml(join(root, "adapter", "authoring", "settings", "provider.yaml"), providerSource().document);
@@ -293,7 +302,7 @@ describe("settings source ownership", () => {
     ].join("\n"));
     writeYaml(join(root, "authoring.config.yaml"), {
       layers: ["packages/compiler/config/authoring"],
-      plugins: ["./documents-plugin/index.ts", "./adapter/index.ts"],
+      plugins: ["./versioning-plugin/index.ts", "./documents-plugin/index.ts", "./adapter/index.ts"],
       settings: {
         "storage.artifacts.maximumBytes": 4_000_000,
       },

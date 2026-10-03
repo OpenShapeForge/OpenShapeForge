@@ -93,3 +93,20 @@ describe("buildModuleRegistry", () => {
     expect(second.root).not.toBe(root); // scratch dirs are independent
   });
 });
+
+ test("runtime configuration is host compiled, detached, and refuses lossy JSON", () => {
+  const configuration = { locale: "nl", formats: ["pdf"] };
+  const plugin = entry("formatting", "@example/formatting", "unused");
+  plugin.plugin.runtimeConfiguration = () => configuration;
+  const registry = buildModuleRegistry("/example", [plugin], { entities: [] });
+  configuration.formats.push("html");
+  expect(registry.modules[0]!.configuration).toEqual({ locale: "nl", formats: ["pdf"] });
+  plugin.plugin.runtimeConfiguration = () => ({ invalid: undefined });
+  expect(() => buildModuleRegistry("/example", [plugin], { entities: [] })).toThrow("finite JSON");
+  plugin.plugin.runtimeConfiguration = () => new Array(1);
+  expect(() => buildModuleRegistry("/example", [plugin], { entities: [] })).toThrow("sparse arrays");
+  plugin.plugin.runtimeConfiguration = () => ({ [Symbol("hidden")]: true });
+  expect(() => buildModuleRegistry("/example", [plugin], { entities: [] })).toThrow("symbol properties");
+  plugin.plugin.runtimeConfiguration = () => ({ invalid: Infinity });
+  expect(() => buildModuleRegistry("/example", [plugin], { entities: [] })).toThrow("finite JSON");
+ });

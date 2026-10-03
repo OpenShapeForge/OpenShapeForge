@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import { operationFailure } from "@openshapeforge/operations";
+import { notAuthorizedRefusal } from "./authorization-refusal-text.js";
 import { redactElicitedValues } from "../../connectors/secrets.js";
 import type { DbSessionInput } from "../../db/session.js";
 import {
@@ -26,20 +27,32 @@ import type {
 } from "./types.js";
 
 export function isGeneratedCrudTableEligible(table: GeneratedCrudTable): boolean {
-  if (table.domainInternal) return false;
-  return table.generatedCrudEligible === undefined
-    ? table.generatedCrud === true
-    : table.generatedCrudEligible === true;
+  return !table.domainInternal && table.generatedCrudEligible === true;
+}
+
+/**
+ * Whether every row of `table` is its own tenant: the compiler stamps
+ * CHECK (id = tenant_id) on a tenant registry (packages/compiler/src/
+ * tenant-bound-references.ts, `hasTenantIdentityCheck`), and this reads the
+ * same mark back from the manifest, with the same whitespace normalisation.
+ * Such a row has one write path, provisioning; nothing creates a second.
+ */
+export function isTenantRegistryTable(table: GeneratedCrudTable): boolean {
+  return (table.constraints ?? []).some(
+    (constraint) =>
+      constraint.kind === "check" &&
+      constraint.expression?.replace(/\s+/g, " ").trim() === "id = tenant_id",
+  );
 }
 
 export function isGeneratedCrudOperationEnabled(
   table: GeneratedCrudTable,
   operation: GeneratedCrudExposureOperation,
 ): boolean {
-  if (table.source?.crud !== undefined) {
-    return table.source.crud.operations?.[operation] === true;
-  }
-  return table.generatedCrud === true;
+  return (
+    isGeneratedCrudTableEligible(table) &&
+    table.source?.crud?.operations?.[operation] === true
+  );
 }
 
 const generatedCrudTables = new Map(
@@ -92,7 +105,7 @@ export function requireEntityOperation(
   const authorizationOperation = AUTHORIZATION_OPERATION[operation];
   const allowed = entityRoleSets.get(table.name)?.[authorizationOperation];
   if (!allowed || allowed.size === 0) {
-    // A generatedCrud table without role metadata means the manifest predates
+    // A CRUD-eligible table without role metadata means the manifest predates
     // the authorization bridge (stale artifacts) — deny with distinct wording
     // so operators recognize the regeneration bug instead of a policy denial.
     throw operationFailure({
@@ -104,10 +117,7 @@ export function requireEntityOperation(
   }
   const sessionRoles = session.roles ?? [];
   if (!sessionRoles.some((role) => allowed.has(role))) {
-    throw operationFailure({
-      code: "FORBIDDEN",
-      message: `Not authorized to ${operation} ${table.source?.authoringEntityName ?? table.name}.`,
-    });
+    throw operationFailure(notAuthorizedRefusal(table, operation));
   }
 }
 

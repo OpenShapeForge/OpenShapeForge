@@ -8,6 +8,8 @@ import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import { operationFailure } from "@openshapeforge/operations";
 import documentsPluginRuntime from "@openshapeforge/documents/runtime";
+import versioningPluginRuntime from "@openshapeforge/versioning/runtime";
+import accountsRuntime from "../accounts/runtime.js";
 import Fastify from "fastify";
 import { GraphQLError } from "graphql";
 import {
@@ -57,14 +59,15 @@ import {
 // Match the runtime loader boundary: the public plugin uses an unbound Kysely
 // database generic, while the API contract specializes it to the generated DB.
 const documentsRuntime = documentsPluginRuntime as unknown as RuntimeModule;
-const workflowRuntime: RuntimeModule = (await import(new URL(
-  "../../../../examples/plugins/workflow/runtime.ts", import.meta.url,
+const versioningRuntime = versioningPluginRuntime as unknown as RuntimeModule;
+const notebookRuntime: RuntimeModule = (await import(new URL(
+  "../../../../examples/plugins/notebook/runtime.ts", import.meta.url,
 ).pathname)).default;
 const completeModuleSets = new WeakMap<readonly RuntimeModule[], RuntimeModule[]>();
 function withDocuments(modules: readonly RuntimeModule[]): RuntimeModule[] {
   let complete = completeModuleSets.get(modules);
   if (!complete) {
-    complete = [documentsRuntime, ...modules];
+    complete = [accountsRuntime, documentsRuntime, versioningRuntime, ...modules];
     completeModuleSets.set(modules, complete);
   }
   return complete;
@@ -75,9 +78,9 @@ const bindOperationHandlers: typeof bindCanonicalOperationHandlers = (modules, o
     : bindCanonicalOperationHandlers(modules, operations);
 
 const session = {
-  tenantId: "tenant-a",
-  userId: "user-a",
-  roles: ["workflow-admin"],
+  tenantId: "11111111-1111-4111-8111-111111111111",
+  userId: "33333333-3333-4333-8333-333333333333",
+  roles: ["Organization.All.ReadWrite"],
   groups: [],
   scope: "tenant" as const,
   credential: "trusted-context" as const,
@@ -157,6 +160,7 @@ const restOperation: OperationContract = {
     header: "Idempotency-Key",
     inputField: "idempotencyKey",
   },
+  effects: { data: "write", external: "none" },
   transports: {
     rest: {
       method: "POST",
@@ -206,6 +210,7 @@ const declaredErrorOperation: OperationContract = {
   auth: { mode: "public" },
   tenancy: { mode: "none" },
   idempotency: { mode: "none" },
+  effects: { data: "write", external: "none" },
   transports: {
     rest: {
       method: "POST",
@@ -300,46 +305,56 @@ describe("canonical operation runtime", () => {
       .toThrow("absent from its compiler contract");
   });
   test("fails closed when the compiler contract has no runtime handler", () => {
-    expect(() => bindOperationHandlers([{ name: "workflow" }])).toThrow(/has no runtime handler/);
-    expect(() => bindOperationHandlers([{ name: "unrelated" }, { name: "workflow" }])).toThrow(/has no runtime handler/);
+    expect(() => bindOperationHandlers([{ name: "notebook" }])).toThrow(/has no runtime handler/);
+    expect(() => bindOperationHandlers([{ name: "unrelated" }, { name: "notebook" }])).toThrow(/has no runtime handler/);
   });
   test("a process without any operation module binds core and native operations only", () => {
     const bound = bindCanonicalOperationHandlers([]);
-    expect(bound.has("workflow.instance.webhook-start")).toBe(false);
+    expect(bound.has("notebook.import")).toBe(false);
     expect(bound.has("entityTypes.list")).toBe(true);
     expect(bound.has("control.list-tenants")).toBe(true);
+    expect(bound.has("grants.revoke")).toBe(true);
+    expect(bound.has("AgreementMilestone.trigger")).toBe(true);
+    expect(bound.has("BillingRun.execute")).toBe(true);
+    expect(bound.has("source-sync.upsert")).toBe(true);
     expect(
       [...bound.values()].every(({ operation }) =>
         operation.implementation?.type === "collection" ||
         operation.implementation?.type === "entity-type-list" ||
         operation.implementation?.type === "constrained-reference-create" ||
+        operation.plugin === "osf-billing" ||
         operation.plugin === "osf-blueprints" ||
-        operation.plugin === "osf-control"
+        operation.plugin === "osf-control" ||
+        operation.plugin === "osf-grants" ||
+        operation.plugin === "osf-jobs" ||
+        operation.plugin === "osf-source-sync" ||
+        operation.plugin === "osf-transitions"
       ),
     ).toBe(true);
     // Once any operation module is present, every plugin operation must bind.
     const noOperationModule = { name: "no-operation-module" };
     expect(() => bindCanonicalOperationHandlers([noOperationModule])).not.toThrow();
-    expect(bindCanonicalOperationHandlers([noOperationModule]).has("workflow.instance.webhook-start")).toBe(false);
+    expect(bindCanonicalOperationHandlers([noOperationModule]).has("notebook.import")).toBe(false);
   });
 
   test("validates input and handler output against the generated contract", async () => {
     const module: RuntimeModule = {
-      name: "workflow",
+      name: "notebook",
       operationHandlers: {
-        startWebhook: async (input) => ({
-          value: { status: "accepted", instanceId: "11111111-1111-4111-8111-111111111111", definitionId: input.definitionId },
+        importNotebook: async (input) => ({
+          value: { status: "accepted", importId: "11111111-1111-4111-8111-111111111111", notebookId: input.notebookId },
         }),
       },
     };
-    const bound = bindOperationHandlers([module]).get("workflow.instance.webhook-start")!;
+    const bound = bindOperationHandlers([module]).get("notebook.import")!;
     await expect(invokeOperation(bound, {}, { transport: "graphql", session })).rejects.toMatchObject({ status: 400 });
     await expect(invokeOperation(bound, {
-      definitionId: "not-a-uuid",
+      notebookId: "not-a-uuid",
       idempotencyKey: "webhook-invalid",
     }, { transport: "graphql", session })).rejects.toMatchObject({ status: 400 });
     const result = await invokeOperation(bound, {
-      definitionId: "22222222-2222-4222-8222-222222222222",
+      notebookId: "22222222-2222-4222-8222-222222222222",
+      body: "imported",
       idempotencyKey: "webhook-1",
     }, { transport: "graphql", session });
     expect(result.value).toMatchObject({ status: "accepted" });
@@ -350,9 +365,9 @@ describe("canonical operation runtime", () => {
     const platform = new ModulePlatformRuntime(db);
     let retainedSession: TrustedSessionContext | undefined;
     const module: RuntimeModule = {
-      name: "workflow",
+      name: "notebook",
       operationHandlers: {
-        startWebhook: async (input, context) => {
+        importNotebook: async (input, context) => {
           if (!context.session || !context.platform) {
             throw new Error("Expected an authenticated database operation.");
           }
@@ -368,14 +383,14 @@ describe("canonical operation runtime", () => {
           return {
             value: {
               status: "accepted",
-              instanceId: "11111111-1111-4111-8111-111111111111",
-              definitionId: input.definitionId,
+              importId: "11111111-1111-4111-8111-111111111111",
+              notebookId: input.notebookId,
             },
           };
         },
       },
     };
-    const bound = bindOperationHandlers([module]).get("workflow.instance.webhook-start")!;
+    const bound = bindOperationHandlers([module]).get("notebook.import")!;
     const verified = {
       ...session,
       tenantId: "22222222-2222-4222-8222-222222222222",
@@ -383,7 +398,8 @@ describe("canonical operation runtime", () => {
     };
     try {
       await expect(invokeOperation(bound, {
-        definitionId: "44444444-4444-4444-8444-444444444444",
+        notebookId: "44444444-4444-4444-8444-444444444444",
+        body: "imported",
         idempotencyKey: "database-session",
       }, {
         db,
@@ -444,9 +460,9 @@ describe("canonical operation runtime", () => {
       clientCapabilities: Object.freeze({ elicitation: false, mcpApp: false }),
     }) as McpInvocationContext;
     const bound = bindOperationHandlers([{
-      name: "workflow",
+      name: "notebook",
       operationHandlers: {
-        startWebhook: async (input, context) => {
+        importNotebook: async (input, context) => {
           expect(context.session).toBe(liveSession);
           expect(await context.platform!.mcp.authorize(context.session!, {
             action: "call",
@@ -465,17 +481,18 @@ describe("canonical operation runtime", () => {
           return {
             value: {
               status: "accepted",
-              instanceId: "11111111-1111-4111-8111-111111111111",
-              definitionId: input.definitionId,
+              importId: "11111111-1111-4111-8111-111111111111",
+              notebookId: input.notebookId,
             },
           };
         },
       },
-    }]).get("workflow.instance.webhook-start")!;
+    }]).get("notebook.import")!;
     try {
       const result = await platform.withActiveInvocation(invocation, () =>
         invokeOperation(bound, {
-          definitionId: "44444444-4444-4444-8444-444444444444",
+          notebookId: "44444444-4444-4444-8444-444444444444",
+          body: "imported",
           idempotencyKey: "mcp-binding",
         }, {
           db,
@@ -504,17 +521,18 @@ describe("canonical operation runtime", () => {
     const platform = new ModulePlatformRuntime(db);
     let invoked = false;
     const bound = bindOperationHandlers([{
-      name: "workflow",
+      name: "notebook",
       operationHandlers: {
-        startWebhook: async () => {
+        importNotebook: async () => {
           invoked = true;
           return { value: {} };
         },
       },
-    }]).get("workflow.instance.webhook-start")!;
+    }]).get("notebook.import")!;
     try {
       await expect(invokeOperation(bound, {
-        definitionId: "44444444-4444-4444-8444-444444444444",
+        notebookId: "44444444-4444-4444-8444-444444444444",
+        body: "imported",
         idempotencyKey: "fabricated-platform",
       }, {
         db,
@@ -533,14 +551,14 @@ describe("canonical operation runtime", () => {
     const platform = new ModulePlatformRuntime(db);
     let nestedInvoked = false;
     const nestedBase = bindOperationHandlers([{
-      name: "workflow",
+      name: "notebook",
       operationHandlers: {
-        startWebhook: async () => {
+        importNotebook: async () => {
           nestedInvoked = true;
           return { value: {} };
         },
       },
-    }]).get("workflow.instance.webhook-start")!;
+    }]).get("notebook.import")!;
     const nested = {
       ...nestedBase,
       operation: {
@@ -549,9 +567,9 @@ describe("canonical operation runtime", () => {
       },
     };
     const outer = bindOperationHandlers([{
-      name: "workflow",
+      name: "notebook",
       operationHandlers: {
-        startWebhook: async (input) => {
+        importNotebook: async (input) => {
           await expect(invokeOperation(nested, input, {
             transport: "graphql",
             session: { ...session, roles: [...session.roles, "elevated"] },
@@ -559,16 +577,17 @@ describe("canonical operation runtime", () => {
           return {
             value: {
               status: "accepted",
-              instanceId: "11111111-1111-4111-8111-111111111111",
-              definitionId: input.definitionId,
+              importId: "11111111-1111-4111-8111-111111111111",
+              notebookId: input.notebookId,
             },
           };
         },
       },
-    }]).get("workflow.instance.webhook-start")!;
+    }]).get("notebook.import")!;
     try {
       await expect(invokeOperation(outer, {
-        definitionId: "44444444-4444-4444-8444-444444444444",
+        notebookId: "44444444-4444-4444-8444-444444444444",
+        body: "imported",
         idempotencyKey: "nested-authority",
       }, {
         db,
@@ -585,20 +604,20 @@ describe("canonical operation runtime", () => {
   test("enforces declared OAuth scopes on every projected transport", async () => {
     const operation = {
       ...bindOperationHandlers([{
-        name: "workflow",
-        operationHandlers: { startWebhook: async () => ({ value: {} }) },
-      }]).get("workflow.instance.webhook-start")!.operation,
-      auth: { mode: "session" as const, roles: ["workflow-admin"], scopes: ["workflow:write"] },
+        name: "notebook",
+        operationHandlers: { importNotebook: async () => ({ value: {} }) },
+      }]).get("notebook.import")!.operation,
+      auth: { mode: "session" as const, roles: ["Organization.All.ReadWrite"], scopes: ["notebook:write"] },
     };
     expect(() => requireOperationAuthorization(operation, session)).toThrow(/OAuth scope/);
     expect(() => requireOperationAuthorization(operation, {
       ...session,
-      oauthScopes: ["workflow:write"],
+      oauthScopes: ["notebook:write"],
     })).not.toThrow();
     expect(() => requireOperationAuthorization(operation, {
       ...session,
       credential: "api-key",
-      oauthScopes: ["workflow:write"],
+      oauthScopes: ["notebook:write"],
     })).toThrow(/cannot be invoked with an API key/);
   });
 
@@ -669,16 +688,17 @@ describe("canonical operation runtime", () => {
 
   test("rejects a success status that differs from the canonical contract", async () => {
     const bound = bindOperationHandlers([{
-      name: "workflow",
+      name: "notebook",
       operationHandlers: {
-        startWebhook: async (input) => ({
+        importNotebook: async (input) => ({
           status: 201,
-          value: { status: "accepted", instanceId: "11111111-1111-4111-8111-111111111111", definitionId: input.definitionId },
+          value: { status: "accepted", importId: "11111111-1111-4111-8111-111111111111", notebookId: input.notebookId },
         }),
       },
-    }]).get("workflow.instance.webhook-start")!;
+    }]).get("notebook.import")!;
     await expect(invokeOperation(bound, {
-      definitionId: "22222222-2222-4222-8222-222222222222",
+      notebookId: "22222222-2222-4222-8222-222222222222",
+      body: "imported",
       idempotencyKey: "webhook-2",
     }, { transport: "rest", session })).rejects.toMatchObject({ status: 500 });
   });
@@ -824,15 +844,15 @@ describe("canonical operation runtime", () => {
 
   test("does not advertise an uncontracted runtime handler", () => {
     expect(() => bindOperationHandlers([{
-      name: "workflow",
-      operationHandlers: { startWebhook: () => ({ value: {} }), hidden: () => ({ value: {} }) },
+      name: "notebook",
+      operationHandlers: { importNotebook: () => ({ value: {} }), hidden: () => ({ value: {} }) },
     }])).toThrow(/absent from its compiler contract: hidden/);
   });
 
   test("caches one immutable handler binding per initialized module set", () => {
     const modules: RuntimeModule[] = [{
-      name: "workflow",
-      operationHandlers: { startWebhook: async () => ({ value: {} }) },
+      name: "notebook",
+      operationHandlers: { importNotebook: async () => ({ value: {} }) },
     }];
     expect(bindOperationHandlers(modules)).toBe(bindOperationHandlers(modules));
   });
@@ -845,7 +865,7 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
   const secret = "operation-rest-test-context-secret";
   process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = secret;
   delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI;
-  delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+  process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = "https://issuer.example.test/realms/runtime-test";
   __resetSessionResolverForTests();
   const observations: unknown[] = [];
   const module: RuntimeModule = {
@@ -885,19 +905,22 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
       headers: { authorization: "Bearer test-token" },
       payload: {},
     });
-    expect(undeclaredUnavailable.statusCode).toBe(401);
+    // A bearer the deployment cannot verify is the deployment's outage, not
+    // an anonymous caller: never 401, never a downgrade to trusted context.
+    expect(undeclaredUnavailable.statusCode).toBe(503);
     expect(undeclaredUnavailable.json() as unknown).toEqual({
       error: {
-        code: "UNAUTHENTICATED",
-        message: "Operation requires an authenticated bearer session.",
+        code: "AUTHENTICATION_UNAVAILABLE",
+        message:
+          "Bearer tokens cannot be verified: OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI and _ISSUER are not configured.",
         retryable: false,
       },
     });
 
     const wrongRole = new Headers({ "content-type": "application/json" });
     applyTrustedContextHeaders(wrongRole, {
-      tenantId: "tenant-a",
-      userId: "user-a",
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      userId: "33333333-3333-4333-8333-333333333333",
       roles: ["reader"],
       groups: [],
     }, { secret });
@@ -912,8 +935,8 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
 
     const authorized = new Headers({ "content-type": "application/json" });
     applyTrustedContextHeaders(authorized, {
-      tenantId: "tenant-a",
-      userId: "user-a",
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      userId: "33333333-3333-4333-8333-333333333333",
       roles: ["quote-publisher"],
       groups: ["/sales"],
     }, { secret });
@@ -1001,7 +1024,7 @@ test("explicit canonical handler envelopes preserve offers and resources without
   const envelope = { data: { status: "waiting" }, operations: [{
     operation: { id: "example.respond", intent: "invoke" }, available: true as const,
     interaction: { kind: "userInput" as const, offerId: "server-issued", expiresAt: "2026-09-12T13:15:00Z",
-      bindTo: { tenant: "tenant-a", subject: "user-a", instance: "instance-a" }, choices: [{ value: "yes", label: "Ja" }] },
+      bindTo: { tenant: "11111111-1111-4111-8111-111111111111", subject: "33333333-3333-4333-8333-333333333333", instance: "instance-a" }, choices: [{ value: "yes", label: "Ja" }] },
   }], resources: [{ uri: "osf://example/result", name: "result" }] };
   for (const explicit of [true, false]) {
     const modules: RuntimeModule[] = [{ name: "demo", operationHandlers: {
@@ -1024,6 +1047,8 @@ test("explicit canonical handler envelopes preserve offers and resources without
 
 test("the generic runtime Operation route parses JSON inside a raw-buffer parent", async () => {
   const previousSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+  const previousIssuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+  process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = "https://issuer.example.test/realms/runtime-test";
   const secret = "runtime-operation-rest-json-test-secret";
   process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = secret;
   __resetSessionResolverForTests();
@@ -1064,8 +1089,8 @@ test("the generic runtime Operation route parses JSON inside a raw-buffer parent
     "idempotency-key": "request-raw-buffer",
   });
   applyTrustedContextHeaders(headers, {
-    tenantId: "tenant-a",
-    userId: "user-a",
+    tenantId: "11111111-1111-4111-8111-111111111111",
+    userId: "33333333-3333-4333-8333-333333333333",
     roles: ["quote-publisher"],
     groups: [],
   }, { secret });
@@ -1093,8 +1118,8 @@ test("the generic runtime Operation route parses JSON inside a raw-buffer parent
       data: {
         quoteId: "quote-raw-buffer",
         idempotencyKey: "request-raw-buffer",
-        tenantId: "tenant-a",
-        userId: "user-a",
+        tenantId: "11111111-1111-4111-8111-111111111111",
+        userId: "33333333-3333-4333-8333-333333333333",
       },
     });
     expect(seen).toEqual([{
@@ -1144,6 +1169,8 @@ test("the generic runtime Operation route parses JSON inside a raw-buffer parent
     await db.destroy();
     if (previousSecret === undefined) delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
     else process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = previousSecret;
+    if (previousIssuer === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+    else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = previousIssuer;
     __resetSessionResolverForTests();
   }
 });
@@ -1285,8 +1312,8 @@ test("REST applies the exact status-and-code fixed representation to core author
 
     const wrongRole = new Headers({ "content-type": "application/json" });
     applyTrustedContextHeaders(wrongRole, {
-      tenantId: "tenant-a",
-      userId: "user-a",
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      userId: "33333333-3333-4333-8333-333333333333",
       roles: ["reader"],
       groups: [],
     }, { secret: "declared-auth-error-test-secret" });
@@ -1310,8 +1337,8 @@ test("REST applies the exact status-and-code fixed representation to core author
 
     const authorized = new Headers({ "content-type": "application/json" });
     applyTrustedContextHeaders(authorized, {
-      tenantId: "tenant-a",
-      userId: "user-a",
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      userId: "33333333-3333-4333-8333-333333333333",
       roles: ["seller"],
       groups: [],
     }, { secret: "declared-auth-error-test-secret" });
@@ -1347,9 +1374,9 @@ test("GraphQL and MCP project declared handler results as transport errors", asy
     error: { code: "CONFLICT", message: "The operation conflicts." },
   };
   const module: RuntimeModule = {
-    name: "workflow",
+    name: "notebook",
     operationHandlers: {
-      startWebhook: () => ({
+      importNotebook: () => ({
         ok: false,
         status: 409,
         code: "CONFLICT",
@@ -1358,7 +1385,8 @@ test("GraphQL and MCP project declared handler results as transport errors", asy
     },
   };
   const input = {
-    definitionId: "22222222-2222-4222-8222-222222222222",
+    notebookId: "22222222-2222-4222-8222-222222222222",
+    body: "imported",
     idempotencyKey: "declared-error",
   };
 
@@ -1368,7 +1396,7 @@ test("GraphQL and MCP project declared handler results as transport errors", asy
     withDocuments([module]),
     { db, platform: platform.services },
   )?.graphql?.({});
-  const resolver = contribution?.resolvers?.Mutation?.workflowStartWebhook as
+  const resolver = contribution?.resolvers?.Mutation?.notebookImport as
     | ((_parent: unknown, args: { input: unknown }, context: { session: TrustedSessionContext }) => Promise<unknown>)
     | undefined;
   expect(resolver).toBeDefined();
@@ -1398,7 +1426,7 @@ test("GraphQL and MCP project declared handler results as transport errors", asy
     await server.connect(serverTransport);
     await client.connect(clientTransport);
     const result = await client.callTool({
-      name: "workflow_start_webhook",
+      name: "notebook_import",
       arguments: input,
     });
     expect(result.isError).toBe(true);
@@ -1417,24 +1445,24 @@ test("GraphQL and MCP project declared handler results as transport errors", asy
 test("MCP projects a handler's content blocks next to the canonical value", async () => {
   const value = {
     status: "accepted",
-    instanceId: "11111111-1111-4111-8111-111111111111",
-    definitionId: "22222222-2222-4222-8222-222222222222",
+    importId: "11111111-1111-4111-8111-111111111111",
+    notebookId: "22222222-2222-4222-8222-222222222222",
   };
   const image = { type: "image" as const, data: "iVBORw0KGgo=", mimeType: "image/png" };
   const module: RuntimeModule = {
-    name: "workflow",
+    name: "notebook",
     operationHandlers: {
-      startWebhook: () => ({
+      importNotebook: () => ({
         value,
         mcp: { content: [{ type: "text", text: "one image" }, image] },
       }),
     },
   };
-  const input = { definitionId: value.definitionId, idempotencyKey: "content-blocks" };
+  const input = { notebookId: value.notebookId, body: "imported", idempotencyKey: "content-blocks" };
 
   // Other transports keep the canonical value; the projection is not validated
   // against the output schema and does not leak into it.
-  const bound = bindOperationHandlers([module]).get("workflow.instance.webhook-start")!;
+  const bound = bindOperationHandlers([module]).get("notebook.import")!;
   const direct = await invokeOperation(bound, input, { transport: "graphql", session });
   expect(direct.value).toEqual(value);
 
@@ -1451,7 +1479,7 @@ test("MCP projects a handler's content blocks next to the canonical value", asyn
   try {
     await server.connect(serverTransport);
     await client.connect(clientTransport);
-    const result = await client.callTool({ name: "workflow_start_webhook", arguments: input });
+    const result = await client.callTool({ name: "notebook_import", arguments: input });
     expect(result.isError).toBeFalsy();
     expect(result.content).toEqual([{ type: "text", text: "one image" }, image]);
     expect(result.structuredContent).toEqual(value);
@@ -1465,14 +1493,14 @@ test("MCP projects a handler's content blocks next to the canonical value", asyn
 test("MCP searchable projection bounds tools/list while search, generic execute, and named calls stay canonical", async () => {
   const value = {
     status: "accepted",
-    instanceId: "11111111-1111-4111-8111-111111111111",
-    definitionId: "22222222-2222-4222-8222-222222222222",
+    importId: "11111111-1111-4111-8111-111111111111",
+    notebookId: "22222222-2222-4222-8222-222222222222",
   };
   const calls: unknown[] = [];
   const module: RuntimeModule = {
-    name: "workflow",
+    name: "notebook",
     operationHandlers: {
-      startWebhook: (input, context) => {
+      importNotebook: (input, context) => {
         calls.push({ input, userId: context.session?.userId });
         return { value };
       },
@@ -1506,18 +1534,18 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
     const listed = await client.listTools();
     expect(listed.tools.map((tool) => tool.name)).toContain("osf_search_operations");
     expect(listed.tools.map((tool) => tool.name)).toContain("osf_execute_operation");
-    expect(listed.tools.map((tool) => tool.name)).not.toContain("workflow_start_webhook");
+    expect(listed.tools.map((tool) => tool.name)).not.toContain("notebook_import");
 
     const searched = await client.callTool({
       name: "osf_search_operations",
-      arguments: { query: "webhook", limit: 20 },
+      arguments: { query: "import a notebook body", limit: 20 },
     });
     expect(searched.isError).not.toBe(true);
     expect(searched.structuredContent).toMatchObject({
       operations: [{
-        operation: { id: "workflow.instance.webhook-start", intent: "invoke" },
+        operation: { id: "notebook.import", intent: "invoke" },
         inputSchema: expect.objectContaining({
-          required: ["definitionId", "idempotencyKey"],
+          required: ["notebookId", "body", "idempotencyKey"],
         }),
       }],
     });
@@ -1525,8 +1553,8 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
     const generic = await client.callTool({
       name: "osf_execute_operation",
       arguments: {
-        operationId: "workflow.instance.webhook-start",
-        input: { definitionId: value.definitionId },
+        operationId: "notebook.import",
+        input: { notebookId: value.notebookId, body: "imported" },
         idempotencyKey: "generic-attempt",
       },
     });
@@ -1534,9 +1562,10 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
     expect(generic.structuredContent).toEqual({ data: value, operations: [] });
 
     const named = await client.callTool({
-      name: "workflow_start_webhook",
+      name: "notebook_import",
       arguments: {
-        definitionId: value.definitionId,
+        notebookId: value.notebookId,
+        body: "imported",
         idempotencyKey: "named-attempt",
       },
     });
@@ -1545,14 +1574,16 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
     expect(calls).toEqual([
       {
         input: {
-          definitionId: value.definitionId,
+          notebookId: value.notebookId,
+          body: "imported",
           idempotencyKey: "generic-attempt",
         },
         userId: session.userId,
       },
       {
         input: {
-          definitionId: value.definitionId,
+          notebookId: value.notebookId,
+          body: "imported",
           idempotencyKey: "named-attempt",
         },
         userId: session.userId,
@@ -1582,14 +1613,14 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
       await deniedClient.connect(deniedClientTransport);
       const hidden = await deniedClient.callTool({
         name: "osf_search_operations",
-        arguments: { query: "webhook" },
+        arguments: { query: "import a notebook body" },
       });
       expect(hidden.structuredContent).toEqual({ operations: [] });
       const deniedGeneric = await deniedClient.callTool({
         name: "osf_execute_operation",
         arguments: {
-          operationId: "workflow.instance.webhook-start",
-          input: { definitionId: value.definitionId },
+          operationId: "notebook.import",
+          input: { notebookId: value.notebookId, body: "imported" },
           idempotencyKey: "denied-attempt",
         },
       });
@@ -1598,9 +1629,9 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
         structuredContent: { error: { code: "NOT_FOUND" } },
       });
       const deniedNamed = await deniedClient.callTool({
-        name: "workflow_start_webhook",
+        name: "notebook_import",
         arguments: {
-          definitionId: value.definitionId,
+          notebookId: value.notebookId,
           idempotencyKey: "denied-named-attempt",
         },
       });
@@ -1680,7 +1711,7 @@ test("MCP projects and dispatches live runtime provider Operations canonically",
   const server = __buildGeneratedMcpServerForTests({
     db,
     session,
-    modules: withDocuments([workflowRuntime, providerModule]),
+    modules: withDocuments([notebookRuntime, providerModule]),
     modulePlatform: platform,
   });
   const client = new Client(
@@ -1817,7 +1848,7 @@ test("MCP refuses unusable or colliding runtime provider tool keys", async () =>
     const server = __buildGeneratedMcpServerForTests({
       db,
       session,
-      modules: withDocuments([workflowRuntime, providerModule]),
+      modules: withDocuments([notebookRuntime, providerModule]),
       modulePlatform: platform,
     });
     const client = new Client(
@@ -1842,10 +1873,10 @@ test("MCP refuses unusable or colliding runtime provider tool keys", async () =>
 test("rejects an MCP projection that is not well-formed content", async () => {
   const value = {
     status: "accepted",
-    instanceId: "11111111-1111-4111-8111-111111111111",
-    definitionId: "22222222-2222-4222-8222-222222222222",
+    importId: "11111111-1111-4111-8111-111111111111",
+    notebookId: "22222222-2222-4222-8222-222222222222",
   };
-  const input = { definitionId: value.definitionId, idempotencyKey: "bad-blocks" };
+  const input = { notebookId: value.notebookId, body: "imported", idempotencyKey: "bad-blocks" };
   for (const mcp of [
     { content: [] },
     { content: [{ type: "image", mimeType: "image/png" }] },
@@ -1854,10 +1885,10 @@ test("rejects an MCP projection that is not well-formed content", async () => {
     { content: [{ type: "text", text: "ok" }], structuredContent: ["not", "a", "record"] },
   ]) {
     const module: RuntimeModule = {
-      name: "workflow",
-      operationHandlers: { startWebhook: () => ({ value, mcp }) as ModuleOperationResult },
+      name: "notebook",
+      operationHandlers: { importNotebook: () => ({ value, mcp }) as ModuleOperationResult },
     };
-    const bound = bindOperationHandlers([module]).get("workflow.instance.webhook-start")!;
+    const bound = bindOperationHandlers([module]).get("notebook.import")!;
     await expect(invokeOperation(bound, input, { transport: "mcp", session })).rejects.toMatchObject({
       status: 500,
       code: "HANDLER_CONTRACT_VIOLATION",
@@ -1889,6 +1920,7 @@ test("binary and stream responses pass through canonical REST routes without buf
     auth: { mode: "public" },
     tenancy: { mode: "none" },
     idempotency: { mode: "none" },
+    effects: { data: "read", external: "none" },
     transports: {
       rest: {
         method: "GET",
@@ -1953,6 +1985,7 @@ test("REST maps a required idempotency header into canonical input only", () => 
       header: "Idempotency-Key",
       inputField: "idempotencyKey",
     },
+    effects: { data: "write", external: "none" },
     transports: { rest: { method: "POST", path: "/api/demo/quotes/:quoteId" } },
   } as unknown as OperationContract;
   const request = {
@@ -1996,6 +2029,7 @@ test("REST coerces typed GET and DELETE query values before canonical validation
       additionalProperties: false,
     },
     idempotency: { mode: "none" },
+    effects: { data: "read", external: "none" },
     transports: { rest: { method: "GET", path: "/api/demo/quotes" } },
   } as unknown as OperationContract;
   const request = {
@@ -2005,4 +2039,23 @@ test("REST coerces typed GET and DELETE query values before canonical validation
     headers: {},
   } as never;
   expect(operationRestInput(request, operation)).toEqual({ limit: 5, enabled: true });
+});
+
+test("REST binds server-supplied input (a grant's record target) before a GET query is validated", () => {
+  const operation = {
+    key: "demo.signing.status",
+    inputSchema: {
+      type: "object",
+      required: ["envelopeId"],
+      properties: { envelopeId: { type: "string", format: "uuid" } },
+      additionalProperties: false,
+    },
+    idempotency: { mode: "none" },
+    effects: { data: "write", external: "none" },
+    transports: { rest: { method: "GET", path: "/api/demo/signing/status" } },
+  } as unknown as OperationContract;
+  const request = { body: undefined, query: {}, params: {}, headers: {} } as never;
+  const subject = "11111111-1111-4111-8111-111111111111";
+  expect(() => operationRestInput(request, operation)).toThrow(/canonical schema/);
+  expect(operationRestInput(request, operation, (input) => ({ ...input, envelopeId: subject }))).toEqual({ envelopeId: subject });
 });

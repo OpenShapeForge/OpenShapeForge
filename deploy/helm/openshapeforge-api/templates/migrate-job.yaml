@@ -80,7 +80,7 @@ spec:
               value: "1"
             {{- end }}
             # Password the SECOND restricted role — openshapeforge_worker, the
-            # one the workflow queue policies compare current_user against — is
+            # one the queue policies compare current_user against — is
             # provisioned with (first creation only). The migrate Job is what
             # creates that role and enumerates its grants, so it needs this even
             # on an install that deploys no worker workload: the policies name

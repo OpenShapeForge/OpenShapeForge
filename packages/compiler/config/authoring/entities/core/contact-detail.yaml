@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ContactDetail
@@ -10,11 +10,15 @@ filterField: value
 labels:
   en: Contact Detail
   nl: Contactgegeven
+pluralLabels:
+  en: Contact details
+  nl: Contactgegevens
 domains:
   - relations
 authorization:
   roles:
     read:
+      - Relations.Relation.ReadWrite
       - Relations.All.Read
       - Relations.All.ReadWrite
     create:
@@ -28,7 +32,6 @@ authorization:
     empty: public
 fields:
   - key: relationId
-    valueType: string
     required: false
     label:
       en: Relation ID
@@ -36,14 +39,19 @@ fields:
     description:
       en: Identifier of the related relation instance.
       nl: Identifier van de gerelateerde relatie-instantie.
-    semanticType: relationId
+    osfType: Relation
     persisted:
       column: relation_id
       storageClass: core
     validation:
       format: uuid
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      ownership: reference
   - key: type
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Type
@@ -61,7 +69,7 @@ fields:
       type: referentiedata
       referentieGroep: CONTACTDETAILTYPE
   - key: value
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Value
@@ -76,7 +84,7 @@ fields:
       column: value
       storageClass: core
   - key: detailType
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Detail type
@@ -90,7 +98,7 @@ fields:
       column: detail_type
       storageClass: core
   - key: status
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Status
@@ -104,7 +112,7 @@ fields:
       column: status
       storageClass: core
   - key: confidentiality
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Confidentiality
@@ -118,7 +126,7 @@ fields:
       column: confidentiality
       storageClass: core
   - key: isPrimary
-    valueType: boolean
+    osfType: boolean
     required: false
     label:
       en: Primary
@@ -130,7 +138,7 @@ fields:
       column: is_primary
       storageClass: core
   - key: preferenceRank
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Preference rank
@@ -142,7 +150,7 @@ fields:
       column: preference_rank
       storageClass: core
   - key: isReachable
-    valueType: boolean
+    osfType: boolean
     required: false
     label:
       en: Reachable
@@ -154,7 +162,7 @@ fields:
       column: is_reachable
       storageClass: core
   - key: verifiedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Verified at
@@ -166,7 +174,7 @@ fields:
       column: verified_at
       storageClass: core
   - key: consentStatus
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Consent status
@@ -183,7 +191,7 @@ fields:
       column: consent_status
       storageClass: core
   - key: validFrom
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid from
@@ -195,7 +203,7 @@ fields:
       column: valid_from
       storageClass: core
   - key: validUntil
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid until
@@ -206,21 +214,16 @@ fields:
     persisted:
       column: valid_until
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
-    label:
-      en: Relation
-      nl: Relatie
-  - key: relationRole
-    kind: belongsTo
-    target: RelationRole
-    foreignKey: relation_role_id
+  - key: relationRoleId
     label:
       en: Relation role
       nl: Relatierol
+    persisted:
+      column: relation_role_id
+      storageClass: core
+    osfType: RelationRole
+    relationship:
+      ownership: reference
 operations:
   list:
     name: { en: List contact details, nl: Contactgegevens tonen }
@@ -283,7 +286,7 @@ operations:
         kind: type-current-field
         field: value
         issuedBy: server
-        bindTo: [subject, tenant, operation, target.id, target.version]
+        bindTo: [ subject, tenant, operation, target.id, target.version ]
         expiresAfter: PT5M
         singleUse: true
 
@@ -336,31 +339,60 @@ interfaces:
           create: { en: /contact-details/new, nl: /contactgegevens/nieuw }
         title: "{{type}}: {{value}}"
         subtitle: "{{status}}"
-        actions: [update, delete]
+        actions: [ update, delete ]
         layout:
           context:
-            fields: [isPrimary, isReachable, confidentiality, validUntil]
-            relationships: [relation, relationRole]
+            fields: [ isPrimary, isReachable, confidentiality, validUntil ]
+            relationships: [ relationId, relationRoleId ]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Contact information, nl: Contactinformatie }
-                  fields: [type, detailType, value, status]
+                  fields: [ type, detailType, value, status ]
                 - title: { en: Contact preferences, nl: Contactvoorkeuren }
-                  fields: [isPrimary, preferenceRank, isReachable]
+                  fields: [ isPrimary, preferenceRank, isReachable ]
                 - title: { en: Privacy and verification, nl: Privacy en verificatie }
-                  fields: [confidentiality, consentStatus, verifiedAt]
+                  fields: [ confidentiality, consentStatus, verifiedAt ]
                 - title: { en: Validity, nl: Geldigheid }
-                  fields: [validFrom, validUntil]
+                  fields: [ validFrom, validUntil ]
         modes:
           create:
             title: { en: Create contact detail, nl: Contactgegeven aanmaken }
             groups:
               - title: { en: Contact information, nl: Contactinformatie }
-                fields: [relationId, type, detailType, value, status, confidentiality, isPrimary, preferenceRank, isReachable, consentStatus, validFrom, validUntil, verifiedAt]
+                fields:
+                  [
+                    relationId,
+                    type,
+                    detailType,
+                    value,
+                    status,
+                    confidentiality,
+                    isPrimary,
+                    preferenceRank,
+                    isReachable,
+                    consentStatus,
+                    validFrom,
+                    validUntil,
+                    verifiedAt
+                  ]
           update:
             title: { en: Update contact detail, nl: Contactgegeven wijzigen }
             groups:
               - title: { en: Contact information, nl: Contactinformatie }
-                fields: [type, detailType, value, status, confidentiality, isPrimary, preferenceRank, isReachable, consentStatus, validFrom, validUntil, verifiedAt]
+                fields:
+                  [
+                    type,
+                    detailType,
+                    value,
+                    status,
+                    confidentiality,
+                    isPrimary,
+                    preferenceRank,
+                    isReachable,
+                    consentStatus,
+                    validFrom,
+                    validUntil,
+                    verifiedAt
+                  ]

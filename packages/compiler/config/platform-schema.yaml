@@ -7,6 +7,12 @@ description: "Greenfield platform schema foundation for apps/api."
 # reference on the strength of its entry here and generateArtifacts checks
 # that the merged manifest really declares the target.
 relationshipRegister:
+  - from: { schema: erp, table: accounts, column: relation_id }
+    to: { schema: erp, table: relations, column: id }
+  - from: { schema: erp, table: accounts, column: natural_person_id }
+    to: { schema: erp, table: natural_persons, column: id }
+  - from: { schema: platform, table: relation_group_roles, column: relation_group_id }
+    to: { schema: erp, table: relation_groups, column: id }
   - from: { schema: platform, table: tenants, column: relation_id }
     to: { schema: erp, table: relations, column: id }
   - from: { schema: platform, table: identity_relations, column: relation_id }
@@ -15,11 +21,47 @@ relationshipRegister:
     to: { schema: erp, table: relations, column: id }
 
 tables:
+  # Historical ERP Account storage is retained, not migrated into login
+  # identities. The public Account entity now projects platform identities;
+  # keeping this explicit table prevents a reset/cutover from dropping old
+  # ERP data and does not create another account-management interface.
+  - schema: erp
+    name: accounts
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, required: true, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+      - { name: external_id, type: text }
+      - { name: source_authority, type: text }
+      - { name: source_organization, type: text }
+      - { name: source_administration, type: text }
+      - { name: source_version, type: text }
+      - { name: username, type: text, required: true }
+      - { name: email, type: text, required: true }
+      - { name: keycloak_sub, type: text }
+      - { name: status, type: text, required: true }
+      - { name: last_login_at, type: timestamptz }
+      - { name: valid_from, type: timestamptz }
+      - { name: valid_until, type: timestamptz }
+      - { name: password_changed_at, type: timestamptz }
+      - name: relation_id
+        type: uuid
+        references: { schema: erp, table: relations, column: id, localColumns: [tenant_id, relation_id], targetColumns: [tenant_id, id] }
+      - name: natural_person_id
+        type: uuid
+        references: { schema: erp, table: natural_persons, column: id, localColumns: [tenant_id, natural_person_id], targetColumns: [tenant_id, id] }
+    indexes:
+      - { name: accounts_tenant_id_relation_id_idx, columns: [tenant_id, relation_id] }
+      - { name: accounts_tenant_id_natural_person_id_idx, columns: [tenant_id, natural_person_id] }
   - schema: platform
     name: schema_migrations
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: version, type: text, primaryKey: true }
       - { name: checksum, type: text, required: true }
@@ -41,7 +83,7 @@ tables:
   # would either be handed a tenant_id column plus tenant-isolation RLS
   # (meaningless on this table) or forfeit role-based authorization entirely.
   #
-  # domainInternal + generatedCrud:false follow from the same fact: a tenant
+  # domainInternal + generatedCrudEligible:false follow from the same fact: a tenant
   # registry is cross-tenant by nature and must never surface on the per-tenant
   # GraphQL/REST schema, where every other row is fenced by a tenant predicate
   # this table has no way to satisfy. The control plane reaches it directly.
@@ -60,7 +102,7 @@ tables:
     tenantScoped: false
     tenantIdentityColumn: id
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       # The RLS key: this uuid is what the `tid` claim carries, what
       # applyDbSession puts in app.tenant_id, and therefore what every
@@ -86,6 +128,12 @@ tables:
       # half-provisioned tenant is representable rather than un-insertable.
       - { name: keycloak_organization_id, type: text }
       - { name: keycloak_realm, type: text }
+      # The tenant's civil clock, an IANA zone name. Anything that turns an
+      # instant into a calendar date that is identity — the fiscal year an
+      # invoice number belongs to, the issue date on it — asks this column,
+      # never the process clock or UTC: at half past midnight on 1 January in
+      # Amsterdam, a UTC date would still hand out last year's numbers.
+      - { name: time_zone, type: text, required: true, default: "'Europe/Amsterdam'" }
       - { name: created_at, type: timestamptz, required: true, default: now() }
       - { name: updated_at, type: timestamptz, required: true, default: now() }
       # The tenant's own organization Relation (auth/organization-relation.ts),
@@ -98,7 +146,17 @@ tables:
       # db/migrations/organization-relation-link.ts adds the permissive UPDATE
       # policy the generated registry policy (WITH CHECK app.bypass_rls() only)
       # would otherwise refuse.
-      - { name: relation_id, type: uuid, references: { schema: erp, table: relations, column: id, onDelete: SET NULL } }
+      - name: relation_id
+        type: uuid
+        references:
+          schema: erp
+          table: relations
+          column: id
+          onDelete: SET NULL
+          # The Relation must belong to this very tenant: the registry's own
+          # id is the tenant the referenced row is fenced by.
+          localColumns: [id, relation_id]
+          targetColumns: [tenant_id, id]
     indexes:
       - name: tenants_slug_uidx
         columns: [slug]
@@ -132,7 +190,7 @@ tables:
     name: entity_page_configs
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: text, primaryKey: true }
       - { name: entity_slug, type: text, required: true }
@@ -151,7 +209,7 @@ tables:
     name: entity_events
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     # A workflow collection-wait is satisfied by events, so the sweep that
     # resolves waits reads this table inside each wait's own tenant. workerDml
     # (a grant) and not workerAccess (a policy widening): the sweep never reads
@@ -189,7 +247,7 @@ tables:
     name: entity_edit_leases
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -222,7 +280,7 @@ tables:
     name: operation_confirmation_challenges
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -252,7 +310,7 @@ tables:
     name: org_unit
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -260,7 +318,15 @@ tables:
       # so a parent cannot be deleted while children reference it (the closure
       # trigger relies on reparent/remove-first — see
       # apps/api/src/db/migrations/core-invariants.ts).
-      - { name: parent_id, type: uuid, references: { schema: platform, table: org_unit, column: id, onDelete: RESTRICT } }
+      - name: parent_id
+        type: uuid
+        references:
+          schema: platform
+          table: org_unit
+          column: id
+          onDelete: RESTRICT
+          localColumns: [tenant_id, parent_id]
+          targetColumns: [tenant_id, id]
       - { name: name, type: text, required: true }
       # This unit's segment of the Keycloak Organization path: the SPI's
       # `organizationPath` (packages/keycloak-spi/.../OpenShapeForgeResource.java)
@@ -312,7 +378,7 @@ tables:
     name: org_unit_closure
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     # Every tenant-scoped session expands its groups through this table in
     # applyDbSession, before any policy applies — a worker's included. Without
     # the grant a worker's own tenant-scoped session fails at setup rather than
@@ -362,7 +428,7 @@ tables:
     name: connector_installations
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -399,11 +465,20 @@ tables:
     name: connector_secrets
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
-      - { name: installation_id, type: uuid, required: true, references: { schema: platform, table: connector_installations, column: id, onDelete: CASCADE } }
+      - name: installation_id
+        type: uuid
+        required: true
+        references:
+          schema: platform
+          table: connector_installations
+          column: id
+          onDelete: CASCADE
+          localColumns: [tenant_id, installation_id]
+          targetColumns: [tenant_id, id]
       - { name: field_key, type: text, required: true }
       - { name: ciphertext, type: text, required: true }
       - { name: key_id, type: text, required: true }
@@ -441,7 +516,7 @@ tables:
     name: api_key_integrations
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -475,17 +550,21 @@ tables:
   # an INSERT now and a DELETE after the grace window — a Keycloak client holds
   # exactly one secret, so key material lives here and not there.
   #
-  # tenantScoped: FALSE, deliberately, and this is the only table in this file
-  # that carries a tenant_id without an RLS policy over it. The authentication
-  # path resolves a credential BEFORE any tenant is known — `tenant_id` here is
-  # an OUTPUT of authentication, not an input to it, and `withDbSession`
-  # (correctly) refuses to open a session without a tenant and a user. The same
-  # reasoning makes platform.system_bypass_audit non-tenant-scoped.
+  # tenantScoped: FALSE, because the generated tenant policy would gate a read
+  # the authentication path has to make BEFORE any tenant is known —
+  # `tenant_id` here is an OUTPUT of authentication, not an input to it, and
+  # `withDbSession` (correctly) refuses to open a session without a tenant and
+  # a user. The table is nonetheless tenant-fenced: db/migrations/api-keys.ts
+  # enables and forces row-level security with the same predicate every other
+  # platform.* row gets, and provides `app.api_key_tenant(lookup_id)` — a point
+  # lookup answering ONE tenant for ONE lookup id — so the store can open an
+  # ordinary tenant-fenced session for the secret comparison and everything
+  # after it. Without that fence the runtime role's blanket DML made every
+  # tenant's key rows reachable from any raw-SQL path.
   #
-  # The management surface does not rely on that: every provisioning read joins
-  # through platform.api_key_integrations, whose tenant policy gates the whole
-  # join, and carries an explicit tenant_id predicate on top. What lives here is
-  # only what authentication needs — no display name, no actor, no audit trail
+  # The management surface joins through platform.api_key_integrations and
+  # carries an explicit tenant_id predicate on top. What lives here is only
+  # what authentication needs — no display name, no actor, no audit trail
   # beyond use timestamps.
   #
   # `secret_hash` is SHA-256 of the secret half; the plaintext is returned once
@@ -495,11 +574,22 @@ tables:
     name: api_keys
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
-      - { name: integration_id, type: uuid, required: true, references: { schema: platform, table: api_key_integrations, column: id, onDelete: CASCADE } }
+      # Bound to the tenant this credential authenticates into: a key can
+      # never resolve to another tenant's integration.
+      - name: integration_id
+        type: uuid
+        required: true
+        references:
+          schema: platform
+          table: api_key_integrations
+          column: id
+          onDelete: CASCADE
+          localColumns: [tenant_id, integration_id]
+          targetColumns: [tenant_id, id]
       # The public half of the credential, carried in the token itself and the
       # only column the authentication path searches on.
       - { name: lookup_id, type: text, required: true }
@@ -533,7 +623,7 @@ tables:
     name: connector_entitlements
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -563,7 +653,7 @@ tables:
     name: connector_oauth_states
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -606,7 +696,7 @@ tables:
     name: mcp_handoffs
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     rowScope:
       userColumns: [user_id]
     columns:
@@ -626,6 +716,60 @@ tables:
         columns: [token_hash]
         unique: true
       - name: mcp_handoffs_expires_idx
+        columns: [expires_at]
+
+  # Capability grants: the token behind a link that lets someone WITHOUT an
+  # account run a fixed set of Operations on one record — accept a document,
+  # sign it, answer a request. Only the SHA-256 of the secret half of the
+  # token is stored; the `<id>.<secret>` token is returned once by
+  # `platform.grants.issue`. Core resolves a presented token into a grant
+  # session before an `auth.mode: capability` Operation runs
+  # (operations/capability-grants.ts): the row is located by id, the secret
+  # is compared in constant time, and expiry, revocation, use count and the
+  # attempt lock are checked. A single-use grant is consumed in the handler's
+  # transaction, so a failed handler leaves it usable. `recipient` is opaque
+  # to core beyond its shape; `operations` holds canonical Operation keys.
+  - schema: platform
+    name: capability_grants
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: token_hash, type: text, required: true }
+      - { name: operations, type: "text[]", required: true }
+      - { name: subject_entity, type: text, required: true }
+      - { name: subject_id, type: uuid, required: true }
+      - { name: recipient, type: jsonb, required: true }
+      # Records beside the subject the issuer delegated to the recipient:
+      # [{ entity, id, intents: [get | update] }], verified against the
+      # issuer's own access when the grant was issued.
+      - { name: records, type: jsonb, required: true, default: "'[]'::jsonb" }
+      - { name: issued_by, type: uuid, required: true }
+      - { name: issued_at, type: timestamptz, required: true, default: now() }
+      - { name: expires_at, type: timestamptz, required: true }
+      # null = reusable until expiry; 1 = single use.
+      - { name: max_uses, type: integer }
+      - { name: uses, type: integer, required: true, default: "0" }
+      - { name: consumed_at, type: timestamptz }
+      - { name: revoked_at, type: timestamptz }
+      - { name: revoked_reason, type: text }
+      - { name: superseded_by, type: uuid }
+      # Attempt limiting: failures inside the current window count up; when
+      # they reach the limit the grant is locked until locked_until.
+      - { name: failed_attempts, type: integer, required: true, default: "0" }
+      - { name: window_started_at, type: timestamptz }
+      - { name: locked_until, type: timestamptz }
+    indexes:
+      - name: capability_grants_token_uidx
+        columns: [token_hash]
+        unique: true
+      - name: capability_grants_subject_idx
+        columns: [tenant_id, subject_entity, subject_id]
+      # Drives the housekeeping purge, which finds dead rows without scanning
+      # every tenant's history.
+      - name: capability_grants_expires_idx
         columns: [expires_at]
 
   # ---------------------------------------------------------------------------
@@ -660,16 +804,18 @@ tables:
   # error the finally block inserts a single row with succeeded = false.
   #
   # Not tenant-scoped: bypass sessions can span tenants by design, and every
-  # bypass must be recorded even when no app.tenant_id was set. No RLS policy
-  # either — the bypass session itself is the only writer. Retention is
-  # handled out of band: these rows are operationally sensitive and belong in
-  # a long-term store (SIEM / log pipeline), not aged out of the OLTP database.
+  # bypass must be recorded even when no app.tenant_id was set. Row-level
+  # security is owned by db/migrations/api-keys.ts: anyone may append, only
+  # the bypass session may read or complete a row, nothing deletes (the
+  # runtime role's DELETE is revoked in app-role.ts). Retention is handled
+  # out of band: these rows are operationally sensitive and belong in a
+  # long-term store (SIEM / log pipeline), not aged out of the OLTP database.
   # Add an explicit compliance review before changing that.
   - schema: platform
     name: system_bypass_audit
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: actor_subject, type: text, required: true }
@@ -697,7 +843,7 @@ tables:
     name: identities
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: issuer, type: text, required: true }
@@ -726,9 +872,9 @@ tables:
   # the acting session to BE the identity or to hold Organization.All.ReadWrite.
   #
   # needs_role_assignment is true only for a Relation the just-in-time path
-  # CREATED: while set, auth/identity.ts overrides the session's roles to a
-  # minimal working set because no admin API grant can reach that very first
-  # token. Cleared by set_member_role.
+  # CREATED whose invited role could not be recorded. Cleared by the shared
+  # identity-link-store.writeMembershipRoles writer, used by admission,
+  # control and Account.assignRole/revokeRole in accounts/account-management.ts.
   #
   # The onboarding_* columns are first-use onboarding state (mcp/onboarding.ts),
   # kept on this row because they have the same lifetime and owner — one
@@ -740,18 +886,44 @@ tables:
     name: identity_relations
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: identity_id, type: uuid, primaryKey: true, references: { schema: platform, table: identities, column: id, onDelete: CASCADE } }
       - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
-      - { name: relation_id, type: uuid, references: { schema: erp, table: relations, column: id, onDelete: CASCADE } }
+      - name: relation_id
+        type: uuid
+        references:
+          schema: erp
+          table: relations
+          column: id
+          onDelete: CASCADE
+          localColumns: [tenant_id, relation_id]
+          targetColumns: [tenant_id, id]
       - { name: status, type: text, required: true }
-      - { name: candidate_relation_id, type: uuid, references: { schema: erp, table: relations, column: id, onDelete: SET NULL } }
+      - name: candidate_relation_id
+        type: uuid
+        references:
+          schema: erp
+          table: relations
+          column: id
+          onDelete: SET NULL
+          localColumns: [tenant_id, candidate_relation_id]
+          targetColumns: [tenant_id, id]
       - { name: linked_at, type: timestamptz }
       # 'jit' for the just-in-time path, otherwise the platform.identities id
       # of whoever linked: the person (confirm_my_link) or an administrator.
       - { name: linked_by, type: text }
       - { name: needs_role_assignment, type: boolean, required: true, default: "false" }
+      - { name: access_blocked, type: boolean, required: true, default: "false" }
+      # The roles this identity holds IN THIS TENANT, and nowhere else: the
+      # organization-scoped grant an invitation or Account.assignRole records
+      # (auth/employee-invitations.ts, accounts/account-management.ts) and that
+      # auth/identity.ts unions onto the session for the selected tenant. A
+      # Keycloak user-wide client role would be visible in every organization
+      # the same account is a member of; this column is what replaced that.
+      # Only a session holding Organization.All.ReadWrite (or the audited
+      # bypass) may change it — trigger in db/migrations/identity-link.ts.
+      - { name: roles, type: "text[]", required: true, default: "'{}'" }
       - { name: created_at, type: timestamptz, required: true, default: now() }
       - { name: updated_at, type: timestamptz, required: true, default: now() }
       - { name: onboarding_completed_at, type: timestamptz }
@@ -784,15 +956,67 @@ tables:
   # Organization.All.ReadWrite. `invited_by` carries the same shape as
   # identity_relations.linked_by.
   - schema: platform
-    name: employee_invitations
+    name: relation_group_roles
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
-      - { name: email, type: text, required: true }
+      - name: relation_group_id
+        type: uuid
+        required: true
+        references:
+          schema: erp
+          table: relation_groups
+          column: id
+          onDelete: CASCADE
+          localColumns: [tenant_id, relation_group_id]
+          targetColumns: [tenant_id, id]
       - { name: role, type: text, required: true }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+    indexes:
+      - name: relation_group_roles_unique
+        columns: [tenant_id, relation_group_id, role]
+        unique: true
+
+  - schema: platform
+    name: organization_access_roles
+    tenantScoped: false
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: label, type: text, required: true }
+      - { name: permissions, type: "text[]", required: true, default: "'{}'::text[]" }
+      - { name: version, type: integer, required: true, default: "1" }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+    indexes:
+      - { name: organization_access_roles_label, columns: [tenant_id, label], unique: true }
+
+  - schema: platform
+    name: organization_access_seed
+    tenantScoped: false
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+
+  - schema: platform
+    name: employee_invitations
+    tenantScoped: false
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: relation_id, type: uuid }
+      - { name: email, type: text, required: true }
+      - { name: role, type: text }
       - { name: first_name, type: text }
       - { name: last_name, type: text }
       - { name: status, type: text, required: true, default: "'pending'::text" }
@@ -819,7 +1043,7 @@ tables:
     name: update_notices
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: key, type: text, primaryKey: true }
       - { name: title, type: text, required: true }
@@ -854,7 +1078,7 @@ tables:
     name: user_update_notices
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
       # The signed-in subject, as app.current_user_id() reports it.
@@ -869,6 +1093,72 @@ tables:
       # is made elsewhere; this table has no write path into an instruction.
       - { name: instruction_decisions, type: jsonb, required: true, default: "'[]'::jsonb" }
 
+  # Durable background jobs — the core outbox. A handler enqueues a job in
+  # the same transaction as its domain write; the `job-worker` role claims
+  # queued rows across every tenant (workerAccess, the same axis as the
+  # workflow queue) and runs each one under that job's own tenant session.
+  #
+  # `status` is queued | running | done | failed | dead | outcome_unknown.
+  # `outcome_unknown` is what a job ends in when an external effect MAY have
+  # happened (an SMTP DATA that timed out): terminal until an operator
+  # resolves it, never retried on its own — the same stance the execution
+  # receipts take for keyed Operations. `delivery_key` makes enqueueing
+  # idempotent per tenant and kind; only a SHA-256 of the one-time claim
+  # token is stored. The state-shape checks live in db/migrations/jobs.ts.
+  - schema: platform
+    name: jobs
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    workerAccess: job-worker
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: kind, type: text, required: true }
+      # The verified user who enqueued the job. The worker runs the handler
+      # under a tenant session for this user, so every row the handler touches
+      # is fenced as if that person had written it.
+      - { name: actor_id, type: uuid, required: true }
+      # The rest of that person's effective session at enqueue — roles,
+      # org-unit groups, RelationGroup memberships and scope — replayed when
+      # the job runs, so the handler reaches exactly what the enqueuing
+      # request could and nothing a later role change would add or remove.
+      - { name: actor_session, type: jsonb, required: true, default: "'{}'::jsonb" }
+      # Monotonic insertion order; the `jobs.list` cursor. `created_at` is
+      # not one: rows of one transaction share it, and a cursor on it skips
+      # the ones after the page boundary.
+      - { name: sequence, type: bigint, required: true, generated: identity }
+      - { name: payload, type: jsonb, required: true, default: "'{}'::jsonb" }
+      - { name: delivery_key, type: text }
+      - { name: status, type: text, required: true, default: "'queued'" }
+      - { name: attempts, type: integer, required: true, default: "0" }
+      - { name: max_attempts, type: integer, required: true, default: "5" }
+      - { name: available_at, type: timestamptz, required: true, default: now() }
+      - { name: lease_until, type: timestamptz }
+      - { name: claim_token_hash, type: text }
+      - { name: last_error, type: jsonb }
+      - { name: result, type: jsonb }
+      - { name: subject_entity, type: text }
+      - { name: subject_id, type: uuid }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+      - { name: completed_at, type: timestamptz }
+    indexes:
+      - name: jobs_delivery_key_uidx
+        columns: [tenant_id, kind, delivery_key]
+        unique: true
+        where: delivery_key IS NOT NULL
+      - name: jobs_poll_idx
+        columns: [status, available_at]
+      - name: jobs_subject_idx
+        columns: [tenant_id, subject_entity, subject_id]
+        where: subject_id IS NOT NULL
+      - name: jobs_tenant_sequence_idx
+        columns: [tenant_id, sequence]
+      - name: jobs_completed_idx
+        columns: [status, completed_at]
+        where: completed_at IS NOT NULL
+
   # Durable receipts for canonical keyed Operation execution — the actor-
   # scoped idempotency ledger. The raw key and request are deliberately
   # absent: only namespaced hashes are retained. A caller can only see or
@@ -881,7 +1171,7 @@ tables:
     name: operation_execution_receipts
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
       - { name: actor_id, type: uuid, primaryKey: true }
@@ -911,7 +1201,7 @@ tables:
     name: blueprint_libraries
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
       - { name: blueprint_tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id } }
@@ -925,7 +1215,7 @@ tables:
     name: blueprint_versions
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id } }
       - { name: entity_name, type: text, primaryKey: true }
@@ -938,14 +1228,15 @@ tables:
       - { name: created_at, type: timestamptz, required: true, default: now() }
 
   # blueprint_copies: provenance of a record a tenant created from a
-  # blueprint — which version, from which blueprint tenant. The composite
+  # blueprint — which version, from which blueprint tenant. The four-column
   # reference into blueprint_versions and the two-tenants-differ check are
-  # in blueprints.ts; the manifest expresses single-column references only.
+  # in blueprints.ts: the manifest's column references pair a column with a
+  # tenant, and this key spans three business columns beside the tenant.
   - schema: platform
     name: blueprint_copies
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
       - { name: entity_name, type: text, primaryKey: true }

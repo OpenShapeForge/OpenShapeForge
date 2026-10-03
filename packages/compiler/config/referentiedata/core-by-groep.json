@@ -449,29 +449,6 @@
       }
     }
   ],
-  "PREFERENCEOWNERSCOPE": [
-    {
-      "value": "account",
-      "label": {
-        "nl": "Account",
-        "en": "Account"
-      }
-    },
-    {
-      "value": "relation",
-      "label": {
-        "nl": "Relatie",
-        "en": "Relation"
-      }
-    },
-    {
-      "value": "tenant",
-      "label": {
-        "nl": "Tenant",
-        "en": "Tenant"
-      }
-    }
-  ],
   "NOTIFICATIETEMPLATESTATUS": [
     {
       "value": "draft",
@@ -1861,13 +1838,6 @@
         "nl": "Taak",
         "en": "Task"
       }
-    },
-    {
-      "value": "workflow",
-      "label": {
-        "nl": "Workflow",
-        "en": "Workflow"
-      }
     }
   ],
   "CASESTEPACTIONSTARTMODE": [
@@ -2137,6 +2107,13 @@
       "label": {
         "nl": "Definitief",
         "en": "Final"
+      }
+    },
+    {
+      "value": "published",
+      "label": {
+        "nl": "Gepubliceerd",
+        "en": "Published"
       }
     },
     {
@@ -2604,36 +2581,6 @@
       "label": {
         "nl": "Mijlpaal",
         "en": "Milestone"
-      }
-    }
-  ],
-  "AGREEMENTMILESTONESTATUS": [
-    {
-      "value": "pending",
-      "label": {
-        "nl": "In afwachting",
-        "en": "Pending"
-      }
-    },
-    {
-      "value": "triggered",
-      "label": {
-        "nl": "Getriggerd",
-        "en": "Triggered"
-      }
-    },
-    {
-      "value": "invoiced",
-      "label": {
-        "nl": "Gefactureerd",
-        "en": "Invoiced"
-      }
-    },
-    {
-      "value": "cancelled",
-      "label": {
-        "nl": "Geannuleerd",
-        "en": "Cancelled"
       }
     }
   ],

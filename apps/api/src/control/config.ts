@@ -85,7 +85,7 @@ export type ControlPlaneEnv = {
   /**
    * The runtime's own public origin, e.g. `https://api.example.com`. Required:
    * it is the first audience every per-organization MCP scope carries
-   * (`<origin>/api/mcp/organizations/<alias>`), and a scope with no audience
+   * (`<origin>/<alias>`), and a scope with no audience
    * would let provisioning "succeed" while every token for the resource is
    * refused. The same variable the MCP server reads for its callback URL, so
    * one deployment has one answer to "where am I served".

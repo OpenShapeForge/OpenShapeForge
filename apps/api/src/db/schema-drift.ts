@@ -12,19 +12,15 @@
  * platform.schema_migrations is not tenant-scoped and has no RLS, so a plain
  * query works without session GUCs.
  *
- * A differing checksum on its own does not say WHICH WAY the two have parted,
- * and the two directions have opposite remedies. `findUndeclaredDatabaseSchema`
- * and `describeGeneratedSchemaDrift` answer that second question so callers can
- * print a remediation that works: see the comment on
- * `describeGeneratedSchemaDrift`.
+ * A differing checksum on its own does not say whether the database is
+ * empty, built from another manifest, or another branch's altogether, and
+ * each has its own next command. `findUndeclaredDatabaseSchema` and
+ * `describeGeneratedSchemaDrift` answer that so callers can print a
+ * remediation that works: see the comment on `describeGeneratedSchemaDrift`.
  */
 import manifest from "../generated/db/manifest.json" with { type: "json" };
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "./connection.js";
-import {
-  isNonManifestManagedColumn,
-  nonManifestManagedTables,
-} from "./migrations/generated-schema.js";
 
 /** Version key of the generated-schema row in platform.schema_migrations. */
 export const GENERATED_SCHEMA_MIGRATION_VERSION = "0001_generated_platform_schema";
@@ -104,8 +100,7 @@ export async function checkGeneratedSchemaDrift(
 
 /**
  * Schema objects that exist in the connected database but that this branch's
- * manifest or a dedicated runtime migration does not declare. Both lists are
- * qualified and sorted.
+ * manifest does not declare. Both lists are qualified and sorted.
  */
 export type UndeclaredDatabaseSchema = {
   /** e.g. "platform.api_keys". */
@@ -124,27 +119,51 @@ export type UndeclaredSchemaManifestTable = {
 /**
  * Find schema the database has and this branch does not declare.
  *
- * This is the direction the checksum comparison cannot tell you and the one
- * that decides whether `bun run db:migrate` is worth running at all. The
- * migrator rolls a database FORWARD: it adds what the manifest declares and
- * the database lacks. It has no way to remove a table or a column, so when the
- * database is *ahead* — a shared database that another worktree migrated
- * against a branch declaring more entities than this one — migrate refuses,
- * correctly, and rerunning it will keep refusing.
+ * The checksum says the database and the code differ; this says which way.
+ * Both directions end in `db:reset`, but a database carrying schema this
+ * branch never declared is a *shared* database another worktree built, and
+ * the honest remedy there is a scratch database rather than destroying what
+ * the other branch is using.
  *
  * Only schemas the manifest covers are examined, so unrelated schemas on the
- * same database are never mistaken for drift. Dedicated runtime-migration
- * tables and plugin-migration-owned columns are exempt for the same reason the
- * migrator exempts them: they are declared outside the generated manifest.
+ * same database are never mistaken for drift. Within those schemas there is
+ * no exemption list: every table and every column is manifest-declared, so
+ * anything else is foreign.
  *
  * Two catalog queries, no row probes; safe to run as the restricted runtime
  * role. A missing schema is not an error here — information_schema simply
  * returns nothing.
  *
  * `declaredTables` defaults to the bundled manifest; it is a parameter so
- * tests can exercise the classification against a purpose-built schema (as
- * diffManifestAgainstDatabase allows). Production callers never pass it.
+ * tests can exercise the classification against a purpose-built schema.
+ * Production callers never pass it.
  */
+/**
+ * Every base table in a manifest-covered schema, declared or not, sorted.
+ * "Empty" for the build path means this list is empty: a declared table
+ * without a generated-schema row is a leftover of a build the chain cannot
+ * vouch for, and `CREATE IF NOT EXISTS` over it would stamp a checksum onto
+ * a database nobody has verified.
+ */
+export async function findLiveManifestSchemaTables(
+  db: OpenShapeForgeDatabase,
+  declaredTables: readonly UndeclaredSchemaManifestTable[] = manifest.tables as
+    UndeclaredSchemaManifestTable[],
+): Promise<string[]> {
+  const schemas = [...new Set(declaredTables.map((table) => table.schema))];
+  if (schemas.length === 0) return [];
+  const rows = (
+    await sql<{ table_schema: string; table_name: string }>`
+      select table_schema, table_name
+      from information_schema.tables
+      where table_type = 'BASE TABLE'
+        and table_schema in (${sql.join(schemas)})
+      order by table_schema, table_name
+    `.execute(db)
+  ).rows;
+  return rows.map((row) => `${row.table_schema}.${row.table_name}`);
+}
+
 export async function findUndeclaredDatabaseSchema(
   db: OpenShapeForgeDatabase,
   declaredTables: readonly UndeclaredSchemaManifestTable[] = manifest.tables as
@@ -185,7 +204,7 @@ export async function findUndeclaredDatabaseSchema(
   const tables: string[] = [];
   for (const row of liveTables) {
     const name = `${row.table_schema}.${row.table_name}`;
-    if (!declaredColumnsByTable.has(name) && !nonManifestManagedTables.has(name)) {
+    if (!declaredColumnsByTable.has(name)) {
       tables.push(name);
     }
   }
@@ -198,10 +217,7 @@ export async function findUndeclaredDatabaseSchema(
     if (declared === undefined) {
       continue;
     }
-    if (
-      !declared.has(row.column_name) &&
-      !isNonManifestManagedColumn(name, row.column_name)
-    ) {
+    if (!declared.has(row.column_name)) {
       columns.push(`${name}.${row.column_name}`);
     }
   }
@@ -210,12 +226,16 @@ export async function findUndeclaredDatabaseSchema(
 }
 
 /**
- * - "migrate": the database is behind the manifest and nothing in it is
- *   foreign to this branch. Rolling forward is the fix.
+ * - "migrate": the database is empty; `db:migrate` builds it.
+ * - "reset": the database was built from another manifest, or has tables
+ *   but no generated-schema record, and nothing in it is foreign to this
+ *   branch. A built database is never changed in place, so `db:reset` (or
+ *   a scratch database) is the fix.
  * - "foreign-schema": the database carries schema this branch does not
- *   declare. Rolling forward cannot remove it, so migrate is a no-op at best.
+ *   declare — a shared database another worktree built. The same reset, but
+ *   the honest suggestion is a scratch database.
  */
-export type SchemaDriftRemediationKind = "migrate" | "foreign-schema";
+export type SchemaDriftRemediationKind = "migrate" | "reset" | "foreign-schema";
 
 export type SchemaDriftRemediation = {
   kind: SchemaDriftRemediationKind;
@@ -247,6 +267,9 @@ function listUndeclared(noun: "table" | "column", names: string[]): string[] {
  * being exercised for real), so the two URLs are carried separately rather
  * than one being reused for both.
  */
+const RESET_RECIPE =
+  '  OPENSHAPEFORGE_RESET_DATABASE_CONFIRMATION="${DATABASE_URL##*/}" bun run db:reset';
+
 const SCRATCH_DATABASE_RECIPE = [
   '  ADMIN="${OPENSHAPEFORGE_MIGRATE_DATABASE_URL:-$DATABASE_URL}"',
   "  psql \"${ADMIN%/*}/postgres\" -c 'create database openshapeforge_e2e'",
@@ -257,20 +280,28 @@ const SCRATCH_DATABASE_RECIPE = [
 /**
  * Turn a drift result plus the undeclared-schema probe into the remediation to
  * print. Pure: the branching lives here, separate from the queries, so the
- * choice between "run db:migrate" and "this database belongs to another
- * branch" is testable without arranging a real drifted database.
+ * choice between "build it", "rebuild it" and "this database belongs to
+ * another branch" is testable without arranging a real drifted database.
  *
- * The rule is one question — does the database contain schema this branch does
- * not declare? If yes, migrate cannot help however many times it is run, and
- * saying "run db:migrate" sends the reader down a road with no end. If no, the
- * database is genuinely behind and migrate is the fix. (Migrate can still
- * refuse for a *declared* object whose type, nullability or default differs;
- * it prints that difference exactly, so pointing at it stays honest.)
+ * Two questions. Does the database contain schema this branch does not
+ * declare? Then it is someone else's build and a scratch database is the
+ * remedy that leaves them alone. Otherwise: is there a build at all? An empty
+ * database is built by `db:migrate`; a built one whose checksum differs is
+ * rebuilt by `db:reset`, because nothing rolls a built database forward.
  */
 export function describeGeneratedSchemaDrift(
   drift: GeneratedSchemaDriftResult,
   undeclared: UndeclaredDatabaseSchema,
-  options: { databaseName?: string | null } = {},
+  options: {
+    databaseName?: string | null;
+    /**
+     * Every live table in a manifest-covered schema
+     * (`findLiveManifestSchemaTables`), for an "unmigrated" database: with
+     * any present, the chain refuses to build rather than adopt them, so the
+     * remedy is a reset, not `db:migrate`.
+     */
+    liveTables?: readonly string[];
+  } = {},
 ): SchemaDriftRemediation {
   const database =
     options.databaseName === undefined || options.databaseName === null
@@ -293,38 +324,73 @@ export function describeGeneratedSchemaDrift(
         ...listUndeclared("table", undeclared.tables),
         ...listUndeclared("column", undeclared.columns),
         "",
-        "`bun run db:migrate` cannot fix this and will refuse: dropping a table or",
-        "column is non-additive. This is what a database shared between git worktrees",
+        "`bun run db:migrate` cannot fix this and refuses it whatever the checksum",
+        "says: nothing is dropped or altered in place. This is what a database shared between git worktrees",
         "looks like once another branch — one that declares more than this one — has",
-        "migrated it. It is not a regression in the branch under test.",
+        "built it. It is not a regression in the branch under test.",
         "",
         "Run the suite against a scratch database (reuses the connection strings you",
         "already have, without echoing them here):",
         ...SCRATCH_DATABASE_RECIPE,
         "",
         "Or rebuild the shared database from this branch's manifest, destroying its",
-        "data — and only until the next worktree migrates it:",
-        '  OPENSHAPEFORGE_RESET_DATABASE_CONFIRMATION="${DATABASE_URL##*/}" bun run db:reset',
+        "data — and only until the next worktree rebuilds it:",
+        RESET_RECIPE,
       ].join("\n"),
     };
   }
 
-  const diagnosis =
-    drift.status === "unmigrated"
-      ? `${database} has no recorded generated-schema migration.`
-      : `${database} is behind the bundled manifest.`;
+  const leftovers = options.liveTables ?? [];
+  if (drift.status === "unmigrated" && leftovers.length > 0) {
+    return {
+      kind: "reset",
+      message: [
+        `Generated schema drift detected (status: "${drift.status}"): ${database} has no recorded generated-schema migration but is not empty.`,
+        ...checksums,
+        "",
+        "Tables already present in a manifest-covered schema:",
+        ...listUndeclared("table", [...leftovers]),
+        "",
+        "`bun run db:migrate` builds an empty database only and refuses this one:",
+        "adopting these tables would stamp the checksum onto a build nobody verified.",
+        "Rebuild it from this branch's manifest, destroying its data:",
+        RESET_RECIPE,
+        "",
+        "Or leave the shared database alone entirely and run against a scratch one:",
+        ...SCRATCH_DATABASE_RECIPE,
+      ].join("\n"),
+    };
+  }
+
+  if (drift.status === "unmigrated") {
+    return {
+      kind: "migrate",
+      message: [
+        `Generated schema drift detected (status: "${drift.status}"): ${database} has no recorded generated-schema migration.`,
+        ...checksums,
+        "",
+        "Nothing in the database is outside this branch's manifest, so building it",
+        "is the fix:",
+        "  bun run db:migrate",
+        "",
+        "To leave the shared database alone entirely, run against a scratch one:",
+        ...SCRATCH_DATABASE_RECIPE,
+      ].join("\n"),
+    };
+  }
+
   return {
-    kind: "migrate",
+    kind: "reset",
     message: [
-      `Generated schema drift detected (status: "${drift.status}"): ${diagnosis}`,
+      `Generated schema drift detected (status: "${drift.status}"): ${database} was built from another manifest.`,
       ...checksums,
       "",
-      "Nothing in the database is outside this branch's manifest, so rolling it",
-      "forward is the fix:",
-      "  bun run db:migrate",
+      "A built database is never changed in place — `bun run db:migrate` refuses a",
+      "checksum mismatch — so rebuild it from this branch's manifest, destroying",
+      "its data:",
+      RESET_RECIPE,
       "",
-      "If db:migrate then refuses, it names the exact non-additive difference. To",
-      "leave the shared database alone entirely, run against a scratch one:",
+      "Or leave the shared database alone entirely and run against a scratch one:",
       ...SCRATCH_DATABASE_RECIPE,
     ].join("\n"),
   };

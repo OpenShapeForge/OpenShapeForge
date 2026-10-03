@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
+import {
+  assertCanonicalStoredFieldDefinition,
+  storedFieldDefinitionBaseType,
+} from "@/lib/field-contract/stored-field-definition";
 import type { Field as CompilerField } from "../../../../../generated/compiler/field-contract";
 import { isFieldCardinalityCollection } from "../../../edit/controls/complex/field-schema-editor/utils";
 import { translateRendererText } from "../../../runtime/field-utils";
@@ -53,13 +57,13 @@ export function getFieldVariableSuggestions(
     }
     // Consumer semantic types (variableTemplate, condition) are containers of
     // variables, not typed slots — any suggestion can be dropped in as a
-    // placeholder. Inferring a semanticType filter from the field's own type
+    // placeholder. Inferring a osfType filter from the field's own type
     // would incorrectly filter the pool to zero. Only apply the inferred
     // filter when the field is a typed consumer; an explicit
     // `suggestions.filter` still wins so authors can narrow when they need to.
     const isConsumerField =
-      field.semanticType === "variableTemplate" ||
-      field.semanticType === "condition";
+      field.osfType === "variableTemplate" ||
+      field.osfType === "condition";
     // `filter` is an optional authoring narrowing that the compiled
     // `FieldSuggestions` contract in this repo does not model, so it is read
     // structurally: authored narrowing still wins where a catalog provides it,
@@ -141,6 +145,7 @@ export function variableSuggestionFromFieldDefinitionRow(
   if (!row || row.kind !== "variable" || typeof row.source !== "string") {
     return null;
   }
+  assertCanonicalStoredFieldDefinition(row, "Stored variable FieldDefinition");
   const label =
     translateRendererText(
       row.label as CompilerField["label"] | undefined,
@@ -150,6 +155,7 @@ export function variableSuggestionFromFieldDefinitionRow(
     return null;
   }
   const source = row.source.trim();
+  const baseType = storedFieldDefinitionBaseType(row);
   return {
     path: source.replace(/^\{\{\s*([^{}]+?)\s*\}\}$/, "$1"),
     displayPath: source,
@@ -160,19 +166,16 @@ export function variableSuggestionFromFieldDefinitionRow(
     sourceNodeLabel: "Opgeslagen variabele",
     valueType: isFieldCardinalityCollection(row.cardinality)
       ? "array"
-      : row.valueType === "number" || row.valueType === "integer"
+      : baseType === "number" || baseType === "integer"
         ? "number"
-        : row.valueType === "boolean"
+        : baseType === "boolean"
           ? "boolean"
-          : row.valueType === "object"
+          : baseType === "object"
             ? "object"
             : "string",
-    fieldType:
-      typeof row.valueType === "string"
-        ? (row.valueType as VariableSuggestion["fieldType"])
-        : "string",
-    ...(typeof row.semanticType === "string"
-      ? { semanticType: row.semanticType }
+    fieldType: baseType,
+    ...(typeof row.osfType === "string"
+      ? { osfType: row.osfType }
       : {}),
   };
 }

@@ -1,0 +1,134 @@
+schemaVersion: 1
+kind: operationCatalog
+plugin: accounts
+operations:
+  listGroupRoles:
+    id: accounts.list-group-roles
+    name: { en: List group roles, nl: Groepsrollen tonen }
+    description: { en: List group roles within the current organization., nl: Groepsrollen tonen binnen de huidige organisatie. }
+    implementation: { type: plugin, plugin: accounts, handler: listGroupRoles }
+    input: { schema: { type: object, additionalProperties: false, required: [ relationGroupId ], properties: { relationGroupId: { type: string, x-osf-i18n: { title: { en: Group, nl: Groep } }, format: uuid } } } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [ assignments ]
+        properties:
+          assignments:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [ id, relationGroupId, roleKey, roleLabel ]
+              properties:
+                id: { type: string, x-osf-i18n: { title: { en: Assignment, nl: Toekenning } }, format: uuid }
+                relationGroupId: { type: string, x-osf-i18n: { title: { en: Group, nl: Groep } }, format: uuid }
+                roleKey:
+                  type: string
+                  x-osf-i18n: { title: { en: Role, nl: Rol }, enum: { org_employee: { en: Employee, nl: Medewerker }, financien: { en: Finance, nl: Financiën }, verkoper: { en: Seller, nl: Verkoper }, goedkeurder: { en: Approver, nl: Goedkeurder }, org_admin: { en: Administrator, nl: Beheerder } } }
+                  enum: [ org_employee, financien, verkoper, goedkeurder, org_admin ]
+                roleLabel: { type: string, x-osf-i18n: { title: { en: Role, nl: Rol } } }
+            x-osf-i18n: { title: { en: Role assignments, nl: Roltoekenningen } }
+    auth: { mode: session, roles: [ Organization.Access.Manage ] }
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors:
+      - { status: 401, code: UNAUTHENTICATED, description: Sign in first. }
+      - { status: 403, code: FORBIDDEN, description: Organization administrator required. }
+      - { status: 404, code: NOT_FOUND, description: The target is not available in this organization. }
+      - { status: 409, code: CONFLICT, description: The assignment conflicts with the current organization state. }
+  getGroupRole:
+    id: accounts.get-group-role
+    name: { en: View, nl: Bekijken }
+    description: { en: List group roles within the current organization., nl: Groepsrollen tonen binnen de huidige organisatie. }
+    implementation: { type: plugin, plugin: accounts, handler: getGroupRole }
+    input: { schema: { type: object, additionalProperties: false, required: [ id, relationGroupId ], properties: { id: { type: string, x-osf-i18n: { title: { en: Id, nl: Id } } }, relationGroupId: { type: string, format: uuid, x-osf-i18n: { title: { en: Relation group, nl: Relatiegroep } } } } } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [ id, relationGroupId, roleKey, roleLabel ]
+        properties:
+          id: { type: string, x-osf-i18n: { title: { en: Assignment, nl: Toekenning } }, format: uuid }
+          relationGroupId: { type: string, x-osf-i18n: { title: { en: Group, nl: Groep } }, format: uuid }
+          roleKey:
+            type: string
+            x-osf-i18n: { title: { en: Role, nl: Rol }, enum: { org_employee: { en: Employee, nl: Medewerker }, financien: { en: Finance, nl: Financiën }, verkoper: { en: Seller, nl: Verkoper }, goedkeurder: { en: Approver, nl: Goedkeurder }, org_admin: { en: Administrator, nl: Beheerder } } }
+            enum: [ org_employee, financien, verkoper, goedkeurder, org_admin ]
+          roleLabel: { type: string, x-osf-i18n: { title: { en: Role, nl: Rol } } }
+    auth: { mode: session, roles: [ Organization.Access.Manage ] }
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors:
+      - { status: 401, code: UNAUTHENTICATED, description: Sign in first. }
+      - { status: 403, code: FORBIDDEN, description: Organization administrator required. }
+      - { status: 404, code: NOT_FOUND, description: The target is not available in this organization. }
+      - { status: 409, code: CONFLICT, description: The assignment conflicts with the current organization state. }
+  assignGroupRole:
+    id: accounts.assign-group-role
+    name: { en: Assign role, nl: Rol toekennen }
+    description: { en: Assign role within the current organization., nl: Rol toekennen binnen de huidige organisatie. }
+    implementation: { type: plugin, plugin: accounts, handler: assignGroupRole }
+    input: { schema: { type: object, additionalProperties: false, required: [ relationGroupId, roleKey ], properties: { relationGroupId: { type: string, x-osf-i18n: { title: { en: Group, nl: Groep } }, format: uuid }, roleKey: { type: string, x-osf-i18n: { title: { en: Role, nl: Rol } }, x-osf-reference: { entity: AccessRole, valueField: key } } } } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [ id, relationGroupId, roleKey, roleLabel ]
+        properties:
+          id: { type: string, x-osf-i18n: { title: { en: Assignment, nl: Toekenning } }, format: uuid }
+          relationGroupId: { type: string, x-osf-i18n: { title: { en: Group, nl: Groep } }, format: uuid }
+          roleKey:
+            type: string
+            x-osf-i18n: { title: { en: Role, nl: Rol }, enum: { org_employee: { en: Employee, nl: Medewerker }, financien: { en: Finance, nl: Financiën }, verkoper: { en: Seller, nl: Verkoper }, goedkeurder: { en: Approver, nl: Goedkeurder }, org_admin: { en: Administrator, nl: Beheerder } } }
+            enum: [ org_employee, financien, verkoper, goedkeurder, org_admin ]
+          roleLabel: { type: string, x-osf-i18n: { title: { en: Role, nl: Rol } } }
+    auth: { mode: session, roles: [ Organization.Access.Manage ] }
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors:
+      - { status: 401, code: UNAUTHENTICATED, description: Sign in first. }
+      - { status: 403, code: FORBIDDEN, description: Organization administrator required. }
+      - { status: 404, code: NOT_FOUND, description: The target is not available in this organization. }
+      - { status: 409, code: CONFLICT, description: The assignment conflicts with the current organization state. }
+  revokeGroupRole:
+    id: accounts.revoke-group-role
+    name: { en: Remove role, nl: Rol verwijderen }
+    description: { en: Remove role within the current organization., nl: Rol verwijderen binnen de huidige organisatie. }
+    implementation: { type: plugin, plugin: accounts, handler: revokeGroupRole }
+    input: { schema: { type: object, additionalProperties: false, required: [ id, relationGroupId ], properties: { id: { type: string, x-osf-i18n: { title: { en: Assignment, nl: Toekenning } }, format: uuid }, relationGroupId: { type: string, x-osf-i18n: { title: { en: Group, nl: Groep } }, format: uuid } } } }
+    output: { schema: { type: object, additionalProperties: false, required: [ removed ], properties: { removed: { type: boolean, x-osf-i18n: { title: { en: Removed, nl: Verwijderd } } } } } }
+    auth: { mode: session, roles: [ Organization.Access.Manage ] }
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors:
+      - { status: 401, code: UNAUTHENTICATED, description: Sign in first. }
+      - { status: 403, code: FORBIDDEN, description: Organization administrator required. }
+      - { status: 404, code: NOT_FOUND, description: The target is not available in this organization. }
+      - { status: 409, code: CONFLICT, description: The assignment conflicts with the current organization state. }
+interfaces:
+  rest:
+    operations:
+      listGroupRoles: { method: POST, path: /api/accounts/list-group-roles, response: { status: 200, kind: json } }
+      getGroupRole: { method: POST, path: /api/accounts/get-group-role, response: { status: 200, kind: json } }
+      assignGroupRole: { method: POST, path: /api/accounts/assign-group-role, response: { status: 200, kind: json } }
+      revokeGroupRole: { method: POST, path: /api/accounts/revoke-group-role, response: { status: 200, kind: json } }
+  web:
+    entities:
+      GroupRoleAssignment:
+        title: { en: Group roles, nl: Groepsrollen }
+        route: /relation-groups/:relationGroupId/roles
+        idField: id
+        displayField: roleLabel
+        fields: [ id, relationGroupId, roleKey, roleLabel ]
+        columns: [ roleLabel ]
+        operations: { list: { operation: listGroupRoles, resultField: assignments, bindings: { relationGroupId: relationGroupId } }, create: { operation: assignGroupRole, bindings: { relationGroupId: relationGroupId } }, recordActions: [ revokeGroupRole ], get: { operation: getGroupRole, bindings: { id: id, relationGroupId: relationGroupId } } }
+        recordRoute: /relation-groups/:relationGroupId/roles/:id

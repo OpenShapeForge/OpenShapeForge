@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * `bun run db:migrate` — build or roll forward the connected database from
- * the compiled manifest. On an empty database this is the bootstrap the API
- * performs on first start (db/bootstrap.ts); on a built one it re-applies the
- * invariants, rolls an additive manifest change forward, and re-runs the
- * seeds. Non-additive drift is refused: the reset model settles that with
- * `bun run db:reset`, not with a hand-written migration.
+ * `bun run db:migrate` — build the connected database from the compiled
+ * manifest. On an empty database this is the bootstrap the API performs on
+ * first start (db/bootstrap.ts); on a built one whose checksum matches it
+ * re-applies the invariants and re-runs the seeds. A built database whose
+ * checksum differs is refused: the reset model settles that with
+ * `bun run db:reset`, never with an in-place change.
  */
 import { createDatabaseRuntime, readMigrateDatabaseUrl } from "./connection.js";
 import { loadRuntimeModules } from "../modules/registry.js";

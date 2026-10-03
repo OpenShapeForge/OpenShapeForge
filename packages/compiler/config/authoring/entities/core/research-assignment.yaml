@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ResearchAssignment
@@ -10,6 +10,9 @@ filterField: title
 labels:
   en: Research Assignment
   nl: Onderzoeksopdracht
+pluralLabels:
+  en: Research assignments
+  nl: Onderzoeksopdrachten
 domains:
   - quality
 retention:
@@ -37,7 +40,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -52,7 +55,7 @@ fields:
       column: code
       storageClass: core
   - key: title
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Title
@@ -66,7 +69,6 @@ fields:
       column: title
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -79,13 +81,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    osfType: multilineText
   - key: assignmentKind
-    valueType: string
     required: false
     label:
       en: Kind
@@ -96,13 +93,11 @@ fields:
     persisted:
       column: assignment_kind
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: RESEARCHASSIGNMENTKIND
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: RESEARCHASSIGNMENTKIND
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -113,13 +108,11 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: RESEARCHSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: RESEARCHSTATUS
+    osfType: referenceDataCode
   - key: channel
-    valueType: string
     required: false
     label:
       en: Channel
@@ -130,15 +123,15 @@ fields:
     persisted:
       column: channel
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: COMMUNICATIONCHANNEL
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: COMMUNICATIONCHANNEL
+    osfType: referenceDataCode
   - key: completedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     readOnly: true
+    writeSource: caller
     label:
       en: Completed at
       nl: Afgerond op
@@ -148,11 +141,8 @@ fields:
     persisted:
       column: completed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -165,41 +155,137 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: survey
-    kind: belongsTo
-    target: Survey
-    foreignKey: survey_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    osfType: Relation
+    relationship:
+      ownership: reference
+  - key: surveyId
     label:
       en: Survey
       nl: Vragenlijst
-  - key: researchResult
-    kind: belongsTo
-    target: ResearchResult
-    foreignKey: research_result_id
+    persisted:
+      column: survey_id
+      storageClass: core
+    osfType: Survey
+    relationship:
+      ownership: reference
+  - key: researchResultId
     label:
       en: Research result
       nl: Onderzoeksresultaat
-  - key: measurementRequests
-    kind: hasMany
-    target: QualityMeasurementRequest
-    foreignKey: research_assignment_id
-    label:
-      en: Measurement requests
-      nl: Metingsverzoeken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
-      wait: true
+    persisted:
+      column: research_result_id
+      storageClass: core
+    osfType: ResearchResult
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Research Assignment
+    description: List ResearchAssignment records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Research Assignment
+    description: Get ResearchAssignment records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Research Assignment
+    description: Create ResearchAssignment records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Research Assignment
+    description: Update ResearchAssignment records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Research Assignment
+    description: Delete ResearchAssignment records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000
+      assignmentKind:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: RESEARCHASSIGNMENTKIND
+            clearable: true
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: RESEARCHSTATUS
+            clearable: false
+      channel:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: COMMUNICATIONCHANNEL
+            clearable: true
+      completedAt:
+        render:
+          component: DateTimePicker
+          props: {}

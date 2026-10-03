@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import { operationReferenceKeyword, operationI18nKeyword } from "@openshapeforge/operations";
+import { operationChoiceKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword, operationTypeKeyword } from "@openshapeforge/operations";
 import type {
   CompilerPlugin,
   CompiledPluginOperation,
@@ -9,6 +9,7 @@ import type {
   JsonSchema,
   PluginBaseContext,
   PluginOperationContract,
+  PluginOperationError,
 } from "./plugins.js";
 import type { CompiledConnectorContract } from "./authoring/types/connector.js";
 import type { CompiledEntityOperation } from "./authoring/types.js";
@@ -20,11 +21,13 @@ import type { LocalizedText } from "./authoring/types.js";
 import type { CompiledEntityInfo } from "./plugins.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import { entityOperationJsonSchemas } from "./entity-operation-json-schema.js";
+import { withOperationControlProperties, type JsonObject } from "./entity-operation-controls.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
 import { materializeCollectionOperations } from "./authoring/collection-operations.js";
 
 const nativeBindings = new WeakMap<PluginOperationContract, NonNullable<CompiledPluginOperation["implementation"]>>();
+const resultProjections = new WeakMap<PluginOperationContract, NonNullable<CompiledPluginOperation["resultProjection"]>>();
 const verifiedNativeOperations = new WeakMap<CompiledPluginOperation, string>();
 import {
   SEARCHABLE_OPERATION_TOOL_NAMES,
@@ -39,74 +42,58 @@ export type { CompiledPluginOperation } from "./plugins.js";
 /**
  * Runtime modules the API itself provides, so an Operation bound to one needs
  * no plugin runtime in the module registry: `osf-blueprints` serves the
- * blueprint Operations and `osf-control` the platform's own administration.
+ * blueprint Operations, `osf-control` the platform's own administration,
+ * `osf-grants` the operator side of capability grants, `osf-jobs` the
+ * durable job queue, `osf-transitions` the status transitions declared on
+ * entity fields, `osf-source-sync` the import of records from an external
+ * source system by their base source fields, and `osf-billing` the milestone
+ * billing run and the milestone create that freezes a computed amount.
  */
-export const CORE_OPERATION_MODULES: readonly string[] = ["osf-blueprints", "osf-control"];
+export const CORE_OPERATION_MODULES: readonly string[] = ["accounts", "osf-billing", "osf-blueprints", "osf-control", "osf-grants", "osf-jobs", "osf-source-sync", "osf-transitions"];
 
 /**
- * Platform-owned mutation controls are derived from the canonical Operation
- * policy. Authors describe business input only; every adapter receives this
- * one augmented schema and therefore asks for the same lease/version or
- * confirmation values that the shared executor enforces.
+ * The one OpenAPI security scheme every `auth.mode: capability` Operation is
+ * described by. Core owns the token format and its resolution, so a plugin
+ * never declares a scheme of its own for it — and cannot reuse this name for
+ * a custom scheme.
  */
-function withOperationControls(
+export const CAPABILITY_GRANT_SECURITY_SCHEME = "capabilityGrant";
+
+/**
+ * Refusals core raises while resolving a capability grant, before the handler
+ * runs. Appended to every capability Operation's declared errors so OpenAPI
+ * and every client see them without each plugin repeating the list; an
+ * Operation that declares one of these status-and-code pairs itself keeps its
+ * own description.
+ */
+export const CAPABILITY_GRANT_ERRORS: readonly PluginOperationError[] = Object.freeze([
+  { status: 401, code: "GRANT_INVALID", description: "The grant token is missing, malformed, unknown or its secret does not match." },
+  { status: 403, code: "GRANT_SCOPE", description: "The grant does not cover this Operation or its declared target." },
+  { status: 409, code: "GRANT_CONSUMED", description: "The grant has already been used as often as it allows." },
+  { status: 410, code: "GRANT_EXPIRED", description: "The grant has expired." },
+  { status: 410, code: "GRANT_REVOKED", description: "The grant was revoked or superseded by a newer grant." },
+  { status: 423, code: "GRANT_LOCKED", description: "Too many failed attempts; the grant is temporarily locked." },
+]);
+
+function withCapabilityGrantErrors(operation: PluginOperationContract): PluginOperationContract {
+  if (operation.auth.mode !== "capability") return operation;
+  const declared = new Set(operation.errors.map((error) => JSON.stringify([error.status, error.code])));
+  const appended = CAPABILITY_GRANT_ERRORS.filter((error) => !declared.has(JSON.stringify([error.status, error.code])));
+  return { ...operation, errors: [...operation.errors, ...appended.map((error) => ({ ...error }))] };
+}
+
+/**
+ * Platform mutation controls merged into an authored Operation input. The
+ * controls themselves are described once (entity-operation-controls.ts).
+ */
+export function withOperationControls(
   inputSchema: JsonSchema,
-  definition: EntityOperationDefinition,
+  definition: Pick<EntityOperationDefinition, "concurrency" | "confirmation">,
 ): JsonSchema {
-  const properties = {
-    ...((inputSchema.properties ?? {}) as Record<string, unknown>),
-  };
-  const required = new Set(
-    Array.isArray(inputSchema.required) ? inputSchema.required as string[] : [],
-  );
-  const dependentRequired = {
-    ...((inputSchema.dependentRequired ?? {}) as Record<string, string[]>),
-  };
-
-  if (definition.concurrency?.version) {
-    properties.expectedVersion = {
-      type: "string",
-      format: "date-time",
-      "x-osf-i18n": { title: { en: "Expected version", nl: "Verwachte versie" } },
-      description: `Version from the record's ${definition.concurrency.version.field} field.`,
-    };
-    required.add("expectedVersion");
-  }
-  if (definition.concurrency?.editLease) {
-    properties.leaseToken = {
-      type: "string",
-      minLength: 1,
-      description: "Opaque edit-lease token issued by the server for this Operation and record.",
-    };
-    required.add("leaseToken");
-  }
-  if (definition.confirmation.mode === "acknowledgement") {
-    properties.confirmed = {
-      type: "boolean",
-      description: "Set to true after the user explicitly acknowledges this Operation.",
-    };
-  }
-  if (definition.confirmation.mode === "challenge") {
-    properties.confirmationToken = {
-      type: "string",
-      minLength: 1,
-      description: "Opaque, single-use confirmation challenge token issued by the server.",
-    };
-    properties.confirmationAnswer = {
-      type: "string",
-      minLength: 1,
-      description: `Exact current value requested for ${definition.confirmation.challenge.field}.`,
-    };
-    dependentRequired.confirmationToken = ["confirmationAnswer"];
-    dependentRequired.confirmationAnswer = ["confirmationToken"];
-  }
-
-  return {
-    ...inputSchema,
-    properties,
-    ...(required.size > 0 ? { required: [...required] } : {}),
-    ...(Object.keys(dependentRequired).length > 0 ? { dependentRequired } : {}),
-  };
+  return withOperationControlProperties(inputSchema as JsonObject, {
+    concurrency: definition.concurrency,
+    confirmation: definition.confirmation,
+  }) as JsonSchema;
 }
 
 const KEY = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
@@ -125,6 +112,7 @@ const RESERVED_API_NAMESPACES = new Set([
   "entity-oauth",
   "graphql",
   "health",
+  "jobs",
   "live",
   "mcp",
   "metrics",
@@ -135,11 +123,16 @@ const RESERVED_API_NAMESPACES = new Set([
 
 /**
  * Reserved namespaces a core module owns outright. The reservation exists so
- * a plugin cannot squat on a core prefix; the core module that IS that prefix
- * is the one contributor allowed to author Operations under it.
+ * a plugin cannot squat on a core prefix; the core modules that ARE that
+ * prefix are the only contributors allowed to author Operations under it.
  */
-const CORE_MODULE_API_NAMESPACES: ReadonlyMap<string, string> = new Map([
-  ["control", "osf-control"],
+const CORE_MODULE_API_NAMESPACES: ReadonlyMap<string, readonly string[]> = new Map([
+  ["control", ["osf-control"]],
+  ["jobs", ["osf-jobs"]],
+  // Status transitions and the billing run live under the entity's own
+  // generated REST resource (POST /api/rest/v1/<base>/:id/<key>, POST
+  // /api/rest/v1/billing-runs/execute): they are that resource's verbs.
+  ["rest", ["osf-transitions", "osf-billing"]],
 ]);
 
 const DEFAULT_OPERATION_ERROR_SCHEMA = {
@@ -181,8 +174,6 @@ const CORE_API_ROUTES: readonly RestRoute[] = [
   { method: "GET", path: "/api/rest/docs/swagger-initializer.js", owner: "core REST documentation" },
   { method: "GET", path: "/api/rest/docs/oauth2-redirect.html", owner: "core REST OAuth callback" },
   { method: "GET", path: "/api/rest/docs/oauth2-redirect.js", owner: "core REST OAuth callback" },
-  { method: "POST", path: "/api/documents", owner: "core document commands" },
-  { method: "POST", path: "/api/documents/:documentId/versions", owner: "core document commands" },
   { method: "POST", path: "/api/artifacts", owner: "core artifact transport" },
   { method: "GET", path: "/api/artifacts/:artifactId/contents", owner: "core artifact transport" },
   { method: "GET", path: "/api/rest/v1/connectors", owner: "core connector catalog" },
@@ -304,7 +295,7 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
   const routeNamespace = restPath.split("/")[2] ?? "";
   const reservedNamespace = (authored ? [routeNamespace] : [apiNamespace, plugin, routeNamespace])
     .find(value => RESERVED_API_NAMESPACES.has(value.toLowerCase()) &&
-      CORE_MODULE_API_NAMESPACES.get(value.toLowerCase()) !== plugin);
+      !CORE_MODULE_API_NAMESPACES.get(value.toLowerCase())?.includes(plugin));
   if (reservedNamespace) {
     throw new Error(`${where} uses reserved API namespace "${reservedNamespace}".`);
   }
@@ -406,6 +397,16 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
       throw new Error(`${where} custom auth can only project to REST; MCP and GraphQL need disabled reasons.`);
     }
   }
+  if (operation.auth.mode === "capability") {
+    // The grant carries the tenant and the record; the handler runs under a
+    // grant session that no MCP or GraphQL session can present.
+    if (operation.tenancy.mode !== "required") {
+      throw new Error(`${where} capability auth requires tenancy mode required; the grant supplies the tenant.`);
+    }
+    if (operation.transports.mcp.enabled || operation.transports.graphql.enabled) {
+      throw new Error(`${where} capability auth can only project to REST; MCP and GraphQL need disabled reasons.`);
+    }
+  }
   if (operation.auth.mode === "public" && operation.transports.mcp.enabled) {
     throw new Error(`${where} public operations cannot project to the authenticated MCP endpoint; disable MCP with a reason.`);
   }
@@ -468,6 +469,9 @@ function operationSchemaValidator() {
   });
   ajv.addKeyword(operationReferenceKeyword);
   ajv.addKeyword(operationI18nKeyword);
+  ajv.addKeyword(operationInputFieldsKeyword);
+  ajv.addKeyword(operationChoiceKeyword);
+  ajv.addKeyword(operationTypeKeyword);
   return ajv;
 }
 
@@ -629,8 +633,10 @@ function collectOperationContracts(
     const declared = typeof plugin.operations === "function"
       ? plugin.operations(context)
       : plugin.operations ?? [];
-    for (const operation of declared) {
-      if (Object.hasOwn(operation, "implementation")) throw new Error(`Plugin ${plugin.name} cannot supply compiler-native implementation metadata.`);
+    for (const authoredOperation of declared) {
+      if (Object.hasOwn(authoredOperation, "implementation")) throw new Error(`Plugin ${plugin.name} cannot supply compiler-native implementation metadata.`);
+      if (Object.hasOwn(authoredOperation, "resultProjection")) throw new Error(`Plugin ${plugin.name} cannot supply compiler-owned result projection metadata.`);
+      const operation = withCapabilityGrantErrors(authoredOperation);
       validateOperation(plugin.name, operation, authored);
       const restKey = normalizedRestRoute(
         operation.transports.rest.method,
@@ -654,6 +660,9 @@ function collectOperationContracts(
         throw new Error(`Duplicate plugin operation TypeScript function "${typescriptKey}".`);
       }
       if (operation.auth.mode === "custom") {
+        if (operation.auth.scheme === CAPABILITY_GRANT_SECURITY_SCHEME) {
+          throw new Error(`Plugin ${plugin.name} custom security scheme "${CAPABILITY_GRANT_SECURITY_SCHEME}" is reserved for capability grants.`);
+        }
         const definition = JSON.stringify({
           description: operation.auth.description,
           ...operation.auth.securityScheme,
@@ -675,7 +684,9 @@ function collectOperationContracts(
         id: operation.key,
         intent: "invoke",
       };
-      const native = authored ? nativeBindings.get(operation) : undefined;
+      const native = authored ? nativeBindings.get(authoredOperation) : undefined;
+      const resultProjection = authored ? resultProjections.get(authoredOperation) : undefined;
+      if (resultProjection) compiled.resultProjection = { ...resultProjection };
       if (native) {
         compiled.implementation = { ...native };
         verifiedNativeOperations.set(compiled, JSON.stringify(native));
@@ -757,7 +768,8 @@ export function collectAuthoredEntityPluginOperations(
           entityName: authored.entityName,
           scope: definition.target!.scope,
           ...(definition.target!.scope === "record"
-            ? { inputField: definition.target!.inputField }
+            ? { inputField: definition.target!.inputField,
+                ...(definition.target!.inputBindings ? { inputBindings: definition.target!.inputBindings } : {}) }
             : {}),
         },
         inputSchema,
@@ -818,6 +830,9 @@ export function collectAuthoredEntityPluginOperations(
       };
       if (implementation.type === "collection") nativeBindings.set(operation, {
         type: "collection", entityName: authored.entityName, field: implementation.field, action: implementation.action,
+      });
+      if (contract.source && authored.key === "get") resultProjections.set(operation, {
+        kind: "entity-record", entityName: authored.entityName, idField: "id",
       });
       const current = byPlugin.get(pluginName) ?? [];
       current.push(operation);
@@ -1366,7 +1381,9 @@ export function operationOpenApiPaths(
             : operation.auth.mode === "control"
               // A control-realm bearer: its own scheme, never the tenant session's.
               ? [{ controlBearerAuth: [] }]
-              : [{ [operation.auth.scheme]: [] }],
+              : operation.auth.mode === "capability"
+                ? [{ [CAPABILITY_GRANT_SECURITY_SCHEME]: [] }]
+                : [{ [operation.auth.scheme]: [] }],
         "x-osf-operation": {
           key: operation.key,
           handler: operation.handler,

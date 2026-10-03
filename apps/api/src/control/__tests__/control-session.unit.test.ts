@@ -18,7 +18,6 @@ import {
   isControlSession,
   resolveControlSession,
 } from "../control-session.js";
-import { PLATFORM_ADMIN_ROLE } from "../platform-admin.js";
 
 const ISSUER = "http://localhost:8181/realms/openshapeforge-control";
 const GATEWAY = "openshapeforge-admin-gateway";
@@ -56,7 +55,7 @@ const adminClaims = {
   name: "Platform admin",
   email: "platform-admin@example.com",
   exp: 1_800_000_000,
-  realm_access: { roles: [PLATFORM_ADMIN_ROLE, "default-roles-openshapeforge-control"] },
+  realm_access: { roles: [PLATFORM_OPERATOR_ROLE, "default-roles-openshapeforge-control"] },
 };
 
 async function refusal(claims: Record<string, unknown> | null, options: { resource?: string } = {}) {
@@ -79,7 +78,7 @@ describe("resolveControlSession", () => {
     expect(session).toMatchObject({
       tenantId: null,
       userId: adminClaims.sub,
-      roles: [PLATFORM_ADMIN_ROLE, "default-roles-openshapeforge-control"],
+      roles: [PLATFORM_OPERATOR_ROLE, "default-roles-openshapeforge-control"],
       groups: [],
       scope: "self",
       credential: "control-bearer",
@@ -130,7 +129,7 @@ describe("resolveControlSession", () => {
   it("refuses no bearer, trusted-context headers, an API key and a rejected token alike", async () => {
     for (const headers of [
       new Headers(),
-      new Headers({ "x-openshapeforge-user-id": adminClaims.sub, "x-openshapeforge-roles": PLATFORM_ADMIN_ROLE }),
+      new Headers({ "x-openshapeforge-user-id": adminClaims.sub, "x-openshapeforge-roles": PLATFORM_OPERATOR_ROLE }),
       new Headers({ authorization: "ApiKey osf_live_abcdef" }),
     ]) {
       const error = (await resolveControlSession(headers, config, {
@@ -151,12 +150,12 @@ describe("resolveControlSession", () => {
     const clientRoleOnly = await refusal({
       ...adminClaims,
       realm_access: { roles: [] },
-      resource_access: { [CODEX]: { roles: [PLATFORM_ADMIN_ROLE] } },
+      resource_access: { [CODEX]: { roles: [PLATFORM_OPERATOR_ROLE] } },
     });
     expect(clientRoleOnly.code).toBe("FORBIDDEN");
   });
 
-  it("projects Keycloak's built-in realm admin as both marker roles in host-organization mode", async () => {
+  it("projects Keycloak's built-in realm admin as the single control role in host-organization mode", async () => {
     process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "host";
     const hostIssuer = "https://identity.example.test/realms/example";
     const hostConfig: ControlPlaneConfig = {
@@ -167,9 +166,9 @@ describe("resolveControlSession", () => {
     const session = await resolveControlSession(bearer(), hostConfig, {
       verifier: verifierFor({ sub: "host-admin", azp: "admin-web", resource_access: { "realm-management": { roles: ["realm-admin"] } } }),
     });
-    expect(session.roles).toEqual([PLATFORM_ADMIN_ROLE, PLATFORM_OPERATOR_ROLE]);
+    expect(session.roles).toEqual([PLATFORM_OPERATOR_ROLE]);
     const legacy = (await resolveControlSession(bearer(), hostConfig, {
-      verifier: verifierFor({ sub: "host-admin", azp: "admin-web", realm_access: { roles: [PLATFORM_ADMIN_ROLE, PLATFORM_OPERATOR_ROLE] } }),
+      verifier: verifierFor({ sub: "host-admin", azp: "admin-web", realm_access: { roles: [PLATFORM_OPERATOR_ROLE] } }),
     }).catch((caught: unknown) => caught)) as ControlAuthorizationError;
     expect(legacy.code).toBe("FORBIDDEN");
   });

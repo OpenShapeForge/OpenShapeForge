@@ -90,6 +90,15 @@ export async function loadDocumentTypeCatalog(): Promise<readonly DocumentTypeCa
  * intentionally absent: the host inserts with its trusted tenant and lets the
  * database mint IDs, using `(tenant_id, code) DO NOTHING` for idempotency.
  */
+export {
+  DOCUMENT_THEME_SEED_LOCALES,
+  loadDocumentThemeCatalog,
+  loadDocumentThemeSeedRecords,
+  type DocumentThemeCatalogEntry,
+  type DocumentThemeSeedLocale,
+  type DocumentThemeSeedRecord,
+} from "./theme-seed.js";
+
 export async function loadDocumentTypeSeedRecords(
   locale: DocumentTypeSeedLocale = "en",
 ): Promise<readonly DocumentTypeSeedRecord[]> {

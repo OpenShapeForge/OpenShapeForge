@@ -1,28 +1,39 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: AgreementMilestone
 title: Agreement Milestone
-description: Event-driven, percentage-of-value or fixed-amount billing milestone on an agreement. A milestone starts pending, is explicitly triggered by a caller (e.g. a workflow instance or an operator), and is picked up by a milestone-mode BillingRun to produce exactly one invoice. Amount is computed once at creation from basisAmount/percentOfBasis when a percentage is used, and is frozen thereafter — a later change to the agreement's value must not retroactively change an already-created milestone.
+description: Event-driven, percentage-of-value or fixed-amount billing milestone on an agreement. A milestone starts
+  pending, is explicitly triggered by a caller (e.g. a workflow instance or an operator), and is picked up by a
+  milestone-mode BillingRun to produce exactly one invoice. Amount is computed once at creation from
+  basisAmount/percentOfBasis when a percentage is used, and is frozen thereafter — a later change to the agreement's
+  value must not retroactively change an already-created milestone.
 language: en
 displayTemplate: "{{description}}"
 filterField: description
 labels:
   en: Agreement milestone
   nl: Overeenkomstmijlpaal
+pluralLabels:
+  en: Agreement milestones
+  nl: Overeenkomstmijlpalen
 domains:
   - finance
   - contracts
 # Creation computes and freezes `amount` from basisAmount/percentOfBasis
 # (when a percentage is used) — logic the generic entity-CRUD create path
-# does not, and should not, know about. The generic `create` mutation is
-# withheld the same way DocumentVersion's is; POST /api/agreement-milestones
-# (apps/api/src/billing/rest-routes.ts) is the only creation path. Generic
-# `update`/`delete` stay enabled so the `immutable: true` fields below are
-# still refused on update by the ordinary generated transports.
+# does not, and should not, know about. `create` is therefore the canonical
+# Operation AgreementMilestone.create implemented by the core `osf-billing`
+# module (apps/api/src/operations/billing), projected on every interface
+# like any other create. Generic `update`/`delete` stay enabled so the
+# `immutable: true` fields below are still refused on update by the ordinary
+# generated transports. The status lifecycle is a declared state machine on
+# `status` (see `transitions`): trigger, cancel and invoice are Operations on
+# every interface, and the milestone billing run (BillingRun.execute) moves a
+# milestone to invoiced through the `invoice` rule, never by writing the
+# column itself.
 fields:
   - key: description
-    valueType: string
     required: true
     label:
       en: Description
@@ -36,33 +47,38 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: basisAmount
-    valueType: number
     required: false
     readOnly: true
+    writtenBy: [AgreementMilestone.create]
     immutable: true
     label:
       en: Basis amount
       nl: Basisbedrag
     description:
-      en: The value a percentage is computed against, captured once at creation. Null when the milestone uses a plain fixed amount instead of a percentage.
-      nl: De waarde waartegen een percentage wordt berekend, eenmalig vastgelegd bij aanmaak. Leeg wanneer de mijlpaal een vast bedrag gebruikt in plaats van een percentage.
-    semanticType: currency
+      en: The value a percentage is computed against, captured once at creation. Null when the milestone uses a plain fixed
+        amount instead of a percentage.
+      nl: De waarde waartegen een percentage wordt berekend, eenmalig vastgelegd bij aanmaak. Leeg wanneer de mijlpaal een
+        vast bedrag gebruikt in plaats van een percentage.
+    osfType: currency
     persisted:
       column: basis_amount
       storageClass: core
   - key: percentOfBasis
-    valueType: number
+    osfType: number
     required: false
     readOnly: true
+    writtenBy: [AgreementMilestone.create]
     immutable: true
     label:
       en: Percent of basis
       nl: Percentage van basis
     description:
-      en: Percentage (0-100) of basisAmount that this milestone bills. Null when amount is a plain fixed figure instead of a percentage.
-      nl: Percentage (0-100) van het basisbedrag dat deze mijlpaal factureert. Leeg wanneer het bedrag een vast cijfer is in plaats van een percentage.
+      en: Percentage (0-100) of basisAmount that this milestone bills. Null when amount is a plain fixed figure instead of a
+        percentage.
+      nl: Percentage (0-100) van het basisbedrag dat deze mijlpaal factureert. Leeg wanneer het bedrag een vast cijfer is in
+        plaats van een percentage.
     validation:
       min: 0
       max: 100
@@ -70,22 +86,26 @@ fields:
       column: percent_of_basis
       storageClass: core
   - key: amount
-    valueType: number
     required: true
     readOnly: true
+    writtenBy: [AgreementMilestone.create]
     immutable: true
     label:
       en: Amount
       nl: Bedrag
     description:
-      en: The actual amount to invoice for this milestone. When percentOfBasis is set, computed once at creation as basisAmount * percentOfBasis / 100 and frozen thereafter; otherwise supplied directly as a fixed figure at creation.
-      nl: Het daadwerkelijk te factureren bedrag voor deze mijlpaal. Wanneer percentOfBasis is ingevuld, eenmalig bij aanmaak berekend als basisbedrag * percentage / 100 en daarna bevroren; anders rechtstreeks als vast bedrag opgegeven bij aanmaak.
-    semanticType: currency
+      en: The actual amount to invoice for this milestone. When percentOfBasis is set, computed once at creation as
+        basisAmount * percentOfBasis / 100 and frozen thereafter; otherwise supplied directly as a fixed figure at
+        creation.
+      nl: Het daadwerkelijk te factureren bedrag voor deze mijlpaal. Wanneer percentOfBasis is ingevuld, eenmalig bij aanmaak
+        berekend als basisbedrag * percentage / 100 en daarna bevroren; anders rechtstreeks als vast bedrag opgegeven
+        bij aanmaak.
+    osfType: currency
     persisted:
       column: amount
       storageClass: core
   - key: status
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Status
@@ -94,27 +114,81 @@ fields:
       en: Lifecycle status of the milestone.
       nl: Levenscyclusstatus van de mijlpaal.
     defaultValue: pending
+    readOnly: true
     persisted:
       column: status
       storageClass: core
     options:
-      type: referentiedata
-      referentieGroep: AGREEMENTMILESTONESTATUS
+      type: static
+      items:
+        - { value: pending, label: { en: Pending, nl: In afwachting } }
+        - { value: triggered, label: { en: Triggered, nl: Getriggerd } }
+        - { value: invoiced, label: { en: Invoiced, nl: Gefactureerd } }
+        - { value: cancelled, label: { en: Cancelled, nl: Geannuleerd } }
+    # The lifecycle as a state machine: `trigger`, `cancel` and `invoice` are
+    # the only writers of `status`; `trigger` stamps triggeredAt/triggeredBy
+    # from the server, so a milestone cannot be marked triggered through a
+    # generic update nor backdated. `invoice` is what the milestone billing
+    # run (BillingRun.execute) calls for every milestone it invoices, naming
+    # the Invoice it produced; nothing leaves `invoiced`, so a milestone is
+    # invoiced at most once by construction.
+    transitions:
+      initial: pending
+      rules:
+        - key: trigger
+          from: [pending]
+          to: triggered
+          label: { en: Trigger, nl: Triggeren }
+          description:
+            en: Mark this milestone as reached so the next milestone billing run invoices it
+            nl: Markeer deze mijlpaal als bereikt zodat de volgende mijlpaalfacturatie hem factureert
+          # The agreement this milestone bills must still exist in this tenant
+          # with a code; a dangling or cross-tenant reference is a refusal.
+          preconditions:
+            - { via: agreementId, field: code, present: true }
+          stamps:
+            - { field: triggeredAt, value: now }
+            - { field: triggeredBy, value: actor }
+        - key: cancel
+          from: [pending, triggered]
+          to: cancelled
+          label: { en: Cancel, nl: Annuleren }
+          description:
+            en: Withdraw this milestone so no billing run will invoice it
+            nl: Trek deze mijlpaal in zodat geen facturatierun hem factureert
+        - key: invoice
+          from: [triggered]
+          to: invoiced
+          label: { en: Invoice, nl: Factureren }
+          description:
+            en: Record that this milestone has been invoiced, naming the invoice; the milestone billing run does this for every milestone it invoices
+            nl: Leg vast dat deze mijlpaal gefactureerd is, met de factuur erbij; de mijlpaalfacturatie doet dit voor elke mijlpaal die zij factureert
+          auth: { roles: [Finance.All.ReadWrite] }
+          # The invoice is required, and it must be an invoice of this
+          # milestone's agreement: a milestone is never invoiced against
+          # nothing, nor against another agreement's invoice.
+          writes:
+            - { field: producedInvoiceId, required: true, agreesOn: [agreementId] }
   - key: expectedAt
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Expected on
       nl: Verwacht op
     description:
-      en: The date on which this milestone is expected to be triggered, as planned when the milestone was created. Forecasts and planning read this field to place the milestone's amount on a calendar; it is a plan, not an event. Triggering the milestone does not set it — that moment is recorded in triggeredAt.
-      nl: De datum waarop deze mijlpaal naar verwachting getriggerd wordt, zoals gepland bij het aanmaken van de mijlpaal. Forecast en planning lezen dit veld om het bedrag van de mijlpaal op een kalender te zetten; het is een plan, geen gebeurtenis. Het activeren van de mijlpaal zet dit veld niet — dat moment staat in triggeredAt.
+      en: The date on which this milestone is expected to be triggered, as planned when the milestone was created. Forecasts
+        and planning read this field to place the milestone's amount on a calendar; it is a plan, not an event.
+        Triggering the milestone does not set it — that moment is recorded in triggeredAt.
+      nl: De datum waarop deze mijlpaal naar verwachting getriggerd wordt, zoals gepland bij het aanmaken van de mijlpaal.
+        Forecast en planning lezen dit veld om het bedrag van de mijlpaal op een kalender te zetten; het is een plan,
+        geen gebeurtenis. Het activeren van de mijlpaal zet dit veld niet — dat moment staat in triggeredAt.
     persisted:
       column: expected_at
       storageClass: core
   - key: triggeredAt
-    valueType: datetime
+    osfType: datetime
     required: false
+    readOnly: true
     label:
       en: Triggered at
       nl: Getriggerd op
@@ -125,34 +199,45 @@ fields:
       column: triggered_at
       storageClass: core
   - key: triggeredBy
-    valueType: string
+    osfType: string
     required: false
+    readOnly: true
     label:
       en: Triggered by
       nl: Getriggerd door
     description:
-      en: User account, workflow instance id, or system process that triggered the milestone.
-      nl: Gebruikersaccount, workflow-instantie-id of systeemproces dat de mijlpaal heeft getriggerd.
+      en: The identity of the session that triggered the milestone, stamped by the server when the trigger
+        transition runs; never supplied by the caller.
+      nl: De identiteit van de sessie die de mijlpaal heeft getriggerd, door de server vastgelegd wanneer de
+        trigger-transitie loopt; nooit door de aanroeper opgegeven.
     validation:
       maxLength: 200
     persisted:
       column: triggered_by
       storageClass: core
-relationships:
-  - key: agreement
-    kind: belongsTo
-    target: Agreement
-    foreignKey: agreement_id
+  # A milestone belongs to one agreement for life: the amount was computed
+  # against that agreement, and the invoice a run produces names it.
+  - key: agreementId
+    immutable: true
     label:
       en: Agreement
       nl: Overeenkomst
-  - key: producedInvoice
-    kind: belongsTo
-    target: Invoice
-    foreignKey: produced_invoice_id
+    persisted:
+      column: agreement_id
+      storageClass: core
+    osfType: Agreement
+    relationship:
+      ownership: reference
+  - key: producedInvoiceId
     label:
       en: Produced invoice
       nl: Geproduceerde factuur
+    persisted:
+      column: produced_invoice_id
+      storageClass: core
+    osfType: Invoice
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -168,6 +253,74 @@ authorization:
     enabled: true
     empty: public
 operations:
+  create:
+    name: { en: Create agreement milestone, nl: Overeenkomstmijlpaal aanmaken }
+    description:
+      en: Creates one agreement milestone. Give either a fixed amount, or basisAmount with percentOfBasis; the amount is then computed once and frozen.
+      nl: Maakt één overeenkomstmijlpaal aan. Geef óf een vast bedrag, óf basisAmount met percentOfBasis; het bedrag wordt dan eenmalig berekend en bevroren.
+    implementation: { type: plugin, plugin: osf-billing, handler: createAgreementMilestone, action: create }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [agreementId, description]
+        # Either a fixed amount, or a percentage of a basis: the schema says
+        # so, and every interface refuses an input that gives neither. The
+        # branches restate the property names because strict JSON Schema
+        # wants a required name defined where it is required.
+        anyOf:
+          - { required: [amount], properties: { amount: true } }
+          - { required: [basisAmount, percentOfBasis], properties: { basisAmount: true, percentOfBasis: true } }
+        properties:
+          agreementId:
+            type: string
+            format: uuid
+            x-osf-reference: { entity: Agreement }
+            x-osf-i18n: { title: { en: Agreement, nl: Overeenkomst } }
+          description:
+            type: string
+            minLength: 1
+            maxLength: 2000
+            x-osf-i18n: { title: { en: Description, nl: Omschrijving } }
+          basisAmount:
+            type: number
+            exclusiveMinimum: 0
+            x-osf-i18n:
+              title: { en: Basis amount, nl: Basisbedrag }
+              description: { en: The positive value a percentage is computed against., nl: De positieve waarde waartegen een percentage wordt berekend. }
+          percentOfBasis:
+            type: number
+            exclusiveMinimum: 0
+            maximum: 100
+            x-osf-i18n:
+              title: { en: Percent of basis, nl: Percentage van basis }
+              description: { en: More than 0 and at most 100; a milestone that bills nothing is not a milestone., nl: Meer dan 0 en ten hoogste 100; een mijlpaal die niets factureert is geen mijlpaal. }
+          amount:
+            type: number
+            exclusiveMinimum: 0
+            x-osf-i18n: { title: { en: Amount, nl: Bedrag } }
+          expectedAt:
+            type: [string, "null"]
+            format: date
+            x-osf-i18n: { title: { en: Expected on, nl: Verwacht op } }
+    output:
+      schema:
+        type: object
+        additionalProperties: true
+        required: [id, status, amount]
+        properties:
+          id: { type: string, format: uuid, x-osf-i18n: { title: { en: Record, nl: Record } } }
+          status: { type: string, x-osf-i18n: { title: { en: Status, nl: Status } } }
+          # The wire carries a numeric as a decimal string (docs/api.md, Numbers on the wire).
+          amount: { type: string, pattern: "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$", x-osf-i18n: { title: { en: Amount, nl: Bedrag } } }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+    errors:
+      - { status: 422, code: VALIDATION, description: "The milestone input is invalid: give either a fixed amount or basisAmount with percentOfBasis." }
+      - { status: 403, code: FORBIDDEN, description: The caller may not create agreement milestones. }
+      - { status: 404, code: REFERENCE_NOT_FOUND, description: The agreement does not exist in this tenant. }
   list:
     name: { en: List agreement milestones, nl: Overeenkomstmijlpalen tonen }
     description:
@@ -219,7 +372,7 @@ operations:
         kind: type-current-field
         field: description
         issuedBy: server
-        bindTo: [subject, tenant, operation, target.id, target.version]
+        bindTo: [ subject, tenant, operation, target.id, target.version ]
         expiresAfter: PT5M
         singleUse: true
 
@@ -245,28 +398,26 @@ interfaces:
           read: { en: /agreement-milestones/:id, nl: /overeenkomstmijlpalen/:id }
         title: "{{description}}"
         subtitle: "{{amount}}"
-        actions: [update, delete]
+        actions: [ update, delete ]
         layout:
           context:
-            fields: [status, amount, expectedAt]
-            relationships: [agreement, producedInvoice]
+            fields: [ status, amount, expectedAt ]
+            relationships: [ agreementId, producedInvoiceId ]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Milestone details, nl: Mijlpaalgegevens }
-                  fields: [description, status]
+                  fields: [ description, status ]
                 - title: { en: Amounts, nl: Bedragen }
-                  fields: [basisAmount, percentOfBasis, amount]
+                  fields: [ basisAmount, percentOfBasis, amount ]
                 - title: { en: Planning and execution, nl: Planning en uitvoering }
-                  fields: [expectedAt, triggeredAt, triggeredBy]
+                  fields: [ expectedAt, triggeredAt, triggeredBy ]
         modes:
           update:
             title: { en: Update agreement milestone, nl: Overeenkomstmijlpaal wijzigen }
             groups:
               - title: { en: Milestone details, nl: Mijlpaalgegevens }
-                fields: [description, status]
+                fields: [ description ]
               - title: { en: Planning, nl: Planning }
-                fields: [expectedAt]
-              - title: { en: Trigger, nl: Trigger }
-                fields: [triggeredAt, triggeredBy]
+                fields: [ expectedAt ]

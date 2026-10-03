@@ -5,19 +5,20 @@ entity: TemplateBlock
 title: Template block
 language: en
 labels: { en: Template block, nl: Templateblok }
+pluralLabels: { en: Template blocks, nl: Templateblokken }
 domains: [documents]
 baseEntity: false
 displayTemplate: "{{version}}"
 authorization:
   roles:
-    read: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
+    read: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite]
 fields:
   - key: version
-    semanticType: TemplateVersion
+    osfType: TemplateVersion
     required: true
     label: { en: Template version, nl: Templateversie }
   - key: parameters
-    valueType: object
+    osfType: object
     defaultValue: {}
     label: { en: Local values, nl: Lokale waarden }
 operations:
@@ -39,7 +40,7 @@ operations:
           parametersField: { type: string, const: parameters }
     output: { schema: { type: object } }
     errors: []
-    auth: { mode: session, roles: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite] }
+    auth: { mode: session, roles: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite] }
     tenancy: { mode: required }
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }

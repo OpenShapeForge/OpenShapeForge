@@ -4,8 +4,46 @@ import type {
   CompiledEntityContract,
   CompiledField,
 } from "./authoring/types.js";
+import { deriveEntityOperationErrors } from "./authoring/compiler/entity-operation-errors.js";
 import { renderOpenApiSpec } from "./generate-openapi.js";
 import type { PlatformSchemaManifest } from "./schema.js";
+
+/**
+ * The fixtures below spell each Operation's policy flags by hand; the errors
+ * the compiler derives from those flags are filled in here, after a test has
+ * mutated the flags, so the projection under test sees what the compiler
+ * would have emitted.
+ */
+function withDerivedErrors(
+  entity: CompiledEntityContract,
+  source: PlatformSchemaManifest = manifest,
+): CompiledEntityContract {
+  // The record schema is projected from compiled storage, which the compiler
+  // derives from the same authoring as the manifest table; mirror it here.
+  const table = source.tables.find((candidate) => candidate.source?.authoringEntityName === entity.entity.name);
+  entity.model.relationships ??= [];
+  if (table) {
+    entity.storage = {
+      table: table.name,
+      columns: table.columns.map((column) => ({
+        field: column.sourceField ?? column.name.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase()),
+        column: column.name,
+        type: column.type,
+        nullable: !(column.required === true || column.primaryKey === true),
+        storageClass: "core" as const,
+      })),
+    };
+  }
+  for (const operation of Object.values(entity.entityOperations)) {
+    if (!operation) continue;
+    operation.errors = deriveEntityOperationErrors(entity.entity.name, operation.intent, {
+      concurrency: operation.concurrency,
+      confirmation: operation.interaction?.confirmation ?? { mode: "none" },
+      recordPermissions: entity.authorization?.rowAccess?.recordPermissions !== undefined,
+    });
+  }
+  return entity;
+}
 
 function field(
   overrides: Partial<CompiledField> & Pick<CompiledField, "key">,
@@ -13,7 +51,8 @@ function field(
   const { key, ...rest } = overrides;
   return {
     key,
-    valueType: "string",
+    baseType: "string",
+    osfType: rest.baseType ?? "string",
     cardinality: "single",
     required: false,
     label: { en: key },
@@ -23,7 +62,7 @@ function field(
 }
 
 const contract = {
-  authoringVersion: 2,
+  authoringVersion: 3,
   entity: {
     name: "Relation",
     title: "Relation",
@@ -47,6 +86,8 @@ const contract = {
         key: "relationType",
         required: true,
         label: { en: "Relation type" },
+        // A compiled field names its group in options; the model compiler folded the select's render prop into it.
+        options: { type: "referentiedata", referentieGroep: "RELATIONTYPE" },
         render: {
           component: "ReferenceSelect",
           props: { referentieGroep: "RELATIONTYPE" },
@@ -54,7 +95,7 @@ const contract = {
       }),
       field({
         key: "metadata",
-        valueType: "object",
+        baseType: "object",
         label: { en: "Metadata" },
         children: [
           field({
@@ -93,7 +134,7 @@ const contract = {
       field({ key: "statusIn", description: { en: "Status import marker." } }),
       field({
         key: "isOptedIn",
-        valueType: "boolean",
+        baseType: "boolean",
         description: { en: "Whether the relation opted in." },
       }),
     ],
@@ -111,7 +152,20 @@ const contract = {
   entityOperations: {
     list: { id: "Relation.list", intent: "list" },
     get: { id: "Relation.get", intent: "get" },
-    create: { id: "Relation.create", intent: "create" },
+    create: {
+      id: "Relation.create",
+      intent: "create",
+      interaction: {
+        confirmation: { mode: "none" },
+        secureInput: {
+          type: "secureInput",
+          sourceField: "externalId",
+          sourceEntity: "ExternalSystem",
+          definitionsField: "metadata",
+          into: "metadata",
+        },
+      },
+    },
     update: {
       id: "Relation.update",
       intent: "update",
@@ -152,7 +206,7 @@ const manifest: PlatformSchemaManifest = {
       schema: "erp",
       name: "relations",
       tenantScoped: true,
-      generatedCrud: true,
+      generatedCrudEligible: true,
       columns: [
         { name: "id", type: "uuid", primaryKey: true },
         { name: "tenant_id", type: "uuid", required: true },
@@ -263,7 +317,7 @@ type TestOperation = {
 function spec() {
   return JSON.parse(
     renderOpenApiSpec(manifest, "fixture", {
-      entities: [{ contract }],
+      entities: [{ contract: withDerivedErrors(contract) }],
       referentiedata: {
         RELATIONTYPE: [
           { value: "person", label: { en: "Person", nl: "Persoon" } },
@@ -293,7 +347,7 @@ function spec() {
 describe("rich generated REST OpenAPI", () => {
   it("puts committed host onboarding before generic safe-start guidance and provenance", () => {
     const rendered = JSON.parse(renderOpenApiSpec(manifest, "fixture", {
-      entities: [{ contract }],
+      entities: [{ contract: withDerivedErrors(contract) }],
       documentation: {
         title: "Example Product API",
         version: "2026-09",
@@ -330,7 +384,9 @@ describe("rich generated REST OpenAPI", () => {
       paths: Record<string, unknown>;
     };
 
-    expect(rendered.paths).toEqual({});
+    // The file transport is core's and is documented for every host: any
+    // record may own a file. An empty manifest documents nothing else.
+    expect(Object.keys(rendered.paths).sort()).toEqual(["/api/artifacts", "/api/artifacts/{artifactId}/contents"]);
     expect(rendered.info.title).toBe("OpenShapeForge generated REST API");
     expect(rendered.info.version).toBe("1");
     expect(rendered.info.description).toContain("## Start here");
@@ -358,7 +414,7 @@ describe("rich generated REST OpenAPI", () => {
 
   it("emits host-authored OAuth Authorization Code metadata and public Swagger configuration", () => {
     const rendered = JSON.parse(renderOpenApiSpec(manifest, "fixture", {
-      entities: [{ contract }],
+      entities: [{ contract: withDerivedErrors(contract) }],
       documentation: {
         title: "Example Product API",
         description: "Authenticate before using protected operations.",
@@ -401,11 +457,10 @@ describe("rich generated REST OpenAPI", () => {
     expect(JSON.stringify(rendered)).not.toContain("clientSecret");
   });
 
-  it("emits only allowed routes for a partial policy hidden from legacy runtimes", () => {
+  it("emits only allowed routes for a partial policy", () => {
     const partial = structuredClone(manifest);
     const table = partial.tables[0]!;
     table.generatedCrudEligible = true;
-    table.generatedCrud = false;
     table.source!.rest!.operations = {
       list: true,
       get: true,
@@ -415,7 +470,7 @@ describe("rich generated REST OpenAPI", () => {
     };
     const rendered = JSON.parse(
       renderOpenApiSpec(partial, "fixture", {
-        entities: [{ contract }],
+        entities: [{ contract: withDerivedErrors(contract) }],
       }),
     ) as { paths: Record<string, Record<string, unknown>> };
     expect(Object.keys(rendered.paths["/api/rest/v1/relations"]!)).toEqual([
@@ -533,7 +588,7 @@ describe("rich generated REST OpenAPI", () => {
     };
     const generated = JSON.parse(
       renderOpenApiSpec(manifest, "fixture", {
-        entities: [{ contract: protectedContract }],
+        entities: [{ contract: withDerivedErrors(protectedContract) }],
       }),
     ) as any;
     const create = generated.components.schemas.RelationInput;
@@ -566,7 +621,7 @@ describe("rich generated REST OpenAPI", () => {
     }
     const generated = JSON.parse(
       renderOpenApiSpec(manifest, "fixture", {
-        entities: [{ contract: acknowledgedContract }],
+        entities: [{ contract: withDerivedErrors(acknowledgedContract) }],
       }),
     ) as any;
 
@@ -580,7 +635,7 @@ describe("rich generated REST OpenAPI", () => {
       expect(inputSchema.properties.confirmed).toMatchObject({ type: "boolean" });
       expect(inputSchema.properties.confirmed).not.toHaveProperty("const");
       expect(inputSchema.properties.confirmed.description).toContain(
-        "Only true",
+        "acknowledges",
       );
     }
     for (const operation of [
@@ -601,7 +656,7 @@ describe("rich generated REST OpenAPI", () => {
     };
     const generated = JSON.parse(
       renderOpenApiSpec(manifest, "fixture", {
-        entities: [{ contract: acknowledgedContract }],
+        entities: [{ contract: withDerivedErrors(acknowledgedContract) }],
       }),
     ) as any;
     const inputSchema = generated.components.schemas.RelationDeleteInput;
@@ -622,58 +677,7 @@ describe("rich generated REST OpenAPI", () => {
       .toEqual({ $ref: "#/components/schemas/OperationFailure" });
   });
 
-  it("keeps schemaVersion 1 REST responses and operation metadata legacy", () => {
-    const legacyContract = {
-      ...contract,
-      authoringVersion: 1,
-    } as unknown as CompiledEntityContract;
-    const generated = JSON.parse(
-      renderOpenApiSpec(manifest, "fixture", {
-        entities: [{ contract: legacyContract }],
-      }),
-    );
-    const collection = generated.paths["/api/rest/v1/relations"];
-    const item = generated.paths["/api/rest/v1/relations/{id}"];
-
-    expect(collection.get).not.toHaveProperty("x-osf-operation-id");
-    expect(collection.post).not.toHaveProperty("x-osf-operation-id");
-    expect(item.get).not.toHaveProperty("x-osf-operation-id");
-    expect(item.patch).not.toHaveProperty("x-osf-operation-id");
-    expect(item.delete).not.toHaveProperty("x-osf-operation-id");
-    expect(
-      collection.get.responses["200"].content["application/json"].schema,
-    ).toEqual({ $ref: "#/components/schemas/RelationList" });
-    expect(
-      item.get.responses["200"].content["application/json"].schema,
-    ).toEqual({ $ref: "#/components/schemas/Relation" });
-    expect(item.delete.responses).toHaveProperty("204");
-    expect(item.delete.responses).not.toHaveProperty("200");
-    expect(collection.post.responses).not.toHaveProperty("428");
-    expect(
-      generated.components.schemas.RelationInput.properties.confirmed,
-    ).toBeUndefined();
-    expect(Object.keys(item.patch.responses)).toEqual([
-      "200",
-      "400",
-      "401",
-      "403",
-      "404",
-    ]);
-    expect(Object.keys(item.delete.responses)).toEqual([
-      "204",
-      "401",
-      "403",
-      "404",
-    ]);
-    expect(generated.components.schemas.RelationResult).toBeUndefined();
-    expect(generated.components.schemas.RelationListResult).toBeUndefined();
-    expect(generated.components.schemas.Error.properties.error.required).toEqual([
-      "code",
-      "message",
-    ]);
-  });
-
-  it("keeps response properties storage-derived while retaining entity documentation", () => {
+  it("documents the canonical record: storage scalars with titles, no input rules", () => {
     const generated = spec();
     const relation = generated.components.schemas.Relation as {
       description?: string;
@@ -681,17 +685,22 @@ describe("rich generated REST OpenAPI", () => {
     };
 
     expect(relation.description).toBe("Canonical relation aggregate.");
-    expect(relation.properties.displayName).toEqual({ type: "string" });
-    expect(relation.properties.relationType).toEqual({ type: "string" });
-    expect(relation.properties.metadata).toEqual({});
-    expect(relation.properties.iban).toEqual({ type: "string" });
-    expect(relation.properties.relationGroupId).toEqual({
+    expect(relation.properties.displayName).toEqual({
       type: "string",
-      format: "uuid",
+      title: "Display name",
+      "x-osf-i18n": { title: { en: "Display name" } },
+      "x-osf-type": "string",
+    });
+    expect(relation.properties.displayName).not.toHaveProperty("maxLength");
+    expect(relation.properties.relationType).toMatchObject({ type: "string" });
+    expect(relation.properties.metadata).toMatchObject({ anyOf: [{ title: "Metadata" }, { type: "null" }] });
+    expect(relation.properties.iban).toMatchObject({ anyOf: [{ type: "string" }, { type: "null" }] });
+    expect(relation.properties.relationGroupId).toMatchObject({
+      anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
     });
   });
 
-  it("models create requiredness, partial PATCH, immutability, and secure fields", () => {
+  it("models create requiredness, partial PATCH, immutability, and classified fields", () => {
     const schemas = spec().components.schemas;
     const create = schemas.RelationInput as {
       required?: string[];
@@ -721,7 +730,9 @@ describe("rich generated REST OpenAPI", () => {
     expect(create.properties.externalId?.description).toBe(
       "Identifier in the owning external system. References the ExternalSystem entity.",
     );
-    expect(create.properties.iban).toEqual({ type: "string" });
+    // A classified field keeps its authored input rules: the rules describe
+    // what a caller may send, not what any record holds.
+    expect(create.properties.iban).toMatchObject({ type: "string", maxLength: 34 });
     expect(update.required).toEqual(["expectedVersion", "leaseToken"]);
     expect(update.properties.expectedVersion).toMatchObject({
       type: "string",
@@ -851,7 +862,7 @@ describe("rich generated REST OpenAPI", () => {
 
     const generated = JSON.parse(
       renderOpenApiSpec(manifest, "fixture", {
-        entities: [{ contract: pluginContract }],
+        entities: [{ contract: withDerivedErrors(pluginContract) }],
       }),
     ) as any;
 
@@ -1002,7 +1013,7 @@ describe("rich generated REST OpenAPI", () => {
       renderOpenApiSpec(
         { ...manifest, tables: [restTable, nonRestTable] },
         "fixture",
-        { entities: [{ contract }, { contract: nonRestContract }] },
+        { entities: [{ contract: withDerivedErrors(contract) }, { contract: withDerivedErrors(nonRestContract) }] },
       ),
     ) as any;
     expect(
@@ -1014,7 +1025,7 @@ describe("rich generated REST OpenAPI", () => {
       renderOpenApiSpec(
         { ...manifest, tables: [nonRestTable] },
         "fixture",
-        { entities: [{ contract: nonRestContract }] },
+        { entities: [{ contract: withDerivedErrors(nonRestContract) }] },
       ),
     ) as any;
     expect(nonRestOnly.paths["/api/operation-leases"]).toBeUndefined();
@@ -1028,8 +1039,9 @@ describe("rich generated REST OpenAPI", () => {
     semanticContract.model.fields.push(
       field({
         key: "definition",
-        valueType: "object",
-        semanticType: "fieldDefinition",
+        baseType: "object",
+        osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
       }),
     );
     const semanticManifest = structuredClone(manifest);
@@ -1040,7 +1052,7 @@ describe("rich generated REST OpenAPI", () => {
     });
     const generated = JSON.parse(
       renderOpenApiSpec(semanticManifest, "fixture", {
-        entities: [{ contract: semanticContract }],
+        entities: [{ contract: withDerivedErrors(semanticContract, semanticManifest) }],
       }),
     ) as { components: { schemas: Record<string, Record<string, unknown>> } };
     const create = generated.components.schemas.RelationInput as {
@@ -1074,6 +1086,10 @@ describe("rich generated REST OpenAPI", () => {
   it("tags operations with the compiled entity description", () => {
     const generated = spec();
     expect(generated.tags).toEqual([
+      {
+        name: "Files",
+        description: "Authenticated streaming transport for temporary and record-bound files. Storage policy and authorization remain server-side.",
+      },
       {
         name: "Edit leases",
         description: "Central leases for long-running record write modes.",
@@ -1170,7 +1186,8 @@ describe("rich generated REST OpenAPI", () => {
     expect(byName.has("tenantIdIn")).toBe(false);
     expect(byName.has("privateMarker")).toBe(false);
     expect(byName.has("privateMarkerIn")).toBe(false);
-    expect(byName.get("sequenceNumber")?.schema).toEqual({ type: "integer" });
+    // A bigint filter value is the decimal text the column holds, exact.
+    expect(byName.get("sequenceNumber")?.schema).toMatchObject({ type: "string", pattern: "^-?(?:0|[1-9][0-9]*)$" });
   });
 
   it("avoids transport and explicit-IN parameter name collisions", () => {

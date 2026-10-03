@@ -21,19 +21,19 @@ import type {
   GraphQLRelationship,
   GraphQLProfileType,
   ComponentCatalog,
-  SemanticTypeDefinition,
+  OsfTypeDefinition,
 } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
 import { fieldGraphqlBaseType, capitalize, uncapitalize, pluralize } from "./helpers.js";
 import { resolveFieldOptions, resolveRender } from "./model.js";
-import { isCoreEntityV2, v2GraphqlOperationActions } from "../entity-v2.js";
+import { graphqlOperationActions } from "../entity-model.js";
 
 export function buildGraphQL(
   coreEntity: LoadedArtifacts["coreEntity"],
   profiles: EntityProfile[],
   relationships: CompiledRelationship[],
   componentCatalog?: ComponentCatalog,
-  semanticTypes?: Record<string, SemanticTypeDefinition>
+  osfTypes?: Record<string, OsfTypeDefinition>
 ): GraphQLSection {
   const typeName = coreEntity.entity;
   const fields: GraphQLField[] = coreEntity.fields.filter((f) => !f.relationship?.target).map((f) => {
@@ -45,30 +45,19 @@ export function buildGraphQL(
       ...(f.graphqlType ? { computedResolver: "labels" as const } : {}),
     };
   });
-  const fieldNames = new Set(fields.map((field) => field.name));
 
-  for (const relationship of relationships) {
-    if (relationship.fieldKey) continue;
-    if (relationship.kind !== "belongsTo") continue;
-    const syntheticIdFieldName = `${relationship.key}Id`;
-    if (fieldNames.has(syntheticIdFieldName)) continue;
-    fields.push({
-      name: syntheticIdFieldName,
-      type: "ID",
-      source: "core",
-    });
-    fieldNames.add(syntheticIdFieldName);
-  }
-
-  const gqlRels: GraphQLRelationship[] = relationships.map((r) => ({
+  // A provider-backed reference has no column to join on; its target's
+  // Operations resolve it outside GraphQL.
+  const gqlRels: GraphQLRelationship[] = relationships.filter((r) => !r.provider).map((r) => ({
     name: r.key,
     target: r.target,
-    type: r.kind === "hasMany" || r.kind === "manyToMany"
+    type: r.kind === "hasMany"
       ? `[${r.target}!]!`
       : `${r.target}`,
     resolve: r.kind,
     foreignKey: r.foreignKey,
     via: r.via,
+    ...(r.through ? { through: r.through } : {}),
   }));
 
   const profileTypes: Record<string, GraphQLProfileType> = {};
@@ -79,7 +68,7 @@ export function buildGraphQL(
       fieldName: profile.profile,
       description: toGraphQLDescription(profile.description),
       fields: profile.fields.map((f) => {
-        const semType = f.semanticType ? semanticTypes?.[f.semanticType] : undefined;
+        const semType = f.osfType ? osfTypes?.[f.osfType] : undefined;
         // Resolve display render (for lists/detail) separately from input render (for forms)
         const displayComponent = semType?.render?.display;
         const displayRender = displayComponent && componentCatalog
@@ -91,7 +80,7 @@ export function buildGraphQL(
           column: f.persisted?.column,
           label: f.label ?? semType?.label,
           description: toGraphQLDescription(f.description ?? semType?.description),
-          semanticType: f.semanticType,
+          osfType: f.osfType,
           render: componentCatalog ? resolveRender(f, componentCatalog, semType) : undefined,
           displayRender,
           validation: f.validation ?? semType?.validation,
@@ -130,9 +119,7 @@ export function buildGraphQL(
       update: { name: `update${typeName}`, input: `Update${typeName}Input!` },
       delete: { name: `delete${typeName}`, args: [{ name: "id", type: "ID!" }] },
     },
-    ...(isCoreEntityV2(coreEntity)
-      ? { operations: v2GraphqlOperationActions(coreEntity) }
-      : {}),
+    operations: graphqlOperationActions(coreEntity),
   };
 }
 

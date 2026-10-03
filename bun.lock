@@ -6,6 +6,7 @@
       "name": "openshapeforge",
       "devDependencies": {
         "@openshapeforge/documents": "workspace:*",
+        "@openshapeforge/versioning": "workspace:*",
         "@types/bun": "^1.3.5",
       },
     },
@@ -80,6 +81,7 @@
         "@dnd-kit/sortable": "^10.0.0",
         "@dnd-kit/utilities": "^3.2.2",
         "@openshapeforge/auth": "workspace:*",
+        "@openshapeforge/operations": "workspace:*",
         "@openshapeforge/ui": "workspace:*",
         "@radix-ui/react-checkbox": "^1.3.3",
         "@radix-ui/react-dialog": "^1.1.15",
@@ -118,44 +120,43 @@
     "connectors/afas-profit": {
       "name": "@openshapeforge/connector-afas-profit",
       "version": "0.1.0",
+      "dependencies": {
+        "@openshapeforge/plugin-runtime": "workspace:*",
+      },
     },
     "connectors/dynamics-finance": {
       "name": "@openshapeforge/connector-dynamics-finance",
       "version": "0.1.0",
+      "dependencies": {
+        "@openshapeforge/plugin-runtime": "workspace:*",
+      },
     },
     "connectors/exact-online": {
       "name": "@openshapeforge/connector-exact-online",
       "version": "0.1.0",
+      "dependencies": {
+        "@openshapeforge/plugin-runtime": "workspace:*",
+      },
     },
     "connectors/twinfield": {
       "name": "@openshapeforge/connector-twinfield",
       "version": "0.1.0",
+      "dependencies": {
+        "@openshapeforge/plugin-runtime": "workspace:*",
+      },
     },
     "examples/connectors/object-store": {
       "name": "@openshapeforge/connector-example-object-store",
       "version": "0.1.0",
+      "dependencies": {
+        "@openshapeforge/plugin-runtime": "workspace:*",
+      },
     },
-    "examples/plugins/workflow": {
-      "name": "@openshapeforge/example-plugin-workflow",
+    "examples/plugins/notebook": {
+      "name": "@openshapeforge/example-plugin-notebook",
       "version": "0.1.0",
       "dependencies": {
-        "@restatedev/restate-sdk": "^1.10.4",
-        "cron-parser": "^5.5.0",
-        "fastify": "^5.8.2",
         "kysely": "^0.29.4",
-        "react": "19.2.7",
-        "yaml": "^2.8.3",
-        "zod": "^4.3.6",
-      },
-      "devDependencies": {
-        "@types/react": "^19",
-      },
-    },
-    "examples/plugins/workflow-domain-nodes": {
-      "name": "@openshapeforge/example-plugin-workflow-domain-nodes",
-      "version": "0.1.0",
-      "dependencies": {
-        "yaml": "^2.8.3",
       },
     },
     "packages/auth": {
@@ -169,10 +170,14 @@
         "@types/node": "^26",
         "typescript": "^5.9.0",
       },
+      "peerDependencies": {
+        "ioredis": "^5.11.1",
+        "next-auth": "5.0.0-beta.32",
+      },
     },
     "packages/compiler": {
       "name": "@openshapeforge/compiler",
-      "version": "0.1.7",
+      "version": "0.2.0",
       "bin": {
         "openshapeforge-compiler": "./src/index.ts",
       },
@@ -194,9 +199,10 @@
     },
     "packages/documents": {
       "name": "@openshapeforge/documents",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
+        "@openshapeforge/versioning": "workspace:*",
         "yaml": "^2.8.3",
       },
       "devDependencies": {
@@ -204,13 +210,13 @@
         "typescript": "^5.9.0",
       },
       "peerDependencies": {
-        "@openshapeforge/compiler": ">=0.1.7 <0.2.0",
+        "@openshapeforge/compiler": ">=0.2.0 <0.3.0",
         "@openshapeforge/plugin-runtime": ">=0.1.0 <0.2.0",
       },
     },
     "packages/interface-web": {
       "name": "@openshapeforge/interface-web",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
       },
@@ -248,7 +254,7 @@
     },
     "packages/operations": {
       "name": "@openshapeforge/operations",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "devDependencies": {
         "@types/bun": "^1.3.5",
         "typescript": "^5.9.0",
@@ -256,7 +262,7 @@
     },
     "packages/plugin-runtime": {
       "name": "@openshapeforge/plugin-runtime",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
         "fastify": "^5.8.2",
@@ -265,22 +271,6 @@
       "devDependencies": {
         "@types/bun": "^1.3.5",
         "typescript": "^5.9.0",
-      },
-    },
-    "packages/preferences": {
-      "name": "@openshapeforge/preferences",
-      "version": "0.1.0",
-      "dependencies": {
-        "@openshapeforge/operations": "workspace:*",
-        "yaml": "^2.8.3",
-      },
-      "devDependencies": {
-        "@types/bun": "^1.3.5",
-        "typescript": "^5.9.0",
-      },
-      "peerDependencies": {
-        "@openshapeforge/compiler": ">=0.1.7 <0.2.0",
-        "@openshapeforge/plugin-runtime": ">=0.1.0 <0.2.0",
       },
     },
     "packages/ui": {
@@ -306,6 +296,21 @@
         "react-dom": "^19.0.0",
       },
     },
+    "packages/versioning": {
+      "name": "@openshapeforge/versioning",
+      "version": "0.1.0",
+      "dependencies": {
+        "@openshapeforge/operations": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.5",
+        "typescript": "^5.9.0",
+      },
+      "peerDependencies": {
+        "@openshapeforge/compiler": ">=0.2.0 <0.3.0",
+        "@openshapeforge/plugin-runtime": ">=0.1.0 <0.2.0",
+      },
+    },
     "packages/workflow-layout": {
       "name": "@openshapeforge/workflow-layout",
       "version": "0.1.0",
@@ -322,7 +327,7 @@
   "overrides": {
     "brace-expansion": "^5.0.9",
     "fast-uri": "^4.1.2",
-    "fastify": "5.10.0",
+    "fastify": "5.12.2",
     "hono": "^4.12.34",
     "nanoid": "^3.3.18",
     "postcss": "^8.5.18",
@@ -527,9 +532,7 @@
 
     "@openshapeforge/documents": ["@openshapeforge/documents@workspace:packages/documents"],
 
-    "@openshapeforge/example-plugin-workflow": ["@openshapeforge/example-plugin-workflow@workspace:examples/plugins/workflow"],
-
-    "@openshapeforge/example-plugin-workflow-domain-nodes": ["@openshapeforge/example-plugin-workflow-domain-nodes@workspace:examples/plugins/workflow-domain-nodes"],
+    "@openshapeforge/example-plugin-notebook": ["@openshapeforge/example-plugin-notebook@workspace:examples/plugins/notebook"],
 
     "@openshapeforge/interface-web": ["@openshapeforge/interface-web@workspace:packages/interface-web"],
 
@@ -539,9 +542,9 @@
 
     "@openshapeforge/plugin-runtime": ["@openshapeforge/plugin-runtime@workspace:packages/plugin-runtime"],
 
-    "@openshapeforge/preferences": ["@openshapeforge/preferences@workspace:packages/preferences"],
-
     "@openshapeforge/ui": ["@openshapeforge/ui@workspace:packages/ui"],
+
+    "@openshapeforge/versioning": ["@openshapeforge/versioning@workspace:packages/versioning"],
 
     "@openshapeforge/web": ["@openshapeforge/web@workspace:apps/web"],
 
@@ -615,7 +618,7 @@
 
     "@pinojs/redact": ["@pinojs/redact@0.4.0", "", {}, "sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg=="],
 
-    "@playwright/test": ["@playwright/test@1.62.1", "", { "dependencies": { "playwright": "1.62.1" }, "bin": { "playwright": "cli.js" } }, "sha512-DTcUc8qii+cpHvtOwggMtBRMjKZHXYWdw8syRYu2vtzuq4Wxphqq4NfCs5Zt44L6mA8rfDfj+PHnxFc/FeK6mQ=="],
+    "@playwright/test": ["@playwright/test@1.63.0", "", { "dependencies": { "playwright": "1.63.0" }, "bin": { "playwright": "cli.js" } }, "sha512-oxMK4vllB9RK5NQ2l1pq1IfOf2AvnEuj/vYGDj0H2nMtmtZpKtCwt/l00GEO6xjGfpBNAvjovvYdCm50dRQkpQ=="],
 
     "@protobufjs/aspromise": ["@protobufjs/aspromise@1.1.2", "", {}, "sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ=="],
 
@@ -708,10 +711,6 @@
     "@radix-ui/rect": ["@radix-ui/rect@1.1.3", "", {}, "sha512-JtyZR+mqgBibTo8xea3B6ZRmzZiM/YeVBtUkas6zMuXjAlfIFIW2FgqeM9eLyvEaYX66vr6DJMK+4U6LV0KhNw=="],
 
     "@repeaterjs/repeater": ["@repeaterjs/repeater@3.1.0", "", {}, "sha512-TaoVksZRSx2KWYYpyLQtMQXXeS98VsgZImzW65xmiVgbYhXLk+aEsmzPLirqVuE4/XuUapH2iMtxUzaBNDzdSQ=="],
-
-    "@restatedev/restate-sdk": ["@restatedev/restate-sdk@1.16.2", "", { "dependencies": { "@restatedev/restate-sdk-core": "1.16.2" } }, "sha512-L2XqUukvdGYmqCqsFvJzTsaU3JiuFzsYSh6nK19Q1yKNOr/bBBZKdic0o0hza5P5QdiiFC5jLHJ5wCWt77IO0Q=="],
-
-    "@restatedev/restate-sdk-core": ["@restatedev/restate-sdk-core@1.16.2", "", {}, "sha512-dytd78+c7x24NFhfj7XpziqYJCY5E4DE2Qd0N6la/hXoF2SbhhM5/Iey82MCwELCEnN7RPfN3+/Th58LQezTQw=="],
 
     "@scarf/scarf": ["@scarf/scarf@1.4.0", "", {}, "sha512-xxeapPiUXdZAE3che6f3xogoJPeZgig6omHEy1rIY5WVsB3H2BHNnZH+gHG6x91SCWyQCzWGsuL2Hh3ClO5/qQ=="],
 
@@ -887,8 +886,6 @@
 
     "cors": ["cors@2.8.6", "", { "dependencies": { "object-assign": "^4", "vary": "^1" } }, "sha512-tJtZBBHA6vjIAaF6EnIaq6laBBP9aq/Y3ouVJjEfoHbRBcHBAHYcMh/w8LDrk2PvIMMq8gmopa5D4V8RmbrxGw=="],
 
-    "cron-parser": ["cron-parser@5.6.2", "", { "dependencies": { "luxon": "^3.7.2" } }, "sha512-yJ/G1LVir6CnlkLI40CsampPLKl1SprGGlUagWtGJxewytRVYezv5xVyzzbT+Pvzx+VIRvZVF7/a0eEMTxdnTA=="],
-
     "cross-inspect": ["cross-inspect@1.0.1", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-Pcw1JTvZLSJH83iiGWt6fRcT+BjZlCDRVwYLbUcHzv/CRpB7r0MlSrGbIyQvVSNyGnbt7G4AXuyCiDR3POvZ1A=="],
 
     "cross-spawn": ["cross-spawn@7.0.6", "", { "dependencies": { "path-key": "^3.1.0", "shebang-command": "^2.0.0", "which": "^2.0.1" } }, "sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA=="],
@@ -979,7 +976,7 @@
 
     "fast-uri": ["fast-uri@4.1.3", "", {}, "sha512-7+72G6vLt7jjNas8SmSATx2qeyRIjxeqO3i4IkmDTxlqYZRKANhOe1bnovcp4WZmvsYrp60WyqPyHqgRiX0yXw=="],
 
-    "fastify": ["fastify@5.10.0", "", { "dependencies": { "@fastify/ajv-compiler": "^4.0.5", "@fastify/error": "^4.0.0", "@fastify/fast-json-stringify-compiler": "^5.0.0", "@fastify/proxy-addr": "^5.0.0", "abstract-logging": "^2.0.1", "avvio": "^9.0.0", "fast-json-stringify": "^7.0.0", "find-my-way": "^9.6.0", "light-my-request": "^6.0.0", "pino": "^9.14.0 || ^10.1.0", "process-warning": "^5.0.0", "rfdc": "^1.3.1", "secure-json-parse": "^4.0.0", "semver": "^7.6.0", "toad-cache": "^3.7.0" } }, "sha512-A9L0ziuWGQHgEEVgF3davQ9vbD93IuX+lo2IsxapQmu5b/Y/ynn9m9K5JHt9dvyJXOFc5iN0Zk5GHEOqnzhWjg=="],
+    "fastify": ["fastify@5.12.2", "", { "dependencies": { "@fastify/ajv-compiler": "^4.0.5", "@fastify/error": "^4.0.0", "@fastify/fast-json-stringify-compiler": "^5.0.0", "@fastify/proxy-addr": "^5.0.0", "abstract-logging": "^2.0.1", "avvio": "^9.0.0", "fast-json-stringify": "^7.0.0", "find-my-way": "^9.6.0", "light-my-request": "^6.0.0", "pino": "^9.14.0 || ^10.1.0", "process-warning": "^5.1.0", "rfdc": "^1.3.1", "secure-json-parse": "^4.0.0", "semver": "^7.6.0", "toad-cache": "^3.7.0" } }, "sha512-npAgfhAigNiLOhCZEg7uFWThMrYoiDX/7/VyzicXSrVSXz6K/KYekW+QpOk7WOnZER0U7MmjvoDHV6qO5x4wKg=="],
 
     "fastify-plugin": ["fastify-plugin@5.1.0", "", {}, "sha512-FAIDA8eovSt5qcDgcBvDuX/v0Cjz0ohGhENZ/wpc3y+oZCY2afZ9Baqql3g/lC+OHRnciQol4ww7tuthOb9idw=="],
 
@@ -994,8 +991,6 @@
     "forwarded-parse": ["forwarded-parse@2.1.2", "", {}, "sha512-alTFZZQDKMporBH77856pXgzhEzaUVmLCDk+egLgIgHst3Tpndzz8MnKe+GzRJRfvVdn69HhpW7cmXzvtLvJAw=="],
 
     "fresh": ["fresh@2.0.0", "", {}, "sha512-Rx/WycZ60HOaqLKAi6cHRKKI7zxWbJ31MhntmtwMoaTeF7XFH9hhBp8vITaMidfljRQ6eYWCKkaTK+ykVJHP2A=="],
-
-    "fsevents": ["fsevents@2.3.2", "", { "os": "darwin" }, "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA=="],
 
     "function-bind": ["function-bind@1.1.2", "", {}, "sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA=="],
 
@@ -1110,8 +1105,6 @@
     "lru-cache": ["lru-cache@10.4.3", "", {}, "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ=="],
 
     "lucide-react": ["lucide-react@1.28.0", "", { "peerDependencies": { "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-fARAFJULsGuDDydjp6+6blekG/sBIM29TerzLjc9bQUKAcEfrSc4ZQKb25KRz4OMKd87cZTb5dgq0w/T6KufVg=="],
-
-    "luxon": ["luxon@3.7.2", "", {}, "sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew=="],
 
     "magic-string": ["magic-string@0.30.21", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5" } }, "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ=="],
 
@@ -1231,9 +1224,9 @@
 
     "pkce-challenge": ["pkce-challenge@5.0.1", "", {}, "sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ=="],
 
-    "playwright": ["playwright@1.62.1", "", { "dependencies": { "playwright-core": "1.62.1" }, "optionalDependencies": { "fsevents": "2.3.2" }, "bin": { "playwright": "cli.js" } }, "sha512-0M+L3LAD8/nm554LOla9Ayx0j0tmFZ0FBcoQ7F1VuVHpM/XpiC8RcDzBQB8W5+hA8L22THxELzeF+2WcUzvcLg=="],
+    "playwright": ["playwright@1.63.0", "", { "dependencies": { "playwright-core": "1.63.0" }, "bin": { "playwright": "cli.js" } }, "sha512-+7ziBLidS4NaNCdt57SUDT+wYmmd5fmiQejUic/kb+YsYSCPyOOE9sebzMjNmQrsnNpDJqd4WHvV/8lfKfUDUg=="],
 
-    "playwright-core": ["playwright-core@1.62.1", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw=="],
+    "playwright-core": ["playwright-core@1.63.0", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg=="],
 
     "postcss": ["postcss@8.5.25", "", { "dependencies": { "nanoid": "^3.3.16", "picocolors": "^1.1.1", "source-map-js": "^1.2.1" } }, "sha512-DTPx3RWSSnWyzLxQnlH0rJP+EW5ekl16ZU4/psbIhA0e53kJfdgaN5vKM+xP7yJtXVu+nfdVFmlgFDEKAe4Pyw=="],
 

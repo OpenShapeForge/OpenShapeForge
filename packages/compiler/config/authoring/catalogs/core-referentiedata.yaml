@@ -184,16 +184,6 @@ groepen:
       - value: tenant
         label: { nl: Tenant, en: Tenant, fr: Locataire }
 
-  PREFERENCEOWNERSCOPE:
-    description: Kerncodetabel voor de eigenaarsscope van generieke preferences.
-    items:
-      - value: account
-        label: { nl: Account, en: Account, fr: Compte }
-      - value: relation
-        label: { nl: Relatie, en: Relation, fr: Relation }
-      - value: tenant
-        label: { nl: Tenant, en: Tenant, fr: Locataire }
-
   NOTIFICATIETEMPLATESTATUS:
     description: Kerncodetabel voor de levenscyclus van notificatietemplates.
     items:
@@ -703,12 +693,10 @@ groepen:
         label: { nl: Handmatige goedkeuring, en: Manual approval, fr: Approbation manuelle }
 
   CASESTEPACTIONKIND:
-    description: Kerncodetabel voor typen acties binnen een zaakstap.
+    description: Kerncodetabel voor soorten acties binnen een zaakstap; een plugin kan soorten toevoegen.
     items:
       - value: task
         label: { nl: Taak, en: Task, fr: Tâche }
-      - value: workflow
-        label: { nl: Workflow, en: Workflow, fr: Workflow }
 
   CASESTEPACTIONSTARTMODE:
     description: Kerncodetabel voor hoe zaakstapacties gestart worden.
@@ -817,6 +805,8 @@ groepen:
         label: { nl: Concept, en: Draft, fr: Brouillon }
       - value: final
         label: { nl: Definitief, en: Final, fr: Définitif }
+      - value: published
+        label: { nl: Gepubliceerd, en: Published, fr: Publié }
       - value: superseded
         label: { nl: Vervangen, en: Superseded, fr: Remplacé }
       - value: withdrawn
@@ -995,18 +985,6 @@ groepen:
         label: { nl: Hercreatie (TWK), en: Reissue (TWK) }
       - value: milestone
         label: { nl: Mijlpaal, en: Milestone }
-
-  AGREEMENTMILESTONESTATUS:
-    description: Lifecycle status of an agreement milestone.
-    items:
-      - value: pending
-        label: { nl: In afwachting, en: Pending }
-      - value: triggered
-        label: { nl: Getriggerd, en: Triggered }
-      - value: invoiced
-        label: { nl: Gefactureerd, en: Invoiced }
-      - value: cancelled
-        label: { nl: Geannuleerd, en: Cancelled }
 
   BILLINGRUNITEMSTATUS:
     description: Per-agreement/per-period idempotency ledger status inside a BillingRun.

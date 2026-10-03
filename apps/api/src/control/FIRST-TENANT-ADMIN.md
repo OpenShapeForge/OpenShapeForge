@@ -2,16 +2,45 @@
 
 The authenticated platform MCP exposes `invite_first_tenant_admin` with only
 `slug` and `email`. It requires the control-realm `platform-operator` role;
-tenant tokens and an admin-only `platform_admin` session are insufficient.
+tenant tokens and an admin-only `platform-operator` session are insufficient.
 The tenant must already be active and linked to the exact enabled Keycloak
 organization in the configured tenant realm. Confirm tenant and recipient before
-calling this mail-sending tool.
+calling this tool.
 
 This uses the existing organization invitation API and employee invitation store.
 The recipient gets a pending `org_admin` intent; the existing verified sign-in /
 invitation-acceptance flow grants that role. The platform administrator remains a
 control identity, not a tenant member. No user or membership is created by this
 tool. The audited system session identifies the control issuer and subject.
+
+## What the result says
+
+Every invite result (`invite_first_tenant_admin`, `create_tenant_invitation`,
+`resend_tenant_invitation`) carries `delivery`, `signInUrl` and `nextStep`:
+
+| `delivery` | mail | what the person does |
+| --- | --- | --- |
+| `email_sent` | Keycloak accepted an invitation e-mail request | follows the link in that e-mail |
+| `no_email_existing_account` | none, ever | signs in at `signInUrl`; the role applies then |
+| `already_pending` | none new; Keycloak holds an unexpired invitation (delivery unconfirmed) | uses the earlier e-mail, or asks for an explicit resend |
+| `already_accepted` | none; already a member | signs in; roles change via `assign_tenant_member_roles` |
+
+`signInUrl` is `OPENSHAPEFORGE_PUBLIC_ORIGIN` + `/<slug>` (the same address as
+the tenant's MCP resource), or null without a public origin. `nextStep` is
+written for the assistant relaying the result.
+
+An address that already belongs to the Keycloak organization is detected
+before `invite-user` is called: Keycloak would refuse it, and membership alone
+does not create the OSF Relation or identity link. The local intent is recorded
+without mail and consumed on first sign-in. `list_tenant_invitations` shows such
+an intent under `unresolved` with status `awaiting_sign_in`; `provider_missing`
+is reserved for an intent with neither an account nor a provider invitation.
+A Keycloak `409` on `invite-user` is re-read first (a concurrent sign-up or
+invitation); otherwise it becomes `ORGANIZATION_MEMBER_EXISTS`,
+`INVITATION_ALREADY_PENDING` or `INVITATION_REJECTED` — never
+`INVITATION_DELIVERY_UNCONFIRMED`, because no mail was attempted.
+
+## Serialization
 
 A tenant-row lock serializes bootstrap decisions. A repeated pending invitation
 is reused without another mail; a confirmed remote invitation can recover a lost
@@ -47,6 +76,7 @@ bun test apps/api/src/control/__tests__/first-tenant-administrator.test.ts \
   apps/api/src/control/__tests__/platform-admin.unit.test.ts \
   apps/api/src/control/__tests__/platform-tools.unit.test.ts \
   apps/api/src/control/__tests__/keycloak-organization-members.unit.test.ts \
+  apps/api/src/control/__tests__/invitation-outcome.unit.test.ts \
   apps/api/src/mcp/employee-invitation-tools.test.ts
 ```
 

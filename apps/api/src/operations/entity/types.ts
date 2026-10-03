@@ -61,6 +61,11 @@ export type GeneratedCrudRelationship = {
   cardinality?: "single" | "collection" | { min?: number; max?: number | "unbounded" };
   sortable?: boolean;
   positionColumn?: string;
+  /** Owner-scoped collection Operations authorize the children through the owner (authored per field). */
+  childAuthorization?: "owner";
+  /** Child field whose true value makes the owner's update, move and remove refuse that child. */
+  childLock?: string;
+  version?: "pinned" | "current";
   via?: string;
   viaSchema?: string;
   mutationSupport?: "unsupported";
@@ -78,16 +83,64 @@ export type GeneratedCrudTable = {
   table: string;
   tenantScoped: boolean;
   domainInternal: boolean;
-  generatedCrudEligible?: boolean;
-  generatedCrud: boolean;
+  generatedCrudEligible: boolean;
   primaryKey: string | null;
   columns: GeneratedCrudColumn[];
+  retention?: {
+    clock: { column: string; type?: "timestamptz" | "date"; fallbackColumns?: string[] };
+    rules: Array<{
+      id: string;
+      duration: {
+        minimum?: { years?: number; months?: number; days?: number };
+        default?: { years?: number; months?: number; days?: number };
+        maximum?: { years?: number; months?: number; days?: number };
+      };
+      action: "retain" | "archive" | "redact" | "delete";
+      disposition?: "keep" | "archive" | "delete" | "anonymize" | "mask" | "cryptoDelete" | "review";
+    }>;
+    legalHold?: { suspendDestruction: boolean; activeColumn?: string };
+  };
+  /** Compiler- and plugin-owned table constraints, as the manifest carries them. */
+  constraints?: Array<{ name: string; kind: string; expression?: string; columns?: string[] }>;
   realtime?: { readPredicate: string; visibilityColumns: string[] };
   source?: {
     blueprint?: { fields: string[]; labelField: string; operations: { list: string; status: string; reset: string; publish: string } };
+    /** Status state machines declared on fields; each rule is the Operation `operation`. */
+    transitions?: Array<{
+      field: string;
+      label?: { en?: string; nl?: string };
+      values?: Record<string, { en?: string; nl?: string }>;
+      initial: string;
+      rules: Array<{
+        key: string;
+        operation: string;
+        from: string[];
+        to: string;
+        label: { en?: string; nl?: string };
+        recordPermission?: "edit";
+        preconditions?: Array<{ field: string; present?: boolean; via?: string; in?: Array<string | number | boolean>; refusal?: { en?: string; nl?: string } }>;
+        writes?: Array<{ field: string; required: boolean; agreesOn?: string[] }>;
+        stamps?: Array<{ field: string; value: "now" | "actor"; actor?: "relation" | "user" }>;
+      }>;
+    }>;
     authoringEntityName?: string;
-    /** Present only for strict v2 entity authoring; absence means legacy v1. */
-    authoringVersion?: 2 | 3;
+    /** The entity's authored name in both languages, for what a person reads. */
+    labels?: { en?: string; nl?: string };
+    versioning?: {
+      strategy: "publishedSnapshot";
+      versionEntity: string;
+      versionsField: string;
+      snapshot: { ownedRelationships: "recursive" };
+      publishOperation: string;
+      /** The draft rule: the head field a content edit resets, and to what. */
+      onEdit: { field: string; value: string };
+      storage: {
+        head: { schema: string; table: string };
+        version: { schema: string; table: string; headColumn: string };
+        owned: Array<{ schema: string; table: string; childColumns: string[]; parentColumns: string[]; children: unknown[] }>;
+      };
+    };
+    hardDelete?: { requireNeverPublished: true };
     computedFields?: Array<{
       field: string;
       resolver: "labelRules";
@@ -165,7 +218,8 @@ export type EntityOperationContract = EntityOperationRef & {
   target?:
     | { entityId: string; entityName: string; scope: "collection" }
     | { entityId: string; entityName: string; scope: "record"; inputField: string };
-  errors?: import("../runtime.js").OperationContract["errors"];
+  /** Every failure the Operation declares; derived by the compiler for every entity Operation. */
+  errors: import("../runtime.js").OperationContract["errors"];
   interfaces?: {
     rest?: false | {
       method?: string;
@@ -195,6 +249,10 @@ export type EntityOperationContract = EntityOperationRef & {
     idempotency: { mode: "natural" | "keyed" | "none"; inputField?: string };
   };
   prerequisites?: readonly OperationPrerequisite[];
+  stamps?: readonly {
+    field: string;
+    source: "now" | "actorRelation" | "actorUserId";
+  }[];
   interaction: {
     confirmation: OperationConfirmation;
     secureInput?: {

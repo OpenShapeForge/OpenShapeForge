@@ -19,6 +19,7 @@ import {
   tablesByTypeName,
 } from "./e2e/entity-factory.js";
 import { fetchRecord } from "./e2e/gql-shapes.js";
+import { isOperationWrittenColumn } from "../../operations/entity/write-policy.js";
 
 registerSuiteLifecycle();
 
@@ -46,6 +47,13 @@ for (const table of tables) {
           ? undefined
           : foreignKeyTargets(fkOwner).get(relationship.foreignKey);
       if (emittedTarget !== undefined && emittedTarget !== fkRowTable.name) continue;
+      const relationshipColumn = fkOwner.columns.find(
+        (column) => column.name === relationship.foreignKey,
+      );
+      // A named Operation, not generic CRUD, establishes this edge. Its
+      // semantics are covered by the operation-written reference suite; this
+      // generic traversal fixture cannot legitimately drive it.
+      if (relationshipColumn && isOperationWrittenColumn(relationshipColumn)) continue;
 
       // The engine populates tenant_id from the session; no input can set it.
       // Driving such a relationship means asserting against the session's own

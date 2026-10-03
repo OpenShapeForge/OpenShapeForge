@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ResearchResult
@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Research Result
   nl: Onderzoeksresultaat
+pluralLabels:
+  en: Research results
+  nl: Onderzoeksresultaten
 domains:
   - quality
 retention:
@@ -35,7 +38,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Code
@@ -49,7 +52,7 @@ fields:
       column: code
       storageClass: core
   - key: completedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Completed at
@@ -60,11 +63,8 @@ fields:
     persisted:
       column: completed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -77,26 +77,93 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: assignment
-    kind: belongsTo
-    target: ResearchAssignment
-    foreignKey: research_assignment_id
+  - key: assignmentId
     label:
       en: Research assignment
       nl: Onderzoeksopdracht
-  - key: answers
-    kind: hasMany
-    target: SurveyAnswer
-    foreignKey: research_result_id
-    label:
-      en: Answers
-      nl: Antwoorden
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: research_assignment_id
+      storageClass: core
+    osfType: ResearchAssignment
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Research Result
+    description: List ResearchResult records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Research Result
+    description: Get ResearchResult records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Research Result
+    description: Create ResearchResult records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Research Result
+    description: Update ResearchResult records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Research Result
+    description: Delete ResearchResult records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    fields:
+      completedAt:
+        render:
+          component: DateTimePicker
+          props: {}

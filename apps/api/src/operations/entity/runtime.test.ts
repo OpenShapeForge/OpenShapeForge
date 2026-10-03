@@ -15,6 +15,7 @@ import {
   restEditLeaseOperationIdsForSession,
   secureInputInteractionError,
   tableForEntityOperation,
+  trustedOperationStampValues,
 } from "./runtime.js";
 
 const relation = getGeneratedCrudTables().find(
@@ -22,6 +23,27 @@ const relation = getGeneratedCrudTables().find(
 )!;
 
 describe("entity operation runtime", () => {
+  test("derives human attribution only from a confirmed tenant Relation", () => {
+    const operation = { key: "create", stamps: [{ field: "authorId", source: "actorRelation" as const }] };
+    expect(trustedOperationStampValues(operation, {
+      userId: "identity-user",
+      relation: { status: "linked", relationId: "relation-1", displayName: "Author" },
+    } as never)).toEqual({ authorId: "relation-1" });
+    expect(() => trustedOperationStampValues(operation, {
+      userId: "identity-user",
+      relation: { status: "pending_confirmation", relationId: null },
+    } as never)).toThrow("session is not linked");
+  });
+
+  test("keeps system identity attribution explicit instead of substituting a Relation", () => {
+    expect(trustedOperationStampValues({
+      key: "run",
+      stamps: [{ field: "actor", source: "actorUserId" }],
+    }, {
+      userId: "service-identity",
+      relation: { status: "linked", relationId: "human-relation" },
+    } as never)).toEqual({ actor: "service-identity" });
+  });
   test("custom offers require one role from every canonical role group", () => {
     const auth = {
       mode: "session" as const,
@@ -269,9 +291,11 @@ describe("entity operation runtime", () => {
       ({ id }) => id === "Relation.update",
     )!;
     expect(restEditLeaseOperationIdsForSession({ roles: [] })).toEqual([]);
+    // Roles are alternatives, not an ordered broad-to-narrow permission ladder.
+    expect(update.authorization.roles).toContain("Relations.All.ReadWrite");
     expect(
       restEditLeaseOperationIdsForSession({
-        roles: [update.authorization.roles[0]!],
+        roles: ["Relations.All.ReadWrite"],
       }),
     ).toEqual([
       "Address.delete",
@@ -282,6 +306,9 @@ describe("entity operation runtime", () => {
       "PaymentDetail.update",
       "Relation.update",
     ]);
+    expect(update.authorization.roles).toContain("Relations.Relation.ReadWrite");
+    expect(restEditLeaseOperationIdsForSession({ roles: ["Relations.Relation.ReadWrite"] }))
+      .toEqual(["Relation.update"]);
     // RelationGroup is a blueprint entity, so its tenant-local reset holds
     // the same lease as an update for the role that may write it.
     expect(restEditLeaseOperationIdsForSession({ roles: ["Relations.RelationGroups.ReadWrite"] })).toEqual([
@@ -308,8 +335,11 @@ describe("entity operation runtime", () => {
     const contracts = getEntityOperationContracts().filter(
       (operation) => operation.entityName === "Relation",
     );
-    const readRole = contracts.find((operation) => operation.intent === "get")!
-      .authorization.roles[0]!;
+    const readRole = "Relations.All.Read";
+    expect(contracts.find((operation) => operation.intent === "get")!.authorization.roles).toContain(readRole);
+    for (const intent of ["update", "delete"]) {
+      expect(contracts.find((operation) => operation.intent === intent)!.authorization.roles).not.toContain(readRole);
+    }
 
     expect(
       getEntityOperationOffers(
@@ -318,6 +348,15 @@ describe("entity operation runtime", () => {
         ["get", "update", "delete"],
     ).map((offer) => offer.operation.id),
     ).toEqual(["Relation.get"]);
+  });
+
+  test("does not offer a source action with a missing required record binding", () => {
+    const id = "00000000-0000-4000-8000-000000000001";
+    const offers = getEntityOperationOffers("Account", { roles: ["Organization.Accounts.Manage"] }, [], {},
+      { id, row: { id, status: "linked" } });
+    expect(offers.find(offer => offer.operation.id === "Account.block")).toMatchObject({
+      available: false, error: { code: "OPERATION_UNAVAILABLE" },
+    });
   });
 
   test("refuses an unauthorized mutation before inspecting its controls", async () => {

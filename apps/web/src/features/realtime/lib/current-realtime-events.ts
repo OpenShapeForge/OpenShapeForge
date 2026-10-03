@@ -24,8 +24,6 @@ export type CurrentRealtimeEvent = RealtimeChangedEvent | RealtimeDeletedEvent;
 export type RealtimeInvalidationKey =
   | RealtimeResourceKey
   | `entity-list:${string}:*`
-  | "workflow-instance-list:*"
-  | "workflow-definition-list:*"
   | `summary:${string}:current`
   | `collection:${string}:current`;
 
@@ -70,14 +68,6 @@ export function parseCurrentRealtimeEvent(
 export function resourceKeysForCurrentRealtimeEvent(
   event: CurrentRealtimeEvent,
 ): RealtimeInvalidationKey[] {
-  if (event.resourceType === "workflow.instance" && event.resourceId) {
-    return [`workflow-instance:${event.resourceId}`, "workflow-instance-list:*"];
-  }
-
-  if (event.resourceType === "workflow.instance.list") {
-    return event.scope ? [`workflow-instance-list:${event.scope}`] : [];
-  }
-
   if (event.resourceType === "notification" && event.resourceId) {
     return [`notification:${event.resourceId}`];
   }
@@ -123,18 +113,6 @@ export function resourceKeysForCurrentRealtimeEvent(
   ) {
     const kind = event.resourceType === "realtime.summary" ? "summary" : "collection";
     return [`${kind}:${event.resourceId}:current`];
-  }
-
-  if (event.resourceType === "workflow.definition.lock" && event.resourceId) {
-    return [`workflow-definition-lock:${event.resourceId}`];
-  }
-
-  if (event.resourceType === "workflow.definition.version" && event.resourceId) {
-    return [`workflow-definition-version:${event.resourceId}`];
-  }
-
-  if (event.resourceType === "workflow.definitions.catalog") {
-    return ["workflow-definition-list:*"];
   }
 
   return [];

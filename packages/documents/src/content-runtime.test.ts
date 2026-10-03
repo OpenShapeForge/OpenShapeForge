@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { operationFailure } from "@openshapeforge/operations";
 import type { ModuleOperationContext, RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
 import { composeTemplate, contentFieldProjection, materializeFields, materializeTemplate } from "./content-runtime.js";
 
@@ -14,50 +13,57 @@ const carrier: RuntimeEntityValueCarrier = {
   valuesColumn: "values", definitionColumn: "definition_key",
   definitions: {
     TextBlock: {
-      entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "text", valueType: "string", required: true }],
-      valueSchema: { type: "object", properties: { text: { type: "string", minLength: 1 } }, required: ["text"], additionalProperties: false },
+      entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true }],
+      valueSchema: { type: "object", properties: { markdown: { type: "string", minLength: 1 } }, required: ["markdown"], additionalProperties: false },
       references: [], materializeOperationId: "TextBlock.materialize",
     },
     IncludeBlock: {
-      entityName: "IncludeBlock", schemaVersion: 1, definitionHash: "b".repeat(64), fields: [{ key: "version", valueType: "string", required: true, relationship: { target: "TemplateVersion" } }, { key: "parameters", valueType: "object" }],
+      entityName: "IncludeBlock", schemaVersion: 1, definitionHash: "b".repeat(64), fields: [{ key: "version", osfType: "TemplateVersion", baseType: "string", required: true, relationship: { target: "TemplateVersion" } }, { key: "parameters", osfType: "object", baseType: "object" }],
       valueSchema: { type: "object", properties: { parameters: { type: "object" } }, additionalProperties: false },
       references: [{ fieldKey: "version", targetEntity: "TemplateVersion", schema: "erp", table: "template_versions", column: "include_version_id", required: true }],
     },
   },
 };
 
-function fixture(blockDefault?: string, withReference = false) {
+function fixture(blockDefault?: string, withReference = false, withBinding = false) {
   const authorizations: string[] = [];
   const calls: { schema: unknown; values: unknown }[] = [];
   const executions: unknown[] = [];
   const reads: string[] = [];
   const queries: string[] = [];
-  const data = { text: "Hello {{local.name}} from {{chips.brand}}", chip: "Example", tenant: ids.tenant, unavailableOperation: false, denyBlock: false, disallowText: false,
-    redactChip: false, redactBlock: false, omitBlockText: false, missingRead: "" };
+  const data = { markdown: "Hello {{local.name}} from {{chips.brand}}", chip: "Example", tenant: ids.tenant, unavailableOperation: false, disallowText: false,
+    redactChip: false, redactBlockValues: false, missingRead: "", snapshotTemplate: ids.template, liveText: "LIVE-ROW-MUST-NOT-LEAK", variantLocale: "en", variantDefault: false };
   const compiledCarrier = structuredClone({ ...carrier, definitions: { ...carrier.definitions,
-    TextBlock: { ...carrier.definitions.TextBlock!, fields: [{ key: "text", valueType: "string", required: true,
+    TextBlock: { ...carrier.definitions.TextBlock!, fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true,
       ...(blockDefault === undefined ? {} : { defaultValue: blockDefault }) },
-      ...(withReference ? [{ key: "brand", valueType: "string", required: true, relationship: { target: "Chip" } }] : [])],
-      references: withReference ? [{ fieldKey: "brand", targetEntity: "Chip", column: "text_brand_id", schema: "erp", table: "chips", required: true }] : [],
+      ...(withReference ? [{ key: "brand", osfType: "Chip", baseType: "string", required: true, relationship: { target: "Chip" } }] : [])],
+      references: withReference ? [{ fieldKey: "brand", targetEntity: "Chip", column: "text_brand_id", schema: "erp", table: "chips", required: true,
+        ...(withBinding ? { parameterColumn: "text_brand_parameter" } : {}) }] : [],
     },
   } });
   const op = {
     id: "TextBlock.materialize", intent: "invoke", effects: { data: "read", external: "none" },
-    output: { kind: "json-schema", schema: { type: "object", properties: { value: { type: "object", properties: { text: { type: "string", title: "Text" } } } } } },
+    output: { kind: "json-schema", schema: { type: "object", properties: { value: { type: "object", properties: { markdown: { type: "string", title: "Text" } } } } } },
     input: { kind: "json-schema", schema: { type: "object", required: ["definitionKey", "values"], properties: { definitionKey: { const: "TextBlock" }, values: { type: "object" } } } },
   };
   const context = {
     transport: "operation",
     session: { tenantId: ids.tenant, userId: ids.tenant, credential: "bearer", roles: ["General.All.Read"], groups: [], scope: "tenant" },
     platform: {
-      records: { async assertAccess(_session: unknown, request: { entityName: string; id: string }) {
-        authorizations.push(`${request.entityName}:${request.id}`);
-        if (data.denyBlock && request.entityName === "Block") throw operationFailure({ code: "FORBIDDEN", message: "Not allowed." });
-      } },
+      records: {
+        async assertAccess(_session: unknown, request: { entityName: string; id: string }) {
+          authorizations.push(`${request.entityName}:${request.id}`);
+        },
+        projectStoredFields(_session: unknown, request: { entityName: string; fields: Record<string, unknown> }) {
+          if (request.entityName === "Block" && data.redactBlockValues) return { ...request.fields, values: null };
+          return request.fields;
+        },
+      },
       schemas: {
         entityValues: { get: () => compiledCarrier, collection: () => ({ targetEntity: "Block", allowedDefinitions: data.disallowText ? ["IncludeBlock"] : Object.keys(carrier.definitions) }) },
         fields: {
-          object: () => ({ type: "object", properties: { name: { type: "string", default: "Reader" } } }),
+          object: () => ({ type: "object", properties: { name: { type: "string", default: "Reader" },
+            ...(withBinding ? { brand: { type: "string", format: "uuid", "x-osf-reference": { entity: "Chip" } } } : {}) } }),
           validateObject: () => ({ valid: true }),
         },
         json: { validate(schema: unknown, values: unknown) { calls.push({ schema, values }); return { valid: true }; } },
@@ -66,9 +72,10 @@ function fixture(blockDefault?: string, withReference = false) {
         return work({ async executeQuery(query: { sql: string; parameters: unknown[] }) {
           queries.push(query.sql);
           expect(query.parameters[0]).toBe(ids.tenant);
-          if (query.sql.includes("from erp.template_versions")) return { rows: [{ id: ids.version, tenant_id: data.tenant, template_id: ids.template, version_number: 1, parameters: [{ key: "name", valueType: "string", defaultValue: "Reader" }] }] };
-          if (query.sql.includes("from erp.template_variants")) return { rows: [{ id: ids.variant, channel: "document", locale: "en" }] };
-          if (query.sql.includes('from "erp"."blocks"')) return { rows: [{ id: ids.block, definition_key: "TextBlock", definition_version: 1, values: { text: data.text } }] };
+          if (query.sql.includes("from erp.template_versions")) return { rows: [{ id: ids.version }] };
+          // Live variant and block rows exist but must never be consulted: the
+          // published snapshot is the only source of frozen content.
+          if (/template_variants|blocks/.test(query.sql)) throw new Error(`Live content table read: ${query.sql}`);
           if (query.sql.includes("from erp.chips")) return { rows: [{ id: ids.chip, tenant_id: ids.tenant, value: data.chip, version: "2026-01-01T00:00:00Z" }] };
           throw new Error(`Unexpected query: ${query.sql}`);
         } });
@@ -83,11 +90,19 @@ function fixture(blockDefault?: string, withReference = false) {
             const entity = request.operation.entityName!;
             reads.push(entity);
             const base = { id: request.input.id, tenantId: data.tenant, updatedAt: "2026-01-01T00:00:00Z" };
+            const blockRow = { id: ids.block, tenant_id: data.tenant, variant_id: ids.variant, variant_id_position: 0, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.markdown },
+              ...(withReference ? (withBinding ? { text_brand_parameter: "brand", text_brand_id: null } : { text_brand_id: ids.chip, text_brand_parameter: null }) : {}) };
+            const snapshot = { schemaVersion: 1, entity: "Template", head: { table: "templates",
+              row: { id: data.snapshotTemplate, tenant_id: data.tenant, parameters: [{ key: "name", osfType: "string", defaultValue: "Reader" }] },
+              children: { template_variants: [
+                { table: "template_variants", row: { id: ids.variant, tenant_id: data.tenant, template_id: ids.template, channel: "document", locale: data.variantLocale, is_default: data.variantDefault }, children: { blocks: [{ table: "blocks", row: blockRow, children: {} }] } },
+                { table: "template_variants", row: { id: ids.chip, tenant_id: data.tenant, template_id: ids.template, channel: "email", locale: "en" }, children: { blocks: [] } },
+              ] } } };
             const records: Record<string, unknown> = {
-              TemplateVersion: { ...base, template: ids.template, versionNumber: 1, parameters: [{ key: "name", valueType: "string", defaultValue: "Reader" }] },
-              TemplateVariant: { ...base, version: ids.version, channel: "document", locale: "en" },
-              Block: { ...base, variant: ids.variant, definitionKey: "TextBlock", definitionVersion: 1,
-                values: data.redactBlock ? null : { ...(data.omitBlockText ? {} : { text: data.text }), ...(withReference ? { brand: ids.chip } : {}) } },
+              TemplateVersion: { ...base, template: ids.template, versionNumber: 1, snapshot },
+              // Live rows drifted after publish; a materialization that shows them is a bug.
+              TemplateVariant: { ...base, template: ids.template, channel: "document", locale: "en" },
+              Block: { ...base, variant: ids.variant, definitionKey: "TextBlock", definitionVersion: 1, values: { markdown: data.liveText } },
               Chip: { ...base, key: "brand", value: data.redactChip ? null : data.chip },
             };
             return { data: records[entity], operations: [] };
@@ -105,30 +120,59 @@ function fixture(blockDefault?: string, withReference = false) {
 }
 
 describe("template materialization runtime adapter", () => {
+  test("preserves entity parameter metadata and resolves symbolic references via canonical reads", async () => {
+    const f = fixture(undefined, true, true);
+    const response = await materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en", parameters: { brand: ids.chip } }, f.context);
+    expect("value" in response).toBe(true);
+    expect(f.reads).toContain("Chip");
+    expect(f.executions).toHaveLength(1);
+    expect((response as any).value.templates[0].version.variants[0].blocks[0].references.brand).toEqual({ parameter: "brand" });
+    const missing = fixture(undefined, true, true);
+    await expect(materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, missing.context)).rejects.toBeDefined();
+    expect(missing.executions).toHaveLength(0);
+  });
   test("reads scoped records, applies local/chip values and invokes the canonical block Operation", async () => {
     const f = fixture();
     const response = await materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context);
     expect("value" in response).toBe(true);
-    const snapshot = (response as { value: { blocks: Array<{ values: { text: string }; materialization: unknown }> } }).value;
-    expect(snapshot.blocks[0]!.values.text).toBe("Hello Reader from Example");
-    expect(snapshot.blocks[0]!.materialization).toEqual({ operationId: "TextBlock.materialize", result: { kind: "block", value: { text: "Hello Reader from Example" } } });
-    expect(f.authorizations).toEqual([`TemplateVersion:${ids.version}`, `Template:${ids.template}`, `TemplateVariant:${ids.variant}`, `Block:${ids.block}`, `Chip:${ids.chip}`]);
+    const snapshot = (response as { value: { blocks: Array<{ values: { markdown: string }; materialization: unknown }> } }).value;
+    expect(snapshot.blocks[0]!.values.markdown).toBe("Hello Reader from Example");
+    expect(snapshot.blocks[0]!.materialization).toEqual({ operationId: "TextBlock.materialize", result: { kind: "block", value: { markdown: "Hello Reader from Example" } } });
+    expect(f.authorizations).toEqual([`TemplateVersion:${ids.version}`, `Template:${ids.template}`, `Chip:${ids.chip}`]);
     expect(f.calls[0]!.schema).toBe(f.carrier.definitions.TextBlock!.valueSchema);
-    expect(f.reads).toEqual(["TemplateVersion", "TemplateVariant", "Block", "Chip"]);
+    expect(f.reads).toEqual(["TemplateVersion", "Chip"]);
+    expect(JSON.stringify(snapshot)).not.toContain(f.data.liveText);
     expect(f.queries.every(query => query.startsWith("select id from "))).toBe(true);
     expect(f.executions).toHaveLength(1);
-    expect((response as any).value.definitions.TextBlock.materializationSchema.properties.value.properties.text.title).toBe("Text");
+    expect((response as any).value.definitions.TextBlock.materializationSchema.properties.value.properties.markdown.title).toBe("Text");
     f.data.chip = "Changed";
-    expect(snapshot.blocks[0]!.values.text).toBe("Hello Reader from Example");
+    expect(snapshot.blocks[0]!.values.markdown).toBe("Hello Reader from Example");
   });
-  test("does not return data after a denied block read or missing materialization Operation", async () => {
+  test("does not return data when the block materialization Operation is missing", async () => {
     const f = fixture();
-    f.data.denyBlock = true;
-    await expect(materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context)).rejects.toMatchObject({ operationError: { code: "FORBIDDEN" } });
-    expect(f.executions).toHaveLength(0);
-    f.data.denyBlock = false;
     f.data.unavailableOperation = true;
     await expect(materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context)).rejects.toMatchObject({ operationError: { code: "OPERATION_UNAVAILABLE" } });
+    expect(f.executions).toHaveLength(0);
+  });
+  test("rejects a snapshot frozen for another template and a locale that was never published", async () => {
+    const f = fixture();
+    f.data.snapshotTemplate = ids.chip;
+    await expect(materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context)).rejects.toMatchObject({ operationError: { code: "DEPENDENCY_INVALID" } });
+    const g = fixture();
+    await expect(materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "nl" }, g.context)).rejects.toBeDefined();
+    expect(g.executions).toHaveLength(0);
+    expect(g.reads).toEqual(["TemplateVersion"]);
+  });
+  test("serves the frozen variant of the requested language, or the channel's frozen default", async () => {
+    const f = fixture();
+    f.data.variantLocale = "nl";
+    const served = await materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "nl-NL" }, f.context);
+    expect((served as { value: { templates: { variantId: string; version: { variants: { locale: string }[] } }[] } }).value.templates[0]!.version.variants[0]!.locale).toBe("nl");
+    const g = fixture();
+    g.data.variantDefault = true;
+    const fallback = await materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "nl" }, g.context);
+    expect((fallback as { value: { templates: { variantId: string }[] } }).value.templates[0]!.variantId).toBe(ids.variant);
+    expect(g.executions).toHaveLength(1);
   });
   test("never exposes a confidential Chip value when canonical get redacts it", async () => {
     const f = fixture();
@@ -145,24 +189,21 @@ describe("template materialization runtime adapter", () => {
     expect(JSON.stringify(f.calls)).not.toContain(f.data.chip);
     expect(f.queries.every(query => query.startsWith("select id from "))).toBe(true);
   });
-  test("never reads Block.values around canonical redaction or restores omitted leaves", async () => {
-    for (const policy of ["redactBlock", "omitBlockText"] as const) {
-      // A default must not reintroduce a field omitted by the authorized read.
-      const f = fixture("confidential-block-fixture");
-      f.data.text = "confidential-block-fixture";
-      f.data[policy] = true;
-      let failure: unknown;
-      try {
-        await materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context);
-      } catch (error) { failure = error; }
-      expect(failure).toBeDefined();
-      expect(f.reads).toContain("Block");
-      expect(f.executions).toHaveLength(0);
-      expect(JSON.stringify(failure)).not.toContain(f.data.text);
-    }
+  test("never exposes classified block values from an immutable published snapshot", async () => {
+    const f = fixture();
+    f.data.markdown = "classification-fixture-frozen-value";
+    f.data.redactBlockValues = true;
+    let failure: unknown;
+    try {
+      await materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context);
+    } catch (error) { failure = error; }
+    expect(failure).toMatchObject({ operationError: { code: "MISSING_VARIABLE" } });
+    expect(JSON.stringify(failure)).not.toContain(f.data.markdown);
+    expect(f.executions).toHaveLength(0);
+    expect(f.queries.every(query => query.startsWith("select id from "))).toBe(true);
   });
   test("fails closed without canonical source reads and rejects a mismatched tenant", async () => {
-    for (const entity of ["TemplateVersion", "TemplateVariant", "Block", "Chip"]) {
+    for (const entity of ["TemplateVersion", "Chip"]) {
       const f = fixture();
       f.data.missingRead = entity;
       await expect(materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context))
@@ -176,12 +217,12 @@ describe("template materialization runtime adapter", () => {
   });
   test("uses authorized logical reference IDs and preserves reference-field redaction in frozen sources", async () => {
     const f = fixture(undefined, true);
-    f.data.text = "Public caption";
+    f.data.markdown = "Public caption";
     f.data.chip = "confidential-reference-fixture";
     f.data.redactChip = true;
     const result = await materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context);
     const snapshot = (result as { value: { blocks: Array<{ values: unknown; references: Record<string, unknown> }> } }).value;
-    expect(snapshot.blocks[0]!.values).toEqual({ text: "Public caption" });
+    expect(snapshot.blocks[0]!.values).toEqual({ markdown: "Public caption" });
     expect(snapshot.blocks[0]!.references.brand).toMatchObject({ entity: "Chip", id: ids.chip, value: { value: null } });
     expect(JSON.stringify(snapshot)).not.toContain(f.data.chip);
     expect(f.queries.every(query => query.startsWith("select id from "))).toBe(true);
@@ -200,6 +241,6 @@ describe("template materialization runtime adapter", () => {
     expect(f.executions).toHaveLength(0);
   });
   test("keeps resolved cardinality and nested fields in the snapshot projection", () => {
-    expect(contentFieldProjection({ valueType: "object", cardinality: "collection", cardinalityBounds: { min: 1, max: 3 }, children: [{ key: "title", valueType: "string", required: true }] })).toMatchObject({ cardinality: { min: 1, max: 3 }, fields: { title: { valueType: "string", required: true } } });
+    expect(contentFieldProjection({ osfType: "object", baseType: "object", cardinality: "collection", cardinalityBounds: { min: 1, max: 3 }, children: [{ key: "title", osfType: "string", baseType: "string", required: true }] })).toMatchObject({ cardinality: { min: 1, max: 3 }, fields: { title: { baseType: "string", required: true } } });
   });
 });

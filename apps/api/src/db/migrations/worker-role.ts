@@ -157,8 +157,8 @@ const manifestTables = manifest.tables as unknown as ManifestWorkerTable[];
  * plane. `platform.tenants`, `platform.api_keys`, `platform.api_key_integrations`,
  * `platform.connector_installations`, `platform.connector_secrets`,
  * `platform.connector_entitlements`, `platform.connector_oauth_states`,
- * `platform.entity_page_configs`, `platform.org_unit`,
- * `platform.entity_field_suggestions` and the migration/audit ledgers are all
+ * `platform.entity_page_configs`, `platform.org_unit` and the
+ * migration/audit ledgers are all
  * reachable by the app role and none of them by a worker. Several are GLOBAL
  * tables with no policy at all, where the grant is the only gate there is.
  */

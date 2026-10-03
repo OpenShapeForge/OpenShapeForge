@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: QualityMeasurementRequest
@@ -10,6 +10,9 @@ filterField: title
 labels:
   en: Quality Measurement Request
   nl: Kwaliteitsmetingsverzoek
+pluralLabels:
+  en: Quality measurement requests
+  nl: Kwaliteitsmetingsverzoeken
 domains:
   - quality
 retention:
@@ -37,7 +40,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -52,7 +55,7 @@ fields:
       column: code
       storageClass: core
   - key: title
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Title
@@ -66,7 +69,6 @@ fields:
       column: title
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -79,13 +81,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    osfType: multilineText
   - key: measurementKind
-    valueType: string
     required: false
     label:
       en: Kind
@@ -96,13 +93,11 @@ fields:
     persisted:
       column: measurement_kind
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: QUALITYMEASUREMENTKIND
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: QUALITYMEASUREMENTKIND
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -113,15 +108,15 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: QUALITYMEASUREMENTSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: QUALITYMEASUREMENTSTATUS
+    osfType: referenceDataCode
   - key: closedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     readOnly: true
+    writeSource: caller
     label:
       en: Closed at
       nl: Gesloten op
@@ -131,11 +126,8 @@ fields:
     persisted:
       column: closed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -148,48 +140,156 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: targetRelation
-    kind: belongsTo
-    target: Relation
-    foreignKey: target_relation_id
+  - key: targetRelationId
     label:
       en: Target relation
       nl: Te enquêteren relatie
-  - key: researchAssignment
-    kind: belongsTo
-    target: ResearchAssignment
-    foreignKey: research_assignment_id
+    persisted:
+      column: target_relation_id
+      storageClass: core
+    osfType: Relation
+    relationship:
+      ownership: reference
+  - key: researchAssignmentId
     label:
       en: Research assignment
       nl: Onderzoeksopdracht
-  - key: measurementResult
-    kind: belongsTo
-    target: QualityMeasurementResult
-    foreignKey: measurement_result_id
+    persisted:
+      column: research_assignment_id
+      storageClass: core
+    osfType: ResearchAssignment
+    relationship:
+      ownership: reference
+      inverse:
+        key: measurementRequests
+        label:
+          en: Measurement requests
+          nl: Metingsverzoeken
+  - key: measurementResultId
     label:
       en: Measurement result
       nl: Metingsresultaat
-  - key: case
-    kind: belongsTo
-    target: Case
-    foreignKey: case_id
+    persisted:
+      column: measurement_result_id
+      storageClass: core
+    osfType: QualityMeasurementResult
+    relationship:
+      ownership: reference
+  - key: caseId
     label:
       en: Related case
       nl: Gerelateerde zaak
-  - key: contactMoment
-    kind: belongsTo
-    target: ContactMoment
-    foreignKey: contact_moment_id
+    persisted:
+      column: case_id
+      storageClass: core
+    osfType: Case
+    relationship:
+      ownership: reference
+  - key: contactMomentId
     label:
       en: Contact moment
       nl: Contactmoment
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
-      wait: true
+    persisted:
+      column: contact_moment_id
+      storageClass: core
+    osfType: ContactMoment
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Quality Measurement Request
+    description: List QualityMeasurementRequest records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Quality Measurement Request
+    description: Get QualityMeasurementRequest records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Quality Measurement Request
+    description: Create QualityMeasurementRequest records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Quality Measurement Request
+    description: Update QualityMeasurementRequest records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Quality Measurement Request
+    description: Delete QualityMeasurementRequest records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000
+      measurementKind:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: QUALITYMEASUREMENTKIND
+            clearable: true
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: QUALITYMEASUREMENTSTATUS
+            clearable: false
+      closedAt:
+        render:
+          component: DateTimePicker
+          props: {}

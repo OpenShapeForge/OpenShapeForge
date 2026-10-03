@@ -137,12 +137,6 @@ export function AppLayoutShell({
     return <>{children}</>;
   }
 
-  const isWorkflowDesignerRoute =
-    currentPathname === "/workflow-designer" ||
-    currentPathname.startsWith("/workflow-designer/");
-  const isWorkflowInstanceRoute =
-    currentPathname === "/workflow-instances" ||
-    currentPathname.startsWith("/workflow-instances/");
   const isKlantgesprekkenRoute =
     currentPathname === "/klantgesprekken" ||
     currentPathname.startsWith("/klantgesprekken/");
@@ -150,8 +144,6 @@ export function AppLayoutShell({
     /^\/(relations|relaties)\/[^/]+$/.test(currentPathname);
   const routeOwnsBaseLayout =
     isKlantgesprekkenRoute ||
-    isWorkflowDesignerRoute ||
-    isWorkflowInstanceRoute ||
     isRelationPageRoute;
 
   const content = (

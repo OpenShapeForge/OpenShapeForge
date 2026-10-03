@@ -12,28 +12,8 @@ enumerations, and AI hints the author already wrote.
 
 ## Opting in
 
-Per entity, in the entity YAML — the same fail-closed shape as `rest:`:
-
-```yaml
-mcp: true # every operation, prefix derived from the entity name
-```
-
-```yaml
-mcp:
-  enabled: true
-  toolPrefix: contact # default: entity name in snake_case
-  tools: dedicated # or `generic` — see "Tool surface"
-  operations:
-    delete: false # each flag defaults to true
-```
-
-Absent or `false` means no tools at all. An `mcp:` block on an entity that is
-not generated-CRUD enabled fails the build, exactly as `rest:` does — MCP tools
-delegate to the CRUD layer, so the authoring intent would otherwise evaporate
-silently.
-
-Strict-v2 entities keep this technical projection under `interfaces.mcp` and
-name canonical operations rather than CRUD action flags:
+Per entity, the technical projection lives under `interfaces.mcp` and names
+canonical Operations rather than defining a second behavior model:
 
 ```yaml
 interfaces:
@@ -43,10 +23,11 @@ interfaces:
       delete: false # the only authored entry: an interface-specific exclusion
 ```
 
-Declaring an interface projects every canonical Operation declared by the
-entity. Do not write `operations: all` (there is no such sentinel) and do not
-repeat the common list. The optional `operations` map contains only real
-interface-specific instructions or `false` exclusions.
+Absent `interfaces.mcp` means no entity tools. Declaring it projects every
+canonical Operation declared by the entity. Do not write `operations: all`
+(there is no such sentinel) and do not repeat the common list. The optional
+`operations` map contains only interface-specific instructions, an explicit
+tool name, or `false` exclusions.
 
 `tools` changes only how the projected operations are advertised. It does not
 define a new operation, permission, workflow, or product concept.
@@ -67,7 +48,8 @@ headers every other transport takes; an unauthenticated request is `401` before
 any dispatch.
 
 For ordinary configuration data (a `create_connection` for an Adapter, or any
-entity with `mcp.elicitOnCreate`), the runtime preserves this UX order:
+create Operation with a secure-input `interaction`), the runtime preserves
+this UX order:
 
 1. **In-client elicitation** — the secure form in place; values never touch
    the model.
@@ -144,7 +126,8 @@ request-rate boundary applies.
 Beside `/api/mcp` the same server answers on one resource per Keycloak
 Organization:
 
-    POST|GET|DELETE /api/mcp/organizations/<alias>
+    POST|GET|DELETE /<alias>
+    POST|GET|DELETE /<alias>/mcp
 
 `<alias>` is the Organization's Keycloak alias — the key of the `organization`
 claim and the name the built-in `organization:<alias>` scope selects — not the
@@ -175,14 +158,14 @@ replayed here. Only a bearer JWT is accepted on these paths; API keys and
 trusted-context headers name a tenant, not a membership, and are refused.
 
 Each resource has its own metadata document,
-`/.well-known/oauth-protected-resource/api/mcp/organizations/<alias>`, whose
+`/.well-known/oauth-protected-resource/<alias>`, whose
 `resource` is that exact URL and whose `scopes_supported` lists the two scopes
 a client must request:
 
 - `organization:<alias>` — Keycloak's built-in dynamic scope; selects the
   membership and emits `organization.<alias>.id`;
 - `mcp-resource:<alias>` — a client scope with one `oidc-audience-mapper` per
-  public origin, value `<origin>/api/mcp/organizations/<alias>`. It
+  public origin, value `<origin>/<alias>`. It
   deliberately does not share the `organization:` prefix: a static client
   scope named `organization:<alias>` shadows the dynamic one, and the token
   then carries the audience but no membership claim.
@@ -206,7 +189,7 @@ environment:
 
 | variable | meaning |
 | --- | --- |
-| `OPENSHAPEFORGE_PUBLIC_ORIGIN` | **required** — the first audience on every scope, `<origin>/api/mcp/organizations/<alias>`; the same variable the MCP server reads for its callback URL |
+| `OPENSHAPEFORGE_PUBLIC_ORIGIN` | **required** — the first audience on every scope, `<origin>/<alias>`; the same variable the MCP server reads for its callback URL |
 | `OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS` | optional comma-separated *additional* origins (a second ingress, a local port beside the public one); each gets its own mapper, and an origin removed from the list is removed from Keycloak on the next re-apply |
 | `OPENSHAPEFORGE_MCP_CLIENTS` | optional comma-separated `clientId`s the scope is attached to; default `codex,openshapeforge-gateway,openshapeforge-inspector`; a listed client the realm does not have is skipped |
 
@@ -228,17 +211,15 @@ another path is `403`.
 `/api/control/mcp` is a different server on the same transport plumbing: the
 control plane's MCP for a control-realm user, who has no tenant. It
 authenticates against the **control** realm (its metadata document names that
-realm as authorization server), requires `platform_admin` or
-`platform-operator`, and exposes only the Operations allowed by the user's
-roles. `platform-operator` owns tenant lifecycle, organization changes and
-reconciliation; `platform_admin` owns catalog administration, update notices
-and audit; both can inspect shared platform state. See
+realm as authorization server), requires `platform-operator`, and exposes
+every control Operation to that role: tenant lifecycle,
+organization changes, reconciliation, catalog administration, update notices
+and audit. See
 [api.md, "The platform administrator MCP"](api.md#the-platform-administrator-mcp).
 
 ## Tool surface
 
-Two catalog styles, chosen per entity with either legacy `mcp.tools` or
-strict-v2 `interfaces.mcp.tools`:
+Two catalog styles are chosen per entity with `interfaces.mcp.tools`:
 
 - **`dedicated`** (default) — one tool per enabled operation:
   `relation_list`, `relation_get`, `relation_create`, `relation_update`,
@@ -248,14 +229,48 @@ strict-v2 `interfaces.mcp.tools`:
   `osf_create` / `osf_update` / `osf_delete` tools taking an `entity`
   parameter, keeping the advertised tool count flat.
 
+The generic tools are advertised in two steps, so their size does not grow
+with the number of entities behind them. `tools/list` carries the `entity`
+enum (bounded to what the session may address), the properties every entity
+shares with the same schema (`id`, paging, the mutation controls) verbatim, a
+stub for a property every entity has but describes differently (`values`,
+`filter`, the sort field enum), and a one-line per-entity summary in the
+description; an entity's own fields are not listed and the schema stays open
+to them. The exact per-entity schema — the one the call is validated against —
+comes from **`osf_describe { entity, operation? }`**, listed beside the generic
+tools whenever the session can address a generic entity, described with the
+same withholding and collection policy the dedicated tools get, plus the
+refusals the Operation declares (`errors: [{ status, code, description }]`),
+which the listing leaves out for its byte budget. Both the listing and the
+describe answer carry a schema in the session's language: the compiled
+catalogue keeps every language under `x-osf-i18n`, and the wire gets one
+`title`/`description` per property. The
+`osf://schema/entities/{slug}` resource keeps describing the readable field
+model; `osf_describe` is the write contract.
+
 Tool-selection quality degrades well before a model runs out of context, so the
 compiler **fails the build** when the dedicated tool count would exceed 60,
-naming the entities to switch to `generic`. This is a build failure rather than
-a runtime surprise, matching how the rest of the compiler fails closed.
+naming the entities to switch to `generic`. The same guard exists in bytes:
+the listing a session holding every role would receive — projected exactly as
+the runtime projects it, generic tools compact — may not exceed
+`MAX_ADVERTISED_TOOL_BYTES` (640 KB, of which 32 KB is reserved for the
+platform's fixed tools and 128 KB for tools that exist only at run time —
+`packages/operations/src/mcp-tool-budget.ts`), and the failure says what is
+over and which tools weigh most. The fixed tools' shapes, the searchable pair,
+the edit-lease trio, the derived-tool helpers and the connector projection live
+in `@openshapeforge/operations`, imported by both the runtime and the compiler,
+so the compiler measures what the runtime lists. Binding rows for a derived
+tool come from `bindingsRelation`, an owned collection on the owner; see
+[plugins.md](plugins.md#derived-tool-execution-bindings).
+Both are build failures rather than runtime surprises, matching how the rest of
+the compiler fails closed.
 
 Every tool carries annotations derived mechanically from its operation:
-`readOnlyHint` on list/get, `idempotentHint` on update/delete, and
-`destructiveHint` on delete.
+`readOnlyHint` on list/get, `destructiveHint` on delete, `idempotentHint` on
+list/get/delete — and **not** on update: the runtime appends an event and
+advances `updatedAt` on every execution, so repeating an update is not
+idempotent, unless the entity's update operation declares keyed idempotency
+(`reliability.idempotency.mode: keyed`), which sets it.
 
 ## Resource surface
 
@@ -287,7 +302,8 @@ Entity resources describe the readable field model. They deliberately do not
 compose those fields into a second `jsonSchema`: create and update inputs differ
 from the read model because identifiers, timestamps and other server-managed
 fields are not writable. The per-operation input schemas returned by
-`tools/list` are the authoritative write contract.
+`tools/list` (dedicated entities) and `osf_describe` (generic entities) are the
+authoritative write contract.
 
 OpenShapeForge does not currently author MCP prompts or resource templates, so
 their list methods return valid empty catalogs. This keeps generic MCP clients
@@ -303,12 +319,12 @@ never the token: no claims, no ids, no slugs, no tenant keys.
 
 ```json
 {
-  "name": "Hans Eilers",
-  "email": "hans@example.com",
-  "organization": "Zerocopter",
+  "name": "Alex Example",
+  "email": "alex@example.com",
+  "organization": "Acme",
   "role": "Organization administrator",
-  "permissions": ["Pentest.All.ReadWrite", "Relations.All.ReadWrite"],
-  "groups": [{ "name": "Zerocopter", "active": true }],
+  "permissions": ["Advies.All.ReadWrite", "Relations.All.ReadWrite"],
+  "groups": [{ "name": "Acme", "active": true }],
   "signedInVia": "Codex",
   "accessTokenExpiresAt": "2026-09-04T10:12:00.000Z",
   "accessTokenExpiresIn": "in 12 minutes",
@@ -316,32 +332,40 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   "signOut": "Sign out in your client (Codex: codex mcp logout <entry>; ChatGPT: the connector's menu).",
   "access": { "tools": 68, "resources": 13 },
   "relation": {
-    "status": "Linked", "name": "Hans Eilers", "kind": "person",
+    "status": "Linked", "name": "Alex Example", "kind": "person",
     "explanation": "The record you act as in this organization; roles like employee or supplier are assigned by an administrator."
   },
-  "summary": "You are Hans Eilers, organization administrator of Zerocopter, signed in via Codex. Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. You act as the record Hans Eilers. You can use 68 tools and 13 resources."
+  "summary": "You are Alex Example, organization administrator of Acme, signed in via Codex. Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. You act as the record Alex Example. You can use 68 tools and 13 resources."
 }
 ```
 
 - `organization` is the display name from the tenant registry
   (`platform.tenants.name`), read as the session's own row under the same
   row-level-security policy `Query.currentTenant` relies on.
-- `role` is derived from the realm's composite roles — `org_admin` reads as
+- `role` is the persona recorded on the person's membership row for this
+  organization (`platform.identity_relations.roles`) — `org_admin` reads as
   "Organization administrator", `org_employee` as "Employee" — and otherwise
   falls back to the raw role list. `permissions` lists the remaining role names
   (Keycloak's own bookkeeping roles such as `offline_access` are dropped).
+  The words come from the roles themselves: `roleLabels` in
+  `authorization.yaml` (`label` for a persona, `phrase` for the wording inside
+  the opening sentence — "may manage clients and other relations"), which a
+  host extends for its own roles through an `authorizationPatch`; the compiler
+  emits them as `generated/compiler/role-labels.json`. A `<Area>.All.ReadWrite`
+  role without a phrase is described from its shape; any other role without
+  one is left unsaid rather than shown as a technical name.
 - `groups` are the Keycloak Organization memberships the token carries, with
   the one the session acts for marked `active`. On a per-organization endpoint
-  (`/api/mcp/organizations/<alias>`) that is the bound organization, whatever
+  (`/<alias>`) that is the bound organization, whatever
   `organization:<alias>` scope the token also carries. Only the active group
   can be named from the registry; other memberships show their alias (naming
   them would take a registry read outside the session's own row, which
   row-level security fences — left open on purpose).
 - `signedInVia` names the client the token was issued to (`codex` → "Codex",
   `openshapeforge-inspector` → "MCP Inspector", `openshapeforge-gateway` →
-  "Hubble", any other `azp` as is). A trusted-context session reports
+  the product name, `OPENSHAPEFORGE_PRODUCT_NAME`, any other `azp` as is). A trusted-context session reports
   "Development identity" and has no expiry. On a per-organization endpoint the
-  summary adds "on the Zerocopter endpoint" (the organization's display name).
+  summary adds "on the Acme endpoint" (the organization's display name).
 - `accessTokenExpiresAt` / `accessTokenExpiresIn` are the access token's own
   expiry, which a client refreshes silently, and are named for it: published as
   `signInExpiresAt` they read as the end of the sign-in and regularly showed a
@@ -362,9 +386,15 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   record), "Pending confirmation" (a Relation carrying the person's e-mail
   exists; `name`/`kind` describe that candidate and the summary says "A record
   with your e-mail exists — run confirm_my_link to use it.") or "Not linked"
-  (no record, or a session that carries no person: API key, development
-  identity). `explanation` is one fixed line saying what a Relation is. No
-  ids leave the answer.
+  (no record yet). An API key that reached the organization has recorded its
+  identity and an empty pending link; its summary calls it unlinked and says
+  an organization administrator finds it under `list_pending_members`
+  (`unlinked`) and links it with `link_identity`. A person's summary says an
+  administrator links them by e-mail address. `name` is what the credential
+  knows — the token's claims, or for an API key the integration's display
+  name — and "unlinked" is said only of a recorded identity with neither a
+  record nor a candidate. `explanation` is one fixed line saying what a
+  Relation is. No ids leave the answer, the identity id included.
 
 The tool result carries the JSON both as text content and as
 `structuredContent`. The implementation is `apps/api/src/mcp/session-info.ts`;
@@ -380,7 +410,7 @@ SQL needs and almost nothing a model needs.
 
 | Authored                                       | Becomes                                                  |
 | ---------------------------------------------- | -------------------------------------------------------- |
-| `valueType`, `cardinality`                     | JSON Schema `type`; `array` + `items` for collections    |
+| `osfType` (via its base type), `cardinality`   | JSON Schema `type`; `array` + `items` for collections    |
 | `cardinality.{min,max}`, `validation.minItems` | `minItems` / `maxItems`                                  |
 | `validation.minLength` / `maxLength`           | `minLength` / `maxLength`                                |
 | `validation.min` / `max`                       | `minimum` / `maximum`                                    |
@@ -417,7 +447,7 @@ contract keys:
 
 ```yaml
   - key: reviewedAt
-    writtenBy: [pentest.finding.review]
+    writtenBy: [advies.finding.review]
 ```
 
 Use it for a field that records that a process took place — a review signed
@@ -537,10 +567,25 @@ import { sessionRelation } from "../auth/identity-link.js";
 const party = sessionRelation(session); // { relationId, displayName } | null
 ```
 
-`null` means "not linked": pending, never resolved, or a session that carries
-no person at all (trusted-context and API key sessions never link). Resolution
-is cached per (identity, tenant) for a minute inside a process; a link made
-through the tools invalidates it there and shows up elsewhere within the TTL.
+`null` means "not linked": pending, or no link yet. Every credential kind
+resolves through the same row: a bearer session with its token's claims and
+the admission that goes with them (the invitation, the e-mail candidate, the
+just-in-time Relation) — which is why the web host forwards the person's
+own token whenever the session holds one; a trusted-context session (a
+token-less server call) or an API-key session by the realm this deployment
+trusts (`OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER`, which such a deployment
+must set: a session that could be linked but names no realm is refused as
+unavailable, never treated as nobody) and its user id, the identity subject.
+A trusted-context session only reads. An API-key session — a service account
+nothing else would ever record — writes, on first use, its own identity row
+and an empty pending link under its own session, so an administrator's
+`link_identity` can name it by the identity id `list_pending_members` lists
+under `unlinked`, and an invitation for its e-mail claims that row. One
+cache, keyed (issuer, subject, tenant), serves both paths for a minute
+inside a process; only a linked state settles the bearer path, every
+invalidation moves the key's generation on and a read stores only under the
+generation it started with, so a link an administrator makes during a read
+is never overwritten, and a link shows up on other replicas within the TTL.
 
 Not part of this: Keycloak user attributes as a data source, relation ids in
 tokens, and RelationRoles — the administrator assigns those.
@@ -583,11 +628,11 @@ naming the exact next call:
 
 | step | done when | not applicable when |
 | --- | --- | --- |
-| `identity` | `session.relation.status === "linked"` (see [Identities and Relations](#identities-and-relations)). Pending with a candidate → `confirm_my_link`; without → an administrator's `link_identity`. | the session carries no person (development identity, API key) |
+| `identity` | `session.relation.status === "linked"` (see [Identities and Relations](#identities-and-relations)). Pending with a candidate → `confirm_my_link`; without → an administrator's `link_identity`, by e-mail or by the identity id the step names. | the session is not a person's: an API key (an integration records its identity for `link_identity` but is never onboarded), or a development identity that cannot be linked |
 | `organization_connections` | **organization administrators only** (`org_admin`): for every Adapter in the organization whose auth needs organization-level configuration — it declares `configurationFields`, or its auth profile references credential values (an API key, basic credentials, the OAuth client behind a personal sign-in) — a tenant-owned Connection exists and passes the same required-values check `test_connection` runs. The `howTo` names `create_connection` with the `adapterId`, lists the form fields with secret ones marked, and for an OAuth Adapter the redirect URL to register (`<OPENSHAPEFORGE_PUBLIC_ORIGIN>/api/entity-oauth/callback`); an incomplete Connection is named with its missing values. Shared vocabulary: `apps/api/src/mcp/connection-guidance.ts`. | the person is not an organization administrator, or no Adapter needs organization-level configuration |
 | `connections` | for every published Service this person can use whose provider needs a **personal** sign-in (`auth.connectionScope: user`, or an `oauth2AuthorizationCode` profile), a Connection row owned by this person exists. The `howTo` names `connect_service` with the tool that binds the widest set of that provider's capabilities — the natural entry point, since one consent covers the provider. | no such Service is published for this person (a fresh tenant, or a person outside the Services' audience) |
 | `preferences` | at least one PersonalInstruction of this person exists (`set_my_preferences`), or the person skipped the step (`complete_onboarding { skip: true }`) | the deployment offers no personal instructions to this person |
-| `guide` | every role guide the session is shown (`pentest_guide` for pentest roles, `provider_setup_guide` for integration administrators) was read — in this session, or recorded at an earlier completion | no guide applies to the person's roles |
+| `guide` | every role guide the session is shown (`advies_guide` for advies roles, `provider_setup_guide` for integration administrators) was read — in this session, or recorded at an earlier completion | no guide applies to the person's roles |
 
 **Status.** `Completed` once `complete_onboarding` succeeded under the current
 `ONBOARDING_VERSION`; otherwise `In progress` when any applicable step is done

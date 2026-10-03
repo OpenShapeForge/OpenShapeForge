@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: SlaPolicy
@@ -9,6 +9,9 @@ displayTemplate: "{{name}}"
 filterField: name
 labels:
   en: SLA Policy
+  nl: SLA-beleid
+pluralLabels:
+  en: SLA policies
   nl: SLA-beleid
 domains:
   - cases
@@ -29,7 +32,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -41,7 +44,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -53,7 +56,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -63,13 +65,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    osfType: multilineText
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -77,13 +74,11 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: SLAPOLICYSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: SLAPOLICYSTATUS
+    osfType: referenceDataCode
   - key: targetEntity
-    valueType: string
     required: true
     label:
       en: Target entity
@@ -91,13 +86,12 @@ fields:
     persisted:
       column: target_entity
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: SLAPOLICYTARGETENTITY
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: SLAPOLICYTARGETENTITY
+    osfType: referenceDataCode
   - key: firstResponseMinutes
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: First response minutes
@@ -106,7 +100,7 @@ fields:
       column: first_response_minutes
       storageClass: core
   - key: resolutionMinutes
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Resolution minutes
@@ -115,7 +109,7 @@ fields:
       column: resolution_minutes
       storageClass: core
   - key: breachWarningMinutes
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Breach warning minutes
@@ -124,7 +118,7 @@ fields:
       column: breach_warning_minutes
       storageClass: core
   - key: escalationAfterMinutes
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Escalation after minutes
@@ -133,7 +127,7 @@ fields:
       column: escalation_after_minutes
       storageClass: core
   - key: businessHoursProfile
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Business hours profile
@@ -144,7 +138,7 @@ fields:
       column: business_hours_profile
       storageClass: core
   - key: pauseOnWaitingCustomer
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Pause on waiting for customer
@@ -154,7 +148,7 @@ fields:
       column: pause_on_waiting_customer
       storageClass: core
   - key: pauseOnPendingExternal
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Pause on pending external dependency
@@ -164,7 +158,7 @@ fields:
       column: pause_on_pending_external
       storageClass: core
   - key: autoCloseOnResolution
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Auto-close on resolution
@@ -173,33 +167,107 @@ fields:
     persisted:
       column: auto_close_on_resolution
       storageClass: core
-relationships:
-  - key: escalationQueue
-    kind: belongsTo
-    target: WorkQueue
-    foreignKey: escalation_queue_id
+  - key: escalationQueueId
     label:
       en: Escalation queue
       nl: Escalatiequeue
-  - key: cases
-    kind: hasMany
-    target: Case
-    foreignKey: sla_policy_id
-    label:
-      en: Cases
-      nl: Zaken
-  - key: milestones
-    kind: hasMany
-    target: Milestone
-    foreignKey: sla_policy_id
-    label:
-      en: Milestones
-      nl: Mijlpalen
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: escalation_queue_id
+      storageClass: core
+    osfType: WorkQueue
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List SLA Policy
+    description: List SlaPolicy records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get SLA Policy
+    description: Get SlaPolicy records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create SLA Policy
+    description: Create SlaPolicy records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update SLA Policy
+    description: Update SlaPolicy records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete SLA Policy
+    description: Delete SlaPolicy records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: SLAPOLICYSTATUS
+            clearable: false
+      targetEntity:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: SLAPOLICYTARGETENTITY
+            clearable: false

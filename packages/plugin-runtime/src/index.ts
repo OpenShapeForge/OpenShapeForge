@@ -8,9 +8,9 @@ import type { Kysely, Transaction } from "kysely";
 import type { RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
 import type { RuntimeSettingsService } from "./settings.js";
 import type { RuntimeRecordAccessServices } from "./record-access.js";
-export type { RuntimeRecordAccessServices, RuntimeRecordAccessRequest, RuntimeRecordAccessIntent } from "./record-access.js";
+export type { RuntimeRecordAccessServices, RuntimeRecordAccessRequest, RuntimeRecordAccessIntent, RuntimeStoredFieldProjectionRequest } from "./record-access.js";
 export type { RuntimeSettingValue, RuntimeSettingsService } from "./settings.js";
-export type { RuntimeArtifactDescriptor, RuntimeArtifactStageInput, RuntimeArtifactOwnerInput, RuntimeArtifactBindInput,
+export type { RuntimeArtifactDescriptor, RuntimeArtifactStageInput, RuntimeArtifactOwner, RuntimeArtifactOwnerInput, RuntimeArtifactBindInput,
   RuntimeArtifactContents, RuntimeArtifactSessionContext, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
 import type {
   OperationConfirmation,
@@ -31,7 +31,37 @@ export type PluginSessionCredential =
    * the host's own control Operations accept it; a plugin Operation never
    * sees one, and a plugin must never treat it as a tenant session.
    */
-  | "control-bearer";
+  | "control-bearer"
+  /**
+   * A capability grant the host resolved for an `auth.mode: capability`
+   * Operation: a tenant, no user, no roles. `grant` names the Operations and
+   * the one record it covers; the handler works on nothing else.
+   */
+  | "grant";
+
+/**
+ * One record a grant reaches beside its subject, with the intents the
+ * issuer delegated. Core verified at issue time that the issuer held each
+ * intent on the record, so a grant never reaches further than its issuer.
+ */
+export type RuntimeCapabilityGrantRecordAccess = {
+  entity: string;
+  id: string;
+  intents: readonly ("get" | "update")[];
+};
+
+/** What a capability grant covers, verified by the host from the grant row. */
+export type PluginCapabilityGrant = {
+  id: string;
+  subject: { entity: string; id: string };
+  /** Opaque beyond its `kind`; whatever the issuer recorded about the recipient. */
+  recipient: { kind: string; [key: string]: unknown };
+  operations: readonly string[];
+  /** Delegated record access beside the subject; see `RuntimeCapabilityGrantRecordAccess`. */
+  records: readonly RuntimeCapabilityGrantRecordAccess[];
+  expiresAt: string;
+  maxUses: number | null;
+};
 
 /** Verified by the host. A plugin must never populate this from tool input. */
 export type PluginSessionContext = {
@@ -49,10 +79,71 @@ export type PluginSessionContext = {
   relationGroupIds?: readonly string[];
   scope: PluginSessionScope;
   credential: PluginSessionCredential;
+  /** Present exactly when `credential` is "grant". */
+  grant?: PluginCapabilityGrant;
   relation?: unknown;
 };
 
 export type PluginDatabaseSchema = Record<string, unknown>;
+
+export type RuntimeCapabilityGrantRecipient = { kind: string; [key: string]: unknown };
+
+export type RuntimeCapabilityGrantIssueInput = {
+  /** Canonical keys of `auth.mode: capability` Operations the grant may invoke. */
+  operations: readonly string[];
+  subject: { entity: string; id: string };
+  recipient: RuntimeCapabilityGrantRecipient;
+  /**
+   * Records the grant's handlers may reach beside the subject, each with the
+   * intents delegated: `get` admits `platform.records.assertAccess` and the
+   * artifact reads that build on it; `update` admits the document commands.
+   * Issuing verifies the issuer holds every intent listed, so a grant never
+   * reaches further than the session that issued it.
+   */
+  records?: readonly RuntimeCapabilityGrantRecordAccess[];
+  expiresAt: Date | string;
+  /** Omitted or null: reusable until expiry. 1: single use. */
+  maxUses?: number | null;
+  /** Revoke every active grant for the same subject and recipient in the same transaction. */
+  supersede?: "same-subject-and-recipient";
+};
+
+export type RuntimeCapabilityGrantIssued = {
+  id: string;
+  /** `<grantId>.<secret>`; returned once, never stored or readable again. */
+  token: string;
+  expiresAt: string;
+};
+
+export type RuntimeCapabilityGrantStatus = "active" | "consumed" | "expired" | "revoked";
+
+/** A grant as operators and issuers see it: never the token or its hash. */
+export type RuntimeCapabilityGrantSummary = {
+  id: string;
+  subjectEntity: string;
+  subjectId: string;
+  recipient: RuntimeCapabilityGrantRecipient;
+  operations: readonly string[];
+  records: readonly RuntimeCapabilityGrantRecordAccess[];
+  issuedBy: string;
+  issuedAt: string;
+  expiresAt: string;
+  maxUses: number | null;
+  uses: number;
+  consumedAt: string | null;
+  revokedAt: string | null;
+  revokedReason: string | null;
+  supersededBy: string | null;
+  lockedUntil: string | null;
+  status: RuntimeCapabilityGrantStatus;
+};
+
+export type RuntimeCapabilityGrantServices<Session> = {
+  issue(session: Session, input: RuntimeCapabilityGrantIssueInput): Promise<RuntimeCapabilityGrantIssued>;
+  /** Idempotent: an inactive grant is reported as it is. Unknown ids fail. */
+  revoke(session: Session, input: { id: string; reason?: string }): Promise<RuntimeCapabilityGrantSummary>;
+  list(session: Session, subject: { entity: string; id: string }): Promise<readonly RuntimeCapabilityGrantSummary[]>;
+};
 
 export type RuntimeSchemaValidationResult =
   | { valid: true }
@@ -66,7 +157,7 @@ export type RuntimeJsonSchemaValidator = {
 export type RuntimeFieldSchemaCompiler = {
   /**
    * Validate canonical stored FieldDefinitions and project their value object
-   * through the host's active semantic-type and reference-data registries.
+   * through the host's active osf-type and reference-data registries.
    */
   object(
     fields: readonly Readonly<Record<string, unknown>>[],
@@ -90,6 +181,7 @@ export type RuntimeEntityValueDefinition = {
     readonly schema: string;
     readonly table: string;
     readonly column: string;
+    readonly parameterColumn?: string;
     readonly required: boolean;
   }[];
   readonly materializeOperationId?: string;
@@ -115,13 +207,41 @@ export type RuntimeEntityValueRegistry = {
   }> | undefined;
 };
 
+/**
+ * Compiler-bound storage of one published-snapshot pair: the editable head
+ * and the immutable version table, with the version table's foreign key back
+ * to the head. The versioning runtime executes against exactly these names.
+ */
+/** One owned child table of a snapshot, with its own owned children. */
+export type RuntimeVersioningOwnedChild = {
+  readonly schema: string;
+  readonly table: string;
+  readonly childColumns: readonly string[];
+  readonly parentColumns: readonly string[];
+  readonly children: readonly RuntimeVersioningOwnedChild[];
+};
+
+export type RuntimeVersioningBinding = {
+  readonly sourceEntity: string;
+  readonly versionEntity: string;
+  readonly head: { readonly schema: string; readonly table: string };
+  readonly version: { readonly schema: string; readonly table: string; readonly headColumn: string };
+  /** The authored ownership tree a snapshot walks; nothing outside it is content. */
+  readonly owned: readonly RuntimeVersioningOwnedChild[];
+};
+
+/** Metadata only. A binding grants no record or Operation access. */
+export type RuntimeVersioningRegistry = {
+  get(sourceEntity: string): RuntimeVersioningBinding | undefined;
+};
+
 export type RuntimeOperationDefinition = OperationReference & {
   key?: string;
   /** Native field binding is part of execution identity, without physical storage names. */
   implementation?:
     | { type: "entity" }
     | { type: "plugin"; plugin: string; handler: string }
-    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" };
+    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" | "update" | "remove" };
   entityId?: string;
   entityName?: string;
   name: string | Readonly<Record<string, string>>;
@@ -143,6 +263,8 @@ export type RuntimeOperationDefinition = OperationReference & {
   };
   /** Core-issued completion proof is required before this Operation may run. */
   prerequisites?: readonly OperationPrerequisite[];
+  /** The declared failure catalogue: what a caller can be answered with. */
+  errors?: readonly { status: number; code: string; description: string }[];
   concurrency?: {
     version?: { mode: "required"; field: string };
     editLease?: { mode: "required"; expiresAfterInactivity: string };
@@ -265,11 +387,15 @@ export type PluginPlatformServices = {
     organizationServiceIdentity(session: PluginSessionContext): Promise<{ serviceIdentityId: string }>;
   };
   db: PluginDatabase;
+  /** The durable outbox; see `RuntimeJobServices`. */
+  readonly jobs: RuntimeJobServices;
   schemas: {
     fields: RuntimeFieldSchemaCompiler;
     json: RuntimeJsonSchemaValidator;
     /** Absent on hosts without entity-value support; callers must fail closed. */
     entityValues?: RuntimeEntityValueRegistry;
+    /** Absent on hosts without published-snapshot versioning; callers must fail closed. */
+    versioning?: RuntimeVersioningRegistry;
   };
   events: {
     append(
@@ -289,6 +415,13 @@ export type PluginPlatformServices = {
      */
     classifyDatabase(cause: unknown): OperationError | undefined;
   };
+  /**
+   * Capability grants: hashed, expiring, recipient-bound tokens that let
+   * someone without an account invoke the listed `auth.mode: capability`
+   * Operations on one record. Issuing joins the active Operation transaction
+   * when there is one, so a grant and the record it covers commit together.
+   */
+  grants: RuntimeCapabilityGrantServices<PluginSessionContext>;
   operations: {
     /** Definitions currently available to this live verified session. */
     list(
@@ -346,12 +479,117 @@ export type RuntimeResolvedOperationWork = {
   serviceIdentityId: string;
   /** Persisted before first dispatch; prevents changed contracts reopening unsafe retries. */
   operationContractFingerprint?: string;
+  /**
+   * Present only when the resolver persists dispatch facts
+   * (`markOperationDispatch`). `attempt` is the claim attempt that last
+   * started a dispatch and did not prove it never reached the Operation;
+   * absent means no attempt ever did, so a later attempt is not an uncertain
+   * repeat. Without this field core infers uncertainty from `attempt > 1`.
+   */
+  dispatch?: { tracked: true; attempt?: number };
   operation: { id: string; input?: Record<string, unknown>; idempotencyKey: string };
 };
 
 export type RuntimeWorkerOperationBroker = RuntimeWorkerOperationExecutor & {
   authorize(reference: RuntimeDurableWorkReference): Promise<RuntimeDurableOperationRequest>;
 };
+
+/**
+ * The durable job/outbox primitive. A module enqueues a job inside the same
+ * transaction as its domain write; the host's `job-worker` role claims it and
+ * runs the handler registered for its kind under a tenant session for the
+ * person who enqueued it.
+ */
+export type RuntimeJobSubject = { entity: string; id: string };
+
+export type RuntimeJobStatus = "queued" | "running" | "done" | "failed" | "dead" | "outcome_unknown";
+
+export type RuntimeJobEnqueueInput = {
+  /** Namespaced, e.g. `mail.deliver` or `<plugin>.<job>`. */
+  kind: string;
+  payload: Record<string, unknown>;
+  /**
+   * Idempotent enqueue: the same key for the same tenant and kind returns the
+   * existing job instead of a second one.
+   */
+  deliveryKey?: string;
+  /** Not before; defaults to now. */
+  availableAt?: Date;
+  maxAttempts?: number;
+  /** The record this job is about, so a screen can list the jobs of one record. */
+  subject?: RuntimeJobSubject;
+};
+
+export type RuntimeJobEnqueueResult = {
+  id: string;
+  /** False when `deliveryKey` matched an existing job, which is returned instead. */
+  created: boolean;
+  status: RuntimeJobStatus;
+};
+
+export type RuntimeJobServices = {
+  /**
+   * Enqueue under the live verified session's tenant, inside the active
+   * transaction when there is one — the outbox pattern: the job exists
+   * exactly when the domain write does. The active transaction is the
+   * Operation's, or, for a storage contribution called from `stage` or
+   * `read`, the one that artifact call opened (`context.withTransaction`),
+   * so a staged row and the job that collects it commit together.
+   */
+  enqueue(session: PluginSessionContext, input: RuntimeJobEnqueueInput): Promise<RuntimeJobEnqueueResult>;
+};
+
+/** What a job handler may read about the job it is running. */
+export type RuntimeJobClaim = {
+  id: string;
+  tenantId: string;
+  actorId: string;
+  kind: string;
+  /** 1 on the first run. */
+  attempt: number;
+  maxAttempts: number;
+  subject: RuntimeJobSubject | null;
+};
+
+export type RuntimeJobError = { message: string; code?: string; detail?: Record<string, unknown> };
+
+/**
+ * How a handler ends. `retry` backs off with jitter and turns `dead` once the
+ * attempt bound is reached; `failed` is terminal without retry;
+ * `outcome_unknown` says an external effect MAY have happened and must never
+ * be repeated automatically — an operator decides. A handler that throws is
+ * treated as `outcome_unknown`, because the generic worker cannot prove that
+ * it threw before an external effect. A handler that knows repetition is safe
+ * returns `retry` explicitly. A handler that returns nothing is `done`.
+ */
+export type RuntimeJobOutcome =
+  | { outcome: "done"; result?: Record<string, unknown> }
+  | { outcome: "retry"; error: RuntimeJobError; retryAt?: Date }
+  | { outcome: "failed"; error: RuntimeJobError }
+  | { outcome: "outcome_unknown"; error: RuntimeJobError };
+
+export type RuntimeJobHandlerContextContract<Database> = {
+  job: RuntimeJobClaim;
+  /**
+   * A tenant transaction that replays the session of the person who enqueued
+   * the job — tenant, user, roles, groups, RelationGroup memberships and
+   * scope as they were at enqueue — so the handler reaches exactly what that
+   * request could. It holds no worker role and no worker GUC: the queue's
+   * cross-tenant policy is the host's, never the handler's. The handler's
+   * writes commit together with the job's outcome.
+   */
+  db: Database;
+  log: RuntimeWorkerLogger;
+};
+
+export type RuntimeJobHandlerContract<Context> = (
+  payload: Record<string, unknown>,
+  context: Context,
+) => Promise<RuntimeJobOutcome | void>;
+
+export type RuntimeJobHandler = RuntimeJobHandlerContract<
+  RuntimeJobHandlerContextContract<Transaction<PluginDatabaseSchema>>
+>;
 
 /** Minimal structured logger shared by every contributed worker. */
 export type RuntimeWorkerLogger = {
@@ -399,6 +637,18 @@ export type RuntimeWorkerContract<Context> = {
     context: Context,
     reference: RuntimeDurableWorkReference,
     fingerprint: string,
+  ): Promise<void>;
+  /**
+   * Optional. Persist, under the exact active claim and committed before core
+   * dispatches, that this attempt `started` a dispatch; or, once core has
+   * proof nothing reached the Operation (only rate-limiter refusals), that it
+   * was `not-dispatched`. Lets a transient failure retry without being taken
+   * for an uncertain repeat (#885). Reported back as `dispatch`.
+   */
+  markOperationDispatch?(
+    context: Context,
+    reference: RuntimeDurableWorkReference,
+    state: "started" | "not-dispatched",
   ): Promise<void>;
 };
 
@@ -521,6 +771,7 @@ export type RuntimeModuleContract<
   >,
   AvailabilityHandler = ModuleOperationAvailabilityHandler,
   ArtifactStorage = RuntimeArtifactStorageContribution<PluginSessionContext, Transaction<PluginDatabaseSchema>>,
+  JobHandler = RuntimeJobHandler,
 > = {
   /** Must match the compiler plugin name. */
   name: string;
@@ -535,6 +786,12 @@ export type RuntimeModuleContract<
   artifactStorage?: ArtifactStorage;
   operationProviders?: readonly OperationProvider[];
   workers?: Record<string, Worker>;
+  /**
+   * Handlers for durable job kinds, keyed by kind. A kind two active modules
+   * both register fails closed when the host composes its handlers; a queued
+   * job whose kind no module handles ends `dead`.
+   */
+  jobHandlers?: Record<string, JobHandler>;
   seeds?: Seed[];
 };
 
@@ -559,3 +816,6 @@ export type RuntimeModule = RuntimeModuleContract<
   ModuleSeed,
   RuntimeOperationProvider
 >;
+
+/** Creates an isolated module using its compiler-authored, nonsecret configuration. */
+export type RuntimeModuleFactory = (configuration: unknown) => RuntimeModule;

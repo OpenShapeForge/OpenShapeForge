@@ -11,6 +11,8 @@ import type {
   TableDefinition,
 } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
+import { SCALAR_PROJECTION } from "@openshapeforge/operations";
+import { assertTenantBoundReferences, renderOnDeleteSql, renderTenantRegistryWritePolicies } from "./tenant-bound-references.js";
 
 type GroupExpand = NonNullable<RowScopePolicy["group"]>["expand"];
 
@@ -29,6 +31,7 @@ const defaultSource = "packages/compiler/config/platform-schema.yaml";
 export const WORKER_DATABASE_ROLE = "openshapeforge_worker";
 export const APP_DATABASE_ROLE = "openshapeforge_app";
 export const BLUEPRINT_READER_DATABASE_ROLE = "openshapeforge_blueprint_reader";
+export const IDENTITY_RESOLVER_DATABASE_ROLE = "openshapeforge_identity_resolver";
 
 /**
  * One declared database role. Roles are cluster-wide objects, so the
@@ -38,7 +41,7 @@ export const BLUEPRINT_READER_DATABASE_ROLE = "openshapeforge_blueprint_reader";
  */
 export type DatabaseRoleContract = {
   /** Stable key hosts and the runtime address the role by. */
-  key: "app" | "worker" | "blueprintReader";
+  key: "app" | "worker" | "blueprintReader" | "identityResolver";
   name: string;
   /** Whether the role authenticates; the definer roles never do. */
   login: boolean;
@@ -55,6 +58,8 @@ export const DATABASE_ROLES: readonly DatabaseRoleContract[] = [
     purpose: "The background worker connection the workerAccess policies compare current_user against." },
   { key: "blueprintReader", name: BLUEPRINT_READER_DATABASE_ROLE, login: false, migratorMember: true,
     purpose: "Definer of the cross-tenant blueprint read function; owns nothing else." },
+  { key: "identityResolver", name: IDENTITY_RESOLVER_DATABASE_ROLE, login: false, migratorMember: true,
+    purpose: "Definer of the two identity-registry point lookups; owns nothing else." },
 ];
 
 export type GenerateArtifactsOptions = {
@@ -109,54 +114,8 @@ function stableIdentifier(value: string): string {
   return `${value.slice(0, 54)}_${hash}`;
 }
 
-function sqlType(type: ScalarType): string {
-  switch (type) {
-    case "uuid":
-      return "uuid";
-    case "text":
-      return "text";
-    case "boolean":
-      return "boolean";
-    case "integer":
-      return "integer";
-    case "bigint":
-      return "bigint";
-    case "numeric":
-      return "numeric";
-    case "date":
-      return "date";
-    case "timestamptz":
-      return "timestamptz";
-    case "jsonb":
-      return "jsonb";
-    case "text[]":
-      return "text[]";
-  }
-}
-
-function tsType(type: ScalarType): string {
-  switch (type) {
-    case "uuid":
-    case "text":
-      return "string";
-    case "boolean":
-      return "boolean";
-    case "integer":
-      return "number";
-    case "bigint":
-      return "string";
-    case "numeric":
-      return "Numeric";
-    case "date":
-      return "DateOnly";
-    case "timestamptz":
-      return "Timestamp";
-    case "jsonb":
-      return "Json";
-    case "text[]":
-      return "string[]";
-  }
-}
+const sqlType = (type: ScalarType): string => SCALAR_PROJECTION[type].sql;
+const tsType = (type: ScalarType): string => SCALAR_PROJECTION[type].ts;
 
 function generatedTsType(column: ColumnDefinition): string {
   if (column.type === "timestamptz") {
@@ -260,7 +219,7 @@ function groupFunctionForExpand(expand: GroupExpand): string {
  * The second stays because `workerAccess` is a per-role authoring surface, not
  * a per-deployment one. Dropping it would make every worker role in the
  * deployment equivalent: a second plugin's worker, connected as the same
- * PostgreSQL role, would inherit the workflow plugin's queue for free. Keeping
+ * PostgreSQL role, would inherit the first plugin's queue for free. Keeping
  * it as an AND costs one comparison and preserves the distinction the compiler
  * already expresses.
  *
@@ -414,6 +373,14 @@ function renderRowScopePredicate(
     }
     branches.push(`${quoteIdent(userColumn)} = app.current_user_id()`);
   }
+  for (const relationColumn of scope.relationColumns ?? []) {
+    if (!present.has(relationColumn)) {
+      throw new Error(
+        `Table ${table.schema}.${table.name} declares rowScope.relationColumns "${relationColumn}" but the column is not defined.`,
+      );
+    }
+    branches.push(`${quoteIdent(relationColumn)} = app.current_relation_id()`);
+  }
   // `empty: public` — each listed column emits an extra "IS NULL" OR-branch so
   // that rows whose owner/group column is NULL stay visible tenant-wide.
   // Validated for presence exactly like the group/user axes.
@@ -446,6 +413,43 @@ function renderRowScopePredicate(
   return `app.bypass_rls()${workerAccess} OR (${tenant}${rowAxes}${acl})`;
 }
 
+function quoteSqlLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+/**
+ * The restrictive owner-axis read policy: beside the permissive tenant
+ * policy, a row is readable only with the read roles of the entity its set
+ * owner column references, by a platform bypass, or inside a transaction a
+ * server-side command marked with the authored setting. The role names come
+ * from the manifest, never from a migration.
+ */
+function renderOwnerAxisPolicy(table: TableDefinition): string[] {
+  const policy = table.ownerAxis;
+  if (!policy) return [];
+  if (!table.tenantScoped) {
+    throw new Error(`Table ${table.schema}.${table.name} declares ownerAxis but is not tenant-scoped.`);
+  }
+  const present = columnNames(table);
+  const branches = ["app.bypass_rls()"];
+  if (policy.command) {
+    branches.push(`nullif(current_setting(${quoteSqlLiteral(policy.command.setting)}, true), '') IN (${policy.command.values.map(quoteSqlLiteral).join(", ")})`);
+  }
+  for (const axis of policy.axes) {
+    if (!present.has(axis.column)) {
+      throw new Error(`Table ${table.schema}.${table.name} declares ownerAxis column "${axis.column}" but the column is not defined.`);
+    }
+    branches.push(`(${quoteIdent(axis.column)} IS NOT NULL AND app.has_any_role(ARRAY[${axis.roles.map(quoteSqlLiteral).join(", ")}]))`);
+  }
+  const policyName = quoteIdent(`${table.name}_owner_read`);
+  return [
+    "",
+    `DROP POLICY IF EXISTS ${policyName} ON ${tableIdent(table)};`,
+    `CREATE POLICY ${policyName} ON ${tableIdent(table)} AS RESTRICTIVE FOR SELECT`,
+    `  USING (${branches.join(" OR ")});`,
+  ];
+}
+
 function deriveRowScopeIndexes(table: TableDefinition): Array<{
   name: string;
   columns: string[];
@@ -462,7 +466,7 @@ function deriveRowScopeIndexes(table: TableDefinition): Array<{
       columns: ["tenant_id", scope.group.column],
     });
   }
-  for (const userColumn of scope.userColumns ?? []) {
+  for (const userColumn of [...(scope.userColumns ?? []), ...(scope.relationColumns ?? [])]) {
     indexes.push({
       name: `${table.name}_tenant_${userColumn}_idx`,
       columns: ["tenant_id", userColumn],
@@ -522,12 +526,10 @@ function renderTableSql(table: TableDefinition): string {
         ? renderRowScopePredicate(table, workerAccess, false)!
         : rowScopePredicate;
       const policyName = quoteIdent(`${table.name}_row_scope`);
-      const supersededPolicyName = quoteIdent(`${table.name}_tenant_isolation`);
       lines.push(
         "",
         `ALTER TABLE ${tableIdent(table)} ENABLE ROW LEVEL SECURITY;`,
         `ALTER TABLE ${tableIdent(table)} FORCE ROW LEVEL SECURITY;`,
-        `DROP POLICY IF EXISTS ${supersededPolicyName} ON ${tableIdent(table)};`,
         `DROP POLICY IF EXISTS ${policyName} ON ${tableIdent(table)};`,
         `CREATE POLICY ${policyName} ON ${tableIdent(table)}`,
         `  USING (${rowScopePredicate})`,
@@ -535,13 +537,11 @@ function renderTableSql(table: TableDefinition): string {
       );
     } else {
       const policyName = quoteIdent(`${table.name}_tenant_isolation`);
-      const supersededPolicyName = quoteIdent(`${table.name}_row_scope`);
       const tenantExpression = `app.bypass_rls()${workerAccess} OR (tenant_id = app.current_tenant())`;
       lines.push(
         "",
         `ALTER TABLE ${tableIdent(table)} ENABLE ROW LEVEL SECURITY;`,
         `ALTER TABLE ${tableIdent(table)} FORCE ROW LEVEL SECURITY;`,
-        `DROP POLICY IF EXISTS ${supersededPolicyName} ON ${tableIdent(table)};`,
         `DROP POLICY IF EXISTS ${policyName} ON ${tableIdent(table)};`,
         `CREATE POLICY ${policyName} ON ${tableIdent(table)}`,
         `  USING (${tenantExpression})`,
@@ -554,6 +554,8 @@ function renderTableSql(table: TableDefinition): string {
     // is the exception, and says so with `tenantIdentityColumn`.
     lines.push(...tenantRegistryPolicy);
   }
+  lines.push(...renderOwnerAxisPolicy(table));
+  lines.push(...renderTenantRegistryWritePolicies(table));
 
   for (const index of deriveRowScopeIndexes(table)) {
     lines.push("", renderIndexSql(table, index));
@@ -583,7 +585,7 @@ function renderColumnForeignKeySql(table: TableDefinition, column: ColumnDefinit
   ) {
     throw new Error(`Invalid composite foreign key ${table.schema}.${table.name}.${column.name}.`);
   }
-  const onDelete = reference.onDelete ? ` ON DELETE ${reference.onDelete}` : "";
+  const onDelete = renderOnDeleteSql(table, `${table.schema}.${table.name}.${column.name}`, localColumns, reference.onDelete);
 
   return [
     "DO $openshapeforge_fk$",
@@ -681,20 +683,6 @@ export interface DB {
 ${dbFields}
 }
 `;
-}
-
-function isLegacyFullCrudCompatible(table: TableDefinition): boolean {
-  const crud = table.source?.crud;
-  if (crud === undefined) return true;
-
-  const operations = crud.operations;
-  return (
-    operations?.list === true &&
-    operations.get === true &&
-    operations.create === true &&
-    operations.update === true &&
-    operations.delete === true
-  );
 }
 
 /**
@@ -803,20 +791,13 @@ function renderManifestJson(
           "tenant_id",
           ...(table.rowScope?.group ? [table.rowScope.group.column] : []),
           ...(table.rowScope?.userColumns ?? []),
+          ...(table.rowScope?.relationColumns ?? []),
           ...(table.rowScope?.nullVisibleColumns ?? []),
           ...(table.rowScope?.recordPermissions ? [table.rowScope.recordPermissions.column] : []),
         ])].sort(),
       },
     } : {}),
     generatedCrudEligible: isGeneratedCrudEligible(table),
-    // Legacy all-or-nothing marker. Partial policies deliberately keep this
-    // false so an older runtime hides them; current runtimes read the explicit
-    // eligibility marker and per-operation source.crud block above.
-    generatedCrud:
-      isGeneratedCrudEligible(table) &&
-      isLegacyFullCrudCompatible(table) &&
-      table.generatedCrud === true &&
-      table.domainInternal !== true,
     // The single column generated CRUD addresses a row by; null for a
     // composite key, which no CRUD-eligible table carries.
     primaryKey: singlePrimaryKey(table)?.name ?? null,
@@ -826,10 +807,6 @@ function renderManifestJson(
       required: column.required === true || column.primaryKey === true,
       primaryKey: column.primaryKey === true,
       generated: column.generated ?? null,
-      // Verbatim SQL default so the roll-forward migrator can detect default
-      // drift (a changed default is otherwise invisible: it does not alter
-      // information_schema.data_type/nullability/identity).
-      ...(column.default === undefined ? {} : { default: column.default }),
       ...(column.sourceField === undefined ? {} : { sourceField: column.sourceField }),
       ...(column.classification === undefined ? {} : { classification: column.classification }),
       // Authored `immutable: true` — the runtime's writability rule refuses the
@@ -936,35 +913,11 @@ function renderManifestJson(
  * a build failure that names the column rather than a foreign key Postgres
  * refuses at migrate time.
  */
-function assertReferenceTargets(manifest: PlatformSchemaManifest): void {
-  const tables = new Map(
-    manifest.tables.map((table) => [`${table.schema}.${table.name}`, table]),
-  );
-  for (const table of manifest.tables) {
-    for (const column of table.columns) {
-      const reference = column.references;
-      if (!reference) continue;
-      const targetName = `${reference.schema}.${reference.table}`;
-      const target = tables.get(targetName);
-      if (!target) {
-        throw new Error(
-          `${table.schema}.${table.name}.${column.name} references unknown table ${targetName}.`,
-        );
-      }
-      if (!target.columns.some((candidate) => candidate.name === reference.column)) {
-        throw new Error(
-          `${table.schema}.${table.name}.${column.name} references unknown column ${targetName}.${reference.column}.`,
-        );
-      }
-    }
-  }
-}
-
 export function generateArtifacts(
   manifest: PlatformSchemaManifest,
   options: GenerateArtifactsOptions = {},
 ): GeneratedArtifact[] {
-  assertReferenceTargets(manifest);
+  assertTenantBoundReferences(manifest);
   const source = options.source ?? defaultSource;
   const sql = `${sqlGeneratedHeader(source)}
 

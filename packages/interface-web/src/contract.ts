@@ -73,6 +73,12 @@ export type WebSchemaOperationRef<
   };
   concurrency?: OperationConcurrency;
   confirmation: OperationConfirmation;
+  /** Canonical caller policy, also used by Operation-backed entity projections. */
+  auth?:
+    | { mode: "public" }
+    | { mode: "session"; roles?: readonly string[]; scopes?: readonly string[] }
+    | { mode: "control"; roles: readonly string[] };
+  prerequisites?: readonly WebOperationPrerequisite[];
   /** Authenticated browser execution endpoint, including honest binary output. */
   rest?: {
     method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -90,7 +96,7 @@ export type WebEntityPluginOperationRef = WebSchemaOperationRef<"create" | "upda
   implementation: { type: "plugin"; plugin: string; handler: string };
   prerequisites?: readonly WebOperationPrerequisite[];
 };
-export type WebOperationRef = WebBuiltinOperationRef | WebEntityPluginOperationRef;
+export type WebOperationRef = WebBuiltinOperationRef | WebEntityPluginOperationRef | WebCustomOperationRef;
 export type WebViewMode = "read" | "create" | "update";
 
 /** Opaque layout-renderer registry key. A host must reject unknown keys clearly. */
@@ -125,7 +131,7 @@ export type WebFieldOptionSource =
 
 /**
  * Semantic field projection. A renderer registry resolves presentation from
- * semanticType, valueType, cardinality, surface and mode; fields never name a
+ * osfType, baseType, cardinality, surface and mode; fields never name a
  * component or renderer as their default behaviour.
  */
 export type WebFieldProjection = {
@@ -135,10 +141,14 @@ export type WebFieldProjection = {
   key: string;
   label: LocalizedText;
   description: LocalizedText;
-  valueType: string;
-  semanticType?: string;
+  /**
+   * The one type axis: a base type, a osf-type key or an entity name.
+   * The renderer registry keys on it; `baseType` is its structural base.
+   */
+  osfType: string;
+  baseType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   /** Logical dynamic form metadata; physical storage stays server-side. */
-  entityValue?: { definitionField: string };
+  entityValue?: { definitionField: string; parameterBindings?: boolean };
   allowedDefinitions?: string[];
   relationship?: {
     targetEntityId: string;
@@ -166,7 +176,13 @@ export type WebFieldProjection = {
   supports: { read: boolean; create: boolean; update: boolean };
 };
 
-export type WebFieldGroup = { id: string; title: LocalizedText; fields: string[] };
+export type WebFieldGroup = {
+  id: string;
+  title: LocalizedText;
+  fields: string[];
+  /** Per-field presentation-renderer overrides authored on a FieldRef; keyed by field key, sparse. */
+  fieldOverrides?: Record<string, { render: { component: WebRendererKey } }>;
+};
 
 export type WebCollectionView = {
   id: string;
@@ -191,7 +207,7 @@ export type WebRelationshipProjection = {
   id: string;
   key: string;
   label: LocalizedText;
-  kind: string;
+  kind: "belongsTo" | "hasMany";
   targetEntityId: string;
   targetRoute: string;
   foreignKey?: string;
@@ -199,19 +215,38 @@ export type WebRelationshipProjection = {
   fieldKey?: string;
   inverse?: string;
   ownership?: "owned" | "reference";
+  /** A single reference to a versioned target: pinned to one immutable version, or the current head (default). */
+  version?: "pinned" | "current";
+  /** Boolean field of the owned child; the owner's update, move and remove refuse a child whose flag is set. */
+  childLock?: string;
   cardinality?: "single" | "collection" | { min?: number; max?: number | "unbounded" };
   sortable?: boolean;
   positionColumn?: string;
   via?: string;
+  through?: { field: string; column: string; target: string };
   mutationSupport?: "unsupported" | "atomic";
   allowedDefinitions?: string[];
   constraints?: WebRelationshipConstraints;
+  /**
+   * Present when the target is a provider-backed entity: no foreign key exists.
+   * The browser runs the target's Operations, filling each input field named
+   * in `bindings` from the field of the current record it maps to.
+   */
+  source?: {
+    kind: "provider";
+    bindings: Record<string, string>;
+    createBindings?: Record<string, string>;
+    /** Canonical list capabilities narrowed for this relationship placement. */
+    query?: NonNullable<WebEntityInterface["operationSource"]>["collection"]["query"];
+  };
   operations: {
     list?: WebOperationRef;
     get?: WebOperationRef;
     create?: WebOperationRef;
     insert?: WebCustomOperationRef;
     move?: WebCustomOperationRef;
+    update?: WebCustomOperationRef;
+    remove?: WebCustomOperationRef;
   };
   collection?: WebCollectionView;
 };
@@ -221,13 +256,15 @@ export type WebRecordTab = {
   label: LocalizedText;
   groups: WebFieldGroup[];
   relationshipId?: string;
+  /** Named view owned by the relationship target selected by this placement. */
+  targetView?: string;
 };
 
 export type WebRecordView = {
   id: string;
   kind: "record";
   renderer: WebRendererKey;
-  preset: "inbox-main-context";
+  preset: "main" | "inbox-main-context";
   modes: WebViewMode[];
   routes: {
     read?: string;
@@ -245,6 +282,7 @@ export type WebRecordView = {
   /** Authored form layout retained even when standalone create is unavailable. */
   formGroups?: { create?: WebFieldGroup[]; update?: WebFieldGroup[] };
   subtitleTemplate?: string;
+  badges?: string[];
   layout: {
     tabs: WebRecordTab[];
     context: { groups: WebFieldGroup[]; relationships: string[] };
@@ -258,10 +296,46 @@ export type WebRecordView = {
   };
 };
 
-export type WebEntityView = WebCollectionView | WebRecordView;
+export type WebNamedView =
+  | (WebRecordView & { relationships?: Record<string, WebRelationshipProjection> })
+  /** Compatibility with manifests compiled before named record layouts. */
+  | { kind: "record"; fields: string[] }
+  | {
+      kind: "record";
+      titleTemplate?: string;
+      layout: { tabs: WebRecordTab[] };
+    }
+  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string }
+  | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
+
+export type WebEntityView = WebCollectionView | WebRecordView | WebNamedView;
+
+/**
+ * A status field declared as a state machine. Each rule is also one of the
+ * entity's `operations` (by `operation` id) and appears in a record's offer
+ * list only while the record's status is in `from`; the renderer shows the
+ * offered rules as the record's transition buttons.
+ */
+export type WebStatusTransitions = {
+  field: string;
+  initial: string;
+  rules: Array<{
+    key: string;
+    operation: string;
+    from: string[];
+    to: string;
+    label: LocalizedText;
+    recordPermission?: "edit";
+    preconditions?: Array<{ field: string; present?: boolean; via?: string; in?: Array<string | number | boolean>; refusal?: { en?: string; nl?: string } }>;
+    writes?: Array<{ field: string; required: boolean; agreesOn?: string[] }>;
+    stamps?: Array<{ field: string; value: "now" | "actor"; actor?: "relation" | "user" }>;
+  }>;
+};
 
 export type WebEntityInterface = {
   blueprint?: { fields: string[]; labelField: string; operations: { list: string; status: string; reset: string; publish: string } };
+  /** Status state machines declared on this entity's fields. */
+  transitions?: WebStatusTransitions[];
   /** Canonical record label used outside a particular view, including selectors. */
   displayTemplate?: string;
   entityId: string;
@@ -277,10 +351,17 @@ export type WebEntityInterface = {
    */
   operationSource?: {
     idField: string;
+    create?: { bindings?: Record<string, string> };
     collection: {
       resultField: string;
       /** Operation input field -> route parameter. Equal names need no entry. */
       bindings?: Record<string, string>;
+      /** Canonical query capabilities declared by the list Operation itself. */
+      query?: {
+        input: WebCollectionQueryContract;
+        nextCursorField: string;
+        totalCountField?: string;
+      };
     };
     record?: {
       resultField?: string;
@@ -297,6 +378,7 @@ export type WebEntityInterface = {
   views: {
     collection: WebCollectionView;
     record?: WebRecordView;
+    named?: Record<string, WebNamedView>;
   };
   relationships: Record<string, WebRelationshipProjection>;
 };
@@ -308,10 +390,21 @@ export type WebEntityInterface = {
  * landing operation — run as soon as its page opens.
  */
 export type WebStandaloneOperationRef = Omit<WebSchemaOperationRef<"invoke">, "target"> & {
+  /**
+   * Present when an operation-backed entity lists the Operation as one of its
+   * actions: a collection action needs no record, a record action binds the
+   * current record by `inputField`. Absent on page Operations.
+   */
+  target?: {
+    entityId: string;
+    entityName: string;
+    scope: "collection" | "record";
+    inputField?: string;
+  };
   /** Who may invoke it; the web hides what the session cannot invoke. */
   auth:
     | { mode: "public" }
-    | { mode: "session"; roles?: readonly string[]; scopes?: readonly string[] }
+    | { mode: "session"; roles?: readonly string[]; roleGroups?: readonly (readonly string[])[]; scopes?: readonly string[] }
     | { mode: "control"; roles: readonly string[] };
   prerequisites?: readonly WebOperationPrerequisite[];
   page: string;

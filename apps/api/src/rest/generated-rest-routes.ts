@@ -19,6 +19,10 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { OperationFailure } from "@openshapeforge/operations";
 import openApiSpec from "../generated/rest/openapi.json" with { type: "json" };
+import { DECIMAL_PATTERN, INTEGER_TEXT_PATTERN } from "@openshapeforge/operations";
+
+const DECIMAL = new RegExp(DECIMAL_PATTERN);
+const INTEGER_TEXT = new RegExp(INTEGER_TEXT_PATTERN);
 import { resolveSessionContext } from "../auth/identity.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
@@ -50,24 +54,6 @@ type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 type GeneratedColumn = GeneratedTable["columns"][number];
 type RestMetadata = NonNullable<NonNullable<GeneratedTable["source"]>["rest"]>;
 
-function usesCanonicalResultEnvelope(table: GeneratedTable): boolean {
-  return (table.source?.authoringVersion ?? 1) >= 2;
-}
-
-function legacyFailureBody(body: Record<string, unknown>): Record<string, unknown> {
-  const error = body.error as Record<string, unknown> | undefined;
-  if (!error) return body;
-  const data = error.data as Record<string, unknown> | undefined;
-  return {
-    error: {
-      code: error.code,
-      message: error.message,
-      ...(typeof error.detail === "string" ? { detail: error.detail } : {}),
-      ...(typeof data?.hint === "string" ? { hint: data.hint } : {}),
-    },
-  };
-}
-
 const RESERVED_LIST_PARAMS = new Set([
   "first",
   "after",
@@ -98,10 +84,7 @@ function expectedMutationControlType(
   return field === "confirmed" ? "boolean" : "string";
 }
 
-function splitMutationBody(
-  body: unknown,
-  allowControls: boolean,
-): {
+function splitMutationBody(body: unknown): {
   valuesBody: unknown;
   controls: Record<string, string | boolean>;
 } {
@@ -109,28 +92,25 @@ function splitMutationBody(
     return { valuesBody: body, controls: {} };
   }
   const entries = Object.entries(body as Record<string, unknown>);
-  if (allowControls) {
-    for (const [key, value] of entries) {
-      if (!MUTATION_CONTROL_FIELDS.has(key)) continue;
-      const field = key as MutationControlField;
-      const expectedType = expectedMutationControlType(field);
-      if (typeof value !== expectedType) {
-        if (field === "blueprintId") throw new HttpError(400, "BAD_USER_INPUT", "blueprintId must be a string.");
-        throw invalidMutationControlTypeFailure(field, expectedType);
-      }
+  for (const [key, value] of entries) {
+    if (!MUTATION_CONTROL_FIELDS.has(key)) continue;
+    const field = key as MutationControlField;
+    const expectedType = expectedMutationControlType(field);
+    if (typeof value !== expectedType) {
+      if (field === "blueprintId") throw new HttpError(400, "BAD_USER_INPUT", "blueprintId must be a string.");
+      throw invalidMutationControlTypeFailure(field, expectedType);
     }
   }
   const controls = Object.fromEntries(
     entries.filter(
       ([key, value]) =>
-        allowControls &&
         MUTATION_CONTROL_FIELDS.has(key) &&
         (typeof value === "string" ||
           (key === "confirmed" && typeof value === "boolean")),
     ),
   ) as Record<string, string | boolean>;
   const valuesBody = Object.fromEntries(
-    entries.filter(([key]) => !allowControls || !MUTATION_CONTROL_FIELDS.has(key)),
+    entries.filter(([key]) => !MUTATION_CONTROL_FIELDS.has(key)),
   );
   return { valuesBody, controls };
 }
@@ -250,8 +230,7 @@ function coerceFilterValue(column: GeneratedColumn, raw: string): unknown {
         `Filter field ${fieldNameForColumn(column)} expects "true" or "false".`,
       );
     }
-    case "integer":
-    case "bigint": {
+    case "integer": {
       const parsed = Number.parseInt(raw, 10);
       if (!Number.isInteger(parsed) || String(parsed) !== raw.trim()) {
         throw new HttpError(
@@ -262,16 +241,27 @@ function coerceFilterValue(column: GeneratedColumn, raw: string): unknown {
       }
       return parsed;
     }
-    case "numeric": {
-      const parsed = Number(raw);
-      if (!Number.isFinite(parsed)) {
+    // A bigint or numeric filter value stays the decimal text the column
+    // holds: comparing as text in the database is exact, a JS number is not.
+    case "bigint": {
+      if (!INTEGER_TEXT.test(raw.trim())) {
         throw new HttpError(
           400,
           "BAD_USER_INPUT",
-          `Filter field ${fieldNameForColumn(column)} expects a number.`,
+          `Filter field ${fieldNameForColumn(column)} expects an integer.`,
         );
       }
-      return parsed;
+      return raw.trim();
+    }
+    case "numeric": {
+      if (!DECIMAL.test(raw.trim())) {
+        throw new HttpError(
+          400,
+          "BAD_USER_INPUT",
+          `Filter field ${fieldNameForColumn(column)} expects a decimal number.`,
+        );
+      }
+      return raw.trim();
     }
     default:
       return raw;
@@ -425,16 +415,8 @@ export function registerGeneratedRestRoutes(
       },
     );
 
-    instance.setErrorHandler((error, request, reply) => {
-      const { status, body: canonicalBody } = toHttpError(error);
-      const pathname = request.url.split("?", 1)[0] ?? request.url;
-      const table = restTables.find((candidate) => {
-        const base = `${REST_MOUNT_PATH}/${candidate.source.rest.basePath}`;
-        return pathname === base || pathname.startsWith(`${base}/`);
-      });
-      const body = table && !usesCanonicalResultEnvelope(table)
-        ? legacyFailureBody(canonicalBody as unknown as Record<string, unknown>)
-        : canonicalBody;
+    instance.setErrorHandler((error, _request, reply) => {
+      const { status, body } = toHttpError(error);
       if (status >= 500) {
         instance.log.error({ err: error }, "Generated REST route failed.");
       }
@@ -444,7 +426,6 @@ export function registerGeneratedRestRoutes(
     for (const table of restTables) {
       const rest = table.source.rest;
       const base = `${REST_MOUNT_PATH}/${rest.basePath}`;
-      const canonical = usesCanonicalResultEnvelope(table);
       const offerIntents = (Object.entries(rest.operations) as Array<[
         "list" | "get" | "create" | "update" | "delete",
         boolean,
@@ -470,15 +451,6 @@ export function registerGeneratedRestRoutes(
           if (operationResult.intent !== "list") throw new Error("Unexpected entity result.");
           if ("error" in operationResult) throw new OperationFailure(operationResult.error);
           const result = operationResult.data;
-          if (!canonical) {
-            return reply.send({
-              items: result.items.map((item) =>
-                serializeGeneratedRestRow(table, item.data),
-              ),
-              totalCount: result.totalCount,
-              nextCursor: result.nextCursor,
-            });
-          }
           return reply.send({
             data: {
               items: result.items.map((item) => ({
@@ -508,7 +480,6 @@ export function registerGeneratedRestRoutes(
           if (!row) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
-          if (!canonical) return reply.send(serializeGeneratedRestRow(table, row));
           return reply.send({
             data: serializeGeneratedRestRow(table, row),
             operations: result.operations,
@@ -522,10 +493,7 @@ export function registerGeneratedRestRoutes(
         const path = projection && projection.path ? projection.path : base;
         instance.post(path, async (request, reply) => {
           const context = await requireRestContext(request);
-          const { valuesBody, controls } = splitMutationBody(
-            request.body ?? {},
-            canonical,
-          );
+          const { valuesBody, controls } = splitMutationBody(request.body ?? {});
           const input = operation.implementation?.type === "plugin"
             ? pluginEntityTransportInput(operation, request.body ?? {}, undefined,
                 typeof request.headers["idempotency-key"] === "string" ? request.headers["idempotency-key"] : undefined)
@@ -539,9 +507,6 @@ export function registerGeneratedRestRoutes(
           if ("error" in result) throw new OperationFailure(result.error);
           const row = result.data;
           if (!row) throw new Error("Create operation returned no record.");
-          if (!canonical) {
-            return reply.status(201).send(serializeGeneratedRestRow(table, row));
-          }
           return reply.status(projection && projection.response?.status ? projection.response.status : 201).send({
             data: serializeGeneratedRestRow(table, row),
             operations: result.operations,
@@ -560,10 +525,7 @@ export function registerGeneratedRestRoutes(
           const params = request.params as Record<string, string>;
           const id = params[targetField] ?? params.id;
           if (!id) throw new HttpError(400, "BAD_USER_INPUT", "The record identifier is missing.");
-          const { valuesBody, controls } = splitMutationBody(
-            request.body ?? {},
-            canonical,
-          );
+          const { valuesBody, controls } = splitMutationBody(request.body ?? {});
           const input = operation.implementation?.type === "plugin"
             ? pluginEntityTransportInput(operation, request.body ?? {}, id,
                 typeof request.headers["idempotency-key"] === "string" ? request.headers["idempotency-key"] : undefined)
@@ -580,7 +542,6 @@ export function registerGeneratedRestRoutes(
           if (!row) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
-          if (!canonical) return reply.send(serializeGeneratedRestRow(table, row));
           return reply.status(projection && projection.response?.status ? projection.response.status : 200).send({
             data: serializeGeneratedRestRow(table, row),
             operations: result.operations,
@@ -592,12 +553,8 @@ export function registerGeneratedRestRoutes(
         instance.delete(`${base}/:id`, async (request, reply) => {
           const context = await requireRestContext(request);
           const { id } = request.params as { id: string };
-          const { valuesBody, controls } = splitMutationBody(
-            request.body ?? {},
-            canonical,
-          );
+          const { valuesBody, controls } = splitMutationBody(request.body ?? {});
           if (
-            canonical &&
             valuesBody &&
             typeof valuesBody === "object" &&
             Object.keys(valuesBody as Record<string, unknown>).length > 0
@@ -619,7 +576,6 @@ export function registerGeneratedRestRoutes(
           if (!deleted) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
-          if (!canonical) return reply.status(204).send();
           return reply.send({ data: result.data, operations: result.operations });
         });
       }

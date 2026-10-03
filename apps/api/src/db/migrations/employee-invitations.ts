@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
+import { IDENTITY_LINK_ADMIN_ROLE } from "../../auth/organization-roles.js";
 import type { OpenShapeForgeDatabase } from "../connection.js";
 import { ensureCheckConstraint } from "./sql-invariants.js";
 
@@ -36,11 +37,9 @@ export async function applyEmployeeInvitationsMigration(db: OpenShapeForgeDataba
       where status = 'pending';
   `.execute(db);
 
-  await ensureCheckConstraint(db, {
-    table: "platform.employee_invitations",
-    name: "employee_invitations_role_check",
-    expression: "role in ('org_admin', 'org_employee')",
-  });
+  // Assignable role names come from the generated authorization catalog.
+  await sql`alter table platform.employee_invitations drop constraint if exists employee_invitations_role_check`.execute(db);
+
   await ensureCheckConstraint(db, {
     table: "platform.employee_invitations",
     name: "employee_invitations_status_check",
@@ -61,16 +60,49 @@ export async function applyEmployeeInvitationsMigration(db: OpenShapeForgeDataba
     alter table platform.employee_invitations force row level security;
 
     drop policy if exists employee_invitations_tenant_isolation on platform.employee_invitations;
-    create policy employee_invitations_tenant_isolation on platform.employee_invitations
+    drop policy if exists employee_invitations_insertable on platform.employee_invitations;
+    drop policy if exists employee_invitations_updatable on platform.employee_invitations;
+    drop policy if exists employee_invitations_deletable on platform.employee_invitations;
+    create policy employee_invitations_tenant_isolation on platform.employee_invitations for select
       using (
         app.bypass_rls()
         or tenant_id = app.current_tenant()
+      );
+    create policy employee_invitations_insertable on platform.employee_invitations for insert
+      with check (
+        app.bypass_rls()
+        or (
+          tenant_id = app.current_tenant()
+          and ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
+            string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
+          )
+        )
+      );
+    create policy employee_invitations_updatable on platform.employee_invitations for update
+      using (
+        app.bypass_rls()
+        or (
+          tenant_id = app.current_tenant()
+          and ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
+            string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
+          )
+        )
       )
       with check (
         app.bypass_rls()
         or (
           tenant_id = app.current_tenant()
-          and 'Organization.All.ReadWrite' = any (
+          and ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
+            string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
+          )
+        )
+      );
+    create policy employee_invitations_deletable on platform.employee_invitations for delete
+      using (
+        app.bypass_rls()
+        or (
+          tenant_id = app.current_tenant()
+          and ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
             string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
           )
         )

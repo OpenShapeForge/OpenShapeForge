@@ -10,4 +10,3 @@ export { MarkdownDisplay } from "@/features/renderer/display/markdown-display";
 export { RelationshipCards } from "@/features/renderer/display/relationship-cards";
 export { RelationshipList } from "@/features/renderer/display/relationship-list";
 export { TextDisplay } from "@/features/renderer/display/text-display";
-export { WorkflowDefinitionReferenceDisplay } from "@/features/renderer/display/workflow-definition-reference-display";

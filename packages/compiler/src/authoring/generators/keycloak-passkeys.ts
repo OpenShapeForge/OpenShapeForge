@@ -62,50 +62,26 @@
  *     forced off below, so there is no self-service "e-mail me a link" form.
  *     An administrator has to do it, and it is written to the admin event log.
  *
- * ── Google Workspace ────────────────────────────────────────────────────────
- * `google-workspace` is the one linked identity provider, and it IS an
- * accepted alternative to presenting a passkey — the `identity-provider-
- * redirector` execution sits at ALTERNATIVE next to the passkey sub-flow, so
- * whichever one answers first admits the person.
- *
- * That is a decision, not an oversight, and it cuts both ways:
- *   - FOR: the provider is linked per Keycloak Organization to one tenant's
- *     own Workspace domain (see control/keycloak-organization-admin.ts). For
- *     that tenant, Google IS the identity authority, and their own Workspace
- *     MFA policy is what actually guards the account. Demanding a second,
- *     Hubble-specific passkey on top makes the SSO the tenant bought
- *     pointless and doubles their enrolment burden.
- *   - AGAINST, stated plainly: it means the passkey-only guarantee is only as
- *     strong as that tenant's Workspace policy. A Workspace that still allows
- *     bare passwords re-opens a password path into Hubble — at Google, not
- *     here. That is the tenant's risk to carry, and it is the price of
- *     federating at all.
- * Two things keep it from being a hole by accident: `hideOnLogin: true` (the
- * button is not on the realm login page; only a member of an Organization
- * that linked the provider is routed to it), and the
- * `webauthn-register-passwordless` required action being a DEFAULT action, so
- * a person who arrives over Workspace is walked through enrolling a passkey
- * anyway and ends up with one.
+ * ── Google Workspace, and any other Organization-linked provider ──────────
+ * Federation IS an accepted alternative to presenting a passkey, and an
+ * address on an Organization domain is routed to that Organization's provider
+ * before the passkey prompt. Both decisions, and what they cost, are argued in
+ * keycloak-passkey-browser-flow.ts, which holds the browser flow.
  */
 
 import { PASSKEY_REQUIRED_ACTIONS } from "./keycloak-passkey-required-actions.js";
 import type { KeycloakRequiredActionExport } from "./keycloak-passkey-required-actions.js";
 export { WEBAUTHN_PASSWORDLESS_REQUIRED_ACTION } from "./keycloak-passkey-required-actions.js";
 export type { KeycloakRequiredActionExport };
+import { PASSKEY_BROWSER_FLOW, passkeyBrowserFlows } from "./keycloak-passkey-browser-flow.js";
+export { PASSKEY_BROWSER_FLOW, PASSKEY_ORGANIZATION_FLOW } from "./keycloak-passkey-browser-flow.js";
 
-/** Top-level browser flow alias. */
-export const PASSKEY_BROWSER_FLOW = "passkey-browser";
-/** Sub-flow holding the actual credential challenge. */
-const PASSKEY_FORMS_FLOW = "passkey-browser-forms";
 /** Top-level direct-grant flow alias — the one that always denies. */
 export const PASSKEY_DIRECT_GRANT_FLOW = "passkey-direct-grant-denied";
 /** Top-level registration flow alias — account creation without a password. */
 export const PASSKEY_REGISTRATION_FLOW = "passkey-registration";
 /** The form sub-flow the registration page renders. */
 const PASSKEY_REGISTRATION_FORM = "passkey-registration-form";
-
-/** Keycloak's provider id for the passwordless (passkey) authenticator. */
-const WEBAUTHN_PASSWORDLESS_AUTHENTICATOR = "webauthn-authenticator-passwordless";
 
 export interface KeycloakAuthenticationExecutionExport {
   authenticator?: string;
@@ -158,8 +134,8 @@ const RP_ID_RE = /^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A
  * It CANNOT be derived from the gateway's `redirectUris`: the WebAuthn
  * ceremony runs on Keycloak's OWN login page, so the rpId has to match
  * Keycloak's browser-facing hostname (or a registrable parent shared with the
- * app — e.g. `hubble.localhost` covering both `auth.hubble.localhost` and
- * `app.hubble.localhost`). The compiler has no way to know that host, so it is
+ * app — e.g. `example.localhost` covering both `auth.example.localhost` and
+ * `app.example.localhost`). The compiler has no way to know that host, so it is
  * authored, and a production realm that did not author it fails generation
  * rather than shipping a guess.
  */
@@ -214,72 +190,7 @@ export function buildPasskeyProfile(options: {
     directGrantFlow: PASSKEY_DIRECT_GRANT_FLOW,
     registrationFlow: PASSKEY_REGISTRATION_FLOW,
     authenticationFlows: [
-      {
-        alias: PASSKEY_BROWSER_FLOW,
-        description:
-          "Passkey-only browser login. No password execution exists in this flow; see keycloak-passkeys.ts.",
-        providerId: "basic-flow",
-        topLevel: true,
-        builtIn: false,
-        authenticationExecutions: [
-          // An existing SSO session. Not a credential — it is the cookie a
-          // passkey (or Workspace) login already minted.
-          {
-            authenticator: "auth-cookie",
-            requirement: "ALTERNATIVE",
-            priority: 10,
-            authenticatorFlow: false,
-            userSetupAllowed: false,
-          },
-          // Google Workspace, reached by kc_idp_hint or an Organization link.
-          // ALTERNATIVE, i.e. federation is accepted INSTEAD of a passkey —
-          // the trade-off is argued in this file's header.
-          {
-            authenticator: "identity-provider-redirector",
-            requirement: "ALTERNATIVE",
-            priority: 20,
-            authenticatorFlow: false,
-            userSetupAllowed: false,
-          },
-          {
-            flowAlias: PASSKEY_FORMS_FLOW,
-            requirement: "ALTERNATIVE",
-            priority: 30,
-            authenticatorFlow: true,
-            userSetupAllowed: false,
-          },
-        ],
-      },
-      {
-        alias: PASSKEY_FORMS_FLOW,
-        description: "Identify the person, then require a passkey. Deliberately contains no password authenticator.",
-        providerId: "basic-flow",
-        topLevel: false,
-        builtIn: false,
-        authenticationExecutions: [
-          // Username (or e-mail — loginWithEmailAllowed) only. This is
-          // `auth-username-form`, NOT `auth-username-password-form`: the
-          // latter is the stock browser flow's execution and is the one thing
-          // that would put a password box back on the page.
-          {
-            authenticator: "auth-username-form",
-            requirement: "REQUIRED",
-            priority: 10,
-            authenticatorFlow: false,
-            userSetupAllowed: false,
-          },
-          // REQUIRED, not ALTERNATIVE: there is nothing to be an alternative
-          // TO, and ALTERNATIVE-with-one-execution is how a flow accidentally
-          // becomes optional.
-          {
-            authenticator: WEBAUTHN_PASSWORDLESS_AUTHENTICATOR,
-            requirement: "REQUIRED",
-            priority: 20,
-            authenticatorFlow: false,
-            userSetupAllowed: false,
-          },
-        ],
-      },
+      ...passkeyBrowserFlows(),
       {
         // ── Account creation ────────────────────────────────────────────────
         // `registrationAllowed` is off, so nobody reaches this by browsing to

@@ -92,8 +92,8 @@ export function coerceGeneratedFieldValue(
 
   if (
     component === "NumberInput"
-    || field.valueType === "integer"
-    || field.valueType === "number"
+    || field.baseType === "integer"
+    || field.baseType === "number"
   ) {
     const parsed = Number(rawValue);
     return Number.isNaN(parsed) ? rawValue : parsed;

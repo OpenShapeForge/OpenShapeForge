@@ -7,7 +7,7 @@ description: |
   context-full entity at load time. Author-declared duplicates of these fields
   raise a compile error (strict-replace semantics).
 
-  The semanticType for `id` is auto-derived per entity (`<entityCamelCase>Id`),
+  The osfType for `id` is auto-derived per entity (`<entityCamelCase>Id`),
   so individual entities never need to redeclare `id` to attach their own
   semantic type catalog entry.
 
@@ -18,7 +18,7 @@ description: |
 language: en
 fields:
   - key: id
-    valueType: string
+    osfType: string
     required: true
     readOnly: true
     label:
@@ -33,7 +33,7 @@ fields:
     validation:
       format: uuid
   - key: createdAt
-    valueType: datetime
+    osfType: datetime
     required: true
     readOnly: true
     label:
@@ -48,7 +48,7 @@ fields:
     render:
       component: DateTimePicker
   - key: updatedAt
-    valueType: datetime
+    osfType: datetime
     required: true
     readOnly: true
     label:
@@ -63,7 +63,7 @@ fields:
     render:
       component: DateTimePicker
   - key: externalId
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External ID
@@ -77,7 +77,7 @@ fields:
       column: external_id
       storageClass: core
   - key: sourceAuthority
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Source authority
@@ -91,7 +91,7 @@ fields:
       column: source_authority
       storageClass: core
   - key: sourceOrganization
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Source organization
@@ -105,7 +105,7 @@ fields:
       column: source_organization
       storageClass: core
   - key: sourceAdministration
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Source administration
@@ -117,4 +117,27 @@ fields:
       maxLength: 200
     persisted:
       column: source_administration
+      storageClass: core
+  - key: sourceVersion
+    osfType: string
+    required: false
+    label:
+      en: Source version
+      nl: Bronversie
+    description:
+      en: >-
+        The source system's own change marker for this record (a row version, sync timestamp or modification time),
+        written by whatever imports the record. Values from one source sort as text in change order: integers
+        zero-padded to 20 digits, times as ISO-8601 UTC with milliseconds (the `source-version` response transform
+        produces both). The highest value among records with the same sourceAuthority and sourceAdministration is
+        where the next incremental import resumes, so no separate sync cursor is stored.
+      nl: >-
+        De eigen wijzigingsmarkering van het bronsysteem voor dit record (rijversie, synchronisatietijdstempel of
+        wijzigingstijd), geschreven door wat het record importeert. Waarden uit één bron sorteren als tekst in
+        wijzigingsvolgorde. De hoogste waarde binnen dezelfde gegevensbeheerder en bronadministratie is het punt waar
+        de volgende incrementele import verdergaat.
+    validation:
+      maxLength: 200
+    persisted:
+      column: source_version
       storageClass: core

@@ -39,7 +39,9 @@ import type { OperationContract } from "../operations/runtime.js";
 import { sessionOperationRolesAllow } from "../operations/session-authorization.js";
 import { ControlAuthorizationError } from "./authorization.js";
 import { type ControlSessionContext, isControlSession } from "./control-session.js";
-import { ControlServiceError } from "./errors.js";
+import { ControlOperationError, ControlServiceError } from "./errors.js";
+
+export { ControlOperationError };
 import {
   FirstAdministratorError,
   inviteFirstTenantAdministrator,
@@ -56,6 +58,7 @@ import {
   type CatalogKind,
   getCatalogEntry,
   getPlatformTenant,
+  installCurrentCatalogForTenant,
   listCatalogEntries,
   listPlatformTenants,
   type PlatformCatalogDeps,
@@ -80,6 +83,7 @@ import {
 } from "./tenant-registry.js";
 import {
   changeTenantMemberRoles,
+  confirmTenantMemberLink,
   getTenantMember,
   getTenantCredential,
   listTenantCredentials,
@@ -120,23 +124,6 @@ type ControlHandler = (
   context: ControlHandlerContext,
 ) => Promise<unknown>;
 
-/**
- * A refusal a handler states in the Operation's own vocabulary, for the two
- * cases no service class covers: a state the service reports as `null`
- * (a notice that does not exist) and a process without a database.
- */
-export class ControlOperationError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    /** The finer-grained code kept in the body for a client that branches on it. */
-    readonly detail: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = "ControlOperationError";
-  }
-}
 
 function catalogDeps(context: ControlHandlerContext): PlatformCatalogDeps {
   return {
@@ -208,9 +195,9 @@ function requiredString(input: Record<string, unknown>, field: string): string {
 }
 
 function memberDeps(context: ControlHandlerContext) {
-  if (!context.runtime.clients?.identityMembers || !context.runtime.clients.memberRoles) throw new ControlAuthorizationError("CONTROL_PLANE_NOT_CONFIGURED", "Tenant identity administration is not configured.");
+  if (!context.runtime.clients?.identityMembers) throw new ControlAuthorizationError("CONTROL_PLANE_NOT_CONFIGURED", "Tenant identity administration is not configured.");
   return { db: context.db, administrator: context.session.administrator,
-    members: context.runtime.clients.identityMembers, memberRoles: context.runtime.clients.memberRoles };
+    members: context.runtime.clients.identityMembers };
 }
 
 /** What whoami says a session can use when the transport did not say. */
@@ -236,16 +223,16 @@ const HANDLERS: Readonly<Record<string, ControlHandler>> = {
     });
   },
   platformGuide: async () => ({ guide: PLATFORM_GUIDE }),
-  listTenants: async (_input, context) => ({
-    tenants: await listPlatformTenants(catalogDeps(context)),
-  }),
+  listTenants: (input, context) => listPlatformTenants(catalogDeps(context), input),
   getTenant: (input, context) =>
     getPlatformTenant(catalogDeps(context), requireSlug(input, "slug")),
-  createTenant: (input, context) => {
+  createTenant: async (input, context) => {
     const slug = requireSlug(input, "slug");
     const name = input.name;
     assertDisplayName(name, "name");
-    return provisionTenant(controlDeps(context), { slug, name });
+    const result = await provisionTenant(controlDeps(context), { slug, name });
+    await installCurrentCatalogForTenant(catalogDeps(context), slug, result.tenant.id);
+    return result;
   },
   updateTenant: (input, context) => {
     const slug = requireSlug(input, "slug");
@@ -339,6 +326,7 @@ const HANDLERS: Readonly<Record<string, ControlHandler>> = {
   getTenantMember: (input, context) => getTenantMember(memberDeps(context), requireSlug(input, "slug"), requiredString(input, "memberId")),
   assignTenantMemberRoles: (input, context) => changeTenantMemberRoles(memberDeps(context), requireSlug(input, "slug"), requiredString(input, "memberId"), input.roles, "assign"),
   removeTenantMemberRoles: (input, context) => changeTenantMemberRoles(memberDeps(context), requireSlug(input, "slug"), requiredString(input, "memberId"), input.roles, "remove"),
+  confirmTenantMemberLink: (input, context) => confirmTenantMemberLink(memberDeps(context), requireSlug(input, "slug"), requiredString(input, "memberId")),
   removeTenantMembership: (input, context) => removeTenantMembership(memberDeps(context), requireSlug(input, "slug"), requiredString(input, "memberId")),
   requestPasskeyRecovery: (input, context) => requestPasskeyRecovery(memberDeps(context), requireSlug(input, "slug"), requiredString(input, "memberId")),
   listTenantCredentials: (input, context) => listTenantCredentials(memberDeps(context), requireSlug(input, "slug"), requiredString(input, "memberId")),

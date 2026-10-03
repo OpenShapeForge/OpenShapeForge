@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: MaintenanceOrder
@@ -10,11 +10,14 @@ filterField: code
 labels:
   en: Maintenance order
   nl: Onderhoudsorder
+pluralLabels:
+  en: Maintenance orders
+  nl: Onderhoudsorders
 domains:
   - maintenance
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +32,7 @@ fields:
       column: code
       storageClass: core
   - key: title
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Title
@@ -44,7 +47,6 @@ fields:
       column: title
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -57,13 +59,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 5000
+    osfType: multilineText
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -74,13 +71,12 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: MAINTENANCEORDERSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: MAINTENANCEORDERSTATUS
+    osfType: referenceDataCode
   - key: issueDate
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Issue date
@@ -91,11 +87,8 @@ fields:
     persisted:
       column: issue_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: plannedStartDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Planned start date
@@ -106,11 +99,8 @@ fields:
     persisted:
       column: planned_start_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: plannedEndDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Planned end date
@@ -121,11 +111,8 @@ fields:
     persisted:
       column: planned_end_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: actualStartDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Actual start date
@@ -136,11 +123,8 @@ fields:
     persisted:
       column: actual_start_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: actualEndDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Actual end date
@@ -151,11 +135,8 @@ fields:
     persisted:
       column: actual_end_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: currencyCode
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Currency
@@ -171,7 +152,6 @@ fields:
       column: currency_code
       storageClass: core
   - key: estimatedAmount
-    valueType: number
     required: false
     label:
       en: Estimated amount
@@ -179,12 +159,11 @@ fields:
     description:
       en: Estimated total amount for the order.
       nl: Geraamd totaalbedrag voor de order.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: estimated_amount
       storageClass: core
   - key: actualAmount
-    valueType: number
     required: false
     label:
       en: Actual amount
@@ -192,12 +171,12 @@ fields:
     description:
       en: Actual total amount realized for the order.
       nl: Werkelijk gerealiseerd totaalbedrag voor de order.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: actual_amount
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -210,187 +189,36 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: maintenanceRequest
-    kind: belongsTo
-    target: MaintenanceRequest
-    foreignKey: maintenance_request_id
+  - key: maintenanceRequestId
     label:
       en: Maintenance request
       nl: Onderhoudsverzoek
-  - key: agreement
-    kind: belongsTo
-    target: Agreement
-    foreignKey: agreement_id
+    persisted:
+      column: maintenance_request_id
+      storageClass: core
+    osfType: MaintenanceRequest
+    relationship:
+      ownership: reference
+  - key: agreementId
     label:
       en: Agreement
       nl: Overeenkomst
-  - key: asset
-    kind: belongsTo
-    target: Asset
-    foreignKey: asset_reference
+    persisted:
+      column: agreement_id
+      storageClass: core
+    osfType: Agreement
+    relationship:
+      ownership: reference
+  - key: assetId
     label:
       en: Asset
       nl: Object
-ui:
-  routes:
-    list:
-      en: /maintenance-orders
-      nl: /onderhoudsorders
-    detail:
-      en: /maintenance-orders/:id
-      nl: /onderhoudsorders/:id
-    create:
-      en: /maintenance-orders/create
-      nl: /onderhoudsorders/aanmaken
-    edit:
-      en: /maintenance-orders/:id/edit
-      nl: /onderhoudsorders/:id/bewerken
-    delete:
-      en: /maintenance-orders/:id/delete
-      nl: /onderhoudsorders/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Maintenance orders
-        nl: Onderhoudsorders
-      columns:
-        - key: code
-          sortable: true
-        - key: title
-          sortable: true
-        - key: status
-          sortable: true
-        - key: issueDate
-          sortable: true
-        - key: plannedStartDate
-          sortable: true
-      defaultSort:
-        key: issueDate
-        direction: desc
-      rowLink:
-        en: /maintenance-orders/:id
-        nl: /onderhoudsorders/:id
-    detail:
-      header:
-        title: "{{code}} {{title}}"
-        subtitle: "{{status}}"
-        badges:
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Order details
-                nl: Ordergegevens
-              fields:
-                - code
-                - title
-                - status
-                - issueDate
-            - title:
-                en: Planning
-                nl: Planning
-              fields:
-                - plannedStartDate
-                - plannedEndDate
-                - actualStartDate
-                - actualEndDate
-            - title:
-                en: Amounts
-                nl: Bedragen
-              fields:
-                - currencyCode
-                - estimatedAmount
-                - actualAmount
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create maintenance order
-            nl: Onderhoudsorder aanmaken
-          groups:
-            - title:
-                en: Order details
-                nl: Ordergegevens
-              fields:
-                - code
-                - title
-                - status
-                - issueDate
-            - title:
-                en: Planning
-                nl: Planning
-              fields:
-                - plannedStartDate
-                - plannedEndDate
-                - actualStartDate
-                - actualEndDate
-            - title:
-                en: Amounts
-                nl: Bedragen
-              fields:
-                - currencyCode
-                - estimatedAmount
-                - actualAmount
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit maintenance order
-            nl: Onderhoudsorder bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: asset_reference
+      storageClass: core
+    osfType: Asset
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -405,3 +233,245 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Maintenance Order
+    description: List MaintenanceOrder records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Maintenance Order
+    description: Get MaintenanceOrder records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Maintenance Order
+    description: Create MaintenanceOrder records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update MaintenanceOrder records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /maintenance-orders
+          nl: /onderhoudsorders
+        columns:
+          - key: code
+            sortable: true
+          - key: title
+            sortable: true
+          - key: status
+            sortable: true
+          - key: issueDate
+            sortable: true
+          - key: plannedStartDate
+            sortable: true
+        title:
+          en: Maintenance orders
+          nl: Onderhoudsorders
+        defaultSort:
+          key: issueDate
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /maintenance-orders/:id
+            nl: /onderhoudsorders/:id
+          create:
+            en: /maintenance-orders/create
+            nl: /onderhoudsorders/aanmaken
+        title: "{{code}} {{title}}"
+        subtitle: "{{status}}"
+        badges:
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Order details
+                    nl: Ordergegevens
+                  fields:
+                    - code
+                    - title
+                    - status
+                    - issueDate
+                - title:
+                    en: Planning
+                    nl: Planning
+                  fields:
+                    - plannedStartDate
+                    - plannedEndDate
+                    - actualStartDate
+                    - actualEndDate
+                - title:
+                    en: Amounts
+                    nl: Bedragen
+                  fields:
+                    - currencyCode
+                    - estimatedAmount
+                    - actualAmount
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create maintenance order
+              nl: Onderhoudsorder aanmaken
+            groups:
+              - title:
+                  en: Order details
+                  nl: Ordergegevens
+                fields:
+                  - code
+                  - title
+                  - status
+                  - issueDate
+              - title:
+                  en: Planning
+                  nl: Planning
+                fields:
+                  - plannedStartDate
+                  - plannedEndDate
+                  - actualStartDate
+                  - actualEndDate
+              - title:
+                  en: Amounts
+                  nl: Bedragen
+                fields:
+                  - currencyCode
+                  - estimatedAmount
+                  - actualAmount
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit maintenance order
+              nl: Onderhoudsorder bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 5000
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: MAINTENANCEORDERSTATUS
+            clearable: false
+      issueDate:
+        render:
+          component: DatePicker
+          props: {}
+      plannedStartDate:
+        render:
+          component: DatePicker
+          props: {}
+      plannedEndDate:
+        render:
+          component: DatePicker
+          props: {}
+      actualStartDate:
+        render:
+          component: DatePicker
+          props: {}
+      actualEndDate:
+        render:
+          component: DatePicker
+          props: {}

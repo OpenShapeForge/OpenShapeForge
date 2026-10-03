@@ -15,11 +15,11 @@ function assertScalarField(
   constraint: EqualityConstraint,
 ) {
   const field = target.contract.model.fields.find((candidate) => candidate.key === key);
-  if (!field || field.cardinality === "collection" || field.valueType === "object" || field.relationship) {
+  if (!field || field.cardinality === "collection" || field.baseType === "object" || field.relationship) {
     throw new Error(`${owner}: constraint ${target.contract.entity.name}.${key} must name a scalar target field.`);
   }
-  const expected = field.valueType === "boolean" ? "boolean"
-    : ["integer", "number"].includes(field.valueType) ? "number" : "string";
+  const expected = field.baseType === "boolean" ? "boolean"
+    : ["integer", "number"].includes(field.baseType) ? "number" : "string";
   if (typeof constraint.eq !== expected) {
     throw new Error(`${owner}: constraint ${target.contract.entity.name}.${key}.eq must be ${expected}.`);
   }

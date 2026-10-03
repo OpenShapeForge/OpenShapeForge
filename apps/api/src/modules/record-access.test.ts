@@ -17,6 +17,7 @@ import {
   getEntityOperationContracts,
   tableForEntityOperation,
 } from "../operations/entity/runtime.js";
+import { fieldNameForColumn } from "../operations/entity/columns.js";
 import { RecordAccessRuntime } from "./record-access.js";
 
 const tenantId = "11111111-1111-4111-8111-111111111111";
@@ -106,6 +107,36 @@ function harness(
 }
 
 describe("RecordAccessRuntime", () => {
+  test("projects stored values through current classification without fetching or authorizing a row", async () => {
+    const operation = getEntityOperationContracts().find(
+      (candidate) => candidate.entityName === "Relation" && candidate.intent === "get",
+    )!;
+    const table = tableForEntityOperation({ id: operation.id, intent: operation.intent });
+    const column = table.columns.find((candidate) => fieldNameForColumn(candidate) === "notes")!;
+    const field = fieldNameForColumn(column);
+    const previous = column.classification;
+    column.classification = "confidential";
+    const state = harness();
+    const reader = { ...session, roles: ["Relations.All.Read"] };
+    state.live.add(session);
+    state.live.add(reader);
+    try {
+      expect(state.services.projectStoredFields(reader, { entityName: "Relation", fields: { [field]: "secret" } }))
+        .toEqual({ [field]: null });
+      expect(state.services.projectStoredFields(session, { entityName: "Relation", fields: { [field]: "secret" } }))
+        .toEqual({ [field]: "secret" });
+      expect(state.queries).toHaveLength(0);
+      expect(() => state.services.projectStoredFields(reader, { entityName: "Relation", fields: { unknown: "secret" } }))
+        .toThrow();
+      expect(() => state.services.projectStoredFields({ ...reader }, { entityName: "Relation", fields: { [field]: "secret" } }))
+        .toThrow();
+    } finally {
+      if (previous === undefined) delete column.classification;
+      else column.classification = previous;
+      await state.db.destroy();
+    }
+  });
+
   test("requires the exact live session and current canonical Entity role", async () => {
     const state = harness();
     const forged = { ...session };

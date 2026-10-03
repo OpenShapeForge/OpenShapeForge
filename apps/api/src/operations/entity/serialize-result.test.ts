@@ -14,7 +14,7 @@ const table = {
   schema: "example",
   table: "examples",
   tenantScoped: true,
-  generatedCrud: true,
+  generatedCrudEligible: true,
   domainInternal: false,
   primaryKey: "id",
   columns: [
@@ -102,11 +102,11 @@ const bigintTable = {
   ],
 } satisfies GeneratedCrudTable;
 
-test("normalizes safe PostgreSQL bigint strings before REST and MCP consume the entity result", () => {
+test("keeps bigint text exact on every public entity result boundary", () => {
   const stored = {
     ...row,
     artifact_version: "2147483648",
-    byte_size: "9007199254740991",
+    byte_size: "9007199254740993",
   };
   const projected = projectRows(
     bigintTable,
@@ -118,14 +118,14 @@ test("normalizes safe PostgreSQL bigint strings before REST and MCP consume the 
     [stored],
   );
   expect(projected[0]).toMatchObject({
-    artifact_version: 2_147_483_648,
-    byte_size: Number.MAX_SAFE_INTEGER,
+    artifact_version: "2147483648",
+    byte_size: "9007199254740993",
   });
   const [firstProjected] = projected;
   if (!firstProjected) throw new Error("Expected one projected row.");
   expect(serializeEntityRow(bigintTable, firstProjected)).toMatchObject({
-    artifactVersion: 2_147_483_648,
-    byteSize: Number.MAX_SAFE_INTEGER,
+    artifactVersion: "2147483648",
+    byteSize: "9007199254740993",
   });
   expect(
     serializeEntityResult(bigintTable, {
@@ -134,47 +134,23 @@ test("normalizes safe PostgreSQL bigint strings before REST and MCP consume the 
       operations: [],
     }),
   ).toMatchObject({
-    data: {
-      items: [
-        {
-          data: {
-            artifactVersion: 2_147_483_648,
-            byteSize: Number.MAX_SAFE_INTEGER,
-          },
-        },
-      ],
-    },
+    data: { items: [{ data: { artifactVersion: "2147483648", byteSize: "9007199254740993" } }] },
   });
-  expect(stored).toMatchObject({
-    artifact_version: "2147483648",
-    byte_size: "9007199254740991",
-  });
+  expect(stored).toMatchObject({ artifact_version: "2147483648", byte_size: "9007199254740993" });
 });
 
-test("preserves unsafe or non-canonical bigint text without numeric truncation", () => {
-  const unsafe = {
-    ...row,
-    artifact_version: "9007199254740992",
-    byte_size: "-9007199254740992",
-  };
-  expect(normalizeEntityStorageRow(bigintTable, unsafe)).toMatchObject({
-    artifact_version: "9007199254740992",
-    byte_size: "-9007199254740992",
-  });
+test("prints a bigint or a number a handler produced as the same decimal text", () => {
   expect(
     normalizeEntityStorageRow(bigintTable, {
-      ...unsafe,
-      artifact_version: "-9007199254740991",
-    }),
-  ).toMatchObject({ artifact_version: Number.MIN_SAFE_INTEGER });
-  expect(
-    normalizeEntityStorageRow(bigintTable, {
-      ...unsafe,
-      artifact_version: "01",
-      byte_size: 9_007_199_254_740_992n,
+      ...row,
+      artifact_version: 2_147_483_648,
+      byte_size: 9_007_199_254_740_993n,
     }),
   ).toMatchObject({
-    artifact_version: "01",
-    byte_size: "9007199254740992",
+    artifact_version: "2147483648",
+    byte_size: "9007199254740993",
+  });
+  expect(normalizeEntityStorageRow(bigintTable, { ...row, artifact_version: null })).toMatchObject({
+    artifact_version: null,
   });
 });

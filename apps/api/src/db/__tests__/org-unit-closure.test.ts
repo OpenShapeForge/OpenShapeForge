@@ -256,16 +256,17 @@ describe("org_unit closure trigger", () => {
             `.execute(conn);
 
             // ── INSERT with a cross-tenant parent must be rejected ──
-            // parent_id references tenant B's root; the FK passes (id exists)
-            // but the trigger's same-tenant-parent guard aborts the write
-            // rather than silently creating a phantom root (issue #15).
+            // parent_id names tenant B's root. The key is (tenant_id,
+            // parent_id) -> (tenant_id, id), so the row is unexpressible and
+            // the foreign key refuses it before the trigger's
+            // same-tenant-parent guard (issue #15) would.
             const crossMsg = await expectRejects(
               sql`
                 insert into platform.org_unit (id, tenant_id, parent_id, name)
                 values (${childA}::uuid, ${tenantA}::uuid, ${unitB}::uuid, ${"child-a"})
               `.execute(conn),
             );
-            expect(crossMsg.toLowerCase()).toContain("cross-tenant");
+            expect(crossMsg).toContain('"org_unit_parent_id_fkey"');
             // Nothing was written for the rejected node.
             const orphan = await sql<{ n: number }>`
               select count(*)::int as n from platform.org_unit_closure
@@ -300,7 +301,7 @@ describe("org_unit closure trigger", () => {
                 conn,
               ),
             );
-            expect(reparentMsg.toLowerCase()).toContain("cross-tenant");
+            expect(reparentMsg).toContain('"org_unit_parent_id_fkey"');
             // The child still hangs under its original tenant-A parent.
             const stillUnderA = await sql<{ depth: number }>`
               select depth from platform.org_unit_closure
@@ -309,13 +310,26 @@ describe("org_unit closure trigger", () => {
             expect(stillUnderA.rows[0]?.depth).toBe(1);
 
             // Mutating tenant_id must be rejected by the trigger's immutability
-            // assertion (NEW.tenant_id <> OLD.tenant_id).
+            // assertion (NEW.tenant_id <> OLD.tenant_id). On a childless root,
+            // so the trigger is what answers: any node with a parent or
+            // children is already held by the (tenant_id, parent_id) key.
+            const lonely = randomUUID();
+            await sql`
+              insert into platform.org_unit (id, tenant_id, parent_id, name)
+              values (${lonely}::uuid, ${tenantA}::uuid, null, ${"lonely"})
+            `.execute(conn);
             const msg = await expectRejects(
-              sql`update platform.org_unit set tenant_id = ${tenantB}::uuid where id = ${unit}::uuid`.execute(
+              sql`update platform.org_unit set tenant_id = ${tenantB}::uuid where id = ${lonely}::uuid`.execute(
                 conn,
               ),
             );
             expect(msg.toLowerCase()).toContain("immutable");
+            const rootMsg = await expectRejects(
+              sql`update platform.org_unit set tenant_id = ${tenantB}::uuid where id = ${unit}::uuid`.execute(
+                conn,
+              ),
+            );
+            expect(rootMsg).toContain('"org_unit_parent_id_fkey"');
           });
         });
       });

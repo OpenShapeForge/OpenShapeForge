@@ -2,6 +2,8 @@
 import { sql } from "kysely";
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { OpenShapeForgeDatabase } from "../connection.js";
+import { databaseRole } from "../database-roles.js";
+import { manifestTableForEntity } from "../manifest-lookup.js";
 
 /**
  * Grants the provisioned, restricted `openshapeforge_app` role exactly the
@@ -44,8 +46,8 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
  * automatically on every migrate.
  */
 
-/** The restricted runtime role. */
-export const APP_ROLE = "openshapeforge_app";
+/** The restricted runtime role, as the generated manifest's role contract names it. */
+export const APP_ROLE = databaseRole("app").name;
 
 /**
  * The local-dev-only default password for {@link APP_ROLE}. It matches the
@@ -110,7 +112,7 @@ export function shouldRotateAppRolePassword(env: NodeJS.ProcessEnv = process.env
  * order is deterministic.
  *
  * Derived rather than listed because a compiler PLUGIN contributes schemas the
- * core has never heard of — the workflow plugin owns `workflow` — and a
+ * core has never heard of — a workflow plugin owns `workflow` — and a
  * hardcoded list silently withholds every grant from them. The database is
  * loud about it (`permission denied for schema workflow`), but only once
  * something actually connects as the restricted role, and the migration and
@@ -273,23 +275,37 @@ export async function applyAppRoleGrants(db: OpenShapeForgeDatabase) {
   }
 
   // Documents must be created atomically with their first immutable version,
-  // and DocumentVersion is append-only through the SECURITY DEFINER commands
-  // installed by migration 0007. The broad generated-table sweep above
-  // intentionally remains generic; these final revokes are re-applied on every
-  // migrate so a fresh table, default privilege, or manual grant cannot reopen
-  // direct writes for the runtime role. Generated reads remain available.
+  // and DocumentVersion is append-only: through the SECURITY DEFINER commands
+  // installed by migration 0007, or through the generic snapshot publish,
+  // which inserts as the runtime role under a transaction-local marker the
+  // write guard in core-invariants.ts checks (that guard is what refuses any
+  // other insert). The broad generated-table sweep above intentionally
+  // remains generic; these final revokes are re-applied on every migrate so a
+  // fresh table, default privilege, or manual grant cannot reopen updates or
+  // deletes for the runtime role. Generated reads remain available.
+  const documents = manifestTableForEntity("Document");
+  const documentVersions = manifestTableForEntity("DocumentVersion");
   await sql`
     do $$
     begin
-      if to_regclass('erp.documents') is not null then
+      if to_regclass(${sql.lit(documents.name)}) is not null then
         execute format(
-          'revoke insert on erp.documents from %I',
-          ${sql.lit(APP_ROLE)}
+          'revoke insert on %I.%I from %I',
+          ${sql.lit(documents.schema)}, ${sql.lit(documents.table)}, ${sql.lit(APP_ROLE)}
         );
       end if;
-      if to_regclass('erp.document_versions') is not null then
+      if to_regclass(${sql.lit(documentVersions.name)}) is not null then
         execute format(
-          'revoke insert, update, delete on erp.document_versions from %I',
+          'revoke update, delete on %I.%I from %I',
+          ${sql.lit(documentVersions.schema)}, ${sql.lit(documentVersions.table)}, ${sql.lit(APP_ROLE)}
+        );
+      end if;
+      -- The bypass audit trail is append-only for the runtime: rows are
+      -- inserted, completed by the bypass session that opened them
+      -- (migrations/api-keys.ts), and never removed by the application.
+      if to_regclass('platform.system_bypass_audit') is not null then
+        execute format(
+          'revoke delete on platform.system_bypass_audit from %I',
           ${sql.lit(APP_ROLE)}
         );
       end if;

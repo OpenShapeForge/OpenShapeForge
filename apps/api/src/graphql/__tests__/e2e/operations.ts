@@ -2,13 +2,13 @@
 /**
  * Canonical-Operations awareness for the e2e suites.
  *
- * A current (`authoringVersion >= 2`) entity is driven through its authored
- * Operation contracts: an update or delete may demand a record version and an
- * edit lease, a delete may demand a typed confirmation challenge, and a create
- * may be plugin-backed with an input contract of its own. The suites derive
- * every one of those facts from the same contract catalog the runtime reads,
- * so an entity conversion that adds a lease or a challenge is covered the
- * moment it lands rather than when someone remembers to update a test.
+ * Every entity is driven through its authored Operation contracts: an update
+ * or delete may demand a record version and an edit lease, a delete may
+ * demand a typed confirmation challenge, and a create may be plugin-backed
+ * with an input contract of its own. The suites derive every one of those
+ * facts from the same contract catalog the runtime reads, so an entity that
+ * adds a lease or a challenge is covered the moment it lands rather than
+ * when someone remembers to update a test.
  *
  * Leases are acquired over REST (`/api/operation-leases`): the central lease
  * service has no GraphQL projection, so the GraphQL suites reach it the way a
@@ -22,6 +22,8 @@ import {
   entityOperationRef,
   isGeneratedCrudOperationEnabled,
 } from "../../generated-crud.js";
+import { fieldNameForColumn } from "../../../operations/entity/columns.js";
+import { isOperationWrittenColumn } from "../../../operations/entity/write-policy.js";
 import type { EntityOperationContract } from "../../../operations/entity/types.js";
 import { OPERATION_LEASES_PATH } from "../../../rest/edit-lease-routes.js";
 import { REST_MOUNT_PATH } from "../../../rest/rest-paths.js";
@@ -34,25 +36,21 @@ export type MutationIntent = "update" | "delete";
 export type MutationControls = {
   expectedVersion?: string;
   leaseToken?: string;
+  confirmed?: boolean;
   confirmationToken?: string;
   confirmationAnswer?: string;
 };
 
-/** Authored as canonical Operations (v2 and later). */
-export function isCanonical(table: GeneratedTable): boolean {
-  return (table.source?.authoringVersion ?? 1) >= 2;
-}
-
 /**
  * The authored Operation behind one CRUD intent, or undefined when the table
- * is v1 or does not expose the intent. Read from the runtime's own catalog so
- * the suite and the API can never disagree about what a mutation requires.
+ * does not expose the intent. Read from the runtime's own catalog so the
+ * suite and the API can never disagree about what a mutation requires.
  */
 export function operationContractFor(
   table: GeneratedTable,
   intent: Intent,
 ): EntityOperationContract | undefined {
-  if (!isCanonical(table) || !isGeneratedCrudOperationEnabled(table, intent)) return undefined;
+  if (!isGeneratedCrudOperationEnabled(table, intent)) return undefined;
   return entityOperationContract(entityOperationRef(table, intent).id);
 }
 
@@ -73,12 +71,35 @@ export function isEntityBackedCreate(table: GeneratedTable): boolean {
   return contract === undefined || contract.implementation?.type !== "plugin";
 }
 
+/**
+ * Whether the create's contract lets the caller supply `field` at the top
+ * level. An entity-backed create offers every column except one an
+ * Operation writes (`writtenBy`: an invoice number the billing run issues);
+ * a plugin create offers what its authored input names.
+ */
+export function createOffersField(table: GeneratedTable, field: string): boolean {
+  if (isEntityBackedCreate(table)) {
+    const column = table.columns.find((candidate) => fieldNameForColumn(candidate) === field);
+    return column !== undefined && !isOperationWrittenColumn(column);
+  }
+  const contract = operationContractFor(table, "create");
+  const schema = (contract?.input as { schema?: { properties?: Record<string, unknown> } } | undefined)?.schema;
+  return field in (schema?.properties ?? {});
+}
+
 export function versionRequired(table: GeneratedTable, intent: MutationIntent): boolean {
   return operationContractFor(table, intent)?.concurrency?.version !== undefined;
 }
 
 export function leaseRequired(table: GeneratedTable, intent: MutationIntent): boolean {
   return operationContractFor(table, intent)?.concurrency?.editLease !== undefined;
+}
+
+export function acknowledgementRequired(
+  table: GeneratedTable,
+  intent: MutationIntent,
+): boolean {
+  return operationContractFor(table, intent)?.interaction.confirmation.mode === "acknowledgement";
 }
 
 /** The field a `type-current-field` challenge asks the caller to retype, if any. */
@@ -110,6 +131,9 @@ export function challengeAnswerFor(
       `${operationIdFor(table, intent)} challenge field ${field} is empty on the record.`,
     );
   }
+  if (typeof value === "object" && !Array.isArray(value) && "id" in value) {
+    return String((value as { id: unknown }).id);
+  }
   return String(value);
 }
 
@@ -117,7 +141,7 @@ export function challengeAnswerFor(
  * Syntactically valid controls for a request that must be refused BEFORE the
  * controls are examined (authorization precedes lease and version checks in
  * the dispatcher). The canonical SDL marks them non-null, so a denial test
- * cannot simply omit them the way a v1 test omits nothing.
+ * cannot simply omit them.
  */
 export function placeholderControls(
   table: GeneratedTable,
@@ -128,6 +152,7 @@ export function placeholderControls(
       ? { expectedVersion: "2026-01-01T00:00:00.000Z" }
       : {}),
     ...(leaseRequired(table, intent) ? { leaseToken: "e2e-placeholder-lease" } : {}),
+    ...(acknowledgementRequired(table, intent) ? { confirmed: true } : {}),
   };
 }
 

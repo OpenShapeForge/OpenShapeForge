@@ -5,5 +5,8 @@
   "license": "BUSL-1.1",
   "type": "module",
   "description": "Connector implementation package for the dynamics-finance contract: Dynamics 365 Finance and Operations OData, authorized through platform-held Entra ID application tokens.",
-  "module": "index.ts"
+  "module": "index.ts",
+  "dependencies": {
+    "@openshapeforge/plugin-runtime": "workspace:*"
+  }
 }

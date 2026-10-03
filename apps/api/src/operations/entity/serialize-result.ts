@@ -2,43 +2,32 @@
 import { fieldNameForColumn } from "./columns.js";
 import { entityValuePhysicalColumns } from "./entity-value-io.js";
 import { generatedEntityValues } from "../../modules/entity-value-registry.js";
+import { decimalText } from "@openshapeforge/operations";
 import type {
   EntityOperationResult,
-  GeneratedCrudColumn,
   GeneratedCrudTable,
   GeneratedEntityRow,
 } from "./types.js";
 
-const MIN_SAFE_INTEGER = BigInt(Number.MIN_SAFE_INTEGER);
-const MAX_SAFE_INTEGER = BigInt(Number.MAX_SAFE_INTEGER);
-const POSTGRES_BIGINT_TEXT = /^-?(?:0|[1-9][0-9]*)$/;
-
-function safeJsonInteger(column: GeneratedCrudColumn, value: unknown): unknown {
-  if (column.type !== "bigint") return value;
-  if (typeof value === "bigint") {
-    return value >= MIN_SAFE_INTEGER && value <= MAX_SAFE_INTEGER
-      ? Number(value)
-      : value.toString();
-  }
-  if (typeof value !== "string" || value.length > 20 || !POSTGRES_BIGINT_TEXT.test(value)) {
-    return value;
-  }
-  const integer = BigInt(value);
-  return integer >= MIN_SAFE_INTEGER && integer <= MAX_SAFE_INTEGER ? Number(integer) : value;
-}
-
-/** Normalize exact PostgreSQL bigint values only when JSON can represent them losslessly. */
+/**
+ * The wire text of every numeric and bigint column: a JSON number would round
+ * money and 64-bit counters, so both cross as decimal strings, as the scalar
+ * table (@openshapeforge/operations) declares them and the record schemas
+ * say. The driver already hands them over as text; a handler or a fixture
+ * that produced a number or a bigint is printed exactly.
+ */
 export function normalizeEntityStorageRow(
   table: GeneratedCrudTable,
   row: GeneratedEntityRow,
 ): GeneratedEntityRow {
   let normalized = row;
   for (const column of table.columns) {
-    if (column.type !== "bigint" || !Object.hasOwn(row, column.name)) continue;
-    const value = safeJsonInteger(column, row[column.name]);
-    if (value === row[column.name]) continue;
+    if ((column.type !== "bigint" && column.type !== "numeric") || !Object.hasOwn(row, column.name)) continue;
+    const value = row[column.name];
+    const text = value === null || value === undefined ? value : decimalText(value);
+    if (text === value) continue;
     if (normalized === row) normalized = { ...row };
-    normalized[column.name] = value;
+    normalized[column.name] = text;
   }
   return normalized;
 }

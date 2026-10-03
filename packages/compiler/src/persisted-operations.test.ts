@@ -43,7 +43,7 @@ describe("persisted operation artifacts", () => {
           : "mutation RenameThing($id: ID!) { renameThing(id: $id) }";
       `,
     );
-    const pluginWebDir = join(repoRoot, "examples/plugins/workflow/web");
+    const pluginWebDir = join(repoRoot, "examples/plugins/notebook/web");
     await mkdir(pluginWebDir, { recursive: true });
     await writeFile(
       join(pluginWebDir, "page.tsx"),

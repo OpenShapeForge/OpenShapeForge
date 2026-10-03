@@ -2,6 +2,7 @@
 import { test, expect } from "bun:test";
 import { generateKeyPair, exportJWK, SignJWT } from "jose";
 import { resolveSessionContext, __resetSessionResolverForTests } from "./identity.js";
+import { stubLinkedMembershipForTests } from "./identity-link.test-support.js";
 import { sessionLocale } from "../mcp/session-identity.js";
 
 test("REST keeps verified locale across bundled session copies and rejects tampered claims", async () => {
@@ -15,7 +16,7 @@ test("REST keeps verified locale across bundled session copies and rejects tampe
     OPENSHAPEFORGE_API_VERIFY_BEARER_AUTHORIZED_PARTIES: "web",
   };
   const before = Object.fromEntries(Object.keys(updates).map(key => [key, process.env[key]]));
-  Object.assign(process.env, updates); __resetSessionResolverForTests();
+  Object.assign(process.env, updates); __resetSessionResolverForTests(); stubLinkedMembershipForTests();
   try {
     for (const locale of ["en-GB", "nl-NL"]) {
       const token = await new SignJWT({ tid: "tenant-a", locale, azp: "web" })

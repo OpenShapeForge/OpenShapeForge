@@ -23,10 +23,10 @@ export function materializeCollectionOperations(
       const fail: (message: string) => never = (message) => { throw new Error(`${authored.id}: ${message}`); };
       if (actions.has(`${key}.${action}`)) fail("one collection Operation per field/action is supported.");
       actions.add(`${key}.${action}`);
-      if (owner.authoringVersion !== 3 || owner.entity.valueDefinition || !["insert", "move"].includes(action)) fail("collection Operations require an identity-bearing schema-3 owner and insert|move.");
+      if (owner.entity.valueDefinition || !["insert", "move", "update", "remove"].includes(action)) fail("collection Operations require an identity-bearing owner and insert|move|update|remove.");
       const field = owner.model.fields.find((field) => field.key === key);
       const relation = owner.model.relationships.find((relation) => relation.fieldKey === key);
-      if (!field || field.cardinality !== "collection" || relation?.kind !== "hasMany" || relation.ownership !== "owned" || !relation.inverse || !relation.foreignKey) fail("collection Operations require an owned inverse collection field.");
+      if (!field || field.cardinality !== "collection" || relation?.kind !== "hasMany" || relation.through || relation.ownership !== "owned" || !relation.inverse || !relation.foreignKey) fail("collection Operations require an owned inverse collection field.");
       if (action === "move" && !relation.sortable) fail("move requires a sortable collection.");
       const child = contracts.find((contract) => contract.entity.name === relation.target);
       if (!child || child.entity.valueDefinition) fail("collection child storage is absent.");
@@ -40,11 +40,26 @@ export function materializeCollectionOperations(
       };
       const update = requireEntityOperation(owner.entityOperations.update, "owner update");
       requireEntityOperation(child.entityOperations.list, "child list");
-      if (relation.sortable) requireEntityOperation(child.entityOperations.update, "child update");
+      // update and remove edit an owned child through its owner; the child's own
+      // update Operation proves it is mutable, its roles are not required.
+      if (relation.sortable || action === "update" || action === "remove") requireEntityOperation(child.entityOperations.update, "child update");
       if (update.concurrency?.version?.mode !== "required" || update.concurrency.version.field !== "updatedAt" ||
         !owner.storage.columns.some((column) => column.field === "updatedAt" && column.column === "updated_at" && column.type === "timestamptz")) fail("owner update requires persisted updatedAt version concurrency.");
       if (definition.effects.data !== "write" || definition.effects.external !== "none" || definition.confirmation.mode !== "none" || definition.reliability.idempotency.mode !== "none" || definition.concurrency?.editLease) fail("unsupported collection guard/effect combination.");
 
+      // A child never chooses its owner nor its lock through the owner's
+      // collection Operations: every owning foreign key of the child (this
+      // collection's inverse and any other entity's) and the collection's
+      // childLock field leave the values contract, so the schema promises no
+      // more than the storage guards admit.
+      const excluded = new Set<string>([relation.inverse, ...(relation.childLock ? [relation.childLock] : []),
+        ...contracts.flatMap((contract) => contract.model.relationships
+          .filter((candidate) => candidate.kind === "hasMany" && candidate.ownership === "owned" && candidate.target === child.entity.name && candidate.inverse)
+          .map((candidate) => candidate.inverse!))]);
+      const withoutExcluded = (values: Record<string, unknown>) => {
+        for (const key of excluded) delete (values.properties as Record<string, unknown>)[key];
+        if (Array.isArray(values.required)) values.required = values.required.filter((key) => !excluded.has(String(key)));
+      };
       const properties: Record<string, unknown> = {
         id: { ...uuid, ...title("Parent ID", "Bovenliggend ID") },
         expectedVersion: { type: "string", format: "date-time", ...title("Expected version", "Verwachte versie") },
@@ -57,9 +72,8 @@ export function materializeCollectionOperations(
         const input = entityOperationJsonSchemas(child, create, contracts, referentiedata).inputSchema;
         const values = structuredClone((input.properties as Record<string, unknown>).values) as Record<string, unknown>;
         if (!values || values.type !== "object" || !values.properties) fail("child create must expose a concrete values object.");
+        withoutExcluded(values);
         const valueProperties = values.properties as Record<string, unknown>;
-        delete valueProperties[relation.inverse];
-        if (Array.isArray(values.required)) values.required = values.required.filter((key) => key !== relation.inverse);
         definitions = input.$defs;
         const branches: Record<string, unknown>[] = [];
         for (const valueField of child.model.fields.filter((field) => field.entityValue)) {
@@ -82,12 +96,37 @@ export function materializeCollectionOperations(
             const bundled = splitBundledDefinitions(compiledObjectSchema(valueDefinition.model.fields, referentiedata, { requireRequired: true, includeDefault: true }));
             definitions = { ...(definitions as Record<string, unknown> | undefined), ...bundled.definitions };
             const valueSchema = bundled.schema;
+            if (valueField.entityValue?.parameterBindings) {
+              const properties = valueSchema.properties as Record<string, unknown>;
+              for (const reference of valueDefinition.model.fields.filter(field => field.relationship?.target)) {
+                // The wrapper is what a form reads: it carries the property's type and reference like the branch it wraps.
+                const original = properties[reference.key] as Record<string, unknown>;
+                properties[reference.key] = {
+                  ...Object.fromEntries(Object.entries(original).filter(([key]) => key === "x-osf-type" || key === "x-osf-reference" || key === "x-osf-i18n" || key === "title")),
+                  anyOf: [original, {
+                    type: "object", additionalProperties: false, required: ["parameter"],
+                    properties: { parameter: { type: "string", pattern: "^[a-z][A-Za-z0-9]{0,127}$" } },
+                  }],
+                };
+              }
+            }
             branches.push({ if: { properties: { [discriminator]: { const: name } }, required: [discriminator] }, then: { properties: { [valueField.key]: valueSchema } } });
           }
         }
         if (branches.length) values.allOf = [...(Array.isArray(values.allOf) ? values.allOf : []), ...branches];
         properties.values = { ...values, ...title("Values", "Waarden") }; required.push("values");
+      } else if (action === "update") {
+        const childUpdate = requireEntityOperation(child.entityOperations.update, "child update");
+        const input = entityOperationJsonSchemas(child, childUpdate, contracts, referentiedata).inputSchema;
+        const values = structuredClone((input.properties as Record<string, unknown>).values) as Record<string, unknown>;
+        if (!values || values.type !== "object" || !values.properties) fail("child update must expose a concrete values object.");
+        withoutExcluded(values);
+        definitions = input.$defs;
+        delete properties.beforeId;
+        properties.childId = { ...uuid, ...title("Child ID", "Onderliggend ID") }; required.push("childId");
+        properties.values = { ...values, ...title("Values", "Waarden") }; required.push("values");
       } else {
+        if (action === "remove") delete properties.beforeId;
         properties.childId = { ...uuid, ...title("Child ID", "Onderliggend ID") }; required.push("childId");
       }
       const normalized: EntityOperationDefinition = {

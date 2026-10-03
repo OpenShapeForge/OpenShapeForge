@@ -3,12 +3,12 @@ import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
   compileAuthoringBackendManifest,
-  listAuthoringContextEntitySpecs,
   listAuthoringEntitySlugs,
 } from "./authoring/backend-manifest.js";
 import { resolveAuthoringLayers } from "./authoring/layers.js";
 import { buildConnector } from "./authoring/compiler/connector.js";
 import { listConnectorFiles, loadConnector } from "./authoring/connector-loader.js";
+import { loadOsfTypes } from "./authoring/loader.js";
 import type { CompiledConnectorContract } from "./authoring/types/connector.js";
 import { loadManifest } from "./load-manifest.js";
 import { canonicalRepoRelativePath, resolvePackagedConfigPath } from "./packaged-config.js";
@@ -22,9 +22,10 @@ import {
 import type { PlatformSchemaManifest, TableDefinition } from "./schema.js";
 import { buildCoreReferentiedataSnapshot, loadCoreReferentiedataCatalog } from "./core-referentiedata-artifacts.js";
 import { materializeEntityInputSources } from "./entity-input-sources.js";
+import { ensureCompositeReferenceKeys } from "./tenant-bound-references.js";
 
 export const activeManifestSource =
-  "packages/compiler/config/platform-schema.yaml + authoring layers (entities + contexts/*/full)";
+  "packages/compiler/config/platform-schema.yaml + authoring layers (entities)";
 
 const resolvedAuthoringDirs = new Map<string, string>();
 
@@ -72,7 +73,7 @@ export function mergePromotedTables(
     ]),
   );
 
-  return {
+  const merged: PlatformSchemaManifest = {
     ...baseManifest,
     ...(promotedManifest.entityValues ? { entityValues: promotedManifest.entityValues } : {}),
     description:
@@ -84,6 +85,11 @@ export function mergePromotedTables(
       ...retainedTables.slice(insertAt),
     ],
   };
+  // Platform and plugin tables declare their compound references in YAML or
+  // TypeScript; the unique target key such a reference needs is provisioned
+  // here, once every table is in one manifest.
+  ensureCompositeReferenceKeys(merged);
+  return merged;
 }
 
 export type ActivePlatformCompile = {
@@ -106,10 +112,11 @@ function compileActiveConnectors(
   authoringDir: string,
   sourcePathPrefix: string,
 ): CompiledConnectorContract[] {
+  const osfTypes = loadOsfTypes(authoringDir);
   return listConnectorFiles(authoringDir)
     .map(({ slug, path }) => {
       const origin = join(sourcePathPrefix, "connectors", `${slug}.yaml`);
-      return buildConnector(loadConnector(path, slug, origin), slug, origin);
+      return buildConnector(loadConnector(path, slug, origin), slug, origin, osfTypes);
     })
     .sort((a, b) => a.slug.localeCompare(b.slug));
 }
@@ -135,7 +142,6 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
       mergePluginPlatformTables(baseManifest, plugins, { repoRoot, authoringDir, webPresent });
 
       const authoringEntitySlugs = listAuthoringEntitySlugs(authoringDir);
-      const contextEntitySpecs = listAuthoringContextEntitySpecs(authoringDir);
       const entities: CompiledEntityInfo[] = [];
       const promotedManifest = compileAuthoringBackendManifest(
         authoringDir,
@@ -143,11 +149,9 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
           mode: "promote",
           sourcePathPrefix: canonicalRepoRelativePath(repoRoot, authoringDir),
           entityAllowlist: authoringEntitySlugs,
-          contextEntityAllowlist: contextEntitySpecs,
           schemaByModule: { core: "erp" },
           relationshipRegister: baseManifest.relationshipRegister ?? [],
           generatedCrudAllowlist: authoringEntitySlugs,
-          contextEntityGeneratedCrudAllowlist: contextEntitySpecs,
           onCandidate: (candidate) => entities.push(candidate),
         },
       );

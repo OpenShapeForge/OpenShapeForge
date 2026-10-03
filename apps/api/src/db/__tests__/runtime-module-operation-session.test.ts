@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
+import accountsRuntime from "../../accounts/runtime.js";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import documentsPluginRuntime from "@openshapeforge/documents/runtime";
 import { OperationFailure } from "@openshapeforge/operations";
+import versioningPluginRuntime from "@openshapeforge/versioning/runtime";
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
@@ -41,6 +43,7 @@ import { APP_ROLE } from "../migrations/app-role.js";
 // The public plugin keeps its database generic unbound; the API runtime
 // specializes the same contract to the generated DB at its loader boundary.
 const documentsRuntime = documentsPluginRuntime as unknown as RuntimeModule;
+const versioningRuntime = versioningPluginRuntime as unknown as RuntimeModule;
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -351,13 +354,13 @@ describe("canonical operation database sessions", () => {
         // Use one module-provided operation on every transport; the blueprint
         // and control operations are bound to core runtimes and take no module.
         const operation = listOperationContracts().find((entry) =>
-          entry.key === "workflow.instance.webhook-start"
+          entry.key === "notebook.import"
         );
         if (!operation || operation.auth.mode !== "session" || !operation.auth.roles?.length) {
           throw new Error("Expected a session-authenticated operation on every transport.");
         }
         const role = operation.auth.roles[0]!;
-        const definitionId = randomUUID();
+        const notebookId = randomUUID();
         const observations: Observation[] = [];
         let mcpAuthorization: unknown;
         const handler: ModuleOperationHandler = async (input, context) => {
@@ -377,7 +380,7 @@ describe("canonical operation database sessions", () => {
             );
             await context.platform.events.append(context.session, {
               aggregateType: "module-operation-test",
-              aggregateId: definitionId,
+              aggregateId: notebookId,
               eventType: "module-operation-test.completed",
               payload: {},
             });
@@ -412,8 +415,8 @@ describe("canonical operation database sessions", () => {
               : {}),
             value: {
               status: "accepted",
-              instanceId: randomUUID(),
-              definitionId: String(input.definitionId),
+              importId: randomUUID(),
+              notebookId: String(input.notebookId),
             },
           };
         };
@@ -437,7 +440,10 @@ describe("canonical operation database sessions", () => {
           { secret: CONTEXT_SECRET },
         );
         const priorSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+        const priorIssuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
         process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = CONTEXT_SECRET;
+        // A trusted-context session's identity must name its realm; unreachable on purpose.
+        process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = "http://127.0.0.1:9/realms/e2e";
         __setOperationExecutionReceiptExecutorForTests(db, async (_session, options) =>
           options.execute(() => {}));
         try {
@@ -453,14 +459,14 @@ describe("canonical operation database sessions", () => {
             const response = await rest.inject({
               method: operation.transports.rest.method as "POST",
               url: operation.transports.rest.path.replace(
-                ":definitionId",
-                definitionId,
+                ":notebookId",
+                notebookId,
               ),
               headers: {
                 ...Object.fromEntries(signedHeaders),
                 [operation.idempotency.header!.toLowerCase()]: "rest-request",
               },
-              payload: {},
+              payload: { body: "imported" },
             });
             expect(response.statusCode).toBe(
               operation.transports.rest.response.status ?? 200,
@@ -471,7 +477,7 @@ describe("canonical operation database sessions", () => {
 
           const graphqlPlatform = new ModulePlatformRuntime(db);
           const schema = buildGraphqlSchema(
-            [documentsRuntime, module],
+            [accountsRuntime, documentsRuntime, versioningRuntime, module],
             { db, platform: graphqlPlatform.services },
           );
           const graphqlResult = await graphql({
@@ -481,7 +487,8 @@ describe("canonical operation database sessions", () => {
             }`,
             variableValues: {
               input: {
-                definitionId,
+                notebookId,
+                body: "imported",
                 idempotencyKey: "graphql-request",
               },
             },
@@ -493,7 +500,7 @@ describe("canonical operation database sessions", () => {
           const server = __buildGeneratedMcpServerForTests({
             db,
             session: verifiedSession,
-            modules: [documentsRuntime, module],
+            modules: [accountsRuntime,documentsRuntime, versioningRuntime, module],
             modulePlatform: mcpPlatform,
           });
           const client = new Client(
@@ -508,7 +515,8 @@ describe("canonical operation database sessions", () => {
             const result = await client.callTool({
               name: operation.transports.mcp.name!,
               arguments: {
-                definitionId,
+                notebookId,
+                body: "imported",
                 idempotencyKey: "mcp-request",
               },
             });
@@ -524,6 +532,8 @@ describe("canonical operation database sessions", () => {
           } else {
             process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = priorSecret;
           }
+          if (priorIssuer === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+          else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = priorIssuer;
         }
 
         expect(observations.map((entry) => entry.transport)).toEqual([
@@ -538,7 +548,7 @@ describe("canonical operation database sessions", () => {
           .where("aggregate_type", "=", "module-operation-test")
           .execute()).toEqual([{
             tenant_id: tenantId,
-            aggregate_id: definitionId,
+            aggregate_id: notebookId,
             event_type: "module-operation-test.completed",
           }]);
         for (const observation of observations) {

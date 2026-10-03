@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { standaloneOperationFixture } from "./authoring/standalone-operation.fixtures.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -70,13 +71,13 @@ function assertCanonicalDocumentInput(schema: JsonObject): void {
   });
   expect(versionProperties.status).toMatchObject({
     type: "string",
-    enum: ["draft", "final", "superseded", "withdrawn"],
+    enum: ["draft", "final", "published", "superseded", "withdrawn"],
   });
   expect(versionProperties.accountId).toMatchObject({
     type: "string",
     format: "uuid",
-    title: "Account",
-    "x-osf-reference": { entity: "Account" },
+    title: "Person",
+    "x-osf-reference": { entity: "Relation" },
   });
 }
 
@@ -85,18 +86,21 @@ test("canonical entity input sources reach every generated operation interface",
   try {
     await writeFile(
       join(root, "authoring.config.yaml"),
-      `layers:\n  - packages/compiler/config/authoring\nplugins:\n  - ${JSON.stringify(new URL("../../documents/src/index.ts", import.meta.url).pathname)}\n`,
+      `layers:\n  - packages/compiler/config/authoring\nplugins:\n  - ${JSON.stringify(new URL("../../versioning/src/index.ts", import.meta.url).pathname)}\n  - ${JSON.stringify(new URL("../../documents/src/index.ts", import.meta.url).pathname)}\n`,
     );
     await mkdir(join(root, "apps/product-web"), { recursive: true });
 
     // A host can generate its frontend directly from the public compile API,
     // before (or without) running the all-artifact generator.
     const active = await loadActivePlatformCompile(root);
-    const directWeb = buildWebManifest(active.entities);
+    const directWeb = buildWebManifest(active.entities, {}, standaloneOperationFixture());
     const directCreate = object(JSON.parse(JSON.stringify(directWeb.entities.Document!.operations.create)));
     expect(object(directCreate.input).kind).toBe("json-schema");
     assertCanonicalDocumentInput(object(object(directCreate.input).schema));
     expect(JSON.stringify(directWeb)).not.toContain("x-osf-entityInput");
+    expect(directWeb.entities.Block!.views.record?.variableSources).toEqual([
+      { key: "chips", resolver: "chips" },
+    ]);
 
     const artifacts = await collectAllArtifacts(root);
     const parse = (path: string): JsonObject => {
@@ -146,7 +150,7 @@ test("canonical entity input sources reach every generated operation interface",
     // Real identity-less definitions author their materialized value shape
     // from ordinary entity fields. Outputs must expand just like inputs.
     for (const [name, selected, route] of [
-      ["TextBlock", ["text"], "/api/content-blocks/text/materialize"],
+      ["TextBlock", ["markdown"], "/api/content-blocks/text/materialize"],
       ["YouTubeEmbed", ["title", "url", "showControls"], "/api/content-blocks/video/materialize"],
     ] as const) {
       const key = `${name}.materialize`;

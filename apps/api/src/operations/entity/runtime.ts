@@ -7,6 +7,7 @@ import {
   type OperationError,
   type OperationTargetBinding,
 } from "@openshapeforge/operations";
+import { sanitizeError } from "@openshapeforge/observability";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DbSessionInput } from "../../db/session.js";
 import { normalizeTimestampToken } from "../../db/timestamps.js";
@@ -32,7 +33,7 @@ import {
   deleteGeneratedEntity,
   updateGeneratedEntity,
 } from "./mutations.js";
-import { getGeneratedEntity, listGeneratedEntities } from "./queries.js";
+import { fetchGeneratedEntityRow, getGeneratedEntity, listGeneratedEntities } from "./queries.js";
 import type {
   EntityOperationInput,
   EntityOperationContract,
@@ -53,6 +54,14 @@ import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "../
 import { requireOperationPrerequisites } from "../prerequisite-receipts.js";
 import { executeEntityPlugin } from "./plugin-executor.js";
 import { entityBusinessUnavailability } from "./availability.js";
+import { assertEntityValuesValid, assertOperationInputValid, type EntityValuesValidation } from "./input-validation.js";
+import {
+  assertNoCallerElicitedOutput,
+  assertNoForeignOperationWrittenValues,
+  assertNoOperationWrittenValues,
+} from "./write-policy.js";
+import { sessionRelation } from "../../auth/identity-link.js";
+import { sql } from "kysely";
 
 const COLLECTION_OFFER_INTENTS: readonly GeneratedCrudExposureOperation[] = [
   "list",
@@ -73,6 +82,7 @@ const operationCatalog = rawOperationCatalog as unknown as {
       entityName: string;
       scope: "collection" | "record";
       inputField?: string;
+      inputBindings?: Record<string, string>;
     };
     auth:
       | { mode: "public" }
@@ -164,6 +174,51 @@ function requireValues(input: EntityOperationInput | undefined): Record<string, 
     throw generatedCrudError("Entity operation requires values.", "BAD_USER_INPUT");
   }
   return input.values;
+}
+
+/** Values derived once in the shared Operation runtime, before any transport-specific adapter. */
+export function trustedOperationStampValues(
+  operation: Pick<EntityOperationContract, "key" | "stamps">,
+  session: DbSessionInput,
+): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
+  for (const stamp of operation.stamps ?? []) {
+    if (stamp.source === "now") {
+      values[stamp.field] = sql`now()`;
+      continue;
+    }
+    if (stamp.source === "actorUserId") {
+      if (!session.userId) throw generatedCrudError(`${operation.key} requires an authenticated actor identity.`, "FORBIDDEN");
+      values[stamp.field] = session.userId;
+      continue;
+    }
+    const relation = sessionRelation(session as Parameters<typeof sessionRelation>[0]);
+    if (!relation) {
+      throw operationFailure({
+        code: "FORBIDDEN",
+        message: `${operation.key} records the acting Relation, and this session is not linked to one.`,
+        retryable: false,
+      });
+    }
+    values[stamp.field] = relation.relationId;
+  }
+  return values;
+}
+
+/**
+ * The compiled write contract, enforced once for every interface. The
+ * operation-written and elicited refusals run first so a field that exists but
+ * is not the caller's to set is named as such, not as an unknown field.
+ */
+function requireContractValues(
+  operation: EntityOperationContract,
+  table: GeneratedCrudTable,
+  values: Record<string, unknown>,
+  options: EntityValuesValidation,
+): void {
+  assertNoCallerElicitedOutput(table, values);
+  assertNoOperationWrittenValues(table, values);
+  assertEntityValuesValid(operation, table, values, options);
 }
 
 function requireControl(
@@ -289,6 +344,13 @@ async function prepareMutationConfirmation(
   const confirmation = operation.interaction.confirmation;
   if (confirmation.mode === "none") return { ready: true };
   if (confirmation.mode === "acknowledgement") {
+    // A missing row answers NOT_FOUND before the acknowledgement is demanded,
+    // the same order the challenge path keeps: there is nothing to confirm
+    // when the target is gone, and REST clients read 428 on a deleted row as
+    // "still there".
+    if (input?.confirmed !== true) {
+      await requireMutationTarget(db, session, table, requireId(input));
+    }
     requireOperationAcknowledgement(operation, input);
     return { ready: true };
   }
@@ -325,6 +387,17 @@ async function prepareMutationConfirmation(
     confirmationToken: requireControl(input, "confirmationToken"),
     confirmationAnswer: requireControl(input, "confirmationAnswer"),
   };
+}
+
+/** The tenant-scoped row an update or delete targets, or NOT_FOUND. */
+async function requireMutationTarget(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  id: string,
+): Promise<void> {
+  if (await fetchGeneratedEntityRow(db, session, table, id)) return;
+  throw operationFailure({ code: "NOT_FOUND", message: "Resource not found." });
 }
 
 /**
@@ -444,8 +517,7 @@ export function restEditLeaseOperationIdsForSession(
         id: operation.id,
         intent: operation.intent,
       });
-      return (table.source?.authoringVersion ?? 1) >= 2 &&
-        table.source?.rest?.operations[operation.intent] === true;
+      return table.source?.rest?.operations[operation.intent] === true;
     })
     .map(({ id }) => id);
   return [
@@ -611,7 +683,12 @@ export function getEntityOperationOffers(
         hasRecordPermissions([operation.auth.recordPermission]))
     )
     .map((operation) => {
-      const error = unavailable[operation.key];
+      const bindings = Object.entries(operation.target?.inputBindings ?? {});
+      const missingBinding = target && bindings.some(([, fieldKey]) =>
+        target.row?.[fieldKey] === undefined || target.row?.[fieldKey] === null);
+      const error = unavailable[operation.key] ?? (missingBinding
+        ? { code: "OPERATION_UNAVAILABLE", message: "The record is missing an action input. Read it again before continuing.", retryable: false }
+        : undefined);
       const reference = { id: operation.key, intent: "invoke" as const };
       if (error) return { operation: reference, available: false as const, error };
       return {
@@ -626,7 +703,9 @@ export function getEntityOperationOffers(
                   id: target.id,
                   ...(target.version ? { version: target.version } : {}),
                 },
-                input: { [operation.target.inputField]: target.id },
+                input: { [operation.target.inputField]: target.id,
+                  ...Object.fromEntries(Object.entries(operation.target.inputBindings ?? {}).map(([inputKey, fieldKey]) =>
+                    [inputKey, target.row?.[fieldKey]])) },
               },
             }
           : {}),
@@ -746,6 +825,15 @@ export async function executeEntityOperation(
           "INTERNAL_SERVER_ERROR",
         );
       }
+      // The write policy before the plugin's own contract, as the entity path
+      // does: a field an Operation writes is refused as such, naming the
+      // Operation to call, not as a property the authored input does not know.
+      // Then the payload before prerequisites: an invalid request answers
+      // VALIDATION, not a prerequisite it would only fail after.
+      if (operation.intent !== "delete") {
+        assertNoForeignOperationWrittenValues(table, request.input ?? {}, operation.id);
+      }
+      assertOperationInputValid(operation, request.input ?? {});
       await requireOperationPrerequisites(db, session, operation);
       if (operation.intent === "delete") {
         const data = await executeEntityPlugin(
@@ -847,14 +935,28 @@ export async function executeEntityOperation(
         };
       }
       case "create": {
+        const blueprintId = typeof request.input?.blueprintId === "string" ? request.input.blueprintId : undefined;
+        const values = blueprintId === undefined ? requireValues(request.input) : request.input?.values ?? {};
+        // The payload first: an invalid create must answer VALIDATION, never
+        // a prerequisite or CONFIRMATION_REQUIRED it would only fail after. A
+        // blueprint create completes the caller's overlay from the blueprint
+        // before the row is written; the merged record is what the contract
+        // has to hold for, so it is validated in full once merged.
+        requireContractValues(operation, table, values, { partial: blueprintId !== undefined });
         await requireOperationPrerequisites(db, session, operation);
         requireCreateOperationConfirmation(operation, request.input);
         const interactionError = secureInputInteractionError(operation);
         if (interactionError) return { intent: "create", error: interactionError };
-        const data = typeof request.input?.blueprintId === "string"
-          ? await createFromBlueprint(db, session, table, request.input.blueprintId, request.input.values ?? {})
+        const data = blueprintId !== undefined
+          ? await createFromBlueprint(db, session, table, blueprintId, values,
+              (merged) => assertEntityValuesValid(operation, table, merged, { partial: false }),
+              operation.stamps?.length
+                ? { operation: operation.id, values: trustedOperationStampValues(operation, session) }
+                : undefined)
           : await createGeneratedEntity(db, session, {
-              table: table.name, values: requireValues(request.input),
+              table: table.name,
+              values,
+              ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
             });
         return {
           intent: "create",
@@ -874,6 +976,10 @@ export async function executeEntityOperation(
           );
         }
         const concurrencyGuard = mutationConcurrencyGuard(operation, request.input);
+        // Before any confirmation or lease work: an illegal payload must not
+        // start a challenge it can only fail on the confirmed retry.
+        const values = requireValues(request.input);
+        requireContractValues(operation, table, values, { partial: true });
         const confirmation = await prepareMutationConfirmation(
           db,
           session,
@@ -898,7 +1004,8 @@ export async function executeEntityOperation(
         const data = await updateGeneratedEntity(db, session, {
           table: table.name,
           id: requireId(request.input),
-          values: requireValues(request.input),
+          values,
+          ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
           ...(guard ? { guard } : {}),
         });
         return {
@@ -959,9 +1066,19 @@ export async function executeEntityOperation(
       }
     }
   } catch (error) {
+    const operationError = operationErrorOf(error);
+    // A canonical failure is the answer; anything else is a defect. Report it
+    // before it collapses into the opaque internal error the caller sees, so
+    // the server log holds the cause (#471). Message only — no input, no session.
+    if (!operationError) {
+      console.error(
+        `[entity-runtime] ${request.operation.id} (${request.operation.intent}) failed unexpectedly: ${error instanceof Error ? error.message : String(error)}`,
+        sanitizeError(error, "entity.unexpected"),
+      );
+    }
     return {
       intent: request.operation.intent,
-      error: operationErrorOf(error) ?? internalOperationError(),
+      error: operationError ?? internalOperationError(),
     } as EntityOperationResult;
   }
 }

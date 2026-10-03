@@ -78,6 +78,17 @@ function stubFetch(admin: (url: string) => Response): { fetch: typeof globalThis
 }
 
 describe("inviting a member", () => {
+  it("carries Keycloak's own 409 wording and status so the caller can name the conflict", async () => {
+    for (const errorMessage of ["User already a member of the organization", "User already has a pending invitation"]) {
+      const { fetch } = stubFetch(() => Response.json({ errorMessage }, { status: 409 }));
+      const failure = await createKeycloakOrganizationMembersClient(config, { fetch })
+        .inviteUser("acme", { email: "hans@example.com" }).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(KeycloakAdminError);
+      expect(failure).toMatchObject({ code: "KEYCLOAK_ADMIN_REJECTED", status: 409, operation: "invite_member" });
+      expect((failure as KeycloakAdminError).message).toContain(errorMessage);
+    }
+  });
+
   it("identifies the timed-out admin subcall without carrying request data", async () => {
     const readings = [0, 10, 10_010];
     const tokens: ServiceAccountTokenProvider = {
@@ -254,7 +265,7 @@ const invitationRow = {
   expiresAt: 1788691160,
   status: "PENDING",
   inviteLink:
-    "https://auth.hubble.localhost/realms/openshapeforge/protocol/openid-connect/" +
+    "https://auth.example.localhost/realms/openshapeforge/protocol/openid-connect/" +
     "registrations?response_type=code&client_id=account&token=eyJhbGciOiJIUzI1NiJ9.ORGIVT-SECRET",
 };
 
@@ -447,22 +458,41 @@ describe("cancelling an invitation", () => {
 });
 
 describe("tenant member and credential administration", () => {
-  it("lists only members of the named organization with their effective client roles", async () => {
+  it("finds an existing organization member by e-mail without reading roles", async () => {
     const { fetch, calls } = stubFetch((url) => {
-      if (url.includes("/clients?clientId=")) return Response.json([{ id: "client-uuid", clientId: "hubble-api" }]);
+      if (url.includes("first=0")) {
+        return Response.json(Array.from({ length: 100 }, (_, index) => ({
+          id: `member-${index}`,
+          email: index === 99 ? "Hans@Example.com" : `person-${index}@example.com`,
+        })));
+      }
+      return Response.json([]);
+    });
+    const client = createKeycloakOrganizationMembersClient(config, { fetch });
+
+    await expect(client.hasMemberByEmail("acme", " hans@example.COM ")).resolves.toBe(true);
+    await expect(client.hasMemberByEmail("acme", "absent@example.com")).resolves.toBe(false);
+    expect(calls.some(({ url }) => url.includes("/organizations/acme/members?first=100&max=100")))
+      .toBe(true);
+    expect(calls.some(({ url }) => url.includes("role-mappings"))).toBe(false);
+  });
+
+  it("lists only members of the named organization, and never reads their Keycloak user roles", async () => {
+    const { fetch, calls } = stubFetch((url) => {
       if (url.includes("/organizations/acme/members?")) return Response.json([{
         id: "member-1", username: "hans", email: "hans@example.com", firstName: "Hans", lastName: "Eilers",
         enabled: true, emailVerified: true,
       }]);
-      if (url.includes("/role-mappings/clients/client-uuid/composite")) return Response.json([{ name: "org_admin" }]);
       return Response.json([]);
     });
-    const members = await createKeycloakOrganizationMembersClient(config, { fetch }).listMembers("acme", "hubble-api");
+    const members = await createKeycloakOrganizationMembersClient(config, { fetch }).listMembers("acme");
     expect(members).toEqual([{
       memberId: "member-1", username: "hans", email: "hans@example.com", firstName: "Hans", lastName: "Eilers",
-      enabled: true, emailVerified: true, roles: ["org_admin"],
+      enabled: true, emailVerified: true,
     }]);
     expect(calls.some(({ url }) => url.includes("/organizations/acme/members?first=0&max=100"))).toBe(true);
+    // A member's roles are the tenant's record, not a Keycloak user mapping.
+    expect(calls.some(({ url }) => url.includes("role-mappings"))).toBe(false);
   });
 
   it("returns safe credential metadata and never provider secrets", async () => {

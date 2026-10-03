@@ -16,47 +16,63 @@
  */
 import { expect } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { applyTrustedContextHeaders } from "@openshapeforge/auth";
-import Ajv2020 from "ajv/dist/2020.js";
 import catalog from "../../generated/mcp/tools.json" with { type: "json" };
 import {
-  createRow,
   eligibleTables,
   fieldName,
   foreignKeyTargets,
   nextMarker,
-  pluginCreateInput,
-  sampleValue,
+  contractSample,
   tables,
   tablesByName,
   untrackRow,
 } from "../../graphql/__tests__/e2e/entity-factory.js";
 import {
+  acknowledgementRequired,
   challengeAnswerFor,
-  isCanonical,
   isEntityBackedCreate,
   leaseRequired,
   operationIdFor,
-  versionRequired,
 } from "../../graphql/__tests__/e2e/operations.js";
+import { expectedDeleteOutcome, expectFreshRecordOffers, operationWrittenReferences } from "../../graphql/__tests__/e2e/reference-policy.js";
 import {
-  apiApp,
   createdRows,
   describe,
   type Identity,
   noRoles,
   readOnly,
   registerSuiteLifecycle,
-  remoteUrl,
   seed,
   tenantA,
   tenantB,
   test,
 } from "../../graphql/__tests__/e2e/harness.js";
+import { __entityMutationControlsForTests } from "../generated-mcp-server.js";
 import {
-  __entityMutationControlsForTests,
-  MCP_MOUNT_PATH,
-} from "../generated-mcp-server.js";
+  acquireLease,
+  advertisedSchema,
+  argsFor,
+  authoredKeys,
+  buildCreateArgs,
+  callTool,
+  catalogTool,
+  createArgs,
+  createForeignKeyTarget,
+  createMcpRow,
+  createSchemaProperties,
+  expectCanonicalToolOutput,
+  mcpCreateTables,
+  mcpTables,
+  resourcePayload,
+  rpc,
+  sessionMayInvoke,
+  toolEnvelope,
+  toolError,
+  toolNameFor,
+  toolPayload,
+  notebookWriter,
+  type CrudOperation,
+} from "./e2e/mcp-sweep.js";
 
 registerSuiteLifecycle();
 
@@ -77,384 +93,6 @@ test("MCP forwards every canonical mutation control, including update challenges
   });
 });
 
-const SECRET = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ?? null;
-
-let nextRpcId = 1;
-
-/**
- * One JSON-RPC call over the Streamable HTTP transport. This helper uses the
- * sessionless compatibility path, so each request is self-contained; real
- * elicitation and MCP Apps clients initialize a stateful session. `Accept`
- * must list both content types the transport can answer with, or the request is
- * rejected before dispatch.
- */
-async function rpc(
-  identity: Identity | null,
-  method: string,
-  params?: Record<string, unknown>,
-): Promise<{ status: number; body: any }> {
-  const headers = new Headers();
-  headers.set("content-type", "application/json");
-  headers.set("accept", "application/json, text/event-stream");
-  if (identity) {
-    applyTrustedContextHeaders(headers, identity, { secret: SECRET });
-  }
-  const payload = JSON.stringify({
-    jsonrpc: "2.0",
-    id: nextRpcId++,
-    method,
-    ...(params === undefined ? {} : { params }),
-  });
-
-  if (remoteUrl) {
-    const response = await fetch(`${remoteUrl}${MCP_MOUNT_PATH}`, {
-      method: "POST",
-      headers,
-      body: payload,
-    });
-    const text = await response.text();
-    return { status: response.status, body: text ? JSON.parse(text) : undefined };
-  }
-
-  const response = await (await apiApp()).inject({
-    method: "POST",
-    url: MCP_MOUNT_PATH,
-    headers: Object.fromEntries(headers.entries()),
-    payload,
-  });
-  return {
-    status: response.statusCode,
-    body: response.body ? JSON.parse(response.body) : undefined,
-  };
-}
-
-/** Parse the JSON value returned by a generated tool. */
-function toolEnvelope(body: any): any {
-  const text = body?.result?.content?.[0]?.text;
-  return text ? JSON.parse(text) : undefined;
-}
-
-/** Normalize strict-v2 envelopes and legacy-v1 payloads for shared assertions. */
-function toolPayload(body: any): any {
-  const envelope = toolEnvelope(body);
-  const canonical = envelope && Object.hasOwn(envelope, "data");
-  const data = canonical ? envelope.data : envelope;
-  if (canonical && Array.isArray(data?.items)) {
-    return { ...data, items: data.items.map((item: any) => item.data) };
-  }
-  return data;
-}
-
-function toolError(body: any): string | undefined {
-  if (body?.result?.isError !== true) return undefined;
-  return body?.result?.content?.[0]?.text;
-}
-
-type McpTable = (typeof tables)[number];
-type CrudOperation = "list" | "get" | "create" | "update" | "delete";
-
-/** `<prefix>_<op>` for a dedicated entity, the shared `osf_<op>` for a generic one. */
-function toolNameFor(table: McpTable, operation: CrudOperation): string {
-  const mcp = table.source!.mcp!;
-  return mcp.tools === "generic" ? `osf_${operation}` : `${mcp.toolPrefix}_${operation}`;
-}
-
-/** A generic tool call names its entity; a dedicated tool must not. */
-function argsFor(table: McpTable, args: Record<string, unknown>): Record<string, unknown> {
-  return table.source!.mcp!.tools === "generic"
-    ? { entity: table.source!.authoringEntityName, ...args }
-    : args;
-}
-
-/** Whether `identity` holds a role the entity's operation allow-list names. */
-function sessionMayInvoke(identity: Identity, entity: string, operation: CrudOperation): boolean {
-  const roles = eligibleTables.find((table) => table.source?.authoringEntityName === entity)
-    ?.source?.authorization?.roles;
-  const allowed = roles?.[operation === "list" || operation === "get" ? "read" : operation] ?? [];
-  return allowed.some((role) => identity.roles.includes(role));
-}
-
-/** Transport controls a create or update schema advertises next to the authored fields. */
-const MUTATION_CONTROLS = new Set([
-  "blueprintId",
-  "expectedVersion",
-  "leaseToken",
-  "confirmed",
-  "confirmationToken",
-  "confirmationAnswer",
-]);
-
-function authoredKeys(properties: Record<string, unknown>): string[] {
-  return Object.keys(properties).filter((key) => !MUTATION_CONTROLS.has(key));
-}
-
-/** The compiled catalog entry for one entity's operation — loud when absent. */
-function catalogTool(table: McpTable, operation: CrudOperation) {
-  const name = toolNameFor(table, operation);
-  const entry = catalog.tools.find(
-    (tool) => tool.name === name && tool.entity === table.source!.authoringEntityName,
-  );
-  if (!entry) {
-    throw new Error(`${table.source!.authoringEntityName} has no compiled ${name} tool.`);
-  }
-  return entry;
-}
-
-/**
- * The input schema a session is shown for one entity's operation: the tool's
- * own for a dedicated entity, the entity's `anyOf` branch (minus the `entity`
- * selector) for a generic one. Throws when the listing omits it, so a test
- * that expected the tool sees why instead of a property read on undefined.
- */
-function advertisedSchema(
-  tools: { name: string; inputSchema: any }[],
-  table: McpTable,
-  operation: CrudOperation,
-): any {
-  const name = toolNameFor(table, operation);
-  const tool = tools.find((candidate) => candidate.name === name);
-  if (!tool) throw new Error(`The session was not offered ${name}.`);
-  if (table.source!.mcp!.tools !== "generic") return tool.inputSchema;
-  const entity = table.source!.authoringEntityName;
-  const branch = (tool.inputSchema.anyOf as any[] | undefined)?.find(
-    (candidate) => candidate.properties?.entity?.const === entity,
-  );
-  if (!branch) throw new Error(`${name} advertises no ${entity} branch to this session.`);
-  const { entity: _selector, ...properties } = branch.properties;
-  return {
-    ...branch,
-    properties,
-    required: (branch.required as string[]).filter((key) => key !== "entity"),
-  };
-}
-
-async function acquireLease(
-  table: McpTable,
-  identity: Identity,
-  row: Record<string, unknown>,
-  intent: "update" | "delete",
-): Promise<Record<string, string>> {
-  if (!leaseRequired(table, intent)) {
-    if (!versionRequired(table, intent)) return {};
-    expect(row.updatedAt).toBeString();
-    return { expectedVersion: String(row.updatedAt) };
-  }
-  const acquired = await callTool(identity, "osf_acquire_edit_lease", {
-    operationId: operationIdFor(table, intent),
-    targetId: row.id,
-  });
-  expect(toolError(acquired.body)).toBeUndefined();
-  const lease = toolPayload(acquired.body);
-  expect(Date.parse(lease.targetVersion)).toBe(Date.parse(String(row.updatedAt)));
-  return {
-    expectedVersion: lease.targetVersion,
-    leaseToken: lease.leaseToken,
-  };
-}
-
-const outputAjv = new Ajv2020.default({
-  strict: false,
-  validateFormats: false,
-});
-const outputValidators = new Map<string, ReturnType<typeof outputAjv.compile>>();
-
-function expectCanonicalToolOutput(table: McpTable, operation: CrudOperation, body: any): void {
-  const tool = catalogTool(table, operation);
-  const key = `${tool.entity}.${tool.name}`;
-  if (!tool.outputSchema) throw new Error(`${key} has no output schema`);
-  let validate = outputValidators.get(key);
-  if (!validate) {
-    validate = outputAjv.compile(tool.outputSchema);
-    outputValidators.set(key, validate);
-  }
-  const structured = body?.result?.structuredContent;
-  if (!validate(withoutPluginOffers(structured))) {
-    throw new Error(
-      `${key} returned structuredContent outside its outputSchema: ` +
-        JSON.stringify(validate.errors),
-    );
-  }
-}
-
-/**
- * Known contract gap, validated around rather than hidden: the runtime also
- * offers the plugin Operations bound to an entity (a blueprint entity's
- * blueprint commands) as `{ operation: { intent: "invoke" }, binding }`
- * (operations/entity/runtime.ts, entityPluginOfferBinding), while the
- * compiled OperationOffer schema (packages/compiler/src/generate-mcp.ts)
- * models only the five entity intents and no `binding`. Those offers are
- * removed before validation; every entity-intent offer and the rest of the
- * envelope are still held to the advertised schema.
- */
-function withoutPluginOffers(structured: any): any {
-  if (!structured || typeof structured !== "object") return structured;
-  const entityOffers = (offers: unknown) =>
-    Array.isArray(offers)
-      ? offers.filter((offer) => offer?.operation?.intent !== "invoke")
-      : offers;
-  return {
-    ...structured,
-    ...("operations" in structured ? { operations: entityOffers(structured.operations) } : {}),
-    ...(structured.data && Array.isArray(structured.data.items)
-      ? {
-          data: {
-            ...structured.data,
-            items: structured.data.items.map((item: any) =>
-              item && typeof item === "object" && "operations" in item
-                ? { ...item, operations: entityOffers(item.operations) }
-                : item,
-            ),
-          },
-        }
-      : {}),
-  };
-}
-
-function resourcePayload(body: any): any {
-  const text = body?.result?.contents?.[0]?.text;
-  return text ? JSON.parse(text) : undefined;
-}
-
-const mcpTables = tables.filter((table) => table.source?.mcp);
-const mcpCreateTables = eligibleTables.filter(
-  (table) => table.source?.mcp?.operations.create,
-);
-const workflowOperator: Identity = {
-  tenantId: tenantA.tenantId,
-  userId: randomUUID(),
-  roles: ["workflow-admin"],
-};
-
-async function callTool(
-  identity: Identity | null,
-  name: string,
-  args: Record<string, unknown> = {},
-) {
-  return rpc(identity, "tools/call", { name, arguments: args });
-}
-
-async function createMcpRow(
-  table: McpTable,
-  identity: Identity,
-  overrides: Record<string, unknown> = {},
-  depth = 0,
-): Promise<string> {
-  if (!isCanonical(table)) return createRow(table, identity, overrides, depth);
-  const created = await callTool(
-    identity,
-    toolNameFor(table, "create"),
-    argsFor(table, await createArgs(table, identity, overrides, depth)),
-  );
-  expect(toolError(created.body)).toBeUndefined();
-  const row = toolPayload(created.body);
-  expect(row?.id).toBeTruthy();
-  createdRows.push({ table, id: row.id, identity });
-  return row.id;
-}
-
-/** Create arguments for the table's create: columns, or the plugin's own contract. */
-async function createArgs(
-  table: McpTable,
-  identity: Identity,
-  overrides: Record<string, unknown> = {},
-  depth = 0,
-): Promise<Record<string, unknown>> {
-  if (!isEntityBackedCreate(table)) return pluginCreateInput(table, identity, overrides, depth);
-  return { ...(await buildCreateArgs(table, identity, depth)), ...overrides };
-}
-
-/** The property schemas one entity's create advertises, keyed by property name. */
-function createSchemaProperties(
-  table: McpTable,
-): Record<string, { enum?: unknown[]; maxLength?: number; pattern?: string }> {
-  const tool = catalogTool(table, "create");
-  return (
-    (tool.inputSchema as { properties?: Record<string, { enum?: unknown[]; maxLength?: number; pattern?: string }> })
-      .properties ?? {}
-  );
-}
-
-/**
- * A sample the advertised schema accepts: an allowed enum value, else the
- * column sample cut to the advertised length (a three-letter currency code
- * cannot carry a marker). The server enforces what it advertises.
- */
-function schemaSample(
-  column: (typeof tables)[number]["columns"][number],
-  schema: { enum?: unknown[]; maxLength?: number; pattern?: string } | undefined,
-  marker: string,
-): unknown {
-  if (Array.isArray(schema?.enum) && schema.enum.length > 0) return schema.enum[0];
-  const rawSample = sampleValue(column, marker);
-  if (typeof rawSample !== "string") return rawSample;
-  let sample: string = rawSample;
-  if (schema?.pattern && !new RegExp(schema.pattern).test(sample)) {
-    const identifier = `e2e${marker.replace(/[^a-zA-Z0-9]/g, "")}${fieldName(column)}`;
-    if (!new RegExp(schema.pattern).test(identifier)) {
-      throw new Error(`No deterministic sample satisfies ${fieldName(column)} pattern ${schema.pattern}.`);
-    }
-    sample = identifier;
-  }
-  return schema?.maxLength !== undefined ? sample.slice(0, schema.maxLength) : sample;
-}
-
-/** Sample create arguments: required scalars plus real rows for required FKs.
- * Values respect the tool schema — the server now enforces what it
- * advertises, so an enum field gets an allowed value, not a marker string. */
-async function buildCreateArgs(
-  table: McpTable,
-  identity: Identity,
-  depth = 0,
-): Promise<Record<string, unknown>> {
-  if (depth > 5) throw new Error(`MCP FK dependency chain too deep while creating ${table.name}`);
-  const fkTargets = foreignKeyTargets(table);
-  const properties = createSchemaProperties(table);
-  const marker = nextMarker();
-  const args: Record<string, unknown> = {};
-  for (const column of table.columns) {
-    if (!column.required || column.primaryKey) continue;
-    if (["tenant_id", "created_at", "updated_at"].includes(column.name)) continue;
-    const target = fkTargets.get(column.name);
-    if (target) {
-      args[fieldName(column)] = await createForeignKeyTarget(target, identity, depth + 1);
-      continue;
-    }
-    args[fieldName(column)] = schemaSample(column, properties[fieldName(column)], marker);
-  }
-  return args;
-}
-
-/**
- * A row for a foreign-key target: through MCP when the target's create is
- * MCP-projected (so the dependency is exercised on this transport too),
- * otherwise through the factory.
- */
-async function createForeignKeyTarget(
-  target: string,
-  identity: Identity,
-  depth = 1,
-): Promise<string> {
-  const fullCrudTarget = tablesByName.get(target);
-  if (fullCrudTarget?.source?.graphql && !isCanonical(fullCrudTarget)) {
-    return createRow(fullCrudTarget, identity);
-  }
-
-  const mcpTarget = mcpCreateTables.find(
-    (candidate) => candidate.name === target && candidate.source?.mcp?.operations.create,
-  );
-  if (!mcpTarget) throw new Error(`MCP FK target ${target} has no create operation`);
-  const dependency = await callTool(
-    identity,
-    toolNameFor(mcpTarget, "create"),
-    argsFor(mcpTarget, await createArgs(mcpTarget, identity, {}, depth)),
-  );
-  expect(toolError(dependency.body)).toBeUndefined();
-  const row = toolPayload(dependency.body);
-  expect(row?.id).toBeTruthy();
-  createdRows.push({ table: mcpTarget, id: row.id, identity });
-  return row.id;
-}
-
 describe("generated MCP server", () => {
   test("rejects an unauthenticated request", async () => {
     const { status } = await rpc(null, "tools/list");
@@ -466,7 +104,7 @@ describe("generated MCP server", () => {
     expect(status).toBe(200);
     const tools = body.result.tools as {
       name: string;
-      outputSchema?: Record<string, unknown>;
+      outputSchema: Record<string, unknown>;
       annotations?: { idempotentHint?: boolean };
     }[];
     const names = tools.map((tool) => tool.name);
@@ -496,31 +134,19 @@ describe("generated MCP server", () => {
     const create = advertisedFor("create", "Relation")!;
     const remove = advertisedFor("delete")!;
     const update = advertisedFor("update")!;
-    const canonicalTools = [get, list, create].filter(
-      (tool) => tool.outputSchema !== undefined,
-    );
-    for (const tool of canonicalTools) {
-      expect(tool.outputSchema?.type).toBe("object");
-      expect(Array.isArray(tool.outputSchema?.oneOf)).toBe(true);
-      const definitions = tool.outputSchema?.$defs as Record<string, unknown>;
+    for (const tool of [get, list, create]) {
+      expect(tool.outputSchema.type).toBe("object");
+      expect(Array.isArray(tool.outputSchema.oneOf)).toBe(true);
+      const definitions = tool.outputSchema.$defs as Record<string, unknown>;
       expect(definitions.OperationOffer).toBeDefined();
       expect(definitions.OperationError).toBeDefined();
     }
-    const legacyNames = new Set(
-      catalog.tools
-        .filter((tool) => tool.outputSchema === undefined)
-        .map((tool) => tool.name),
-    );
-    expect(
-      tools.filter((tool) => legacyNames.has(tool.name))
-        .every((tool) => tool.outputSchema === undefined),
-    ).toBe(true);
-    const getSuccess = (get.outputSchema!.oneOf as Record<string, unknown>[])[0]!;
+    const getSuccess = (get.outputSchema.oneOf as Record<string, unknown>[])[0]!;
     const getProperties = getSuccess.properties as Record<string, Record<string, unknown>>;
     expect(getSuccess.required).toEqual(["data", "operations"]);
     expect(getProperties.data?.type).toBe("object");
     expect(getProperties.operations?.type).toBe("array");
-    const listSuccess = (list.outputSchema!.oneOf as Record<string, unknown>[])[0]!;
+    const listSuccess = (list.outputSchema.oneOf as Record<string, unknown>[])[0]!;
     expect(listSuccess).toMatchObject({
       properties: {
         data: {
@@ -530,7 +156,7 @@ describe("generated MCP server", () => {
     });
     // A canonical delete answers with the deletion envelope: `data.deleted`
     // is the constant true (a missing row is an error, never `deleted: false`).
-    const removeSuccess = (remove.outputSchema!.oneOf as Record<string, unknown>[])[0]!;
+    const removeSuccess = (remove.outputSchema.oneOf as Record<string, unknown>[])[0]!;
     expect(removeSuccess.required).toEqual(["data", "operations"]);
     expect(removeSuccess.properties).toMatchObject({
       data: { required: ["deleted"], properties: { deleted: { type: "boolean", const: true } } },
@@ -539,7 +165,7 @@ describe("generated MCP server", () => {
   });
 
   test("binds, authorizes and dispatches a canonical operation tool", async () => {
-    const listed = await rpc(workflowOperator, "tools/list");
+    const listed = await rpc(notebookWriter, "tools/list");
     expect(listed.status).toBe(200);
     const tools = listed.body.result.tools as { name: string; inputSchema: unknown }[];
     expect(tools).toContainEqual(expect.objectContaining({
@@ -547,27 +173,25 @@ describe("generated MCP server", () => {
       inputSchema: expect.objectContaining({ type: "object" }),
     }));
 
-    const searched = await callTool(workflowOperator, "osf_search_operations", {
-      query: "webhook",
+    const searched = await callTool(notebookWriter, "osf_search_operations", {
+      query: "import a notebook",
       limit: 20,
     });
     expect(toolEnvelope(searched.body)).toMatchObject({
-      operations: [{ operation: { id: "workflow.instance.webhook-start" } }],
+      operations: [{ operation: { id: "notebook.import" } }],
     });
 
-    const called = await callTool(workflowOperator, "osf_execute_operation", {
-      operationId: "workflow.instance.webhook-start",
-      input: { definitionId: randomUUID() },
+    const called = await callTool(notebookWriter, "osf_execute_operation", {
+      operationId: "notebook.import",
+      input: { notebookId: randomUUID(), body: "imported" },
       idempotencyKey: randomUUID(),
     });
-    // The Operation is keyed and declares an external write, so the runtime
-    // records a running receipt and marks effects admitted BEFORE it invokes
-    // the handler (operations/runtime.ts, execute); the handler's NOT_FOUND
-    // for a definition that never existed therefore surfaces fail-closed as
-    // OPERATION_OUTCOME_UNKNOWN. That is the dispatch this test proves. (It
-    // used to read NOT_FOUND only because the receipt insert failed on an
-    // unseeded platform.tenants row — REFERENCE_NOT_FOUND matched the regex.)
-    expect(toolError(called.body)).toMatch(/OPERATION_OUTCOME_UNKNOWN/);
+    // The Operation is keyed with no external effect, so the runtime records
+    // its receipt and lets the handler's own declared NOT_FOUND for a notebook
+    // that never existed surface as the tool error. That the handler was
+    // reached at all, through search and the generic executor, is the
+    // dispatch this test proves.
+    expect(toolError(called.body)).toMatch(/NOT_FOUND/);
   });
 
   test("carries the authored field schema into the tool input schema", async () => {
@@ -775,6 +399,9 @@ describe("generated MCP server", () => {
     expect(resource.fields).toHaveLength(source!.fields.length);
     expect(resource).not.toHaveProperty("jsonSchema");
     expect(resource.operations.length).toBeGreaterThan(0);
+    const storageRelationships = tables.find(
+      (table) => table.source?.authoringEntityName === source!.entity,
+    )?.source?.graphql?.relationships ?? [];
     expect(resource.relationships).toEqual(
       source!.relationships
         .filter((relationship) =>
@@ -786,6 +413,9 @@ describe("generated MCP server", () => {
           )!;
           return {
             ...relationship,
+            ...storageRelationships.find(
+              (entry) => entry.fieldKey && entry.name === relationship.key,
+            ),
             resourceUri: `osf://schema/entities/${target.slug}`,
           };
         }),
@@ -890,7 +520,6 @@ describe("generated MCP server", () => {
       operation: CrudOperation,
       args: Record<string, unknown> = {},
     ) => callTool(identity, toolNameFor(table, operation), argsFor(table, args));
-    const canonical = catalogTool(table, "create").outputSchema !== undefined;
 
     test(`${prefix}: create, get, list, update, delete round-trip`, async () => {
       const args = await createArgs(table, tenantA);
@@ -898,24 +527,21 @@ describe("generated MCP server", () => {
       const createdEnvelope = toolEnvelope(created.body);
       let row = toolPayload(created.body);
       expect(toolError(created.body)).toBeUndefined();
-      if (canonical) {
-        expectCanonicalToolOutput(table, "create", created.body);
-        expect(createdEnvelope.operations.every((offer: any) => offer.available)).toBe(true);
-      } else {
-        expect(createdEnvelope).not.toHaveProperty("data");
-        expect(createdEnvelope).not.toHaveProperty("operations");
-      }
+      expectCanonicalToolOutput(table, "create", created.body);
+      // A fresh record offers every Operation; only a transition whose
+      // `from` excludes the initial state may be listed as INVALID_STATE.
+      expectFreshRecordOffers(table, createdEnvelope.operations);
       expect(row.id).toBeTruthy();
       createdRows.push({ table, id: row.id, identity: tenantA });
 
       const fetchedCall = await call(tenantA, "get", { id: row.id });
-      if (canonical) expectCanonicalToolOutput(table, "get", fetchedCall.body);
+      expectCanonicalToolOutput(table, "get", fetchedCall.body);
       const fetched = toolPayload(fetchedCall.body);
       expect(fetched.id).toBe(row.id);
       row = fetched;
 
       const listedCall = await call(tenantA, "list", { first: 5 });
-      if (canonical) expectCanonicalToolOutput(table, "list", listedCall.body);
+      expectCanonicalToolOutput(table, "list", listedCall.body);
       const listed = toolPayload(listedCall.body);
       expect(Array.isArray(listed.items)).toBe(true);
       expect(listed.totalCount).toBeGreaterThan(0);
@@ -933,15 +559,22 @@ describe("generated MCP server", () => {
           values: { [fieldName(textColumn)]: `updated-${seed}` },
           ...controls,
         });
-        if (canonical) expectCanonicalToolOutput(table, "update", updatedCall.body);
+        expectCanonicalToolOutput(table, "update", updatedCall.body);
         expect(toolError(updatedCall.body)).toBeUndefined();
         const updated = toolPayload(updatedCall.body);
         expect(updated[fieldName(textColumn)]).toBe(`updated-${seed}`);
         row = updated;
       }
 
+      // Decided before the first delete call, from what the create left
+      // behind, so a cascade that wrongly took the companions with it cannot
+      // make a refusal look warranted after the fact.
+      const outcome = await expectedDeleteOutcome(table, row.id, tenantA);
       const lease = await acquireLease(table, tenantA, row, "delete");
-      let deleteControls: Record<string, string> = { ...lease };
+      let deleteControls: Record<string, string | boolean> = {
+        ...lease,
+        ...(acknowledgementRequired(table, "delete") ? { confirmed: true } : {}),
+      };
       const first = await call(tenantA, "delete", { id: row.id, ...deleteControls });
       let deleted = first;
       if (toolError(first.body)?.includes("CONFIRMATION_REQUIRED")) {
@@ -958,34 +591,38 @@ describe("generated MCP server", () => {
         deleted = await call(tenantA, "delete", { id: row.id, ...deleteControls });
       }
 
-      if (!isEntityBackedCreate(table)) {
-        // A plugin-backed create makes companion records the entity delete is
-        // authored to refuse while they exist (a document and its first
-        // version); removing them is the plugin's own contract.
+      // Rows that reference the record (a document's first version) mean the
+      // schema's on-delete rule must refuse and the record must remain;
+      // removing the companions is the create's own contract.
+      if (outcome.refused) {
         expect(toolError(deleted.body)).toMatch(/REFERENCE_IN_USE/);
+        const still = await call(tenantA, "get", { id: row.id });
+        expect(toolError(still.body)).toBeUndefined();
+        expect(toolPayload(still.body).id).toBe(row.id);
+        expect(await expectedDeleteOutcome(table, row.id, tenantA)).toEqual(outcome);
         return;
       }
-      if (canonical) expectCanonicalToolOutput(table, "delete", deleted.body);
+      if (table.source?.authoringEntityName === "DocumentTheme" && row.isDefault === true) {
+        expect(toolError(deleted.body)).toMatch(/VALIDATION: choose another default/);
+        const still = await call(tenantA, "get", { id: row.id });
+        expect(toolError(still.body)).toBeUndefined();
+        expect(toolPayload(still.body).id).toBe(row.id);
+        return;
+      }
+      expectCanonicalToolOutput(table, "delete", deleted.body);
       expect(toolError(deleted.body)).toBeUndefined();
       expect(toolPayload(deleted.body)).toEqual({ deleted: true });
       untrackRow(row.id);
 
       const missing = await call(tenantA, "get", { id: row.id });
-      if (canonical) expectCanonicalToolOutput(table, "get", missing.body);
+      expectCanonicalToolOutput(table, "get", missing.body);
       expect(toolError(missing.body)).toMatch(/NOT_FOUND/);
       const missingError = missing.body.result.structuredContent.error;
-      if (canonical) {
-        expect(missingError).toMatchObject({
-          code: "NOT_FOUND",
-          message: "Resource not found.",
-          retryable: false,
-        });
-      } else {
-        expect(missingError).toEqual({
-          code: "NOT_FOUND",
-          message: "Resource not found.",
-        });
-      }
+      expect(missingError).toMatchObject({
+        code: "NOT_FOUND",
+        message: "Resource not found.",
+        retryable: false,
+      });
     });
 
     test(`${prefix}: does not leak rows across tenants`, async () => {
@@ -995,6 +632,45 @@ describe("generated MCP server", () => {
     });
 
     if (isEntityBackedCreate(table)) {
+      const optionField = Object.entries(createSchemaProperties(table))
+        .find(([, schema]) => Array.isArray(schema.enum) && schema.enum.length > 0)?.[0];
+      if (optionField) {
+        test(`${prefix}: an out-of-options ${optionField} is the canonical VALIDATION answer with a field violation`, async () => {
+          // The same envelope REST and GraphQL return: the runtime judges the
+          // authored values once, for every interface, and MCP relays it.
+          const valid = await createArgs(table, tenantA);
+          const { body } = await call(tenantA, "create", { ...valid, [optionField]: "not-an-option" });
+          expect(toolError(body)).toMatch(/VALIDATION/);
+          expect(body.result.structuredContent.error).toMatchObject({
+            code: "VALIDATION",
+            retryable: false,
+            violations: [{ field: optionField, code: "NOT_IN_OPTIONS" }],
+          });
+        });
+      }
+
+      // A required scalar, not a foreign key: the factory creates parents for
+      // those, and their absence is a reference question, not this one.
+      const foreignKeyFields = new Set(
+        table.columns.filter((column) => foreignKeyTargets(table).has(column.name)).map(fieldName),
+      );
+      const requiredField = ((catalogTool(table, "create").inputSchema as { required?: string[] }).required ?? [])
+        .find((field) => !foreignKeyFields.has(field));
+      if (requiredField) {
+        test(`${prefix}: a create missing ${requiredField} is the canonical VALIDATION answer with a REQUIRED violation`, async () => {
+          // The edge holds the envelope only; the missing authored field is
+          // the runtime's finding, so it arrives as a field violation and not
+          // as ajv's verdict on the advertised argument object.
+          const { [requiredField]: _omitted, ...incomplete } = await createArgs(table, tenantA);
+          const { body } = await call(tenantA, "create", incomplete);
+          expect(toolError(body)).toMatch(/VALIDATION/);
+          expect(body.result.structuredContent.error).toMatchObject({
+            code: "VALIDATION",
+            violations: expect.arrayContaining([{ field: requiredField, code: "REQUIRED", message: expect.any(String) }]),
+          });
+        });
+      }
+
       test(`${prefix}: rejects a create argument the tool schema does not declare`, async () => {
         // The schema says additionalProperties:false; the server must agree.
         const valid = await createArgs(table, tenantA);
@@ -1012,6 +688,18 @@ describe("generated MCP server", () => {
         });
         expect(toolError(body)).toMatch(/BAD_USER_INPUT/);
         expect(toolError(body)).toMatch(/\bid\b/);
+      });
+    } else {
+      test(`${prefix}: a plugin-backed create is held to its advertised tool schema as a whole`, async () => {
+        // A plugin Operation owns its nested input contract; the edge keeps
+        // validating the full advertised schema, not a reduced envelope.
+        const schema = catalogTool(table, "create").inputSchema as { required?: string[] };
+        const missing = schema.required?.[0];
+        if (!missing) return;
+        const { [missing]: _omitted, ...incomplete } = await createArgs(table, tenantA);
+        const { body } = await call(tenantA, "create", incomplete);
+        expect(toolError(body)).toMatch(/BAD_USER_INPUT/);
+        expect(toolError(body)).toMatch(new RegExp(`required property '${missing}'`));
       });
     }
 
@@ -1042,12 +730,14 @@ describe("generated MCP server", () => {
      * plugin-backed create advertises its own contract, so only the update
      * and filter halves apply to it.
      */
-    const relationshipKeys = table.columns.filter((column) => {
+    const referenceColumns = table.columns.filter((column) => {
       if (column.primaryKey || column.required) return false;
       const target = foreignKeyTargets(table).get(column.name);
       return target !== undefined && tablesByName.has(target);
     });
-
+    // A reference an Operation writes (`writtenBy`) is nobody's to set through
+    // create or update; mcp-reference-policy.e2e.test.ts proves that refusal.
+    const relationshipKeys = referenceColumns.filter((column) => !operationWrittenReferences(table).some((reference) => reference.column === column));
     for (const column of relationshipKeys) {
       const key = fieldName(column);
       const targetTable = tablesByName.get(foreignKeyTargets(table).get(column.name)!)!;
@@ -1056,10 +746,10 @@ describe("generated MCP server", () => {
       test(`${prefix}: advertises ${key} as a uuid on ${onCreate ? "create, " : ""}update and filter`, async () => {
         const { body } = await rpc(tenantA, "tools/list");
         const tools = body.result.tools as { name: string; inputSchema: any }[];
-        const update = advertisedSchema(tools, table, "update");
-        const list = advertisedSchema(tools, table, "list");
+        const update = await advertisedSchema(tenantA, tools, table, "update");
+        const list = await advertisedSchema(tenantA, tools, table, "list");
         if (onCreate) {
-          const create = advertisedSchema(tools, table, "create");
+          const create = await advertisedSchema(tenantA, tools, table, "create");
           expect(create.properties[key]).toMatchObject({ type: "string", format: "uuid" });
         }
         expect(list.properties.filter.properties[key]).toMatchObject({
@@ -1155,21 +845,21 @@ describe("generated MCP server", () => {
     test(`${prefix}: the update schema ${immutable ? "withholds" : "matches create on"} immutable fields`, async () => {
       const { body } = await rpc(tenantA, "tools/list");
       const tools = body.result.tools as { name: string; inputSchema: any }[];
-      const update = advertisedSchema(tools, table, "update");
+      const update = await advertisedSchema(tenantA, tools, table, "update");
       // Authored fields only: a create may also offer a blueprint control,
       // an update its version and lease controls.
       const updatable = authoredKeys(update.properties.values.properties);
 
       if (!immutable) {
         if (offeredOnCreate) {
-          const create = advertisedSchema(tools, table, "create");
+          const create = await advertisedSchema(tenantA, tools, table, "create");
           expect(updatable).toEqual(authoredKeys(create.properties));
         }
         return;
       }
       for (const field of immutableFields) expect(updatable).not.toContain(field);
       if (offeredOnCreate) {
-        const creatable = authoredKeys(advertisedSchema(tools, table, "create").properties);
+        const creatable = authoredKeys((await advertisedSchema(tenantA, tools, table, "create")).properties);
         for (const field of immutableFields) expect(creatable).toContain(field);
         expect(updatable).toEqual(creatable.filter((key) => !immutableFields.includes(key)));
       }
@@ -1181,7 +871,7 @@ describe("generated MCP server", () => {
 
       test(`${prefix}: ${offeredOnCreate ? `accepts ${field} on create and ` : ""}refuses ${field} on update`, async () => {
         const valueFor = async () =>
-          fkTarget ? createForeignKeyTarget(fkTarget, tenantA) : sampleValue(immutable, nextMarker());
+          fkTarget ? createForeignKeyTarget(fkTarget, tenantA) : contractSample(table, immutable, nextMarker());
         const created = await call(
           tenantA,
           "create",

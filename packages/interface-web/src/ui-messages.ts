@@ -26,6 +26,10 @@ export const uiMessages = {
     "en": "Create",
     "nl": "Aanmaken"
   },
+  "Close": {
+    "en": "Close",
+    "nl": "Sluiten"
+  },
   "Search all accessible": {
     "en": "Search all accessible",
     "nl": "Alle toegankelijke"

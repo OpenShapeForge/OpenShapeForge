@@ -65,6 +65,8 @@ import {
   AUTHORIZATION_PATCH_KIND,
   applyAuthorizationPatch,
   isAuthorizationFilePath,
+  rewriteAuthorizationClientReferences,
+  type ClientRename,
 } from "./authorization-patch.js";
 
 export type AuthoringConfig = {
@@ -1148,6 +1150,7 @@ function materializeAuthoringLayers(buildDir: string, layerDirs: string[]): stri
   // relativePath -> { sourceLayer, contents } for plain files;
   // entity slugs are tracked separately so patches can target them by slug.
   const files = new Map<string, { layer: string; path: string }>();
+  const authorizationRenames = new Map<string, ClientRename[]>();
   const entityPathBySlug = new Map<string, string>();
   // Entity names are tracked too: the same `entity:` under a second file stem
   // is the slug collision wearing a different name, and a slug-only check lets
@@ -1244,10 +1247,19 @@ function materializeAuthoringLayers(buildDir: string, layerDirs: string[]): stri
           const baseDoc = YAML.parse(
             readFileSync(join(target.layer, target.path), "utf8"),
           ) as JsonValue;
-          const merged = applyAuthorizationPatch(baseDoc, parsed as JsonValue, {
+          let patch = parsed as unknown as Record<string, JsonValue>;
+          for (const rename of authorizationRenames.get(relativePath) ?? []) {
+            patch = rewriteAuthorizationClientReferences(patch, rename);
+          }
+          const merged = applyAuthorizationPatch(baseDoc, patch as JsonValue, {
             strategicMerge,
             origin: `${AUTHORIZATION_PATCH_KIND} ${layerDir}/${relativePath}`,
           });
+          if (patch.renameClient) {
+            const renames = authorizationRenames.get(relativePath) ?? [];
+            renames.push(patch.renameClient as unknown as ClientRename);
+            authorizationRenames.set(relativePath, renames);
+          }
           const mergedPath = join(buildDir, relativePath);
           mkdirSync(join(mergedPath, ".."), { recursive: true });
           writeFileSync(mergedPath, YAML.stringify(merged), "utf8");

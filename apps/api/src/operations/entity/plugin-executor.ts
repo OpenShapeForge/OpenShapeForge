@@ -14,6 +14,7 @@ import { decimalText } from "@openshapeforge/operations";
 import { fieldNameForColumn } from "./columns.js";
 import { assertCreateRecordPermissions } from "./record-permissions.js";
 import { assertNoForeignOperationWrittenValues } from "./write-policy.js";
+import { assertCallerNestedFields, assertCallerTopLevelFields } from "./field-policy.js";
 import type { EntityOperationContract, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
 
 type Executor = (
@@ -161,6 +162,8 @@ export function createEntityPluginExecutor(options: {
     // Operation to call, not as a property the authored input does not know.
     if (entityOperation.intent !== "delete") {
       assertNoForeignOperationWrittenValues(table, input, entityOperation.id);
+      assertCallerTopLevelFields(table, session, input, entityOperation.intent, entityOperation.id);
+      assertCallerNestedFields(table, session, input, entityOperation.id, entityOperation.intent);
     }
     let result: Awaited<ReturnType<typeof invokeOperation>>;
     try {

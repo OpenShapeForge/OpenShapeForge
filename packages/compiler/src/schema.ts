@@ -283,6 +283,7 @@ export type ColumnDefinition = {
   generated?: "identity";
   references?: ReferenceDefinition;
   sourceField?: string;
+  fieldPolicy?: import("@openshapeforge/operations").FieldValuePolicy;
   /**
    * Data-classification tier propagated from the authoring field's
    * `classification.sensitivity`. Only the restricting tiers

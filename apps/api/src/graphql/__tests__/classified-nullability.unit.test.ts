@@ -46,6 +46,10 @@ function tableWith(columns: GeneratedColumn[]): GeneratedTable {
 }
 
 describe("nonNullSuffix", () => {
+  test("a required field with explicit read roles is nullable after redaction", () => {
+    expect(nonNullSuffix(column({ name: "secret", required: true,
+      fieldPolicy: { readRoles: ["Sensitive.Read"], writeRoles: ["Sensitive.Write"] } }))).toBe("");
+  });
   test("marks required and primary-key columns non-null", () => {
     expect(nonNullSuffix(column({ name: "id", primaryKey: true }))).toBe("!");
     expect(nonNullSuffix(column({ name: "title", required: true }))).toBe("!");

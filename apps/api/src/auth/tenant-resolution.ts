@@ -188,17 +188,14 @@ export async function resolveScopedServiceTenant(
       !sameTenantId(identity.tenantId, credential.tenantId) ||
       claims.azp !== credential.clientId ||
       claims.preferred_username !== `service-account-${credential.clientId}`) return null;
-  const row = await withDbSession(db, {
+  const tenantId = await withDbSession(db, {
     tenantId: credential.tenantId, userId: identity.userId, roles: [], scope: "self",
   }, async (trx) => {
-    const result = await sql<{ keycloak_organization_id: string | null; keycloak_realm: string | null }>`
-      select keycloak_organization_id, keycloak_realm from platform.tenants
-      where id = ${credential.tenantId}::uuid
+    const result = await sql<{ tenant_id: string | null }>`
+      select app.tenant_for_scoped_service(${credential.tenantId}::uuid, ${realm}) as tenant_id
     `.execute(trx);
-    return result.rows[0];
+    return result.rows[0]?.tenant_id ?? null;
   });
-  if (!row?.keycloak_organization_id || row.keycloak_realm !== realm) return null;
-  const tenantId = await lookupTenantForOrganization(db, realm, row.keycloak_organization_id);
   if (!sameTenantId(tenantId, credential.tenantId)) return null;
   // If a service token also carries membership, it may not contradict the credential.
   if (claims.organization !== undefined &&

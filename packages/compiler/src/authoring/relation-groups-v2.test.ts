@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { standaloneOperationFixture } from "./standalone-operation.fixtures.js";
 import { describe, expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -8,6 +7,7 @@ import { compileAuthoringBackendManifest } from "./backend-manifest.js";
 import { compile } from "./compiler/index.js";
 import { loadEntity } from "./loader.js";
 import { buildWebManifest } from "./web-manifest.js";
+import { corpusWebOperations } from "./corpus-web.fixtures.js";
 
 const authoringDir = join(import.meta.dir, "../../config/authoring");
 const slugs = ["relation", "relation-group", "relation-group-membership", "account"] as const;
@@ -46,7 +46,7 @@ describe("typed RelationGroups and many-relation memberships", () => {
         foreignKey: "relation_id",
       });
 
-    const manifest = buildWebManifest(slugs.map(compiled), {}, standaloneOperationFixture(authoringDir));
+    const manifest = buildWebManifest(slugs.map(compiled), {}, corpusWebOperations(authoringDir));
     expect(manifest.entities.Relation?.fields.relationGroupId?.supports).toEqual({
       read: true,
       create: false,
@@ -133,7 +133,7 @@ describe("typed RelationGroups and many-relation memberships", () => {
       } },
     });
 
-    const projected = buildWebManifest(slugs.map(compiled), {}, standaloneOperationFixture(authoringDir)).entities.RelationGroupMembership!;
+    const projected = buildWebManifest(slugs.map(compiled), {}, corpusWebOperations(authoringDir)).entities.RelationGroupMembership!;
     expect(projected.fields.relationId?.supports).toEqual({
       read: true,
       create: true,

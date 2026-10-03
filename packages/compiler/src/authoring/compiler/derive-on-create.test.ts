@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import type { CompiledColumn, CompiledField } from "../types/compiled.js";
-import { resolveDerivedOnCreateBindings } from "./derive-on-create.js";
+import { ensureDerivedIdentifierIndexes, resolveDerivedOnCreateBindings } from "./derive-on-create.js";
 
 function field(key: string, overrides: Partial<CompiledField> = {}): CompiledField {
   return {
@@ -55,6 +55,27 @@ describe("deriveOnCreate compiler contract", () => {
   test("accepts the bare target index, which the compiler leads with tenant_id", () => {
     expect(resolve({ indexes: [{ name: "templates_key_uidx", fields: ["key"], unique: true }] })[0]?.conflictColumns)
       .toEqual(["tenant_id", "key"]);
+  });
+
+  test("keeps a partial index and adds an unconditional index for identifier allocation", () => {
+    const indexes = [{ name: "active_keys", columns: ["tenant_id", "key"], unique: true, where: '"active" = true' }];
+    expect(ensureDerivedIdentifierIndexes("templates", indexes, resolve())).toEqual([
+      ...indexes,
+      { name: "templates_key_derived_uidx", columns: ["tenant_id", "key"], unique: true },
+    ]);
+    expect(indexes).toHaveLength(1);
+  });
+
+  test("reuses unconditional uniqueness and keeps its existing name", () => {
+    const indexes = [{ name: "existing_keys", columns: ["tenant_id", "key"], unique: true }];
+    expect(ensureDerivedIdentifierIndexes("templates", indexes, resolve())).toEqual(indexes);
+    expect(ensureDerivedIdentifierIndexes("templates", indexes, [])).toEqual(indexes);
+  });
+
+  test("refuses a conflicting generated index name rather than silently losing uniqueness", () => {
+    expect(() => ensureDerivedIdentifierIndexes("templates", [
+      { name: "templates_key_derived_uidx", columns: ["name"] },
+    ], resolve())).toThrow(/collides with an authored index/);
   });
 
   test("fails closed without the exact database uniqueness scope", () => {

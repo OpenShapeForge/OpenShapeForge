@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { standaloneOperationFixture } from "./authoring/standalone-operation.fixtures.js";
 import { expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
-import { loadActivePlatformCompile } from "./active-manifest.js";
+import { loadActivePlatformCompile, resolveActiveAuthoringDir } from "./active-manifest.js";
 import { buildWebManifest } from "./authoring/web-manifest.js";
+import { corpusWebOperations } from "./authoring/corpus-web.fixtures.js";
 
 test("managed document type operations preserve read access and separate deletion", async () => {
   const root = fileURLToPath(new URL("../../../", import.meta.url));
@@ -20,7 +20,8 @@ test("managed document type operations preserve read access and separate deletio
   expect(defaults.requiresRegistration).toBe(true);
   expect(defaults.allowsExternalPublication).toBe(false);
   expect(defaults.defaultConfidentiality).toBeUndefined();
-  const web = buildWebManifest(compile.entities, {}, standaloneOperationFixture(fileURLToPath(new URL("../config/authoring", import.meta.url)))).entities.DocumentType!;
+  const manifest = buildWebManifest(compile.entities, {}, corpusWebOperations(resolveActiveAuthoringDir(root)));
+  const web = manifest.entities.DocumentType!;
   expect(web.displayTemplate).toBe("{{name}}");
   expect(web.views.collection.route).toBe("/document-types");
   expect(web.views.record?.routes.create).toBe("/document-types/new");
@@ -34,7 +35,7 @@ test("managed document type operations preserve read access and separate deletio
   const version = compile.entities.find(entity => entity.contract.entity.name === "DocumentTypeVersion")!.contract;
   expect(version.entityOperations.delete).toBeUndefined();
   expect(version.authorization.roles.delete).toEqual([]);
-  const document = buildWebManifest(compile.entities, {}, standaloneOperationFixture(fileURLToPath(new URL("../config/authoring", import.meta.url)))).entities.Document!;
+  const document = manifest.entities.Document!;
   expect(document.fields.documentType!.optionSource).toEqual({
     type: "entity", source: "DocumentType", valueField: "code",
   });

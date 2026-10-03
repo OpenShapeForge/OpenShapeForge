@@ -16,6 +16,7 @@ import type { DerivedToolsCatalogEntry } from "../../mcp/derived-tools.js";
 import { assertRecordPermissionInTransaction } from "./record-permissions.js";
 import { draftOwningHead, draftRule } from "./versioned-head.js";
 import { isWritableColumn, normalizeWritableValues } from "./write-policy.js";
+import { assertCallerTopLevelFields, prepareProtectedFieldWrites } from "./field-policy.js";
 import { assertEntityValuesValid } from "./input-validation.js";
 import { assertEntityValueInput, entityValueCarriers, prepareEntityValueWriteInTransaction } from "./entity-value-io.js";
 import { assertRelationshipConstraintsInTransaction } from "./relationship-constraints.js";
@@ -160,6 +161,9 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
     if (binding.action === "insert" && (request.childId !== undefined || !request.values || typeof request.values !== "object" || Array.isArray(request.values))) invalid("Insert requires child values and cannot link an existing id.");
     let insertValues: Record<string, unknown> | undefined;
     if (createOp) {
+      assertCallerTopLevelFields(target, session, request.values!, "create");
+      prepareProtectedFieldWrites(target, session,
+        normalizeWritableValues(target, request.values!, "create", entityValues), "create");
       assertEntityValueInput(target, request.values!, "create", entityValues);
       assertAllowed(request.values!, true);
       const managed = collectionManagedFields(target, catalog.tables);
@@ -248,7 +252,10 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
         await permission(trx, session, target, childId, updateOp!, "edit");
         const current = rows.find((row) => row.id === childId)!;
         if (binding.action === "update") {
-          const prepared = await prepareEntityValueWriteInTransaction(trx, session, target, normalizeWritableValues(target, request.values!, "update", entityValues), "update", current, { registry: entityValues, tables: catalog.tables });
+          assertCallerTopLevelFields(target, session, request.values!, "update");
+          const protectedValues = prepareProtectedFieldWrites(target, session,
+            normalizeWritableValues(target, request.values!, "update", entityValues), "update", current);
+          const prepared = await prepareEntityValueWriteInTransaction(trx, session, target, protectedValues, "update", current, { registry: entityValues, tables: catalog.tables });
           await assertRelationshipConstraintsInTransaction(trx, session, target, prepared);
           const assignments = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} = ${value}`);
           const changes = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} is distinct from ${value}`);

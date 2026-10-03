@@ -5,7 +5,8 @@ import type {
   RuntimeOperationDefinition, RuntimeOperationExecutionResult, RuntimeResolvedOperationWork,
   RuntimeWorkerOperationBroker,
 } from "@openshapeforge/plugin-runtime";
-import { resolveSessionContext } from "../auth/identity.js";
+import { resolveCredentialSession } from "../auth/session-resolver.js";
+import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import {
   organizationServiceIdentities, serviceIdentityEndpoint, type OrganizationServiceIdentity,
 } from "../auth/organization-service-identities.js";
@@ -63,6 +64,8 @@ function safeToRepeat(definition: RuntimeOperationDefinition): boolean {
     (definition.effects.data === "read" && definition.effects.external !== "write");
 }
 
+type WorkerIdentityVerifier = (token: string) => Promise<{ tenantId: string | null; userId: string | null; serviceIdentityId: string | null }>;
+
 export type DurableWorkerBrokerOptions = {
   /** Bound by core to the actual registered module's persisted claim resolver. */
   resolveWork(reference: RuntimeDurableWorkReference): Promise<RuntimeResolvedOperationWork | undefined>;
@@ -77,9 +80,12 @@ export type DurableWorkerBrokerOptions = {
   now?: () => number;
   /** Backoff for transient token/catalog/limiter answers within one claim (#885). */
   transientRetry?: TransientRetryPolicy;
-  /** Tests only. Production uses the ordinary pinned bearer verifier. */
-  verify?: (token: string) => Promise<{ tenantId: string | null; userId: string | null; serviceIdentityId: string | null }>;
-};
+} & (
+  /** Production requires the worker connection for scoped registry checks. */
+  | { db: OpenShapeForgeDatabase; verify?: WorkerIdentityVerifier }
+  /** Tests may provide an identity verifier instead of a database connection. */
+  | { db?: OpenShapeForgeDatabase; verify: WorkerIdentityVerifier }
+);
 
 export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): RuntimeWorkerOperationBroker {
   const api = serviceIdentityEndpoint(options.apiUrl, "Canonical Operation API");
@@ -88,7 +94,10 @@ export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): 
   const now = options.now ?? Date.now;
   const retryPolicy = options.transientRetry ?? DEFAULT_TRANSIENT_RETRY;
   const verify = options.verify ?? (async (token: string) => {
-    const session = await resolveSessionContext(new Headers({ authorization: `Bearer ${token}` }));
+    // Verify the token and its scoped registry binding with the restricted
+    // worker connection. Membership and Operation authorization are checked
+    // by the canonical HTTP catalog/execute boundary, using its app connection.
+    const session = await resolveCredentialSession(new Headers({ authorization: `Bearer ${token}` }), { db: options.db });
     if (!session.userId) return { ...session, serviceIdentityId: null };
     // Decoding is an ADDITIONAL restriction, only after the ordinary verifier
     // has accepted this exact token. Never a substitute for signature checking.
@@ -330,12 +339,13 @@ export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): 
 }
 
 export function configuredDurableWorkerBroker(
+  db: OpenShapeForgeDatabase,
   resolveWork: DurableWorkerBrokerOptions["resolveWork"],
   pinOperationContract: DurableWorkerBrokerOptions["pinOperationContract"],
   env: NodeJS.ProcessEnv = process.env,
   markDispatch?: DurableWorkerBrokerOptions["markDispatch"],
 ): RuntimeWorkerOperationBroker {
-  return createDurableWorkerBroker({ resolveWork, pinOperationContract, ...(markDispatch ? { markDispatch } : {}),
+  return createDurableWorkerBroker({ db, resolveWork, pinOperationContract, ...(markDispatch ? { markDispatch } : {}),
     identities: organizationServiceIdentities(env),
     apiUrl: env.OPENSHAPEFORGE_OPERATION_API_URL ?? "",
     tokenUrl: env.OPENSHAPEFORGE_SERVICE_IDENTITY_TOKEN_URL ?? "" });

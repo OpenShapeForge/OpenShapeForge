@@ -16,7 +16,8 @@ import {
   type GeneratedSchemaDriftResult,
   type UndeclaredDatabaseSchema,
 } from "../db/schema-drift.js";
-import type { ModuleSeed } from "../modules/contract.js";
+import type { ModuleSeed, RuntimeModule } from "../modules/contract.js";
+import type { InitializedMaintenanceOwner } from "../modules/maintenance.js";
 import type { ModuleRegistry } from "../modules/registry.js";
 
 const DRIFT_CHECK_TIMEOUT_MS = 5_000;
@@ -106,6 +107,8 @@ export type SchemaFreshnessOptions = {
   databaseUrl?: string;
   /** Seeds the loaded runtime modules contribute, applied by the bootstrap. */
   moduleSeeds?: readonly ModuleSeed[];
+  maintenanceModules?: readonly RuntimeModule[];
+  maintenanceRuntime?: InitializedMaintenanceOwner;
   /** The environment the migrate URL is read from; process.env by default. */
   env?: NodeJS.ProcessEnv;
 };
@@ -144,6 +147,8 @@ async function bootstrapEmptyDatabase(
   try {
     const outcome = await bootstrapIfEmpty(migrator.db, {
       ...(options.moduleSeeds ? { moduleSeeds: options.moduleSeeds } : {}),
+      ...(options.maintenanceModules ? { maintenanceModules: options.maintenanceModules } : {}),
+      ...(options.maintenanceRuntime ? { maintenanceRuntime: options.maintenanceRuntime } : {}),
     });
     if (outcome.bootstrapped) {
       log.info(

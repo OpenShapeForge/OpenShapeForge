@@ -112,7 +112,7 @@ try {
 
 const runtime = createDatabaseRuntime({ databaseUrl: migrateUrl.toString() });
 try {
-  const result = await runMigrationChainLocked(runtime.db, { moduleSeeds });
+  const result = await runMigrationChainLocked(runtime.db, { moduleSeeds, maintenanceModules: modules.loaded });
   console.log(
     JSON.stringify({ reset: target, ...renderMigrationReport(result, modules.failures) }, null, 2),
   );

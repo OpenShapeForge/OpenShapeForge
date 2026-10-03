@@ -70,6 +70,7 @@ import {
   type ModuleRegistry,
 } from "../modules/registry.js";
 import type { ModuleRuntimeContext } from "../modules/contract.js";
+import type { InitializedMaintenanceOwner } from "../modules/maintenance.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
 import { composeJobHandlers } from "../jobs/handlers.js";
 import { createJobsRuntimeModule } from "../jobs/module.js";
@@ -177,6 +178,7 @@ export function createApiApp(options: {
   };
   const operationContracts = options.operationContracts ?? listOperationContracts();
   const limits = readApiLimits();
+  const trustProxy = limits.trustProxy;
 
   // Default level stays "info"; LOG_LEVEL=debug surfaces the drift "ok" line.
   // trustProxy lets Fastify derive the real client IP from X-Forwarded-For (the
@@ -202,8 +204,11 @@ export function createApiApp(options: {
       },
       ...(options.logStream ? { stream: options.logStream } : {}),
     },
-    // Fastify 5.12 refuses numeric-only proxy trust; preserve that fail-closed behavior.
-    trustProxy: typeof limits.trustProxy === "number" ? false : limits.trustProxy,
+    // Express the configured hop count through Fastify's supported trust function.
+    // The socket is hop zero; addresses beyond that count stay untrusted.
+    trustProxy: typeof trustProxy === "number"
+      ? (_address, hop) => hop < trustProxy
+      : trustProxy,
     requestTimeout: limits.requestTimeoutMs,
     // Browser handoff tokens (`/api/entity-configuration/<token>`,
     // mcp/handoff-store.ts) are `<tenant>.<handoff>.<secret>` — 117
@@ -324,6 +329,8 @@ export function createApiApp(options: {
       await enforceGeneratedSchemaFreshness(app.log, runtime.db, {
         databaseUrl,
         moduleSeeds: initialisedModules.flatMap((module) => module.seeds ?? []),
+        maintenanceModules: initialisedModules,
+        ...(maintenanceRuntime ? { maintenanceRuntime } : {}),
       });
     });
   } else {
@@ -340,6 +347,7 @@ export function createApiApp(options: {
   // constructing.
   let ready: { yoga: ReturnType<typeof createGraphqlYoga> } | null = null;
   let initialisedModules: ModuleRegistry["loaded"] = [];
+  let maintenanceRuntime: InitializedMaintenanceOwner | undefined;
   const databaseToClose = databaseRuntime;
 
   app.addHook("onClose", async () => {
@@ -375,6 +383,9 @@ export function createApiApp(options: {
     };
     const initialised = await initRuntimeModules(modules, moduleContext);
     initialisedModules = initialised.loaded;
+    if (modulePlatform) {
+      maintenanceRuntime = { platform: modulePlatform.services, modules: initialised.loaded };
+    }
     // A job kind two modules both register is refused here, at API boot, and
     // not only in the worker: the worker may not be running, and the API is
     // what would enqueue jobs into a queue nothing can drain unambiguously.

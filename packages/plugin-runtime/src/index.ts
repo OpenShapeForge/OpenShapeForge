@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import type { RunMaintenanceSeed, RuntimeMaintenanceContribution } from "./maintenance.js";
 import type {
   FastifyInstance,
   FastifyReply,
@@ -700,6 +701,8 @@ export type ModuleOperationContextContract<
   session?: Session;
   request?: Request;
   reply?: Reply;
+  /** Present only for a registered owner during an active Control invocation. */
+  runSeed?: RunMaintenanceSeed;
   /**
    * Live, host-minted bridge to a temporary core compatibility handler.
    * The canonical Operation handler remains the public entry point; this
@@ -746,6 +749,8 @@ export type ModuleSeedResult = {
 export type ModuleSeedContract<Database, Result> = {
   name: string;
   apply(db: Database, context?: ModuleSeedContext): Promise<Result>;
+  /** Host-owned explicit gate, checked again by the core job owner before elevation. */
+  maintenanceOptIn?(): boolean;
 };
 
 /** Managed seed services; no user identity or additional database authority. */
@@ -753,6 +758,7 @@ export type ModuleSeedContext = {
   schemas: PluginPlatformServices["schemas"];
   /** Compiler-collected fixtures from the active composed application. */
   seedDirectory?: string;
+  runSeed?: RunMaintenanceSeed;
 };
 
 export type ModuleReadinessCheck = {
@@ -793,6 +799,7 @@ export type RuntimeModuleContract<
    */
   jobHandlers?: Record<string, JobHandler>;
   seeds?: Seed[];
+  maintenance?: readonly RuntimeMaintenanceContribution[];
 };
 
 export type ModuleOperationContext = ModuleOperationContextContract<
@@ -819,3 +826,5 @@ export type RuntimeModule = RuntimeModuleContract<
 
 /** Creates an isolated module using its compiler-authored, nonsecret configuration. */
 export type RuntimeModuleFactory = (configuration: unknown) => RuntimeModule;
+
+export type { MaintenanceQuery, MaintenanceConnection, MaintenanceStore, MaintenanceContext, MaintenanceRequest, RunMaintenanceSeed, RuntimeMaintenanceContribution } from "./maintenance.js";

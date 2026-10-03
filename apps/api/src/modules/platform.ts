@@ -2,8 +2,8 @@
 /** Core-owned services made available to reviewed runtime modules. */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import type { Transaction } from "kysely";
-import type { OpenShapeForgeDatabase } from "../db/connection.js";
+import { sql, type Transaction } from "kysely";
+import { assertSameDatabase, type OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession } from "../db/session.js";
 import { enqueueJob } from "../jobs/store.js";
 import { appendEntityEventInTransaction } from "../platform/entity-events.js";
@@ -1003,6 +1003,19 @@ export class ModulePlatformRuntime {
     this.#servers.delete(server);
   }
 
+  async assertRestrictedOperationConnection(expectedDatabase?: OpenShapeForgeDatabase): Promise<void> {
+    if (expectedDatabase) await assertSameDatabase(this.#db, expectedDatabase);
+    const result = await sql<{ rolbypassrls: boolean; rolsuper: boolean }>`select rolbypassrls, rolsuper from pg_roles where rolname = current_user`.execute(this.#db);
+    if (!result.rows[0] || result.rows[0].rolbypassrls || result.rows[0].rolsuper) throw new Error("Maintenance Operations require the restricted application connection.");
+  }
+
+  assertActiveOperationSession(session: TrustedSessionContext): void {
+    const current = activeOperationSessionStorage.getStore();
+    if (!current || current.runtime !== this || current.session !== session || !this.#activeOperationSessions.has(current)) {
+      throw new Error("Maintenance requires the active verified Operation session.");
+    }
+  }
+
   /**
    * Activate one immutable session capability while core invokes a canonical
    * operation handler. An existing live MCP capability keeps its exact identity;
@@ -1306,3 +1319,18 @@ export async function invokeModuleDeclarativeService(
 
 export const __assertSecretFreeModuleEventForTests = assertSecretFree;
 export const __isSensitiveModuleEventKeyForTests = isSensitiveEventKey;
+
+/** Core-only ownership check for a live maintenance elevation. */
+export function assertLiveModuleOperationSession(platform: ModulePlatformServices | undefined, session: TrustedSessionContext | undefined): void {
+  const current = activeOperationSessionStorage.getStore();
+  if (!current || !platform || !session || platformRuntimes.get(platform) !== current.runtime || current.session !== session) {
+    throw new Error("Maintenance requires the live verified Operation session.");
+  }
+  current.runtime.assertActiveOperationSession(session);
+}
+
+export async function assertRestrictedModuleOperationConnection(platform: ModulePlatformServices, expectedDatabase?: OpenShapeForgeDatabase): Promise<void> {
+  const runtime = platformRuntimes.get(platform);
+  if (!runtime) throw new Error("Maintenance platform is not core owned.");
+  await runtime.assertRestrictedOperationConnection(expectedDatabase);
+}

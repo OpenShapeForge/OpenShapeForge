@@ -229,6 +229,7 @@ export async function startWorkerRole(
     const marker = resolved.worker.markOperationDispatch;
     const durableOperations = resolver && pinner
       ? configuredDurableWorkerBroker(
+          databaseRuntime.db,
           (reference) => resolver(context, reference),
           (reference, fingerprint) => pinner(context, reference, fingerprint),
           options.env,

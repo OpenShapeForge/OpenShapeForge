@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { sql } from 'kysely';
 import { withDbSession } from '../db/session.js';
 import { HttpError } from '../rest/http-error.js';

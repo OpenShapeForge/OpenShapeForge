@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { CompiledEntityInfo } from "../plugins.js";
 import type { CompiledEntityContract, CompiledField, CompiledViewContext, OperationCatalogDefinition } from "./types.js";
 import { collectAuthoredModulePluginOperations } from "../generate-operations.js";
+import { corpusWebOperations } from "./corpus-web.fixtures.js";
 import { buildWebManifest, renderWebManifest } from "./web-manifest.js";
 import { buildEntityOperations } from "./compiler/entity-operations.js";
 import { compile } from "./compiler/index.js";
@@ -420,8 +421,7 @@ describe("web manifest projection", () => {
     }));
     const authorId = entries[0]!.contract.model.fields.find(({ key }) => key === "authorId")!;
     expect(authorId.readOnly).toBe(true);
-    const catalogs = ["accounts", "accounts-members"].map(name => parse(readFileSync(join(authoringDir, `operations/${name}.yaml`), "utf8")) as OperationCatalogDefinition);
-    const web = buildWebManifest(entries, {}, { catalogs, operations: collectAuthoredModulePluginOperations(catalogs, operationContext) });
+    const web = buildWebManifest(entries, {}, corpusWebOperations(authoringDir));
     expect(web.entities.Comment!.fields.authorId?.supports).toEqual({ read: true, create: false, update: false });
     expect(web.entities.Relation!.relationships.comments).toMatchObject({ kind: "hasMany", recordField: "authorId" });
     expect(web.entities.Relation!.relationships.comments?.operations.create).toBeUndefined();

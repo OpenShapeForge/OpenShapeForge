@@ -10,7 +10,7 @@ import { bindOperationHandlers, entityPluginOperationContract } from "../runtime
 import { getGeneratedCrudTables } from "./catalog.js";
 import { createEntityPluginExecutor } from "./plugin-executor.js";
 import { entityRecordOfferBinding } from "./runtime.js";
-import type { EntityOperationContract } from "./types.js";
+import type { EntityOperationContract, GeneratedCrudColumn } from "./types.js";
 
 const tenantId = "11111111-1111-4111-8111-111111111111";
 const userId = "22222222-2222-4222-8222-222222222222";
@@ -509,6 +509,117 @@ describe("plugin-backed Entity Operation runtime", () => {
       expect(operationErrorOf(error)?.code).toBe("HANDLER_CONTRACT_VIOLATION");
       expect(invoked).toBe(1);
     } finally {
+      await db.destroy();
+    }
+  });
+
+  test("refuses caller-restricted top-level and nested input before invoking the plugin handler", async () => {
+    const db = database();
+    const platform = new ModulePlatformRuntime(db);
+    const table = relationTable();
+    const originalColumns = table.columns;
+    const policyColumn = (name: string, sourceField: string, fieldPolicy: NonNullable<GeneratedCrudColumn["fieldPolicy"]>): GeneratedCrudColumn => ({
+      name, sourceField, type: "jsonb", required: false, primaryKey: false, generated: null, fieldPolicy,
+    });
+    table.columns = [
+      ...originalColumns,
+      policyColumn("policy_top", "policyTop", { writeRoles: ["Relations.Policy.Write"] }),
+      policyColumn("policy_details", "policyDetails", { children: {
+        secret: { writeRoles: ["Relations.Policy.Write"] },
+        rows: { item: { children: { secret: { writeRoles: ["Relations.Policy.Write"] } } } },
+      } }),
+    ];
+    const base = entityOperation("create");
+    const detailsSchema = { type: "object", properties: {
+      secret: { type: "string" },
+      rows: { type: "array", items: { type: "object", properties: { secret: { type: "string" } } } },
+    } };
+    const operation: EntityOperationContract = {
+      ...base,
+      inputSchema: { ...base.inputSchema, properties: {
+        ...(base.inputSchema!.properties as Record<string, unknown>),
+        policyTop: { type: "object" },
+        policyDetails: detailsSchema,
+        policy_details: detailsSchema,
+      } },
+    };
+    let invoked = 0;
+    const bindings = bindOperationHandlers([{
+      name: "example",
+      operationHandlers: { createRelation: async () => {
+        invoked += 1;
+        return { value: head() };
+      } },
+    }], [entityPluginOperationContract(operation, table)]);
+    const execute = createEntityPluginExecutor({ bindings, runtime: { db, platform: platform.services } });
+    try {
+      for (const [input, path] of [
+        [{ policyTop: {} }, "policyTop"],
+        [{ policyDetails: { secret: "changed" } }, "policyDetails.secret"],
+        [{ policyDetails: { rows: [{ secret: "changed" }] } }, "policyDetails.rows[0].secret"],
+        [{ policy_details: { secret: "changed" } }, "policyDetails.secret"],
+      ] as const) {
+        await expect(execute(session, operation, { displayName: "Valid", ...input })).rejects.toMatchObject({
+          operationError: { code: "FORBIDDEN", message: `Not authorized to change field "${path}".` },
+        });
+        expect(invoked).toBe(0);
+      }
+    } finally {
+      table.columns = originalColumns;
+      await db.destroy();
+    }
+  });
+
+  test("permits privileged stamps only through their owning plugin Entity Operation", async () => {
+    const db = database();
+    const platform = new ModulePlatformRuntime(db);
+    const table = relationTable();
+    const originalColumns = table.columns;
+    const base = entityOperation("create");
+    const stamp = "2026-09-13T10:02:00.000Z";
+    table.columns = [...originalColumns, {
+      name: "policy_stamp", sourceField: "policyStamp", type: "timestamptz", required: false, primaryKey: false, generated: null,
+      writtenBy: [{ operation: base.id, rest: "/api/example/relations" }],
+      fieldPolicy: { writeRoles: ["Relations.Policy.Write"] },
+    }, {
+      name: "policy_details", sourceField: "policyDetails", type: "jsonb", required: false, primaryKey: false, generated: null,
+      fieldPolicy: { children: { stampedAt: { writtenBy: [base.id], writeRoles: ["Relations.Policy.Write"] } } },
+    }];
+    const properties = {
+      policyStamp: { type: "string", format: "date-time" },
+      policyDetails: { type: "object", properties: { stampedAt: { type: "string", format: "date-time" } }, additionalProperties: false },
+    };
+    const operation: EntityOperationContract = {
+      ...base,
+      inputSchema: { ...base.inputSchema, properties: { ...(base.inputSchema!.properties as Record<string, unknown>), ...properties } },
+      outputSchema: { ...base.outputSchema, properties: { ...(base.outputSchema!.properties as Record<string, unknown>), ...properties } },
+    };
+    const foreign = { ...operation, id: "example.relations.foreignCreate" };
+    let invoked = 0;
+    const bindings = bindOperationHandlers([{
+      name: "example",
+      operationHandlers: { createRelation: async (input) => {
+        invoked += 1;
+        return { value: { ...head(), policyStamp: input.policyStamp, policyDetails: input.policyDetails } };
+      } },
+    }], [operation, foreign].map((item) => entityPluginOperationContract(item, table)));
+    const execute = createEntityPluginExecutor({ bindings, runtime: { db, platform: platform.services } });
+    const input = { displayName: "Valid", policyStamp: stamp, policyDetails: { stampedAt: stamp } };
+    const privilegedSession = { ...session, roles: [...session.roles, "Relations.Policy.Write"] };
+    try {
+      await expect(execute(session, operation, input)).rejects.toMatchObject({ operationError: { code: "FORBIDDEN" } });
+      expect(invoked).toBe(0);
+      await expect(execute(privilegedSession, operation, input)).resolves.toMatchObject({
+        id: recordId, policy_stamp: stamp, policy_details: { stampedAt: stamp },
+      });
+      expect(invoked).toBe(1);
+      await expect(execute(privilegedSession, foreign, input)).rejects.toMatchObject({ operationError: { code: "BAD_USER_INPUT" } });
+      await expect(execute(privilegedSession, foreign, { displayName: "Valid", policyDetails: input.policyDetails })).rejects.toMatchObject({
+        operationError: { code: "BAD_USER_INPUT", message: `Field "policyDetails.stampedAt" can only be written by ${operation.id}.` },
+      });
+      expect(invoked).toBe(1);
+    } finally {
+      table.columns = originalColumns;
       await db.destroy();
     }
   });

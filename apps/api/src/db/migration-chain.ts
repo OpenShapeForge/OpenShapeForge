@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { maintenanceJob, drainMaintenanceJobs, acknowledgeMaintenanceFailure } from "../modules/maintenance-jobs.js";
+import type { RunMaintenanceSeed } from "@openshapeforge/plugin-runtime";
 /**
  * The ordered chain that builds a database from the compiled manifest,
  * shared by db:migrate, db:reset and the empty-database bootstrap
@@ -105,6 +107,8 @@ import {
   applyEntityPageConfigsSeed,
   type EntityPageConfigsSeedResult,
 } from "./migrations/entity-page-configs-seed.js";
+import { runRegisteredSeedJob, type InitializedMaintenanceOwner } from "../modules/maintenance.js";
+import type { RuntimeModule } from "../modules/contract.js";
 import type { ModuleSeed } from "../modules/contract.js";
 import type { CatalogSeedResult } from "./migrations/catalog-seed.js";
 
@@ -118,6 +122,10 @@ export type MigrationChainOptions = {
    * every caller that only migrates schema.
    */
   moduleSeeds?: readonly ModuleSeed[];
+  /** Exact installed owners of the contributed seeds. */
+  maintenanceModules?: readonly RuntimeModule[];
+  /** Borrow the API's already-initialised runtime during empty-DB bootstrap. */
+  maintenanceRuntime?: InitializedMaintenanceOwner;
 };
 
 export type MigrationChainResult = GeneratedSchemaMigrationResult & {
@@ -173,10 +181,30 @@ export async function runMigrationChain(
   const pageConfigs = await applyEntityPageConfigsSeed(db);
   const moduleSeeds: Record<string, CatalogSeedResult> = {};
   for (const seed of options.moduleSeeds ?? []) {
-    moduleSeeds[seed.name] = await seed.apply(db, {
-      schemas: { fields: generatedRuntimeFieldSchemas, json: runtimeJsonSchemas },
-      seedDirectory: fileURLToPath(new URL("../../../../authoring/seeds/", import.meta.url)),
-    });
+    let active = true;
+    const pending: ReturnType<typeof maintenanceJob>[] = [];
+    const runSeed: RunMaintenanceSeed = (request, callback) => {
+      if (!active) throw new Error("Maintenance seed callback has finished.");
+      if (!seed.maintenanceOptIn!()) throw new Error("Maintenance seed is not explicitly opted in.");
+      const owners = (options.maintenanceModules ?? []).filter(module => module.seeds?.includes(seed));
+      if (owners.length !== 1) throw new Error("Maintenance seed has no unique installed owner.");
+      const child = runRegisteredSeedJob(owners[0]!, db, seed.name, options.appliedBy ?? "migration", runner => runner(request, callback), options.maintenanceRuntime);
+      const job = maintenanceJob(child); pending.push(job); return job.promise;
+    };
+    Object.defineProperty(runSeed, "acknowledgeFailure", { value: (job: Promise<unknown>) => {
+      if (!active) throw new Error("Maintenance seed callback has finished.");
+      acknowledgeMaintenanceFailure(pending, job);
+    } });
+    Object.freeze(runSeed);
+    try {
+      moduleSeeds[seed.name] = await seed.apply(db, {
+        schemas: { fields: generatedRuntimeFieldSchemas, json: runtimeJsonSchemas },
+        seedDirectory: fileURLToPath(new URL("../../../../authoring/seeds/", import.meta.url)),
+        ...(seed.maintenanceOptIn ? { runSeed } : {}),
+      });
+      active = false;
+      await drainMaintenanceJobs(pending);
+    } finally { active = false; await Promise.allSettled(pending.map(job => job.work)); }
   }
   return {
     ...generated,

@@ -1,6 +1,6 @@
 {
   "name": "@openshapeforge/compiler",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Compiles OpenShapeForge authoring YAML into database, API, UI and Keycloak artifacts. Runs under Bun; see docs/consuming.md in the repository.",
   "//publishConfig": "Published with its operations and interface-web runtime dependencies by .github/workflows/package-compiler.yml on pushes to main (only when a package version does not exist there yet). The registry pin prevents a stray npm publish from landing on npmjs.com.",
   "publishConfig": {
@@ -19,7 +19,7 @@
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
-  "//files": "src is the runtime — there is no build step. config must ship too: schema-validation.ts resolves config/schemas relative to its own module, so a tarball without it fails on the first authoring validation.",
+  "//files": "src is the runtime \u2014 there is no build step. config must ship too: schema-validation.ts resolves config/schemas relative to its own module, so a tarball without it fails on the first authoring validation.",
   "files": [
     "src",
     "config",
@@ -31,8 +31,8 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@openshapeforge/operations": "^0.2.1",
-    "@openshapeforge/interface-web": "^0.2.1",
+    "@openshapeforge/operations": "^0.2.2",
+    "@openshapeforge/interface-web": "^0.2.2",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "ejs": "^5.0.1",

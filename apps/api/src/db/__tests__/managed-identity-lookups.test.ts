@@ -13,6 +13,7 @@ const url = new URL(adminUrl);
 url.pathname = `/${name}`;
 const db = new SQL(url.toString(), { max: 1 });
 const id = "00000000-0000-4000-8000-000000000001";
+const otherId = "00000000-0000-4000-8000-000000000002";
 const resolverRole = databaseRole("identityResolver").name;
 
 beforeAll(async () => {
@@ -23,9 +24,12 @@ beforeAll(async () => {
   await db.unsafe(`
     create schema app;
     create schema platform;
+    create function app.current_tenant() returns uuid language sql stable as
+      $$ select nullif(current_setting('app.tenant_id', true), '')::uuid $$;
     create table platform.tenants(id uuid, keycloak_realm text, keycloak_organization_id text);
     create table platform.identities(id uuid, subject text);
     insert into platform.tenants values ('${id}', 'test', 'org');
+    insert into platform.tenants values ('${otherId}', 'test', 'other-org');
     insert into platform.identities values ('${id}', 'subject');
     alter table platform.tenants enable row level security;
     alter table platform.tenants force row level security;
@@ -42,7 +46,7 @@ beforeAll(async () => {
   // Exercise the shipped definitions, including SECURITY DEFINER and fixed
   // search_path, as a restricted managed-database migrator.
   const source = await Bun.file(new URL("../migrations/identity-link.ts", import.meta.url)).text();
-  for (const fn of ["tenant_for_keycloak_organization", "identity_subject"]) {
+  for (const fn of ["tenant_for_keycloak_organization", "tenant_for_scoped_service", "identity_subject"]) {
     const start = source.indexOf(`create or replace function app.${fn}(`);
     const end = source.indexOf("$fn$;", start) + 5;
     if (start < 0 || end < start) throw new Error("Missing lookup definition");
@@ -51,6 +55,7 @@ beforeAll(async () => {
   await db.unsafe(`
     grant create on schema app to ${resolverRole};
     alter function app.tenant_for_keycloak_organization(text, text) owner to ${resolverRole};
+    alter function app.tenant_for_scoped_service(uuid, text) owner to ${resolverRole};
     alter function app.identity_subject(uuid) owner to ${resolverRole};
     revoke create on schema app from ${resolverRole};
   `);
@@ -71,6 +76,13 @@ for (const value of ["", "false"]) {
     await db.begin(async (tx) => {
       await tx`select set_config('app.bypass_rls', ${value}, true)`;
       expect((await tx`select app.tenant_for_keycloak_organization('test','org') as value`)[0].value).toBe(id);
+      await tx`select set_config('app.tenant_id', ${id}, true)`;
+      expect((await tx`select app.tenant_for_scoped_service(${id}::uuid, 'test') as value`)[0].value).toBe(id);
+      expect((await tx`select app.tenant_for_scoped_service(${otherId}::uuid, 'test') as value`)[0].value).toBeNull();
+      expect((await tx`select app.tenant_for_scoped_service(${id}::uuid, 'other') as value`)[0].value).toBeNull();
+      expect((await tx`select app.tenant_for_scoped_service(null, 'test') as value`)[0].value).toBeNull();
+      await tx`select set_config('app.tenant_id', '', true)`;
+      expect((await tx`select app.tenant_for_scoped_service(${id}::uuid, 'test') as value`)[0].value).toBeNull();
       await tx`select set_config('app.user_id', 'subject', true)`;
       expect((await tx`select app.identity_subject(${id}::uuid) as value`)[0].value).toBe(true);
       await tx`select set_config('app.user_id', 'someone-else', true)`;

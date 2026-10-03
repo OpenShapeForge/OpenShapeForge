@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 // Derived from Keycloak 26.7.3 (Apache-2.0). Only label confirmation is removed.
 import { base64url } from "rfc4648";
 

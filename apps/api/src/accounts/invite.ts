@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import type { ModuleOperationHandler } from "../modules/contract.js";
 import { inviteEmployee, type EmployeeInvitationRole } from "../auth/employee-invitations.js";
 import { HttpError } from "../rest/http-error.js";

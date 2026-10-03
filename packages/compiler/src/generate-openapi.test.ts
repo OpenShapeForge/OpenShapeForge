@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
+import Ajv2020 from "ajv/dist/2020.js";
 import type {
   CompiledEntityContract,
   CompiledField,
@@ -533,6 +534,20 @@ describe("rich generated REST OpenAPI", () => {
     expect(
       generated.paths["/api/rest/v1/relations/{id}"]?.delete?.responses,
     ).not.toHaveProperty("204");
+  });
+
+  it("validates extensible canonical operation offers without accepting malformed intents", () => {
+    const schemas = spec().components.schemas;
+    const validate = new Ajv2020.default({ strict: false, validateFormats: false }).compile({
+      components: { schemas }, $ref: "#/components/schemas/OperationOffer",
+    });
+    for (const intent of ["list", "invoke", "plugin.custom"]) {
+      expect(validate({ operation: { id: "Relation.example", intent }, available: true })).toBe(true);
+      expect(validate({ operation: { id: "Relation.example", intent }, available: false,
+        error: { code: "FORBIDDEN", message: "Unavailable", retryable: false } })).toBe(true);
+    }
+    expect(validate({ operation: { id: "Relation.example", intent: 42 }, available: true })).toBe(false);
+    expect(validate({ operation: { id: "Relation.example", intent: "invoke" }, available: false })).toBe(false);
   });
 
   it("documents canonical v2 mutation policy failures with the shared envelope", () => {

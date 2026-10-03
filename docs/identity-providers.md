@@ -217,11 +217,24 @@ The consequence for anyone administering a realm: a client role granted to a
 **user** in Keycloak is user-wide and is therefore never read for a person's
 session. It would otherwise apply in every organization the account is a
 member of, which is the cross-organization escalation this design closes.
-Realm roles remain issuer-wide grants for operator-level rights (`Platform.*`),
-and service accounts — configured service identities and the per-tenant
-API-key clients — keep their client roles, because their clients belong to one
-tenant. A federated login changes none of this: the broker admits the person
-to the realm, the organization's invitation admits them to the organization.
+Realm roles are read differently: **every** realm role in the token is added to
+the person's roles in **every** organization they sign in to. No prefix filter
+applies, so the realm-role list is meant for operator-level rights
+(`Platform.*`) only — a realm role named like an organization role would hold
+in every organization the account is a member of. The generated realms define
+no realm roles. Service accounts — configured service identities and the
+per-tenant API-key clients — keep their client roles, because their clients
+belong to one tenant.
+
+A federated login changes none of this: the broker admits the person to the
+realm, and the organization admits them in one of two ways
+(`apps/api/src/auth/identity-link.ts`). Either an organization administrator
+invited the token's e-mail address, or a Relation in the organization already
+carries that address; in the second case no invitation is needed, the
+identity is recorded as a pending candidate for that Relation, and the person
+links to it by confirming (`confirm_my_link`). The match uses the `email` claim
+as the token carries it. See [mcp.md](mcp.md#identities-and-relations) for the
+link states.
 
 ## How a human signs in: passkeys, and how a federated login fits
 

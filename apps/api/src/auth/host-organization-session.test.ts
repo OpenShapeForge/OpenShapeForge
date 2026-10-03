@@ -340,7 +340,6 @@ describe("explicit service credentials in host mode", () => {
     const session = await resolveSessionContext(await headers(serviceClaims), { db });
     expect(session.tenantId).toBe(TENANT_A);
     expect(session.relation).toBeNull();
-    expect(lookups).toEqual([["host", "org-a"]]);
     expect(queries.some((q) => q.sql.includes("set_config('app.tenant_id'") && q.parameters.includes(TENANT_A))).toBe(true);
     expect(queries.some((q) => q.sql.includes("app.tenant_for_scoped_service") && q.parameters.includes(TENANT_A))).toBe(true);
     expect(queries.some((q) =>

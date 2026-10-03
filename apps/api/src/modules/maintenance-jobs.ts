@@ -3,14 +3,11 @@
 export function maintenanceJob<T>(work: Promise<T>) {
   let observed = false;
   class ObservedJob extends Promise<T> {
-    static get [Symbol.species]() {
-      return Promise;
-    }
     override then<TResult1 = T, TResult2 = never>(
       fulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
       rejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
     ): Promise<TResult1 | TResult2> {
-      observed = true;
+      if (typeof rejected === "function") observed = true;
       return super.then(fulfilled, rejected);
     }
   }

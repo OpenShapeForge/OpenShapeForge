@@ -1,8 +1,9 @@
 # Capability grants
 
 A **capability grant** is a hashed, expiring, recipient-bound token that lets
-someone *without an account* invoke a fixed set of Operations on exactly one
-record: a customer who receives a link, opens a document and accepts or signs
+someone *without an account* invoke a fixed set of Operations on one subject
+record, plus any records the issuer explicitly delegates (at most sixteen; see
+below): a customer who receives a link, opens a document and accepts or signs
 it; a contact who answers a request. The plugin that owns the record decides
 which Operations a recipient gets; core owns the token, its resolution, the
 attempt limits and the audit trail. Once issued, nothing a plugin does with a
@@ -238,6 +239,11 @@ grant), `capability_grant_locked` (attempts, `locked_until`) and
 `capability_grant_revoked` (reason, and `supersededBy` when a newer grant
 caused it). A wrong secret that does not reach the lock is not journaled.
 
+The journal is append-only by convention, not by the database: its policy
+isolates tenants but allows every command, so the trail is only as reliable as
+the code that runs as the application role (see
+[api.md](api.md#the-entity-event-journal)).
+
 ## Housekeeping
 
 Expired, consumed and revoked rows are inert — resolution refuses them — but
@@ -245,4 +251,4 @@ a table nobody deletes from grows without bound. `purgeCapabilityGrants(db,
 session, { retainDays })` removes rows whose expiry or revocation is older
 than the window (default thirty days); the audit trail stays in the journal.
 There is no scheduler in the API that calls it; see
-[retention.md](retention.md#runtime-enforcement-not-implemented-follow-up).
+[retention.md](retention.md#runtime-enforcement).

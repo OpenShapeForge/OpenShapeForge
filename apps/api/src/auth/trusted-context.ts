@@ -34,9 +34,10 @@ export type SessionCredential =
   | "control-bearer"
   /**
    * A capability grant resolved by core for an `auth.mode: capability`
-   * Operation: a tenant, no user, no roles, and exactly the Operations and
-   * the one record the grant names (`grant`). Only those Operations accept
-   * it; a session Operation refuses it like an unauthenticated call.
+   * Operation: a tenant, no user, no roles, and exactly the Operations, the
+   * subject record and the delegated records the grant names (`grant`). Only
+   * those Operations accept it; a session Operation refuses it like an
+   * unauthenticated call.
    */
   | "grant";
 

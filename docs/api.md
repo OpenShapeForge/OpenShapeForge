@@ -787,8 +787,10 @@ visibility.
 **4. Capability grants** — `Authorization: Grant <grantId>.<secret>`, accepted
 only by Operations declared with `auth.mode: capability`. Not a session
 resolver path: the operations runtime resolves the token into a grant
-session with a tenant, no user and no roles, so a grant reaches exactly the
-Operations it lists on exactly one record, and nothing else on this surface.
+session with a tenant, no user and no roles, so a grant reaches only the
+Operations it lists, on its subject record and on the records it delegates (at
+most sixteen, each for the intents written on the grant), and nothing else on
+this surface.
 See [capability-grants.md](capability-grants.md).
 
 ## The entity-event journal
@@ -830,7 +832,11 @@ notification presentation are outside this transport.
 There is **no general API query**
 over the journal; `listEntityEvents` exists in code and is used by the e2e
 suite reading Postgres directly through the same RLS session layer. The
-journal is append-only by design (`test:perf` runs accumulate rows).
+journal is append-only by convention: no core path deletes events
+(`test:perf` runs accumulate rows), and the only core update assigns the
+delivery cursor. The database does not enforce it — the tenant-isolation
+policy on `platform.entity_events` covers all commands, so code running as the
+application role can update or delete its own tenant's events.
 
 ## Environment configuration
 

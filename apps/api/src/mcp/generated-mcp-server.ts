@@ -68,8 +68,7 @@ import { createTransportSessions } from "./transport-sessions.js";
 import { registerSessionWithPlatform } from "./platform-registration.js";
 import { registerSessionExecutors } from "./session-executors.js";
 import { createDispatchTool } from "./tool-dispatcher.js";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { Server } from "@modelcontextprotocol/server";
 import type { FastifyInstance } from "fastify";
 import { buildAuthenticateChallenge } from "./protected-resource-metadata.js";
 import { MCP_MOUNT_PATH, ORGANIZATION_MCP_ROUTES } from "./organization-resource.js";
@@ -168,7 +167,7 @@ export function buildServer(
   /** @internal Test-only projection override. */
   operationToolProjectionOverride?: OperationToolProjection,
   /** Already validated, tenant-scoped initialize presentation metadata. */
-  serverIcons?: import("@modelcontextprotocol/sdk/types.js").Icon[],
+  serverIcons?: import("@modelcontextprotocol/server").Icon[],
 ): Server {
   const scope = createServerScope({
     db, session, modules, modulePlatform, egressOwner, onDerivedDefinitionChanged,
@@ -180,11 +179,11 @@ export function buildServer(
 
   const dispatchTool = createDispatchTool(scope, surface);
 
-  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+  server.setRequestHandler('tools/call', async (request, ctx) => {
     const outcome = await dispatchTool(
       request.params.name,
       (request.params.arguments ?? {}) as Record<string, unknown>,
-      extra.requestId,
+      ctx.mcpReq.id,
       false,
     );
     return outcome.result;

@@ -19,7 +19,7 @@ import { serializeRow } from "./catalog-rows.js";
 import { sessionMayInvoke } from "./session-projection.js";
 import { runtimeRowByFilter, runtimeRowsByFilter } from "./session-connections.js";
 import { type ToolResult, failed, ok } from "./tool-results.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { DirectCallScope } from "./tool-dispatch.js";
 
 /**

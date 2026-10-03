@@ -7,6 +7,7 @@ import { describe, expect, it } from "bun:test";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import {
   clientInfoFromInitializeBody,
+  clientInfoFromEnvelopeBody,
   connectedViaLabel,
   rememberSessionClient,
   sessionClientOf,
@@ -27,6 +28,20 @@ const session = (): TrustedSessionContext => ({
   groups: [],
   scope: "tenant",
   credential: "bearer",
+});
+
+describe("clientInfoFromEnvelopeBody", () => {
+  it("reads current modern request display facts without requiring initialize", () => {
+    expect(clientInfoFromEnvelopeBody({ method: "tools/list", params: { _meta: {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientInfo": { name: "workflow-agent", version: "2" },
+      "io.modelcontextprotocol/clientCapabilities": { elicitation: {}, extensions: {} },
+    } } })).toEqual({ name: "workflow-agent", version: "2", capabilities: ["elicitation", "extensions"] });
+  });
+  it("keeps absent or malformed introductions out of the session", () => {
+    expect(clientInfoFromEnvelopeBody({ params: { _meta: { "io.modelcontextprotocol/clientInfo": { name: " " } } } })).toBeNull();
+    expect(clientInfoFromEnvelopeBody({ params: { clientInfo: { name: "unscoped" } } })).toBeNull();
+  });
 });
 
 describe("clientInfoFromInitializeBody", () => {

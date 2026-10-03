@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import { compareCodeUnits } from "@openshapeforge/operations";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
-import { type Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { Tool } from "@modelcontextprotocol/server";
 import { deriveToolName } from "./derived-tools.js";
 import { localizedText, type ResolvedLocale } from "./locale.js";
 import {

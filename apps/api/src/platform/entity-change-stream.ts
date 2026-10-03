@@ -11,6 +11,7 @@ import { mapEntityEvent, type EntityEventRecord } from "./entity-events.js";
 export const REPLAY_WINDOW_MS = 24 * 60 * 60 * 1000;
 export type ResourceChange = { entity: string; id: string; change: "created" | "updated" | "deleted"; version?: string };
 export type ChangeBatch = { cursor: string; reset: boolean; changes: Array<{ cursor: string; data: ResourceChange }> };
+export type ResourceChangeAuthorizer = (session: DbSessionInput, entity:string, id:string) => Promise<boolean>;
 
 export function parseStreamCursor(value: unknown): string | undefined {
   if (value === undefined) return undefined;
@@ -31,10 +32,15 @@ function eventTable(event: EntityEventRecord): GeneratedCrudTable | undefined {
   ));
 }
 
-async function projectChange(trx: Transaction<DB>, session: DbSessionInput, event: EntityEventRecord): Promise<ResourceChange | undefined> {
+async function projectChange(trx: Transaction<DB>, session: DbSessionInput, event: EntityEventRecord, authorizeResource?:ResourceChangeAuthorizer): Promise<ResourceChange | undefined> {
   if (!["created", "updated", "deleted"].includes(event.eventType)) return;
   const table = eventTable(event);
-  if (!table?.realtime || !table.primaryKey || !table.source?.authoringEntityName) return;
+  if (!table) {
+    // Private resources have no tombstone policy; never disclose a deletion.
+    if (event.eventType!=="deleted" && authorizeResource && await authorizeResource(session,event.aggregateType,event.aggregateId)) return {entity:event.aggregateType,id:event.aggregateId,change:event.eventType as ResourceChange["change"]};
+    return;
+  }
+  if (!table.realtime || !table.primaryKey || !table.source?.authoringEntityName) return;
   try { requireEntityOperation(table, "get", session); } catch { return; }
 
   const payload = event.payload as Record<string, unknown> | null;
@@ -61,7 +67,7 @@ async function projectChange(trx: Transaction<DB>, session: DbSessionInput, even
 }
 
 /** Each poll is a short transaction, shared by every API replica through the journal. */
-export async function readChangeBatch(db: OpenShapeForgeDatabase, session: DbSessionInput, cursor?: string, validateCursor = true): Promise<ChangeBatch> {
+export async function readChangeBatch(db: OpenShapeForgeDatabase, session: DbSessionInput, cursor?: string, validateCursor = true, authorizeResource?:ResourceChangeAuthorizer): Promise<ChangeBatch> {
   return withDbSession(db, session, async trx => {
     // Writers never acquire this lock. Only committed journal rows receive a
     // delivery cursor, so a slow transaction cannot be skipped or deadlock a writer.
@@ -98,7 +104,7 @@ export async function readChangeBatch(db: OpenShapeForgeDatabase, session: DbSes
     const changes: ChangeBatch["changes"] = [];
     for (const row of rows) {
       const event = { ...mapEntityEvent(row), sequence: row.delivery_sequence! };
-      const data = await projectChange(trx, session, event);
+      const data = await projectChange(trx, session, event, authorizeResource);
       if (data) changes.push({ cursor: event.sequence, data });
     }
     return { cursor: rows.at(-1)?.delivery_sequence ?? cursor, reset: false, changes };

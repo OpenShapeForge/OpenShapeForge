@@ -24,7 +24,7 @@
  *     would silently reopen the channel this exists to close.
  */
 import { localizedText, type ResolvedLocale } from "./locale.js";
-import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import type { Server } from "@modelcontextprotocol/server";
 import { HttpError } from "../rest/http-error.js";
 import {
   encryptSecret,

@@ -16,6 +16,7 @@
  * never a reason to allow or refuse anything.
  */
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
+import { CLIENT_CAPABILITIES_META_KEY, CLIENT_INFO_META_KEY } from "@modelcontextprotocol/server";
 
 export type McpClientInfo = {
   /** `clientInfo.name` as sent, e.g. "claude-desktop", "Claude Code". */
@@ -63,6 +64,18 @@ export function clientInfoFromInitializeBody(body: unknown): McpClientInfo | nul
     };
   }
   return null;
+}
+
+/** Modern clients introduce themselves in each request's protocol envelope. */
+export function clientInfoFromEnvelopeBody(body: unknown): McpClientInfo | null {
+  const params = record(record(body)?.params);
+  const meta = record(params?._meta);
+  const clientInfo = record(meta?.[CLIENT_INFO_META_KEY]);
+  const name = nonEmptyString(clientInfo?.name);
+  if (!name) return null;
+  const capabilities = record(meta?.[CLIENT_CAPABILITIES_META_KEY]);
+  return { name, version: nonEmptyString(clientInfo?.version),
+    capabilities: capabilities ? Object.keys(capabilities).sort() : [] };
 }
 
 // Keyed by the session context object for the same reason the identities

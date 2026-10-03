@@ -12,7 +12,7 @@
  * them onto the Service and `derivedToolResult` can hand them to the model.
  */
 import { OperationFailure, type OperationError } from "@openshapeforge/operations";
-import { type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import { isConnectionProblemCode } from "./connection-guidance.js";
 import type {

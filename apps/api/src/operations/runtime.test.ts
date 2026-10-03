@@ -2,9 +2,9 @@
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { describe, expect, test } from "bun:test";
 import { Readable } from "node:stream";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
+import type { Server } from "@modelcontextprotocol/server";
+import { Client } from "@modelcontextprotocol/client";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import { operationFailure } from "@openshapeforge/operations";
 import documentsPluginRuntime from "@openshapeforge/documents/runtime";
@@ -1012,6 +1012,41 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
     if (previousIssuer === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
     else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = previousIssuer;
     __resetSessionResolverForTests();
+  }
+});
+
+test("the canonical catalog exposes a custom delivery key and keyed replay preserves it", async () => {
+  const db = testDatabase();
+  const platform = new ModulePlatformRuntime(db);
+  const operation: OperationContract = { ...restOperation,
+    key: "demo.notification.send",
+    inputSchema: { type: "object", required: ["message", "deliveryKey"],
+      properties: { message: { type: "string" }, deliveryKey: { type: "string" } }, additionalProperties: false },
+    outputSchema: { type: "object", required: ["call"], properties: { call: { type: "number" } }, additionalProperties: false },
+    idempotency: { mode: "idempotency-key", header: "Idempotency-Key", inputField: "deliveryKey" },
+  };
+  const seen: unknown[] = [];
+  const module: RuntimeModule = { name: "demo", operationHandlers: { publishQuote: async input => {
+    seen.push(input);
+    return { value: { call: seen.length } };
+  } } };
+  platform.registerStaticOperations(runtimeStaticOperationRegistrations([module], { db, platform: platform.services }, [operation]));
+  try {
+    await platform.withActiveOperationSession({ ...session, roles: ["quote-publisher"] }, async active => {
+      const definition = await platform.services.operations.get(active, operation.key);
+      expect(definition?.reliability.idempotency).toEqual({ mode: "keyed", inputField: "deliveryKey" });
+      const request = { operation: { id: operation.key, intent: "invoke" },
+        input: { message: "Approval requested", deliveryKey: "logical-delivery" }, idempotencyKey: "logical-delivery" };
+      const first = await platform.services.operations.execute(active, request);
+      expect(first).toEqual({ data: { call: 1 }, operations: [] });
+      expect(await platform.services.operations.execute(active, request)).toEqual(first);
+      expect(seen).toEqual([request.input]);
+      expect(await platform.services.operations.execute(active, { ...request, idempotencyKey: "different-visit-key" }))
+        .toMatchObject({ error: { code: "BAD_USER_INPUT", retryable: false } });
+      expect(seen).toHaveLength(1);
+    });
+  } finally {
+    await db.destroy();
   }
 });
 

@@ -6,6 +6,7 @@
  * stream has its own bucket, and anything unverifiable stays per IP.
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { Registry } from "@openshapeforge/observability";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { __resetBearerVerifiersForTests } from "../../auth/bearer-verifier.js";
@@ -167,4 +168,18 @@ describe("the API boundary", () => {
     const stream = await app.inject({ method: "GET", url: "/api/events", headers: person });
     expect(stream.statusCode).not.toBe(429);
   });
+});
+
+// Numeric proxy depth stays an exact trust boundary with the current Fastify API.
+describe("forwarded address trust depth", () => {
+  for (const [depth, expected] of [["0", "127.0.0.1"], ["1", "10.0.0.2"], ["2", "203.0.113.1"]] as const) {
+    test(`trusts exactly ${depth} proxy hops`, async () => {
+      setEnv("API_TRUST_PROXY", depth);
+      app = createApiApp({ cors: false, metricsRegistry: new Registry() });
+      app.get("/proxy-proof", request => ({ ip: request.ip }));
+      const response = await app.inject({ method: "GET", url: "/proxy-proof",
+        remoteAddress: "127.0.0.1", headers: { "x-forwarded-for": "203.0.113.1, 10.0.0.2" } });
+      expect(response.json<{ ip: string }>().ip).toBe(expected);
+    });
+  }
 });

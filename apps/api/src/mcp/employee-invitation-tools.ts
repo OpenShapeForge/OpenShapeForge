@@ -16,7 +16,7 @@
  * the MCP server (session-surface.ts, dispatch-platform-tools.ts) by delimited hunks next to the identity-link ones,
  * following the exact shape of mcp/identity-link-tools.ts.
  */
-import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/server";
 import {
   EMPLOYEE_INVITATION_ADMIN_ROLE,
   inviteEmployee,

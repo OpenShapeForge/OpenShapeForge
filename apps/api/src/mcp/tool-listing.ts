@@ -9,7 +9,7 @@ import {
   uploadToolDefinition,
 } from "@openshapeforge/operations";
 import { GENERIC_DESCRIBE_TOOL_NAME } from "@openshapeforge/operations";
-import { ListToolsRequestSchema, type Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { Tool } from "@modelcontextprotocol/server";
 import { derivedHelperAvailable } from "./derived-tools.js";
 import { ARTIFACT_UPLOAD_APP_URI } from "./artifact-upload.js";
 import { productName } from "../config/product-name.js";
@@ -218,7 +218,7 @@ export function createToolListing(scope: ServerScope) {
     return decorated as ListedTool[];
   };
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  server.setRequestHandler('tools/list', async () => ({
     tools: (await listedTools()).map((entry) => entry.tool),
   }));
 

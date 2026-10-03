@@ -38,7 +38,9 @@ that policy; the shared CRUD service enforces the same decision at invocation.
 
 ## Endpoint
 
-`POST /api/mcp` — Streamable HTTP transport with short-lived stateful sessions
+`POST /api/mcp` serves MCP revision `2026-07-28` with the v2 TypeScript SDK,
+using a fresh authenticated context per request. Existing `initialize` clients
+keep their Streamable HTTP transport with short-lived stateful sessions
 for server-initiated elicitation. The Helm chart therefore enables ClientIP
 session affinity by default so successive requests reach the replica holding
 the MCP transport session. Browser OAuth and configuration handoffs are stored
@@ -46,6 +48,32 @@ encrypted in the database and can resume on any replica. Authentication is the
 same bearer token, customer-provisioned API key, or signed trusted-context
 headers every other transport takes; an unauthenticated request is `401` before
 any dispatch.
+
+The official SDK classifies modern envelope requests before sessionful legacy
+dispatch. A modern request never inherits the principal or roles of an earlier
+request. Discovery, resources, tools, and the control MCP all use the same
+canonical authorization and Operation projection.
+
+## Agent Skills
+
+Runtime plugins may ship static `agentSkills` contributions through the public
+plugin-runtime contract. Each contribution includes a skill path, complete text
+file manifest, and optional role allowlist. The path must end in the name from
+the entrypoint's YAML frontmatter. Files are plugin-owned documentation; tenant
+rows are never automatically treated as agent instructions.
+
+The MCP server declares the released `io.modelcontextprotocol/skills` extension
+and implements `skills/list` and `skills/get`. Files are ordinary resources
+readable with `resources/read`, so existing clients can also read them. Each
+manifest preserves the full entrypoint frontmatter and supplies SHA256 digests
+and UTF-8 byte sizes for every file. Skills and their direct resource reads use
+the same session role filter. Hidden skill URIs stay reserved against another
+module's resource contribution. Relative skill references resolve within the
+skill directory, and no filesystem path is opened from a client-supplied URI.
+
+Server instructions point to the skills visible to the session. Loading and
+approval remain the client host's responsibility; reading an ordinary resource
+does not grant any new execution authority.
 
 For ordinary configuration data (a `create_connection` for an Adapter, or any
 create Operation with a secure-input `interaction`), the runtime preserves

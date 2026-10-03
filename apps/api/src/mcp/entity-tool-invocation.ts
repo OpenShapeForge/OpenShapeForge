@@ -14,7 +14,7 @@ import {
   requireId,
 } from "./entity-tool-guards.js";
 import { OperationFailure } from "@openshapeforge/operations";
-import { type Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { Tool } from "@modelcontextprotocol/server";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import {

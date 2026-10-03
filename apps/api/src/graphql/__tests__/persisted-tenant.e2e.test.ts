@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Persisted operations against live tenant data: the compiled manifest's
- * `Get<Entity>` and `Delete<Entity>` documents drive a real row through the
- * persisted endpoint, and cross-tenant isolation holds there too.
+ * Persisted operations against live tenant data: current canonical Get/Delete
+ * documents drive a real row through a fixture client's persisted deployment,
+ * and cross-tenant isolation holds there too.
  *
- * The entity is chosen by what the manifest actually persists — the first
- * GraphQL table with both documents — not by position. The readers come from
- * e2e/gql-shapes.ts.
+ * The fixture derives its documents from the compiled entity/Operation catalog.
+ * The readers come from e2e/gql-shapes.ts.
  */
 import { expect } from "bun:test";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { getOperationAST, parse } from "graphql";
-import persistedManifest from "../../generated/graphql/persisted-operations.json" with { type: "json" };
-import { createApiApp } from "../../roles/api.js";
+import { persistedOperationFixture } from "./persisted-fixture.js";
+import compiledManifest from "../../generated/graphql/persisted-operations.json" with { type: "json" };
+import type { PersistedOperationManifest } from "../yoga.js";
 import {
   createRow,
   graphqlTables as tables,
   untrackRow,
 } from "./e2e/entity-factory.js";
-import { deletedOf, deleteVariables, recordOf } from "./e2e/gql-shapes.js";
+import { deletedOf, deleteVariables, recordOf, getDoc, deleteDoc } from "./e2e/gql-shapes.js";
 import {
   describe,
   registerSuiteLifecycle,
@@ -26,28 +26,44 @@ import {
   tenantA,
   tenantB,
   test,
+  apiApp,
+  registerPersistedFixture,
   type GqlResponse,
   type Identity,
 } from "./e2e/harness.js";
-import { acquireLease, isEntityBackedCreate } from "./e2e/operations.js";
+import { acquireLease, isEntityBackedCreate, operationContractFor, challengeFieldFor } from "./e2e/operations.js";
+import { isGeneratedCrudOperationEnabled } from "../generated-crud.js";
 
 registerSuiteLifecycle();
 
 const contextSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET!;
+const fixtureTables = tables.filter(table =>
+  (["create", "get", "delete"] as const).every(intent => isGeneratedCrudOperationEnabled(table, intent))
+  && isEntityBackedCreate(table)
+  && (["create", "get", "delete"] as const).every(intent => !operationContractFor(table, intent)?.prerequisites?.length)
+  && !challengeFieldFor(table, "delete"));
+// A headless host intentionally emits an empty persisted catalog. This suite
+// represents its own first-party client using the current canonical documents.
+// Interactive provider setup and typed destructive confirmation belong to
+// their bearer-login journeys, rather than this trusted tenant-isolation case.
+const persistedFixture = remoteUrl
+  ? compiledManifest as PersistedOperationManifest
+  : persistedOperationFixture(fixtureTables.flatMap(table => [
+  getDoc(table).replace(/^query/, `query Get${table.source!.graphql!.typeName}`),
+  deleteDoc(table).replace(/^mutation/, `mutation Delete${table.source!.graphql!.typeName}`),
+]));
+const persistedOperations = persistedFixture.operations;
+if (!remoteUrl) registerPersistedFixture(persistedFixture);
 
-const persistedEntries = Object.entries(persistedManifest.operations).map(([hash, query]): [string, string] => {
-  if (typeof query !== "string") throw new Error(`Persisted operation ${hash} has no query document.`);
-  return [hash, query];
-});
 const persistedNames = new Set(
-  persistedEntries.flatMap(([, query]) => {
+  Object.values(persistedOperations).flatMap((query) => {
     const name = getOperationAST(parse(query))?.name?.value;
     return name ? [name] : [];
   }),
 );
 
 /** The first entity the manifest persists a Get and a Delete for. */
-const table = tables.find(
+const table = fixtureTables.find(
   (candidate) =>
     isEntityBackedCreate(candidate) &&
     persistedNames.has(`Get${candidate.source!.graphql!.typeName}`) &&
@@ -55,7 +71,7 @@ const table = tables.find(
 );
 
 function operation(operationName: string): { hash: string; query: string } {
-  const candidates = persistedEntries
+  const candidates = Object.entries(persistedOperations)
     .filter(([, query]) => getOperationAST(parse(query))?.name?.value === operationName)
     .sort((left, right) => left[1].length - right[1].length);
   const [hash, query] = candidates[0] ?? [];
@@ -84,21 +100,14 @@ async function requestPersisted(
     });
     return response.json() as Promise<GqlResponse>;
   }
-  const app = createApiApp({
-    cors: false,
-    databaseUrl: process.env.DATABASE_URL!,
+  const app = await apiApp();
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/graphql/persisted",
+    headers: Object.fromEntries(headers),
+    payload,
   });
-  try {
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/graphql/persisted",
-      headers: Object.fromEntries(headers),
-      payload,
-    });
-    return response.json() as GqlResponse;
-  } finally {
-    await app.close();
-  }
+  return response.json() as GqlResponse;
 }
 
 describe("persisted operations with live tenant data", () => {

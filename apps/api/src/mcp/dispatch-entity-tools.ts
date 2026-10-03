@@ -6,7 +6,7 @@ import { type CatalogTool, catalog } from "./catalog.js";
 import { requireArguments } from "./entity-tool-guards.js";
 import { describeGenericEntity, resolveCrudTool } from "./generic-tool-projection.js";
 import { failed, ok } from "./tool-results.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { DirectCallScope } from "./tool-dispatch.js";
 import { derivedToolCall } from "./dispatch-derived-tool.js";
 import { crudToolCall } from "./dispatch-crud-tool.js";

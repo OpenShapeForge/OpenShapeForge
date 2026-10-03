@@ -26,7 +26,7 @@ import {
   urlSafeConnectionValues,
 } from "./session-connections.js";
 import { ok } from "./tool-results.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { DirectCallScope } from "./tool-dispatch.js";
 /** What one provider's sign-in step reads beyond the call: the derived entry and what the connect call resolved before the loop. */
 export type ConnectProviderScope = DirectCallScope & {

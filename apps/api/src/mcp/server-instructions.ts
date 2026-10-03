@@ -229,6 +229,8 @@ export type ServerInstructionsInput = {
   vocabulary?: ReadonlyArray<VocabularyEntry>;
   locale: ResolvedLocale;
   client: McpClientInfo | null;
+  /** Session-visible skills shipped by the active runtime plugins. */
+  skills?: ReadonlyArray<{ uri: string; description: string }>;
 };
 
 /**
@@ -263,6 +265,9 @@ export function buildServerInstructions(input: ServerInstructionsInput): string 
     // ---- end the opening sentence ----
     INSTRUCTIONS +
     oauthRedirectSentence(input) +
+    ((input.skills?.length ?? 0) > 0
+      ? ` Agent Skills — read the relevant skill before managing its subject: ${input.skills!.map((skill) => `${skill.uri} (${skill.description})`).join("; ")}. Skills files are readable with resources/read; extension-aware clients can verify their manifest with skills/get.`
+      : "") +
     // ---- data acquisition guidance (the constant above) ----
     DATA_ACQUISITION_GUIDANCE +
     // ---- end data acquisition guidance ----

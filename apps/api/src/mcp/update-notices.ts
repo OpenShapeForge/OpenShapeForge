@@ -60,7 +60,7 @@
  * it is unit-tested without a database or a server.
  */
 import { ownedByActingRelation } from "../db/acting-relation.js";
-import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/server";
 import { sql } from "kysely";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";

@@ -57,7 +57,9 @@ import {
   type LeaseProtectedOperation,
   validateEntityVersionInTransaction,
 } from "./entity/edit-leases.js";
+import { withConsumedCollectionLeaseInTransaction } from "./entity/collection-lease-context.js";
 import { getGeneratedCrudTables } from "./entity/catalog.js";
+import { applyOwnedEntityFields, assertOwnedTarget, captureOwnedTarget } from "./entity/owned-fields.js";
 import { getEntityOperationOffers } from "./entity/runtime.js";
 import { entityBusinessUnavailability } from "./entity/availability.js";
 import type { EntityOperationContract, GeneratedCrudTable } from "./entity/types.js";
@@ -406,6 +408,9 @@ function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
           : entry.operation.idempotency.mode === "idempotency-key"
             ? "keyed"
             : "none",
+        ...(entry.operation.idempotency.mode === "idempotency-key" && entry.operation.idempotency.inputField
+          ? { inputField: entry.operation.idempotency.inputField }
+          : {}),
       },
     },
     ...(entry.operation.prerequisites
@@ -1071,6 +1076,11 @@ async function invokeGuardedCustomOperation(
         if (!decision.available) throw operationFailure(decision.error);
       }
       if (leaseToken && expectedVersion) {
+        if (operation.implementation?.type === "collection") {
+          return withConsumedCollectionLeaseInTransaction(trx, context.session!, {
+            operation: protectedOperation, targetId: targetValue, expectedVersion, leaseToken,
+          }, () => invokeHandler(customHandlerInput(operation, input)));
+        }
         await consumeEntityEditLeaseInTransaction(trx, context.session!, {
           operation: protectedOperation,
           targetId: targetValue,
@@ -1223,6 +1233,7 @@ export async function invokeOperation(
   options: InvokeOperationOptions = {},
 ): Promise<ModuleOperationSuccessResult> {
   const input = asInput(inputValue);
+  const ownedTarget = captureOwnedTarget(bound.operation, input);
   const run = async (activeContext: Parameters<ModuleOperationHandler>[1]) => {
     requireOperationAuthorization(bound.operation, activeContext.session);
     const validation = validatorsFor(bound.operation);
@@ -1470,6 +1481,14 @@ export async function invokeOperation(
       ...context,
       ...(session ? { session } : {}),
       ...(runSeed ? { runSeed } : {}),
+      applyOwnedEntityFields: async (change) => {
+        assertOwnedTarget(ownedTarget, change.id);
+        if (!context.db || !context.platform || !session) {
+          throw operationFailure({code:"FORBIDDEN",message:"Owned fields require an authenticated canonical plugin Operation.",retryable:false});
+        }
+        await context.platform.records.assertAccess(session,{entityName:ownedTarget.target.entityName,id:change.id,intent:"update"});
+        return applyOwnedEntityFields(context.db, session, ownedTarget, change);
+      },
       invokeHostOperation: (request, options) => invokeModuleHostOperation(
         context.platform,
         session,

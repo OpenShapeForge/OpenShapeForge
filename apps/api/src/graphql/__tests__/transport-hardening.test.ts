@@ -2,8 +2,11 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { FastifyInstance } from "fastify";
-import persistedManifest from "../../generated/graphql/persisted-operations.json" with { type: "json" };
-import { createApiApp } from "../../roles/api.js";
+import { createApiApp as createCanonicalApiApp } from "../../roles/api.js";
+import { getGeneratedCrudTables } from "../../operations/entity/catalog.js";
+import { entityOperationContract, entityOperationRef } from "../generated-crud.js";
+import { persistedOperationFixture } from "./persisted-fixture.js";
+import { Registry } from "@openshapeforge/observability";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { __resetSessionResolverForTests } from "../../auth/identity.js";
 
@@ -12,6 +15,23 @@ const originalRateLimit = process.env.API_RATE_LIMIT_MAX;
 const originalMaxDepth = process.env.GRAPHQL_MAX_DEPTH;
 const originalContextSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
 let app: FastifyInstance | null = null;
+const protectedRecord = getGeneratedCrudTables().find(table => table.source?.graphql?.updateMutationName);
+const protectedTable = protectedRecord?.source?.graphql;
+if (!protectedTable) throw new Error("Transport fixtures need a generated GraphQL update Operation.");
+const mutationContract = entityOperationContract(entityOperationRef(protectedRecord!, "update").id);
+const requiredMutationSchema = mutationContract?.inputSchema?.required;
+const requiredMutationFields = Array.isArray(requiredMutationSchema) ? requiredMutationSchema : [];
+const persistedFixture = persistedOperationFixture([
+  "query HealthProbe { health { status role } }",
+  "query ActiveTenantShell { currentTenant { id } }",
+  `mutation PersistTaskOutput($input: Update${protectedTable.typeName}Input!) {
+    ${protectedTable.updateMutationName}(input: $input) { data { id } error { code message } }
+  }`,
+]);
+const persistedOperations = persistedFixture.operations;
+const createApiApp: typeof createCanonicalApiApp = options => createCanonicalApiApp({
+  ...options, persistedOperations: persistedFixture, metricsRegistry: new Registry(),
+});
 
 afterEach(async () => {
   await app?.close();
@@ -28,8 +48,8 @@ afterEach(async () => {
 });
 
 function persistedEntry(operationName: string): [string, string] {
-  const entry = Object.entries(persistedManifest.operations).find(([, query]) =>
-    typeof query === "string" && new RegExp(`\\b${operationName}\\b`).test(query),
+  const entry = Object.entries(persistedOperations).find(([, query]) =>
+    new RegExp(`\\b${operationName}\\b`).test(query),
   );
   if (!entry || typeof entry[1] !== "string") throw new Error(`Missing persisted operation ${operationName}.`);
   return [entry[0], entry[1]];
@@ -149,8 +169,12 @@ describe("persisted first-party GraphQL profile", () => {
     expect(query.json().errors[0].extensions.code).toBe("UNAUTHENTICATED");
 
     const [mutationHash] = persistedEntry("PersistTaskOutput");
-    const mutation = await persistedRequest(mutationHash, { input: { id: crypto.randomUUID(), output: {} } });
-    expect(mutation.json().errors[0].extensions.code).toBe("UNAUTHENTICATED");
+    const mutation = await persistedRequest(mutationHash, { input: {
+      id: crypto.randomUUID(),
+      ...(requiredMutationFields.includes("expectedVersion") ? { expectedVersion: "2026-10-03T00:00:00.000Z" } : {}),
+      ...(requiredMutationFields.includes("leaseToken") ? { leaseToken: crypto.randomUUID() } : {}),
+    } });
+    expect(mutation.json()).toMatchObject({ errors: [{ extensions: { code: "UNAUTHENTICATED" } }] });
   });
 
   test("still applies GraphQL Armor before executing a persisted operation", async () => {

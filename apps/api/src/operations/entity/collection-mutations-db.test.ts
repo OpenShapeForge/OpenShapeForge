@@ -15,6 +15,8 @@ import { serializeEntityRow } from "./serialize-result.js";
 import { collectionMutationError } from "./collection-policy.js";
 import { createCollectionMutationExecutor, type CollectionMutationBinding } from "./collection-mutations.js";
 import type { EntityOperationContract, GeneratedCrudColumn, GeneratedCrudTable } from "./types.js";
+import { acquireEntityEditLease, type LeaseProtectedOperation } from "./edit-leases.js";
+import { withConsumedCollectionLeaseInTransaction } from "./collection-lease-context.js";
 
 const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ??
   "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
@@ -23,7 +25,7 @@ let admin: SQL | undefined, privileged: DatabaseRuntime | undefined, restricted:
 let created = false;
 const tenant = randomUUID(), otherTenant = randomUUID(), actor = randomUUID();
 const binding: CollectionMutationBinding = { entityName: "TemplateVariant", field: "blocks", action: "insert" };
-const session = { tenantId: tenant, userId: actor, scope: "self" as const, roles: ["General.All.Read", "General.All.ReadWrite", "Templates.Manage"] };
+const session = { tenantId: tenant, userId: actor, scope: "self" as const, roles: ["Templates.Manage", "General.All.Read", "General.All.ReadWrite", "Organization.All.ReadWrite"] };
 const column = (name: string, type: string, extra: Partial<GeneratedCrudColumn> = {}): GeneratedCrudColumn => ({ name, type, required: true, primaryKey: name === "id", generated: null, ...extra });
 
 function fixture(entityValues = createEntityValueRegistry({ version: 1, carriers: [], collections: [] })) {
@@ -167,6 +169,10 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
       create table platform.entity_events(id uuid primary key default gen_random_uuid(), tenant_id uuid not null,
         aggregate_type text not null, aggregate_id text not null, event_type text not null, payload jsonb,
         sequence bigint generated always as identity, occurred_at timestamptz not null);
+      create table platform.entity_edit_leases(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, entity_id text not null,
+        target_id text not null, operation_id text not null, owner_user_id uuid not null, owner_display_name text, token_hash text not null,
+        acquired_version text not null, inactivity_timeout_seconds integer not null, acquired_at timestamptz not null default now(),
+        last_activity_at timestamptz not null default now(), expires_at timestamptz not null, unique(tenant_id,entity_id,target_id));
       alter table erp.template_variants enable row level security; alter table erp.template_variants force row level security;
       alter table erp.blocks enable row level security; alter table erp.blocks force row level security;
       create policy tenant on erp.template_variants using(tenant_id=app.current_tenant()) with check(tenant_id=app.current_tenant());
@@ -178,7 +184,7 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
     restricted = createDatabaseRuntime({ databaseUrl: databaseUrl(true), maxConnections: 4 });
   }, 30_000);
   beforeEach(async () => {
-    await sql`truncate erp.blocks, erp.template_variants, platform.entity_events`.execute(privileged!.db);
+    await sql`truncate erp.blocks, erp.template_variants, platform.entity_events, platform.entity_edit_leases`.execute(privileged!.db);
   });
   afterAll(async () => {
     await restricted?.close(); await privileged?.close();
@@ -538,6 +544,53 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
         await fails(f.execute(restricted!.db, session, binding, { id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "Denied" } }), "RELATION_COLLECTION_MUTATION_UNSUPPORTED");
       }
     }
+  });
+  test("a leased collection owner refuses direct calls, missing/wrong/stale leases, and another subject", async () => {
+    const f = fixture(), seeded = await seed(0);
+    const editLease = { mode: "required" as const, expiresAfterInactivity: "PT15M" };
+    Object.assign(f.operations.find(op => op.entityName === "TemplateVariant" && op.intent === "update")!.concurrency!, { editLease });
+    const operation: LeaseProtectedOperation = { id: "TemplateVariant.insertBlock", entityId: "core.TemplateVariant", entityName: "TemplateVariant", intent: "invoke", concurrency: { version: { mode: "required", field: "updatedAt" }, editLease } };
+    const request = { id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "Guarded child" } };
+    const before = await state(seeded.id);
+    await fails(withDbSession(restricted!.db, session, trx => f.execute.inTransaction(trx, session, binding, request, operation)), "RELATION_COLLECTION_MUTATION_UNSUPPORTED");
+    const guarded = (leaseToken: string, expectedVersion = seeded.expectedVersion, subject = session) => withDbSession(restricted!.db, subject, trx =>
+      withConsumedCollectionLeaseInTransaction(trx, subject, { operation, targetId: seeded.id, expectedVersion, leaseToken }, () =>
+        f.execute.inTransaction(trx, subject, binding, { ...request, expectedVersion }, operation)));
+    await fails(guarded("missing"), "LEASE_INVALID");
+    const lease = await acquireEntityEditLease(restricted!.db, session, { operation, table: f.parent, targetId: seeded.id });
+    const afterAcquire = await state(seeded.id);
+    expect(afterAcquire.rows).toEqual(before.rows);
+    await fails(guarded("wrong-token"), "LEASE_INVALID");
+    await fails(guarded(lease.leaseToken, new Date().toISOString()), "VERSION_CONFLICT");
+    await fails(guarded(lease.leaseToken, seeded.expectedVersion, { ...session, userId: randomUUID() }), "LOCKED");
+    expect(await state(seeded.id)).toEqual(afterAcquire);
+    const created = await guarded(lease.leaseToken);
+    expect((await state(seeded.id)).rows.map(row => row.id)).toEqual([created.childId]);
+    await fails(guarded(lease.leaseToken), "LEASE_INVALID");
+  });
+  test("a consumed collection lease is transaction-bound and rolls back together with the write", async () => {
+    const f = fixture(), seeded = await seed(0), other = await seed(0);
+    const editLease = { mode: "required" as const, expiresAfterInactivity: "PT15M" };
+    Object.assign(f.operations.find(op => op.entityName === "TemplateVariant" && op.intent === "update")!.concurrency!, { editLease });
+    const operation: LeaseProtectedOperation = { id: "TemplateVariant.insertBlock", entityId: "core.TemplateVariant", entityName: "TemplateVariant", intent: "invoke", concurrency: { version: { mode: "required", field: "updatedAt" }, editLease } };
+    const request = { id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "Guarded child" } };
+    const lease = await acquireEntityEditLease(restricted!.db, session, { operation, table: f.parent, targetId: seeded.id });
+    const before = await state(seeded.id);
+    await expect(withDbSession(restricted!.db, session, trx => withConsumedCollectionLeaseInTransaction(trx, session, {
+      operation, targetId: seeded.id, expectedVersion: seeded.expectedVersion, leaseToken: lease.leaseToken,
+    }, async () => {
+      await fails(f.execute.inTransaction(trx, session, binding, { ...request, id: other.id, expectedVersion: other.expectedVersion }, operation), "RELATION_COLLECTION_MUTATION_UNSUPPORTED");
+      await fails(f.execute.inTransaction(trx, session, binding, request, { ...operation, id: "TemplateVariant.otherOperation" }), "RELATION_COLLECTION_MUTATION_UNSUPPORTED");
+      await fails(restricted!.db.transaction().execute(otherTrx => f.execute.inTransaction(otherTrx, session, binding, request, operation)), "RELATION_COLLECTION_MUTATION_UNSUPPORTED");
+      await f.execute.inTransaction(trx, session, binding, request, operation);
+      throw new Error("Rollback guarded insert");
+    }))).rejects.toThrow("Rollback guarded insert");
+    expect(await state(seeded.id)).toEqual(before);
+    // The transaction rolled back consumption too; the same real lease still works.
+    const result = await withDbSession(restricted!.db, session, trx => withConsumedCollectionLeaseInTransaction(trx, session, {
+      operation, targetId: seeded.id, expectedVersion: seeded.expectedVersion, leaseToken: lease.leaseToken,
+    }, () => f.execute.inTransaction(trx, session, binding, request, operation)));
+    expect(result.parent.id).toBe(seeded.id);
   });
   test("immutable authored fields can be set once by collection insert, but not changed by update", async () => {
     const f = fixture(), seeded = await seed(0);

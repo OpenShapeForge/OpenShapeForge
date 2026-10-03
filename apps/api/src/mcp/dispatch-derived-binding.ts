@@ -30,7 +30,7 @@ import {
   partial,
   unavailableOutcome,
 } from "./composed-results.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { DirectCallScope } from "./tool-dispatch.js";
 
 import { resolveDerivedConnection } from "./dispatch-derived-connection.js";

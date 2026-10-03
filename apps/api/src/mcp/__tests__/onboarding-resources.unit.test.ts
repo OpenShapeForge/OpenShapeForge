@@ -46,8 +46,7 @@ const session = (overrides: Partial<TrustedSessionContext> = {}): TrustedSession
     candidateRelationId: null,
     linkedBy: "jit",
     needsRoleAssignment: false,
-    invitedRoles: [],
-    linkedAtMs: null,
+    roles: [],
   },
   ...overrides,
 });
@@ -71,7 +70,10 @@ const SERVICE_ENTRY: DerivedToolsCatalogEntry = {
     operationEntity: "Capability",
     providerEntity: "Adapter",
     connectionEntity: "Connection",
-    bindingsField: "capabilityBindings",
+    bindingsRelation: "capabilityBindings",
+    bindingsEntity: "ServiceCapabilityBinding",
+    bindingsTable: "integration.service_capability_bindings",
+    parentRef: "serviceId",
     operationRef: "capabilityId",
     operationTable: "integration.capabilities",
     providerRef: "adapterId",
@@ -90,7 +92,12 @@ function rowsWithServices(count: number): Rows {
     "integration.services": Array.from({ length: count }, (_unused, index) => ({
       id: `svc-${index}`,
       key: `service-${index}`,
-      capabilityBindings: [{ order: 1, capabilityId: "cap-google" }],
+    })),
+    "integration.service_capability_bindings": Array.from({ length: count }, (_unused, index) => ({
+      id: `bind-${index}`,
+      serviceId: `svc-${index}`,
+      order: 1,
+      capabilityId: "cap-google",
     })),
     "integration.capabilities": [{ id: "cap-google", adapterId: GOOGLE }],
     "integration.adapters": [
@@ -124,8 +131,6 @@ function environment(input: {
       (rows[table] ?? [])
         .filter((row) => Object.entries(filter).every(([key, value]) => row[key] === value))
         .slice(0, limit),
-    guideTools: () => [],
-    guidesCalled: new Set(),
     store: { async read() { return record; }, async complete() { return true; } },
     connectionContract: () => null,
     tenantConnection: async () => null,

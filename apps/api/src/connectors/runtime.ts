@@ -17,6 +17,7 @@
  *   5. governor           — rate limit, breaker, concurrency, retries
  *   6. execute            — input validated, output validated, errors redacted
  */
+import type { FetchLike } from "@openshapeforge/plugin-runtime/connector";
 import { randomUUID } from "node:crypto";
 import { Counter, getProcessPrometheusRegistry } from "@openshapeforge/observability";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
@@ -28,7 +29,6 @@ import {
   createBoundFetch,
   invokeOperation,
   rewrapPlatformExecutionError,
-  type FetchLike,
 } from "./executor.js";
 import {
   PROVIDER_FAILURE_METRIC_LABELS,

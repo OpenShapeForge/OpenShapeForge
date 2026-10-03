@@ -33,13 +33,17 @@ export async function get<%= typeName %>(id: string, options?: { query?: string 
     detailFields += ` ${detailRelationshipSelectionSet}`;
   }
 -%>
-  const query = options?.query ?? `query Get<%= typeName %>($id: ID!) { <%= gql.queries.single.name %>(id: $id) { <%- detailFields %> } }`;
-  const data = await executeGraphqlRequest<{ <%= gql.queries.single.name %>?: Record<string, unknown> | null }>({
+  const query = options?.query ?? `query Get<%= typeName %>($id: ID!) { <%= gql.queries.single.name %>(id: $id) { data { <%- detailFields %> } error { code message retryable } } }`;
+  const response = await executeGraphqlRequest<{
+    <%= gql.queries.single.name %>?: { data?: Record<string, unknown> | null; error?: { code?: string; message?: string } | null } | null;
+  }>({
     query,
     profile: profileForGraphqlQuery(query),
     variables: { id },
   });
-  return data?.<%= gql.queries.single.name %> ?? null;
+  const result = response?.<%= gql.queries.single.name %>;
+  if (result?.error) throw new Error(`${result.error.code ?? "OPERATION_FAILED"}: ${result.error.message ?? "Operation failed."}`);
+  return result?.data ?? null;
 }
 
 export async function list<%= gql.queries.list.name.charAt(0).toUpperCase() + gql.queries.list.name.slice(1) %>(options?: {
@@ -51,17 +55,15 @@ export async function list<%= gql.queries.list.name.charAt(0).toUpperCase() + gq
 }) {
   const query = options?.query ?? `query List<%= typeName %>($filter: <%= typeName %>Filter, $sort: <%= typeName %>Sort, $first: Int, $after: String) {
       <%= gql.queries.list.name %>(filter: $filter, sort: $sort, first: $first, after: $after) {
-        edges { node { <%- listFields %> } cursor }
-        pageInfo { hasNextPage endCursor }
-        totalCount
+        data { items { data { <%- listFields %> } } nextCursor totalCount }
+        error { code message retryable }
       }
     }`;
-  const data = await executeGraphqlRequest<{
+  const response = await executeGraphqlRequest<{
     <%= gql.queries.list.name %>?: {
-      edges?: Array<{ node?: Record<string, unknown> | null; cursor?: string }>;
-      pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
-      totalCount?: number;
-    };
+      data?: { items?: Array<{ data?: Record<string, unknown> | null }>; nextCursor?: string | null; totalCount?: number } | null;
+      error?: { code?: string; message?: string } | null;
+    } | null;
   }>({
     query,
     profile: profileForGraphqlQuery(query),
@@ -72,17 +74,26 @@ export async function list<%= gql.queries.list.name.charAt(0).toUpperCase() + gq
       after: options?.after,
     },
   });
-  return data?.<%= gql.queries.list.name %> ?? { edges: [], pageInfo: { hasNextPage: false }, totalCount: 0 };
+  const result = response?.<%= gql.queries.list.name %>;
+  if (result?.error) throw new Error(`${result.error.code ?? "OPERATION_FAILED"}: ${result.error.message ?? "Operation failed."}`);
+  const collection = result?.data;
+  return {
+    edges: (collection?.items ?? []).map((item, index) => ({ node: item.data ?? null, cursor: String(index) })),
+    pageInfo: { hasNextPage: Boolean(collection?.nextCursor), endCursor: collection?.nextCursor ?? null },
+    totalCount: collection?.totalCount ?? 0,
+  };
 }
 
 export async function create<%= typeName %>(input: Record<string, unknown>) {
-  const data = await executeGraphqlRequest<{
-    <%= gql.mutations.create.name %>?: Record<string, unknown> | null;
+  const response = await executeGraphqlRequest<{
+    <%= gql.mutations.create.name %>?: { data?: Record<string, unknown> | null; error?: { code?: string; message?: string } | null } | null;
   }>({
-    query: `mutation Create<%= typeName %>($input: Create<%= typeName %>Input!) { <%= gql.mutations.create.name %>(input: $input) { id } }`,
+    query: `mutation Create<%= typeName %>($input: Create<%= typeName %>Input!) { <%= gql.mutations.create.name %>(input: $input) { data { id } error { code message retryable } } }`,
     variables: { input },
   });
-  const created = data?.<%= gql.mutations.create.name %>;
+  const result = response?.<%= gql.mutations.create.name %>;
+  if (result?.error) throw new Error(`${result.error.code ?? "OPERATION_FAILED"}: ${result.error.message ?? "Operation failed."}`);
+  const created = result?.data;
   if (!created) {
     throw new Error("<%= gql.mutations.create.name %> returned no data.");
   }
@@ -90,25 +101,31 @@ export async function create<%= typeName %>(input: Record<string, unknown>) {
 }
 
 export async function update<%= typeName %>(input: Record<string, unknown>) {
-  const data = await executeGraphqlRequest<{
-    <%= gql.mutations.update.name %>?: Record<string, unknown> | null;
+  const response = await executeGraphqlRequest<{
+    <%= gql.mutations.update.name %>?: { data?: Record<string, unknown> | null; error?: { code?: string; message?: string } | null } | null;
   }>({
-    query: `mutation Update<%= typeName %>($input: Update<%= typeName %>Input!) { <%= gql.mutations.update.name %>(input: $input) { id } }`,
+    query: `mutation Update<%= typeName %>($input: Update<%= typeName %>Input!) { <%= gql.mutations.update.name %>(input: $input) { data { id } error { code message retryable } } }`,
     variables: { input },
   });
-  const updated = data?.<%= gql.mutations.update.name %>;
+  const result = response?.<%= gql.mutations.update.name %>;
+  if (result?.error) throw new Error(`${result.error.code ?? "OPERATION_FAILED"}: ${result.error.message ?? "Operation failed."}`);
+  const updated = result?.data;
   if (!updated) {
     throw new Error("<%= gql.mutations.update.name %> returned no data.");
   }
   return updated;
 }
 
-export async function delete<%= typeName %>(id: string) {
-  const data = await executeGraphqlRequest<{
-    <%= gql.mutations.delete.name %>?: boolean | null;
+export async function delete<%= typeName %>(id: string, controls: Record<string, unknown> = {}) {
+  const response = await executeGraphqlRequest<{
+    <%= gql.mutations.delete.name %>?: { data?: { deleted?: boolean } | null; error?: { code?: string; message?: string } | null } | null;
   }>({
-    query: `mutation Delete<%= typeName %>($id: ID!) { <%= gql.mutations.delete.name %>(id: $id) }`,
-    variables: { id },
+    query: `mutation Delete<%= typeName %>($input: Delete<%= typeName %>Input!) { <%= gql.mutations.delete.name %>(input: $input) { data { deleted } error { code message retryable } } }`,
+    // Confirmation is caller-owned. A generated client must never turn an
+    // ordinary delete call into an acknowledgement on the user's behalf.
+    variables: { input: { id, ...controls } },
   });
-  return data?.<%= gql.mutations.delete.name %> ?? false;
+  const result = response?.<%= gql.mutations.delete.name %>;
+  if (result?.error) throw new Error(`${result.error.code ?? "OPERATION_FAILED"}: ${result.error.message ?? "Operation failed."}`);
+  return result?.data?.deleted ?? false;
 }

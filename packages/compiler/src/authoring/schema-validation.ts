@@ -7,7 +7,7 @@
  * The only consumer was a `JSON.parse` in `check:authoring-local`, which proved
  * the files were syntactically valid JSON and nothing more. Drift was therefore
  * silent in both directions, and it had happened: `core-entity.schema.json`
- * still described the pre-`valueType` field shape, and `connector.schema.json`
+ * still described the pre-`osfType` field shape, and `connector.schema.json`
  * declared a `reliability.timeoutMs` the compiler never reads.
  *
  * Two properties this module is built around:
@@ -47,17 +47,20 @@ export const SCHEMAS_DIR = join(
  * Authoring `kind` -> the schema that describes it.
  *
  * Explicit rather than derived from each schema's `properties.kind.const`,
- * because two schemas claim `semanticTypeCatalog` (a v1 and a v2 shape) and
+ * because two schemas claim `osfTypeCatalog` (a v1 and a v2 shape) and
  * only one of them describes what this repo authors today. Deriving the map
  * would make that ambiguity silent again.
  */
 export const SCHEMA_BY_KIND: Readonly<Record<string, string>> = Object.freeze({
   coreEntity: "core-entity.schema.json",
+  operationCatalog: "operation-catalog.schema.json",
   connector: "connector.schema.json",
   authorizationConfig: "authorization-config.schema.json",
   retentionPolicyCatalog: "retention-policy-catalog.schema.json",
-  semanticTypeCatalog: "semantic-type-catalog.schema.json",
+  osfTypeCatalog: "osf-type-catalog.schema.json",
   transformCatalog: "transform-catalog.schema.json",
+  settingsDefinition: "settings-definition.schema.json",
+  settingsProvider: "settings-provider.schema.json",
   entityProfile: "entity-profile.schema.json",
   entityMapping: "entity-mapping.schema.json",
   view: "view.schema.json",
@@ -79,7 +82,7 @@ export const UNSCHEMAD_KINDS: Readonly<Record<string, string>> = Object.freeze({
   entityPatch:
     "a strategic-merge fragment, not a document: it restates only what it changes, so core-entity.schema.json rejects it for the properties it deliberately omits. The base it merges into is validated as coreEntity",
   appShellPatch:
-    "the same strategic-merge fragment against appShell.yaml, whose base kind has no schema either",
+    "the same strategic-merge fragment against menu.yaml, whose base kind has no schema either",
   authorizationPatch:
     "a strategic-merge fragment against an authorization*.yaml realm file (plus a renameClient directive); the MERGED result is validated as authorizationConfig by the layer resolver",
 });

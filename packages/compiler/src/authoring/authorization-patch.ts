@@ -22,6 +22,7 @@
  *   1. `renameClient: { from, to }` rewrites every REFERENCE to a client id in
  *      the base document — `keycloak.entityRoleClient`, `keycloak.clients[].id`,
  *      the client keys of `realmRoles.*.composites`, `clientRoles`,
+ *      `clientRoleComposites` (both owner and referenced client ids),
  *      `users[].clientRoles` and `serviceAccountClientRoles`. It moves the
  *      identity only; the client's `name`, `secret` and `devSecret` are
  *      ordinary fields the patch body sets under the NEW id.
@@ -29,6 +30,7 @@
  *      deep-merge, `null` deletes a property, `keycloak.clients[]` merges by
  *      `id` (`$delete: true` removes one), other arrays replace wholesale —
  *      except role-name lists (`clientRoles.<client>`,
+ *      `clientRoleComposites.<client>.<role>.composites.<client>`,
  *      `realmRoles.<role>.composites.<client>`, `realmRoles.<role>.includes`),
  *      which UNION: base order first, patch additions appended. A grant list
  *      is a set, and "add one composite" restating fifteen others is how a
@@ -68,8 +70,13 @@ const PATCH_BODY_KEYS = new Set([
   "keycloak",
   "realmRoles",
   "clientRoles",
+  "clientRoleComposites",
   "groups",
   "users",
+  "roleLabels",
+  "identity",
+  "organizationAccess",
+  "replaceClientRoleComposites",
 ]);
 
 function isPlainObject(value: JsonValue | undefined): value is JsonObject {
@@ -122,6 +129,9 @@ function baseClientIds(base: JsonObject): string[] {
 
 function renameKeys(map: JsonValue | undefined, rename: ClientRename): JsonValue | undefined {
   if (!isPlainObject(map)) return map;
+  if (Object.hasOwn(map, rename.from) && Object.hasOwn(map, rename.to)) {
+    throw new Error(`Authorization client references contain both "${rename.from}" and its renamed key "${rename.to}"; author one client key explicitly.`);
+  }
   const result: JsonObject = {};
   for (const [key, value] of Object.entries(map)) {
     result[key === rename.from ? rename.to : key] = value;
@@ -138,6 +148,30 @@ function renameRealmRoles(roles: JsonValue | undefined, rename: ClientRename): J
       : def;
   }
   return result;
+}
+
+function renameClientRoleComposites(
+  rolesByOwnerClient: JsonValue | undefined,
+  rename: ClientRename,
+): JsonValue | undefined {
+  if (!isPlainObject(rolesByOwnerClient)) return rolesByOwnerClient;
+  const renamedOwners = renameKeys(rolesByOwnerClient, rename);
+  if (!isPlainObject(renamedOwners)) return renamedOwners;
+  return Object.fromEntries(
+    Object.entries(renamedOwners).map(([ownerClient, roleDefinitions]) => [
+      ownerClient,
+      isPlainObject(roleDefinitions)
+        ? Object.fromEntries(
+            Object.entries(roleDefinitions).map(([roleName, definition]) => [
+              roleName,
+              isPlainObject(definition) && definition.composites !== undefined
+                ? { ...definition, composites: renameKeys(definition.composites, rename)! }
+                : definition,
+            ]),
+          )
+        : roleDefinitions,
+    ]),
+  );
 }
 
 /**
@@ -164,6 +198,12 @@ export function renameClientReferences(base: JsonObject, rename: ClientRename, o
     );
   }
 
+  return rewriteAuthorizationClientReferences(base, rename);
+}
+
+/** Apply an already validated earlier-layer rename to a later contribution. */
+export function rewriteAuthorizationClientReferences(base: JsonObject, rename: ClientRename): JsonObject {
+  const keycloak = isPlainObject(base.keycloak) ? base.keycloak : {};
   const renamedKeycloak: JsonObject = { ...keycloak };
   if (renamedKeycloak.entityRoleClient === rename.from) renamedKeycloak.entityRoleClient = rename.to;
   if (renamedKeycloak.client === rename.from) renamedKeycloak.client = rename.to;
@@ -185,6 +225,12 @@ export function renameClientReferences(base: JsonObject, rename: ClientRename, o
   const result: JsonObject = { ...base, keycloak: renamedKeycloak };
   if (result.realmRoles !== undefined) result.realmRoles = renameRealmRoles(result.realmRoles, rename)!;
   if (result.clientRoles !== undefined) result.clientRoles = renameKeys(result.clientRoles, rename)!;
+  if (result.clientRoleComposites !== undefined) {
+    result.clientRoleComposites = renameClientRoleComposites(
+      result.clientRoleComposites,
+      rename,
+    )!;
+  }
   if (Array.isArray(result.users)) {
     result.users = result.users.map((user) =>
       isPlainObject(user) && user.clientRoles !== undefined
@@ -240,12 +286,19 @@ function mergeValue(
 }
 
 /**
- * `clientRoles.<client>`, `realmRoles.<role>.composites.<client>`,
+ * `clientRoles.<client>`,
+ * `clientRoleComposites.<client>.<role>.composites.<client>`,
+ * `realmRoles.<role>.composites.<client>`,
  * `realmRoles.<role>.includes` and the v1 `keycloak.realmRoles` equivalents.
  */
 function isRoleList(path: string[]): boolean {
   const segments = path[0] === "keycloak" ? path.slice(1) : path;
   if (segments.length === 2 && segments[0] === "clientRoles") return true;
+  if (
+    segments.length === 5 &&
+    segments[0] === "clientRoleComposites" &&
+    segments[3] === "composites"
+  ) return true;
   if (segments[0] !== "realmRoles") return false;
   if (segments.length === 3 && segments[2] === "includes") return true;
   return segments.length === 4 && segments[2] === "composites";
@@ -293,7 +346,21 @@ export function applyAuthorizationPatch(
     base = renameClientReferences(base, parseRename(renameClient, origin), origin);
   }
 
-  const merged = mergeValue(base, body, [], strategicMerge) as JsonObject;
+  const { replaceClientRoleComposites, ...mergeBody } = body;
+  const merged = mergeValue(base, mergeBody, [], strategicMerge) as JsonObject;
+  // Explicit replacement is required to narrow a persona; ordinary patches still union grants.
+  if (replaceClientRoleComposites !== undefined) {
+    if (!isPlainObject(replaceClientRoleComposites)) throw new Error(`${origin}: role replacements must be an object.`);
+    const clients = structuredClone(merged.clientRoleComposites) as JsonObject;
+    merged.clientRoleComposites = clients;
+    for (const [client, roles] of Object.entries(replaceClientRoleComposites)) {
+      if (!isPlainObject(roles) || !isPlainObject(clients?.[client])) throw new Error(`${origin}: unknown role replacement client ${client}`);
+      for (const [role, definition] of Object.entries(roles)) {
+        if (!(clients[client] as JsonObject)[role]) throw new Error(`${origin}: cannot replace undeclared role ${role}`);
+        (clients[client] as JsonObject)[role] = definition;
+      }
+    }
+  }
 
   // The merged document is what the generator reads; the validator names the
   // patch so an author is pointed at the file they can edit.

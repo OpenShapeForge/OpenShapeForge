@@ -2,41 +2,36 @@
 import { sql } from "kysely";
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { OpenShapeForgeDatabase } from "../connection.js";
+import { databaseRole } from "../database-roles.js";
+import { manifestTableForEntity } from "../manifest-lookup.js";
 
 /**
- * Provisions the restricted, non-superuser runtime role `openshapeforge_app` and
- * grants it exactly the privileges the app needs — no more.
+ * Grants the provisioned, restricted `openshapeforge_app` role exactly the
+ * database privileges the app needs — no more.
  *
  * WHY THIS EXISTS
  * ---------------
  * The app runtime MUST connect as a NOSUPERUSER / NOBYPASSRLS role, otherwise
  * `FORCE ROW LEVEL SECURITY` on every tenant-scoped table is silently bypassed
  * (a superuser or a rolbypassrls role ignores all RLS policies) and tenant
- * isolation collapses to the app-layer WHERE clause alone. This migration runs
- * in the PRIVILEGED migrate chain (OPENSHAPEFORGE_MIGRATE_DATABASE_URL); the
- * restricted role itself can never create roles or issue these grants.
+ * isolation collapses to the app-layer WHERE clause alone. The host provisions
+ * this cluster-wide role through the administrator connection; this migration
+ * only applies database-scoped grants.
  *
  * IDEMPOTENCY
  * -----------
- * CREATE ROLE is CLUSTER-WIDE, so the role survives across the throwaway
- * scratch databases used by migrations.test.ts. Everything here is therefore
- * fully idempotent:
- *   - the role is created only if pg_roles has no such row, and its password
- *     is set only at that point (never force-reset on later runs);
- *   - ALTER ROLE ... NOSUPERUSER / NOBYPASSRLS repairs the load-bearing RLS
- *     attributes only when they drift (defensive against manual tampering);
- *   - GRANT and ALTER DEFAULT PRIVILEGES are naturally idempotent.
+ * The role survives across the throwaway scratch databases used by
+ * migrations.test.ts. GRANT and ALTER DEFAULT PRIVILEGES are naturally
+ * idempotent, and the chain verifies the role contract before any DDL runs.
  *
  * PASSWORD OWNERSHIP
  * ------------------
  * The password is OPERATOR-OWNED, not source-owned. It is read from
  * OPENSHAPEFORGE_APP_PASSWORD (see {@link readAppRolePassword}) and must stay
  * consistent with the password in the runtime DATABASE_URL. It is applied only
- * on first creation of the role; migrations do NOT overwrite an existing role's
- * password on every run (that would clobber an operator-chosen credential and
- * force a downgrade to a known value). To rotate, set
- * OPENSHAPEFORGE_APP_PASSWORD_ROTATE=1 for a single migrate run alongside the
- * new OPENSHAPEFORGE_APP_PASSWORD (and update DATABASE_URL in lockstep).
+ * on first creation of the role; migrations never alter it. To rotate, run
+ * `db:provision-roles` once with OPENSHAPEFORGE_APP_PASSWORD_ROTATE=1 and the
+ * new password, and update DATABASE_URL in lockstep.
  *
  * ORDERING
  * --------
@@ -51,8 +46,8 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
  * automatically on every migrate.
  */
 
-/** The restricted runtime role. */
-export const APP_ROLE = "openshapeforge_app";
+/** The restricted runtime role, as the generated manifest's role contract names it. */
+export const APP_ROLE = databaseRole("app").name;
 
 /**
  * The local-dev-only default password for {@link APP_ROLE}. It matches the
@@ -101,13 +96,13 @@ export function readAppRolePassword(env: NodeJS.ProcessEnv = process.env): strin
 }
 
 /**
- * Whether this migrate run should ROTATE the existing role's password. Off by
- * default: the password is set only at role creation, so an operator-chosen
+ * Whether this provisioning run should ROTATE the existing role's password.
+ * Off by default: the password is set only at role creation, so an operator-chosen
  * credential is never clobbered on a routine `helm upgrade`. Set
  * OPENSHAPEFORGE_APP_PASSWORD_ROTATE=1 (with the new OPENSHAPEFORGE_APP_PASSWORD,
- * and DATABASE_URL updated in lockstep) for a single run to rotate.
+ * and DATABASE_URL updated in lockstep) for a single `db:provision-roles` run.
  */
-function shouldRotateAppRolePassword(env: NodeJS.ProcessEnv = process.env): boolean {
+export function shouldRotateAppRolePassword(env: NodeJS.ProcessEnv = process.env): boolean {
   const flag = env.OPENSHAPEFORGE_APP_PASSWORD_ROTATE;
   return flag === "1" || flag === "true";
 }
@@ -117,7 +112,7 @@ function shouldRotateAppRolePassword(env: NodeJS.ProcessEnv = process.env): bool
  * order is deterministic.
  *
  * Derived rather than listed because a compiler PLUGIN contributes schemas the
- * core has never heard of — the workflow plugin owns `workflow` — and a
+ * core has never heard of — a workflow plugin owns `workflow` — and a
  * hardcoded list silently withholds every grant from them. The database is
  * loud about it (`permission denied for schema workflow`), but only once
  * something actually connects as the restricted role, and the migration and
@@ -179,52 +174,11 @@ async function applyAppSchemaGrants(db: OpenShapeForgeDatabase) {
  * the rest take effect.
  */
 export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
-  const appRolePassword = readAppRolePassword();
-
-  // 1. Create the role if absent. The password (operator-owned, must match
-  //    DATABASE_URL) is set ONLY here, at first creation — never force-reset on
-  //    later runs, so a routine migrate can't clobber an operator-chosen
-  //    credential or downgrade it to a known value.
-  //    NOSUPERUSER + NOBYPASSRLS are the load-bearing attributes for RLS.
-  await sql`
-    do $$
-    begin
-      if not exists (select 1 from pg_roles where rolname = ${sql.lit(APP_ROLE)}) then
-        create role ${sql.ref(APP_ROLE)}
-          login password ${sql.lit(appRolePassword)}
-          nosuperuser nobypassrls;
-      end if;
-    end
-    $$;
-  `.execute(db);
-
-  // Repair the load-bearing attributes only when they drift. Besides avoiding
-  // a cluster-wide pg_authid write on every migration, the guard is required
-  // for managed Postgres administrators: they can manage ordinary roles but
-  // PostgreSQL rejects even an idempotent NOSUPERUSER clause unless the caller
-  // is itself a superuser. An already-safe role needs no privileged write.
-  await sql`
-    do $$
-    begin
-      if exists (
-        select 1 from pg_roles
-        where rolname = ${sql.lit(APP_ROLE)}
-          and (not rolcanlogin or rolsuper or rolbypassrls)
-      ) then
-        execute format('alter role %I login nosuperuser nobypassrls', ${sql.lit(APP_ROLE)});
-      end if;
-    end
-    $$;
-  `.execute(db);
-
-  // Rotate the password ONLY when explicitly requested for this run. This is
-  // the sole path that overwrites an existing role's password; the default
-  // (unset flag) leaves an operator-set credential untouched.
-  if (shouldRotateAppRolePassword()) {
-    await sql`alter role ${sql.ref(APP_ROLE)} login password ${sql.lit(appRolePassword)}`.execute(db);
-  }
-
-  // 2. CONNECT on the database itself.
+  // The role itself is part of the declared database role contract
+  //    (db/database-roles.ts): the host provisions it with the admin
+  //    credential and the chain has already verified it exists with LOGIN,
+  //    NOSUPERUSER and NOBYPASSRLS. Nothing cluster-wide is written here.
+  // 1. CONNECT on the database itself.
   //    Stock PostgreSQL grants CONNECT to PUBLIC, so this is a no-op on a local
   //    or CI Postgres — which is exactly why its absence went unnoticed. Managed
   //    providers revoke it (Scaleway RDB does), leaving the role able to
@@ -241,7 +195,7 @@ export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
     $$;
   `.execute(db);
 
-  // 3. Grant USAGE on every table-bearing schema that exists.
+  // 2. Grant USAGE on every table-bearing schema that exists.
   for (const schema of MANAGED_SCHEMAS) {
     await sql`
       do $$
@@ -254,12 +208,12 @@ export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
     `.execute(db);
   }
 
-  // 4. USAGE on `app` + EXECUTE on its RLS helpers. A no-op here on a fresh
+  // 3. USAGE on `app` + EXECUTE on its RLS helpers. A no-op here on a fresh
   //    database (the schema is created by the NEXT chain step);
   //    applyAppRoleGrants re-applies it once it exists.
   await applyAppSchemaGrants(db);
 
-  // 5. ALTER DEFAULT PRIVILEGES for the migrate (current) role so any table or
+  // 4. ALTER DEFAULT PRIVILEGES for the migrate (current) role so any table or
   //    sequence it creates LATER — including newly generated entities — is
   //    auto-granted to openshapeforge_app without a manual grant.
   for (const schema of MANAGED_SCHEMAS) {
@@ -321,23 +275,37 @@ export async function applyAppRoleGrants(db: OpenShapeForgeDatabase) {
   }
 
   // Documents must be created atomically with their first immutable version,
-  // and DocumentVersion is append-only through the SECURITY DEFINER commands
-  // installed by migration 0007. The broad generated-table sweep above
-  // intentionally remains generic; these final revokes are re-applied on every
-  // migrate so a fresh table, default privilege, or manual grant cannot reopen
-  // direct writes for the runtime role. Generated reads remain available.
+  // and DocumentVersion is append-only: through the SECURITY DEFINER commands
+  // installed by migration 0007, or through the generic snapshot publish,
+  // which inserts as the runtime role under a transaction-local marker the
+  // write guard in core-invariants.ts checks (that guard is what refuses any
+  // other insert). The broad generated-table sweep above intentionally
+  // remains generic; these final revokes are re-applied on every migrate so a
+  // fresh table, default privilege, or manual grant cannot reopen updates or
+  // deletes for the runtime role. Generated reads remain available.
+  const documents = manifestTableForEntity("Document");
+  const documentVersions = manifestTableForEntity("DocumentVersion");
   await sql`
     do $$
     begin
-      if to_regclass('erp.documents') is not null then
+      if to_regclass(${sql.lit(documents.name)}) is not null then
         execute format(
-          'revoke insert on erp.documents from %I',
-          ${sql.lit(APP_ROLE)}
+          'revoke insert on %I.%I from %I',
+          ${sql.lit(documents.schema)}, ${sql.lit(documents.table)}, ${sql.lit(APP_ROLE)}
         );
       end if;
-      if to_regclass('erp.document_versions') is not null then
+      if to_regclass(${sql.lit(documentVersions.name)}) is not null then
         execute format(
-          'revoke insert, update, delete on erp.document_versions from %I',
+          'revoke update, delete on %I.%I from %I',
+          ${sql.lit(documentVersions.schema)}, ${sql.lit(documentVersions.table)}, ${sql.lit(APP_ROLE)}
+        );
+      end if;
+      -- The bypass audit trail is append-only for the runtime: rows are
+      -- inserted, completed by the bypass session that opened them
+      -- (migrations/api-keys.ts), and never removed by the application.
+      if to_regclass('platform.system_bypass_audit') is not null then
+        execute format(
+          'revoke delete on platform.system_bypass_audit from %I',
           ${sql.lit(APP_ROLE)}
         );
       end if;

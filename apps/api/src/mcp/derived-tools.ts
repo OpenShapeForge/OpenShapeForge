@@ -2,8 +2,8 @@
 /**
  * Derived MCP tools — entity ROWS projected as tools at request time.
  *
- * The generated catalog's `derivedTools` entries (authored as
- * `mcp.derivedTools` on an entity) declare that each stored record of that
+ * The generated catalog's temporary `derivedTools` compatibility entries
+ * declare that each stored record of that
  * entity becomes one MCP tool for the configured audience roles: the tool is
  * named from the row's key field, described from its description field, and
  * typed from the canonical FieldDefinition collection stored in its
@@ -12,7 +12,7 @@
  *
  * The schema translation below deliberately mirrors the compiler's
  * field-json-schema mapping for the FieldDefinition subset that can live in a
- * stored row (valueType, cardinality, required, label, description,
+ * stored row (osfType, cardinality, required, label, description,
  * validation, static options, children/item). It is hand-rolled here rather
  * than imported because the runtime consumes compiled catalogs, not the
  * compiler package.
@@ -20,6 +20,7 @@
 
 import { localizedText, type ResolvedLocale } from "./locale.js";
 import type { ExecutionCatalogEntry } from "./declarative-execution.js";
+import { storedFieldBaseType } from "../modules/field-schemas.js";
 
 export type DerivedToolsCatalogEntry = {
   entity: string;
@@ -55,6 +56,14 @@ export type DerivedToolsCatalogEntry = {
     instructionField: string;
     set: { name: string; description: string };
   };
+  /** Generated internal execution bridge; never projected as a tool. */
+  compatibility?: {
+    plugin: string;
+    providerId: string;
+    connectOperation?: string;
+    dryRunOperation?: string;
+    setPreferenceOperation?: string;
+  };
 };
 
 export type DerivedTool = {
@@ -84,7 +93,7 @@ export function deriveToolName(key: unknown): string | null {
 
 type StoredFieldDefinition = {
   key?: unknown;
-  valueType?: unknown;
+  osfType?: unknown;
   cardinality?: unknown;
   required?: unknown;
   label?: unknown;
@@ -125,8 +134,7 @@ function scalarSchema(
   definition: StoredFieldDefinition,
   locale?: ResolvedLocale,
 ): Record<string, unknown> {
-  const valueType =
-    typeof definition.valueType === "string" ? definition.valueType : "string";
+  const valueType = storedFieldBaseType(definition);
   const schema: Record<string, unknown> = {
     ...(VALUE_TYPE_TO_SCHEMA[valueType] ?? { type: "string" }),
   };
@@ -224,11 +232,46 @@ export function inputSchemaFromStoredFields(
 
 /** Whether the session's roles admit it to this derived-tools audience. */
 export function sessionInAudience(
-  entry: Pick<DerivedToolsCatalogEntry, "roles">,
+  entry: { roles: readonly string[] },
   sessionRoles: readonly string[] | null | undefined,
 ): boolean {
   const granted = new Set(sessionRoles ?? []);
   return entry.roles.some((role) => granted.has(role));
+}
+
+/**
+ * Whether a session may use one of an entry's helpers — the one rule the
+ * listing and the dispatch share, so a helper is never listed to a session
+ * that cannot call it or reachable by one it is not listed to. Connect and
+ * dry run need the entry's audience AND the helper's own roles (the roles
+ * of the Operation behind it: a user of the tools is not thereby allowed to
+ * sign the organization in or to preview compositions); the preferences
+ * helper has no roles of its own and follows the audience. Connect and dry
+ * run also need an execution contract to act on.
+ */
+export function derivedHelperAvailable(
+  entry: {
+    roles: readonly string[];
+    connect?: DerivedToolsCatalogEntry["connect"] | undefined;
+    dryRun?: DerivedToolsCatalogEntry["dryRun"] | undefined;
+    personalization?: DerivedToolsCatalogEntry["personalization"] | undefined;
+    execution?: DerivedToolsCatalogEntry["execution"] | undefined;
+  },
+  helper: "connect" | "dryRun" | "personalization",
+  sessionRoles: readonly string[] | null | undefined,
+): boolean {
+  if (!sessionInAudience(entry, sessionRoles)) return false;
+  const granted = new Set(sessionRoles ?? []);
+  switch (helper) {
+    case "connect":
+      return entry.connect !== undefined && entry.execution !== undefined &&
+        entry.connect.roles.some((role) => granted.has(role));
+    case "dryRun":
+      return entry.dryRun !== undefined && entry.execution !== undefined &&
+        entry.dryRun.roles.some((role) => granted.has(role));
+    case "personalization":
+      return entry.personalization !== undefined;
+  }
 }
 
 /**

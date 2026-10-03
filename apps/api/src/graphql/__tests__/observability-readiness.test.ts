@@ -332,9 +332,12 @@ describe("bounded GraphQL observability", () => {
       const unexpected = await app.inject({
         method: "POST",
         url: "/api/graphql",
+        // The secret rides in a header and a cookie so the leak check covers
+        // both; not as a bearer, which a deployment without a verifier refuses
+        // (503) before the resolver that must fail unexpectedly ever runs.
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${secret}`,
+          "x-request-secret": secret,
           cookie: `session=${secret}`,
         },
         payload: {

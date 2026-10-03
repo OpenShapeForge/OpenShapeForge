@@ -22,6 +22,66 @@
       }
     }
   ],
+  "RELATIONGROUPTYPE": [
+    {
+      "value": "general",
+      "label": {
+        "nl": "Algemeen",
+        "en": "General"
+      }
+    },
+    {
+      "value": "department",
+      "label": {
+        "nl": "Afdeling",
+        "en": "Department"
+      }
+    },
+    {
+      "value": "team",
+      "label": {
+        "nl": "Team",
+        "en": "Team"
+      }
+    },
+    {
+      "value": "project",
+      "label": {
+        "nl": "Project",
+        "en": "Project"
+      }
+    },
+    {
+      "value": "committee",
+      "label": {
+        "nl": "Commissie",
+        "en": "Committee"
+      }
+    },
+    {
+      "value": "other",
+      "label": {
+        "nl": "Overig",
+        "en": "Other"
+      }
+    }
+  ],
+  "RELATIONGROUPSTATUS": [
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "inactive",
+      "label": {
+        "nl": "Inactief",
+        "en": "Inactive"
+      }
+    }
+  ],
   "COMMUNICATIONTYPE": [
     {
       "value": "appointment_reminder",
@@ -379,29 +439,6 @@
       "label": {
         "nl": "Account",
         "en": "Account"
-      }
-    },
-    {
-      "value": "tenant",
-      "label": {
-        "nl": "Tenant",
-        "en": "Tenant"
-      }
-    }
-  ],
-  "PREFERENCEOWNERSCOPE": [
-    {
-      "value": "account",
-      "label": {
-        "nl": "Account",
-        "en": "Account"
-      }
-    },
-    {
-      "value": "relation",
-      "label": {
-        "nl": "Relatie",
-        "en": "Relation"
       }
     },
     {
@@ -1801,13 +1838,6 @@
         "nl": "Taak",
         "en": "Task"
       }
-    },
-    {
-      "value": "workflow",
-      "label": {
-        "nl": "Workflow",
-        "en": "Workflow"
-      }
     }
   ],
   "CASESTEPACTIONSTARTMODE": [
@@ -2004,71 +2034,6 @@
       }
     }
   ],
-  "DOCUMENTTYPE": [
-    {
-      "value": "incoming_mail",
-      "label": {
-        "nl": "Inkomende post",
-        "en": "Incoming mail"
-      }
-    },
-    {
-      "value": "outgoing_mail",
-      "label": {
-        "nl": "Uitgaande post",
-        "en": "Outgoing mail"
-      }
-    },
-    {
-      "value": "note",
-      "label": {
-        "nl": "Notitie",
-        "en": "Note"
-      }
-    },
-    {
-      "value": "decision",
-      "label": {
-        "nl": "Besluit",
-        "en": "Decision"
-      }
-    },
-    {
-      "value": "attachment",
-      "label": {
-        "nl": "Bijlage",
-        "en": "Attachment"
-      }
-    },
-    {
-      "value": "form",
-      "label": {
-        "nl": "Formulier",
-        "en": "Form"
-      }
-    },
-    {
-      "value": "evidence",
-      "label": {
-        "nl": "Bewijsstuk",
-        "en": "Evidence"
-      }
-    },
-    {
-      "value": "contract",
-      "label": {
-        "nl": "Contract",
-        "en": "Contract"
-      }
-    },
-    {
-      "value": "report",
-      "label": {
-        "nl": "Rapport",
-        "en": "Report"
-      }
-    }
-  ],
   "DOCUMENTSTATUS": [
     {
       "value": "draft",
@@ -2142,6 +2107,13 @@
       "label": {
         "nl": "Definitief",
         "en": "Final"
+      }
+    },
+    {
+      "value": "published",
+      "label": {
+        "nl": "Gepubliceerd",
+        "en": "Published"
       }
     },
     {
@@ -2609,36 +2581,6 @@
       "label": {
         "nl": "Mijlpaal",
         "en": "Milestone"
-      }
-    }
-  ],
-  "AGREEMENTMILESTONESTATUS": [
-    {
-      "value": "pending",
-      "label": {
-        "nl": "In afwachting",
-        "en": "Pending"
-      }
-    },
-    {
-      "value": "triggered",
-      "label": {
-        "nl": "Getriggerd",
-        "en": "Triggered"
-      }
-    },
-    {
-      "value": "invoiced",
-      "label": {
-        "nl": "Gefactureerd",
-        "en": "Invoiced"
-      }
-    },
-    {
-      "value": "cancelled",
-      "label": {
-        "nl": "Geannuleerd",
-        "en": "Cancelled"
       }
     }
   ],

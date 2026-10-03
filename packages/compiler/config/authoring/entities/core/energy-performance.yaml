@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: EnergyPerformance
@@ -10,11 +10,14 @@ filterField: code
 labels:
   en: Energy performance
   nl: Energieprestatie
+pluralLabels:
+  en: Energy performances
+  nl: Energieprestaties
 domains:
   - energy
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +32,7 @@ fields:
       column: code
       storageClass: core
   - key: validFrom
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Valid from
@@ -40,11 +43,8 @@ fields:
     persisted:
       column: valid_from
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: validTo
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid to
@@ -55,11 +55,8 @@ fields:
     persisted:
       column: valid_to
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: energyClass
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Energy class
@@ -73,7 +70,7 @@ fields:
       column: energy_class
       storageClass: core
   - key: energyIndex
-    valueType: number
+    osfType: number
     required: false
     label:
       en: Energy index
@@ -85,7 +82,7 @@ fields:
       column: energy_index
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -98,135 +95,16 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: asset
-    kind: belongsTo
-    target: Asset
-    foreignKey: asset_reference
+  - key: assetId
     label:
       en: Asset
       nl: Object
-ui:
-  routes:
-    list:
-      en: /energy-performances
-      nl: /energieprestaties
-    detail:
-      en: /energy-performances/:id
-      nl: /energieprestaties/:id
-    create:
-      en: /energy-performances/create
-      nl: /energieprestaties/aanmaken
-    edit:
-      en: /energy-performances/:id/edit
-      nl: /energieprestaties/:id/bewerken
-    delete:
-      en: /energy-performances/:id/delete
-      nl: /energieprestaties/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Energy performances
-        nl: Energieprestaties
-      columns:
-        - key: code
-          sortable: true
-        - key: energyClass
-          sortable: true
-        - key: energyIndex
-          sortable: true
-        - key: validFrom
-          sortable: true
-        - key: validTo
-          sortable: true
-      defaultSort:
-        key: validFrom
-        direction: desc
-      rowLink:
-        en: /energy-performances/:id
-        nl: /energieprestaties/:id
-    detail:
-      header:
-        title: "{{code}}"
-        subtitle: "{{energyClass}}"
-        badges:
-          - energyClass
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Performance details
-                nl: Prestatiegegevens
-              fields:
-                - code
-                - energyClass
-                - energyIndex
-                - validFrom
-                - validTo
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create energy performance
-            nl: Energieprestatie aanmaken
-          groups:
-            - title:
-                en: Performance details
-                nl: Prestatiegegevens
-              fields:
-                - code
-                - energyClass
-                - energyIndex
-                - validFrom
-                - validTo
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit energy performance
-            nl: Energieprestatie bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: asset_reference
+      storageClass: core
+    osfType: Asset
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -241,3 +119,183 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Energy Performance
+    description: List EnergyPerformance records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Energy Performance
+    description: Get EnergyPerformance records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Energy Performance
+    description: Create EnergyPerformance records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update EnergyPerformance records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /energy-performances
+          nl: /energieprestaties
+        columns:
+          - key: code
+            sortable: true
+          - key: energyClass
+            sortable: true
+          - key: energyIndex
+            sortable: true
+          - key: validFrom
+            sortable: true
+          - key: validTo
+            sortable: true
+        title:
+          en: Energy performances
+          nl: Energieprestaties
+        defaultSort:
+          key: validFrom
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /energy-performances/:id
+            nl: /energieprestaties/:id
+          create:
+            en: /energy-performances/create
+            nl: /energieprestaties/aanmaken
+        title: "{{code}}"
+        subtitle: "{{energyClass}}"
+        badges:
+          - energyClass
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Performance details
+                    nl: Prestatiegegevens
+                  fields:
+                    - code
+                    - energyClass
+                    - energyIndex
+                    - validFrom
+                    - validTo
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create energy performance
+              nl: Energieprestatie aanmaken
+            groups:
+              - title:
+                  en: Performance details
+                  nl: Prestatiegegevens
+                fields:
+                  - code
+                  - energyClass
+                  - energyIndex
+                  - validFrom
+                  - validTo
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit energy performance
+              nl: Energieprestatie bewerken
+    fields:
+      validFrom:
+        render:
+          component: DatePicker
+          props: {}
+      validTo:
+        render:
+          component: DatePicker
+          props: {}

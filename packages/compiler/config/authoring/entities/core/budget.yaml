@@ -1,20 +1,24 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Budget
 title: Budget
-description: Annual budget container scoped to a fiscal year. Holds budget lines per ledger account, fiscal period, and optional cost dimension.
+description: Annual budget container scoped to a fiscal year. Holds budget lines per ledger account, fiscal period, and
+  optional cost dimension.
 language: en
 displayTemplate: "{{code}} {{name}}"
 filterField: code
 labels:
   en: Budget
   nl: Begroting
+pluralLabels:
+  en: Budgets
+  nl: Begrotingen
 domains:
   - finance
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +33,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -44,7 +48,6 @@ fields:
       column: name
       storageClass: core
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -55,13 +58,11 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: BUDGETSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: BUDGETSTATUS
+    osfType: referenceDataCode
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -74,13 +75,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 1000
+    osfType: multilineText
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -93,148 +90,225 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: fiscalYear
-    kind: belongsTo
-    target: FiscalYear
-    foreignKey: fiscal_year_id
+  - key: fiscalYearId
     label:
       en: Fiscal year
       nl: Boekjaar
-ui:
-  routes:
-    list:
-      en: /budgets
-      nl: /begrotingen
-    detail:
-      en: /budgets/:id
-      nl: /begrotingen/:id
-    create:
-      en: /budgets/create
-      nl: /begrotingen/aanmaken
-    edit:
-      en: /budgets/:id/edit
-      nl: /begrotingen/:id/bewerken
-    delete:
-      en: /budgets/:id/delete
-      nl: /begrotingen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Budgets
-        nl: Begrotingen
-      columns:
-        - key: code
-          sortable: true
-        - key: name
-          sortable: true
-        - key: status
-          sortable: true
-      defaultSort:
-        key: code
-        direction: asc
-      rowLink:
-        en: /budgets/:id
-        nl: /begrotingen/:id
-    detail:
-      header:
-        title: "{{name}}"
-        subtitle: "{{code}}"
-        badges:
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Budget details
-                nl: Begrotingsgegevens
-              fields:
-                - code
-                - name
-                - status
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create budget
-            nl: Begroting aanmaken
-          groups:
-            - title:
-                en: Budget details
-                nl: Begrotingsgegevens
-              fields:
-                - code
-                - name
-                - status
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit budget
-            nl: Begroting bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: fiscal_year_id
+      storageClass: core
+    osfType: FiscalYear
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
       - Finance.All.Read
       - Finance.All.ReadWrite
+      - Finance.Budget.ReadWrite
     create:
       - Finance.All.ReadWrite
+      - Finance.Budget.ReadWrite
     update:
       - Finance.All.ReadWrite
+      - Finance.Budget.ReadWrite
     delete:
       - Finance.All.ReadWrite
+      - Finance.Budget.ReadWrite
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Budget
+    description: List Budget records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Budget
+    description: Get Budget records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Budget
+    description: Create Budget records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Budget records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /budgets
+          nl: /begrotingen
+        columns:
+          - key: code
+            sortable: true
+          - key: name
+            sortable: true
+          - key: status
+            sortable: true
+        title:
+          en: Budgets
+          nl: Begrotingen
+        defaultSort:
+          key: code
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /budgets/:id
+            nl: /begrotingen/:id
+          create:
+            en: /budgets/create
+            nl: /begrotingen/aanmaken
+        title: "{{name}}"
+        subtitle: "{{code}}"
+        badges:
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          preset: main
+          tabs:
+            - id: lines
+              label:
+                en: Budget lines
+                nl: Begrotingsregels
+              relationship:
+                name: budgetLines
+                view: matrix
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Budget details
+                    nl: Begrotingsgegevens
+                  fields:
+                    - code
+                    - name
+                    - status
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create budget
+              nl: Begroting aanmaken
+            groups:
+              - title:
+                  en: Budget details
+                  nl: Begrotingsgegevens
+                fields:
+                  - code
+                  - name
+                  - status
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit budget
+              nl: Begroting bewerken
+    fields:
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: BUDGETSTATUS
+            clearable: false
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 1000

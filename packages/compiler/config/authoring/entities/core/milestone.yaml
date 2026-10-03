@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Milestone
@@ -10,6 +10,9 @@ filterField: name
 labels:
   en: Milestone
   nl: Mijlpaal
+pluralLabels:
+  en: Milestones
+  nl: Mijlpalen
 domains:
   - cases
   - service
@@ -29,7 +32,7 @@ authorization:
     empty: public
 fields:
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -41,7 +44,6 @@ fields:
       column: name
       storageClass: core
   - key: milestoneType
-    valueType: string
     required: true
     label:
       en: Milestone type
@@ -49,13 +51,11 @@ fields:
     persisted:
       column: milestone_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: MILESTONETYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: MILESTONETYPE
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -63,13 +63,12 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: MILESTONESTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: MILESTONESTATUS
+    osfType: referenceDataCode
   - key: startedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Started at
@@ -77,11 +76,8 @@ fields:
     persisted:
       column: started_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: dueAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Due at
@@ -89,11 +85,8 @@ fields:
     persisted:
       column: due_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: pausedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Paused at
@@ -101,11 +94,8 @@ fields:
     persisted:
       column: paused_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: completedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Completed at
@@ -113,11 +103,8 @@ fields:
     persisted:
       column: completed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: breachedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Breached at
@@ -125,11 +112,8 @@ fields:
     persisted:
       column: breached_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: pauseReason
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Pause reason
@@ -140,7 +124,6 @@ fields:
       column: pause_reason
       storageClass: core
   - key: note
-    valueType: string
     required: false
     label:
       en: Note
@@ -150,38 +133,149 @@ fields:
     persisted:
       column: note
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 2000
-relationships:
-  - key: case
-    kind: belongsTo
-    target: Case
-    foreignKey: case_id
+    osfType: multilineText
+  - key: caseId
     label:
       en: Case
       nl: Zaak
-  - key: slaPolicy
-    kind: belongsTo
-    target: SlaPolicy
-    foreignKey: sla_policy_id
+    persisted:
+      column: case_id
+      storageClass: core
+    osfType: Case
+    relationship:
+      ownership: reference
+  - key: slaPolicyId
     label:
       en: SLA policy
       nl: SLA-beleid
-  - key: owner
-    kind: belongsTo
-    target: Account
-    foreignKey: owner_account_id
+    persisted:
+      column: sla_policy_id
+      storageClass: core
+    osfType: SlaPolicy
+    relationship:
+      ownership: reference
+  - key: ownerId
     label:
       en: Owner
       nl: Eigenaar
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: owner_account_id
+      storageClass: core
+    osfType: Relation
+    relationship:
+      ownership: reference
+      inverse: false
+operations:
+  list:
+    name: List Milestone
+    description: List Milestone records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Milestone
+    description: Get Milestone records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Milestone
+    description: Create Milestone records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Milestone
+    description: Update Milestone records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Milestone
+    description: Delete Milestone records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    fields:
+      milestoneType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: MILESTONETYPE
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: MILESTONESTATUS
+            clearable: false
+      startedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      dueAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      pausedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      completedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      breachedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      note:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 2000

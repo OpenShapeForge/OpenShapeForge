@@ -75,7 +75,9 @@ describe("web GraphQL persisted transport", () => {
     const query = generatedOperation("mutation PersistTaskOutput");
     const fetcher = async (_url: string | URL | Request, init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body)));
-      return bodies.length === 1 ? jsonResponse(missPayload) : jsonResponse({ data: { updateTask: { id: "task" } } });
+      return bodies.length === 1
+        ? jsonResponse(missPayload)
+        : jsonResponse({ data: { updateTask: { data: { id: "task" }, error: null } } });
     };
     await executeGraphqlTransport(transportInput(query, fetcher));
     expect(bodies).toHaveLength(2);
@@ -98,7 +100,10 @@ describe("web GraphQL persisted transport", () => {
   test("does not retry a mutation after data or another error is present", async () => {
     const query = generatedOperation("mutation PersistTaskOutput");
     for (const payload of [
-      { data: { updateTask: { id: "already-applied" } }, ...missPayload },
+      {
+        data: { updateTask: { data: { id: "already-applied" }, error: null } },
+        ...missPayload,
+      },
       { errors: [
         ...missPayload.errors,
         { message: "A resolver also failed", extensions: { code: "INTERNAL_SERVER_ERROR" } },

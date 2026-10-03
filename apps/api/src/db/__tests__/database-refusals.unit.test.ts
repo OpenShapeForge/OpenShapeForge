@@ -102,7 +102,7 @@ describe("a refusal RAISEd by a trigger or guard function", () => {
   });
 
   it("a raised foreign_key_violation keeps the guard's wording as REFERENCE_NOT_FOUND 404", () => {
-    // The pentest tenant-consistency guard: identical text for absent and other-tenant.
+    // The advies tenant-consistency guard: identical text for absent and other-tenant.
     expect(
       classifyDatabaseError(
         postgresError("Referenced record is not available.", { sqlstate: "23503", routine: RAISE }),
@@ -322,7 +322,13 @@ describe("errors that must stay redacted", () => {
   it("toHttpError answers a redacted 500 for those, and the refusal for a rule", () => {
     expect(toHttpError(postgresError('syntax error at or near "SELEC"', { sqlstate: "42601" }))).toEqual({
       status: 500,
-      body: { error: { code: "INTERNAL_SERVER_ERROR", message: "Internal server error." } },
+      body: {
+        error: {
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Internal server error.",
+          retryable: false,
+        },
+      },
     });
     expect(
       toHttpError(
@@ -338,7 +344,8 @@ describe("errors that must stay redacted", () => {
         error: {
           code: "OPERATION_REFUSED",
           message: "Status cannot change once closed.",
-          hint: "Reopen via the assessment lead.",
+          retryable: false,
+          data: { hint: "Reopen via the assessment lead." },
         },
       },
     });

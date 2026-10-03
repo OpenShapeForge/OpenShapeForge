@@ -22,8 +22,6 @@ import {
   resolveEntityRealtimeResourceType,
 } from "@/features/realtime/lib/entity-resource-keys";
 import { Renderer } from "@/features/renderer/components/renderer";
-import { EntityActionButtons } from "@/features/entity-actions/components/EntityActionButtons";
-import { fetchActiveActions } from "@/features/entity-actions/lib/fetch-active-actions";
 import { EntityLabelsServer } from "@/features/labels/components/EntityLabelsServer";
 import { executeGraphqlRequest } from "@/lib/server/graphql-client";
 import { resolveEntity, type EntityManifestEntry } from "@/compiler/entity-manifest";
@@ -93,7 +91,6 @@ async function DetailContent({
 
   let loadError: string | null = null;
   let entity: Record<string, unknown> | null = null;
-  let activeActions: any[] = [];
 
   try {
     const data = await executeGraphqlRequest<Record<string, unknown>>({
@@ -106,14 +103,6 @@ async function DetailContent({
     entity = (data?.[config.queryName] ?? null) as Record<string, unknown> | null;
   } catch (error) {
     loadError = resolveEntityLoadErrorMessage(error, lang);
-  }
-
-  if (entity) {
-    try {
-      activeActions = await fetchActiveActions(entry.entityType, id);
-    } catch {
-      // Non-critical: entity action support can be absent while generated detail still works.
-    }
   }
 
   if (!entity && !loadError) notFound();
@@ -145,14 +134,6 @@ async function DetailContent({
           entityType={entry.entityName}
           entityData={(entity ?? {}) as Record<string, unknown>}
         />
-      }
-      headerExtra={
-        activeActions.length > 0 ? (
-          <EntityActionButtons
-            activeActions={activeActions}
-            entityState={(entity ?? {}) as Record<string, unknown>}
-          />
-        ) : null
       }
     >
       <EntityRealtimeRefresh

@@ -10,7 +10,10 @@ import { nativeOperationKey } from "../declarative-execution.js";
 import { __derivedToolResultForTests as derivedToolResult } from "../generated-mcp-server.js";
 
 describe("nativeOperationKey", () => {
-  it("accepts a generated entity tool name and a plugin operation key", () => {
+  it("accepts a canonical entity Operation, legacy tool name, and plugin operation key", () => {
+    expect(nativeOperationKey({ operation: { nativeOperation: "Finding.create" } })).toBe(
+      "Finding.create",
+    );
     expect(nativeOperationKey({ operation: { nativeOperation: "finding_create" } })).toBe(
       "finding_create",
     );
@@ -21,7 +24,19 @@ describe("nativeOperationKey", () => {
     ).toBe("osf-integration.mail.read-attachment");
   });
   it("refuses anything else as OPERATION_MISCONFIGURED", () => {
-    for (const nativeOperation of [undefined, "", "Finding_Create", "a.", ".a", "a..b", "a-b", "x y"]) {
+    for (const nativeOperation of [
+      undefined,
+      "",
+      "Finding_Create",
+      "finding.Create",
+      "Finding.",
+      ".create",
+      "a.",
+      ".a",
+      "a..b",
+      "a-b",
+      "x y",
+    ]) {
       expect(() => nativeOperationKey({ operation: { nativeOperation } })).toThrow(
         expect.objectContaining({ status: 400, code: "OPERATION_MISCONFIGURED" }),
       );

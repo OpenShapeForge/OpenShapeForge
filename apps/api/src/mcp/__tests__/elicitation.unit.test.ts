@@ -20,25 +20,25 @@ const KEYRING = keyringFromEnv(`test:${Buffer.alloc(32, 7).toString("base64")}`)
 const DEFINITIONS = [
   {
     key: "subdomain",
-    valueType: "string",
+    osfType: "string",
     required: true,
     label: { en: "Subdomain" },
     description: { en: "Tenant subdomain." },
   },
   {
     key: "apiToken",
-    valueType: "string",
+    osfType: "string",
     required: true,
     label: { en: "API token" },
     classification: { sensitivity: "confidential" },
   },
   {
     key: "region",
-    valueType: "string",
+    osfType: "string",
     options: { items: [{ value: "eu" }, { value: "us" }] },
   },
-  { key: "nested", valueType: "object", children: [] },
-  { key: "tags", valueType: "string", cardinality: "collection" },
+  { key: "nested", osfType: "object", children: [] },
+  { key: "tags", osfType: "string", cardinality: "collection" },
 ];
 
 describe("elicitationSchemaFromDefinitions", () => {
@@ -57,7 +57,7 @@ describe("elicitationSchemaFromDefinitions", () => {
 
   it("yields nothing for absent or malformed definitions", () => {
     expect(elicitationSchemaFromDefinitions(null).elicitable).toEqual([]);
-    expect(elicitationSchemaFromDefinitions([{ valueType: "string" }]).elicitable).toEqual([]);
+    expect(elicitationSchemaFromDefinitions([{ osfType: "string" }]).elicitable).toEqual([]);
   });
 });
 
@@ -199,7 +199,7 @@ describe("the language the form is asked in", () => {
   const definitions = [
     {
       key: "host",
-      valueType: "string",
+      osfType: "string",
       required: true,
       label: { en: "IMAP server", nl: "IMAP-server" },
       description: { en: "Hostname of the mail server.", nl: "Hostnaam van de mailserver." },

@@ -11,17 +11,27 @@
  * no implementation package, which is the point — the contract compiles and is
  * advertised while the runtime honestly reports it cannot be run.
  *
- * Needs the compose Postgres up.
+ * Creates and migrates its own scratch database. The caller only provides the
+ * PostgreSQL administrator endpoint plus the trusted-context signing and
+ * identity-issuer configuration used by the real session resolver.
  */
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { SQL } from "bun";
 import { randomUUID } from "node:crypto";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { createApiApp } from "../../roles/api.js";
+import { createDatabaseRuntime } from "../../db/connection.js";
+import { runMigrationChain } from "../../db/migration-chain.js";
 import { MCP_MOUNT_PATH } from "../../mcp/generated-mcp-server.js";
 import { listConnectorContracts } from "../catalog.js";
 import { CONNECTOR_ADMIN_ROLE, CONNECTOR_READER_ROLE } from "../authorization.js";
 
 const SECRET = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ?? null;
+const IDENTITY_ISSUER = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER ?? null;
+const ADMIN_URL =
+  process.env.SCRATCH_ADMIN_DATABASE_URL ??
+  "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
+const APP_ROLE = "openshapeforge_app";
 const SLUG = "example-object-store";
 const LIST_TOOL = "example_object_store_list_objects";
 const PUT_TOOL = "example_object_store_put_object";
@@ -38,18 +48,52 @@ function identity(roles: string[]): Identity {
 }
 
 let app: ReturnType<typeof createApiApp> | null = null;
+let admin: SQL;
+let scratchName: string;
+let databaseUrl: string;
+
 function getApp() {
-  app ??= createApiApp(
-    process.env.DATABASE_URL
-      ? { cors: false, databaseUrl: process.env.DATABASE_URL }
-      : { cors: false },
-  );
+  app ??= createApiApp({ cors: false, databaseUrl });
   return app;
 }
+
+beforeAll(async () => {
+  if (!SECRET) {
+    throw new Error(
+      "OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET is required for the connector surface E2E suite.",
+    );
+  }
+  if (!IDENTITY_ISSUER) {
+    throw new Error(
+      "OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER is required so trusted sessions can resolve identity links.",
+    );
+  }
+
+  scratchName = `connector_surfaces_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  admin = new SQL(ADMIN_URL, { max: 1 });
+  await admin.unsafe(`create database "${scratchName}"`);
+
+  const privilegedUrl = new URL(ADMIN_URL);
+  privilegedUrl.pathname = `/${scratchName}`;
+  const privileged = createDatabaseRuntime({
+    databaseUrl: privilegedUrl.toString(),
+    maxConnections: 1,
+  });
+  await privileged.db.connection().execute((connection) => runMigrationChain(connection));
+  await privileged.close();
+
+  const appUrl = new URL(ADMIN_URL);
+  appUrl.username = APP_ROLE;
+  appUrl.password = APP_ROLE;
+  appUrl.pathname = `/${scratchName}`;
+  databaseUrl = appUrl.toString();
+}, 120_000);
 
 afterAll(async () => {
   await app?.close();
   app = null;
+  await admin?.unsafe(`drop database if exists "${scratchName}" with (force)`);
+  await admin?.close();
 });
 
 function headersFor(who: Identity | null, extra: Record<string, string> = {}) {
@@ -132,7 +176,7 @@ describe("the example contract compiles into the catalog", () => {
 
 describe("MCP tools/list is resolved per session", () => {
   test("a read-only session sees the query tool and no mutation tool", async () => {
-    const { body } = await rpc(identity(["Connectors.All.Read"]), "tools/list");
+    const { body } = await rpc(identity(["Connectors.ExampleObjectStore.Read"]), "tools/list");
     const names = toolNames(body);
     expect(names).toContain(LIST_TOOL);
     expect(names).not.toContain(PUT_TOOL);
@@ -140,7 +184,7 @@ describe("MCP tools/list is resolved per session", () => {
 
   test("a writer sees both", async () => {
     const { body } = await rpc(
-      identity(["Connectors.All.Read", "Connectors.All.ReadWrite"]),
+      identity(["Connectors.ExampleObjectStore.Read", "Connectors.ExampleObjectStore.Write"]),
       "tools/list",
     );
     const names = toolNames(body);
@@ -157,7 +201,7 @@ describe("MCP tools/list is resolved per session", () => {
 
   test("the mutation tool is not hinted as safe to repeat without idempotency", async () => {
     const { body } = await rpc(
-      identity(["Connectors.All.Read", "Connectors.All.ReadWrite"]),
+      identity(["Connectors.ExampleObjectStore.Read", "Connectors.ExampleObjectStore.Write"]),
       "tools/list",
     );
     const put = (body.result?.tools ?? []).find(
@@ -169,7 +213,7 @@ describe("MCP tools/list is resolved per session", () => {
   });
 
   test("connector tools carry their own input schema, not a CRUD one", async () => {
-    const { body } = await rpc(identity(["Connectors.All.Read"]), "tools/list");
+    const { body } = await rpc(identity(["Connectors.ExampleObjectStore.Read"]), "tools/list");
     const list = (body.result?.tools ?? []).find(
       (tool: { name: string }) => tool.name === LIST_TOOL,
     );
@@ -184,7 +228,7 @@ describe("MCP tools/list is resolved per session", () => {
 describe("MCP tools/call cannot be used to enumerate connectors", () => {
   // An unauthorized tool and an unknown one must be indistinguishable.
   test("an unauthorized tool and an unknown tool answer identically", async () => {
-    const who = identity(["Connectors.All.Read"]);
+    const who = identity(["Connectors.ExampleObjectStore.Read"]);
     const unauthorized = await rpc(who, "tools/call", { name: PUT_TOOL, arguments: {} });
     const unknown = await rpc(who, "tools/call", { name: "no_such_tool", arguments: {} });
 
@@ -197,7 +241,7 @@ describe("MCP tools/call cannot be used to enumerate connectors", () => {
   });
 
   test("an authorized tool gets past authorization to a real refusal", async () => {
-    const { body } = await rpc(identity(["Connectors.All.Read"]), "tools/call", {
+    const { body } = await rpc(identity(["Connectors.ExampleObjectStore.Read"]), "tools/call", {
       name: LIST_TOOL,
       arguments: {},
     });

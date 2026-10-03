@@ -6,17 +6,17 @@ import YAML from "yaml";
 import { resolveActiveAuthoringDir } from "./active-manifest.js";
 import type { GeneratedArtifact } from "./schema.js";
 
-type CatalogItem = {
+export type CoreReferentiedataCatalogItem = Record<string, unknown> & {
   value: string;
   label?: Partial<Record<"nl" | "en" | "fr", string>>;
 };
 
-type CatalogGroup = {
-  items?: CatalogItem[];
+export type CoreReferentiedataCatalogGroup = Record<string, unknown> & {
+  items?: CoreReferentiedataCatalogItem[];
 };
 
-type CoreCatalog = {
-  groepen?: Record<string, CatalogGroup>;
+export type CoreReferentiedataCatalog = Record<string, unknown> & {
+  groepen?: Record<string, CoreReferentiedataCatalogGroup>;
 };
 
 type SnapshotItem = {
@@ -34,7 +34,7 @@ export const coreReferentiedataArtifactPaths = [
 ] as const;
 
 function requireLabel(
-  item: CatalogItem,
+  item: CoreReferentiedataCatalogItem,
   groupName: string,
   locale: "nl" | "en",
 ): string {
@@ -51,7 +51,9 @@ function requireLabel(
   );
 }
 
-function buildSnapshot(catalog: CoreCatalog): Snapshot {
+export function buildCoreReferentiedataSnapshot(
+  catalog: CoreReferentiedataCatalog,
+): Snapshot {
   const groups = catalog.groepen ?? {};
   const snapshotEntries = Object.entries(groups).map(([groupName, group]) => {
     const items = (group.items ?? []).map((item) => {
@@ -77,6 +79,24 @@ function buildSnapshot(catalog: CoreCatalog): Snapshot {
 export type CoreReferentiedataSnapshot = Snapshot;
 
 /**
+ * The resolved authoring catalog without presentation normalization.
+ *
+ * Build-time consumers such as a field-definition editor need catalog/group
+ * metadata as authored, while operation schemas need the normalized snapshot
+ * below. Keeping both views behind this loader prevents either consumer from
+ * reparsing YAML or reading a stale generated file.
+ */
+export async function loadCoreReferentiedataCatalog(
+  repoRoot: string,
+): Promise<CoreReferentiedataCatalog> {
+  const rawCatalog = await readFile(
+    join(resolveActiveAuthoringDir(repoRoot), catalogRelativePath),
+    "utf8",
+  );
+  return YAML.parse(rawCatalog) as CoreReferentiedataCatalog;
+}
+
+/**
  * The snapshot as a value, built from the authoring catalog.
  *
  * Generators must consume THIS rather than reading the emitted
@@ -91,11 +111,9 @@ export async function loadCoreReferentiedataSnapshot(
 ): Promise<Snapshot> {
   // Read through the resolved authoring layers so overlay catalog merges
   // (e.g. extra referentiedata groups) flow into the snapshot.
-  const rawCatalog = await readFile(
-    join(resolveActiveAuthoringDir(repoRoot), catalogRelativePath),
-    "utf8",
+  return buildCoreReferentiedataSnapshot(
+    await loadCoreReferentiedataCatalog(repoRoot),
   );
-  return buildSnapshot(YAML.parse(rawCatalog) as CoreCatalog);
 }
 
 export async function generateCoreReferentiedataArtifacts(

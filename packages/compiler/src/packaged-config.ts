@@ -42,11 +42,18 @@ export function packagedConfigFallback(repoRelativePath: string): string | null 
  * checkout's machine-specific location.
  */
 export function canonicalRepoRelativePath(repoRoot: string, absolutePath: string): string {
+  // Materialized layer snapshots are process-owned physical inputs, but their
+  // source identity must not encode a PID or random directory in artifacts.
+  const withinRepo = relative(repoRoot, absolutePath);
+  const [buildRoot, snapshot, ...snapshotPath] = withinRepo.split(/[\\/]/);
+  if (buildRoot === ".authoring-build" && /^process-\d+-[A-Za-z0-9]{6}$/.test(snapshot ?? "")) {
+    return join(buildRoot, ...snapshotPath);
+  }
   const withinPackage = relative(packageRoot, absolutePath);
   if (withinPackage && !withinPackage.startsWith("..") && !isAbsolute(withinPackage)) {
     return join("packages/compiler", withinPackage);
   }
-  return relative(repoRoot, absolutePath);
+  return withinRepo;
 }
 
 /**

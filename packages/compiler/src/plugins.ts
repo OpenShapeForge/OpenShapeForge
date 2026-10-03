@@ -19,15 +19,20 @@
  */
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import type { CompiledEntityContract } from "./authoring/types.js";
+import type {
+  CompiledEntityContract,
+  CompiledEntityOperation,
+} from "./authoring/types.js";
+import type { FieldSchemaCompiler } from "./field-json-schema.js";
 import { loadAuthoringConfig } from "./authoring/layers.js";
+import type { EffectiveSettingsPolicy } from "./settings.js";
 import type { GeneratedArtifact, PlatformSchemaManifest, TableDefinition } from "./schema.js";
 
 export type CompiledEntityInfo = {
   slug: string;
   /** Repo-root-relative provenance path of the entity YAML. */
   path: string;
-  origin: "core" | "contextFull";
+  origin: "core";
   contract: CompiledEntityContract;
 };
 
@@ -37,15 +42,131 @@ export type PluginBaseContext = {
   webPresent: boolean;
 };
 
+/** A static plugin-backed Operation after compiler ownership is attached. */
+export type CompiledPluginOperation = PluginOperationContract & {
+  /** Compiler-owned adapter result normalization, never supplied by plugins. */
+  resultProjection?: { kind: "entity-record"; entityName: string; idField: string };
+  /** Compiler-owned native dispatch; never accepted from plugin contributions. */
+  implementation?:
+    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" | "update" | "remove" }
+    | { type: "entity-type-list"; labels: Record<string, { en: string; nl: string }> }
+    | {
+        type: "constrained-reference-create";
+        targetEntityName: string;
+        collectionEntityName?: string;
+        parentField?: string;
+        targetValues: Record<string, string | number | boolean>;
+        childValues?: Record<string, string | number | boolean>;
+      };
+  plugin: string;
+  /** Stable canonical identity. Equal to `key` for this operation kind. */
+  id: string;
+  intent: "invoke";
+};
+
+export type CompiledStaticEntityOperation = CompiledEntityOperation & {
+  /** Concrete input accepted by platform.operations.execute. */
+  inputSchema: JsonSchema;
+  /** Concrete success data returned by platform.operations.execute. */
+  outputSchema: JsonSchema;
+};
+
+export type CompiledStaticOperation =
+  | CompiledStaticEntityOperation
+  | CompiledPluginOperation;
+
+/**
+ * Stable, interface-neutral catalog exposed to compiler plugins.
+ *
+ * This is the complete static catalog: generated entity CRUD and authored
+ * plugin/module Operations share one ordered namespace. Record-derived runtime
+ * Operations remain runtime contributions and therefore do not belong here.
+ */
+export type StaticOperationCatalog = {
+  version: 1;
+  operations: readonly CompiledStaticOperation[];
+};
+
+/** @deprecated Use StaticOperationCatalog; retained as a migration alias. */
+export type EntityOperationCatalog = StaticOperationCatalog;
+
 export type PluginGenerateContext = PluginBaseContext & {
   manifest: PlatformSchemaManifest;
   entities: CompiledEntityInfo[];
+  operationCatalog: StaticOperationCatalog;
+  /** Canonical build-time FieldDefinition -> compiled field/JSON Schema projection. */
+  fieldSchemas: FieldSchemaCompiler;
+  /** Owner-defined settings after committed host narrowing and provider validation. */
+  settingsPolicy: EffectiveSettingsPolicy;
+};
+
+/**
+ * Temporary, generated bridge for core execution code that predates the
+ * canonical Operation registry. It is internal runtime metadata, never an
+ * interface projection. A plugin supplies field identities once; operation
+ * labels, authorization and reliability are resolved from its canonical
+ * Operation contributions.
+ */
+export type PluginExecutionCompatibility = {
+  version: 1;
+  records?: Array<{
+    providerId: string;
+    entity: string;
+    keyField: string;
+    titleField?: string;
+    descriptionField: string;
+    inputFieldsField: string;
+    outputFieldsField?: string;
+    versionField: string;
+    visibleWhen?: { field: string; equals: string };
+    visibleToRolesField?: string;
+    internalOnlyField?: string;
+    /**
+     * The roles a session must hold for the rows to project as tools and to
+     * execute — the audience of the derived tools. Absent, the audience is
+     * the roles of the definition entity's canonical read, which ties "may
+     * use the tools" to "may read the definitions"; a plugin whose users
+     * may call what only its administrators may read names the wider set
+     * here. Every role must exist in the realm; the build fails otherwise.
+     */
+    audience?: string[];
+    execution: {
+      /**
+       * Owned hasMany collection on the owner whose target rows are the
+       * execution steps.
+       */
+      bindingsRelation: string;
+      operationRef: string;
+      operationEntity: string;
+      providerRef: string;
+      providerEntity: string;
+      connectionEntity: string;
+      connectionProviderRef: string;
+      connectionValuesField: string;
+    };
+    connectOperation?: string;
+    dryRunOperation?: string;
+    personalization?: {
+      entity: string;
+      serviceRef: string;
+      instructionField: string;
+      setOperation: string;
+    };
+  }>;
+  discovery?: Array<{ operation: string; entity: string }>;
+  tests?: Array<{ operation: string; entity: string }>;
 };
 
 export type PluginSchemaMigration = {
   /** Plugin-local immutable migration version, e.g. `0100_install-triggers`. */
   version: string;
-  /** PostgreSQL DDL applied after the generated tables exist. */
+  /**
+   * PostgreSQL DDL applied after the generated tables exist: the invariants
+   * the manifest cannot express on a contributed table. A database is built
+   * from the manifest, so there is no earlier phase in which legacy ownership
+   * could be transformed — a contributed table's shape is declared, not
+   * migrated to.
+   */
   sql: string;
 };
 
@@ -78,7 +199,36 @@ export type PluginOperationError = {
 
 export type PluginOperationAuth =
   | { mode: "public" }
-  | { mode: "session"; roles: string[]; scopes?: string[] }
+  | {
+      /**
+       * A control-realm operator: the bearer is verified against the
+       * platform's control realm, never a tenant realm, and must hold one of
+       * these realm roles. No tenant context exists; tenancy must be `none`.
+       */
+      mode: "control";
+      roles: string[];
+    }
+  | {
+      mode: "session";
+      /** Omitted means any authenticated session; [] deliberately denies all. */
+      roles?: string[];
+      /** Every group requires at least one matching role; groups are combined with AND. */
+      roleGroups?: string[][];
+      scopes?: string[];
+      /** Current target-record permission checked in addition to roles. */
+      recordPermission?: import("./authoring/types/common.js").RecordPermissionAction;
+    }
+  | {
+      /**
+       * A capability grant: a hashed, expiring, recipient-bound token that
+       * core resolves into a grant session before the handler runs. The
+       * grant names the exact Operation keys and the one record it covers;
+       * the handler reads them from `session.grant`. REST only, described by
+       * the platform-owned `capabilityGrant` security scheme; the grant
+       * errors are appended to the Operation's declared errors.
+       */
+      mode: "capability";
+    }
   | {
       mode: "custom";
       /** OpenAPI components.securitySchemes key. */
@@ -102,6 +252,14 @@ export type PluginOperationContract = {
   description: string;
   /** Key in the runtime module's `operationHandlers` map. */
   handler: string;
+  /** Optional entity attachment authored in strict-v2 YAML. */
+  target?: {
+    entityId: string;
+    entityName: string;
+    scope: "collection" | "record";
+    inputField?: string;
+    inputBindings?: Record<string, string>;
+  };
   inputSchema: JsonSchema;
   outputSchema: JsonSchema;
   errors: PluginOperationError[];
@@ -117,6 +275,13 @@ export type PluginOperationContract = {
     inputField?: string;
     description?: string;
   };
+  /** Interface-neutral effects; every transport projection derives from them. */
+  effects: {
+    data: "read" | "write" | "delete";
+    external: "none" | "read" | "write";
+  };
+  concurrency?: import("@openshapeforge/operations").OperationConcurrency;
+  confirmation?: import("@openshapeforge/operations").OperationConfirmation;
   transports: {
     rest: {
       method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -145,19 +310,31 @@ export type CompilerPlugin = {
     | PluginOperationContract[]
     | ((context: PluginBaseContext) => PluginOperationContract[]);
   /**
+   * Removal seam while legacy execution engines are extracted from their old
+   * interface adapter. The compiler lowers this into an internal manifest;
+   * canonical Operations remain the only public source of truth.
+   */
+  executionCompatibility?:
+    | PluginExecutionCompatibility
+    | ((context: PluginGenerateContext) => PluginExecutionCompatibility);
+  /**
    * Extra platform tables merged into the base manifest before authoring
    * entities are promoted (e.g. a workflow plugin's catalog/instance tables).
    * Colliding with an existing schema.table is an error.
    */
   contributePlatformTables?(context: PluginBaseContext): TableDefinition[];
   /**
-   * Versioned DDL for invariants that are not table constraints, such as
-   * functions and triggers. Applied after generated tables and checksum-locked
-   * in the shared migration ledger.
+   * Idempotent DDL for invariants that are not table constraints, such as
+   * functions and triggers. Applied after the generated tables on EVERY
+   * migrate — there is no ledger — so each statement must be safe to repeat
+   * (CREATE OR REPLACE, IF NOT EXISTS, a guarded DO block). The version is
+   * an ordering key within the plugin.
    */
   schemaMigrations?:
     | PluginSchemaMigration[]
     | ((context: PluginBaseContext) => PluginSchemaMigration[]);
+  /** Nonsecret, JSON-serializable build configuration bound to this runtime module. */
+  runtimeConfiguration?(context: Pick<PluginGenerateContext, "entities">): unknown;
   /** Emit artifacts; paths are repo-root-relative like all compiler output. */
   generate?(
     context: PluginGenerateContext,
@@ -229,7 +406,10 @@ export function loadCompilerPluginEntries(
         loaded.push({ plugin, spec, modulePath });
       }
       return loaded;
-    })();
+    })().catch((error) => {
+      pluginCache.delete(repoRoot);
+      throw error;
+    });
     pluginCache.set(repoRoot, cached);
   }
   return cached;

@@ -36,7 +36,7 @@
  */
 import { existsSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import type { LoadedCompilerPlugin } from "./plugins.js";
+import type { LoadedCompilerPlugin, PluginGenerateContext } from "./plugins.js";
 
 export const MODULE_REGISTRY_PATH = "apps/api/src/generated/modules/registry.json";
 export const MODULE_REGISTRY_ROOT = "apps/api/src/generated/modules";
@@ -53,6 +53,7 @@ export type RuntimeModuleRegistration = {
    * its own location, so an absolute build-machine path would be wrong.
    */
   specifier: string;
+  configuration?: unknown;
 };
 
 export type ModuleRegistry = {
@@ -87,15 +88,44 @@ function runtimeSpecifierFor(
   return null;
 }
 
+/** Refuse values JSON would silently drop or coerce. Cycles also fail closed. */
+function assertJsonConfiguration(value: unknown, ancestors = new Set<object>()): void {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return;
+  if (typeof value === "number" && Number.isFinite(value)) return;
+  if (typeof value !== "object" || !value || ancestors.has(value)) throw new Error("Runtime configuration must contain finite JSON values without cycles.");
+  if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) throw new Error("Runtime configuration must contain plain JSON objects.");
+  const keys = Reflect.ownKeys(value);
+  if (keys.some(key => typeof key === "symbol")) throw new Error("Runtime configuration cannot contain symbol properties.");
+  if (Array.isArray(value) && (keys.length !== value.length + 1 || Array.from({ length: value.length }, (_, index) => index).some(index => !Object.hasOwn(value, index)))) throw new Error("Runtime configuration cannot contain sparse arrays or custom array properties.");
+  ancestors.add(value);
+  for (const key of keys) {
+    if (Array.isArray(value) && key === "length") continue;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    if (!descriptor.enumerable || !("value" in descriptor)) throw new Error("Runtime configuration requires enumerable data properties.");
+    assertJsonConfiguration(descriptor.value, ancestors);
+  }
+  ancestors.delete(value);
+}
+
 export function buildModuleRegistry(
   repoRoot: string,
   entries: readonly LoadedCompilerPlugin[],
+  context?: Pick<PluginGenerateContext, "entities">,
 ): ModuleRegistry {
   const modules: RuntimeModuleRegistration[] = [];
   for (const entry of entries) {
     const specifier = runtimeSpecifierFor(repoRoot, entry);
     if (specifier) {
-      modules.push({ name: entry.plugin.name, specifier });
+      const registration: RuntimeModuleRegistration = { name: entry.plugin.name, specifier };
+      if (entry.plugin.runtimeConfiguration) {
+        if (!context) throw new Error(`Runtime configuration for ${entry.plugin.name} requires compiled entities.`);
+        const configuration = entry.plugin.runtimeConfiguration(context);
+        assertJsonConfiguration(configuration);
+        const serialized = JSON.stringify(configuration);
+        if (serialized === undefined) throw new Error(`Runtime configuration for ${entry.plugin.name} must be JSON serializable.`);
+        registration.configuration = JSON.parse(serialized);
+      }
+      modules.push(registration);
     }
   }
   return { version: 1, modules };

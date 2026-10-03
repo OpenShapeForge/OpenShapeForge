@@ -1,0 +1,205 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: ValueContract
+title: Value Contract
+description: >-
+  Test fixture — static options, a POSIX-safe pattern, an ECMA-only pattern and a numeric default, to prove which
+  authored value contracts reach the database. Not part of the shipped slice.
+language: en
+displayTemplate: "{{label}}"
+filterField: label
+labels:
+  en: Value Contract
+  nl: Value Contract
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+      - Relaties.All.ReadWrite
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+fields:
+  - key: label
+    osfType: string
+    required: true
+    label:
+      en: Label
+      nl: Label
+    persisted:
+      column: label
+      storageClass: core
+  - key: status
+    osfType: string
+    required: true
+    defaultValue: open
+    label:
+      en: Status
+      nl: Status
+    options:
+      type: static
+      items:
+        - value: open
+          label:
+            en: Open
+            nl: Open
+        - value: closed
+          label:
+            en: Closed
+            nl: Gesloten
+    persisted:
+      column: status
+      storageClass: core
+  - key: locale
+    osfType: string
+    required: false
+    validation:
+      pattern: "^[a-z]{2}(-[A-Z]{2})?$"
+    label:
+      en: Locale
+      nl: Taal
+    persisted:
+      column: locale
+      storageClass: core
+  - key: slug
+    osfType: string
+    required: false
+    validation:
+      pattern: "^(?!-)[a-z-]+$"
+    label:
+      en: Slug
+      nl: Slug
+    persisted:
+      column: slug
+      storageClass: core
+  - key: quantity
+    osfType: number
+    required: true
+    defaultValue: 1
+    label:
+      en: Quantity
+      nl: Aantal
+    persisted:
+      column: quantity
+      storageClass: core
+  - key: segment
+    osfType: string
+    required: false
+    cardinality:
+      min: 0
+      max: 1
+    label:
+      en: Segment
+      nl: Segment
+    validation:
+      pattern: "^[a-z]+--[a-z]+$"
+    options:
+      type: static
+      items:
+        - value: non--food
+          label:
+            en: Non-food
+            nl: Non-food
+        - value: fresh--food
+          label:
+            en: Fresh food
+            nl: Verse waren
+    persisted:
+      column: segment
+      storageClass: core
+  - key: tags
+    osfType: string
+    cardinality: collection
+    required: false
+    label:
+      en: Tags
+      nl: Tags
+    options:
+      type: static
+      items:
+        - value: red
+          label:
+            en: Red
+            nl: Rood
+    persisted:
+      column: tags
+      storageClass: core
+operations:
+  list:
+    name: List Value Contract
+    description: List ValueContract records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Value Contract
+    description: Get ValueContract records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Value Contract
+    description: Create ValueContract records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Value Contract
+    description: Update ValueContract records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Value Contract
+    description: Delete ValueContract records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}

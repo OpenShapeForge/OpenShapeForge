@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: CaseParty
@@ -10,6 +10,9 @@ filterField: displayName
 labels:
   en: Case Party
   nl: Zaakbetrokkene
+pluralLabels:
+  en: Case parties
+  nl: Zaakbetrokkenen
 domains:
   - cases
 authorization:
@@ -28,7 +31,6 @@ authorization:
     empty: public
 fields:
   - key: role
-    valueType: string
     required: true
     label:
       en: Role
@@ -36,13 +38,12 @@ fields:
     persisted:
       column: role
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEPARTYROLE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: CASEPARTYROLE
+    osfType: referenceDataCode
   - key: displayName
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Display name
@@ -53,7 +54,7 @@ fields:
       column: display_name
       storageClass: core
   - key: isPrimary
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Primary
@@ -63,7 +64,7 @@ fields:
       column: is_primary
       storageClass: core
   - key: startDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Start date
@@ -71,11 +72,8 @@ fields:
     persisted:
       column: start_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: endDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: End date
@@ -83,11 +81,7 @@ fields:
     persisted:
       column: end_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: note
-    valueType: string
     required: false
     label:
       en: Note
@@ -97,38 +91,135 @@ fields:
     persisted:
       column: note
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 2000
-relationships:
-  - key: case
-    kind: belongsTo
-    target: Case
-    foreignKey: case_id
+    osfType: multilineText
+  - key: caseId
     label:
       en: Case
       nl: Zaak
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+    persisted:
+      column: case_id
+      storageClass: core
+    osfType: Case
+    relationship:
+      ownership: reference
+      inverse:
+        key: parties
+        label:
+          en: Parties
+          nl: Betrokkenen
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: relationRole
-    kind: belongsTo
-    target: RelationRole
-    foreignKey: relation_role_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    osfType: Relation
+    relationship:
+      ownership: reference
+  - key: relationRoleId
     label:
       en: Relation role
       nl: Relatierol
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: relation_role_id
+      storageClass: core
+    osfType: RelationRole
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Case Party
+    description: List CaseParty records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Case Party
+    description: Get CaseParty records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Case Party
+    description: Create CaseParty records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Case Party
+    description: Update CaseParty records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Case Party
+    description: Delete CaseParty records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    fields:
+      role:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEPARTYROLE
+            clearable: false
+      startDate:
+        render:
+          component: DatePicker
+          props: {}
+      endDate:
+        render:
+          component: DatePicker
+          props: {}
+      note:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 2000

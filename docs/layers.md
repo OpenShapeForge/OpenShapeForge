@@ -16,7 +16,7 @@ layers:
   # - "@openshapeforge/context-care"         # package whose root has an authoring/ dir
 plugins:
   - ./examples/plugins/entity-docs.ts
-  - ./examples/plugins/workflow/index.ts
+  - ./examples/plugins/notebook/index.ts
 restApi:
   title: Example Product API
   version: "1"
@@ -50,8 +50,8 @@ restApi:
 - `plugins` registers compiler plugins ([plugins.md](plugins.md)). A plugin
   that ships its own `authoring/` directory contributes it as an extra layer
   **appended after all configured layers**, in plugin registration order.
-  (That is why this repo, with one configured layer, still materializes
-  `.authoring-build/` — the workflow plugin's layer makes it two.)
+  (That is why this repo materializes `.authoring-build/`: the notebook
+  plugin's layer joins the configured ones.)
 - `restApi` is optional host-owned developer onboarding for the generated
   OpenAPI document and Swagger UI. `title` and Markdown `description` are
   required; `version` defaults to `1`. `externalDocs`, when present, requires
@@ -127,7 +127,7 @@ host set a maximum exposure policy that an installed package/plugin cannot
 widen.
    Patching a slug no earlier layer defines is an error. Later layers may
    patch the same entity again — patches stack.
-2. **`kind: appShellPatch`** — strategic-merged into `appShell.yaml` from an
+2. **`kind: appShellPatch`** — strategic-merged into `menu.yaml` from an
    earlier layer (path-targeted; there is exactly one app shell).
 3. **`kind: authorizationPatch`** — merged into the realm file at the **same
    path** (`authorization.yaml`, `authorization.<realm>.yaml`) from an
@@ -173,7 +173,7 @@ fields:
   - key: notes
     $delete: true          # remove the notes field (keyed-array delete)
   - key: segment           # new key -> appended
-    valueType: string
+    osfType: string
     persisted: { column: segment, storageClass: core }
 ```
 
@@ -195,15 +195,25 @@ overlay-added groups flow into `core-by-groep.json` automatically.
 
 - **Single resolved layer, no patches** → the layer directory is used
   directly (fast path; byte-identical to pre-layer behavior). No build dir.
-- **Multiple layers** → the merged tree is materialized under
-  `.authoring-build/` at the repo root (deleted and rebuilt on every
-  resolve, gitignored). This is your `kustomize build` output: inspect it to
-  see exactly what the compiler saw. Generated provenance paths (e.g.
+- **Multiple layers** → each resolution materializes its own immutable
+  snapshot inside `.authoring-build/` at the repo root. Concurrent processes
+  and repeated resolutions retain their own inputs. Snapshots are gitignored;
+  the owning process cleans them on failure or exit without deleting another
+  process's files. The returned resolved directory can be inspected while
+  that process is running. Generated provenance paths (e.g.
   `source.path` in the manifest, or the "authored in …" lines in
   `docs/entities.generated.md`) point into `.authoring-build/` when layering
-  is active.
+  is active; they omit the process-specific snapshot name to stay deterministic.
 - Resolution is memoized per repo root (`resolveActiveAuthoringDir`), so the
   determinism double-run compiles the same resolved tree.
+- A flat tree left by the earlier compiler is obsolete. With no earlier
+  compiler running, remove those generated flat contents; the compiler does
+  not remove unowned files automatically. Canonical provenance is a stable
+  source label, not a persistent filesystem snapshot.
+- Forced termination can leave a `process-<pid>-*` snapshot behind. Later
+  compilations never consume it. Development cleanup may remove that directory
+  after confirming the owning PID is no longer alive; normal exit and failed
+  resolution clean their owned snapshots automatically.
 
 ## Collision rules — summary
 
@@ -212,7 +222,7 @@ overlay-added groups flow into `core-by-groep.json` automatically.
 | Same path, plain file, non-catalog | Error ("Layer collision") |
 | Same path, `catalogs/*.yaml` | Strategic merge |
 | Same slug via `kind: entityPatch` | Strategic merge (patch) |
-| `appShell.yaml` via `kind: appShellPatch` | Strategic merge (patch) |
+| `menu.yaml` via `kind: appShellPatch` | Strategic merge (patch) |
 | `authorization*.yaml` via `kind: authorizationPatch` | Rename + strategic merge, role lists union |
 | `authorizationPatch` for a realm file no earlier layer has, or off the layer root | Error |
 | Same slug, plain entity file, different path | Error ("Duplicate entity slug") |

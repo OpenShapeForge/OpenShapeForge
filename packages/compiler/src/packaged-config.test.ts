@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { packagedConfigFallback, resolvePackagedConfigPath } from "./packaged-config.js";
+import { canonicalRepoRelativePath, packagedConfigFallback, resolvePackagedConfigPath } from "./packaged-config.js";
 
 const packageRoot = resolve(import.meta.dir, "..");
 
@@ -44,5 +44,21 @@ describe("resolvePackagedConfigPath", () => {
     expect(packagedConfigFallback("packages/compiler/config/authoring")).toBe(
       join(packageRoot, "config/authoring"),
     );
+  });
+
+  test("physical authoring snapshots keep the established deterministic provenance", () => {
+    const root = resolve(tmpdir(), "osf-canonical-host");
+    expect(canonicalRepoRelativePath(root, join(root, ".authoring-build/process-123-ABC123")))
+      .toBe(".authoring-build");
+    expect(canonicalRepoRelativePath(root, join(root, ".authoring-build/process-456-def456/entities/widget.yaml")))
+      .toBe(".authoring-build/entities/widget.yaml");
+    expect(canonicalRepoRelativePath(root, join(root, ".authoring-build/entities/widget.yaml")))
+      .toBe(".authoring-build/entities/widget.yaml");
+    expect(canonicalRepoRelativePath(root, join(root, "authoring/process-123-ABC123/entities/widget.yaml")))
+      .toBe("authoring/process-123-ABC123/entities/widget.yaml");
+    expect(canonicalRepoRelativePath(root, join(root, ".authoring-build/not-a-snapshot/entities/widget.yaml")))
+      .toBe(".authoring-build/not-a-snapshot/entities/widget.yaml");
+    expect(canonicalRepoRelativePath(root, join(packageRoot, "config/authoring/entities/widget.yaml")))
+      .toBe("packages/compiler/config/authoring/entities/widget.yaml");
   });
 });

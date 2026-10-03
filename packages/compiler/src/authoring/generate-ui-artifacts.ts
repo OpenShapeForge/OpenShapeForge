@@ -4,9 +4,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import YAML from "yaml";
 import {
-  discoverContextEntities,
   listEntityFiles,
-  loadContextEntity,
   loadEntity,
 } from "./loader.js";
 import { compile } from "./compiler/index.js";
@@ -17,7 +15,9 @@ import { normalizeKeycloakRoleName } from "./generators/keycloak.js";
 import type { EntityManifestEntryData } from "./generators/app.js";
 import type { RuntimeMetadataData } from "./generators/manifest.js";
 import type { ViewDefinition } from "./types.js";
+import { generateWebContractModules, type ComposedEntity } from "./generators/web-contract.js";
 import { generatePersistedOperationArtifacts } from "../persisted-operations.js";
+import { buildWebManifest, renderWebManifest, type WebStandaloneOperationsInput } from "./web-manifest.js";
 
 export type AuthoringUiArtifact = {
   path: string;
@@ -31,9 +31,6 @@ type CompiledAuthoringEntity = {
   routes?: ViewDefinition["routes"] | undefined;
 };
 
-// Workflow artifact prefixes (api/workflow/, workflow/contract/,
-// workflow/generated/, features/**) moved with the workflow generators to the
-// example workflow plugin (examples/plugins/workflow), which maps them itself.
 const generatedArtifactPathMappings = [
   { oldPrefix: "actions/generated/", servicePrefix: "apps/web/src/actions/generated/" },
   { oldPrefix: "app/", servicePrefix: "apps/web/src/app/" },
@@ -76,6 +73,11 @@ async function loadViewDefinitions(authoringDir: string): Promise<Map<string, Vi
 
 type RuntimeAuthorizationConfig = {
   realmRoles?: Record<string, { composites?: Record<string, string[]> }>;
+  clientRoleComposites?: Record<
+    string,
+    Record<string, { composites: Record<string, string[]> }>
+  >;
+  groups?: RuntimeAuthorizationGroup[];
   users?: Array<{
     username: string;
     tid?: string;
@@ -83,6 +85,13 @@ type RuntimeAuthorizationConfig = {
     groups?: string[];
     clientRoles?: Record<string, string[]>;
   }>;
+};
+
+type RuntimeAuthorizationGroup = {
+  name: string;
+  realmRoles?: string[];
+  clientRoles?: Record<string, string[]>;
+  subGroups?: RuntimeAuthorizationGroup[];
 };
 
 async function loadAuthorizationConfig(authoringDir: string): Promise<RuntimeAuthorizationConfig> {
@@ -94,26 +103,74 @@ function normalizeRoleList(roles: string[] | undefined): string[] {
   return [...new Set((roles ?? []).map(normalizeKeycloakRoleName))].sort();
 }
 
-function buildRuntimeAuthMetadata(
+export function buildRuntimeAuthMetadata(
   authConfig: RuntimeAuthorizationConfig,
 ): Pick<RuntimeMetadataData, "realmRoleComposites" | "personas"> {
   const realmRoleComposites: Record<string, string[]> = {};
   for (const [roleName, role] of Object.entries(authConfig.realmRoles ?? {})) {
     const roles = Object.values(role.composites ?? {}).flat();
-    realmRoleComposites[roleName] = normalizeRoleList(roles);
+    realmRoleComposites[normalizeKeycloakRoleName(roleName)] = normalizeRoleList(roles);
   }
 
+  for (const definitions of Object.values(authConfig.clientRoleComposites ?? {})) {
+    for (const [roleName, role] of Object.entries(definitions)) {
+      realmRoleComposites[normalizeKeycloakRoleName(roleName)] = normalizeRoleList(
+        Object.values(role.composites).flat(),
+      );
+    }
+  }
+
+  const groupRoles = new Map<
+    string,
+    { realmRoles: string[]; clientRoles: string[] }
+  >();
+  const collectGroups = (groups: RuntimeAuthorizationGroup[], parentPath: string) => {
+    for (const group of groups) {
+      const path = `${parentPath}/${group.name}`;
+      groupRoles.set(path, {
+        realmRoles: normalizeRoleList(group.realmRoles),
+        clientRoles: normalizeRoleList(Object.values(group.clientRoles ?? {}).flat()),
+      });
+      collectGroups(group.subGroups ?? [], path);
+    }
+  };
+  collectGroups(authConfig.groups ?? [], "");
+
+  const expandComposites = (initialRoles: string[]): string[] => {
+    const expanded = new Set(normalizeRoleList(initialRoles));
+    const pending = [...expanded];
+    for (const roleName of pending) {
+      for (const composite of realmRoleComposites[roleName] ?? []) {
+        if (!expanded.has(composite)) {
+          expanded.add(composite);
+          pending.push(composite);
+        }
+      }
+    }
+    return [...expanded];
+  };
+
   const personas = (authConfig.users ?? []).map((user) => {
-    const directRoles = Object.values(user.clientRoles ?? {}).flat();
-    const compositeRoles = (user.realmRoles ?? []).flatMap(
-      (roleName) => realmRoleComposites[roleName] ?? [],
-    );
+    const memberships = (user.groups ?? []).flatMap((path) => {
+      const membership = groupRoles.get(path);
+      return membership ? [membership] : [];
+    });
+    const realmRoles = normalizeRoleList([
+      ...(user.realmRoles ?? []),
+      ...memberships.flatMap((membership) => membership.realmRoles),
+    ]);
+    const directClientRoles = normalizeRoleList([
+      ...Object.values(user.clientRoles ?? {}).flat(),
+      ...memberships.flatMap((membership) => membership.clientRoles),
+    ]);
     return {
       username: user.username,
       tid: user.tid ?? null,
-      realmRoles: normalizeRoleList(user.realmRoles),
+      realmRoles,
       groupPaths: [...(user.groups ?? [])].sort(),
-      effectiveClientRoles: normalizeRoleList([...directRoles, ...compositeRoles]),
+      effectiveClientRoles: normalizeRoleList(
+        expandComposites([...realmRoles, ...directClientRoles]),
+      ),
     };
   }).sort((left, right) => left.username.localeCompare(right.username));
 
@@ -143,6 +200,13 @@ export function isGeneratedCrudUiEnabled(contract: CompiledAuthoringEntity["cont
   // Partial CRUD policies are valid for APIs and workflows, but require a
   // purpose-built UI rather than pages that reference omitted operations.
   return Object.values(contract.crud.operations).every(Boolean);
+}
+
+export function resolveGeneratedCrudRoutes(
+  legacyRoutes: ViewDefinition["routes"] | undefined,
+  compiledRoutes: ViewDefinition["routes"] | undefined,
+): ViewDefinition["routes"] | undefined {
+  return legacyRoutes ?? compiledRoutes;
 }
 
 function isGeneratedCrudUiEnabledForEntityName(
@@ -305,28 +369,25 @@ function keepGreenfieldSafeArtifacts(files: Map<string, string>): AuthoringUiArt
 export async function generateAuthoringUiArtifacts(
   authoringDir: string,
   repoRoot: string,
+  standalone: WebStandaloneOperationsInput = { catalogs: [], operations: [] },
+  referentiedata: import("../core-referentiedata-artifacts.js").CoreReferentiedataSnapshot = {},
 ): Promise<AuthoringUiArtifact[]> {
   const entityNames = listEntityFiles(authoringDir).map((file) => file.slug);
   const compiled: CompiledAuthoringEntity[] = [];
+  const composedEntities: ComposedEntity[] = [];
 
   for (const entityName of entityNames) {
     const loaded = loadEntity(authoringDir, entityName);
+    const contract = compile(loaded);
+    composedEntities.push({ entity: loaded.coreEntity, profiles: loaded.profiles });
     compiled.push({
       name: entityName,
-      contract: compile(loaded),
+      contract,
       appShell: loaded.appShell,
-      routes: loaded.coreEntity.ui?.routes,
-    });
-  }
-
-  for (const contextEntity of discoverContextEntities(authoringDir).sort((a, b) =>
-    `${a.context}/${a.name}`.localeCompare(`${b.context}/${b.name}`),
-  )) {
-    const loaded = loadContextEntity(authoringDir, contextEntity.context, contextEntity.name);
-    compiled.push({
-      name: contextEntity.name,
-      contract: compile(loaded),
-      appShell: loaded.appShell,
+      routes: resolveGeneratedCrudRoutes(
+        loaded.coreEntity.ui?.routes,
+        contract.views.core?.routes,
+      ),
     });
   }
 
@@ -436,6 +497,22 @@ export async function generateAuthoringUiArtifacts(
   for (const [path, contents] of routeFiles) {
     generatedFiles.set(path, contents);
   }
+
+  // The renderer's contract modules: the web app types every rendered field
+  // against these rather than importing the compiler package.
+  for (const [name, contents] of generateWebContractModules(authoringDir, composedEntities)) {
+    generatedFiles.set(`generated/web/compiler/${name}`, contents);
+  }
+
+  generatedFiles.set(
+    "generated/web/web-manifest.json",
+    renderWebManifest(buildWebManifest(
+      compiled.map(({ name, contract }) => ({ slug: name, contract })),
+      {},
+      standalone,
+      referentiedata,
+    )),
+  );
 
   const persisted = await generatePersistedOperationArtifacts({
     repoRoot,

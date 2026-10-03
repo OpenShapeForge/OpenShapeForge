@@ -4,7 +4,6 @@ import { BodyHeader } from "@/components/ui/layout/body-header";
 import { EntityPageChrome } from "@/components/entity/EntityPageChrome";
 import { WorkspaceListClient } from "@/components/entity/WorkspaceListClient";
 import { WorkspaceRelatedPane } from "@/components/entity/WorkspaceRelatedPane";
-import { EntityActionButtons } from "@/features/entity-actions/components/EntityActionButtons";
 import {
   detailConfigToRendererDefinition,
   detailPaneToRendererDefinition,
@@ -99,7 +98,6 @@ export function buildBodyColumn({
   entity,
   detailHeader,
   detailLoadError,
-  activeActions,
   activeGroupId,
   listRoute,
   searchParams,
@@ -110,7 +108,6 @@ export function buildBodyColumn({
   entity: Record<string, unknown> | null;
   detailHeader: any;
   detailLoadError: string | null;
-  activeActions: any[];
   activeGroupId: string;
   listRoute: string;
   searchParams: WorkspaceSearchParams;
@@ -125,9 +122,6 @@ export function buildBodyColumn({
             : (detailHeader as any).badges,
         }}
         notice={detailLoadError ? { tone: "warning", message: detailLoadError } : undefined}
-        headerExtra={activeActions.length > 0 ? (
-          <EntityActionButtons activeActions={activeActions} entityState={entity ?? {}} />
-        ) : null}
         className="max-w-none gap-6 pt-0"
       >
         <Renderer

@@ -29,10 +29,10 @@ afterEach(async () => {
 
 function persistedEntry(operationName: string): [string, string] {
   const entry = Object.entries(persistedManifest.operations).find(([, query]) =>
-    new RegExp(`\\b${operationName}\\b`).test(query),
+    typeof query === "string" && new RegExp(`\\b${operationName}\\b`).test(query),
   );
-  if (!entry) throw new Error(`Missing persisted operation ${operationName}.`);
-  return entry;
+  if (!entry || typeof entry[1] !== "string") throw new Error(`Missing persisted operation ${operationName}.`);
+  return [entry[0], entry[1]];
 }
 
 async function persistedRequest(

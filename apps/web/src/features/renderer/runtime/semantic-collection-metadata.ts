@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { Field } from "@/generated/compiler/field-contract";
-import { getCompilerSemanticTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
+import { getCompilerOsfTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
 
 type Lang = "nl" | "en";
 
@@ -11,17 +11,17 @@ export type SemanticCollectionMeta = {
 };
 
 /**
- * These three keys are optional collection affordances a semantic-type catalog
- * may declare. The compiled `SemanticTypeDefinition` in this repo does not
+ * These three keys are optional collection affordances a osf-type catalog
+ * may declare. The compiled `OsfTypeDefinition` in this repo does not
  * model them, so they are read structurally rather than off the generated type:
  * a catalog that declares them is honoured, and one that does not yields `{}`,
  * which every consumer below already treats as "no collection metadata".
  */
 export function resolveSemanticCollectionMeta(
-  field: Pick<Field, "semanticType">,
+  field: Pick<Field, "osfType">,
 ): SemanticCollectionMeta {
-  const def = field.semanticType
-    ? getCompilerSemanticTypeDefinition(field.semanticType)
+  const def = field.osfType
+    ? getCompilerOsfTypeDefinition(field.osfType)
     : undefined;
   if (!isRecord(def)) return {};
 

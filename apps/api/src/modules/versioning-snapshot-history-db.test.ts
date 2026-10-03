@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: BUSL-1.1
+/**
+ * A published snapshot describes content, never publication history.
+ * `template_versions.template_id` is an owned (cascading) reference to the
+ * head, so the generic child walk would embed versions 1..N-1 inside version
+ * N: quadratic storage, and a content hash that changed with every publish of
+ * identical content. The version table is excluded by its compiler-bound
+ * storage, which this proves against the real generated schema.
+ *
+ * Run (cwd apps/api):
+ *   SCRATCH_ADMIN_DATABASE_URL=postgres://openshapeforge:openshapeforge@127.0.0.1:5435/postgres \
+ *     bun test src/modules/versioning-snapshot-history-db.test.ts
+ */
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { sql } from "kysely";
+import { parseSnapshot, type SnapshotNode } from "@openshapeforge/versioning/snapshot";
+import { closeScratch, editor, openScratch, platformFor, privileged, publishTemplate, seedTemplate } from "../documents/__tests__/document-content-fixture.js";
+
+type VersionRow = { id: string; version_number: number; content_hash: string; snapshot: unknown };
+
+async function versions(templateId: string): Promise<VersionRow[]> {
+  return (await sql<VersionRow>`select id, version_number, content_hash, snapshot from erp.template_versions
+    where template_id = ${templateId}::uuid order by version_number`.execute(privileged())).rows;
+}
+function tables(node: SnapshotNode): string[] {
+  return Object.entries(node.children).flatMap(([table, entries]) => [table, ...entries.flatMap(tables)]);
+}
+
+describe("published snapshots against PostgreSQL", () => {
+  beforeAll(openScratch, 120_000);
+  afterAll(closeScratch);
+
+  test("a version never embeds earlier versions, so identical content hashes identically and is not stored twice", async () => {
+    const { context } = platformFor(editor);
+    const ids = await seedTemplate();
+    const first = await publishTemplate(context, ids.template);
+    // Nothing about the head changed, so the same version is reused: three publishes, one row.
+    for (let publish = 0; publish < 2; publish += 1) expect(await publishTemplate(context, ids.template)).toBe(first);
+    let stored = await versions(ids.template);
+    expect(stored.map((row) => row.version_number)).toEqual([1]);
+
+    // Content that does change is a new version with a different hash; the first version is not embedded in it.
+    await sql`update erp.blocks set "values" = '{"markdown":"Changed"}'::jsonb where id = ${ids.second}::uuid`.execute(privileged());
+    await publishTemplate(context, ids.template);
+    stored = await versions(ids.template);
+    expect(stored.map((row) => row.version_number)).toEqual([1, 2]);
+    const second = parseSnapshot(stored[1]!.snapshot);
+    expect(second.entity).toBe("Template");
+    expect(tables(second.head)).toEqual(["template_variants", "blocks"]);
+    expect(JSON.stringify(second)).not.toContain("template_versions");
+    expect(stored[1]!.content_hash).not.toBe(stored[0]!.content_hash);
+
+    // Identical content republished hashes the same as the first version again, as a third row (the latest differs).
+    await sql`update erp.blocks set "values" = '{"markdown":"Second"}'::jsonb where id = ${ids.second}::uuid`.execute(privileged());
+    await publishTemplate(context, ids.template);
+    const hashes = (await versions(ids.template)).map((row) => row.content_hash);
+    expect(hashes).toHaveLength(3);
+    expect(hashes[2]).toBe(hashes[0]);
+    expect(hashes[1]).not.toBe(hashes[0]);
+  });
+});

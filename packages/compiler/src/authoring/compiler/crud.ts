@@ -2,12 +2,13 @@
 /**
  * Common generated-CRUD exposure compiler.
  *
- * The result is the upper bound shared by GraphQL, REST, MCP and workflow.
- * Transport-specific authoring may narrow it, never widen it. Absence keeps
- * the historical all-operations default for existing entities.
+ * An entity exposes exactly the CRUD intents its canonical Operations
+ * implement. The result is the upper bound shared by GraphQL, REST, MCP and
+ * workflow; transport-specific interfaces may narrow it, never widen it.
  */
-import type { CrudConfig, CrudOperationKey, CrudSection } from "../types.js";
+import type { CrudOperationKey, CrudSection } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
+import { operationByAction } from "../entity-model.js";
 
 export const CRUD_OPERATION_KEYS: readonly CrudOperationKey[] = [
   "list",
@@ -17,29 +18,15 @@ export const CRUD_OPERATION_KEYS: readonly CrudOperationKey[] = [
   "delete",
 ];
 
-export function resolveCrudOperations(
-  authored: LoadedArtifacts["coreEntity"]["crud"],
-): CrudSection["operations"] {
-  if (authored === false) {
-    return Object.fromEntries(
-      CRUD_OPERATION_KEYS.map((operation) => [operation, false]),
-    ) as Record<CrudOperationKey, boolean>;
-  }
-
-  const config: CrudConfig = authored === true || authored === undefined ? {} : authored;
-  const enabled = config.enabled !== false;
-  return Object.fromEntries(
-    CRUD_OPERATION_KEYS.map((operation) => [
-      operation,
-      enabled && config.operations?.[operation] !== false,
-    ]),
-  ) as Record<CrudOperationKey, boolean>;
-}
-
 export function buildCrud(
   coreEntity: LoadedArtifacts["coreEntity"],
 ): CrudSection {
-  return { operations: resolveCrudOperations(coreEntity.crud) };
+  const operations = operationByAction(coreEntity);
+  return {
+    operations: Object.fromEntries(
+      CRUD_OPERATION_KEYS.map((operation) => [operation, !coreEntity.source && Boolean(operations[operation])]),
+    ) as Record<CrudOperationKey, boolean>,
+  };
 }
 
 export function limitCrudOperations<T extends CrudOperationKey>(

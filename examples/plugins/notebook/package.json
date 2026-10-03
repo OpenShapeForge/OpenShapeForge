@@ -1,0 +1,13 @@
+{
+  "name": "@openshapeforge/example-plugin-notebook",
+  "version": "0.1.0",
+  "private": true,
+  "license": "BUSL-1.1",
+  "type": "module",
+  "description": "Example plugin: a versioned entity in its own schema, plus one canonical plugin Operation with a runtime half.",
+  "module": "index.ts",
+  "dependencies": {
+    "kysely": "^0.29.4"
+  },
+  "//dependencies": "kysely is the runtime half's: the import handler writes through the query builder the host hands it. Declared here rather than borrowed from apps/api, because a bare specifier does not resolve from examples/. Keep the range in step with apps/api — they share a connection."
+}

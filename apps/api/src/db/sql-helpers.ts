@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql, type RawBuilder } from "kysely";
 
+// Runtime plugins resolve this helper from the API source tree, so the
+// dependency is loaded from the API workspace rather than from a plugin root.
+export { sql };
+
 /**
  * Render an arbitrary JS value as a parameterized `jsonb` literal inside a
  * kysely SQL template. Bind the original value and let the active Bun SQL

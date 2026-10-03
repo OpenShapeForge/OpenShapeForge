@@ -21,13 +21,14 @@
  * SERVICE_MISCONFIGURED — a definition mistake, never a provider outcome.
  */
 import { HttpError } from "../rest/http-error.js";
+import { VALUE_TRANSFORMS } from "./value-transforms.js";
 
 type Rec = Record<string, unknown>;
 
 /** A pipeline scope: the record steps read from and write to, plus parents. */
 type Scope = { value: Rec; parent?: Scope | undefined };
 
-type Condition = { path: string; equals?: unknown; exists?: true };
+type Condition = { path: string; equals?: unknown; notEquals?: unknown; exists?: true };
 
 type Step = Rec & { op: string };
 
@@ -211,7 +212,7 @@ function parseWhere(step: Step, index: number): Condition[] {
       throw misconfigured(
         index,
         step.op,
-        "`where` needs {path, equals?|exists?}",
+        "`where` needs {path, equals?|notEquals?|exists?}",
       );
     return entry as Condition;
   });
@@ -222,12 +223,12 @@ function matches(item: unknown, conditions: Condition[]): boolean {
   return conditions.every((condition) => {
     const actual = scope ? readPath(scope, condition.path) : undefined;
     if (condition.exists === true && !present(actual)) return false;
-    if ("equals" in condition) {
-      const expected = condition.equals;
-      if (typeof actual === "string" && typeof expected === "string")
-        return actual.toLowerCase() === expected.toLowerCase();
-      return actual === expected;
-    }
+    const same = (expected: unknown): boolean =>
+      typeof actual === "string" && typeof expected === "string"
+        ? actual.toLowerCase() === expected.toLowerCase()
+        : actual === expected;
+    if ("equals" in condition && !same(condition.equals)) return false;
+    if ("notEquals" in condition && same(condition.notEquals)) return false;
     return true;
   });
 }
@@ -365,8 +366,11 @@ function runSteps(scope: Scope, steps: unknown, index: number): Rec {
         writePath(current, target, found ?? null);
         break;
       }
-      default:
-        throw misconfigured(i, step.op, "unknown op");
+      default: {
+        const transform = Object.hasOwn(VALUE_TRANSFORMS, step.op) ? VALUE_TRANSFORMS[step.op] : undefined;
+        if (!transform) throw misconfigured(i, step.op, "unknown op");
+        unary((value) => transform(value, step, (message) => misconfigured(i, step.op, message)));
+      }
     }
   });
   return current.value;

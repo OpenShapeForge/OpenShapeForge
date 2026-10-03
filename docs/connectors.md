@@ -54,11 +54,16 @@ implementation:
 availability:
   entitlement: connector.object-store   # absent ⇒ always available
 
+authorization:
+  roles:
+    read: Connectors.ExampleObjectStore.Read
+    write: Connectors.ExampleObjectStore.Write
+
 configuration:
   instances: multiple                 # single | multiple
   fields:                             # same field vocabulary as workflow nodes
-    - { key: endpoint, valueType: string, required: true }
-    - { key: apiKey, valueType: string, required: true, secret: true }
+    - { key: endpoint, osfType: string, required: true }
+    - { key: apiKey, osfType: string, required: true, secret: true }
 
 network:
   egress: ["*.objectstore.example"]   # omitted ⇒ no outbound HTTP at all
@@ -66,9 +71,8 @@ network:
 operations:
   - key: listObjects
     kind: query                       # query | mutation
-    authorization: { roles: { invoke: [Connectors.All.Read] } }
-    input:  [ { key: prefix, valueType: string } ]
-    output: { cardinality: many, fields: [ { key: key, valueType: string, required: true } ] }
+    input:  [ { key: prefix, osfType: string } ]
+    output: { cardinality: many, fields: [ { key: key, osfType: string, required: true } ] }
 
 exposure:
   graphql: true                       # on by default, as for entities

@@ -225,12 +225,10 @@ jobs:
           ${{ env.SECRET_PREFIX }}-realm-client-seed-service|KEYCLOAK_CLIENT_SECRET_SEED_SERVICE
           ${{ env.SECRET_PREFIX }}-realm-client-openshapeforge-auth-api|KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API
           ${{ env.SECRET_PREFIX }}-realm-client-openshapeforge-apikey-provisioner|KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_APIKEY_PROVISIONER
-          ${{ env.SECRET_PREFIX }}-realm-user-acme-directie|E2E_USER_PASSWORD_ACME_DIRECTIE
-          ${{ env.SECRET_PREFIX }}-realm-user-acme-vastgoedbeheerder|E2E_USER_PASSWORD_ACME_VASTGOEDBEHEERDER
-          ${{ env.SECRET_PREFIX }}-realm-user-acme-wijkbeheerder|E2E_USER_PASSWORD_ACME_WIJKBEHEERDER
-          ${{ env.SECRET_PREFIX }}-realm-user-acme-verhuurconsulent|E2E_USER_PASSWORD_ACME_VERHUURCONSULENT
-          ${{ env.SECRET_PREFIX }}-realm-user-acme-noaccess|E2E_USER_PASSWORD_ACME_NOACCESS
-          ${{ env.SECRET_PREFIX }}-realm-user-beta-verhuurconsulent|E2E_USER_PASSWORD_BETA_VERHUURCONSULENT
+          ${{ env.SECRET_PREFIX }}-realm-user-tenant-a-admin|E2E_USER_PASSWORD_TENANT_A_ADMIN
+          ${{ env.SECRET_PREFIX }}-realm-user-tenant-a-user|E2E_USER_PASSWORD_TENANT_A_USER
+          ${{ env.SECRET_PREFIX }}-realm-user-tenant-a-no-access|E2E_USER_PASSWORD_TENANT_A_NO_ACCESS
+          ${{ env.SECRET_PREFIX }}-realm-user-tenant-b-user|E2E_USER_PASSWORD_TENANT_B_USER
           PAIRS
           echo "realm credentials loaded (values masked)"
 

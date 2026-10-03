@@ -1,20 +1,24 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Creditor
 title: Creditor
-description: Accounts payable sub-ledger role on a Relation. Carries control account, payment terms, default payment method, and finance-specific identifiers.
+description: Accounts payable sub-ledger role on a Relation. Carries control account, payment terms, default payment
+  method, and finance-specific identifiers.
 language: en
 displayTemplate: "{{creditorNumber}}"
 filterField: creditorNumber
 labels:
   en: Creditor
   nl: Crediteur
+pluralLabels:
+  en: Creditors
+  nl: Crediteuren
 domains:
   - finance
 fields:
   - key: creditorNumber
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Creditor number
@@ -29,7 +33,6 @@ fields:
       column: creditor_number
       storageClass: core
   - key: status
-    valueType: string
     required: false
     label:
       en: Status
@@ -40,13 +43,11 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: ROLEASSIGNMENTSTATUS
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: ROLEASSIGNMENTSTATUS
+    osfType: referenceDataCode
   - key: paymentTerms
-    valueType: string
     required: false
     label:
       en: Payment terms
@@ -57,13 +58,12 @@ fields:
     persisted:
       column: payment_terms
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PAYMENTTERMS
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: PAYMENTTERMS
+    osfType: referenceDataCode
   - key: defaultIban
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Default IBAN
@@ -77,7 +77,7 @@ fields:
       column: default_iban
       storageClass: core
   - key: vatNumber
-    valueType: string
+    osfType: string
     required: false
     label:
       en: VAT number
@@ -91,7 +91,7 @@ fields:
       column: vat_number
       storageClass: core
   - key: chamberOfCommerceNumber
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Chamber of commerce number
@@ -105,7 +105,6 @@ fields:
       column: chamber_of_commerce_number
       storageClass: core
   - key: creditLimit
-    valueType: number
     required: false
     label:
       en: Credit limit
@@ -113,12 +112,11 @@ fields:
     description:
       en: Maximum outstanding amount allowed for this creditor.
       nl: Maximaal toegestaan openstaand bedrag voor deze crediteur.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: credit_limit
       storageClass: core
   - key: currentBalance
-    valueType: number
     required: false
     label:
       en: Current balance
@@ -126,12 +124,12 @@ fields:
     description:
       en: Current outstanding balance — projection populated by the audit/timeline service.
       nl: Huidig openstaand saldo — projectie die door de audit/timeline-service wordt bijgewerkt.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: current_balance
       storageClass: core
   - key: startDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Start date
@@ -142,11 +140,8 @@ fields:
     persisted:
       column: start_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: endDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: End date
@@ -157,11 +152,8 @@ fields:
     persisted:
       column: end_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: name
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Name
@@ -175,7 +167,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -188,13 +179,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 2000
+    osfType: multilineText
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -207,187 +194,36 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: defaultLedgerAccount
-    kind: belongsTo
-    target: LedgerAccount
-    foreignKey: default_ledger_account_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    osfType: Relation
+    relationship:
+      ownership: reference
+  - key: defaultLedgerAccountId
     label:
       en: Default ledger account
       nl: Standaard grootboekrekening
-  - key: defaultPaymentMethod
-    kind: belongsTo
-    target: PaymentMethod
-    foreignKey: default_payment_method_id
+    persisted:
+      column: default_ledger_account_id
+      storageClass: core
+    osfType: LedgerAccount
+    relationship:
+      ownership: reference
+  - key: defaultPaymentMethodId
     label:
       en: Default payment method
       nl: Standaard betaalwijze
-ui:
-  routes:
-    list:
-      en: /creditors
-      nl: /crediteuren
-    detail:
-      en: /creditors/:id
-      nl: /crediteuren/:id
-    create:
-      en: /creditors/create
-      nl: /crediteuren/aanmaken
-    edit:
-      en: /creditors/:id/edit
-      nl: /crediteuren/:id/bewerken
-    delete:
-      en: /creditors/:id/delete
-      nl: /crediteuren/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Creditors
-        nl: Crediteuren
-      columns:
-        - key: creditorNumber
-          sortable: true
-        - key: name
-          sortable: true
-        - key: status
-          sortable: true
-        - key: paymentTerms
-          sortable: true
-        - key: currentBalance
-          sortable: true
-      defaultSort:
-        key: creditorNumber
-        direction: asc
-      rowLink:
-        en: /creditors/:id
-        nl: /crediteuren/:id
-    detail:
-      header:
-        title: "{{creditorNumber}}"
-        subtitle: "{{name}}"
-        badges:
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Creditor details
-                nl: Crediteurgegevens
-              fields:
-                - creditorNumber
-                - status
-                - paymentTerms
-                - name
-                - startDate
-                - endDate
-            - title:
-                en: Banking and identifiers
-                nl: Bank en identificaties
-              fields:
-                - defaultIban
-                - vatNumber
-                - chamberOfCommerceNumber
-            - title:
-                en: Credit position
-                nl: Kredietpositie
-              fields:
-                - creditLimit
-                - currentBalance
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create creditor
-            nl: Crediteur aanmaken
-          groups:
-            - title:
-                en: Creditor details
-                nl: Crediteurgegevens
-              fields:
-                - creditorNumber
-                - status
-                - paymentTerms
-                - name
-                - startDate
-                - endDate
-            - title:
-                en: Banking and identifiers
-                nl: Bank en identificaties
-              fields:
-                - defaultIban
-                - vatNumber
-                - chamberOfCommerceNumber
-            - title:
-                en: Credit position
-                nl: Kredietpositie
-              fields:
-                - creditLimit
-                - currentBalance
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit creditor
-            nl: Crediteur bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: default_payment_method_id
+      storageClass: core
+    osfType: PaymentMethod
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -402,3 +238,239 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Creditor
+    description: List Creditor records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Creditor
+    description: Get Creditor records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Creditor
+    description: Create Creditor records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Creditor records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /creditors
+          nl: /crediteuren
+        columns:
+          - key: creditorNumber
+            sortable: true
+          - key: name
+            sortable: true
+          - key: status
+            sortable: true
+          - key: paymentTerms
+            sortable: true
+          - key: currentBalance
+            sortable: true
+        title:
+          en: Creditors
+          nl: Crediteuren
+        defaultSort:
+          key: creditorNumber
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /creditors/:id
+            nl: /crediteuren/:id
+          create:
+            en: /creditors/create
+            nl: /crediteuren/aanmaken
+        title: "{{creditorNumber}}"
+        subtitle: "{{name}}"
+        badges:
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Creditor details
+                    nl: Crediteurgegevens
+                  fields:
+                    - creditorNumber
+                    - status
+                    - paymentTerms
+                    - name
+                    - startDate
+                    - endDate
+                - title:
+                    en: Banking and identifiers
+                    nl: Bank en identificaties
+                  fields:
+                    - defaultIban
+                    - vatNumber
+                    - chamberOfCommerceNumber
+                - title:
+                    en: Credit position
+                    nl: Kredietpositie
+                  fields:
+                    - creditLimit
+                    - currentBalance
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create creditor
+              nl: Crediteur aanmaken
+            groups:
+              - title:
+                  en: Creditor details
+                  nl: Crediteurgegevens
+                fields:
+                  - creditorNumber
+                  - status
+                  - paymentTerms
+                  - name
+                  - startDate
+                  - endDate
+              - title:
+                  en: Banking and identifiers
+                  nl: Bank en identificaties
+                fields:
+                  - defaultIban
+                  - vatNumber
+                  - chamberOfCommerceNumber
+              - title:
+                  en: Credit position
+                  nl: Kredietpositie
+                fields:
+                  - creditLimit
+                  - currentBalance
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit creditor
+              nl: Crediteur bewerken
+    fields:
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: ROLEASSIGNMENTSTATUS
+            clearable: true
+      paymentTerms:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PAYMENTTERMS
+            clearable: true
+      startDate:
+        render:
+          component: DatePicker
+          props: {}
+      endDate:
+        render:
+          component: DatePicker
+          props: {}
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 2000

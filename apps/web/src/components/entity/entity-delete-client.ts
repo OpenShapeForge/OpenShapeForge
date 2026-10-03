@@ -21,6 +21,8 @@ function extractDeleteError(payload: EntityDeletePayload | null, fallback: strin
 export async function deleteEntity(options: {
   mutationName: string;
   entityId: string;
+  expectedVersion: string;
+  confirmed: true;
 }): Promise<void> {
   const response = await fetch(ENTITY_DELETE_ENDPOINT, {
     method: "POST",
@@ -28,6 +30,8 @@ export async function deleteEntity(options: {
     body: JSON.stringify({
       mutationName: options.mutationName,
       id: options.entityId,
+      expectedVersion: options.expectedVersion,
+      confirmed: options.confirmed,
     }),
   });
 

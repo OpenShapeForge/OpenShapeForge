@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { SQL } from "bun";
-import { Kysely, type KyselyConfig } from "kysely";
+import { Kysely, sql, type KyselyConfig } from "kysely";
 import { PostgresJSDialect } from "kysely-postgres-js";
 import type { DB } from "../generated/db/types.js";
 
@@ -38,15 +38,15 @@ export function readDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
- * The PRIVILEGED MIGRATE connection string. Migrations need to CREATE ROLE,
- * run DDL, and issue GRANTs — none of which the restricted runtime role can
- * do — so migrate connects as the privileged `openshapeforge` superuser via
- * OPENSHAPEFORGE_MIGRATE_DATABASE_URL.
+ * The database-scoped MIGRATE connection string. Migrations run DDL and issue
+ * GRANTs as a role that is a member of the definer roles. Cluster-wide role
+ * creation and password rotation belong to the separate admin provisioner, so
+ * this connection does not need SUPERUSER or CREATEROLE.
  *
  * Falls back to DATABASE_URL only when the privileged URL is unset (e.g. a
  * legacy single-role setup). In that case, if the runtime role is restricted,
- * the migration chain's role-provisioning / DDL steps will fail loudly with a
- * Postgres permission error rather than silently skipping — which is the
+ * the migration chain's role verification or DDL steps will fail loudly with
+ * a Postgres permission error rather than silently skipping — which is the
  * intended fail-closed behavior.
  */
 export function readMigrateDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
@@ -61,6 +61,15 @@ export function readMigrateDatabaseUrl(env: NodeJS.ProcessEnv = process.env): st
     );
   }
   return databaseUrl;
+}
+
+/**
+ * The CLUSTER ADMINISTRATOR connection used only for role provisioning and
+ * explicit password rotation. An absent or empty value deliberately falls
+ * back to the migrate connection for legacy single-privileged-role hosts.
+ */
+export function readAdminDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  return env.OPENSHAPEFORGE_ADMIN_DATABASE_URL?.trim() || readMigrateDatabaseUrl(env);
 }
 
 export function createDatabaseRuntime(
@@ -83,4 +92,16 @@ export function createDatabaseRuntime(
       await db.destroy();
     },
   };
+}
+
+/** Internal owner guard; credentials and URL aliases do not establish DB identity. */
+export async function assertSameDatabase(left: OpenShapeForgeDatabase, right: OpenShapeForgeDatabase): Promise<void> {
+  const identity = async (db: OpenShapeForgeDatabase) => (await sql<{ name: string; oid: string; address: string | null; port: number | null; started: string }>`
+    select current_database() as name, oid::text as oid,
+           inet_server_addr()::text as address, inet_server_port() as port,
+           pg_postmaster_start_time()::text as started
+      from pg_database where datname = current_database()
+  `.execute(db)).rows[0];
+  const [a, b] = await Promise.all([identity(left), identity(right)]);
+  if (!a || !b || JSON.stringify(a) !== JSON.stringify(b)) throw new Error("Maintenance connections must target the same database.");
 }

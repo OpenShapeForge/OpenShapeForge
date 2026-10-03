@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 import generatedRegistry from "../generated/modules/registry.json" with { type: "json" };
 import type { ModuleRuntimeContext, RuntimeModule } from "./contract.js";
 
-type RuntimeModuleRegistration = { name: string; specifier: string };
+type RuntimeModuleRegistration = { name: string; specifier: string; configuration?: unknown };
 
 // The generated file is `{ version, modules: [] }` in a repo with no runtime
 // plugin, which TypeScript infers as `never[]`. Narrow through the declared
@@ -79,8 +79,10 @@ export function assertSingleModuleEgressOwner(
  * A module's default export, shaped enough to be worth keeping. Anything
  * without a string `name` is rejected here rather than at first use.
  */
-function asRuntimeModule(module: unknown): RuntimeModule | undefined {
-  const candidate = (module as { default?: unknown })?.default ?? module;
+export function configuredRuntimeModule(module: unknown, configuration?: unknown): RuntimeModule | undefined {
+  const exported = (module as { default?: unknown })?.default ?? module;
+  if (configuration !== undefined && typeof exported !== "function") throw new Error("Configured runtime modules must export a factory.");
+  const candidate = typeof exported === "function" ? exported(structuredClone(configuration)) : exported;
   if (!candidate || typeof candidate !== "object") return undefined;
   const shape = candidate as Partial<RuntimeModule>;
   return typeof shape.name === "string" && shape.name ? (candidate as RuntimeModule) : undefined;
@@ -102,7 +104,7 @@ export async function loadRuntimeModules(
   options: LoadModulesOptions = {},
 ): Promise<ModuleRegistry> {
   const importModule = options.importModule ?? ((specifier) => import(specifier));
-  const loaded: RuntimeModule[] = [];
+  const loaded: RuntimeModule[] = [(await import("../accounts/runtime.js")).default];
   const failures: ModuleLoadFailure[] = [];
 
   for (const entry of registry.modules) {
@@ -119,7 +121,14 @@ export async function loadRuntimeModules(
       continue;
     }
 
-    const module = asRuntimeModule(imported);
+    let module: RuntimeModule | undefined;
+    try {
+      module = configuredRuntimeModule(imported, entry.configuration);
+    } catch (error) {
+      failures.push({ name: entry.name, specifier: entry.specifier, reason: "invalid_module",
+        message: error instanceof Error ? error.message : String(error) });
+      continue;
+    }
     if (!module) {
       failures.push({
         name: entry.name,

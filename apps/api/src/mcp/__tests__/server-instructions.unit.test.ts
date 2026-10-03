@@ -9,6 +9,7 @@ import { resolveLocale } from "../locale.js";
 import { ONBOARDING_INSTRUCTION } from "../onboarding.js";
 import {
   audienceAndPresentationInstruction,
+  vocabularySentence,
   buildServerInstructions,
   INSTRUCTIONS,
   languageInstruction,
@@ -20,12 +21,11 @@ const client = { name: "Claude Desktop", version: "1.2.3", capabilities: ["elici
 
 describe("buildServerInstructions", () => {
   it("puts the opening sentence first, then the fixed guidance in order", () => {
-    const opening = "Je assisteert Hans Dev bij Zerocopter; Hans Dev is medewerker. Antwoord in het Nederlands.";
+    const opening = "Je assisteert Alex Dev bij Acme; Alex Dev is medewerker. Antwoord in het Nederlands.";
     const text = buildServerInstructions({
       opening,
       hasConnectors: false,
       oauthCallbackUrl: null,
-      guidesBeforeCreate: [{ name: "pentest_guide", entity: "Assessment" }],
       locale: nl,
       client,
     });
@@ -33,7 +33,6 @@ describe("buildServerInstructions", () => {
     const order = [
       opening,
       INSTRUCTIONS,
-      "Before creating a Assessment, call pentest_guide",
       "Data acquisition —",
       ONBOARDING_INSTRUCTION,
       "Talking to a person —",
@@ -51,7 +50,6 @@ describe("buildServerInstructions", () => {
       opening: null,
       hasConnectors: false,
       oauthCallbackUrl: null,
-      guidesBeforeCreate: [],
       locale: nl,
       client: null,
     });
@@ -65,20 +63,18 @@ describe("buildServerInstructions", () => {
     const withUrl = buildServerInstructions({
       opening: null,
       hasConnectors: true,
-      oauthCallbackUrl: "https://hubble.localhost/api/entity-oauth/callback",
-      guidesBeforeCreate: [],
+      oauthCallbackUrl: "https://example.localhost/api/entity-oauth/callback",
       locale: nl,
       client: null,
     });
     expect(withUrl).toContain(
-      "OAuth redirect (callback) URL is https://hubble.localhost/api/entity-oauth/callback",
+      "OAuth redirect (callback) URL is https://example.localhost/api/entity-oauth/callback",
     );
 
     const withoutConnector = buildServerInstructions({
       opening: null,
       hasConnectors: false,
-      oauthCallbackUrl: "https://hubble.localhost/api/entity-oauth/callback",
-      guidesBeforeCreate: [],
+      oauthCallbackUrl: "https://example.localhost/api/entity-oauth/callback",
       locale: nl,
       client: null,
     });
@@ -90,7 +86,6 @@ describe("buildServerInstructions", () => {
       opening: null,
       hasConnectors: true,
       oauthCallbackUrl: null,
-      guidesBeforeCreate: [],
       locale: nl,
       client: null,
     });
@@ -107,6 +102,27 @@ describe("audienceAndPresentationInstruction", () => {
       `${without} The client in front of you introduced itself as Claude Desktop 1.2.3.`,
     );
     expect(without).toContain("Use whatever the client in front of you can render");
+  });
+
+  it("names no entity of its own: the vocabulary comes from the catalogue the session sees", () => {
+    const without = audienceAndPresentationInstruction(null);
+    expect(without).not.toMatch(/Assessment|TestTarget|Finding|advies/i);
+    expect(vocabularySentence([])).toBe("");
+    const sentence = vocabularySentence([
+      { entity: "Relation", label: "Relatie", description: "The party a record describes. Clients, suppliers and colleagues alike." },
+      { entity: "Widget", label: "Widget" },
+      { entity: "TestTarget", label: "Testdoel" },
+      { entity: "Note", label: "Note", description: "x".repeat(200) },
+    ]);
+    expect(sentence).toBe(
+      ' The records here, by the word their colleagues use: Relation is "Relatie" — The party a record describes.; ' +
+        'TestTarget is "Testdoel"; ' +
+        `Note — ${"x".repeat(139)}….`,
+    );
+    expect(audienceAndPresentationInstruction(client, [{ entity: "TestTarget", label: "Testdoel" }])).toBe(
+      `${without} The records here, by the word their colleagues use: TestTarget is "Testdoel". ` +
+        "The client in front of you introduced itself as Claude Desktop 1.2.3.",
+    );
   });
 });
 

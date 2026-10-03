@@ -13,30 +13,30 @@
  * instance whose Kysely logs every statement, and asserts on the SQL actually
  * issued.
  *
+ * The count lives inside the `data` envelope of a collection result, and the
+ * selection walk has to find it there — through fragments spelled against the
+ * right type each time.
+ *
  * In-process only: it needs the query log of the database this process talks
  * to, which a server behind E2E_API_URL does not expose.
  */
 import { afterAll, expect } from "bun:test";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { describe, registerSuiteLifecycle, remoteUrl, tenantA, test } from "./e2e/harness.js";
-import { createRow, tables } from "./e2e/entity-factory.js";
+import { createRow, graphqlTables as tables } from "./e2e/entity-factory.js";
+import { listDoc } from "./e2e/gql-shapes.js";
+import { isEntityBackedCreate } from "./e2e/operations.js";
 import { createDatabaseRuntime } from "../../db/connection.js";
 import { createGraphqlYoga } from "../yoga.js";
 
 registerSuiteLifecycle();
 
-const table = tables[0]!;
-const graphql = table.source!.graphql!;
-
 /**
- * The relationship assertions need a hasMany edge, which not every entity has.
- * Picking the first table that does keeps them from passing vacuously as the
- * manifest changes; if no entity has one, the suite says so rather than
- * quietly skipping.
+ * One table, chosen by capability rather than by position: only entity-backed
+ * creates qualify — this Yoga has no plugin runtime.
  */
-const relationTable = tables.find((candidate) =>
-  (candidate.source?.graphql?.relationships ?? []).some((rel) => rel.resolve === "hasMany"),
-);
+const table = tables.find((candidate) => isEntityBackedCreate(candidate));
+expect(table).toBeDefined();
 
 const statements: string[] = [];
 const runtime = createDatabaseRuntime({
@@ -73,11 +73,31 @@ async function statementsFor(query: string): Promise<string[]> {
 const countPasses = (sql: string[]) =>
   sql.filter((statement) => /count\(\*\)/i.test(statement)).length;
 
+const graphql = table!.source!.graphql!;
+
+/**
+ * The relationship assertions need a hasMany edge, which not every entity
+ * has. Picking the first table that does keeps them from passing vacuously
+ * as the manifest changes; if no entity has one, the suite says so rather
+ * than quietly skipping.
+ */
+const relationTable = tables.find(
+  (candidate) =>
+    isEntityBackedCreate(candidate) &&
+    (candidate.source?.graphql?.relationships ?? []).some((rel) => rel.resolve === "hasMany"),
+);
+
+// Where the count field lives, and the types a fragment must be spelled
+// against.
+const countField = "data { totalCount }";
+const namedFragment = `query { ${graphql.listQueryName}(first: 1) { data { ...counts } } }
+   fragment counts on ${graphql.typeName}CollectionData { totalCount }`;
+const inlineFragment = `{ ${graphql.listQueryName}(first: 1) { ... on ${graphql.typeName}CollectionOperationResult { data { totalCount } } } }`;
+const aliased = `{ ${graphql.listQueryName}(first: 1) { data { howMany: totalCount } } }`;
+
 describe(`list count is opt-in (${graphql.typeName})`, () => {
   test.skipIf(remoteUrl)("a page without totalCount runs no count pass", async () => {
-    const sql = await statementsFor(
-      `{ ${graphql.listQueryName}(first: 1) { edges { node { id } } } }`,
-    );
+    const sql = await statementsFor(listDoc(table!, { args: "first: 1", selection: "id" }));
     expect(countPasses(sql)).toBe(0);
     // The page itself still ran — a zero count must not come from a query that
     // never reached the database.
@@ -85,38 +105,29 @@ describe(`list count is opt-in (${graphql.typeName})`, () => {
   });
 
   test.skipIf(remoteUrl)("selecting totalCount runs exactly one count pass", async () => {
-    const sql = await statementsFor(`{ ${graphql.listQueryName}(first: 1) { totalCount } }`);
+    const sql = await statementsFor(`{ ${graphql.listQueryName}(first: 1) { ${countField} } }`);
     expect(countPasses(sql)).toBe(1);
   });
 
   test.skipIf(remoteUrl)("totalCount reached through a named fragment still counts", async () => {
     // The selection walk has to follow fragments, or a client using them would
     // silently get null instead of a count.
-    const sql = await statementsFor(
-      `query { ${graphql.listQueryName}(first: 1) { ...counts } }
-       fragment counts on ${graphql.typeName}Connection { totalCount }`,
-    );
-    expect(countPasses(sql)).toBe(1);
+    expect(countPasses(await statementsFor(namedFragment))).toBe(1);
   });
 
   test.skipIf(remoteUrl)("totalCount reached through an inline fragment still counts", async () => {
-    const sql = await statementsFor(
-      `{ ${graphql.listQueryName}(first: 1) { ... on ${graphql.typeName}Connection { totalCount } } }`,
-    );
-    expect(countPasses(sql)).toBe(1);
+    expect(countPasses(await statementsFor(inlineFragment))).toBe(1);
   });
 
   test.skipIf(remoteUrl)("an aliased totalCount still counts", async () => {
-    const sql = await statementsFor(
-      `{ ${graphql.listQueryName}(first: 1) { howMany: totalCount } }`,
-    );
-    expect(countPasses(sql)).toBe(1);
+    expect(countPasses(await statementsFor(aliased))).toBe(1);
   });
 
   test.skipIf(remoteUrl)("a relationship edge costs no count, its aggregate does", async () => {
     expect(relationTable).toBeDefined();
-    const relationGraphql = relationTable!.source!.graphql!;
-    const relationship = relationGraphql.relationships!.find((rel) => rel.resolve === "hasMany")!;
+    const relationship = relationTable!.source!.graphql!.relationships!.find(
+      (rel) => rel.resolve === "hasMany",
+    )!;
 
     // A parent row must exist, or the outer list returns nothing and the
     // relationship resolvers never run — which would pass both assertions
@@ -124,12 +135,15 @@ describe(`list count is opt-in (${graphql.typeName})`, () => {
     await createRow(relationTable!, tenantA);
 
     const edge = await statementsFor(
-      `{ ${relationGraphql.listQueryName}(first: 1) { edges { node { ${relationship.name} { id } } } } }`,
+      listDoc(relationTable!, { args: "first: 1", selection: `${relationship.name} { id }` }),
     );
     expect(countPasses(edge)).toBe(0);
 
     const aggregate = await statementsFor(
-      `{ ${relationGraphql.listQueryName}(first: 1) { edges { node { ${relationship.name}Aggregate { count } } } } }`,
+      listDoc(relationTable!, {
+        args: "first: 1",
+        selection: `${relationship.name}Aggregate { count }`,
+      }),
     );
     // The aggregate IS the count, so it must still run one.
     expect(countPasses(aggregate)).toBeGreaterThan(0);

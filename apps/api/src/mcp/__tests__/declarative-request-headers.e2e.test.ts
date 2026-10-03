@@ -35,9 +35,9 @@ describe("authored request headers over HTTP", () => {
       egressHosts: ["127.0.0.1"],
     };
     const inputFields = [
-      { key: "id", valueType: "string" },
-      { key: "version", valueType: "string" },
-      { key: "title", valueType: "string" },
+      { key: "id", osfType: "string" },
+      { key: "version", osfType: "string" },
+      { key: "title", osfType: "string" },
     ];
 
     await executeBinding({

@@ -5,7 +5,7 @@
  *
  * What is pinned, in order of how badly it fails if it regresses:
  *   1. a fresh Organization gets a scope with one audience per origin, attached
- *      to every configured client and to the realm default optional scopes;
+ *      to every configured client but never to realm defaults;
  *   2. a replay of a converged scope WRITES NOTHING — provisioning replays and
  *      reconciliation both depend on that being literally true;
  *   3. an origin change converges: the stale mapper goes, the new one comes,
@@ -51,7 +51,7 @@ const audiences = (alias: string, origins = settings.origins) =>
   origins.map((origin) => resourceAudience(origin, alias)).sort();
 
 describe("ensureOrganizationScope", () => {
-  it("creates the scope, its audience mappers, and attaches it everywhere", async () => {
+  it("creates the scope, its audience mappers, and attaches it only to configured clients", async () => {
     const keycloak = fakeOrganizationScopes();
 
     const state = await ensureOrganizationScope(keycloak, "acme", settings);
@@ -68,7 +68,6 @@ describe("ensureOrganizationScope", () => {
       "CLIENT_ATTACHED",
       "CLIENT_ATTACHED",
       "CLIENT_ATTACHED",
-      "REALM_ATTACHED",
       "POLICY_ALLOWED",
       "POLICY_ALLOWED",
     ]);
@@ -77,7 +76,7 @@ describe("ensureOrganizationScope", () => {
     for (const clientId of ["codex", "openshapeforge-gateway", "openshapeforge-inspector"]) {
       expect(keycloak.clients.get(clientId)!.optionalScopes).toEqual(["mcp-resource:acme"]);
     }
-    expect(keycloak.realm.optionalScopes).toEqual(["mcp-resource:acme"]);
+    expect(keycloak.realm.optionalScopes).toEqual([]);
     // The client the realm does not have is skipped, not an error and not created.
     expect(keycloak.clients.has("absent-client")).toBe(false);
   });
@@ -149,7 +148,7 @@ describe("ensureOrganizationScope", () => {
     expect(scope.mappers.size).toBe(2);
   });
 
-  it("leaves a scope a client holds as DEFAULT alone", async () => {
+  it("leaves a client's explicit DEFAULT attachment alone but removes the realm default", async () => {
     const keycloak = fakeOrganizationScopes();
     keycloak.clients.get("codex")!.defaultScopes.push("mcp-resource:acme");
     keycloak.realm.defaultScopes.push("mcp-resource:acme");
@@ -162,11 +161,25 @@ describe("ensureOrganizationScope", () => {
       "AUDIENCE_ADDED",
       "CLIENT_ATTACHED",
       "CLIENT_ATTACHED",
+      "REALM_DETACHED",
       "POLICY_ALLOWED",
       "POLICY_ALLOWED",
     ]);
     expect(keycloak.clients.get("codex")!.optionalScopes).toEqual([]);
+    expect(keycloak.realm.defaultScopes).toEqual([]);
     expect(keycloak.realm.optionalScopes).toEqual([]);
+  });
+
+  it("removes a tenant resource scope inherited by every newly registered client", async () => {
+    const keycloak = fakeOrganizationScopes();
+    const existing = await keycloak.createClientScope({ name: "mcp-resource:acme", description: "" });
+    keycloak.realm.optionalScopes.push("mcp-resource:acme");
+
+    const state = await ensureOrganizationScope(keycloak, "acme", settings);
+
+    expect(state.actions).toContainEqual({ kind: "REALM_DETACHED", scope: "mcp-resource:acme", subject: null });
+    expect(keycloak.realm.optionalScopes).toEqual([]);
+    expect(keycloak.writes).toContain(`detach-realm-optional ${existing.name}`);
   });
 });
 

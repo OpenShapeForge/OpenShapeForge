@@ -13,6 +13,8 @@
  * Input:  ViewDefinition + CompiledEntityContract.
  * Output: Map<string, string> — file path to generated TypeScript/TSX source code.
  */
+import { templatePaths } from "@openshapeforge/operations";
+import { surfacedRelationshipKeys } from "./surfaced-relationships.js";
 import path from "node:path";
 import type {
   CompiledEntityContract,
@@ -77,11 +79,11 @@ type GeneratedFieldSuggestions = {
 type GeneratedFormFieldConfig = {
   key: string;
   dataPath: string;
-  valueType: CompiledField["valueType"];
+  baseType: CompiledField["baseType"];
   cardinality?: CompiledField["cardinality"];
   variables?: CompiledField["variables"];
   sortable?: boolean;
-  semanticType?: string;
+  osfType?: string;
   label: LocalizedText;
   description?: LocalizedText;
   help?: LocalizedText;
@@ -226,9 +228,9 @@ type GeneratedListConfig = {
 type GeneratedDetailFieldConfig = {
   key: string;
   label: LocalizedText;
-  valueType?: CompiledField["valueType"];
+  baseType?: CompiledField["baseType"];
   cardinality?: CompiledField["cardinality"];
-  semanticType?: string;
+  osfType?: string;
   /** Mirror of the authoring field's `layoutFraction`, consumed by the renderer's layout-policy helpers. */
   layoutFraction?: number;
   render: {
@@ -885,7 +887,7 @@ function buildRelationshipPresentationFields(
       fields.push({
         key: `${key}.${displayField}`,
         label,
-        valueType: "string",
+        baseType: "string",
         cardinality: "single",
         render: { component: "TextDisplay" },
       });
@@ -1621,8 +1623,8 @@ function waitConditionInputKind(
   options: RuntimeWaitConditionFieldData["options"],
 ): RuntimeWaitConditionFieldData["inputKind"] {
   if (options && options.length > 0) return "select";
-  if (field.valueType === "boolean") return "boolean";
-  if (field.valueType === "integer" || field.valueType === "number") return "number";
+  if (field.baseType === "boolean") return "boolean";
+  if (field.baseType === "integer" || field.baseType === "number") return "number";
   return "text";
 }
 
@@ -1633,7 +1635,7 @@ function buildWaitConditionFields(contract: CompiledEntityContract): RuntimeWait
       && typeof field.key === "string"
       && field.key.trim().length > 0
       && field.cardinality !== "collection"
-      && WAIT_CONDITION_VALUE_TYPES.has(field.valueType),
+      && WAIT_CONDITION_VALUE_TYPES.has(field.baseType),
     )
     .map((field) => {
       const options = waitConditionOptions(field);
@@ -1641,7 +1643,7 @@ function buildWaitConditionFields(contract: CompiledEntityContract): RuntimeWait
         key: field.key,
         label: normalizeText(field.label) ?? field.key,
         ...(field.description ? { description: normalizeText(field.description) } : {}),
-        fieldType: field.valueType,
+        fieldType: field.baseType,
         inputKind: waitConditionInputKind(field, options),
         ...(options ? { options } : {}),
       };
@@ -1729,7 +1731,7 @@ function buildFormFieldConfig(
     return {
       key,
       dataPath: key,
-      valueType: "string",
+      baseType: "string",
       cardinality: "single",
       label: { en: key, nl: key },
       required: false,
@@ -1763,9 +1765,9 @@ function buildDetailFieldConfigFromCompiledField(
   return {
     key: field.key,
     label: field.label,
-    valueType: field.valueType,
+    baseType: field.baseType,
     cardinality: field.cardinality,
-    semanticType: field.semanticType,
+    osfType: field.osfType,
     layoutFraction: field.layoutFraction,
     render: renderOverride ?? field.render,
     validation: field.validation as Record<string, unknown> | undefined,
@@ -1805,7 +1807,7 @@ function buildDetailFieldConfig(
     return attachDisplayMode({
       key: normalizedKey,
       label: profileField.label ?? { en: profileFieldKey, nl: profileFieldKey },
-      valueType: graphQlFieldTypeToFormValueType(profileField.type),
+      baseType: graphQlFieldTypeToFormValueType(profileField.type),
       cardinality: graphQlFieldTypeIsCollection(profileField.type) ? "collection" : "single",
       render: renderOverride ?? profileField.render ?? { component: "TextDisplay" },
       validation: profileField.validation as Record<string, unknown> | undefined,
@@ -1816,7 +1818,7 @@ function buildDetailFieldConfig(
   return attachDisplayMode({
     key: normalizedKey,
     label: { en: normalizedKey, nl: normalizedKey },
-    valueType: "string",
+    baseType: "string",
     cardinality: "single",
     render: renderOverride ?? { component: "TextDisplay" },
   });
@@ -1826,11 +1828,11 @@ function buildCoreFieldConfig(field: CompiledField): GeneratedFormFieldConfig {
   return {
     key: field.key,
     dataPath: field.key,
-    valueType: field.valueType,
+    baseType: field.baseType,
     cardinality: field.cardinality,
     variables: field.variables,
     sortable: field.sortable,
-    semanticType: field.semanticType,
+    osfType: field.osfType,
     label: field.label,
     description: field.description,
     help: field.help,
@@ -1855,7 +1857,7 @@ function buildProfileFieldConfig(
   return {
     key: field.name,
     dataPath: `${profileType?.fieldName ?? "profile"}.${field.name}`,
-    valueType: graphQlFieldTypeToFormValueType(field.type),
+    baseType: graphQlFieldTypeToFormValueType(field.type),
     cardinality: graphQlFieldTypeIsCollection(field.type) ? "collection" : "single",
     label: field.label ?? { en: field.name, nl: field.name },
     required: field.type.endsWith("!"),
@@ -1865,18 +1867,19 @@ function buildProfileFieldConfig(
   };
 }
 
-function graphQlFieldTypeToFormValueType(type: string): GeneratedFormFieldConfig["valueType"] {
+function graphQlFieldTypeToFormValueType(type: string): GeneratedFormFieldConfig["baseType"] {
   const normalizedType = type.replace(/!/g, "");
   const map: Record<string, string> = {
     ID: "string",
     String: "string",
     Int: "integer",
-    Float: "number",
+    // A form edits a decimal as a number; the record it reads it back from carries a string.
+    Decimal: "number",
     Boolean: "boolean",
     JSON: "object",
   };
 
-  return (map[normalizedType.replace(/^\[|\]$/g, "")] ?? "string") as GeneratedFormFieldConfig["valueType"];
+  return (map[normalizedType.replace(/^\[|\]$/g, "")] ?? "string") as GeneratedFormFieldConfig["baseType"];
 }
 
 function graphQlFieldTypeIsCollection(type: string): boolean {
@@ -1894,14 +1897,11 @@ function normalizeFieldOverrides(overrides: Record<string, unknown>): Partial<Ge
   if ("defaultValue" in overrides) normalized.defaultValue = overrides.defaultValue;
   if ("validation" in overrides) normalized.validation = overrides.validation as Record<string, unknown>;
   if ("options" in overrides) normalized.options = overrides.options as Record<string, unknown>;
-  if ("valueType" in overrides && typeof overrides.valueType === "string") {
-    normalized.valueType = overrides.valueType as GeneratedFormFieldConfig["valueType"];
-  }
   if ("cardinality" in overrides && typeof overrides.cardinality === "string") {
     normalized.cardinality = overrides.cardinality as GeneratedFormFieldConfig["cardinality"];
   }
-  if ("semanticType" in overrides && typeof overrides.semanticType === "string") {
-    normalized.semanticType = overrides.semanticType;
+  if ("osfType" in overrides && typeof overrides.osfType === "string") {
+    normalized.osfType = overrides.osfType;
   }
   if ("dataPath" in overrides && typeof overrides.dataPath === "string") normalized.dataPath = overrides.dataPath;
   if ("visibility" in overrides && typeof overrides.visibility === "object") {
@@ -2208,11 +2208,11 @@ function collectListSelectionPaths(
 }
 
 function buildDetailQuery(contract: CompiledEntityContract, selection: string): string {
-  return `query Get${contract.graphql.typeName}($id: ID!) { ${contract.graphql.queries.single.name}(id: $id) { ${selection} } }`;
+  return `query Get${contract.graphql.typeName}($id: ID!) { ${contract.graphql.queries.single.name}(id: $id) { data { ${selection} } error { code message retryable } } }`;
 }
 
 function buildListQuery(contract: CompiledEntityContract, selection: string): string {
-  return `query List${contract.graphql.typeName}($filter: ${contract.graphql.typeName}Filter, $sort: ${contract.graphql.typeName}Sort, $first: Int, $after: String) { ${contract.graphql.queries.list.name}(filter: $filter, sort: $sort, first: $first, after: $after) { edges { node { ${selection} } cursor } pageInfo { hasNextPage endCursor } totalCount } }`;
+  return `query List${contract.graphql.typeName}($filter: ${contract.graphql.typeName}Filter, $sort: ${contract.graphql.typeName}Sort, $first: Int, $after: String) { ${contract.graphql.queries.list.name}(filter: $filter, sort: $sort, first: $first, after: $after) { data { items { data { ${selection} } } nextCursor totalCount } error { code message retryable } } }`;
 }
 
 function getDefaultDetailGroupId(detail: NonNullable<CompiledViewContext["detail"]>): string {
@@ -2291,9 +2291,11 @@ function buildSelectionSet(
     }
   }
 
-  // Include aggregate counts for collection relationships (hasMany / manyToMany)
+  // Aggregate counts only for the collections a view surfaces; a derived
+  // collection nothing displays is not queried (see surfaced-relationships.ts).
+  const surfaced = surfacedRelationshipKeys(contract);
   for (const rel of contract.graphql.relationships) {
-    if (rel.type.startsWith("[")) {
+    if (rel.type.startsWith("[") && surfaced.has(rel.name)) {
       const aggName = `${rel.name}Aggregate`;
       if (!tree.has(aggName)) {
         const countMap = new Map<string, Map<any, any>>();
@@ -2369,13 +2371,10 @@ function resolveFieldPath(
 }
 
 function appendTemplatePaths(paths: string[], template?: string): void {
-  if (!template) return;
-
-  for (const match of template.matchAll(/\{\{(.+?)\}\}/g)) {
-    const expression = match[1];
-    for (const candidate of expression.split("||").map((part) => part.trim()).filter(Boolean)) {
-      appendUnique(paths, candidate);
-    }
+  // One template reader for every surface: the same parser names a picker's
+  // selection at runtime (@openshapeforge/operations, display-template.ts).
+  for (const segments of templatePaths(template)) {
+    appendUnique(paths, segments.join("."));
   }
 }
 

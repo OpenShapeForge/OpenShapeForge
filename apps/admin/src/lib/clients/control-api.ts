@@ -13,12 +13,22 @@ import { getCachedSession } from "@/lib/cached-session";
  * call-site archaeology. Pages and server actions must not call it directly —
  * they call the operations below.
  *
+ * ── What is on the other side ───────────────────────────────────────────────
+ *
+ * The platform's administration as canonical Operations (`osf-control`),
+ * served under `/api/control/v1` by `apps/api`'s operations runtime. The
+ * paths, verbs and shapes here are those Operations': a list answers
+ * `{ tenants: [...] }`, a tenant is the platform projection (slug, status,
+ * Organization alias, catalog counts), and the Operations marked
+ * `acknowledgement` — a lifecycle change, a reparent, a reconciliation
+ * replay — take `confirmed: true` after the operator said so.
+ *
  * ── How the caller is authenticated (settled by #289) ───────────────────────
  *
  * The operator's OWN control-realm access token, forwarded as a bearer. Not the
  * signed trusted-context headers `apps/web` uses, and that is the control
  * surface's decision rather than this app's convenience: `src/control/
- * authorization.ts` refuses trusted-context entirely, because those headers
+ * control-session.ts` refuses trusted-context entirely, because those headers
  * carry arbitrary roles under one shared secret, and on a cross-tenant surface
  * that would mean anything holding the secret could claim to be an operator.
  *
@@ -33,13 +43,14 @@ import { getCachedSession } from "@/lib/cached-session";
  *
  * ── Errors are values, not exceptions ───────────────────────────────────────
  *
- * Every operation returns a discriminated result. The control surface answers
- * with a code vocabulary that pages need to DISCRIMINATE on rather than merely
- * display — a malformed slug (400 CONTROL_INVALID_INPUT) belongs on the field
- * that produced it, an idempotent replay (200 with `created: false`) is a
- * success worth wording differently, and a 503 means the deployment is
- * unconfigured rather than the request wrong. Throwing would flatten all three
- * into one error boundary.
+ * Every operation returns a discriminated result. The Operations answer in a
+ * declared vocabulary (`VALIDATION`, `NOT_FOUND`, `CONFLICT`, …) and keep the
+ * control plane's finer code in `error.detail` (`CONTROL_INVALID_INPUT`,
+ * `CONTROL_TENANT_NOT_FOUND`, `KEYCLOAK_ADMIN_*`, …). Pages branch on that
+ * finer code — a malformed slug belongs on the field that produced it, an
+ * idempotent replay (`created: false`) is a success worth wording
+ * differently, and a 503 means the deployment is unconfigured rather than the
+ * request wrong. Throwing would flatten all of them into one error boundary.
  */
 
 // 127.0.0.1 rather than "localhost" for the same reason apps/web's gateway
@@ -94,12 +105,14 @@ export async function callControlApi(
 }
 
 // ---------------------------------------------------------------------------
-// Types, mirroring `apps/api/src/control/tenant-registry.ts`
+// Types, mirroring `apps/api/src/control/tenant-registry.ts` and
+// `apps/api/src/control/platform-catalog.ts`
 
 /** The TENANTSTATUS codetable, as the control surface validates it. */
 export const TENANT_STATUSES = ["active", "inactive", "suspended"] as const;
 export type TenantStatus = (typeof TENANT_STATUSES)[number];
 
+/** The registry row as provisioning and lifecycle Operations answer it. */
 export type Tenant = {
   id: string;
   slug: string;
@@ -111,19 +124,21 @@ export type Tenant = {
   updatedAt: string;
 };
 
-export type TenantOrganization = {
-  id: string;
-  alias: string;
+/**
+ * A tenant as the list and detail Operations project it: the platform view,
+ * with the Organization alias (the slug, once provisioning linked one) and
+ * the catalog installation counts. The registry row's ids and timestamps are
+ * not part of it.
+ */
+export type PlatformTenant = {
+  slug: string;
   name: string;
-  enabled: boolean;
-};
-
-export type TenantDetail = {
-  tenant: Tenant;
-  /** Keycloak as it actually is, or null when there is no link (or no answer). */
-  organization: TenantOrganization | null;
-  /** Set when Keycloak could not be read; the registry row is still authoritative. */
-  organizationError: string | null;
+  status: string;
+  /** The Keycloak Organization alias — the slug — or null before provisioning linked one. */
+  organizationAlias: string | null;
+  installedEntries: number;
+  overriddenEntries: number;
+  updatesAvailable: number;
 };
 
 export type CreatedTenant = {
@@ -142,10 +157,12 @@ export type UpdatedTenant = {
 /**
  * A refusal the control surface stated, carried rather than thrown.
  *
- * `code` is the surface's own vocabulary (`CONTROL_INVALID_INPUT`,
- * `CONTROL_TENANT_NOT_FOUND`, `KEYCLOAK_ADMIN_*`, …). Pages branch on it; the
- * message is written for an operator and is safe to show, because the control
- * surface redacts anything it has not classified into a generic 500.
+ * `code` is the control plane's own vocabulary (`CONTROL_INVALID_INPUT`,
+ * `CONTROL_TENANT_NOT_FOUND`, `KEYCLOAK_ADMIN_*`, …) when the Operation kept
+ * one in `error.detail`, else the Operation's declared code (`VALIDATION`,
+ * `NOT_FOUND`, `UNAUTHENTICATED`, …). Pages branch on it; the message is
+ * written for an operator and is safe to show, because the operations
+ * runtime redacts anything it has not classified into a generic 500.
  */
 export type ControlApiFailure = {
   ok: false;
@@ -181,14 +198,23 @@ async function operatorAuthorization(): Promise<
   return { ok: true, header: `Bearer ${session.accessToken}` };
 }
 
+/** The finer control-plane code an Operation keeps in `detail`, recognised by its shape. */
+const CONTROL_CODE = /^[A-Z][A-Z0-9_]+$/;
+
 async function readFailure(response: Response): Promise<ControlApiFailure> {
-  // The surface answers `{ error: { code, message } }`. Anything else means a
-  // proxy or a crash got there first, in which case the status is all there is.
+  // The surface answers `{ error: { code, message, detail? } }`. Anything else
+  // means a proxy or a crash got there first, in which case the status is all
+  // there is.
   let code = "CONTROL_API_ERROR";
   let message = `The control plane answered ${response.status}.`;
   try {
-    const body = (await response.json()) as { error?: { code?: unknown; message?: unknown } };
+    const body = (await response.json()) as {
+      error?: { code?: unknown; message?: unknown; detail?: unknown };
+    };
     if (typeof body?.error?.code === "string") code = body.error.code;
+    if (typeof body?.error?.detail === "string" && CONTROL_CODE.test(body.error.detail)) {
+      code = body.error.detail;
+    }
     if (typeof body?.error?.message === "string") message = body.error.message;
   } catch {
     // Keep the status-derived defaults.
@@ -229,13 +255,11 @@ async function request<T>(
 // ---------------------------------------------------------------------------
 // Operations
 
-export async function listTenants(): Promise<
-  ControlApiResult<{ tenants: Tenant[]; truncated: boolean }>
-> {
+export async function listTenants(): Promise<ControlApiResult<{ tenants: PlatformTenant[] }>> {
   return request("/tenants");
 }
 
-export async function getTenant(slug: string): Promise<ControlApiResult<TenantDetail>> {
+export async function getTenant(slug: string): Promise<ControlApiResult<PlatformTenant>> {
   return request(`/tenants/${encodeURIComponent(slug)}`);
 }
 
@@ -253,6 +277,11 @@ export async function createTenant(input: {
  * Organization alias and the URL key, and it is immutable — the control surface
  * refuses a body carrying one, and this signature makes sending one impossible
  * from here rather than merely refused there.
+ *
+ * `confirmed` is the Operation's acknowledgement: suspending or deactivating a
+ * tenant can interrupt access, so the Operation refuses without it. The
+ * console's forms are the acknowledgement — an operator pressed the button
+ * that says what it does — so it is sent here rather than asked twice.
  */
 export async function updateTenant(
   slug: string,
@@ -260,7 +289,7 @@ export async function updateTenant(
 ): Promise<ControlApiResult<UpdatedTenant>> {
   return request(`/tenants/${encodeURIComponent(slug)}`, {
     method: "PATCH",
-    body: JSON.stringify(update),
+    body: JSON.stringify({ ...update, confirmed: true }),
   });
 }
 
@@ -372,7 +401,8 @@ export async function createOrgUnit(
  *
  * `parentOrgUnitId: null` is a REQUEST — "move to the top level" — and is not
  * the same as omitting it. `JSON.stringify` preserves an explicit null, which
- * is what keeps the two distinguishable across the wire.
+ * is what keeps the two distinguishable across the wire. `confirmed` is the
+ * Operation's acknowledgement of a reparent's blast radius; see `updateTenant`.
  */
 export async function updateOrgUnit(
   tenantSlug: string,
@@ -381,7 +411,7 @@ export async function updateOrgUnit(
 ): Promise<ControlApiResult<UpdatedOrgUnit>> {
   return request(
     `/tenants/${encodeURIComponent(tenantSlug)}/organizations/${encodeURIComponent(orgUnitId)}`,
-    { method: "PATCH", body: JSON.stringify(update) },
+    { method: "PATCH", body: JSON.stringify({ ...update, confirmed: true }) },
   );
 }
 
@@ -456,13 +486,14 @@ export async function getDriftReport(): Promise<ControlApiResult<DriftReport>> {
  *
  * `tenantSlug` bounds the run to one tenant. Omitting it reconciles every tenant
  * that has a repairable finding — and a converged registry is a genuine no-op:
- * the API only touches tenants its own report named.
+ * the API only touches tenants its own report named. `confirmed` acknowledges
+ * that a replay may change identity access; see `updateTenant`.
  */
 export async function reapplyProjection(input: {
   tenantSlug?: string;
 } = {}): Promise<ControlApiResult<ReapplyResult>> {
   return request("/reconciliation/reapply", {
     method: "POST",
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, confirmed: true }),
   });
 }

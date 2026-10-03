@@ -36,6 +36,10 @@ import type {
   CompiledAuthorizationRole,
   CompiledFieldAuthorization,
 } from "../types/compiled.js";
+import { fieldSqlType, isCollectionField } from "./helpers.js";
+import { buildCrud } from "./crud.js";
+
+const OWNER_SESSIONS = new Set(["app.current_user_id", "app.current_relation_id"]);
 
 /**
  * Derive a kebab-case slug from a PascalCase entity name. Used internally as
@@ -76,8 +80,9 @@ export function buildAuthorization(
   const slug = toEntitySlug(coreEntity.entity);
   const authConfig = coreEntity.authorization;
 
-  // Entity-level CRUD roles — every op must be present and non-empty. No
-  // implicit fallbacks: the YAML is the source of truth.
+  // Only exposed mutations need entity CRUD grants. Value definitions expose
+  // plugin Operations with their own auth, not fictional standalone CRUD.
+  const enabled = buildCrud(coreEntity).operations;
   const ops: Array<"read" | "create" | "update" | "delete"> = [
     "read",
     "create",
@@ -85,6 +90,7 @@ export function buildAuthorization(
     "delete",
   ];
   for (const op of ops) {
+    if (coreEntity.schemaVersion >= 2 && op !== "read" && !enabled[op]) continue;
     const roles = authConfig.roles?.[op];
     if (!roles || roles.length === 0) {
       throw new AuthorizationCompileError(
@@ -98,9 +104,9 @@ export function buildAuthorization(
 
   const roles = {
     read: authConfig.roles.read,
-    create: authConfig.roles.create!,
-    update: authConfig.roles.update!,
-    delete: authConfig.roles.delete!,
+    create: authConfig.roles.create ?? [],
+    update: authConfig.roles.update ?? [],
+    delete: authConfig.roles.delete ?? [],
   };
 
   // Field-level authorizations — explicit only. Every field-level role must
@@ -160,6 +166,7 @@ export function buildAuthorization(
   if (authConfig.rowAccess?.enabled) {
     const owner = authConfig.rowAccess.owner;
     const group = authConfig.rowAccess.group;
+    const recordPermissions = authConfig.rowAccess.recordPermissions;
 
     // We look up against the raw authoring `Field[]` (core + profile) rather
     // than `compiledFields`, because `CompiledField` does not carry
@@ -193,9 +200,9 @@ export function buildAuthorization(
       const persistedField = allAuthoringFields.find(
         (f) => f.persisted?.column === col,
       );
-      const matchingRelationship = (coreEntity.relationships ?? []).find(
-        (r) => r.kind === "belongsTo" && r.foreignKey === col,
-      );
+      const matchingRelationship = allAuthoringFields.find((field) => field.persisted?.column === col &&
+        field.relationship?.kind === "belongsTo" && field.relationship.target &&
+        fieldSqlType(field) === "uuid")?.relationship;
       if (!persistedField && !matchingRelationship) {
         throw new AuthorizationCompileError(
           coreEntity.entity,
@@ -203,17 +210,20 @@ export function buildAuthorization(
             `The ${axis} column must reference either a uuid field's 'persisted.column' or a relationship's 'foreignKey'.`,
         );
       }
-      // A persisted authoring field never has a uuid valueType (the enum has
-      // no uuid member) — uuid columns come from belongsTo foreignKeys, which
-      // take the matchingRelationship path. So a persisted-field axis column is
-      // always rejected here; report the actual authored valueType honestly.
-      // (The belongsTo FK is the only path since no field valueType is uuid.)
-      if (persistedField && persistedField.valueType !== "uuid") {
+      // Session ownership is a subject UUID, not necessarily an entity FK.
+      // Reuse the storage compiler's canonical UUID-format lowering. A plain
+      // string or a UUID collection is still rejected (text/jsonb storage).
+      // Group axes retain their relationship-only contract.
+      const scalarSessionOwner = axis === "owner" && persistedField &&
+        fieldSqlType(persistedField) === "uuid";
+      if (persistedField && !scalarSessionOwner && !(matchingRelationship && fieldSqlType(persistedField) === "uuid")) {
         throw new AuthorizationCompileError(
           coreEntity.entity,
           `authorization.rowAccess.${axis}.column "${col}" must reference a belongsTo foreignKey (auto-emitted as uuid) — ` +
-            `the persisted field "${col}" has valueType "${persistedField.valueType}", and no field valueType is uuid. ` +
-            `Model the ${axis} as a belongsTo relationship.`,
+            `the persisted field "${col}" has baseType "${persistedField.baseType}". ` +
+            (axis === "owner"
+              ? "A session owner may instead be a scalar string with validation.format: uuid."
+              : "Model the group as a belongsTo relationship."),
         );
       }
       // Relationship FKs are always uuid (storage compiler invariant), no type
@@ -222,15 +232,16 @@ export function buildAuthorization(
 
     if (owner) {
       validateAxisColumn(owner.column, "owner");
-      // The owner axis maps to `rowScope.userColumns`, whose emitter hardcodes
-      // `= app.current_user_id()` (generate.ts). The runtime only ever sets the
-      // `app.user_id` GUC — no code populates an arbitrary per-account session
-      // var — so we constrain owner.session to the identity user id at compile
-      // time rather than shipping a dead GUC surface.
-      if (owner.session !== "app.current_user_id") {
+      // The owner axis compares against one of the two identities the
+      // runtime writes per session (applyDbSession): the login
+      // (`app.current_user_id`, rowScope.userColumns) or the Relation it acts
+      // as (`app.current_relation_id`, rowScope.relationColumns) — the owner
+      // of a person-owned record. No other session var is ever populated, so
+      // anything else would compile to a dead policy.
+      if (!OWNER_SESSIONS.has(owner.session)) {
         throw new AuthorizationCompileError(
           coreEntity.entity,
-          `authorization.rowAccess.owner.session must be "app.current_user_id" — the runtime only exposes the current user id GUC. Per-account session vars are not supported.`,
+          `authorization.rowAccess.owner.session must be "app.current_user_id" or "app.current_relation_id" — the runtime only exposes those session identities.`,
         );
       }
     }
@@ -238,7 +249,58 @@ export function buildAuthorization(
       validateAxisColumn(group.column, "group");
     }
 
-    if (owner || group) {
+    let compiledRecordPermissions:
+      | NonNullable<CompiledAuthorization["rowAccess"]>["recordPermissions"]
+      | undefined;
+    if (recordPermissions) {
+      const field = allAuthoringFields.find((candidate) =>
+        candidate.key === recordPermissions.field
+      );
+      if (!field) {
+        throw new AuthorizationCompileError(
+          coreEntity.entity,
+          `authorization.rowAccess.recordPermissions.field "${recordPermissions.field}" does not match an entity field.`,
+        );
+      }
+      if (
+        field.baseType !== "object" ||
+        isCollectionField(field) ||
+        field.required !== true ||
+        !field.persisted?.column
+      ) {
+        throw new AuthorizationCompileError(
+          coreEntity.entity,
+          `authorization.rowAccess.recordPermissions.field "${recordPermissions.field}" must be a required, persisted, single object field.`,
+        );
+      }
+      if (!/^[a-z_][a-z0-9_]*$/.test(field.persisted.column)) {
+        throw new AuthorizationCompileError(
+          coreEntity.entity,
+          `authorization.rowAccess.recordPermissions field column "${field.persisted.column}" is not a valid column identifier.`,
+        );
+      }
+      if (
+        field.defaultValue !== undefined &&
+        !isValidRecordPermissionsDocument(field.defaultValue)
+      ) {
+        throw new AuthorizationCompileError(
+          coreEntity.entity,
+          `authorization.rowAccess.recordPermissions field "${recordPermissions.field}" has a malformed defaultValue. ` +
+            `Use an object with optional view/edit/delete members whose users/groups/roles values are arrays of non-empty strings.`,
+        );
+      }
+      compiledRecordPermissions = {
+        field: recordPermissions.field,
+        column: field.persisted.column,
+        empty: recordPermissions.empty,
+        createRequires: [...recordPermissions.createRequires],
+        ...(field.defaultValue !== undefined
+          ? { defaultValue: structuredClone(field.defaultValue) as Record<string, unknown> }
+          : {}),
+      };
+    }
+
+    if (owner || group || compiledRecordPermissions) {
       rowAccess = {
         enabled: true,
         // Honor the authored `empty` (default public when an axis is present).
@@ -258,6 +320,9 @@ export function buildAuthorization(
               },
             }
           : {}),
+        ...(compiledRecordPermissions
+          ? { recordPermissions: compiledRecordPermissions }
+          : {}),
       };
     } else {
       rowAccess = {
@@ -269,6 +334,26 @@ export function buildAuthorization(
     rowAccess = undefined;
   }
 
+  let ownerAxis: CompiledAuthorization["ownerAxis"];
+  if (authConfig.ownerAxis) {
+    for (const key of authConfig.ownerAxis.fields) {
+      // Ownership is the derived inverse collection's; the backend manifest checks it once the target is known.
+      const field = coreEntity.fields.find((candidate) => candidate.key === key);
+      if (!field?.relationship || field.relationship.kind !== "belongsTo" || isCollectionField(field) || field.required) {
+        throw new AuthorizationCompileError(
+          coreEntity.entity,
+          `authorization.ownerAxis.fields "${key}" must be an optional single entity reference.`,
+        );
+      }
+    }
+    ownerAxis = {
+      fields: [...authConfig.ownerAxis.fields],
+      ...(authConfig.ownerAxis.command
+        ? { command: { setting: authConfig.ownerAxis.command.setting, values: [...authConfig.ownerAxis.command.values] } }
+        : {}),
+    };
+  }
+
   return {
     entitySlug: slug,
     roles,
@@ -276,7 +361,27 @@ export function buildAuthorization(
     fieldAuthorizations,
     profileAuthorizations,
     rowAccess,
+    ...(ownerAxis ? { ownerAxis } : {}),
   };
+}
+
+function isValidRecordPermissionsDocument(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const document = value as Record<string, unknown>;
+  if (Object.keys(document).some((key) => !["view", "edit", "delete"].includes(key))) {
+    return false;
+  }
+  return Object.values(document).every((subjects) => {
+    if (!subjects || typeof subjects !== "object" || Array.isArray(subjects)) return false;
+    const record = subjects as Record<string, unknown>;
+    if (Object.keys(record).some((key) => !["users", "groups", "roles"].includes(key))) {
+      return false;
+    }
+    return Object.values(record).every((entries) =>
+      Array.isArray(entries) &&
+      entries.every((entry) => typeof entry === "string" && entry.length > 0)
+    );
+  });
 }
 
 function collectFieldAuthorizations(

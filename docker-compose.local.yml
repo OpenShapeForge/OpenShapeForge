@@ -5,15 +5,15 @@ networks:
     driver: bridge
 
 services:
-  # The superuser below is the PRIVILEGED migrate role. `bun run db:migrate`
-  # connects as it and provisions the two restricted runtime roles inside this
-  # database — `openshapeforge_app` for the API and `openshapeforge_worker` for
+  # The superuser below is the local administrator and migrate role.
+  # `bun run db:provision-roles` creates the two restricted runtime roles —
+  # `openshapeforge_app` for the API and `openshapeforge_worker` for
   # a worker process, each NOSUPERUSER NOBYPASSRLS, each with its own password
   # and its own grants. Nothing here creates them; the defaults that connect as
   # them are DATABASE_URL and OPENSHAPEFORGE_WORKER_DATABASE_URL in
   # apps/api/.env.example. `trust` auth means the local passwords are never
   # checked, so the two roles are still distinct identities to Postgres — which
-  # is what the workflow queue policies compare — without local credential
+  # is what the queue policies compare — without local credential
   # juggling.
   platform-db:
     image: pgvector/pgvector:pg17
@@ -140,6 +140,19 @@ services:
       timeout: 5s
       retries: 18
       start_period: 45s
+    networks:
+      - service-net
+
+  # Catches every message the `mail.deliver` job sends locally (docs/jobs.md):
+  # SMTP on 1025 for OPENSHAPEFORGE_SMTP_URL=smtp://localhost:1025, and a web
+  # inbox on 8025. Nothing leaves the machine.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: openshapeforge-mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
     networks:
       - service-net
 

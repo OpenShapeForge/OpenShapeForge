@@ -71,8 +71,46 @@ describe("plugin schema migrations", () => {
     expect(result.migrations[0]!.sql).toContain(
       'ADD CONSTRAINT "requests_id_revision_key" UNIQUE ("id", "revision")',
     );
-    expect(result.migrations.every((migration) => /^[0-9a-f]{64}$/.test(migration.checksum))).toBe(true);
+    expect(Object.keys(result.migrations[0]!).sort()).toEqual(["plugin", "sql", "version"]);
     expect(JSON.parse(renderPluginMigrationRegistry(result))).toEqual(result);
+  });
+
+  test("renders every constraint as a name-guarded, repeatable DO block", () => {
+    const result = registry([
+      table("values", {
+        constraints: [{
+          compilerOwned: true,
+          version: "0001_entity-value-values-kind-acde1234",
+          name: "values_kind_check",
+          kind: "check",
+          expression: `"kind" IN ('Copy', 'Link')`,
+        }],
+      }),
+    ], []);
+
+    expect(result.migrations[0]!.plugin).toBe("osf-compiler");
+    expect(result.migrations[0]!.sql).toBe(
+      [
+        "DO $osf$",
+        "BEGIN",
+        "  IF NOT EXISTS (",
+        "    SELECT 1 FROM pg_constraint",
+        `    WHERE conrelid = '"cpq"."values"'::regclass AND conname = 'values_kind_check'`,
+        "  ) THEN",
+        '    ALTER TABLE "cpq"."values"',
+        `      ADD CONSTRAINT "values_kind_check" CHECK ("kind" IN ('Copy', 'Link'));`,
+        "  END IF;",
+        "END",
+        "$osf$;",
+        "",
+      ].join("\n"),
+    );
+    expect(() => registry([table("values", { constraints: [{
+      version: "0001_tagged",
+      name: "values_tag_check",
+      kind: "check",
+      expression: "id::text <> $osf$x$osf$",
+    }] })])).toThrow("must not contain the $osf$ quote tag");
   });
 
   test("validates foreign-key targets before emitting SQL", () => {
@@ -94,25 +132,28 @@ describe("plugin schema migrations", () => {
   });
 
   test("renders deferred compound foreign keys explicitly", () => {
+    const tenantColumn = { name: "tenant_id", type: "uuid", required: true } as const;
     const result = registry([
       table("requests", {
+        columns: [idColumn, tenantColumn],
         constraints: [
           {
             version: "0001_request-key",
-            name: "requests_id_key",
+            name: "requests_tenant_id_key",
             kind: "unique",
-            columns: ["id"],
+            columns: ["tenant_id", "id"],
           },
         ],
       }),
       table("lines", {
+        columns: [idColumn, tenantColumn, { name: "request_id", type: "uuid" }],
         constraints: [
           {
             version: "0002_request-fk",
             name: "lines_request_fk",
             kind: "foreignKey",
-            columns: ["id"],
-            references: { schema: "cpq", table: "requests", columns: ["id"] },
+            columns: ["tenant_id", "request_id"],
+            references: { schema: "cpq", table: "requests", columns: ["tenant_id", "id"] },
             deferrable: true,
             initiallyDeferred: true,
           },
@@ -120,8 +161,23 @@ describe("plugin schema migrations", () => {
       }),
     ]);
     expect(result.migrations[1]!.sql).toContain(
-      'REFERENCES "cpq"."requests" ("id") DEFERRABLE INITIALLY DEFERRED',
+      'REFERENCES "cpq"."requests" ("tenant_id", "id") DEFERRABLE INITIALLY DEFERRED',
     );
+
+    // A tenant-scoped row referencing another by id alone is refused here as
+    // it is for column references: the registry is the other foreign-key surface.
+    expect(() =>
+      registry([
+        table("requests", { columns: [{ ...idColumn, primaryKey: true }, tenantColumn] }),
+        table("lines", {
+          columns: [idColumn, tenantColumn, { name: "request_id", type: "uuid" }],
+          constraints: [{
+            version: "0002_request-fk", name: "lines_request_fk", kind: "foreignKey",
+            columns: ["request_id"], references: { schema: "cpq", table: "requests", columns: ["id"] },
+          }],
+        }),
+      ]),
+    ).toThrow("set columns: [tenant_id, request_id] and references.columns: [tenant_id, id]");
   });
 
   test("rejects duplicate versions across constraints and raw DDL", () => {
@@ -292,5 +348,70 @@ describe("plugin schema migrations", () => {
       ["cpq", "0001_install-trigger"],
       ["cpq-extra", "0001_install-trigger"],
     ]);
+  });
+});
+
+describe("composite column-level keys", () => {
+  const versionTable = table("versions", {
+    columns: [
+      { name: "tenant_id", type: "uuid", primaryKey: true },
+      { name: "blueprint_id", type: "text", primaryKey: true },
+      { name: "version", type: "integer", primaryKey: true },
+    ],
+  });
+
+  test("a composite column key is one key, and unique only as a whole", () => {
+    // Three primaryKey flags form one key: no "multiple primary keys".
+    expect(() => registry([versionTable])).not.toThrow();
+
+    expect(() =>
+      registry([
+        versionTable,
+        // Provenance across tenants: a global table naming the blueprint's
+        // tenant explicitly, as platform.blueprint_copies does.
+        table("copies", {
+          tenantScoped: false,
+          columns: [
+            idColumn,
+            { name: "blueprint_tenant_id", type: "uuid", required: true },
+            { name: "blueprint_id", type: "text", required: true },
+            { name: "source_version", type: "integer", required: true },
+          ],
+          constraints: [
+            {
+              version: "0001_copies-source-fk",
+              name: "copies_source_fk",
+              kind: "foreignKey",
+              columns: ["blueprint_tenant_id", "blueprint_id", "source_version"],
+              references: {
+                schema: "cpq",
+                table: "versions",
+                columns: ["tenant_id", "blueprint_id", "version"],
+              },
+            },
+          ],
+        }),
+      ]),
+    ).not.toThrow();
+
+    // One member of the composite key does not identify a row.
+    expect(() =>
+      registry([
+        versionTable,
+        table("copies", {
+          tenantScoped: false,
+          columns: [idColumn, { name: "blueprint_id", type: "text", required: true }],
+          constraints: [
+            {
+              version: "0001_copies-source-fk",
+              name: "copies_source_fk",
+              kind: "foreignKey",
+              columns: ["blueprint_id"],
+              references: { schema: "cpq", table: "versions", columns: ["blueprint_id"] },
+            },
+          ],
+        }),
+      ]),
+    ).toThrow(/no matching primary key or unique constraint/);
   });
 });

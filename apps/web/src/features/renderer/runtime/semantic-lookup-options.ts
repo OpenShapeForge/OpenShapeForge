@@ -1,32 +1,33 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { Field, LocalizedText } from "@/generated/compiler/field-contract";
 import {
-  COMPILER_SEMANTIC_TYPE_LOOKUPS,
-  type CompilerSemanticTypeLookupDefinition,
-} from "@/generated/compiler/semantic-type-lookups";
-import { getFieldSemanticTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
+  COMPILER_OSF_TYPE_LOOKUPS,
+  type CompilerOsfTypeLookupDefinition,
+} from "@/generated/compiler/osf-type-lookups";
+import { getFieldOsfTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
+import { resolveFieldOptionSource } from "@/features/renderer/runtime/entity-option-source";
 
-function normalizeSemanticType(field: Field) {
-  const semanticType = field.semanticType?.trim();
-  return semanticType && semanticType.length > 0 ? semanticType : null;
+function normalizeOsfType(field: Field) {
+  const osfType = field.osfType?.trim();
+  return osfType && osfType.length > 0 ? osfType : null;
 }
 
-export function getSemanticTypeLookupDefinition(
+export function getOsfTypeLookupDefinition(
   field: Field,
-): CompilerSemanticTypeLookupDefinition | null {
-  const semanticType = normalizeSemanticType(field);
-  if (!semanticType) {
+): CompilerOsfTypeLookupDefinition | null {
+  const osfType = normalizeOsfType(field);
+  if (!osfType) {
     return null;
   }
   return (
-    COMPILER_SEMANTIC_TYPE_LOOKUPS[
-      semanticType as keyof typeof COMPILER_SEMANTIC_TYPE_LOOKUPS
+    COMPILER_OSF_TYPE_LOOKUPS[
+      osfType as keyof typeof COMPILER_OSF_TYPE_LOOKUPS
     ] ?? null
   );
 }
 
 function lookupSectionLabel(
-  lookup: CompilerSemanticTypeLookupDefinition,
+  lookup: CompilerOsfTypeLookupDefinition,
 ): string {
   if (lookup.provider === "messaging.conversations") {
     return "Conversaties";
@@ -39,7 +40,7 @@ function lookupSectionLabel(
 
 function lookupPlaceholder(
   field: Field,
-  lookup: CompilerSemanticTypeLookupDefinition,
+  lookup: CompilerOsfTypeLookupDefinition,
 ): LocalizedText {
   if (lookup.provider === "messaging.conversations") {
     return {
@@ -57,11 +58,11 @@ export function shouldRenderSemanticLookupField(field: Field, required: boolean)
   if (!required || field.readOnly || field.computed) {
     return false;
   }
-  return getSemanticTypeLookupDefinition(field) !== null;
+  return getOsfTypeLookupDefinition(field) !== null;
 }
 
 export function buildSemanticLookupPickerField(field: Field): Field | null {
-  const lookup = getSemanticTypeLookupDefinition(field);
+  const lookup = getOsfTypeLookupDefinition(field);
   if (!lookup) {
     return null;
   }
@@ -91,29 +92,28 @@ export function buildSemanticLookupPickerField(field: Field): Field | null {
   };
 }
 
+/**
+ * An entity-ID field becomes a record picker when its choices can be
+ * enumerated: through the entity's records (its identity alias's
+ * `optionSource`, the entity's list Operation) or a declared remote endpoint.
+ * A web route is never a source, so an alias without one gets no picker.
+ */
 export function buildEntityReferencePickerField(field: Field): Field | null {
-  const semanticType = getFieldSemanticTypeDefinition(field);
-  if (semanticType?.kind !== "entityId") {
+  const osfType = getFieldOsfTypeDefinition(field);
+  if (osfType?.kind !== "entityId") {
     return null;
   }
 
-  const remoteUrl =
-    field.options?.type === "remote"
-      ? field.options.remoteUrl
-      : semanticType.options?.type === "remote"
-        ? semanticType.options.remoteUrl
-        : semanticType.listUrl;
-
-  if (!remoteUrl?.trim()) {
+  const source = resolveFieldOptionSource(field);
+  if (!source) {
     return null;
   }
 
   return {
     ...field,
-    options: {
-      type: "remote",
-      remoteUrl: remoteUrl.trim(),
-    },
+    options: source.type === "entity"
+      ? { type: "entity", source: source.entity, valueField: source.valueField }
+      : { type: "remote", remoteUrl: source.remoteUrl },
     render: {
       component: "OptionVariablePicker",
       props: {

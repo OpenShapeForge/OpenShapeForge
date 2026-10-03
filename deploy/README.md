@@ -2,6 +2,8 @@
 
 The API is a Bun service. It expects an **external Postgres** and an
 **external OIDC issuer** (Keycloak); this directory does not provision those.
+PostgreSQL 16 or newer is required: managed database-role reconciliation uses
+the PostgreSQL 16 role-membership capabilities.
 
 ## Container image
 
@@ -47,8 +49,9 @@ docker run --rm -p 3001:3001 \
   -e OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET=... \
   ghcr.io/openshapeforge/openshapeforge-api:0.1.0
 
-# Migrate (privileged role; provisions the restricted app role, rolls the
-# generated schema forward, applies versioned migrations)
+# Migrate (privileged role; builds an empty database from the compiled
+# manifest, re-applies the invariants on a built one, refuses one built
+# from another manifest)
 docker run --rm \
   -e OPENSHAPEFORGE_MIGRATE_DATABASE_URL=postgres://openshapeforge:...@host:5432/openshapeforge \
   ghcr.io/openshapeforge/openshapeforge-api:0.1.0 \
@@ -107,14 +110,14 @@ and runs migrations as a **pre-install/pre-upgrade Job**. It can also deploy a
 The image is one entry point with several roles: `OPENSHAPEFORGE_ROLE` picks
 which one `apps/api/src/index.ts` starts. `api` is the default and is the HTTP
 server. Any other value names a background worker role contributed by a runtime
-module — the workflow plugin contributes `workflow-worker`, the process that
-drains `workflow.control_commands`, fires due `workflow.schedules` and resumes
-due timer waits. Without it those queues fill and nothing reads them.
+module — core contributes `job-worker`, the process that drains
+`platform.jobs`, the queue every module enqueues into. Without it the queue
+fills and nothing reads it.
 
 ```sh
 helm upgrade --install openshapeforge deploy/helm/openshapeforge-api \
   --set workers.enabled=true            # off by default
-  # --set workers.role=workflow-worker  # the default; a value, not a literal
+  # --set workers.role=job-worker       # the default; a value, not a literal
   # --set workers.replicaCount=2        # the default
 ```
 
@@ -170,10 +173,9 @@ rules, because it has no port to admit anyone to.
 
 A durable-execution service is configured through `workers.extraEnv`, not
 through a chart-specific setting, for the same reason the role name is a value:
-`OPENSHAPEFORGE_WORKFLOW_RESTATE_*` belongs to the workflow plugin, and the
-chart should not know a plugin's variable names any better than it knows its
-role names. Absent it, the worker uses its in-process dispatcher, which is the
-default and correct on its own.
+the variables belong to the plugin whose worker reads them, and the chart
+should not know a plugin's variable names any better than it knows its role
+names.
 
 ### Keycloak subchart (optional, off by default)
 
@@ -267,13 +269,16 @@ Security posture it encodes (see `../SECURITY.md`):
 - the API connects as a **restricted** (`NOSUPERUSER NOBYPASSRLS`) role
   (`database.url`) so `FORCE ROW LEVEL SECURITY` is enforced;
 - a **worker** connects as a *second* restricted role (`database.workerUrl`).
-  The workflow queue policies compare `current_user` against
+  The queue policies compare `current_user` against
   `openshapeforge_worker`, so the connected role — not a session variable — is
   what authorizes a cross-tenant claim, and the API's role can no longer make
   one. A worker process refuses to start on `DATABASE_URL`, including when it
   is copied into `OPENSHAPEFORGE_WORKER_DATABASE_URL`;
-- migrations run as a **privileged** role (`database.migrateUrl`) in the Job,
-  which provisions both restricted roles and applies DDL. The worker role gets
+- the migration Job first provisions both restricted roles through the optional
+  **administrator** connection (`database.adminUrl`), falling back to the
+  privileged `database.migrateUrl`; explicit password rotations also happen in
+  this administrator phase. The Job then removes the one-shot rotation flags
+  before applying DDL as the migrate role. The worker role gets
   DML on only the tables a worker touches, never the platform control plane
   (`platform.connector_secrets`, `platform.api_keys`, `platform.tenants`, …);
 - `NODE_ENV=production` is always set, so the API refuses to start unless a
@@ -283,14 +288,17 @@ Security posture it encodes (see `../SECURITY.md`):
 
 Provide credentials via an existing Secret (recommended) with keys
 `DATABASE_URL`, `OPENSHAPEFORGE_MIGRATE_DATABASE_URL`,
-`OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` — plus
-`OPENSHAPEFORGE_WORKER_DATABASE_URL` and `OPENSHAPEFORGE_WORKER_PASSWORD` when a
-worker workload is deployed:
+`OPENSHAPEFORGE_APP_PASSWORD`, `OPENSHAPEFORGE_WORKER_PASSWORD` and
+`OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET`. Add the optional
+`OPENSHAPEFORGE_ADMIN_DATABASE_URL` when the migrate role cannot create roles,
+and `OPENSHAPEFORGE_WORKER_DATABASE_URL` when a worker workload is deployed:
 
 ```sh
 kubectl create secret generic openshapeforge-api \
   --from-literal=DATABASE_URL='postgres://openshapeforge_app:...@host:5432/openshapeforge' \
+  --from-literal=OPENSHAPEFORGE_ADMIN_DATABASE_URL='postgres://postgres:...@host:5432/openshapeforge' \
   --from-literal=OPENSHAPEFORGE_MIGRATE_DATABASE_URL='postgres://openshapeforge:...@host:5432/openshapeforge' \
+  --from-literal=OPENSHAPEFORGE_APP_PASSWORD='<strong-random>' \
   --from-literal=OPENSHAPEFORGE_WORKER_DATABASE_URL='postgres://openshapeforge_worker:...@host:5432/openshapeforge' \
   --from-literal=OPENSHAPEFORGE_WORKER_PASSWORD='<strong-random, different from the app role>' \
   --from-literal=OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET='<strong-random>'
@@ -305,8 +313,10 @@ helm install openshapeforge deploy/helm/openshapeforge-api \
 ```
 
 For quick testing you can instead pass `database.url`, `database.migrateUrl`,
-and `auth.internalContextSecret` inline and let the chart create the Secret —
-do not commit real credentials that way.
+and `auth.internalContextSecret` inline and let the chart create the Secret.
+Set `database.adminUrl` when the migrate role cannot create roles; otherwise
+the provisioner deliberately reuses `database.migrateUrl`. Do not commit real
+credentials this way.
 
 Render manifests without installing:
 
@@ -320,8 +330,9 @@ helm template openshapeforge deploy/helm/openshapeforge-api \
 
 - Bring your own Postgres and Keycloak; point the chart at them.
 - The migration Job is a Helm hook — on `helm upgrade` it runs before the new
-  pods roll. Additive schema changes roll forward automatically; non-additive
-  changes require a versioned migration (see `../docs/migrations.md`).
+  pods roll. Any schema change means rebuilding the database from the
+  manifest (`bun run db:reset`, see `../docs/migrations.md`); the Job
+  refuses a database built from another manifest rather than altering it.
 - **Upgrading past the worker role (#223) needs one new value.**
   `database.workerPassword` is required whenever the chart manages the Secret,
   even on an install that runs no worker: the emitted RLS policies name

@@ -10,15 +10,18 @@ import { collectAllArtifacts } from "../packages/compiler/src/index.ts";
 import {
   compilerOwnedGeneratedFiles,
   compilerOwnedGeneratedRoots,
+  orphanCompilerGeneratedFiles,
 } from "./compiler-generated-artifact-paths.mjs";
 
 const repoRoot = process.cwd();
 const webPresent = existsSync(join(repoRoot, "apps/web"));
-// AgreementMilestone withholds generic `create` (see agreement-milestone.yaml)
-// so the stock full-CRUD web UI is intentionally not generated for it
-// (isGeneratedCrudUiEnabled requires every operation to be true) — it stays
-// at the pre-existing count rather than 117.
-const expectedGeneratedCrudEntityCount = 116;
+// Entities with invariant-rich or aggregate-owned writes withhold part of
+// generic CRUD. The stock full-CRUD web UI is intentionally not generated for
+// these entities (isGeneratedCrudUiEnabled requires every operation to be
+// true). Schema-3 entities with an explicit complete CRUD and Web contract do
+// retain their generated pages; partial contracts use the Web manifest only.
+// Account now uses canonical account Operations rather than generated CRUD.
+const expectedGeneratedCrudEntityCount = 115;
 
 /**
  * The realms this repository authors, by name.
@@ -303,7 +306,7 @@ const existingOwnedFiles = (
 )
   .flat()
   .sort();
-const orphanGeneratedFiles = existingOwnedFiles.filter((path) => !artifactPathSet.has(path));
+const orphanGeneratedFiles = orphanCompilerGeneratedFiles(existingOwnedFiles, artifactPathSet);
 if (orphanGeneratedFiles.length > 0) {
   coverageFailures.push("compiler-owned generated roots contain orphan files");
   console.error("\nCompiler-owned generated roots contain orphan files:");

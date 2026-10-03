@@ -23,7 +23,7 @@ import {
   buildNaturalPersonHeaderEntity,
 } from "@/components/entity/entity-workspace-page/natural-person-header";
 import {
-  loadWorkspaceDetailAndActions,
+  loadWorkspaceDetail,
   loadWorkspaceList,
   loadWorkspaceSelectedEntity,
 } from "@/components/entity/entity-workspace-page/data-loaders";
@@ -114,7 +114,7 @@ export async function EntityWorkspacePage({
     ...(selectedId ? [buildEntityDetailRealtimeKey(realtimeResourceType, selectedId)] : []),
   ];
 
-  const { detailLoadError, entity, activeActions } = await loadWorkspaceDetailAndActions({
+  const { detailLoadError, entity } = await loadWorkspaceDetail({
     entry,
     config,
     selectedId,
@@ -157,7 +157,6 @@ export async function EntityWorkspacePage({
       entity,
       detailHeader,
       detailLoadError,
-      activeActions,
       activeGroupId,
       listRoute,
       searchParams,
@@ -191,7 +190,6 @@ export async function EntityWorkspacePage({
     entity,
     detailHeader,
     detailLoadError,
-    activeActions,
     activeGroupId,
     listRoute,
     searchParams,

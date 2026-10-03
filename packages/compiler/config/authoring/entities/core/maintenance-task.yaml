@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: MaintenanceTask
@@ -10,11 +10,14 @@ filterField: description
 labels:
   en: Maintenance task
   nl: Onderhoudstaak
+pluralLabels:
+  en: Maintenance tasks
+  nl: Onderhoudstaken
 domains:
   - maintenance
 fields:
   - key: lineNumber
-    valueType: integer
+    osfType: integer
     required: true
     label:
       en: Line number
@@ -28,7 +31,6 @@ fields:
       column: line_number
       storageClass: core
   - key: description
-    valueType: string
     required: true
     label:
       en: Description
@@ -42,13 +44,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 500
+    osfType: multilineText
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -59,13 +56,12 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: MAINTENANCETASKSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: MAINTENANCETASKSTATUS
+    osfType: referenceDataCode
   - key: quantity
-    valueType: number
+    osfType: number
     required: false
     label:
       en: Quantity
@@ -77,7 +73,7 @@ fields:
       column: quantity
       storageClass: core
   - key: unitId
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Unit
@@ -91,7 +87,6 @@ fields:
       column: unit_id
       storageClass: core
   - key: unitPrice
-    valueType: number
     required: false
     label:
       en: Unit price
@@ -99,12 +94,11 @@ fields:
     description:
       en: Price per unit for this task.
       nl: Prijs per eenheid voor deze taak.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: unit_price
       storageClass: core
   - key: amount
-    valueType: number
     required: false
     label:
       en: Amount
@@ -112,131 +106,20 @@ fields:
     description:
       en: Total amount for this task.
       nl: Totaalbedrag voor deze taak.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount
       storageClass: core
-relationships:
-  - key: maintenanceOrder
-    kind: belongsTo
-    target: MaintenanceOrder
-    foreignKey: maintenance_order_id
+  - key: maintenanceOrderId
     label:
       en: Maintenance order
       nl: Onderhoudsorder
-ui:
-  routes:
-    list:
-      en: /maintenance-tasks
-      nl: /onderhoudstaken
-    detail:
-      en: /maintenance-tasks/:id
-      nl: /onderhoudstaken/:id
-    create:
-      en: /maintenance-tasks/create
-      nl: /onderhoudstaken/aanmaken
-    edit:
-      en: /maintenance-tasks/:id/edit
-      nl: /onderhoudstaken/:id/bewerken
-    delete:
-      en: /maintenance-tasks/:id/delete
-      nl: /onderhoudstaken/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Maintenance tasks
-        nl: Onderhoudstaken
-      columns:
-        - key: lineNumber
-          sortable: true
-        - key: description
-          sortable: true
-        - key: status
-          sortable: true
-        - key: quantity
-          sortable: true
-        - key: amount
-          sortable: true
-      defaultSort:
-        key: lineNumber
-        direction: asc
-      rowLink:
-        en: /maintenance-tasks/:id
-        nl: /onderhoudstaken/:id
-    detail:
-      header:
-        title: "{{description}}"
-        subtitle: "{{status}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Task details
-                nl: Taakgegevens
-              fields:
-                - lineNumber
-                - description
-                - status
-            - title:
-                en: Amounts
-                nl: Bedragen
-              fields:
-                - quantity
-                - unitId
-                - unitPrice
-                - amount
-    form:
-      variants:
-        create:
-          title:
-            en: Create maintenance task
-            nl: Onderhoudstaak aanmaken
-          groups:
-            - title:
-                en: Task details
-                nl: Taakgegevens
-              fields:
-                - lineNumber
-                - description
-                - status
-            - title:
-                en: Amounts
-                nl: Bedragen
-              fields:
-                - quantity
-                - unitId
-                - unitPrice
-                - amount
-        edit:
-          extends: create
-          title:
-            en: Edit maintenance task
-            nl: Onderhoudstaak bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: maintenance_order_id
+      storageClass: core
+    osfType: MaintenanceOrder
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -251,3 +134,179 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Maintenance Task
+    description: List MaintenanceTask records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Maintenance Task
+    description: Get MaintenanceTask records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Maintenance Task
+    description: Create MaintenanceTask records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update MaintenanceTask records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /maintenance-tasks
+          nl: /onderhoudstaken
+        columns:
+          - key: lineNumber
+            sortable: true
+          - key: description
+            sortable: true
+          - key: status
+            sortable: true
+          - key: quantity
+            sortable: true
+          - key: amount
+            sortable: true
+        title:
+          en: Maintenance tasks
+          nl: Onderhoudstaken
+        defaultSort:
+          key: lineNumber
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /maintenance-tasks/:id
+            nl: /onderhoudstaken/:id
+          create:
+            en: /maintenance-tasks/create
+            nl: /onderhoudstaken/aanmaken
+        title: "{{description}}"
+        subtitle: "{{status}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Task details
+                    nl: Taakgegevens
+                  fields:
+                    - lineNumber
+                    - description
+                    - status
+                - title:
+                    en: Amounts
+                    nl: Bedragen
+                  fields:
+                    - quantity
+                    - unitId
+                    - unitPrice
+                    - amount
+        modes:
+          create:
+            title:
+              en: Create maintenance task
+              nl: Onderhoudstaak aanmaken
+            groups:
+              - title:
+                  en: Task details
+                  nl: Taakgegevens
+                fields:
+                  - lineNumber
+                  - description
+                  - status
+              - title:
+                  en: Amounts
+                  nl: Bedragen
+                fields:
+                  - quantity
+                  - unitId
+                  - unitPrice
+                  - amount
+          update:
+            title:
+              en: Edit maintenance task
+              nl: Onderhoudstaak bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 500
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: MAINTENANCETASKSTATUS
+            clearable: false

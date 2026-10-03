@@ -59,6 +59,7 @@
  * Written against a small environment interface, like onboarding, so all of
  * it is unit-tested without a database or a server.
  */
+import { ownedByActingRelation } from "../db/acting-relation.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { sql } from "kysely";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
@@ -601,7 +602,7 @@ async function instructionsFor(env: UpdateNoticesEnvironment): Promise<UpdateFac
     const rows = await env.rowsByFilter(personalization.table, {});
     const services = new Map<string, Record<string, unknown>>();
     for (const row of rows) {
-      if (row.ownerUserId !== env.session.userId) continue;
+      if (!ownedByActingRelation(row.ownerUserId, env.session)) continue;
       const id = typeof row.id === "string" ? row.id : null;
       const instruction = typeof row[personalization.instructionField] === "string"
         ? (row[personalization.instructionField] as string).trim()

@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: CaseFileType
@@ -10,6 +10,9 @@ filterField: name
 labels:
   en: Case file type
   nl: Dossiertype
+pluralLabels:
+  en: Case file types
+  nl: Dossiertypen
 domains:
   - cases
   - governance
@@ -29,7 +32,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -41,7 +44,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -53,7 +56,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -63,13 +65,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    osfType: multilineText
   - key: defaultConfidentiality
-    valueType: string
     required: false
     label:
       en: Default confidentiality
@@ -77,13 +74,12 @@ fields:
     persisted:
       column: default_confidentiality
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEFILECONFIDENTIALITY
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASEFILECONFIDENTIALITY
+    osfType: referenceDataCode
   - key: archiveProfile
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Archive profile
@@ -94,7 +90,7 @@ fields:
       column: archive_profile
       storageClass: core
   - key: retentionYears
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Retention years
@@ -102,11 +98,91 @@ fields:
     persisted:
       column: retention_years
       storageClass: core
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+operations:
+  list:
+    name: List Case file type
+    description: List CaseFileType records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Case file type
+    description: Get CaseFileType records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Case file type
+    description: Create CaseFileType records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Case file type
+    description: Update CaseFileType records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Case file type
+    description: Delete CaseFileType records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000
+      defaultConfidentiality:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEFILECONFIDENTIALITY
+            clearable: true

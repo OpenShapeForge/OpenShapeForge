@@ -61,7 +61,9 @@ describe("classified filter/sort guard in listGeneratedEntities", () => {
       for (const filter of [{ [field]: "probe" }, { [`${field}In`]: ["probe"] }]) {
         await expect(
           listGeneratedEntities(noDb, readOnlySession, { table: table.name, filter }),
-        ).rejects.toMatchObject({ extensions: { code: "FORBIDDEN", status: 403 } });
+        ).rejects.toMatchObject({
+          operationError: { code: "FORBIDDEN", retryable: false },
+        });
       }
     });
   });
@@ -73,7 +75,9 @@ describe("classified filter/sort guard in listGeneratedEntities", () => {
           table: table.name,
           sort: { field, direction: "desc" },
         }),
-      ).rejects.toMatchObject({ extensions: { code: "FORBIDDEN", status: 403 } });
+      ).rejects.toMatchObject({
+        operationError: { code: "FORBIDDEN", retryable: false },
+      });
     });
   });
 

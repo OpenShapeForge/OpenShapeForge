@@ -9,22 +9,27 @@
 import { describe, expect, it } from "bun:test";
 import {
   consumeConfiguration,
-  findExistingConfiguration,
-  mergeConfigurationValues,
   mintConfiguration,
-  parseSubmission,
   peekConfiguration,
-  renderConfigurationApp,
-  renderConfigurationForm,
-  renderMessagePage,
-  storeSubmission,
   type PendingConfiguration,
 } from "../configuration-handoff.js";
+import { renderConfigurationForm } from "../browser-pages.js";
+import { renderConfigurationApp, renderMessagePage } from "../configuration-app.js";
+import {
+  findExistingConfiguration,
+  handoffFailureCode,
+  handoffModelValues,
+  mergeConfigurationValues,
+  parseSubmission,
+  storeSubmission,
+} from "../configuration-submission.js";
 import {
   keyringFromEnv,
   redactElicitedValues,
   SECRET_SET_SENTINEL,
 } from "../../connectors/secrets.js";
+import { HttpError } from "../../rest/http-error.js";
+import { operationFailure } from "@openshapeforge/operations";
 
 const KEYRING = keyringFromEnv(
   `test:${Buffer.alloc(32, 5).toString("base64")}`,
@@ -33,27 +38,27 @@ const KEYRING = keyringFromEnv(
 const DEFINITIONS = [
   {
     key: "subdomain",
-    valueType: "string",
+    osfType: "string",
     required: true,
     label: { en: "Zendesk subdomain" },
     description: { en: "The part before .zendesk.com." },
   },
   {
     key: "clientSecret",
-    valueType: "string",
+    osfType: "string",
     required: true,
     label: { en: "OAuth client secret" },
     classification: { sensitivity: "confidential" },
   },
   {
     key: "retries",
-    valueType: "integer",
+    osfType: "integer",
     required: false,
     label: { en: "Retries" },
   },
   {
     key: "sandbox",
-    valueType: "boolean",
+    osfType: "boolean",
     required: false,
     label: { en: "Sandbox" },
   },
@@ -203,7 +208,7 @@ describe("renderConfigurationForm", () => {
       definitions: [
         {
           key: `x" autofocus onfocus="alert(1)`,
-          valueType: "string",
+          osfType: "string",
           required: true,
         },
       ],
@@ -263,5 +268,50 @@ describe("resubmitting a key that already exists", () => {
     expect(mergeConfigurationValues(["not", "an", "object"], { clientId: "x" })).toEqual({
       clientId: "x",
     });
+  });
+});
+
+describe("handoffFailureCode", () => {
+  it("names the failure by its bounded code, never its message", () => {
+    expect(handoffFailureCode(new HttpError(500, "SECRET_KEYRING_MISSING", "set the keyring"))).toBe("http:SECRET_KEYRING_MISSING");
+    expect(handoffFailureCode(operationFailure({ code: "VALIDATION", message: "email jane@example.com is taken" }))).toBe("operation:VALIDATION");
+    expect(handoffFailureCode(Object.assign(new Error("null value in column \"key\""), { code: "23502" }))).toBe("postgres:23502");
+    expect(handoffFailureCode(new TypeError("undefined is not an object"))).toBe("error:TypeError");
+    expect(handoffFailureCode("boom")).toBe("unknown");
+    for (const error of [new HttpError(400, "VALIDATION", "jane@example.com"), Object.assign(new Error("jane@example.com"), { code: "23505" })]) {
+      expect(handoffFailureCode(error)).not.toContain("jane");
+    }
+  });
+});
+
+describe("handoffModelValues", () => {
+  const elicit = {
+    sourceField: "adapterId",
+    sourceEntity: "Adapter",
+    sourceTable: "integration.adapters",
+    definitionsField: "configurationFields",
+    into: "configurationValues",
+  };
+  const required = ["key", "name", "adapterId", "configurationValues"];
+  const sourceRow = { id: "adapter-1", key: "google-gmail", name: "Google" };
+
+  it("fills the key and name a model left out from the source row", () => {
+    expect(handoffModelValues({ required, elicit, modelValues: { adapterId: "adapter-1" }, sourceRow })).toEqual({
+      adapterId: "adapter-1",
+      key: "google-gmail",
+      name: "Google",
+    });
+  });
+
+  it("keeps what the model did send", () => {
+    const modelValues = { adapterId: "adapter-1", key: "gmail-hans", name: "Hans' Gmail" };
+    expect(handoffModelValues({ required, elicit, modelValues, sourceRow })).toEqual(modelValues);
+  });
+
+  it("refuses a handoff whose other required arguments are still missing, naming them", () => {
+    expect(() => handoffModelValues({ required: [...required, "tenantSlug"], elicit, modelValues: { adapterId: "adapter-1" }, sourceRow }))
+      .toThrow(/Provide tenantSlug in the call/);
+    expect(() => handoffModelValues({ required, elicit, modelValues: {}, sourceRow: {} }))
+      .toThrow(/Provide key, name, adapterId in the call/);
   });
 });

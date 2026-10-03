@@ -1,32 +1,31 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: CaseStepAction
 title: Case Step Action
-description: Runtime action inside a case step. An action either creates a human task or starts a workflow instance.
+description: Runtime action inside a case step. An action is one unit of work the step owns, such as a human task; a plugin may contribute other kinds.
 language: en
 displayTemplate: "{{actionKey}}"
 filterField: actionKey
 labels:
   en: Case Step Action
   nl: Zaakstapactie
+pluralLabels:
+  en: Case step actions
+  nl: Zaakstapacties
 domains:
   - cases
-  - workflow
-# Runtime scheduler rows are created and advanced by case/workflow services.
-# Generic transports and workflow entity nodes must never mutate them.
-crud: false
 authorization:
   roles:
     read:
       - Cases.All.Read
       - Cases.All.ReadWrite
     create:
-      - Workflow.Internal.Write
+      - Cases.All.ReadWrite
     update:
-      - Workflow.Internal.Write
+      - Cases.All.ReadWrite
     delete:
-      - Workflow.Internal.Write
+      - Cases.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public
@@ -39,9 +38,9 @@ indexes:
       - id
 fields:
   - key: processId
-    valueType: string
     required: true
     readOnly: true
+    writeSource: caller
     label:
       en: Case step ID
       nl: Zaakstap-ID
@@ -53,23 +52,11 @@ fields:
     persisted:
       column: process_id
       storageClass: core
-  - key: processStepId
-    valueType: string
-    required: false
-    readOnly: true
-    label:
-      en: Legacy process step ID
-      nl: Legacy processtap-ID
-    description:
-      en: Optional legacy bridge to the older process-step row while the runtime migrates to process-owned actions.
-      nl: Optionele legacy-koppeling naar de oudere processtaprij terwijl de runtime migreert naar proces-acties.
-    validation:
-      format: uuid
-    persisted:
-      column: process_step_id
-      storageClass: core
+    osfType: Process
+    relationship:
+      ownership: reference
   - key: actionKey
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Action key
@@ -81,7 +68,7 @@ fields:
       column: action_key
       storageClass: core
   - key: sequenceNumber
-    valueType: integer
+    osfType: integer
     required: true
     label:
       en: Sequence number
@@ -90,7 +77,6 @@ fields:
       column: sequence_number
       storageClass: core
   - key: kind
-    valueType: string
     required: true
     label:
       en: Kind
@@ -98,13 +84,12 @@ fields:
     persisted:
       column: kind
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASESTEPACTIONKIND
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: CASESTEPACTIONKIND
+    osfType: referenceDataCode
   - key: required
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Required
@@ -114,7 +99,6 @@ fields:
       column: required
       storageClass: core
   - key: startMode
-    valueType: string
     required: true
     label:
       en: Start mode
@@ -123,13 +107,11 @@ fields:
     persisted:
       column: start_mode
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASESTEPACTIONSTARTMODE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: CASESTEPACTIONSTARTMODE
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -138,37 +120,12 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASESTEPACTIONSTATUS
-        clearable: false
-  - key: workflowDefinitionId
-    valueType: string
-    required: false
-    semanticType: workflowDefinitionId
-    label:
-      en: Workflow definition
-      nl: Workflowdefinitie
-    validation:
-      format: uuid
-    persisted:
-      column: workflow_definition_id
-      storageClass: core
-  - key: workflowInstanceId
-    valueType: string
-    required: false
-    readOnly: true
-    label:
-      en: Workflow instance
-      nl: Workflowinstantie
-    validation:
-      format: uuid
-    persisted:
-      column: workflow_instance_id
-      storageClass: core
+    options:
+      type: referentiedata
+      referentieGroep: CASESTEPACTIONSTATUS
+    osfType: referenceDataCode
   - key: taskTemplate
-    valueType: object
+    osfType: object
     required: false
     label:
       en: Task template
@@ -176,10 +133,8 @@ fields:
     persisted:
       column: task_template
       storageClass: core
-    render:
-      component: JsonFieldEditor
   - key: result
-    valueType: object
+    osfType: object
     required: false
     label:
       en: Result
@@ -187,10 +142,8 @@ fields:
     persisted:
       column: result
       storageClass: core
-    render:
-      component: JsonFieldEditor
   - key: failureDetails
-    valueType: object
+    osfType: object
     required: false
     label:
       en: Failure details
@@ -198,10 +151,8 @@ fields:
     persisted:
       column: failure_details
       storageClass: core
-    render:
-      component: JsonFieldEditor
   - key: activatedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Activated at
@@ -210,7 +161,7 @@ fields:
       column: activated_at
       storageClass: core
   - key: completedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Completed at
@@ -219,7 +170,7 @@ fields:
       column: completed_at
       storageClass: core
   - key: cancelledAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Cancelled at
@@ -227,32 +178,55 @@ fields:
     persisted:
       column: cancelled_at
       storageClass: core
-relationships:
-  - key: process
-    kind: belongsTo
-    target: Process
-    foreignKey: process_id
-    label:
-      en: Case step
-      nl: Zaakstap
-  - key: processStep
-    kind: belongsTo
-    target: ProcessStep
-    foreignKey: process_step_id
-    label:
-      en: Legacy process step
-      nl: Legacy processtap
-  - key: caseStepTemplate
-    kind: belongsTo
-    target: CaseStepTemplate
-    foreignKey: case_step_template_id
+  - key: caseStepTemplateId
     label:
       en: Case step template
       nl: Zaakstapsjabloon
-  - key: task
-    kind: belongsTo
-    target: Task
-    foreignKey: task_id
+    persisted:
+      column: case_step_template_id
+      storageClass: core
+    osfType: CaseStepTemplate
+    relationship:
+      ownership: reference
+  - key: taskId
     label:
       en: Task
       nl: Taak
+    persisted:
+      column: task_id
+      storageClass: core
+    osfType: Task
+    relationship:
+      ownership: reference
+operations: {}
+interfaces:
+  graphql: {}
+  web:
+    fields:
+      kind:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASESTEPACTIONKIND
+            clearable: false
+      startMode:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASESTEPACTIONSTARTMODE
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASESTEPACTIONSTATUS
+            clearable: false
+      taskTemplate:
+        render:
+          component: JsonFieldEditor
+      result:
+        render:
+          component: JsonFieldEditor
+      failureDetails:
+        render:
+          component: JsonFieldEditor

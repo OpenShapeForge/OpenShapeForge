@@ -6,13 +6,6 @@ import type {
   TranslatableLabel,
 } from "@/lib/navigation/types";
 
-const WORKFLOW_DESIGNER_ITEM: NavItem = {
-  key: "workflow-designer",
-  label: { en: "Workflow Designer", nl: "Workflow Designer" },
-  icon: "GitFork",
-  route: { en: "/workflow-designer", nl: "/workflow-designer" },
-};
-
 /**
  * Tenant administration. Present for every deployment because the API surface
  * it configures is always there; the page itself explains its own emptiness to
@@ -25,26 +18,16 @@ const API_KEYS_ITEM: NavItem = {
   route: { en: "/settings/api-keys", nl: "/settings/api-keys" },
 };
 
-const TOOLING_KEYS = new Set([WORKFLOW_DESIGNER_ITEM.key, API_KEYS_ITEM.key]);
-
+/**
+ * Setup entries. A plugin's screens reach the sidebar through its own
+ * authoring layer (`kind: appShellPatch` on `menu.yaml`), never from here.
+ */
 function isToolingItem(item: NavItem): boolean {
-  if (TOOLING_KEYS.has(item.key)) return true;
-  const en = item.route?.en;
-  return en === WORKFLOW_DESIGNER_ITEM.route?.en || en === API_KEYS_ITEM.route?.en;
+  return item.key === API_KEYS_ITEM.key || item.route?.en === API_KEYS_ITEM.route?.en;
 }
 
 function ensureToolingPresent(items: NavItem[]): NavItem[] {
-  let result = [...items];
-
-  if (!result.some((i) => i.key === WORKFLOW_DESIGNER_ITEM.key || i.route?.en === WORKFLOW_DESIGNER_ITEM.route?.en)) {
-    result = [...result, WORKFLOW_DESIGNER_ITEM];
-  }
-
-  if (!result.some((i) => i.key === API_KEYS_ITEM.key || i.route?.en === API_KEYS_ITEM.route?.en)) {
-    result = [...result, API_KEYS_ITEM];
-  }
-
-  return result;
+  return items.some(isToolingItem) ? [...items] : [...items, API_KEYS_ITEM];
 }
 
 function resolveLabel(label: TranslatableLabel, lang: string): string {

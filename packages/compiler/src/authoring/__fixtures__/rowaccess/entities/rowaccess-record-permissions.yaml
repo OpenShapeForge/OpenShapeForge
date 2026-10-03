@@ -1,0 +1,126 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: RowAccessRecordPermissions
+title: Row Access Record Permissions
+description: Test fixture for action-specific record authorization. Not shipped.
+language: en
+displayTemplate: "{{title}}"
+filterField: title
+labels:
+  en: Row Access Record Permissions
+  nl: Row Access Record Permissions
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: restricted
+    recordPermissions:
+      field: authorization
+      empty: public
+      createRequires:
+        - view
+        - edit
+fields:
+  - key: title
+    osfType: string
+    required: true
+    label:
+      en: Title
+      nl: Titel
+    persisted:
+      column: title
+      storageClass: core
+  - key: authorization
+    osfType: object
+    required: true
+    defaultValue: {}
+    label:
+      en: Authorization
+      nl: Autorisatie
+    persisted:
+      column: authorization
+      storageClass: core
+operations:
+  list:
+    name: List Row Access Record Permissions
+    description: List RowAccessRecordPermissions records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Row Access Record Permissions
+    description: Get RowAccessRecordPermissions records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Row Access Record Permissions
+    description: Create RowAccessRecordPermissions records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Row Access Record Permissions
+    description: Update RowAccessRecordPermissions records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Row Access Record Permissions
+    description: Delete RowAccessRecordPermissions records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}

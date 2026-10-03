@@ -4,8 +4,10 @@ import { sql } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
 import { applyAppHelpersMigration } from "../../db/migrations/app-helpers.js";
 import { applyEmployeeInvitationsMigration } from "../../db/migrations/employee-invitations.js";
-import { applySystemBypassAuditMigration } from "../../db/migrations/system-bypass-audit.js";
+import { applyGeneratedTables } from "../../db/__tests__/__fixtures__/generated-tables.js";
 import { inviteEmployee } from "../../auth/employee-invitations.js";
+import { manageTenantInvitations } from "../tenant-invitations.js";
+import roleComposites from "../../generated/compiler/role-composites.json" with { type: "json" };
 import {
   invitationDeliveryUnconfirmed,
   inviteFirstTenantAdministrator,
@@ -61,6 +63,8 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
   let sends: string[];
   let pending: Set<string>;
   let admins: { email: string | null }[];
+  let members: string[];
+  let conflictMessage: string | null;
   let smtp: boolean;
   let deliveryFails: boolean;
   const invite = (email = 'admin@example.com', slug = 'acme') => inviteFirstTenantAdministrator({
@@ -75,7 +79,12 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
       keycloak_realm text, keycloak_organization_id text
     )`.execute(owner.db);
     await applyAppHelpersMigration(owner.db);
-    await applySystemBypassAuditMigration(owner.db);
+    // Both tables come from the manifest; the invitations migration file owns
+    // only the checks, the pending-address index and the policy.
+    await applyGeneratedTables(owner.db, [
+      "platform.system_bypass_audit",
+      "platform.employee_invitations",
+    ]);
     await applyEmployeeInvitationsMigration(owner.db);
     await sql`create role bootstrap_runtime login;
       grant usage on schema platform, app to bootstrap_runtime;
@@ -92,39 +101,60 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     await sql`truncate platform.employee_invitations, platform.tenants, platform.system_bypass_audit;
       insert into platform.tenants (slug, status, keycloak_realm, keycloak_organization_id)
       values ('acme', 'active', 'tenant', 'org-acme'), ('other', 'active', 'tenant', 'org-other')`.execute(owner.db);
-    sends = []; pending = new Set(); admins = []; smtp = true; deliveryFails = false;
+    sends = []; pending = new Set(); admins = []; members = []; smtp = true; deliveryFails = false; conflictMessage = null;
+    process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = 'https://example.example';
     clients = {
       tenantRealm: 'tenant',
       organizations: { getOrganization: async id => ({ id, alias: id.slice(4), name: id, enabled: true }) },
       members: {
+        listMembers: async () => [...admins.map(admin => admin.email), ...members].map((email, index) => ({
+          memberId: `m-${index}`, username: null, email, firstName: null, lastName: null, enabled: true, emailVerified: true,
+        })),
+        hasMemberByEmail: async (_id, email) => [...admins.map(admin => admin.email), ...members].some(member => member?.toLowerCase() === email.toLowerCase()),
         hasInvitationMailConfiguration: async () => smtp,
         organizationAdministrators: async () => admins,
-        findPendingInvitationByEmail: async (id, email) => pending.has(`${id}:${email}`) ? { id: 'invite', email } as never : null,
+        findPendingInvitationByEmail: async (id, email) => pending.has(`${id}:${email}`)
+          ? { id: 'invite', email, firstName: null, lastName: null, status: 'PENDING', sentDate: null, expiresAt: Math.floor(Date.now() / 1000) + 3600 }
+          : null,
         inviteUser: async (id, input) => {
           if (deliveryFails) throw new KeycloakAdminError('KEYCLOAK_ADMIN_UNAVAILABLE', 'SMTP rejected the message');
+          if (conflictMessage) throw new KeycloakAdminError('KEYCLOAK_ADMIN_REJECTED', `rejected: ${conflictMessage}`, 409);
           sends.push(`${id}:${input.email}`); pending.add(`${id}:${input.email}`);
         },
-        listInvitations: async () => [], deleteInvitation: async () => false,
+        listInvitations: async id => [...pending].filter(value => value.startsWith(`${id}:`)).map(value => ({
+          id: `${id}-invite`, email: value.slice(id.length + 1), firstName: null, lastName: null,
+          status: 'PENDING', sentDate: 1788647960, expiresAt: 1788691160,
+        })),
+        deleteInvitation: async id => {
+          for (const value of pending) if (value.startsWith(`${id}:`)) pending.delete(value);
+          return true;
+        },
+        resendInvitation: async id => {
+          if (deliveryFails) throw new KeycloakAdminError('KEYCLOAK_ADMIN_UNAVAILABLE', 'mail failed');
+          sends.push(`resent:${id}`);
+        },
       },
     };
   });
 
   it('records only the requested tenant and deferred org_admin role; preserves control identity and replay', async () => {
-    const first = await invite(' Admin@Example.com ');
+    const { delivery, nextStep, ...first } = await invite(' Admin@Example.com ');
     expect(first.status).toBe('pending');
-    expect(await invite()).toEqual(first);
+    expect(delivery).toBe('email_sent'); expect(nextStep).toContain('e-mail');
+    expect(await invite()).toMatchObject({ ...first, delivery: 'already_pending' });
     expect(sends).toEqual(['org-acme:admin@example.com']);
     const rows = (await sql<any>`select i.*, t.slug from platform.employee_invitations i join platform.tenants t on t.id=i.tenant_id`.execute(owner.db)).rows;
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ slug: 'acme', role: 'org_admin', invited_by: `${administrator.issuer}#operator` });
     const audit = (await sql<any>`select * from platform.system_bypass_audit`.execute(owner.db)).rows;
     expect(audit).toHaveLength(2);
-    expect(audit.every(a => a.tenant_id === null && a.succeeded && a.actor_subject === `${administrator.issuer}#operator (platform-admin)` && a.reason === 'platform-mcp: invite_first_tenant_admin acme')).toBe(true);
+    expect(audit.every(a => a.tenant_id === null && a.succeeded && a.actor_subject === `${administrator.issuer}#operator (platform-admin)` && a.reason === 'platform-mcp: control.invite-first-tenant-admin acme')).toBe(true);
     expect((await sql`select * from platform.employee_invitations`.execute(runtime.db)).rows).toHaveLength(0);
   });
   it('serializes concurrent same-address retries to one mail and one invitation', async () => {
     const results = await Promise.all([invite(), invite(), invite()]);
-    expect(results[1]).toEqual(results[0]); expect(results[2]).toEqual(results[0]);
+    expect(new Set(results.map(result => result.id)).size).toBe(1);
+    expect(results.filter(result => result.delivery === 'email_sent')).toHaveLength(1);
     expect(sends).toHaveLength(1);
   });
   it('serializes competing first admins, while allowing a separate tenant bootstrap', async () => {
@@ -151,11 +181,60 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     expect((await invite()).status).toBe('pending'); expect(sends).toHaveLength(0);
     expect((await sql`select * from platform.employee_invitations`.execute(owner.db)).rows).toHaveLength(1);
   });
-  it('refuses an existing different administrator; same administrator is a no-op', async () => {
+  it('refuses an existing different administrator; same administrator gets local admission without mail', async () => {
     admins = [{ email: 'someone@example.com' }];
     await expect(invite()).rejects.toMatchObject({ code: 'FIRST_ADMIN_ALREADY_ASSIGNED' });
     admins = [{ email: 'admin@example.com' }];
-    expect((await invite()).status).toBe('already_admin'); expect(sends).toHaveLength(0);
+    expect(await invite()).toMatchObject({ status: 'pending', delivery: 'no_email_existing_account', signInUrl: 'https://example.example/acme' });
+    expect(sends).toHaveLength(0);
+    expect((await sql<any>`select email, role, status from platform.employee_invitations`.execute(owner.db)).rows)
+      .toEqual([{ email: 'admin@example.com', role: 'org_admin', status: 'pending' }]);
+  });
+  it('admits an existing non-admin account without mail and says where to sign in', async () => {
+    members = ['admin@example.com'];
+    const result = await invite();
+    expect(result).toMatchObject({ status: 'pending', role: 'org_admin', delivery: 'no_email_existing_account' });
+    expect(result.nextStep).toContain('https://example.example/acme');
+    expect(sends).toHaveLength(0);
+    expect((await invite()).delivery).toBe('no_email_existing_account');
+    expect((await manage('list') as any).unresolved[0]).toMatchObject({
+      email: 'admin@example.com', status: 'awaiting_sign_in', signInUrl: 'https://example.example/acme',
+    });
+  });
+  it('reports an accepted administrator only while the membership exists', async () => {
+    await invite(); pending.clear();
+    await sql`update platform.employee_invitations set status='accepted', accepted_at=now()`.execute(owner.db);
+    admins = [{ email: 'admin@example.com' }];
+    expect(await invite()).toMatchObject({ status: 'accepted', delivery: 'already_accepted' });
+    admins = [];
+    expect(await invite()).toMatchObject({ status: 'pending', delivery: 'email_sent' });
+    expect(sends).toHaveLength(2);
+  });
+  it('names a Keycloak 409 instead of reporting unconfirmed delivery', async () => {
+    conflictMessage = 'User already has a pending invitation';
+    await expect(invite()).rejects.toMatchObject({ code: 'INVITATION_ALREADY_PENDING' });
+    conflictMessage = 'User already a member of the organization';
+    await expect(invite()).rejects.toMatchObject({ code: 'ORGANIZATION_MEMBER_EXISTS' });
+    expect((await sql`select * from platform.employee_invitations`.execute(owner.db)).rows).toHaveLength(0);
+  });
+  it('create_tenant_invitation admits an existing account without mail, and reports an accepted member', async () => {
+    // The allowlist is the generated realm's role table; use whichever client declares org_admin there.
+    const realm = new URL(process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER ?? 'http://localhost/realms/openshapeforge').pathname.split('/realms/')[1]!;
+    const tables = (roleComposites as Record<string, { clients: Record<string, object> }>)[realm]?.clients ?? {};
+    const previousClient = process.env.OPENSHAPEFORGE_API_KEY_ROLE_CLIENT_ID;
+    process.env.OPENSHAPEFORGE_API_KEY_ROLE_CLIENT_ID = Object.keys(tables).find(client => 'org_admin' in tables[client]!);
+    members = ['member@example.com'];
+    const create = () => manageTenantInvitations({ db: runtime.db, administrator, firstAdministrator: clients }, 'create',
+      { slug: 'acme', email: 'Member@example.com', role: 'org_admin' }) as Promise<any>;
+    expect(await create()).toMatchObject({ email: 'member@example.com', role: 'org_admin', delivery: 'no_email_existing_account' });
+    expect(sends).toHaveLength(0);
+    await sql`update platform.employee_invitations set status='accepted', accepted_at=now()`.execute(owner.db);
+    expect(await create()).toMatchObject({ status: 'accepted', delivery: 'already_accepted' });
+    members = [];
+    expect(await create()).toMatchObject({ status: 'pending', delivery: 'email_sent' });
+    expect(sends).toEqual(['org-acme:member@example.com']);
+    if (previousClient === undefined) delete process.env.OPENSHAPEFORGE_API_KEY_ROLE_CLIENT_ID;
+    else process.env.OPENSHAPEFORGE_API_KEY_ROLE_CLIENT_ID = previousClient;
   });
   it('does not elevate a pending employee invitation', async () => {
     await sql`insert into platform.employee_invitations (tenant_id,email,role,invited_by)
@@ -174,8 +253,101 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     expect(sends).toHaveLength(0);
   });
   it('leaves the ordinary invitation org_admin gate intact', async () => {
-    await expect(inviteEmployee(runtime.db, { roles: ['platform_admin'] } as never, clients.members,
+    await expect(inviteEmployee(runtime.db, { roles: ['platform-operator'] } as never, clients.members,
       { email: 'admin@example.com', role: 'org_admin' })).rejects.toMatchObject({ status: 403 });
     expect(sends).toHaveLength(0);
+  });
+
+  const manage = (
+    action: 'list' | 'revoke' | 'resend',
+    invitationId?: string,
+    slug = 'acme',
+  ) => manageTenantInvitations(
+    { db: runtime.db, administrator, firstAdministrator: clients },
+    action,
+    { slug, ...(invitationId ? { invitationId } : {}) },
+  );
+
+  it('lists provider state with its stored role and no redeemable link', async () => {
+    await invite();
+    const result = await manage('list') as any;
+    expect(result.invitations).toHaveLength(1);
+    expect(result.invitations[0]).toMatchObject({
+      email: 'admin@example.com', role: 'org_admin', canResend: true, canRevoke: true,
+      sentAt: '2026-09-05T22:39:20.000Z', expiresAt: '2026-09-06T10:39:20.000Z',
+    });
+    expect(JSON.stringify(result)).not.toContain('inviteLink');
+    const audit = (await sql<any>`select reason, actor_subject from platform.system_bypass_audit order by started_at desc limit 1`.execute(owner.db)).rows[0];
+    expect(audit).toMatchObject({
+      reason: 'platform-mcp: control.list-tenant-invitations acme',
+      actor_subject: `${administrator.issuer}#operator (platform-admin)`,
+    });
+  });
+
+  it('keeps expired provider history readable without offering an invalid revoke', async () => {
+    pending.add('org-acme:expired@example.com');
+    clients.members.listInvitations = async () => [{
+      id: 'expired-invite', email: 'expired@example.com', firstName: null, lastName: null,
+      status: 'EXPIRED', sentDate: 1788647960, expiresAt: 1788691160,
+    }];
+    const result = await manage('list') as any;
+    expect(result.invitations[0]).toMatchObject({
+      invitationId: 'expired-invite', status: 'EXPIRED', canResend: false, canRevoke: false,
+    });
+  });
+
+  it('revokes provider and local intent, then permits a replacement administrator', async () => {
+    await invite();
+    await manage('revoke', 'org-acme-invite');
+    expect(pending.size).toBe(0);
+    expect((await sql<any>`select status from platform.employee_invitations`.execute(owner.db)).rows[0].status)
+      .toBe('revoked');
+    expect((await invite('replacement@example.com')).status).toBe('pending');
+  });
+
+  it('resends without changing recipient, role or stored invitation', async () => {
+    const { delivery: _, nextStep: __, ...original } = await invite();
+    expect(await manage('resend', 'org-acme-invite')).toMatchObject({
+      status: 'resent', email: 'admin@example.com', role: 'org_admin', delivery: 'email_sent',
+    });
+    expect(await invite()).toMatchObject(original);
+    expect(sends).toEqual(['org-acme:admin@example.com', 'resent:org-acme']);
+  });
+
+  it('refuses foreign, stale, accepted and untracked invitations before mutation', async () => {
+    await invite();
+    await expect(manage('revoke', 'org-acme-invite', 'other'))
+      .rejects.toMatchObject({ code: 'INVITATION_NOT_FOUND' });
+    await expect(manage('resend', 'stale'))
+      .rejects.toMatchObject({ code: 'INVITATION_NOT_FOUND' });
+    pending.clear();
+    pending.add('org-acme:untracked@example.com');
+    await expect(manage('resend', 'org-acme-invite'))
+      .rejects.toMatchObject({ code: 'INVITATION_ROLE_MISSING' });
+    pending.clear();
+    pending.add('org-acme:admin@example.com');
+    await sql`update platform.employee_invitations set status='accepted', accepted_at=now()`.execute(owner.db);
+    await expect(manage('revoke', 'org-acme-invite'))
+      .rejects.toMatchObject({ code: 'INVITATION_ALREADY_ACCEPTED' });
+  });
+
+  it('reports missing provider state and never guesses acceptance', async () => {
+    await invite();
+    pending.clear();
+    const result = await manage('list') as any;
+    expect(result.invitations).toEqual([]);
+    expect(result.unresolved[0]).toMatchObject({
+      email: 'admin@example.com', status: 'provider_missing',
+    });
+    expect(sends).toHaveLength(1);
+  });
+
+  it('does not claim resend success after an uncertain provider response', async () => {
+    await invite();
+    deliveryFails = true;
+    await expect(manage('resend', 'org-acme-invite'))
+      .rejects.toMatchObject({ code: 'INVITATION_DELIVERY_UNCONFIRMED' });
+    expect((await sql<any>`select status from platform.employee_invitations`.execute(owner.db)).rows[0].status)
+      .toBe('pending');
   });
 });

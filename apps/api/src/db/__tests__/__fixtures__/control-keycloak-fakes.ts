@@ -368,10 +368,11 @@ export function fakeOrganizationScopes(
     async getRealmDefaultScopes() {
       return { defaultScopes: [...realm.defaultScopes], optionalScopes: [...realm.optionalScopes] };
     },
-    async addRealmOptionalScope(scopeId) {
+    async removeRealmDefaultScope(scopeId, kind) {
       const scope = requireScope(scopeId);
-      if (!realm.optionalScopes.includes(scope.name)) realm.optionalScopes.push(scope.name);
-      writes.push(`attach-realm ${scope.name}`);
+      const target = kind === "default" ? "defaultScopes" : "optionalScopes";
+      realm[target] = realm[target].filter((name) => name !== scope.name);
+      writes.push(`detach-realm-${kind} ${scope.name}`);
     },
     async findRegistrationPolicy() {
       return policy

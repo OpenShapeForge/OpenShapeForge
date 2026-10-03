@@ -77,6 +77,9 @@ describe("readApiLimits", () => {
       rateLimitTiers: {
         anonymous: DEFAULT_RATE_LIMIT_MAX,
         trusted: DEFAULT_RATE_LIMIT_MAX * DEFAULT_TRUSTED_RATE_LIMIT_MULTIPLIER,
+        // #886: per verified person and per service identity.
+        subject: DEFAULT_RATE_LIMIT_MAX,
+        service: DEFAULT_RATE_LIMIT_MAX * DEFAULT_TRUSTED_RATE_LIMIT_MULTIPLIER,
       },
       // Unset => in-memory store, budget enforced per instance (#161).
       rateLimitRedisUrl: undefined,
@@ -99,7 +102,7 @@ describe("readApiLimits", () => {
     ).toEqual({
       rateLimitMax: 100,
       rateLimitWindowMs: 1000,
-      rateLimitTiers: { anonymous: 100, trusted: 700 },
+      rateLimitTiers: { anonymous: 100, trusted: 700, subject: 100, service: 700 },
       rateLimitRedisUrl: "redis://valkey:6379",
       requestTimeoutMs: 0,
       trustProxy: true,
@@ -110,6 +113,8 @@ describe("readApiLimits", () => {
     expect(limits.rateLimitTiers).toEqual({
       anonymous: 100,
       trusted: 100 * DEFAULT_TRUSTED_RATE_LIMIT_MULTIPLIER,
+      subject: 100,
+      service: 100 * DEFAULT_TRUSTED_RATE_LIMIT_MULTIPLIER,
     });
   });
   test("treats a blank redis url as unset, not as an empty host", () => {

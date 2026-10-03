@@ -1,29 +1,28 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The three MCP tools that let an organization administrator invite a
+ * The three MCP tools that let an organization administrator admit a
  * colleague themselves, instead of it only being possible through a Keycloak
  * admin script run by hand (auth/employee-invitations.ts):
  *
- *   invite_employee    — invite an e-mail address into this organization with
- *                        a pre-selected role, ready to apply once they sign in.
+ *   invite_employee    — admit an e-mail address into this organization with
+ *                        a pre-selected role, sending mail only when needed.
  *   list_invitations   — the tenant's still-pending invitations.
- *   revoke_invitation  — cancel a pending invitation (Hubble-side; see
- *                        auth/employee-invitations.ts for why Keycloak itself
- *                        has nothing to cancel).
+ *   revoke_invitation  — cancel a pending admission and withdraw any matching
+ *                        Keycloak invitation that still exists.
  *
- * All three are shown only to a session holding `Organization.All.ReadWrite`
+ * All three are shown only to a session holding the configured administrator role
  * — the same role `link_identity` requires, and for the same reason: both are
  * ways to shape who acts as whom in this organization. Wired into
- * generated-mcp-server.ts by delimited hunks next to the identity-link ones,
+ * the MCP server (session-surface.ts, dispatch-platform-tools.ts) by delimited hunks next to the identity-link ones,
  * following the exact shape of mcp/identity-link-tools.ts.
  */
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
   EMPLOYEE_INVITATION_ADMIN_ROLE,
-  EMPLOYEE_INVITATION_ROLES,
   inviteEmployee,
   listInvitations,
   revokeInvitation,
+  type EmployeeAdmission,
   type EmployeeInvitation,
   type EmployeeInvitationRole,
 } from "../auth/employee-invitations.js";
@@ -38,21 +37,24 @@ export const REVOKE_INVITATION_TOOL = "revoke_invitation";
 
 const INVITE_EMPLOYEE: Tool = {
   name: INVITE_EMPLOYEE_TOOL,
-  title: "Invite an employee",
+  title: "Admit an employee",
   description:
-    "Invite a new employee or colleague into this organization by e-mail. Keycloak " +
-    "sends them an invitation e-mail; the role you pick here is applied automatically " +
-    "once they accept it and sign in for the first time. For organization administrators.",
+    "Admit an employee or colleague into this organization with a pre-selected role. " +
+    "A person not yet in the Keycloak organization receives an invitation e-mail. Someone who is " +
+    "already a member receives no redundant mail and can sign in again immediately. An " +
+    "existing pending invitation is reused without resending it. Report the returned delivery " +
+    "and nextStep exactly: status pending means the application role awaits sign-in, not that an " +
+    "e-mail was sent or must be accepted. For organization administrators.",
   inputSchema: {
     type: "object",
     properties: {
-      email: { type: "string", description: "E-mail address to invite." },
-      firstName: { type: "string", description: "Optional first name for the invitation e-mail." },
-      lastName: { type: "string", description: "Optional last name for the invitation e-mail." },
+      email: { type: "string", description: "E-mail address to admit." },
+      firstName: { type: "string", description: "Optional first name, used if an invitation e-mail is needed." },
+      lastName: { type: "string", description: "Optional last name, used if an invitation e-mail is needed." },
       role: {
         type: "string",
-        enum: [...EMPLOYEE_INVITATION_ROLES],
-        description: "The role to apply once this person signs in.",
+        description: "A role key from this organization's AccessRole catalogue, applied on first sign-in. Read the catalogue before choosing; do not invent a key.",
+        "x-osf-reference": { entity: "AccessRole", valueField: "key" },
       },
     },
     required: ["email", "role"],
@@ -68,7 +70,7 @@ const INVITE_EMPLOYEE: Tool = {
 const LIST_INVITATIONS: Tool = {
   name: LIST_INVITATIONS_TOOL,
   title: "List pending invitations",
-  description: "List this organization's invitations that have not yet been accepted or revoked.",
+  description: "List this organization's role admissions awaiting sign-in. A pending row does not prove an invitation e-mail was sent: existing Keycloak members need no e-mail.",
   inputSchema: {
     type: "object",
     properties: {},
@@ -85,10 +87,9 @@ const REVOKE_INVITATION: Tool = {
   name: REVOKE_INVITATION_TOOL,
   title: "Revoke a pending invitation",
   description:
-    "Cancel a pending invitation for an e-mail address so its pre-selected role is no " +
-    "longer applied when they sign in. Keycloak itself keeps no record of an unaccepted " +
-    "invitation, so this cannot un-send an e-mail already delivered — it only withdraws " +
-    "the role Hubble was going to apply.",
+    "Cancel a pending admission for an e-mail address so its pre-selected role is no " +
+    "longer applied when they sign in. If Keycloak still holds an invitation, it is also " +
+    "withdrawn and the link in the delivered e-mail stops working.",
   inputSchema: {
     type: "object",
     properties: {
@@ -130,6 +131,35 @@ function publicInvitation(invitation: EmployeeInvitation): Record<string, unknow
     invitedBy: invitation.invitedBy,
     invitedAt: invitation.invitedAt,
     revokedAt: invitation.revokedAt,
+  };
+}
+
+export function publicEmployeeAdmission(admission: EmployeeAdmission): Record<string, unknown> {
+  const outcome = admission.delivery === "sent"
+    ? {
+        reason: "invitation_sent",
+        message: "Keycloak accepted a new invitation e-mail request. The role awaits the person's sign-in.",
+        nextStep: "The person must follow the invitation link and sign in.",
+      }
+    : admission.delivery === "not_required"
+    ? {
+        reason: "existing_organization_member",
+        message: "This person already belongs to the Keycloak organization. No e-mail was sent. The role awaits their next sign-in.",
+        nextStep: "The person must sign out and sign in again with this account. There is no e-mail invitation to accept.",
+      }
+    : {
+        reason: "existing_invitation",
+        message: "Keycloak already holds a pending invitation. This operation did not send another e-mail.",
+        nextStep: "Keycloak retained the existing invitation; this operation did not resend it. " +
+          "Revoke and admit again if a fresh message is required.",
+      };
+  return {
+    message: outcome.message,
+    nextStep: outcome.nextStep,
+    delivery: admission.delivery,
+    reason: outcome.reason,
+    admitted: true,
+    ...publicInvitation(admission),
   };
 }
 
@@ -236,7 +266,7 @@ export async function callEmployeeInvitationTool(
       new HttpError(
         503,
         "CONTROL_PLANE_NOT_CONFIGURED",
-        "Inviting employees requires the tenant control plane's Keycloak configuration, " +
+        "Admitting employees requires the tenant control plane's Keycloak configuration, " +
           "which this deployment has not set.",
       ),
     );
@@ -244,13 +274,13 @@ export async function callEmployeeInvitationTool(
   try {
     const email = stringArgument(args, "email", true)!;
     const role = stringArgument(args, "role", true)!;
-    const invitation = await inviteEmployee(db, scoped, keycloak, {
+    const admission = await inviteEmployee(db, scoped, keycloak, {
       email,
       firstName: stringArgument(args, "firstName", false),
       lastName: stringArgument(args, "lastName", false),
       role: role as EmployeeInvitationRole,
     });
-    return succeeded({ invited: true, ...publicInvitation(invitation) });
+    return succeeded(publicEmployeeAdmission(admission));
   } catch (error) {
     return failed(error);
   }

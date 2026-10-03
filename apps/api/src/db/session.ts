@@ -3,10 +3,12 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { readStatementTimeoutMs } from "../config/limits.js";
+import { actingRelationId, type ActingRelationSource } from "./acting-relation.js";
 
 export type DbSessionScope = "tenant" | "group" | "self";
 
 const MAX_SESSION_GROUPS = 256;
+const MAX_RELATION_GROUPS = 256;
 
 // Closure expansion of the direct set (capped at MAX_SESSION_GROUPS) can
 // legitimately grow far beyond it: a shallow-but-wide org tree turns one
@@ -20,16 +22,32 @@ const MAX_EXPANDED_SESSION_GROUPS = 4096;
 export type DbSessionInput = {
   tenantId?: string | null;
   userId?: string | null;
+  /**
+   * Opaque binding to a verified interactive login session. This is control
+   * metadata for canonical Operations and is deliberately not projected into
+   * a PostgreSQL GUC or used as database authority.
+   */
+  loginSessionBinding?: string;
+  /** Server-derived display label used only in safe, tenant-local messages. */
+  userDisplayName?: string | null;
   roles?: readonly string[] | null;
   groups?: readonly string[] | null;
+  /**
+   * Server-derived active RelationGroup memberships. These are not Keycloak
+   * groups and are never expanded through the platform org-unit hierarchy.
+   */
+  relationGroupIds?: readonly string[] | null;
   scope?: DbSessionScope | null;
-};
+} & NonNullable<ActingRelationSource>;
 
 export type DbSessionContext = {
   tenantId: string;
   userId: string;
   roles: readonly string[];
   groups: readonly string[];
+  relationGroupIds: readonly string[];
+  /** The acting Relation (acting-relation.ts); `app.current_relation_id()`. */
+  relationId: string | null;
   scope: DbSessionScope;
 };
 
@@ -39,13 +57,25 @@ const dbSessionHooks = new AsyncLocalStorage<{
   afterCommit: DbSessionAfterCommitHook[];
 }>();
 
+const activeDbSession = new AsyncLocalStorage<{
+  db: Kysely<unknown>;
+  trx: Transaction<unknown>;
+  session: DbSessionContext;
+}>();
+
 export function registerDbSessionAfterCommit(hook: DbSessionAfterCommitHook) {
   const store = dbSessionHooks.getStore();
   if (!store) return;
   store.afterCommit.push(hook);
 }
 
-const UUID_PATTERN =
+/** The database that opened the active session, so nested readers reuse its transaction. */
+export function currentDbSessionDatabase(): Kysely<unknown> | undefined {
+  return activeDbSession.getStore()?.db;
+}
+
+/** RFC 4122 shape, the one every id this layer accepts must have. */
+export const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function assertUuid(value: string, label: string) {
@@ -57,7 +87,7 @@ function assertUuid(value: string, label: string) {
 function normalizeGroups(groups: readonly string[] | null | undefined): readonly string[] {
   if (!groups || groups.length === 0) return [];
   // Trusted-context now propagates Keycloak group PATHS (e.g.
-  // "/openshapeforge-demo/tenant-acme/role-directie") for app-level authorization.
+  // "/customer/region/editors") for app-level authorization.
   // The DB session GUC `app.user_groups` only accepts UUIDs — path → org-unit
   // UUID translation is a separate concern. Silently filter the paths so the
   // session can still apply, while UUID groups (when present) flow through.
@@ -70,6 +100,20 @@ function normalizeGroups(groups: readonly string[] | null | undefined): readonly
     );
   }
   return uuids;
+}
+
+function normalizeRelationGroupIds(
+  groups: readonly string[] | null | undefined,
+): readonly string[] {
+  if (!groups || groups.length === 0) return [];
+  if (groups.length > MAX_RELATION_GROUPS) {
+    throw new Error(
+      `Database session has ${groups.length} RelationGroup memberships; cap is ${MAX_RELATION_GROUPS}.`,
+    );
+  }
+  const unique = [...new Set(groups)];
+  for (const groupId of unique) assertUuid(groupId, "relationGroupId");
+  return unique.sort();
 }
 
 function assertExpandedGroupsWithinCap(expanded: readonly string[], label: string) {
@@ -101,6 +145,8 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
     userId: input.userId,
     roles: input.roles ?? [],
     groups: normalizeGroups(input.groups),
+    relationGroupIds: normalizeRelationGroupIds(input.relationGroupIds),
+    relationId: actingRelationId(input),
     scope: normalizeScope(input.scope),
   };
 }
@@ -121,10 +167,16 @@ export async function applyDbSession<TDatabase>(
     );
   }
 
+  // A tenant session is never a continuation of a system session. Clear the
+  // break-glass flag explicitly before any tenant-scoped lookup so a pooled
+  // connection cannot carry broader authority into an ordinary request.
+  await sql`select set_config('app.bypass_rls', 'false', true)`.execute(trx);
   await sql`select set_config('app.tenant_id', ${session.tenantId}, true)`.execute(trx);
   await sql`select set_config('app.user_id', ${session.userId}, true)`.execute(trx);
   await sql`select set_config('app.roles', ${session.roles.join(",")}, true)`.execute(trx);
   await sql`select set_config('app.scope', ${session.scope}, true)`.execute(trx);
+  await sql`select set_config('app.relation_group_ids', ${session.relationGroupIds.join(",")}, true)`.execute(trx);
+  await sql`select set_config('app.relation_id', ${session.relationId ?? ""}, true)`.execute(trx);
 
   // Group expansion (§E.1/E.3). The user's DIRECT org-unit UUIDs
   // (session.groups — already UUID-filtered and capped at MAX_SESSION_GROUPS by
@@ -181,9 +233,31 @@ export async function withDbSession<TDatabase, TResult>(
   db: Kysely<TDatabase>,
   input: DbSessionInput,
   callback: (trx: Transaction<TDatabase>, session: DbSessionContext) => Promise<TResult>,
-  options: { isolationLevel?: "repeatable read" | "serializable" } = {},
+  options: { isolationLevel?: "repeatable read" | "serializable"; independent?: boolean } = {},
 ): Promise<TResult> {
   const session = createDbSessionContext(input);
+  const active = activeDbSession.getStore();
+  if (active && active.db === db) {
+    const sameSession = active.session.tenantId === session.tenantId &&
+      active.session.userId === session.userId &&
+      active.session.scope === session.scope &&
+      active.session.roles.length === session.roles.length &&
+      active.session.roles.every((role, index) => role === session.roles[index]) &&
+      active.session.groups.length === session.groups.length &&
+      active.session.groups.every((group, index) => group === session.groups[index]) &&
+      active.session.relationGroupIds.length === session.relationGroupIds.length &&
+      active.session.relationGroupIds.every(
+        (group, index) => group === session.relationGroupIds[index],
+      ) &&
+      active.session.relationId === session.relationId;
+    if (!sameSession) {
+      throw new Error("Nested database work cannot replace the active session.");
+    }
+    if (!options.independent) return callback(
+      active.trx as Transaction<TDatabase>,
+      active.session,
+    );
+  }
   const hooks = { afterCommit: [] as DbSessionAfterCommitHook[] };
 
   const result = await dbSessionHooks.run(hooks, () => {
@@ -192,7 +266,14 @@ export async function withDbSession<TDatabase, TResult>(
       : db.transaction();
     return transaction.execute(async (trx) => {
       await applyDbSession(trx, session);
-      return callback(trx, session);
+      return activeDbSession.run(
+        {
+          db: db as Kysely<unknown>,
+          trx: trx as Transaction<unknown>,
+          session,
+        },
+        () => callback(trx, session),
+      );
     });
   });
 

@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Chip
@@ -10,6 +10,9 @@ filterField: name
 labels:
   en: Chip
   nl: Chip
+pluralLabels:
+  en: Chips
+  nl: Chips
 domains:
   - core
 indexes:
@@ -38,14 +41,15 @@ authorization:
       - Organization.All.ReadWrite
 fields:
   - key: key
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Variable key
       nl: Variabele-sleutel
     description:
       en: Stable lower-case key used in templates as `{{chips.<key>}}`, for example `general.phone`.
-      nl: Stabiele sleutel in kleine letters die in templates wordt gebruikt als `{{chips.<key>}}`, bijvoorbeeld `general.phone`.
+      nl: Stabiele sleutel in kleine letters die in templates wordt gebruikt als `{{chips.<key>}}`, bijvoorbeeld
+        `general.phone`.
     validation:
       minLength: 1
       maxLength: 160
@@ -54,7 +58,7 @@ fields:
       column: key
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -69,7 +73,6 @@ fields:
       column: name
       storageClass: core
   - key: value
-    valueType: string
     required: true
     label:
       en: Value
@@ -83,13 +86,8 @@ fields:
     persisted:
       column: value
       storageClass: core
-    render:
-      component: InputMultiline
-      props:
-        rows: 5
-        maxLength: 8000
+    osfType: multilineText
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -102,13 +100,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 500
+    osfType: multilineText
   - key: category
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Category
@@ -122,7 +116,7 @@ fields:
       column: category
       storageClass: core
   - key: isActive
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Active
@@ -134,11 +128,91 @@ fields:
     persisted:
       column: is_active
       storageClass: core
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+operations:
+  list:
+    name: List Chip
+    description: List Chip records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Chip
+    description: Get Chip records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Chip
+    description: Create Chip records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Chip
+    description: Update Chip records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Chip
+    description: Delete Chip records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    fields:
+      value:
+        render:
+          component: InputMultiline
+          props:
+            rows: 5
+            maxLength: 8000
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 500

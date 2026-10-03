@@ -3,8 +3,8 @@
  * `<FieldIcon name="AtSign" />` — renders a lucide-react icon by name.
  *
  * The set of supported names is the union of:
- *  - `SemanticTypeDefinition.icon` values used in
- *    `packages/compiler/config/authoring/**\/semantic-types.yaml`
+ *  - `OsfTypeDefinition.icon` values used in
+ *    `packages/compiler/config/authoring/**\/osf-types.yaml`
  *  - `FIELD_TYPE_ICONS` in `runtime/field-icons.ts`
  *
  * If the requested icon isn't in the registry, the component renders nothing.

@@ -1,0 +1,88 @@
+# The immutable version of a Notebook: the generic snapshot columns the
+# versioning runtime writes, and an owned reference back to the head.
+schemaVersion: 3
+kind: coreEntity
+module: notebook
+entity: NotebookVersion
+title: Notebook version
+language: en
+labels: { en: Notebook version, nl: Notitieboekversie }
+domains: [documents]
+authorization:
+  roles:
+    read: [General.All.Read, General.All.ReadWrite, Organization.All.ReadWrite]
+    create: [Organization.All.ReadWrite]
+    update: [Organization.All.ReadWrite]
+    delete: [Organization.All.ReadWrite]
+displayTemplate: "{{versionNumber}}"
+indexes:
+  - { name: notebook_versions_tenant_number_uidx, fields: [tenantId, notebook, versionNumber], unique: true }
+fields:
+  - key: notebook
+    osfType: Notebook
+    required: true
+    immutable: true
+    relationship:
+      inverse:
+        key: versions
+        label: { en: Versions, nl: Versies }
+        ownership: owned
+  - key: versionNumber
+    osfType: integer
+    required: true
+    immutable: true
+    validation: { min: 1 }
+    label: { en: Version, nl: Versie }
+    persisted: { column: version_number, storageClass: core }
+  - key: status
+    osfType: string
+    required: true
+    immutable: true
+    defaultValue: published
+    options: { type: static, items: [{ value: published, label: { en: Published, nl: Gepubliceerd } }] }
+    persisted: { column: status, storageClass: core }
+  - key: snapshot
+    osfType: object
+    required: true
+    immutable: true
+    label: { en: Frozen content, nl: Vastgelegde inhoud }
+    persisted: { column: snapshot, storageClass: core }
+  - key: contentHash
+    osfType: string
+    required: true
+    immutable: true
+    validation: { pattern: "^[a-f0-9]{64}$" }
+    label: { en: Content checksum, nl: Inhoudschecksum }
+    persisted: { column: content_hash, storageClass: core }
+  - key: publishedBy
+    osfType: string
+    required: true
+    immutable: true
+    validation: { format: uuid }
+    label: { en: Published by, nl: Gepubliceerd door }
+    persisted: { column: published_by, storageClass: core }
+  - key: publishedAt
+    osfType: datetime
+    required: true
+    immutable: true
+    label: { en: Published at, nl: Gepubliceerd op }
+    persisted: { column: published_at, storageClass: core }
+operations:
+  list:
+    name: List notebook versions
+    description: Read accessible notebook version records.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read notebook version
+    description: Read one accessible notebook version record.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }

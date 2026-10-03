@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Tenant
@@ -10,6 +10,9 @@ filterField: slug
 labels:
   en: Tenant
   nl: Tenant
+pluralLabels:
+  en: Tenants
+  nl: Tenants
 domains:
   - core
 authorization:
@@ -17,16 +20,12 @@ authorization:
     read:
       - Organization.All.Read
       - Organization.All.ReadWrite
-    create:
-      - Organization.All.ReadWrite
-    update:
-      - Organization.All.ReadWrite
-    delete:
-      - Organization.All.ReadWrite
+      - Organization.Access.Manage
 fields:
   - key: slug
-    valueType: string
+    osfType: string
     required: true
+    immutable: true
     label:
       en: Slug
       nl: Slug
@@ -41,8 +40,9 @@ fields:
       column: slug
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
+    immutable: true
     label:
       en: Name
       nl: Naam
@@ -56,8 +56,8 @@ fields:
       column: name
       storageClass: core
   - key: status
-    valueType: string
     required: true
+    immutable: true
     label:
       en: Status
       nl: Status
@@ -74,14 +74,11 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: TENANTSTATUS
-        clearable: false
+    osfType: referenceDataCode
   - key: tenantKind
-    valueType: string
+    osfType: string
     required: true
+    immutable: true
     label:
       en: Tenant kind
       nl: Tenantsoort
@@ -96,8 +93,8 @@ fields:
       column: tenant_kind
       storageClass: core
   - key: description
-    valueType: string
     required: false
+    immutable: true
     label:
       en: Description
       nl: Omschrijving
@@ -109,14 +106,11 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 500
+    osfType: multilineText
   - key: avatarStorageLocation
-    valueType: string
+    osfType: string
     required: false
+    immutable: true
     label:
       en: Avatar
       nl: Avatar
@@ -128,11 +122,10 @@ fields:
     persisted:
       column: avatar_storage_location
       storageClass: core
-    render:
-      component: FileUpload
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
+    immutable: true
     label:
       en: External code
       nl: Externe code
@@ -144,129 +137,106 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: tenantSettings
-    kind: hasMany
-    target: TenantSetting
-    foreignKey: tenant_id
-    label:
-      en: Tenant settings
-      nl: Tenantinstellingen
-  - key: organizationPermissions
-    kind: hasMany
-    target: OrganizationPermission
-    foreignKey: target_tenant_id
-    label:
-      en: Organization permissions
-      nl: Organisatierechten
-  - key: userOrganizationPermissions
-    kind: hasMany
-    target: UserOrganizationPermission
-    foreignKey: target_tenant_id
-    label:
-      en: User organization permissions
-      nl: Gebruikersrechten per organisatie
-ui:
-  routes:
-    list:
-      en: /tenants
-      nl: /tenants
-    detail:
-      en: /tenants/:id
-      nl: /tenants/:id
-    create:
-      en: /tenants/create
-      nl: /tenants/aanmaken
-    edit:
-      en: /tenants/:id/edit
-      nl: /tenants/:id/bewerken
-    delete:
-      en: /tenants/:id/delete
-      nl: /tenants/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Tenants
-        nl: Tenants
-      columns:
-        - key: slug
-          sortable: true
-        - key: name
-          sortable: true
-        - key: status
-          sortable: true
-      defaultSort:
-        key: slug
-        direction: asc
-      rowLink:
-        en: /tenants/:id
-        nl: /tenants/:id
-    detail:
-      header:
+# The registry row has exactly one write path: tenant provisioning
+# (apps/api/src/control/provisioning.ts) inserts it beside the platform row,
+# with id = tenant_id = the platform tenant's id, which CHECK (id = tenant_id)
+# holds. No generic create or delete: a tenant neither creates nor removes
+# itself, and a second creator would fight the check and the provisioner.
+operations:
+  list:
+    name: List Tenant
+    description: List Tenant records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Tenant
+    description: Get Tenant records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  mcp: { tools: generic }
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /tenants
+          nl: /tenants
+        columns:
+          - key: slug
+            sortable: true
+          - key: name
+            sortable: true
+          - key: status
+            sortable: true
+        title:
+          en: Tenants
+          nl: Tenants
+        defaultSort:
+          key: slug
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /tenants/:id
+            nl: /tenants/:id
         title: "{{name}}"
         subtitle: "{{slug}}"
         badges:
           - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Tenant details
-                nl: Tenantgegevens
-              fields:
-                - slug
-                - name
-                - status
-                - description
-                - avatarStorageLocation
-        - id: settings
-          label:
-            en: Settings
-            nl: Instellingen
-          relationship: tenantSettings
-    form:
-      variants:
-        create:
-          title:
-            en: Create tenant
-            nl: Tenant aanmaken
-          groups:
-            - title:
-                en: Tenant details
-                nl: Tenantgegevens
-              fields:
-                - slug
-                - name
-                - status
-                - description
-                - avatarStorageLocation
-        edit:
-          extends: create
-          title:
-            en: Edit tenant
-            nl: Tenant bewerken
-workflow:
-  nodes:
-    actions:
-      create: false
-      getOne: false
-      list: false
-      update: false
-      delete: false
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Tenant details
+                    nl: Tenantgegevens
+                  fields:
+                    - slug
+                    - name
+                    - status
+                    - description
+                    - avatarStorageLocation
+            - id: settings
+              label:
+                en: Settings
+                nl: Instellingen
+              relationship: tenantSettings
+    fields:
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: TENANTSTATUS
+            clearable: false
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 500
+      avatarStorageLocation:
+        render:
+          component: FileUpload

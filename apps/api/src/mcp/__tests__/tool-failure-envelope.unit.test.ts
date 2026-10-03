@@ -12,6 +12,7 @@ import {
   type ConnectorProviderOutcome,
 } from "../../connectors/provider-outcome.js";
 import { HttpError, toHttpError } from "../../rest/http-error.js";
+import { OperationFailure } from "@openshapeforge/operations";
 import {
   __failedForTests as failed,
   __nativeToolOutputForTests as nativeToolOutput,
@@ -40,7 +41,7 @@ const RATE_LIMITED = new ConnectorExecutionError(
 );
 
 describe("a successful tool result", () => {
-  it("carries an object payload as structuredContent too, without a success envelope", () => {
+  it("carries an object payload as structuredContent too", () => {
     // A Service aggregating several query bindings reads structuredContent
     // only; a text-only success reached it as `{}`.
     const result = ok({ id: "example", openFindingsTotal: 3 });
@@ -153,7 +154,7 @@ describe("an unclassified failure", () => {
     expect(result.isError).toBe(true);
     expect(textOf(result.content[0])).toBe('NOT_FOUND: Unknown tool "x".');
     expect(result.structuredContent).toEqual({
-      error: { code: "NOT_FOUND", message: 'Unknown tool "x".' },
+      error: { code: "NOT_FOUND", message: 'Unknown tool "x".', retryable: false },
     });
     expect(JSON.parse(textOf(result.content[1]))).toEqual(result.structuredContent);
   });
@@ -168,7 +169,7 @@ function raisedRefusal(message: string, hint: string): Error {
     errno: "P0001",
     hint,
     routine: "exec_stmt_raise",
-    where: "PL/pgSQL function pentest.assert_status_transition() line 9 at RAISE",
+    where: "PL/pgSQL function advies.assert_status_transition() line 9 at RAISE",
   });
   return error;
 }
@@ -184,7 +185,8 @@ describe("a database rule's refusal", () => {
       error: {
         code: "OPERATION_REFUSED",
         message: "A finding cannot move from closed back to open.",
-        hint: "Create a new finding instead.",
+        retryable: false,
+        data: { hint: "Create a new finding instead." },
       },
     });
     expect(result.content[0]).toEqual({
@@ -200,12 +202,14 @@ describe("a database rule's refusal", () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(HttpError);
+    expect(thrown).toBeInstanceOf(OperationFailure);
     expect(thrown).toMatchObject({
-      status: 409,
-      code: "OPERATION_REFUSED",
       message: "A finding cannot move from closed back to open.",
-      hint: "Create a new finding instead.",
+      operationError: {
+        code: "OPERATION_REFUSED",
+        retryable: false,
+        data: { hint: "Create a new finding instead." },
+      },
     });
     expect(result.structuredContent).toEqual(toHttpError(thrown).body);
   });
@@ -218,5 +222,93 @@ describe("a database rule's refusal", () => {
       thrown = error;
     }
     expect(thrown).toMatchObject({ status: 502, code: "PROVIDER_ERROR", message: "boom" });
+  });
+});
+
+describe("native composition of a canonical entity success", () => {
+  it("maps the operation data and does not expose offers as business output", () => {
+    expect(nativeToolOutput(ok({
+      data: { id: "relation-1", displayName: "Example" },
+      operations: [{ operation: { id: "Relation.update", intent: "update" }, available: true }],
+    }))).toEqual({ id: "relation-1", displayName: "Example" });
+  });
+
+  it("maps list rows without leaking per-row offers into business output", () => {
+    expect(nativeToolOutput(ok({
+      data: {
+        items: [
+          {
+            data: { id: "relation-1", displayName: "Example" },
+            operations: [{ operation: { id: "Relation.get", intent: "get" }, available: true }],
+          },
+        ],
+        totalCount: 1,
+        nextCursor: null,
+      },
+      operations: [{ operation: { id: "Relation.list", intent: "list" }, available: true }],
+    }))).toEqual({
+      items: [{ id: "relation-1", displayName: "Example" }],
+      totalCount: 1,
+      nextCursor: null,
+    });
+  });
+});
+
+describe("native composition of a canonical entity failure", () => {
+  it("preserves retry and safe structured details", () => {
+    const result = failed(new OperationFailure({
+      code: "LOCKED",
+      message: "Deze relatie wordt op dit moment bewerkt door Hans E.",
+      detail: "Nog 15 minuten geldig.",
+      retryable: true,
+      retryAt: "2026-09-11T14:30:00.000Z",
+      data: { holderDisplayName: "Hans E" },
+    }));
+    expect(() => nativeToolOutput(result)).toThrow(OperationFailure);
+    try {
+      nativeToolOutput(result);
+    } catch (error) {
+      expect(error).toMatchObject({
+        operationError: {
+          code: "LOCKED",
+          retryable: true,
+          retryAt: "2026-09-11T14:30:00.000Z",
+          data: { holderDisplayName: "Hans E" },
+        },
+      });
+    }
+  });
+});
+
+describe("a confirmation refusal over MCP", () => {
+  const result = failed(new OperationFailure({
+    code: "CONFIRMATION_REQUIRED",
+    message: "Confirm Invite first tenant admin before continuing.",
+    detail: "Retry the Operation with confirmed set to true.",
+    retryable: true,
+    data: { confirmation: { kind: "acknowledgement", requiredValue: true } },
+  }));
+
+  it("names a stale tool list as the reason a client may reject `confirmed`", () => {
+    const hint = (result.structuredContent as { error: { hint?: string } }).error.hint;
+    expect(hint).toContain("refresh the connector");
+    expect(hint).toContain("confirmed set to true");
+    expect(result.content.map((item) => (item as { text?: string }).text)).toContain(hint);
+  });
+
+  it("keeps the Operation's own detail and retry data", () => {
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        code: "CONFIRMATION_REQUIRED",
+        detail: "Retry the Operation with confirmed set to true.",
+        retryable: true,
+        data: { confirmation: { kind: "acknowledgement", requiredValue: true } },
+      },
+    });
+  });
+
+  it("leaves every other refusal without the hint", () => {
+    const other = failed(new OperationFailure({ code: "LOCKED", message: "Locked.", retryable: true }));
+    expect((other.structuredContent as { error: { hint?: string } }).error.hint).toBeUndefined();
   });
 });

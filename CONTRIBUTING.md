@@ -18,7 +18,8 @@ bun install
 cp apps/api/.env.example apps/api/.env   # required before db:migrate/dev:api; defaults match the compose stack
 docker compose -f docker-compose.local.yml up -d --build
 bun run generate       # compile authoring YAML into generated artifacts
-bun run db:migrate     # create/roll-forward the schema
+bun run db:provision-roles # once per Postgres volume
+bun run db:migrate     # build the schema
 bun run dev:api        # http://127.0.0.1:3001/api/graphql (GraphiQL in dev)
 ```
 
@@ -26,8 +27,10 @@ bun run dev:api        # http://127.0.0.1:3001/api/graphql (GraphiQL in dev)
 
 ## The golden rule: never edit generated artifacts
 
-Everything the compiler emits is gitignored, reproducible, and named or located to make
+Everything the compiler emits is reproducible and named or located to make
 its origin obvious (`apps/api/src/generated/`, `generated-*`, `*.generated.*`).
+Bulky runtime roots are gitignored; a small allowlist of shared compiler contract
+artifacts is tracked and freshness-checked.
 Hand-written engines consume generated manifests; they never contain per-entity code.
 If a generated file looks wrong, fix the authoring YAML, a template, or a generator —
 then rerun `bun run generate` and let the gates verify. Hand-edits are overwritten and
@@ -38,23 +41,19 @@ flagged as drift by `check:generated`.
 ```sh
 bun run check:generated         # artifacts fresh + deterministic (double-run), no orphans
 bun run check:authoring-local   # authoring catalog compiles deterministically
-bun run check:ts-nocheck        # compiler/workflow @ts-nocheck baseline does not grow
+bun run check:ts-nocheck        # compiler @ts-nocheck baseline does not grow
 bun run check:notices:linux     # THIRD-PARTY-NOTICES matches the deps, as CI runs it
 bun run typecheck:compiler
 bun run typecheck:api
 bun run typecheck:examples  # the shipped example plugins/connectors
 bun run test:compiler
+bun run test:web                # apps/web pure modules (after generate)
 bun run test:e2e                # manifest-driven GraphQL e2e suite (needs Postgres up)
 bun run --cwd apps/api test:migrations   # migrator + drift tests (bun test src/db)
 ```
 
 Run `bun run test:perf` as well when touching the API hot path (resolvers, the CRUD
 engine, RLS/session plumbing); it needs k6 and a running API.
-
-Run `bun run test:browser` when touching `apps/web`. It drives the assembled screen
-in a real Chromium and needs a running stack — the compose services plus both app
-processes — because it signs in through the Keycloak login page. Setup is in
-[docs/testing.md](docs/testing.md#the-browser-suite-for-appsweb).
 
 If you add, remove, or bump a dependency, run `bun run notices:linux` and commit the
 updated `THIRD-PARTY-NOTICES.md` — the notices gate fails the PR otherwise.
@@ -76,8 +75,8 @@ counts — a truncated pipe can make a failing suite look green.
    the slug and must be unique across all `entities/` subfolders; relationships may only
    target entities present in this repo).
 2. Bump `expectedGeneratedCrudEntityCount` in `scripts/check-generated-artifacts.mjs`.
-3. `bun run generate && bun run db:migrate` — additive changes roll forward
-   automatically, no migration code needed.
+3. `bun run generate`, then `bun run db:reset` on a built database (or
+   `bun run db:migrate` on an empty one) — no migration code needed.
 
 That's it: e2e specs, perf scenarios, and report coverage are derived from the generated
 manifest, so a new entity is tested automatically. A new field on an existing entity is
@@ -110,19 +109,20 @@ ownedPaths? }` (see `packages/compiler/src/plugins.ts`) and is registered under
 
 Plugins must be **deterministic**: `check:generated` runs the whole pipeline twice,
 plugins included, and fails on any byte drift. Study the two examples under
-`examples/plugins/`: `entity-docs.ts` (minimal single-file plugin) and `workflow/`
-(platform tables + own authoring layer + api-side artifacts).
+`examples/plugins/`: `entity-docs.ts` (minimal single-file plugin) and `notebook/`
+(own authoring layer + a plugin Operation with a runtime half).
 
 ## Schema-migration rules
 
-- **Additive is automatic.** New entities/fields: `bun run generate && bun run
-  db:migrate`. The migrator diffs the manifest against the live schema and rolls
-  forward.
-- **Non-additive needs a versioned migration.** Drops, renames, type changes, or
-  required no-default columns fail `db:migrate` with an exact drift listing. Scaffold
-  with `bun run db:migration:new <name>` and write its `up()`.
-- **Applied migrations are immutable.** Each is recorded with a checksum verified on
-  every run; editing an applied migration fails loudly — write a new one instead.
+- **Every schema change means a rebuild.** New entities, new fields, drops,
+  renames, type changes alike: `bun run generate` moves the manifest checksum,
+  `db:migrate` refuses the built database, and the schema is versioned by git
+  and a database is built from the manifest, so rebuild it:
+  `OPENSHAPEFORGE_RESET_DATABASE_CONFIRMATION=<db> bun run db:reset`. There is
+  no roll-forward, additive or otherwise.
+- **No hand-written migration history.** What the manifest cannot express (checks,
+  functions, triggers, bespoke policies) is idempotent DDL under
+  `apps/api/src/db/migrations/`, applied on every run; edit it in place.
 
 ## Code style
 

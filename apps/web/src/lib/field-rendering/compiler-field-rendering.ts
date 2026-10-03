@@ -11,28 +11,44 @@
  * (for read-only mode). Also resolves field-level validation rules from
  * semantic type definitions.
  *
- * @input  Field definition with valueType, semanticType, readOnly, and optional render override
+ * @input  Field definition with osfType (or a compiled baseType), readOnly, and optional render override
  * @output ResolvedFieldRender: { component, props, source }
  */
 import type {
   FieldRender,
   FieldValidation,
-  SemanticTypeDefinition,
+  OsfTypeDefinition,
 } from "@/generated/compiler/field-contract";
 import {
   COMPILER_FIELD_COMPONENT_DEFAULTS,
   type CompilerFieldTypeKey,
 } from "@/generated/compiler/component-defaults";
-import { COMPILER_SEMANTIC_TYPES } from "@/generated/compiler/semantic-types";
+import { COMPILER_OSF_TYPES } from "@/generated/compiler/osf-types";
+import { resolveFieldBaseType, type OperationFieldSchemaRegistry } from "@openshapeforge/operations";
 
 type RendererAwareField = {
-  valueType?: string;
+  key?: string;
+  /** Compiled fields carry the base type; an authored field resolves it from `osfType`. */
+  baseType?: string;
   cardinality?: string | { min?: number; max?: number | "unbounded" };
-  semanticType?: string;
+  osfType?: string;
   readOnly?: boolean;
   render?: Partial<FieldRender> | null;
   validation?: FieldValidation;
 };
+
+/**
+ * The base type behind a field, the way the projector resolves it: the
+ * compiled `baseType`, else `osfType` through the generated catalog. A field
+ * without an osfType has no base and no default component; an unknown osfType
+ * is an error, never a text box.
+ */
+function rendererBaseType(field: RendererAwareField): string | undefined {
+  if (field.baseType) return field.baseType;
+  const osfType = getOsfTypeKey(field);
+  if (!osfType) return undefined;
+  return resolveFieldBaseType({ key: field.key ?? osfType, osfType }, COMPILER_OSF_TYPES as OperationFieldSchemaRegistry["osfTypes"]);
+}
 
 function isRendererCollectionField(field: RendererAwareField): boolean {
   if (field.cardinality === "collection") return true;
@@ -46,7 +62,7 @@ function isRendererCollectionField(field: RendererAwareField): boolean {
 export type ResolvedFieldRender = {
   component: string;
   props?: Record<string, unknown>;
-  source: "explicit" | "semanticType" | "fieldType" | "fallback";
+  source: "explicit" | "osfType" | "fieldType" | "fallback";
 };
 
 const COMPONENT_ALIASES: Record<string, string> = {
@@ -60,10 +76,10 @@ const COMPONENT_ALIASES: Record<string, string> = {
   MoneyInput: "NumberInput",
 };
 
-function getSemanticTypeKey(field: RendererAwareField) {
-  return typeof field.semanticType === "string" &&
-    field.semanticType.trim().length > 0
-    ? field.semanticType.trim()
+function getOsfTypeKey(field: RendererAwareField) {
+  return typeof field.osfType === "string" &&
+    field.osfType.trim().length > 0
+    ? field.osfType.trim()
     : undefined;
 }
 
@@ -76,24 +92,24 @@ export function normalizeFieldComponentName(component?: string) {
   return COMPONENT_ALIASES[normalized] ?? normalized;
 }
 
-export function getCompilerSemanticTypeDefinition(
-  semanticType: string | undefined,
-): SemanticTypeDefinition | undefined {
-  if (!semanticType) {
+export function getCompilerOsfTypeDefinition(
+  osfType: string | undefined,
+): OsfTypeDefinition | undefined {
+  if (!osfType) {
     return undefined;
   }
 
-  return COMPILER_SEMANTIC_TYPES[
-    semanticType as keyof typeof COMPILER_SEMANTIC_TYPES
+  return COMPILER_OSF_TYPES[
+    osfType as keyof typeof COMPILER_OSF_TYPES
   ];
 }
 
-export function getFieldSemanticTypeDefinition(field: RendererAwareField) {
-  return getCompilerSemanticTypeDefinition(getSemanticTypeKey(field));
+export function getFieldOsfTypeDefinition(field: RendererAwareField) {
+  return getCompilerOsfTypeDefinition(getOsfTypeKey(field));
 }
 
 function getDefaultFieldTypeRender(field: RendererAwareField) {
-  const key = isRendererCollectionField(field) ? "collection" : field.valueType;
+  const key = isRendererCollectionField(field) ? "collection" : rendererBaseType(field);
 
   if (!key) {
     return undefined;
@@ -134,11 +150,11 @@ export function resolveFieldInputRender(field: RendererAwareField): ResolvedFiel
     return explicitRender;
   }
 
-  const semanticType = getFieldSemanticTypeDefinition(field);
+  const osfType = getFieldOsfTypeDefinition(field);
   const semanticRender = buildResolvedRender(
-    semanticType?.render?.input,
-    semanticType?.props,
-    "semanticType",
+    osfType?.render?.input,
+    osfType?.props,
+    "osfType",
   );
   if (semanticRender) {
     return semanticRender;
@@ -166,11 +182,11 @@ export function resolveFieldDisplayRender(field: RendererAwareField): ResolvedFi
     return explicitRender;
   }
 
-  const semanticType = getFieldSemanticTypeDefinition(field);
+  const osfType = getFieldOsfTypeDefinition(field);
   const semanticRender = buildResolvedRender(
-    semanticType?.render?.display,
-    semanticType?.props,
-    "semanticType",
+    osfType?.render?.display,
+    osfType?.props,
+    "osfType",
   );
   if (semanticRender) {
     return semanticRender;
@@ -195,5 +211,5 @@ export function resolveFieldDisplayRender(field: RendererAwareField): ResolvedFi
 }
 
 export function resolveFieldValidation(field: RendererAwareField) {
-  return field.validation ?? getFieldSemanticTypeDefinition(field)?.validation;
+  return field.validation ?? getFieldOsfTypeDefinition(field)?.validation;
 }

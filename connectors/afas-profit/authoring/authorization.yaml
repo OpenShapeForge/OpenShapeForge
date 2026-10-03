@@ -1,0 +1,11 @@
+kind: authorizationPatch
+clientRoles:
+  erp-provider:
+    - Connectors.AfasProfit.Read
+clientRoleComposites:
+  erp-provider:
+    Connectors.AfasProfit.Write:
+      description: Invoke write operations on the AFAS Profit connector
+      composites:
+        erp-provider:
+          - Connectors.AfasProfit.Read

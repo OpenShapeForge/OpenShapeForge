@@ -10,7 +10,7 @@ import {
 } from "./semantic-collection-field";
 
 export type SemanticCollectionAdapter = {
-  semanticType: string;
+  osfType: string;
   framework: "semanticCollectionField";
   defaultExpandedItems?: SemanticCollectionFieldProps["defaultExpandedItems"];
   createItem?: () => unknown;
@@ -29,7 +29,7 @@ function createActionDefinitionItem() {
 
 const semanticCollectionAdapters: Record<string, SemanticCollectionAdapter> = {
   actionDefinition: {
-    semanticType: "actionDefinition",
+    osfType: "actionDefinition",
     framework: "semanticCollectionField",
     createItem: createActionDefinitionItem,
   },
@@ -39,11 +39,11 @@ export function resolveSemanticCollectionAdapter(
   field: Field,
 ): SemanticCollectionAdapter | null {
   if (!isFieldObjectCollection(field)) return null;
-  if (!field.semanticType) return null;
+  if (!field.osfType) return null;
 
   // fieldDefinition remains on FieldSchemaField until its variable-source rows
   // can converge without changing field-schema behavior.
-  return semanticCollectionAdapters[field.semanticType] ?? null;
+  return semanticCollectionAdapters[field.osfType] ?? null;
 }
 
 export function renderSemanticCollectionField(

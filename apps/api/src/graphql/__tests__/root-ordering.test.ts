@@ -28,11 +28,22 @@ function expectedRootOrder() {
       ...sortedFields(generatedEntityQueryFields),
       ...sortedFields(`${connectorQueryFields}\n${connectorNamespaceQueryFields}`),
       ...sortedFields(apiKeyQueryFields),
+      // The core `osf-jobs` Operations project in every process (jobs.md),
+      // after the module groups, as the operation contribution is merged last.
+      "job",
+      "jobs",
     ],
     mutation: [
       ...sortedFields(generatedEntityMutationFields),
       ...sortedFields(`${connectorMutationFields}\n${connectorNamespaceMutationFields}`),
       ...sortedFields(apiKeyMutationFields),
+      // Likewise the core `osf-transitions` and `osf-jobs` Operations: the
+      // operation contribution keeps catalog order (sorted by key).
+      "agreementMilestoneCancel",
+      "agreementMilestoneInvoice",
+      "agreementMilestoneTrigger",
+      "billingRunExecute",
+      "jobRetry",
     ],
   };
 }
@@ -107,5 +118,5 @@ describe("GraphQL root ordering", () => {
       return JSON.parse(stdout);
     };
     expect(await inspect()).toEqual(await inspect());
-  });
+  }, 30_000);
 });

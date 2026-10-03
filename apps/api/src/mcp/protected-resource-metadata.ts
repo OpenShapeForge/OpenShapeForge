@@ -21,10 +21,10 @@
  * fatal in production when unset (see config/production-guard.ts).
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { hostMcpResource, usesHostOrganizationContext } from "../config/host-organization.js";
 import {
   isOrganizationAlias,
   MCP_MOUNT_PATH,
-  ORGANIZATION_MCP_PATH_PREFIX,
   organizationAliasFromPath,
   organizationMcpPath,
   organizationResourceScopes,
@@ -33,8 +33,16 @@ import {
 
 export const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
 
-/** `https://host`, honouring a proxy's `x-forwarded-proto`. */
+/**
+ * The origin resources are named under. `OPENSHAPEFORGE_PUBLIC_ORIGIN` when the
+ * deployment states it — the audience a token must carry is then a value the
+ * operator chose, not one a caller can steer with a Host or
+ * `x-forwarded-proto` header. Only a deployment that states no public origin
+ * falls back to the request, honouring a proxy's `x-forwarded-proto`.
+ */
 export function requestOrigin(request: FastifyRequest): string {
+  const configured = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN?.trim().replace(/\/+$/, "");
+  if (configured) return configured;
   const forwardedProto = request.headers["x-forwarded-proto"];
   const proto =
     (typeof forwardedProto === "string" ? forwardedProto.split(",")[0]?.trim() : undefined) ??
@@ -44,8 +52,8 @@ export function requestOrigin(request: FastifyRequest): string {
 }
 
 /**
- * The resource path a request is addressed to: the per-organization mount
- * when the URL names a well-formed alias, the legacy mount otherwise.
+ * The resource path a request is addressed to: the per-organization resource
+ * when the URL names a well-formed alias, the shared mount otherwise.
  */
 export function resourcePathOf(request: FastifyRequest, alias?: string | null): string {
   const resolved = alias ?? organizationAliasFromPath(request.url);
@@ -60,11 +68,12 @@ export function resourcePathOf(request: FastifyRequest, alias?: string | null): 
  * request rather than configured separately: a mismatch between the two is
  * exactly the confused-deputy case the parameter exists to prevent.
  *
- * With `alias`, the per-organization resource `/api/mcp/organizations/<alias>`
+ * With `alias`, the per-organization resource `/<alias>`
  * (organization-resource.ts); without, the alias is read off the request URL
- * and the legacy `/api/mcp` is the fallback.
+ * and the shared `/api/mcp` is the fallback.
  */
 export function canonicalResourceUri(request: FastifyRequest, alias?: string | null): string {
+  if (usesHostOrganizationContext()) return hostMcpResource();
   return `${requestOrigin(request)}${resourcePathOf(request, alias)}`;
 }
 
@@ -82,7 +91,7 @@ export type AuthenticateChallengeOptions = {
 /**
  * The `WWW-Authenticate` challenge for an unauthenticated MCP request.
  *
- * On the legacy mount `scope` is deliberately absent. The spec permits it and
+ * On the shared mount `scope` is deliberately absent. The spec permits it and
  * recommends it where a server knows which scopes an operation needs — but
  * this deployment authorizes by ROLE, resolved per entity from the compiled
  * manifest, not by OAuth scope. Advertising a scope the authorization server
@@ -105,7 +114,7 @@ export function buildAuthenticateChallenge(
   request: FastifyRequest,
   options: AuthenticateChallengeOptions = {},
 ): string {
-  const alias = options.alias ?? organizationAliasFromPath(request.url);
+  const alias = usesHostOrganizationContext() ? null : options.alias ?? organizationAliasFromPath(request.url);
   const metadataPath = alias
     ? `${PROTECTED_RESOURCE_METADATA_PATH}${organizationMcpPath(alias)}`
     : PROTECTED_RESOURCE_METADATA_PATH;
@@ -117,8 +126,10 @@ export function buildAuthenticateChallenge(
       'error_description="The token is not bound to this organization resource."',
     );
   }
-  attributes.push(`resource_metadata="${requestOrigin(request)}${metadataPath}"`);
-  if (alias) attributes.push(`scope="${organizationResourceScopes(alias).join(" ")}"`);
+  const origin = usesHostOrganizationContext() ? new URL(hostMcpResource()).origin : requestOrigin(request);
+  attributes.push(`resource_metadata="${origin}${metadataPath}"`);
+  if (usesHostOrganizationContext()) attributes.push('scope="organization"');
+  else if (alias) attributes.push(`scope="${organizationResourceScopes(alias).join(" ")}"`);
   return `${parts.join(" ")} ${attributes.join(", ")}`;
 }
 
@@ -146,8 +157,8 @@ export function buildProtectedResourceMetadata(
     bearer_methods_supported: ["header"],
     // Per-organization resources name their scopes so a client requests the
     // token this path accepts (RFC 9728 §2; MCP clients pass these to the
-    // authorization request). The legacy mount advertises none, see above.
-    ...(alias ? { scopes_supported: organizationResourceScopes(alias) } : {}),
+    // authorization request). The shared mount advertises none, see above.
+    ...(usesHostOrganizationContext() ? { scopes_supported: ["organization"] } : alias ? { scopes_supported: organizationResourceScopes(alias) } : {}),
   };
 }
 
@@ -191,13 +202,12 @@ export function registerProtectedResourceMetadata(app: FastifyInstance): void {
   // RFC 9728 §3.1 spells the document's URL by inserting the well-known
   // segment before the resource's path, so the CANONICAL resource
   // `https://hubble.com/zerocopter` is described at
-  // `/.well-known/oauth-protected-resource/zerocopter`. That is the one a
-  // client derives on its own; the long spelling below it stays answerable
-  // for anything still holding the pre-rename URL.
+  // `/.well-known/oauth-protected-resource/zerocopter`.
   const organizationMetadata = async (
     request: FastifyRequest,
     reply: FastifyReply,
   ) => {
+    if (usesHostOrganizationContext()) return reply.code(404).send({ error: "unknown resource" });
     const alias = (request.params as { alias?: unknown }).alias;
     if (!isOrganizationAlias(alias) || RESERVED_ROOT_SEGMENTS.has(alias.toLowerCase())) {
       return reply.code(404).send({ error: "unknown resource" });
@@ -209,10 +219,10 @@ export function registerProtectedResourceMetadata(app: FastifyInstance): void {
   };
 
   app.get(`${PROTECTED_RESOURCE_METADATA_PATH}/:alias`, organizationMetadata);
-  app.get(
-    `${PROTECTED_RESOURCE_METADATA_PATH}${ORGANIZATION_MCP_PATH_PREFIX}/:alias`,
-    organizationMetadata,
-  );
+  // The explicit MCP spelling `https://host/zerocopter/mcp` is what a person
+  // types into a hosted client, and RFC 9728 path insertion turns it into
+  // `/.well-known/oauth-protected-resource/zerocopter/mcp`. Same document.
+  app.get(`${PROTECTED_RESOURCE_METADATA_PATH}/:alias/mcp`, organizationMetadata);
 }
 
 /**

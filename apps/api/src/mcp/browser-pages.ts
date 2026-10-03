@@ -22,19 +22,22 @@ import {
   isSecretDefinition,
 } from "./elicitation.js";
 import type { PendingConfiguration } from "./configuration-handoff.js";
+import { storedFieldBaseType } from "../modules/field-schemas.js";
+import { productName } from "../config/product-name.js";
 
 type JsonRecord = Record<string, unknown>;
 
-const PRODUCT_NAME = "Hubble";
-const DEFAULT_HOST_NAME = PRODUCT_NAME;
 const HOST_NAME_ENV = "OSF_INTEGRATION_HOST_NAME";
 
-/** The name the deployment shows people; the integration host sets it. */
+/**
+ * The name the deployment shows people on these pages; the integration host
+ * sets it, and it defaults to the product name (OPENSHAPEFORGE_PRODUCT_NAME).
+ */
 export function hostDisplayName(
   env: Record<string, string | undefined> = process.env,
 ): string {
   const configured = env[HOST_NAME_ENV]?.trim();
-  return configured && configured.length > 0 ? configured : DEFAULT_HOST_NAME;
+  return configured && configured.length > 0 ? configured : productName(env);
 }
 
 export function escapeHtml(value: string): string {
@@ -112,7 +115,7 @@ footer{margin-top:1.5rem;font-size:.8rem;color:var(--muted)}
 @media (max-width:480px){body{padding:1.25rem .75rem}main{padding:1.35rem 1.1rem;border-radius:12px}}
 `.trim();
 
-/** A lens: the Hubble mark. Uses currentColor so it follows the theme. */
+/** A lens: the product mark. Uses currentColor so it follows the theme. */
 const MARK_SVG =
   `<svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">` +
   `<circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" stroke-width="2.5"/>` +
@@ -144,12 +147,13 @@ const TONE_LABEL: Record<PageTone, string> = {
 /** The shared layout. Everything in `page` is escaped here except `bodyHtml`. */
 export function renderBrowserPage(page: BrowserPage): string {
   const hostName = page.hostName ?? hostDisplayName();
+  const product = productName();
   const tone = page.tone ?? "neutral";
   const title = escapeHtml(`${page.title} · ${hostName}`);
   const brandLine =
-    hostName === PRODUCT_NAME
-      ? `<strong>${escapeHtml(PRODUCT_NAME)}</strong>`
-      : `<strong>${escapeHtml(hostName)}</strong><span aria-hidden="true">·</span><span>${escapeHtml(PRODUCT_NAME)}</span>`;
+    hostName === product
+      ? `<strong>${escapeHtml(product)}</strong>`
+      : `<strong>${escapeHtml(hostName)}</strong><span aria-hidden="true">·</span><span>${escapeHtml(product)}</span>`;
   const status =
     tone === "neutral"
       ? ""
@@ -325,7 +329,7 @@ export function renderNoticePage(message: string, hostName?: string): string {
 
 type StoredFieldDefinition = {
   key?: unknown;
-  valueType?: unknown;
+  osfType?: unknown;
   required?: unknown;
   label?: unknown;
   description?: unknown;
@@ -378,10 +382,7 @@ export function renderConfigurationForm(
       const description = localized(definition.description);
       const required = definition.required === true;
       const error = errors[key];
-      const valueType =
-        typeof definition.valueType === "string"
-          ? definition.valueType
-          : "string";
+      const valueType = storedFieldBaseType(definition);
       const optionItems = definition.options?.items;
       const secret = isSecretDefinition(definition as never);
 

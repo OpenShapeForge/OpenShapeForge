@@ -1,9 +1,15 @@
 // @ts-nocheck
 // SPDX-License-Identifier: BUSL-1.1
 import type {
+  OperationConcurrency,
+  OperationConfirmation,
+  OperationPrerequisite,
+} from "@openshapeforge/operations";
+import type {
   LocalizedText,
   FieldValidation,
-  SemanticTypeLookupDefinition,
+  FieldRender,
+  OsfTypeLookupDefinition,
   EntityPermissions,
   FieldOptions,
   DataClassification,
@@ -13,12 +19,13 @@ import type {
   AuthorizationConfig,
   ProfileAuthorizationConfig,
 } from "./common.js";
-import type { Relationship, UIDefinition } from "./views.js";
+import type { UIDefinition } from "./views.js";
 import type {
   FieldDefinition,
   FieldDefinitionAuthoringMetadata,
   FieldDefinitionCardinality,
   FieldDefinitionRelationship,
+  FieldDefinitionValueType,
   FieldDefinitionRuntimeMetadata,
   FieldDefinitionSuggestions,
   FieldDefinitionWorkflowInspector,
@@ -30,6 +37,11 @@ import type {
  * hatches that have not yet moved into the enforced authoring schema.
  */
 export interface Field extends FieldDefinition {
+  /**
+   * Compiler-derived base of `osfType`: the type itself for a base type, the
+   * catalog entry's `baseType` otherwise. Never authored.
+   */
+  baseType?: FieldDefinitionValueType;
   /**
    * Escape hatch to override the emitted GraphQL type for a non-persisted
    * field. When set, the GraphQL codegen skips the default `FIELD_TO_GQL_TYPE`
@@ -67,18 +79,25 @@ export interface ComponentCatalog {
   components: Record<string, ComponentDefinition>;
 }
 
-export interface SemanticTypeDefinition {
+export interface OsfTypeDefinition {
+  /** Derived from the entity corpus, never authored in the osf-type catalog. */
+  entityIdentity?: boolean;
+  /** Derived: the entity declares `versioning`, so a reference to it may say `version: current`. */
+  versioned?: boolean;
+  /** Derived: this entity is the immutable version entity of the named versioned entity, so a reference to it may be `version: pinned`. */
+  versionEntityOf?: string;
   /**
-   * Discriminator for entity-ID semantic types. When set to `"entityId"`,
-   * the entry MUST also declare `entity`, `listUrl`, `displayTemplate`,
-   * `filterField`, `icon`, and `render.{display,input}` (see the catalog
-   * JSON schema and `checks.ts` for enforcement). Absent on value-shape
-   * semantic types.
+   * `scalar` and `object` are authored. `entity` (a loaded entity, the
+   * relationship target), `entityId` (its identity alias, `<entity>Id`) and
+   * `provider` (an Operation-catalog entity) are derived from the corpus by
+   * `deriveEntityOsfTypes` / `deriveProviderOsfTypes`; an authored entry
+   * under a derived key is a compile error.
    */
-  kind?: "scalar" | "entityId" | "entity" | "object";
+  kind?: "scalar" | "entityId" | "entity" | "object" | "provider";
   label: LocalizedText;
   pluralLabel?: LocalizedText;
-  valueType:
+  /** The base type every transport maps this type to: storage, GraphQL and JSON Schema. */
+  baseType:
     | "string"
     | "integer"
     | "number"
@@ -89,7 +108,15 @@ export interface SemanticTypeDefinition {
   cardinality?: FieldCardinality;
   validation?: FieldValidation;
   options?: FieldOptions;
-  lookup?: SemanticTypeLookupDefinition;
+  /**
+   * The complete value schema of this type: a `$ref` into the bundled
+   * field-definition definitions. A type that declares one is projected
+   * through it instead of through `baseType` and `shape`, which is how a
+   * recursive contract (a stored FieldDefinition) is a catalog type like any
+   * other, with no engine code that knows its name.
+   */
+  schema?: OsfTypeSchemaReference;
+  lookup?: OsfTypeLookupDefinition;
   render?: {
     display: string;
     input: string;
@@ -112,18 +139,19 @@ export interface SemanticTypeDefinition {
    */
   icon?: string;
   /**
-   * For entity-ID semantic types (`kind: "entityId"`): the kebab-case slug
-   * of the entity this type identifies. Lets downstream consumers
-   * (variable pickers, workflow inspector, the core-entity-options route)
-   * resolve from a `semanticType` string back to the entity it represents.
+   * For derived entity, entity-ID and provider types: the name of the entity
+   * this type identifies or references, spelled as the entity's own osfType
+   * (PascalCase), so a consumer can resolve from an `osfType` string back
+   * to the entity without a second spelling.
    */
   entity?: string;
   /**
-   * For entity-ID semantic types: the canonical workflow-designer options
-   * URL, always shaped as
-   * `/api/workflow/designer/core-entity-options?entity=<entity-slug>`.
+   * For entity-ID types: where a picker enumerates the records a value of
+   * this type identifies — the entity itself, resolved through its list
+   * Operation. Absent when the entity has no list Operation. A field that
+   * declares its own `options` keeps them.
    */
-  listUrl?: string;
+  optionSource?: FieldOptions;
   /**
    * Copied from the entity's `displayTemplate`. Variable pickers and
    * cards render instances with this template.
@@ -136,10 +164,12 @@ export interface SemanticTypeDefinition {
   filterField?: string;
 }
 
-export interface SemanticTypeCatalog {
+export type OsfTypeSchemaReference = { $ref: string } & Record<string, unknown>;
+
+export interface OsfTypeCatalog {
   schemaVersion: number;
-  kind: "semanticTypeCatalog";
-  types: Record<string, SemanticTypeDefinition>;
+  kind: "osfTypeCatalog";
+  types: Record<string, OsfTypeDefinition>;
 }
 
 export interface RetentionPolicyCatalog {
@@ -157,12 +187,22 @@ export interface AuthoredEntityIndex {
   name: string;
   /**
    * Entity field keys (camelCase) that compose the index. The compiler
-   * resolves each to the corresponding persisted column name. For
-   * tenant-scoped uniqueness include `tenantId` first.
+   * resolves each to the corresponding persisted column name.
    */
   fields: string[];
-  /** When true, generates `CREATE UNIQUE INDEX` instead of `CREATE INDEX`. */
+  /**
+   * When true, generates `CREATE UNIQUE INDEX` instead of `CREATE INDEX`.
+   * On a tenant-scoped entity the compiler leads the index with `tenant_id`
+   * when `tenantId` is not among the fields: uniqueness is per tenant.
+   */
   unique?: boolean;
+  /**
+   * Partial index: only rows whose field equals the value (`{ field:
+   * isDefault, equals: true }`) or holds one at all (`{ field: invoiceNumber,
+   * present: true }`) take part, so a unique index enforces at most one such
+   * row per key and leaves the rows without the value alone.
+   */
+  where?: { field: string; equals: boolean | string | number } | { field: string; present: boolean };
 }
 
 export type CrudOperationKey = "list" | "get" | "create" | "update" | "delete";
@@ -201,25 +241,6 @@ export type McpOperationKey = RestOperationKey;
  */
 export type McpToolStyle = "dedicated" | "generic";
 
-export interface McpOperationConfig {
-  /** Defaults to true. */
-  enabled?: boolean;
-  /**
-   * Override the complete generated tool name for this operation, replacing
-   * the `<toolPrefix>_<operation>` default (`dedicated` style only — the
-   * shared `osf_*` tools cannot be renamed per entity). Emitted verbatim into
-   * tool names, so the compiler restricts it to `^[a-z][a-z0-9_]*$` and
-   * fails closed on a duplicate across the catalog.
-   */
-  name?: string;
-  /**
-   * Override the generated tool description for this operation (`dedicated`
-   * style only). Use for short, operational, entity-specific guidance; the
-   * compiler-composed default is used when absent.
-   */
-  description?: string;
-}
-
 export interface McpResourceConfig {
   /**
    * Absolute URI of the entity's MCP catalogue resource, e.g.
@@ -235,49 +256,6 @@ export interface McpResourceConfig {
   description?: string;
   /** Description of the derived single-record template. */
   templateDescription?: string;
-}
-
-export interface McpDerivedVisibilityConfig {
-  /** Row field that gates projection. */
-  field: string;
-  /** Value the field must equal for the row to project as a tool. */
-  equals: string;
-}
-
-export interface McpDerivedConnectConfig {
-  /** Tool name for the provider-connection handoff, e.g. `connect_service`. */
-  name: string;
-  /** Override the composed tool description. */
-  description?: string;
-  /** Roles allowed to create or replace a shared tenant connection. */
-  roles: string[];
-}
-
-export interface McpDerivedPersonalizationConfig {
-  /** Entity whose rows hold one person's instruction for a derived tool. */
-  entity: string;
-  /**
-   * Field on the preference row referencing the defining row's id; an empty
-   * value means the instruction applies to every tool of this projection.
-   */
-  serviceRef: string;
-  /** Field holding the person's instruction text. */
-  instructionField: string;
-  /** The audience-facing tool that stores the caller's own instruction. */
-  set: { name: string; description?: string };
-}
-
-export interface McpDerivedDryRunConfig {
-  /** Tool name for the composition preview, e.g. `dry_run_service`. */
-  name: string;
-  /** Override the composed tool description. */
-  description?: string;
-  /**
-   * Roles offered the dry run — typically the definition AUTHORS, not the
-   * derived tools' audience: the composed requests expose provider URLs and
-   * header shapes that are authoring detail.
-   */
-  roles: string[];
 }
 
 /**
@@ -309,190 +287,266 @@ export interface McpDeclarativeRequestMapping {
   headers?: McpDeclarativeRequestHeaderMapping[];
 }
 
-export interface McpDerivedToolsConfig {
-  /**
-   * Roles whose sessions are offered the derived tools. Deliberately separate
-   * from the entity's CRUD roles: the audience of the derived tools is
-   * usually NOT the audience allowed to manage the defining rows.
-   */
-  roles: string[];
-  /** Field whose value names the derived tool (sanitized to snake_case). */
-  keyField: string;
-  /** Field whose value becomes the derived tool's title. */
-  titleField?: string;
-  /** Field whose value becomes the derived tool's description. */
-  descriptionField: string;
-  /**
-   * Field holding the collection of canonical FieldDefinition objects that
-   * the runtime translates into the derived tool's input JSON Schema.
-   */
-  inputFieldsField: string;
-  /**
-   * Optional field holding canonical FieldDefinition objects for model-visible
-   * outputs. Core uses it to bound runtime authorization decisions.
-   */
-  outputFieldsField?: string;
-  versionField?: string;
-  /**
-   * Opt-in declarative execution: calling a derived tool runs its bindings
-   * against the referenced operation/provider/connection rows, whose fields
-   * follow the canonical OSF integration vocabulary (transport, method,
-   * pathTemplate, baseUrlTemplate, auth, egressHosts, responseMapping, …).
-   * Absent, a derived tool call answers 501.
-   */
-  execution?: McpDerivedExecutionConfig;
-  /**
-   * Only rows matching this predicate project as tools — the publication
-   * gate: a draft definition is invisible to its audience until published.
-   */
-  visibleWhen?: McpDerivedVisibilityConfig;
-  /**
-   * Opt-in per-row audience restriction: names an authored field holding a
-   * role list. A row whose list is non-empty projects (and answers) only
-   * for sessions holding one of those roles — how an administrative
-   * definition stays invisible to the wider audience.
-   */
-  visibleToRolesField?: string;
-  /** Boolean field whose true rows are callable only through internal MCP dispatch. */
-  internalOnlyField?: string;
-  /**
-   * Opt-in personal-connection handoff tool: given one projected row, the
-   * runtime validates the row's execution chain and returns a provider
-   * authorization URL (PKCE) for the CALLER to open. Requires `execution`.
-   */
-  connect?: McpDerivedConnectConfig;
-  /**
-   * Opt-in composition preview tool: given a derived tool's name and
-   * arguments, the runtime composes the exact provider request(s) the call
-   * would make — method, URL, headers with placeholder credentials, body —
-   * WITHOUT sending them, and works on rows the visibility gate still hides,
-   * so authors verify a definition before publishing it. Requires
-   * `execution`.
-   */
-  dryRun?: McpDerivedDryRunConfig;
-  /**
-   * Opt-in per-person instructions: each audience member may store one
-   * instruction per derived tool (or one for all of them), which the
-   * projection appends to that tool's description FOR THAT PERSON — under
-   * the authored description, labelled as subordinate to it. This is how a
-   * person's standing preferences reach every client they use, without a
-   * new runtime concept on the assistant's side.
-   */
-  personalization?: McpDerivedPersonalizationConfig;
-}
+/**
+ * Where a derived tool's ordered binding rows live: an owned hasMany
+ * collection whose target carries the binding vocabulary.
+ */
+/**
+ * Version 2 entity authoring keeps behaviour in canonical operations and lets
+ * interfaces only opt into those operations.  The first supported
+ * implementation kind is generated entity CRUD; custom/plugin operations can
+ * be added without changing this entity contract.
+ */
+export type EntityOperationAction = CrudOperationKey;
 
-export interface McpElicitOnCreateConfig {
-  /** Local field whose value references the source row (e.g. a relation id). */
+/**
+ * Transport-neutral request for server-issued secure input on an Operation.
+ * The `into` field is server-owned: generated entity inputs must never accept
+ * it directly from a model, browser form, REST body or GraphQL mutation.
+ */
+export type EntityOperationSecureInput = {
+  type: "secureInput";
   sourceField: string;
-  /** Entity whose row carries the field definitions to elicit. */
   sourceEntity: string;
-  /** Field on the source row holding the FieldDefinition collection. */
   definitionsField: string;
-  /**
-   * Local field the elicited values are stored into. Excluded from the
-   * create tool's input schema: these values come from the person at the
-   * client, never from the model, and anything the model passes anyway is
-   * discarded before the elicited values are stored.
-   */
   into: string;
-  /** Optional custom prompt shown above the elicitation form. */
   message?: string;
+};
+
+/**
+ * A value owned by the canonical Operation rather than any of its interface
+ * payloads. `actorRelation` deliberately differs from `actorUserId`: a human
+ * attribution may require the tenant-confirmed Relation, while background and
+ * system actors must keep their explicit identity and can never masquerade as
+ * that Relation.
+ */
+export type EntityOperationStamp = {
+  field: string;
+  source: "now" | "actorRelation" | "actorUserId";
+};
+
+export interface EntityOperationDefinition {
+  /** Stable canonical id for a plugin Operation; defaults to `<Entity>.<key>`. */
+  id?: string;
+  name: string | LocalizedText;
+  description: string | LocalizedText;
+  guidance?: { assistant?: string | LocalizedText };
+  prerequisites?: OperationPrerequisite[];
+  stamps?: EntityOperationStamp[];
+  implementation:
+    | { type: "collection"; action: "insert" | "move" | "update" | "remove"; field: string }
+    | {
+        type: "entity";
+        action: EntityOperationAction;
+      }
+    | {
+        /** Runtime code only; the YAML remains the canonical contract. */
+        type: "plugin";
+        plugin: string;
+        handler: string;
+        /** Canonical entity CRUD intent implemented by this handler. */
+        action?: "list" | "get" | "create" | "update" | "delete";
+      };
+  /** How a record-scoped plugin Operation binds the current record to input. */
+  target?:
+    | { scope: "collection" }
+    | { scope: "record"; inputField: string; inputBindings?: Record<string, string> };
+  input?: { schema: Record<string, unknown> };
+  output?: { schema: Record<string, unknown> };
+  errors?: Array<{
+    status: number;
+    code: string;
+    description: string;
+    schema?: Record<string, unknown>;
+    rest?: { body?: unknown; contentType?: string };
+  }>;
+  auth?: import("../../plugins.js").PluginOperationAuth;
+  tenancy?: {
+    mode: "required" | "derived" | "none";
+    description?: string;
+  };
+  effects: {
+    data: "read" | "write" | "delete";
+    external: "none" | "read" | "write";
+  };
+  reliability: {
+    idempotency: {
+      mode: "natural" | "keyed" | "none";
+      /** Required for keyed plugin Operations; populated from Idempotency-Key on REST. */
+      inputField?: string;
+      header?: string;
+    };
+  };
+  concurrency?: OperationConcurrency;
+  confirmation: OperationConfirmation;
+  interaction?: EntityOperationSecureInput;
 }
 
-export interface McpDiscoveryConfig {
-  /** Tool name, e.g. `discover_provider`; same alphabet as other tool names. */
-  name: string;
-  /** Override the composed tool description. */
-  description?: string;
+export interface EntityInterfaceOperationProjectionConfig {
+  /** MCP-only wording may refine, but never redefine, the operation. */
+  instructions?: string | LocalizedText;
 }
 
-export interface McpTestConfig {
-  /** Tool name, e.g. `test_connection`; same alphabet as other tool names. */
-  name: string;
-  /** Override the composed tool description. */
-  description?: string;
+export interface EntityRestOperationProjectionConfig
+  extends EntityInterfaceOperationProjectionConfig {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  path?: string;
+  response?: {
+    status?: number;
+    kind: "json" | "binary" | "stream";
+    contentType?: string;
+  };
 }
 
-export interface McpGuideConfig {
-  /** Tool name, e.g. `setup_provider_guide`. */
-  name: string;
-  /** Tool description; say WHEN to call it (e.g. "call this first when ..."). */
-  description: string;
-  /** Roles whose sessions see the guide. */
-  roles: string[];
-  /** The playbook itself, returned verbatim as the tool result. */
-  content: string;
-  /**
-   * Enforce the "call this first" that descriptions alone cannot: a stateful
-   * session that has not called this guide is refused CREATE operations on
-   * the guide's own entity, with the guide named as the next step. Exists
-   * because agents carrying cached local procedures skip voluntary guidance.
-   */
-  requireBeforeCreate?: boolean;
+export interface EntityWebOperationProjectionConfig extends EntityInterfaceOperationProjectionConfig {
+  /** Presentation only; never changes the operation result or its authorization. */
+  resultRenderer?: string;
 }
 
-export interface McpConfig {
-  /** Defaults to true when the `mcp` block is present. */
-  enabled?: boolean;
-  /**
-   * Tool-name prefix for `dedicated` style; defaults to the entity name in
-   * snake_case (`ContactDetail` → `contact_detail`). Emitted verbatim into
-   * tool names, so the compiler restricts it to `^[a-z][a-z0-9_]*$`.
-   */
-  toolPrefix?: string;
-  /** Defaults to `dedicated`. */
-  tools?: McpToolStyle;
-  /**
-   * Per-operation flags; each defaults to true when MCP is enabled. The
-   * object form additionally overrides the generated tool name and/or
-   * description for that operation.
-   */
-  operations?: Partial<Record<McpOperationKey, boolean | McpOperationConfig>>;
-  /**
-   * Opt-in MCP resource exposure: a direct catalogue resource at `uri` plus
-   * a derived `<uri>/{id}` template for one record. Reads are authorized like
-   * the entity's read operations.
-   */
-  resource?: McpResourceConfig;
-  /**
-   * Opt-in schema discovery tool: given a row id, the runtime fetches the
-   * row's declared schema document (canonical fields `discovery`, `schemaUrl`,
-   * `egressHosts`) and returns a compact operation summary. Visibility follows
-   * the entity's read role.
-   */
-  discovery?: McpDiscoveryConfig;
-  /**
-   * Opt-in authored playbook, projected as a zero-argument tool returning
-   * the content verbatim. This is how a product pins a fixed process for
-   * assistants — choreography that field schemas alone cannot carry.
-   */
-  guide?: McpGuideConfig;
-  /**
-   * Opt-in runtime projection of this entity's ROWS as MCP tools: each stored
-   * record becomes one tool, named from keyField and typed from the canonical
-   * FieldDefinition collection in inputFieldsField. This is how a deployment's
-   * own admins author new tools as data instead of code.
-   */
-  derivedTools?: McpDerivedToolsConfig;
-  /**
-   * Opt-in MCP elicitation on the create operation: the runtime collects the
-   * values for the source row's field definitions directly from the person at
-   * the client via a standard elicitation form, so tenant configuration and
-   * secrets never travel through model context or tool arguments.
-   */
-  elicitOnCreate?: McpElicitOnCreateConfig;
-  /**
-   * Opt-in verification tool for rows whose values were elicited: given a row
-   * id, the runtime checks the stored values against the source row's
-   * definitions and auth contract, and — when the source declares a `probe`
-   * request — exercises them against the provider. Requires `elicitOnCreate`
-   * (the wiring to the source row comes from it); visibility follows the
-   * entity's read role.
-   */
-  test?: McpTestConfig;
+export interface EntityMcpOperationProjectionConfig
+  extends EntityInterfaceOperationProjectionConfig {
+  name?: string;
+}
+
+export interface EntityGraphqlOperationProjectionConfig
+  extends EntityInterfaceOperationProjectionConfig {
+  kind?: "query" | "mutation";
+  field?: string;
+}
+
+/** `false` is an explicit interface-local exclusion; omission inherits projection. */
+export type EntityInterfaceOperationProjection =
+  | false
+  | EntityInterfaceOperationProjectionConfig;
+
+export interface EntityWebRecordLayout {
+  preset?: "main" | "inbox-main-context";
+  tabs: import("./views.js").ViewGroup[];
+  /** Deliberately selected summary, independent of the full record tabs. */
+  context?: { fields: string[]; relationships?: string[] };
+}
+
+export type EntityWebNamedViewDefinition =
+    | { kind: "record"; title?: string; fields: string[] }
+    | { kind: "record"; title?: string; layout: EntityWebRecordLayout }
+    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string }
+    | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
+
+export interface EntityWebViewDefinition {
+  /** Additional target-owned views, addressable by relationship placements. */
+  named?: Record<string, EntityWebNamedViewDefinition>;
+  /** Authoring shorthand: every non-reserved key is a target-owned named view. */
+  [name: string]: unknown;
+  collection: {
+    /** Opaque host renderer-registry key; omission uses the generic collection renderer. */
+    renderer?: string;
+    route: string | LocalizedText;
+    title?: LocalizedText;
+    /** Ordered collection-scoped plugin Operations shown by Web consumers. */
+    actions?: string[];
+    columns: { key: string; label?: LocalizedText; sortable?: boolean }[];
+    defaultSort?: { key: string; direction: "asc" | "desc" };
+  };
+  record?: {
+    /** Opaque host renderer-registry key; omission uses the generic record renderer. */
+    renderer?: string;
+    routes?: { read?: string | LocalizedText; create?: string | LocalizedText };
+    title: string;
+    subtitle?: string;
+    badges?: string[];
+    variableSources?: import("./views.js").FormVariableSource[];
+    actions?: string[];
+    layout: EntityWebRecordLayout;
+    modes?: {
+      create?: { title: LocalizedText; groups: import("./views.js").ViewGroup[] };
+      update?: { title: LocalizedText; groups?: import("./views.js").ViewGroup[] };
+    };
+  };
+}
+
+export interface EntityInterfacesDefinition {
+  rest?: {
+    basePath?: string;
+    operations?: Record<
+      string,
+      false | EntityRestOperationProjectionConfig
+    >;
+  };
+  graphql?: {
+    operations?: Record<
+      string,
+      false | EntityGraphqlOperationProjectionConfig
+    >;
+  };
+  mcp?: {
+    /** Technical tool projection; defaults to one dedicated tool per operation. */
+    tools?: McpToolStyle;
+    operations?: Record<string, false | EntityMcpOperationProjectionConfig>;
+    resource?: McpResourceConfig;
+  };
+  web?: {
+    fields?: Record<string, { render: FieldRender }>;
+    operations?: Record<string, false | EntityWebOperationProjectionConfig>;
+    views?: EntityWebViewDefinition;
+  };
+}
+
+/** One web page of standalone Operations (a menu entry without an entity). */
+export interface OperationCatalogWebPage {
+  title: LocalizedText;
+  description?: LocalizedText;
+  /** Battery icon key, e.g. `buildings`. */
+  icon?: string;
+  order?: number;
+}
+
+/** Where a standalone Operation appears on the web. */
+export interface OperationCatalogWebOperation {
+  page: string;
+  /** Runs when the page opens and shows its result first; read operations without required input only. */
+  landing?: boolean;
+  order?: number;
+}
+
+export interface OperationCatalogWebInterface {
+  pages: Record<string, OperationCatalogWebPage>;
+  operations: Record<string, OperationCatalogWebOperation>;
+  /** Provider-backed resources that use normal entity collection/detail views. */
+  entities?: Record<string, {
+    title: LocalizedText;
+    route: string;
+    recordRoute?: string;
+    idField: string;
+    displayField: string;
+    fields: string[];
+    columns: string[];
+    operations: {
+      list: { operation: string; resultField: string; bindings?: Record<string, string> };
+      get?: { operation: string; resultField?: string; bindings?: Record<string, string> };
+      create?: { operation: string; bindings?: Record<string, string> };
+      collectionActions?: string[];
+      recordActions?: Array<string | { operation: string; visibleWhen?: VisibilityConfig }>;
+    };
+    related?: Array<{ entity: string; label: LocalizedText; route: string }>;
+  }>;
+}
+
+/** YAML-owned module/global Operations that have no honest entity target. */
+export interface OperationCatalogDefinition {
+  schemaVersion: 1;
+  kind: "operationCatalog";
+  plugin: string;
+  operations: Record<string, EntityOperationDefinition>;
+  interfaces: Omit<EntityInterfacesDefinition, "web"> & { web?: OperationCatalogWebInterface };
 }
 
 export interface CoreEntity {
+  /** Canonical read Operations resolve records; this entity owns no SQL table. */
+  source?: { kind: "operations"; query?: { filterFields: string[]; sortFields: string[] } };
+  /** Explicit safe scalar content copied from a published blueprint. */
+  blueprint?: { fields: string[] };
+  /** Named cross-tenant worker; enforced together with the dedicated DB role. */
+  workerAccess?: string;
   schemaVersion: number;
   kind: "coreEntity";
   module: string;
@@ -501,6 +555,8 @@ export interface CoreEntity {
   description?: string | LocalizedText;
   language: string;
   labels?: LocalizedText;
+  /** Plural labels carried by derived inverse collections; absent, the English label is pluralised and other locales keep their singular. */
+  pluralLabels?: LocalizedText;
   domains?: string[];
   retention?: RetentionPolicy;
   baseEntity?: boolean;
@@ -536,98 +592,33 @@ export interface CoreEntity {
    * naturally tenant-isolated.
    */
   indexes?: AuthoredEntityIndex[];
+  /**
+   * Opt-in immutable publication history for an editable entity head.
+   * The compiler supplies lifecycle fields and the canonical publish Operation;
+   * the version entity stores the frozen snapshot.
+   */
+  versioning?: {
+    strategy: "publishedSnapshot";
+    versionEntity: string;
+    versionsField: string;
+    snapshot?: { ownedRelationships?: "recursive" };
+  };
+  /** Optional shared-runtime hard-delete restrictions. */
+  hardDelete?: {
+    requireNeverPublished: true;
+  };
   fields: Field[];
-  relationships?: Relationship[];
-  hooks?: EntityHooks;
-  permissions?: EntityPermissions;
   authorization?: AuthorizationConfig;
+  /** Derived by the compiler from `interfaces.web`; never authored. */
   ui?: UIDefinition;
   /**
-   * Common generated-CRUD policy shared by every transport. Absent or `true`
-   * preserves the historical all-operations default; `false` disables the
-   * entity completely. The object form can make an entity read-only or expose
-   * any smaller operation set. REST, MCP, workflow and later layers may narrow
-   * this policy but never widen it.
+   * Canonical Operations: every behaviour of the entity, including generated
+   * CRUD, is one of these. Exposure per transport is declared under
+   * `interfaces`, which may narrow this set but never widen it.
    */
-  crud?: boolean | CrudConfig;
-  /**
-   * Opt-in generated REST exposure for this entity. Absent or `false` means
-   * no REST routes are generated (fail closed, mirroring the generatedCrud
-   * allowlist). `true` enables every operation under a base path derived
-   * from the entity name (plural kebab-case, e.g. `RelationGroup` →
-   * `relation-groups`). The object form allows per-operation flags and a
-   * custom base path; `basePath` is emitted verbatim into route strings and
-   * OpenAPI paths, so the loader restricts it to `^[a-z][a-z0-9-]*$`.
-   */
-  rest?: boolean | RestConfig;
-  /**
-   * Opt-in generated MCP (Model Context Protocol) exposure for this entity.
-   * Absent or `false` means no tools are generated — fail closed, exactly as
-   * `rest` does. `true` emits one tool per operation under a prefix derived
-   * from the entity name (snake_case, e.g. `ContactDetail` →
-   * `contact_detail`). The object form allows per-operation flags, a custom
-   * prefix, and the `generic` tool style for large catalogs.
-   */
-  mcp?: boolean | McpConfig;
-  workflow?: {
-    nodes?: {
-      actions?: {
-        create?:
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-            };
-        getOne?:
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-            };
-        list?:
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-              defaultSort?: {
-                field: string;
-                direction: "asc" | "desc";
-              };
-            };
-        update?:
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-            };
-        delete?:
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-            };
-        wait?:
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-            };
-        awaitAction?:
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-            };
-      };
-    };
-  };
+  operations?: Record<string, EntityOperationDefinition>;
+  /** Thin interface projections (REST, GraphQL, MCP, web). */
+  interfaces?: EntityInterfacesDefinition;
 }
 
 export interface ThirdPartyApiEndpoint {
@@ -660,7 +651,6 @@ export interface EntityProfile {
    */
   filterField?: string;
   fields?: Field[];
-  relationships?: Relationship[];
   authorization?: ProfileAuthorizationConfig;
   projection?: {
     thirdPartyApi?: {
@@ -670,28 +660,6 @@ export interface EntityProfile {
     };
   };
   ui?: UIDefinition;
-  crud?: boolean | CrudConfig;
-  workflow?: {
-    nodes?: {
-      actions?: Partial<
-        Record<
-          | "create"
-          | "getOne"
-          | "list"
-          | "update"
-          | "delete"
-          | "wait"
-          | "awaitAction",
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-            }
-        >
-      >;
-    };
-  };
   storage?: {
     profileTable: string;
   };
@@ -733,6 +701,20 @@ export interface AuthorizationRealmRole {
   composites?: Record<string, string[]>;
   /** Wildcard-expansion patterns (e.g. "*:full") over entity-derived roles. */
   includes?: string[];
+}
+
+/**
+ * A client role that groups roles from one or more resource clients.
+ *
+ * This is the audience-scoped counterpart of a realm-role composite: hosts can
+ * expose product personas on their own API audience without promoting those
+ * personas to realm-global roles.
+ */
+export interface AuthorizationClientRoleComposite {
+  description?: string;
+  attributes?: Record<string, string[]>;
+  /** Per-client composite role mapping: {clientId: [roleName, ...]}. */
+  composites: Record<string, string[]>;
 }
 
 export interface AuthorizationRealmSettings {
@@ -824,6 +806,10 @@ export interface AuthorizationClient {
    * require (e.g. `{ "realm-management": ["manage-realm"] }`).
    */
   serviceAccountClientRoles?: Record<string, string[]>;
+  /** Tenant fixed to this service-account client by host-owned authorization. */
+  serviceAccountTenantId?: string;
+  /** Marks the client as an organization automation identity, never a human login. */
+  organizationAutomation?: boolean;
 }
 
 /**
@@ -897,6 +883,7 @@ export interface AuthorizationIdentityProvider {
 export interface AuthorizationGroupNode {
   name: string;
   realmRoles?: string[];
+  clientRoles?: Record<string, string[]>;
   subGroups?: AuthorizationGroupNode[];
 }
 
@@ -914,7 +901,22 @@ export interface AuthorizationUser {
   enabled?: boolean;
 }
 
+/**
+ * What a role means to the person holding it, per language. `label` is the
+ * title-case name a persona is shown as; `phrase` the lower-case wording
+ * inside a sentence. Display only.
+ */
+export interface AuthorizationRoleLabel {
+  label?: Record<string, string>;
+  phrase?: Record<string, string>;
+}
+
 export interface AuthorizationConfigFile {
+  organizationAccess?: {
+    permissions: string[];
+    roles: string[];
+    groups: { key: string; name: string; roles: string[] }[];
+  };
   schemaVersion: number;
   kind: "authorizationConfig";
 
@@ -946,6 +948,15 @@ export interface AuthorizationConfigFile {
   clientRoles?: Record<string, string[]>;
 
   /**
+   * v2 audience-scoped composite roles, keyed first by owning clientId and then
+   * by role name. Their grants may target any declared client role set.
+   */
+  clientRoleComposites?: Record<
+    string,
+    Record<string, AuthorizationClientRoleComposite>
+  >;
+
+  /**
    * v2 Keycloak group hierarchy for dev/demo (organizational labels, optional
    * realm role mappings on groups).
    */
@@ -953,6 +964,45 @@ export interface AuthorizationConfigFile {
 
   /** v2 dev test users. */
   users?: AuthorizationUser[];
+
+  /**
+   * Who a login is, in entity terms: the party it acts as, the person record
+   * beside it, where its e-mail lives and which role administers the
+   * organization. Declared once per deployment; emitted as identity.json.
+   */
+  identity?: {
+    administratorRole: string;
+    memberRoles: string[];
+    actingParty: {
+      entity: string;
+      nameField: string;
+      typeField: string;
+      personType: string;
+      organizationType: string;
+      statusField: string;
+      activeStatus: string;
+      /** The field the organization resource shows as its profile text. */
+      profileField: string;
+    };
+    person: {
+      entity: string;
+      relationField: string;
+      firstNameField: string;
+      lastNameField: string;
+    };
+    loginContact: {
+      entity: string;
+      relationField: string;
+      typeField: string;
+      emailType: string;
+      valueField: string;
+      primaryField: string;
+      statusField: string;
+      activeStatus: string;
+    };
+  };
+  /** What each role means to its holder, keyed by role name (display only). */
+  roleLabels?: Record<string, AuthorizationRoleLabel>;
 }
 
 export interface TransformDefinition {

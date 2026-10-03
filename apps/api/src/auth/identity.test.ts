@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: BUSL-1.1
+import roleComposites from "../generated/compiler/role-composites.json" with { type: "json" };
+import { __setRoleCompositesForTests, expandRoleComposites, personSessionRoles } from "./person-roles.js";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   __resetSessionResolverForTests,
   mergeIdentityRoles,
-  realmFromIssuer,
   resolveSessionContext,
-  selectOrganizationMembership,
-  SessionAuthenticationUnavailableError,
 } from "./identity.js";
+import { SessionAuthenticationUnavailableError } from "./session-unavailable.js";
+import { realmFromIssuer, selectOrganizationMembership } from "./tenant-resolution.js";
 
 const MANAGED_ENV = [
   "OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI",
@@ -25,6 +26,7 @@ const EMPTY = {
   userId: null,
   roles: [] as string[],
   groups: [] as string[],
+  relationGroupIds: [] as string[],
   scope: "self" as const,
   credential: "none" as const,
 };
@@ -66,21 +68,20 @@ describe("resolveSessionContext bearer fail-closed", () => {
     expect(trustedOnly.userId).toBe("user-a");
 
     // Now the caller signals bearer auth. With no verifier configured, the
-    // bearer signal must fail closed and NOT downgrade to the (valid) trusted
-    // context — otherwise the bearer signal would be downgrade-attackable.
+    // bearer signal must NOT downgrade to the (valid) trusted context —
+    // otherwise the bearer signal would be downgrade-attackable — and must not
+    // run as nobody either: a browser whose host forwards its token would
+    // silently lose its session. It is the deployment that is unavailable.
     headers.set("authorization", "Bearer some.jwt.token");
-    const session = await resolveSessionContext(headers);
-    expect(session).toEqual(EMPTY);
+    await expect(resolveSessionContext(headers)).rejects.toMatchObject({ status: 503, code: "AUTHENTICATION_UNAVAILABLE" });
   });
 
-  test("can report an unconfigured bearer verifier without changing the default fallback", async () => {
+  test("reports an unconfigured bearer verifier as unavailable", async () => {
     const headers = new Headers({ authorization: "Bearer some.jwt.token" });
-    await expect(resolveSessionContext(headers)).resolves.toEqual(EMPTY);
-    await expect(resolveSessionContext(headers, { failOnUnavailable: true }))
-      .rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
+    await expect(resolveSessionContext(headers)).rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
   });
 
-  test("can distinguish an unavailable remote verifier from an invalid credential", async () => {
+  test("reports a JWKS outage as unavailable on every call, never as an anonymous session", async () => {
     const jwks = Bun.serve({
       port: 0,
       fetch: () => new Response(null, { status: 503 }),
@@ -96,9 +97,11 @@ describe("resolveSessionContext bearer fail-closed", () => {
     ].join(".");
     const headers = new Headers({ authorization: `Bearer ${token}` });
     try {
-      await expect(resolveSessionContext(headers)).resolves.toEqual(EMPTY);
-      await expect(resolveSessionContext(headers, { failOnUnavailable: true }))
-        .rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
+      await expect(resolveSessionContext(headers)).rejects.toMatchObject({
+        status: 503,
+        code: "AUTHENTICATION_UNAVAILABLE",
+        message: "Bearer tokens cannot be verified: the remote bearer verifier is unavailable.",
+      });
     } finally {
       jwks.stop(true);
     }
@@ -122,7 +125,7 @@ describe("resolveSessionContext bearer fail-closed", () => {
     ].join(".");
     const headers = new Headers({ authorization: `Bearer ${token}` });
 
-    await expect(resolveSessionContext(headers, { failOnUnavailable: true }))
+    await expect(resolveSessionContext(headers))
       .rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
   });
 
@@ -133,8 +136,7 @@ describe("resolveSessionContext bearer fail-closed", () => {
     __resetSessionResolverForTests();
 
     const headers = new Headers({ authorization: "Bearer not-a-jwt" });
-    await expect(resolveSessionContext(headers, { failOnUnavailable: true }))
-      .resolves.toEqual(EMPTY);
+    await expect(resolveSessionContext(headers)).resolves.toEqual(EMPTY);
   });
 
   test("reports unusable matching remote key material as unavailable", async () => {
@@ -158,10 +160,8 @@ describe("resolveSessionContext bearer fail-closed", () => {
     ].join(".");
 
     try {
-      await expect(resolveSessionContext(
-        new Headers({ authorization: `Bearer ${token}` }),
-        { failOnUnavailable: true },
-      )).rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
+      await expect(resolveSessionContext(new Headers({ authorization: `Bearer ${token}` })))
+        .rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
     } finally {
       jwks.stop(true);
     }
@@ -205,28 +205,92 @@ describe("resolveSessionContext bearer fail-closed", () => {
 
 describe("mergeIdentityRoles (bearer effective roles)", () => {
   test("merges realm roles with every resource_access client's roles, deduplicated and sorted", () => {
-    // Mirrors a dev-realm token: `directie` is the realm composite; Keycloak
-    // expands it into entity client roles under resource_access.
+    // Mirrors a dev-realm token: an audience client composite is expanded by
+    // Keycloak into entity client roles under resource_access.
     expect(
       mergeIdentityRoles({
-        roles: ["directie", "default-roles-openshapeforge"],
+        roles: ["default-roles-openshapeforge"],
         clientRoles: {
-          "erp-provider": ["Relations.All.ReadWrite", "Relations.All.Read"],
+          "erp-provider": ["Test.Admin", "Relations.All.ReadWrite", "Relations.All.Read"],
           account: ["manage-account", "Relations.All.Read"],
         },
       }),
     ).toEqual([
       "Relations.All.Read",
       "Relations.All.ReadWrite",
+      "Test.Admin",
       "default-roles-openshapeforge",
-      "directie",
       "manage-account",
     ]);
   });
 
   test("returns realm roles unchanged when the token carries no client roles", () => {
-    expect(mergeIdentityRoles({ roles: ["directie"] })).toEqual(["directie"]);
+    expect(mergeIdentityRoles({ roles: ["realm-reader"] })).toEqual(["realm-reader"]);
     expect(mergeIdentityRoles({ roles: [], clientRoles: {} })).toEqual([]);
+  });
+});
+
+describe("personSessionRoles (a person's effective roles in the selected organization)", () => {
+  const identity = {
+    roles: ["default-roles-openshapeforge", "Platform.ApiKeys.Manage"],
+    clientRoles: { "erp-provider": ["Organization.All.ReadWrite", "Relations.All.ReadWrite"] },
+  };
+  const realm = "openshapeforge";
+
+  test("unions realm roles with the membership row's roles and ignores client roles entirely", () => {
+    expect(
+      personSessionRoles(identity, { roles: ["General.All.Read"], needsRoleAssignment: false }, realm),
+    ).toEqual(["General.All.Read", "Platform.ApiKeys.Manage", "default-roles-openshapeforge"]);
+  });
+
+  test("an unassigned membership grants no implicit organization permissions", () => {
+    expect(personSessionRoles(identity, { roles: [], needsRoleAssignment: true }, realm)).toEqual([
+      "Platform.ApiKeys.Manage",
+      "default-roles-openshapeforge",
+    ]);
+  });
+
+  test("the shipped realm expands the personas the invitation path records", () => {
+    // Hosts rename the audience client and add permissions; the baseline
+    // organization boundary must hold in both base and composed artifacts.
+    const clients = (roleComposites as any)[realm].clients;
+    const audience = Object.keys(clients).find(key => clients[key].org_admin);
+    expect(audience).toBeDefined();
+    expect(expandRoleComposites(realm, ["org_admin"], audience)).toEqual(
+      expect.arrayContaining(["org_admin", "Organization.All.ReadWrite"]),
+    );
+    const employee = expandRoleComposites(realm, ["org_employee"], audience);
+    expect(employee).toContain("Relations.All.Read");
+    expect(employee).not.toContain("Organization.All.ReadWrite");
+    expect(employee).not.toContain("General.All.Read");
+    // A realm the artifact does not know expands nothing.
+    expect(expandRoleComposites("other-realm", ["org_admin"])).toEqual(["org_admin"]);
+    expect(expandRoleComposites(undefined, ["org_admin"])).toEqual(["org_admin"]);
+  });
+
+  test("expansion follows each member into its own namespace, never a same-named role of another client", () => {
+    __setRoleCompositesForTests({
+      [realm]: {
+        realm: { reader: [{ client: "erp-provider", role: "Records.Read" }] },
+        clients: {
+          "erp-provider": {
+            org_admin: [{ realm: "reader" }, { client: "other", role: "org_admin" }],
+          },
+          other: {
+            // The persona of ANOTHER client named org_admin: reachable only
+            // as a member, and its own members are other's, not erp-provider's.
+            org_admin: [{ client: "other", role: "x" }],
+            "Records.Read": [{ client: "other", role: "leak" }],
+          },
+        },
+      },
+    });
+    try {
+      expect(expandRoleComposites(realm, ["org_admin"])).toEqual(["Records.Read", "org_admin", "reader", "x"]);
+      expect(expandRoleComposites(realm, ["org_admin"], "other")).toEqual(["org_admin", "x"]);
+    } finally {
+      __setRoleCompositesForTests(null);
+    }
   });
 });
 
@@ -242,9 +306,9 @@ describe("tenant from Keycloak Organization membership", () => {
   test("selects the single membership that carries an organization id", () => {
     expect(
       selectOrganizationMembership({
-        organizations: { "zerocopter-dev": { id: "org-1" } },
+        organizations: { "acme-dev": { id: "org-1" } },
       }),
-    ).toEqual({ alias: "zerocopter-dev", id: "org-1" });
+    ).toEqual({ alias: "acme-dev", id: "org-1" });
   });
 
   test("fails closed without an id, and on several memberships with no organization:<alias> scope", () => {

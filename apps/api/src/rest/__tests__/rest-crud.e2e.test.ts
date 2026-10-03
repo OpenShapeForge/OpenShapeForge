@@ -1,22 +1,25 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * Generated REST API e2e suite — the REST counterpart of the manifest-driven
- * GraphQL entity-crud suite. Drives the full Fastify app (createApiApp) via
+ * GraphQL entity-crud suite. Drives the harness's in-process API app via
  * inject(), or E2E_API_URL over HTTP when set, for every entity that opted in
  * with a `rest:` block. Row setup/cleanup reuses the shared GraphQL harness so
  * both APIs are exercised against the same data and RLS session plumbing.
+ *
+ * Contract-driven: which controls a mutation needs (version, lease,
+ * confirmation challenge) and whether a create is entity-backed or
+ * plugin-backed are read from the Operation catalog through
+ * e2e/operations.ts, never assumed per entity.
  */
-import { afterAll, expect } from "bun:test";
+import { expect } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { applyTrustedContextHeaders } from "@openshapeforge/auth";
-import { createApiApp } from "../../roles/api.js";
 import { REST_MOUNT_PATH, REST_OPENAPI_PATH } from "../generated-rest-routes.js";
 import {
-  createdRows,
   describe,
   noRoles,
   readOnly,
   registerSuiteLifecycle,
+  getRuntime,
   remoteUrl,
   seed,
   tenantA,
@@ -25,118 +28,45 @@ import {
   type Identity,
 } from "../../graphql/__tests__/e2e/harness.js";
 import {
-  createRow,
   fieldName,
   foreignKeyTargets,
-  isMutableColumn,
+  nextMarker,
   redactableColumnFor,
-  sampleValue,
-  tables,
-  tablesByName,
+  contractSample,
   textColumnFor,
   untrackRow,
   withClassifiedColumn,
 } from "../../graphql/__tests__/e2e/entity-factory.js";
+import {
+  createOffersField,
+  isEntityBackedCreate,
+  leaseRequired,
+  operationContractFor,
+  operationIdFor,
+  versionRequired,
+} from "../../graphql/__tests__/e2e/operations.js";
+import { expectedDeleteOutcome, expectFreshRecordOffers, expectWriterRefusal } from "../../graphql/__tests__/e2e/reference-policy.js";
+import { updateGeneratedEntity } from "../../operations/entity/index.js";
+import {
+  issueEntityConfirmationChallenge,
+  type ChallengeProtectedOperation,
+} from "../../operations/entity/confirmation-challenges.js";
+import type { LeaseProtectedOperation } from "../../operations/entity/edit-leases.js";
+import {
+  acquireLease,
+  buildCreateBody,
+  createForeignKeyTarget,
+  createRestRow,
+  listPayload,
+  recordPayload,
+  requestLease,
+  rest,
+  restDelete,
+  restTables,
+  trackRestRow,
+} from "./e2e/rest-sweep.js";
 
 registerSuiteLifecycle();
-
-const SECRET = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ?? null;
-
-const restTables = tables.filter((table) => table.source?.rest);
-
-let app: ReturnType<typeof createApiApp> | null = null;
-function getApp() {
-  app ??= createApiApp(
-    process.env.DATABASE_URL
-      ? { cors: false, databaseUrl: process.env.DATABASE_URL }
-      : { cors: false },
-  );
-  return app;
-}
-
-afterAll(async () => {
-  await app?.close();
-  app = null;
-});
-
-type RestResponse = { status: number; body: any };
-
-async function rest(
-  identity: Identity | null,
-  method: "GET" | "POST" | "PATCH" | "DELETE",
-  url: string,
-  payload?: unknown,
-  options: { rawPayload?: string } = {},
-): Promise<RestResponse> {
-  const headers = new Headers();
-  if (identity) {
-    applyTrustedContextHeaders(headers, identity, { secret: SECRET });
-  }
-  const body =
-    options.rawPayload ?? (payload === undefined ? undefined : JSON.stringify(payload));
-  if (body !== undefined) {
-    headers.set("content-type", "application/json");
-  }
-
-  if (remoteUrl) {
-    const response = await fetch(`${remoteUrl}${url}`, {
-      method,
-      headers,
-      ...(body === undefined ? {} : { body }),
-    });
-    const text = await response.text();
-    return { status: response.status, body: text ? JSON.parse(text) : undefined };
-  }
-
-  const response = await getApp().inject({
-    method,
-    url,
-    headers: Object.fromEntries(headers.entries()),
-    ...(body === undefined ? {} : { payload: body }),
-  });
-  return {
-    status: response.statusCode,
-    body: response.body ? JSON.parse(response.body) : undefined,
-  };
-}
-
-/**
- * Builds a valid REST create body: sample values for required non-FK columns,
- * recursively created (GraphQL-tracked) rows for required foreign keys —
- * the same assembly rules as entity-factory's createRow.
- */
-async function buildCreateBody(
-  table: (typeof restTables)[number],
-  identity: Identity,
-  overrides: Record<string, unknown> = {},
-): Promise<Record<string, unknown>> {
-  const fkTargets = foreignKeyTargets(table);
-  const body: Record<string, unknown> = { ...overrides };
-  for (const column of table.columns) {
-    if (!isMutableColumn(column)) continue;
-    const field = fieldName(column);
-    if (field in body) continue;
-    const fkTarget = fkTargets.get(column.name);
-    if (fkTarget) {
-      if (column.required) {
-        const targetTable = tablesByName.get(fkTarget);
-        if (!targetTable) {
-          throw new Error(`Required FK ${table.name}.${column.name} targets unknown table ${fkTarget}`);
-        }
-        body[field] = await createRow(targetTable, identity);
-      }
-      continue;
-    }
-    if (column.required) {
-      body[field] = sampleValue(column, `rest-${seed}`);
-    }
-  }
-  return body;
-}
-
-function trackRestRow(table: (typeof restTables)[number], id: string, identity: Identity) {
-  createdRows.push({ table, id, identity });
-}
 
 describe("REST transport", () => {
   test("manifest exposes at least one rest-enabled entity", () => {
@@ -176,7 +106,7 @@ describe("REST entity role enforcement", () => {
   const base = `${REST_MOUNT_PATH}/${table.source!.rest!.basePath}`;
 
   test("a session without roles gets 403 FORBIDDEN on every operation", async () => {
-    const id = await createRow(table, tenantA);
+    const id = await createRestRow(table, tenantA);
     for (const attempt of [
       () => rest(noRoles, "GET", base),
       () => rest(noRoles, "GET", `${base}/${id}`),
@@ -191,11 +121,14 @@ describe("REST entity role enforcement", () => {
   });
 
   test("a read-only session can GET but not mutate (empty PATCH included)", async () => {
-    const id = await createRow(table, tenantA);
+    const id = await createRestRow(table, tenantA);
 
     const list = await rest(readOnly, "GET", `${base}?id=${id}`);
     expect(list.status).toBe(200);
-    expect(list.body.totalCount).toBe(1);
+    expect(listPayload(list).totalCount).toBe(1);
+    expect(list.body.operations.map((offer: any) => offer.operation.intent)).toEqual([
+      "list",
+    ]);
 
     const single = await rest(readOnly, "GET", `${base}/${id}`);
     expect(single.status).toBe(200);
@@ -221,30 +154,40 @@ for (const table of restTables) {
       const body = await buildCreateBody(table, tenantA);
       const created = await rest(tenantA, "POST", base, body);
       expect(created.status).toBe(201);
-      const id = created.body.id as string;
+      const createdRecord = recordPayload(created);
+      const id = createdRecord.id as string;
       expect(id).toBeTruthy();
       trackRestRow(table, id, tenantA);
-      expect(created.body.createdAt).toBeTruthy();
-      expect(Object.keys(created.body).some((key) => key.includes("_"))).toBe(false);
+      expect(createdRecord.createdAt).toBeTruthy();
+      expect(Object.keys(createdRecord).some((key) => key.includes("_"))).toBe(false);
+      // A fresh record offers every Operation; only a transition whose
+      // `from` excludes the initial state may be listed as INVALID_STATE.
+      expectFreshRecordOffers(table, created.body.operations);
 
       const fetched = await rest(tenantA, "GET", `${base}/${id}`);
       expect(fetched.status).toBe(200);
-      expect(fetched.body.id).toBe(id);
+      expect(recordPayload(fetched).id).toBe(id);
     });
 
-    test("POST with an unknown body field is rejected with 400", async () => {
-      const body = await buildCreateBody(table, tenantA, { nopeField: "x" });
-      const response = await rest(tenantA, "POST", base, body);
-      expect(response.status).toBe(400);
-      expect(response.body.error.message).toContain("nopeField");
-    });
+    if (isEntityBackedCreate(table)) {
+      test("POST with an unknown body field is rejected with 400", async () => {
+        const body = await buildCreateBody(table, tenantA, { nopeField: "x" });
+        const response = await rest(tenantA, "POST", base, body);
+        expect(response.status).toBe(400);
+        expect(response.body.error.message).toContain("nopeField");
+      });
+    }
 
     test("GET list filters by query params (eq and repeated → In)", async () => {
-      const id = await createRow(table, tenantA);
+      const id = await createRestRow(table, tenantA);
       const eq = await rest(tenantA, "GET", `${base}?id=${id}`);
       expect(eq.status).toBe(200);
-      expect(eq.body.totalCount).toBe(1);
-      expect(eq.body.items[0].id).toBe(id);
+      const eqData = listPayload(eq);
+      expect(eqData.totalCount).toBe(1);
+      expect(eqData.items[0].id).toBe(id);
+      expect(
+        eq.body.data.items[0].operations.map((offer: any) => offer.operation.intent),
+      ).toContain("get");
 
       const inFilter = await rest(
         tenantA,
@@ -252,14 +195,14 @@ for (const table of restTables) {
         `${base}?id=${id}&id=${randomUUID()}`,
       );
       expect(inFilter.status).toBe(200);
-      expect(inFilter.body.totalCount).toBe(1);
+      expect(listPayload(inFilter).totalCount).toBe(1);
 
       // Explicit `<field>In` naming (the GraphQL filter convention) must
       // behave identically — single value included, which previously would
       // have been silently dropped by the CRUD layer's array check.
       const inSingle = await rest(tenantA, "GET", `${base}?idIn=${id}`);
       expect(inSingle.status).toBe(200);
-      expect(inSingle.body.totalCount).toBe(1);
+      expect(listPayload(inSingle).totalCount).toBe(1);
 
       const inRepeated = await rest(
         tenantA,
@@ -267,32 +210,34 @@ for (const table of restTables) {
         `${base}?idIn=${id}&idIn=${randomUUID()}`,
       );
       expect(inRepeated.status).toBe(200);
-      expect(inRepeated.body.totalCount).toBe(1);
+      expect(listPayload(inRepeated).totalCount).toBe(1);
     });
 
     test("GET list paginates with first/after without overlap", async () => {
       const ids = [
-        await createRow(table, tenantA),
-        await createRow(table, tenantA),
-        await createRow(table, tenantA),
+        await createRestRow(table, tenantA),
+        await createRestRow(table, tenantA),
+        await createRestRow(table, tenantA),
       ];
       const idParams = ids.map((id) => `id=${id}`).join("&");
       const page1 = await rest(tenantA, "GET", `${base}?${idParams}&first=2`);
       expect(page1.status).toBe(200);
-      expect(page1.body.totalCount).toBe(3);
-      expect(page1.body.items).toHaveLength(2);
-      expect(page1.body.nextCursor).toBeTruthy();
+      const firstPage = listPayload(page1);
+      expect(firstPage.totalCount).toBe(3);
+      expect(firstPage.items).toHaveLength(2);
+      expect(firstPage.nextCursor).toBeTruthy();
 
       const page2 = await rest(
         tenantA,
         "GET",
-        `${base}?${idParams}&first=2&after=${encodeURIComponent(page1.body.nextCursor)}`,
+        `${base}?${idParams}&first=2&after=${encodeURIComponent(firstPage.nextCursor)}`,
       );
       expect(page2.status).toBe(200);
-      expect(page2.body.items).toHaveLength(1);
-      expect(page2.body.nextCursor).toBeNull();
+      const secondPage = listPayload(page2);
+      expect(secondPage.items).toHaveLength(1);
+      expect(secondPage.nextCursor).toBeNull();
 
-      const seen = [...page1.body.items, ...page2.body.items].map((item: any) => item.id);
+      const seen = [...firstPage.items, ...secondPage.items].map((item: any) => item.id);
       expect(new Set(seen).size).toBe(3);
     });
 
@@ -335,8 +280,8 @@ for (const table of restTables) {
     if (sortColumn) {
       const field = fieldName(sortColumn);
       test(`GET list sorts by ${field} asc/desc`, async () => {
-        const low = await createRow(table, tenantA, { [field]: `aaa-rest-${seed}` });
-        const high = await createRow(table, tenantA, { [field]: `zzz-rest-${seed}` });
+        const low = await createRestRow(table, tenantA, { [field]: `aaa-rest-${seed}` });
+        const high = await createRestRow(table, tenantA, { [field]: `zzz-rest-${seed}` });
         for (const [direction, expectedFirst] of [
           ["asc", low],
           ["desc", high],
@@ -347,42 +292,291 @@ for (const table of restTables) {
             `${base}?id=${low}&id=${high}&sortField=${field}&sortDirection=${direction}&first=2`,
           );
           expect(response.status).toBe(200);
-          expect(response.body.items[0].id).toBe(expectedFirst);
+          expect(listPayload(response).items[0].id).toBe(expectedFirst);
         }
       });
 
       test(`PATCH updates ${field}`, async () => {
-        const id = await createRow(table, tenantA);
+        const id = await createRestRow(table, tenantA);
         const updated = `rest-updated-${seed}`;
+        const controls = await acquireLease(table, tenantA, id, "update");
         const response = await rest(tenantA, "PATCH", `${base}/${id}`, {
           [field]: updated,
+          ...controls,
         });
         expect(response.status).toBe(200);
-        expect(response.body[field]).toBe(updated);
+        expect(recordPayload(response)[field]).toBe(updated);
       });
     }
 
     test("PATCH of a nonexistent row returns 404", async () => {
-      const response = await rest(tenantA, "PATCH", `${base}/${randomUUID()}`, {});
+      const missingId = randomUUID();
+      // A lease-protected update cannot begin on a missing row: the lease
+      // service is where NOT_FOUND surfaces.
+      const response = leaseRequired(table, "update")
+        ? await requestLease(table, tenantA, missingId, "update")
+        : await rest(tenantA, "PATCH", `${base}/${missingId}`, {
+            ...(versionRequired(table, "update")
+              ? { expectedVersion: "2026-01-01T00:00:00.000Z" }
+              : {}),
+          });
       expect(response.status).toBe(404);
       expect(response.body.error.code).toBe("NOT_FOUND");
     });
 
-    test("DELETE removes the row (204) and subsequent GET is 404", async () => {
-      const id = await createRow(table, tenantA);
-      const deleted = await rest(tenantA, "DELETE", `${base}/${id}`);
-      expect(deleted.status).toBe(204);
-      untrackRow(id);
+    // What DELETE must do depends on what the create actually left behind,
+    // read from the database: a record nothing references is removed; a
+    // record whose create also made rows that reference it (a document and
+    // its first version) is refused by the schema's on-delete rule while
+    // they exist, and removing them is the create's own contract. A refusal
+    // without such rows, or a removal despite them, is a finding.
+    test("DELETE removes the row with the v2 envelope, or is refused only while rows that reference it exist", async () => {
+      const id = await createRestRow(table, tenantA);
+      // Decided before the first delete call, so a cascade that wrongly took
+      // the companions with it cannot make a refusal look warranted after.
+      const outcome = await expectedDeleteOutcome(table, id, tenantA);
+      if (outcome.refused) {
+        const refused = await restDelete(table, tenantA, id);
+        expect(refused.status).toBe(409);
+        expect(refused.body.error.code).toBe("REFERENCE_IN_USE");
+        expect((await rest(tenantA, "GET", `${base}/${id}`)).status).toBe(200);
+        expect(await expectedDeleteOutcome(table, id, tenantA)).toEqual(outcome);
+        return;
+      }
+      {
+        const deleted = await restDelete(table, tenantA, id);
+        expect(deleted.status).toBe(200);
+        expect(deleted.body.data).toEqual({ deleted: true });
+        expect(Array.isArray(deleted.body.operations)).toBe(true);
+        untrackRow(id);
 
-      const after = await rest(tenantA, "GET", `${base}/${id}`);
-      expect(after.status).toBe(404);
+        const after = await rest(tenantA, "GET", `${base}/${id}`);
+        expect(after.status).toBe(404);
 
-      const again = await rest(tenantA, "DELETE", `${base}/${id}`);
-      expect(again.status).toBe(404);
+        const again = leaseRequired(table, "delete")
+          ? await requestLease(table, tenantA, id, "delete")
+          : await rest(tenantA, "DELETE", `${base}/${id}`, {
+              ...(versionRequired(table, "delete")
+                ? { expectedVersion: "2026-01-01T00:00:00.000Z" }
+                : {}),
+            });
+        expect(again.status).toBe(404);
+      }
     });
 
+    if (leaseRequired(table, "update") && leaseRequired(table, "delete")) {
+      test("the central record lease blocks a second writer across update and delete", async () => {
+        const id = await createRestRow(table, tenantA);
+        const acquired = await requestLease(table, tenantA, id, "update");
+        expect(acquired.status).toBe(201);
+
+        const otherWriter: Identity = {
+          tenantId: tenantA.tenantId,
+          userId: randomUUID(),
+          roles: [...tenantA.roles],
+        };
+        const blocked = await requestLease(table, otherWriter, id, "delete");
+        expect(blocked.status).toBe(423);
+        expect(blocked.body.error).toMatchObject({
+          code: "LOCKED",
+          retryable: true,
+        });
+        expect(blocked.body.error.retryAt).toBeString();
+
+        const released = await rest(
+          tenantA,
+          "POST",
+          "/api/operation-leases/release",
+          { leaseToken: acquired.body.data.leaseToken },
+        );
+        expect(released.status).toBe(200);
+        expect(released.body.data.released).toBe(true);
+      });
+    }
+
+    if (leaseRequired(table, "update")) {
+      test("role revocation blocks lease renewal but not release", async () => {
+        const id = await createRestRow(table, tenantA);
+        const acquired = await requestLease(table, tenantA, id, "update");
+        expect(acquired.status).toBe(201);
+        const revoked: Identity = { ...tenantA, roles: [] };
+
+        const renewal = await rest(
+          revoked,
+          "POST",
+          "/api/operation-leases/renew",
+          { leaseToken: acquired.body.data.leaseToken },
+        );
+        expect(renewal.status).toBe(409);
+        expect(renewal.body.error.code).toBe("LEASE_EXPIRED");
+
+        const release = await rest(
+          revoked,
+          "POST",
+          "/api/operation-leases/release",
+          { leaseToken: acquired.body.data.leaseToken },
+        );
+        expect(release.status).toBe(200);
+        expect(release.body.data.released).toBe(true);
+      });
+    }
+
+    test("REST lease acquire refuses operations outside its lease projection", async () => {
+      // A read never carries a lease, whatever the entity's mutations do.
+      const refused = await rest(tenantA, "POST", "/api/operation-leases", {
+        operationId: operationIdFor(table, "get"),
+        targetId: randomUUID(),
+      });
+      expect(refused.status).toBe(404);
+      expect(refused.body.error).toMatchObject({
+        code: "NOT_FOUND",
+        retryable: false,
+      });
+    });
+
+    if (versionRequired(table, "update")) {
+      test("invalid expectedVersion is a field validation error, not a server error", async () => {
+        const refused = await rest(
+          tenantA,
+          "PATCH",
+          `${base}/${randomUUID()}`,
+          {
+            expectedVersion: "2026-02-30T12:00:00.000Z",
+            leaseToken: "not-used-because-version-validation-runs-first",
+          },
+        );
+        expect(refused.status).toBe(422);
+        expect(refused.body.error).toMatchObject({
+          code: "VALIDATION",
+          retryable: false,
+          violations: [
+            {
+              field: "expectedVersion",
+              code: "INVALID_DATETIME",
+            },
+          ],
+        });
+      });
+    }
+
+    test("invalid mutation control types are canonical validation errors", async () => {
+      const refused = await rest(
+        tenantA,
+        "DELETE",
+        `${base}/${randomUUID()}`,
+        {
+          expectedVersion: new Date().toISOString(),
+          leaseToken: "not-used-because-control-validation-runs-first",
+          confirmationToken: false,
+        },
+      );
+      expect(refused.status).toBe(422);
+      expect(refused.body.error).toMatchObject({
+        code: "VALIDATION",
+        retryable: false,
+        violations: [
+          {
+            field: "confirmationToken",
+            code: "INVALID_TYPE",
+          },
+        ],
+      });
+    });
+
+    const versionedColumn = textColumnFor(table);
+    if (leaseRequired(table, "update") && versionedColumn) {
+      const versionedField = fieldName(versionedColumn);
+
+      test("a valid lease still refuses an older expectedVersion", async () => {
+        const id = await createRestRow(table, tenantA);
+        const firstLease = await acquireLease(table, tenantA, id, "update");
+        const updated = await rest(tenantA, "PATCH", `${base}/${id}`, {
+          [versionedField]: `versioned-${seed}`,
+          ...firstLease,
+        });
+        expect(updated.status).toBe(200);
+
+        const currentLease = await requestLease(table, tenantA, id, "update");
+        expect(currentLease.status).toBe(201);
+        const stale = await rest(tenantA, "PATCH", `${base}/${id}`, {
+          [versionedField]: `must-not-write-${seed}`,
+          expectedVersion: firstLease.expectedVersion,
+          leaseToken: currentLease.body.data.leaseToken,
+        });
+        expect(stale.status).toBe(409);
+        expect(stale.body.error.code).toBe("VERSION_CONFLICT");
+
+        await rest(tenantA, "POST", "/api/operation-leases/release", {
+          leaseToken: currentLease.body.data.leaseToken,
+        });
+      });
+
+      test("a server challenge canonicalizes a visible datetime and protects update atomically", async () => {
+        const id = await createRestRow(table, tenantA);
+        const current = await rest(tenantA, "GET", `${base}/${id}`);
+        const row = recordPayload(current);
+        const lease = await acquireLease(table, tenantA, id, "update");
+        // The entity's own update contract, re-authored with a challenge on a
+        // datetime field: what is under test is the core's canonicalization of
+        // the typed answer, not any one entity's authored confirmation.
+        const authored = operationContractFor(table, "update")!;
+        const challengedOperation = {
+          ...authored,
+          intent: "update" as const,
+          interaction: {
+            confirmation: {
+              mode: "challenge" as const,
+              challenge: {
+                kind: "type-current-field" as const,
+                field: "createdAt",
+                issuedBy: "server" as const,
+                bindTo: [
+                  "subject",
+                  "tenant",
+                  "operation",
+                  "target.id",
+                  "target.version",
+                ] as const,
+                expiresAfter: "PT5M",
+                singleUse: true as const,
+              },
+            },
+          },
+        } satisfies ChallengeProtectedOperation & LeaseProtectedOperation;
+        const required = await issueEntityConfirmationChallenge(
+          getRuntime().db,
+          tenantA,
+          {
+            operation: challengedOperation,
+            table,
+            targetId: id,
+            expectedVersion: lease.expectedVersion!,
+            leaseToken: lease.leaseToken!,
+          },
+        );
+        expect(required.code).toBe("CONFIRMATION_REQUIRED");
+        const confirmation = required.data!.confirmation as {
+          challengeToken: string;
+        };
+        const value = `challenged-update-${seed}`;
+        const updated = await updateGeneratedEntity(getRuntime().db, tenantA, {
+          table: table.name,
+          id,
+          values: { [versionedField]: value },
+          guard: {
+            operation: challengedOperation,
+            expectedVersion: lease.expectedVersion!,
+            leaseToken: lease.leaseToken!,
+            confirmationToken: confirmation.challengeToken,
+            confirmationAnswer: row.createdAt,
+          },
+        });
+        expect(updated?.[versionedColumn.name]).toBe(value);
+      });
+    }
+
     test("cross-tenant isolation: tenant B cannot read tenant A's row", async () => {
-      const id = await createRow(table, tenantA);
+      const id = await createRestRow(table, tenantA);
       const response = await rest(tenantB, "GET", `${base}/${id}`);
       expect(response.status).toBe(404);
     });
@@ -398,6 +592,10 @@ for (const table of restTables) {
  * Skipped against a remote server: withClassifiedColumn arms the in-process
  * manifest, which a server behind E2E_API_URL does not share.
  */
+test("the REST classification suite has a redactable manifest column", () => {
+  expect(restTables.filter(redactableColumnFor).length).toBeGreaterThan(0);
+});
+
 for (const table of restTables) {
   const rest_ = table.source!.rest!;
   const base = `${REST_MOUNT_PATH}/${rest_.basePath}`;
@@ -410,32 +608,32 @@ for (const table of restTables) {
       `a read-only caller gets ${field} nulled on list and get; a writer still sees it`,
       async () => {
         const value = `rest-redaction-${seed}`;
-        const id = await createRow(table, tenantA, { [field]: value });
+        const id = await createRestRow(table, tenantA, { [field]: value });
 
         // Control: unclassified, the column is served to a read-only caller.
         const control = await rest(readOnly, "GET", `${base}/${id}`);
         expect(control.status).toBe(200);
-        expect(control.body[field]).toBe(value);
+        expect(recordPayload(control)[field]).toBe(value);
 
         await withClassifiedColumn(classified, "pii", async () => {
           const single = await rest(readOnly, "GET", `${base}/${id}`);
           expect(single.status).toBe(200);
-          expect(single.body[field]).toBeNull();
+          expect(recordPayload(single)[field]).toBeNull();
           // Unclassified columns are untouched.
-          expect(single.body.id).toBe(id);
-          expect(single.body.createdAt).toBeTruthy();
+          expect(recordPayload(single).id).toBe(id);
+          expect(recordPayload(single).createdAt).toBeTruthy();
 
           const list = await rest(readOnly, "GET", `${base}?id=${id}`);
           expect(list.status).toBe(200);
-          expect(list.body.totalCount).toBe(1);
-          expect(list.body.items[0][field]).toBeNull();
+          expect(listPayload(list).totalCount).toBe(1);
+          expect(listPayload(list).items[0][field]).toBeNull();
 
           // A write grant reads the real value on both paths — redaction is
           // scoped to the grant, not a blanket null.
           const writerSingle = await rest(tenantA, "GET", `${base}/${id}`);
-          expect(writerSingle.body[field]).toBe(value);
+          expect(recordPayload(writerSingle)[field]).toBe(value);
           const writerList = await rest(tenantA, "GET", `${base}?id=${id}`);
-          expect(writerList.body.items[0][field]).toBe(value);
+          expect(listPayload(writerList).items[0][field]).toBe(value);
         });
       },
     );
@@ -444,7 +642,7 @@ for (const table of restTables) {
       `a read-only caller cannot filter or sort by ${field}`,
       async () => {
         const value = `rest-oracle-${seed}`;
-        const id = await createRow(table, tenantA, { [field]: value });
+        const id = await createRestRow(table, tenantA, { [field]: value });
         const probe = encodeURIComponent(value);
 
         await withClassifiedColumn(classified, "pii", async () => {
@@ -458,8 +656,7 @@ for (const table of restTables) {
             expect(response.status).toBe(403);
             expect(response.body.error.code).toBe("FORBIDDEN");
             // The refusal must not answer the question it refused.
-            expect(response.body.items).toBeUndefined();
-            expect(response.body.totalCount).toBeUndefined();
+            expect(response.body.data).toBeUndefined();
           }
 
           // The same query stays available to a write grant.
@@ -469,8 +666,8 @@ for (const table of restTables) {
             `${base}?${field}=${probe}&sortField=${field}`,
           );
           expect(allowed.status).toBe(200);
-          expect(allowed.body.totalCount).toBe(1);
-          expect(allowed.body.items[0].id).toBe(id);
+          expect(listPayload(allowed).totalCount).toBe(1);
+          expect(listPayload(allowed).items[0].id).toBe(id);
         });
       },
     );
@@ -497,35 +694,50 @@ for (const table of restTables) {
 
   /** A value the column will accept: a real parent row for an FK, else a sample. */
   const valueFor = async (identity: Identity) => {
-    if (!fkTarget) return sampleValue(immutable, `rest-immutable-${seed}`);
-    const targetTable = tablesByName.get(fkTarget);
-    if (!targetTable) throw new Error(`immutable FK targets unknown table ${fkTarget}`);
-    return await createRow(targetTable, identity);
+    if (!fkTarget) return contractSample(table, immutable, nextMarker());
+    return createForeignKeyTarget(fkTarget, identity);
   };
+  // An entity-backed create offers the column as input; a plugin create only
+  // where its authored contract names the field (a milestone's basis amount),
+  // and otherwise owns the value (a document's current version). PATCH
+  // refuses it either way, and the schema says so.
+  const offeredOnCreate = createOffersField(table, field);
+  // A column an Operation writes is refused naming every writer, on create and update alike.
+  const writers = (immutable.writtenBy ?? []).map((writer) => writer.operation);
 
   describe(`${rest_.basePath} immutable fields`, () => {
-    test(`POST accepts ${field}; PATCH rejects it with 400 and the value stands`, async () => {
-      const value = await valueFor(tenantA);
-      const body = await buildCreateBody(table, tenantA, { [field]: value });
+    test(`${offeredOnCreate ? `POST accepts ${field}; ` : ""}PATCH rejects ${field} with 400 and the value stands`, async () => {
+      const body = offeredOnCreate
+        ? await buildCreateBody(table, tenantA, { [field]: await valueFor(tenantA) })
+        : await buildCreateBody(table, tenantA);
+      // A column an Operation writes is not the caller's at create either: the
+      // entity-backed create refuses it by name, as the update does below.
+      if (!offeredOnCreate && isEntityBackedCreate(table)) {
+        const refusedCreate = await rest(tenantA, "POST", base, { ...body, [field]: await valueFor(tenantA) });
+        expect(refusedCreate.status).toBe(400);
+        expectWriterRefusal(refusedCreate.body.error, field, writers);
+      }
       const created = await rest(tenantA, "POST", base, body);
       expect(created.status).toBe(201);
-      const id = created.body.id as string;
+      const id = recordPayload(created).id as string;
       trackRestRow(table, id, tenantA);
-      expect(created.body[field]).toBe(value);
+      const value = recordPayload(await rest(tenantA, "GET", `${base}/${id}`))[field];
+      // A numeric value is sent as a number and read back as its decimal text.
+      const sent = body[field];
+      if (offeredOnCreate) expect(value).toBe(typeof sent === "number" && typeof value === "string" ? String(sent) : sent);
 
       // Re-pointing the record at a different parent is the integrity gap.
       const repointed = await valueFor(tenantA);
       const patched = await rest(tenantA, "PATCH", `${base}/${id}`, { [field]: repointed });
       expect(patched.status).toBe(400);
-      expect(patched.body.error.code).toBe("BAD_USER_INPUT");
-      expect(patched.body.error.message).toContain(field);
+      expectWriterRefusal(patched.body.error, field, writers);
 
       const after = await rest(tenantA, "GET", `${base}/${id}`);
       expect(after.status).toBe(200);
-      expect(after.body[field]).toBe(value);
+      expect(recordPayload(after)[field]).toBe(value);
     });
 
-    test(`openapi.json advertises ${field} on POST only`, async () => {
+    test(`openapi.json advertises ${field} on ${offeredOnCreate ? "POST only" : "neither POST nor PATCH"}`, async () => {
       const spec = await rest(null, "GET", REST_OPENAPI_PATH);
       expect(spec.status).toBe(200);
       const schemaFor = (operation: "post" | "patch", path: string) => {
@@ -536,7 +748,8 @@ for (const table of restTables) {
       const create = schemaFor("post", `${REST_MOUNT_PATH}/${rest_.basePath}`);
       const update = schemaFor("patch", `${REST_MOUNT_PATH}/${rest_.basePath}/{id}`);
 
-      expect(Object.keys(create.properties)).toContain(field);
+      if (offeredOnCreate) expect(Object.keys(create.properties)).toContain(field);
+      else expect(Object.keys(create.properties)).not.toContain(field);
       expect(Object.keys(update.properties)).not.toContain(field);
     });
   });

@@ -13,19 +13,15 @@ import {
   type GraphQLResolveInfo,
   type SelectionSetNode,
 } from "graphql";
+import { isScalarType, operationErrorOf, SCALAR_PROJECTION } from "@openshapeforge/operations";
 import graphqlDocumentation from "../generated/graphql/documentation.json" with { type: "json" };
 import {
   getGeneratedCrudTables,
-  getGeneratedEntity,
   isElicitedOutputColumn,
   isGeneratedCrudOperationEnabled,
-  createGeneratedEntity,
-  deleteGeneratedEntity,
   isCallerWritableColumn,
   isOperationWrittenColumn,
-  listGeneratedEntities,
   listGeneratedEntityRelation,
-  updateGeneratedEntity,
   type GeneratedCrudRelationship,
 } from "./generated-crud.js";
 // Field-level redaction and the classified filter/sort guard are NOT applied
@@ -33,6 +29,17 @@ import {
 // through, so REST and future transports are covered by the same code (#164).
 import { assertOperationAllowed } from "./generated-authz.js";
 import type { GraphqlContext } from "./context.js";
+import { collectionMutationError } from "../operations/entity/collection-policy.js";
+import { projectGraphqlOperation } from "./operation-error.js";
+import {
+  entityOperationContract,
+  entityOperationRef,
+  executeEntityOperation,
+} from "../operations/entity/index.js";
+import type {
+  EntityOperationInput,
+  GeneratedCrudExposureOperation,
+} from "../operations/entity/types.js";
 
 type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 
@@ -88,17 +95,80 @@ const documentationByGraphqlType = createGraphqlDocumentationIndex(
 type CrudOperation = "list" | "get" | "create" | "update" | "delete";
 
 function operationEnabled(table: GeneratedTable, operation: CrudOperation): boolean {
-  return isGeneratedCrudOperationEnabled(table, operation);
+  if (table.source?.graphql?.operations?.[operation] === false ||
+    !isGeneratedCrudOperationEnabled(table, operation)) return false;
+  if (operation === "create" && collectionMutationError(table, "create", getGeneratedCrudTables()) &&
+    entityOperationContract(entityOperationRef(table, "create").id).implementation?.type !== "plugin") return false;
+  return true;
+}
+
+function projectedOperationIntents(table: GeneratedTable): GeneratedCrudExposureOperation[] {
+  const operations = table.source?.graphql?.operations ?? {} as Partial<
+    Record<GeneratedCrudExposureOperation, boolean>
+  >;
+  return (["list", "get", "create", "update", "delete"] as const)
+    .filter((intent) => operations[intent] !== false && operationEnabled(table, intent));
+}
+
+function operationContractForSchema(
+  table: GeneratedTable,
+  intent: "create" | "update" | "delete",
+) {
+  try {
+    return entityOperationContract(entityOperationRef(table, intent).id);
+  } catch (error) {
+    if (operationErrorOf(error)?.code === "GENERATED_CRUD_NOT_ENABLED") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function operationControlFields(
+  table: GeneratedTable,
+  intent: "create" | "update" | "delete",
+): string[] {
+  if (!operationEnabled(table, intent)) return [];
+  const operation = operationContractForSchema(table, intent);
+  return [
+    ...(intent === "create" && table.source?.blueprint ? ["      blueprintId: String"] : []),
+    ...(operation?.concurrency?.version ? ["      expectedVersion: String!"] : []),
+    ...(operation?.concurrency?.editLease ? ["      leaseToken: String!"] : []),
+    ...(operation?.interaction.confirmation.mode === "acknowledgement"
+      ? ["      confirmed: Boolean!"]
+      : []),
+    ...(operation?.interaction.confirmation.mode === "challenge"
+      ? ["      confirmationToken: String", "      confirmationAnswer: String"]
+      : []),
+  ];
+}
+
+function canonicalRecordResultType(graphql: GraphqlMetadata): string {
+  return `${graphql.typeName}OperationResult`;
+}
+
+function mutationInputType(table: GeneratedTable, intent: "create" | "update"): string {
+  const graphql = assertGraphqlMetadata(table);
+  if (operationContractForSchema(table, intent)?.implementation?.type === "plugin") return "JSON";
+  return `${intent === "create" ? "Create" : "Update"}${graphql.typeName}Input`;
+}
+
+function canonicalCollectionResultType(graphql: GraphqlMetadata): string {
+  return `${graphql.typeName}CollectionOperationResult`;
+}
+
+function canonicalDeleteResultType(graphql: GraphqlMetadata): string {
+  return `${graphql.typeName}DeleteOperationResult`;
 }
 
 export function renderGeneratedQueryFields(table: GeneratedTable): string[] {
   const graphql = assertGraphqlMetadata(table);
   return [
     ...(operationEnabled(table, "get")
-      ? [`      ${graphql.singleQueryName}(id: ID!): ${graphql.typeName}`]
+      ? [`      ${graphql.singleQueryName}(id: ID!): ${canonicalRecordResultType(graphql)}`]
       : []),
     ...(operationEnabled(table, "list")
-      ? [`      ${graphql.listQueryName}(filter: ${graphql.typeName}Filter, sort: ${graphql.typeName}Sort, first: Int, after: String): ${graphql.typeName}Connection!`]
+      ? [`      ${graphql.listQueryName}(filter: ${graphql.typeName}Filter, sort: ${graphql.typeName}Sort, first: Int, after: String): ${canonicalCollectionResultType(graphql)}`]
       : []),
   ];
 }
@@ -107,13 +177,13 @@ export function renderGeneratedMutationFields(table: GeneratedTable): string[] {
   const graphql = assertGraphqlMetadata(table);
   return [
     ...(operationEnabled(table, "create")
-      ? [`      ${graphql.createMutationName}(input: Create${graphql.typeName}Input!): ${graphql.typeName}`]
+      ? [`      ${graphql.createMutationName}(input: ${mutationInputType(table, "create")}!): ${canonicalRecordResultType(graphql)}`]
       : []),
     ...(operationEnabled(table, "update")
-      ? [`      ${graphql.updateMutationName}(input: Update${graphql.typeName}Input!): ${graphql.typeName}`]
+      ? [`      ${graphql.updateMutationName}(input: ${mutationInputType(table, "update")}!): ${canonicalRecordResultType(graphql)}`]
       : []),
     ...(operationEnabled(table, "delete")
-      ? [`      ${graphql.deleteMutationName}(id: ID!): Boolean!`]
+      ? [`      ${graphql.deleteMutationName}(input: Delete${graphql.typeName}Input!): ${canonicalDeleteResultType(graphql)}`]
       : []),
   ];
 }
@@ -134,25 +204,8 @@ function assertGraphqlMetadata(table: GeneratedTable): GraphqlMetadata {
   return graphql;
 }
 
-function graphqlScalarForColumn(column: GeneratedTable["columns"][number]) {
-  switch (column.type) {
-    case "boolean":
-      return "Boolean";
-    case "integer":
-      return "Int";
-    case "bigint":
-    case "numeric":
-      return "Float";
-    case "uuid":
-      return "ID";
-    case "jsonb":
-      return "JSON";
-    case "date":
-    case "timestamptz":
-    case "text":
-    default:
-      return "String";
-  }
+function graphqlScalarForColumn(column: GeneratedTable["columns"][number]): string {
+  return isScalarType(column.type) ? SCALAR_PROJECTION[column.type].gql : "String";
 }
 
 function fieldNameForColumn(column: GeneratedTable["columns"][number]) {
@@ -173,7 +226,7 @@ function fieldNameForColumn(column: GeneratedTable["columns"][number]) {
  * admits the null that redaction produces.
  */
 export function nonNullSuffix(column: GeneratedTable["columns"][number]) {
-  if (column.classification) {
+  if (column.classification || column.fieldPolicy?.readRoles !== undefined) {
     return "";
   }
   return column.required || column.primaryKey ? "!" : "";
@@ -260,7 +313,8 @@ export function renderTypeDefinition(
     (column) => !isElicitedOutputColumn(table, column),
   );
   const filterFieldNames = new Set(queryableColumns.map(fieldNameForColumn));
-  const columnFields = table.columns
+  const relationNames = new Set((graphql.relationships ?? []).filter((relationship) => relationship.fieldKey).map((relationship) => relationship.name));
+  const columnFields = table.columns.filter((column) => !relationNames.has(fieldNameForColumn(column)))
     .map((column) => {
       const field = fieldNameForColumn(column);
       return `${renderDescription(fieldDocumentation.get(field)?.description, "      ")}` +
@@ -272,7 +326,8 @@ export function renderTypeDefinition(
       relationshipReadEnabled(relationship, tablesByGraphqlType.get(relationship.target))
     )
     .flatMap((relationship) => [
-      `      ${relationship.name}: ${relationFieldType(relationship)}`,
+      `${renderDescription(fieldDocumentation.get(relationship.name)?.description, "      ")}` +
+        `      ${relationship.name}: ${relationFieldType(relationship)}`,
       `      ${relationship.name}Aggregate: AggregateResult!`,
     ]);
   // Create and update inputs are rendered from the CRUD layer's caller
@@ -300,23 +355,59 @@ export function renderTypeDefinition(
       return `${renderDescription(fieldDocumentation.get(field)?.description, "      ")}` +
         `      ${field}: ${graphqlScalarForColumn(column)}`;
     }),
+    ...operationControlFields(table, "update"),
   ].join("\n");
+  const canonicalCreateInputBody = [
+    createInputBody,
+    ...operationControlFields(table, "create"),
+  ].join("\n");
+  const deleteInputBody = [
+    "      id: ID!",
+    ...operationControlFields(table, "delete"),
+  ].join("\n");
+  const canonicalResultTypes = `
+    type ${graphql.typeName}RecordEnvelope {
+      data: ${graphql.typeName}!
+      operations: [EntityOperationOffer!]!
+    }
+
+    type ${graphql.typeName}CollectionData {
+      items: [${graphql.typeName}RecordEnvelope!]!
+      nextCursor: String
+      totalCount: Int
+    }
+
+    type ${canonicalRecordResultType(graphql)} {
+      data: ${graphql.typeName}
+      operations: [EntityOperationOffer!]
+      error: EntityOperationError
+    }
+
+    type ${canonicalCollectionResultType(graphql)} {
+      data: ${graphql.typeName}CollectionData
+      operations: [EntityOperationOffer!]
+      error: EntityOperationError
+    }
+
+    type ${graphql.typeName}DeletionData {
+      deleted: Boolean!
+    }
+
+    type ${canonicalDeleteResultType(graphql)} {
+      data: ${graphql.typeName}DeletionData
+      operations: [EntityOperationOffer!]
+      error: EntityOperationError
+    }
+
+    input Delete${graphql.typeName}Input {
+${deleteInputBody}
+    }
+`;
 
   return `
 ${renderDescription(documentation?.description, "    ")}
     type ${graphql.typeName} {
 ${[...columnFields, ...relationshipFields].join("\n")}
-    }
-
-    type ${graphql.typeName}Edge {
-      node: ${graphql.typeName}
-      cursor: String
-    }
-
-    type ${graphql.typeName}Connection {
-      edges: [${graphql.typeName}Edge!]!
-      pageInfo: PageInfo!
-      totalCount: Int
     }
 
     input ${graphql.typeName}Filter {
@@ -368,26 +459,109 @@ ${queryableColumns
 
 ${renderDescription(operationWrittenNote(table), "    ")}
     input Create${graphql.typeName}Input {
-${createInputBody}
+${canonicalCreateInputBody}
     }
 
 ${renderDescription(operationWrittenNote(table), "    ")}
     input Update${graphql.typeName}Input {
 ${updateInputBody}
     }
+${canonicalResultTypes}
   `;
 }
 
-export const generatedEntityTypeDefs = /* GraphQL */ `
-  type PageInfo {
-    hasNextPage: Boolean
-    endCursor: String
-  }
-
+/** The result envelope, offer and error types every generated entity's SDL refers to. */
+export const entityOperationSharedTypeDefs = /* GraphQL */ `
   type AggregateResult {
     count: Int!
   }
 
+  type EntityOperationReference {
+    id: String!
+    intent: String!
+  }
+
+  type EntityOperationViolation {
+    field: String
+    code: String!
+    message: String!
+    detail: String
+  }
+
+  type EntityOperationError {
+    code: String!
+    message: String!
+    detail: String
+    violations: [EntityOperationViolation!]
+    retryable: Boolean!
+    retryAt: String
+    data: JSON
+  }
+
+  type EntityOperationInteractionChoice {
+    value: String!
+    label: String!
+    description: String
+    available: Boolean
+    error: EntityOperationError
+  }
+
+  type EntityOperationInteractionBinding {
+    tenant: String!
+    subject: String!
+    target: String
+    instance: String
+    node: String
+    version: String
+  }
+
+  type EntityOperationInteraction {
+    kind: String!
+    offerId: String!
+    expiresAt: String!
+    bindTo: EntityOperationInteractionBinding!
+    inputSchema: JSON
+    choices: [EntityOperationInteractionChoice!]
+  }
+
+  type EntityOperationVersionConcurrency {
+    mode: String!
+    field: String!
+  }
+
+  type EntityOperationEditLeaseConcurrency {
+    mode: String!
+    expiresAfterInactivity: String!
+  }
+
+  type EntityOperationConcurrency {
+    version: EntityOperationVersionConcurrency
+    editLease: EntityOperationEditLeaseConcurrency
+  }
+
+  type EntityOperationTarget {
+    entityId: String!
+    id: String!
+    version: String
+  }
+
+  type EntityOperationTargetBinding {
+    target: EntityOperationTarget!
+    input: JSON!
+  }
+
+  type EntityOperationOffer {
+    operation: EntityOperationReference!
+    available: Boolean!
+    interaction: EntityOperationInteraction
+    concurrency: EntityOperationConcurrency
+    binding: EntityOperationTargetBinding
+    error: EntityOperationError
+  }
+`;
+
+export const generatedEntityTypeDefs = /* GraphQL */ `
+${entityOperationSharedTypeDefs}
 ${tables.map((table) => renderTypeDefinition(table)).join("\n")}
 `;
 
@@ -400,13 +574,13 @@ export function renderQueryFields(
       ? [`${renderDescription(
           `Fetches one ${graphql.typeName} record by id.`,
           "      ",
-        )}      ${graphql.singleQueryName}(id: ID!): ${graphql.typeName}`]
+        )}      ${graphql.singleQueryName}(id: ID!): ${canonicalRecordResultType(graphql)}`]
       : []),
     ...(operationEnabled(table, "list")
       ? [`${renderDescription(
           `Returns a page of ${graphql.typeName} records.`,
           "      ",
-        )}      ${graphql.listQueryName}(filter: ${graphql.typeName}Filter, sort: ${graphql.typeName}Sort, first: Int, after: String): ${graphql.typeName}Connection!`]
+        )}      ${graphql.listQueryName}(filter: ${graphql.typeName}Filter, sort: ${graphql.typeName}Sort, first: Int, after: String): ${canonicalCollectionResultType(graphql)}`]
       : []),
   ].join("\n");
 }
@@ -424,19 +598,19 @@ export function renderMutationFields(
       ? [`${renderDescription(
           `Creates a ${graphql.typeName} record.`,
           "      ",
-        )}      ${graphql.createMutationName}(input: Create${graphql.typeName}Input!): ${graphql.typeName}`]
+        )}      ${graphql.createMutationName}(input: ${mutationInputType(table, "create")}!): ${canonicalRecordResultType(graphql)}`]
       : []),
     ...(operationEnabled(table, "update")
       ? [`${renderDescription(
           `Partially updates a ${graphql.typeName} record.`,
           "      ",
-        )}      ${graphql.updateMutationName}(input: Update${graphql.typeName}Input!): ${graphql.typeName}`]
+        )}      ${graphql.updateMutationName}(input: ${mutationInputType(table, "update")}!): ${canonicalRecordResultType(graphql)}`]
       : []),
     ...(operationEnabled(table, "delete")
       ? [`${renderDescription(
           `Deletes a ${graphql.typeName} record by id.`,
           "      ",
-        )}      ${graphql.deleteMutationName}(id: ID!): Boolean!`]
+        )}      ${graphql.deleteMutationName}(input: Delete${graphql.typeName}Input!): ${canonicalDeleteResultType(graphql)}`]
       : []),
   ].join("\n");
 }
@@ -459,26 +633,6 @@ function requireGeneratedDb(context: GraphqlContext) {
   return context.db;
 }
 
-function toConnection(
-  rows: Record<string, unknown>[],
-  nextCursor: string | null,
-  totalCount: number | null,
-) {
-  return {
-    edges: rows.map((row, index) => ({
-      node: row,
-      cursor: Buffer.from(String(index + 1), "utf8").toString("base64url"),
-    })),
-    pageInfo: {
-      hasNextPage: nextCursor !== null,
-      endCursor: nextCursor,
-    },
-    // Null only when the client did not select it, in which case nothing reads
-    // it. `totalCount: Int` is nullable in the schema, so this is well-formed.
-    totalCount,
-  };
-}
-
 /**
  * Whether the client selected `name` on the field being resolved.
  *
@@ -486,8 +640,9 @@ function toConnection(
  * `totalCount` must not pay for the count pass. Walks the selection set the
  * same way execution will — inline fragments and named fragment spreads
  * included, since `... on FooConnection { totalCount }` selects the field just
- * as plainly as naming it. Aliases need no handling: an alias renames the
- * response key, not the field.
+ * as plainly as naming it — and through the canonical `data` envelope, where a
+ * v2 client's `totalCount` lives. Aliases need no handling: an alias renames
+ * the response key, not the field.
  *
  * Wrong in the safe direction if it ever missed a spelling: the count comes
  * back null and the client sees no value, rather than the server quietly
@@ -501,6 +656,12 @@ function selectionIncludes(info: GraphQLResolveInfo, name: string): boolean {
     for (const selection of selectionSet.selections) {
       if (selection.kind === Kind.FIELD) {
         if (selection.name.value === name) return true;
+        // A canonical result wraps the collection in `data { ... }`, so the
+        // count a v2 client asks for sits one field down. Only that envelope
+        // is descended: a record's own nested selections never carry a count,
+        // and walking them would charge a count pass to a query that asked
+        // for none.
+        if (selection.name.value === "data" && walk(selection.selectionSet)) return true;
       } else if (selection.kind === Kind.INLINE_FRAGMENT) {
         if (walk(selection.selectionSet)) return true;
       } else if (selection.kind === Kind.FRAGMENT_SPREAD) {
@@ -518,20 +679,67 @@ function selectionIncludes(info: GraphQLResolveInfo, name: string): boolean {
   return info.fieldNodes.some((node) => walk(node.selectionSet));
 }
 
+const GRAPHQL_OPERATION_CONTROLS = new Set([
+  "blueprintId",
+  "expectedVersion",
+  "leaseToken",
+  "confirmed",
+  "confirmationToken",
+  "confirmationAnswer",
+]);
+
+/** Split transport controls from authored values before canonical dispatch. */
+export function splitCanonicalGraphqlMutationInput(
+  input: Record<string, unknown>,
+  includeId: boolean,
+): { id?: string; values: Record<string, unknown>; controls: EntityOperationInput } {
+  const values: Record<string, unknown> = {};
+  const controls: EntityOperationInput = {};
+  let id: string | undefined;
+  for (const [key, value] of Object.entries(input)) {
+    if (includeId && key === "id") {
+      if (typeof value === "string") id = value;
+    } else if (GRAPHQL_OPERATION_CONTROLS.has(key)) {
+      (controls as Record<string, unknown>)[key] = value;
+    } else {
+      values[key] = value;
+    }
+  }
+  return { ...(id === undefined ? {} : { id }), values, controls };
+}
+
+/**
+ * Canonical GraphQL adapter boundary, exported so tests and alternate schema
+ * composers can prove they dispatch the same request contract as REST/MCP.
+ */
+export function executeCanonicalGraphqlOperation(
+  table: GeneratedTable,
+  intent: GeneratedCrudExposureOperation,
+  input: EntityOperationInput,
+  context: GraphqlContext,
+  dispatcher: typeof executeEntityOperation = executeEntityOperation,
+) {
+  const db = requireGeneratedDb(context);
+  return dispatcher(db, context.session!, {
+    operation: entityOperationRef(table, intent),
+    offerIntents: projectedOperationIntents(table),
+    input,
+  });
+}
+
 const queryResolvers = Object.fromEntries(
   tables.flatMap((table) => {
     const graphql = assertGraphqlMetadata(table);
-    const authorization = table.source?.authorization;
     return [
       ...(operationEnabled(table, "get") ? [[
         graphql.singleQueryName,
         async (_parent: unknown, args: { id: string }, context: GraphqlContext) => {
-          const db = requireGeneratedDb(context);
-          assertOperationAllowed(authorization, context.session, "read", graphql.typeName);
-          return getGeneratedEntity(db, context.session, {
-            table: table.name,
-            id: args.id,
-          });
+          return executeCanonicalGraphqlOperation(
+            table,
+            "get",
+            { id: args.id },
+            context,
+          );
         },
       ]] : []),
       ...(operationEnabled(table, "list") ? [[
@@ -547,19 +755,22 @@ const queryResolvers = Object.fromEntries(
           context: GraphqlContext,
           info: GraphQLResolveInfo,
         ) => {
-          const db = requireGeneratedDb(context);
-          assertOperationAllowed(authorization, context.session, "read", graphql.typeName);
-          const result = await listGeneratedEntities(db, context.session, {
-            table: table.name,
-            ...(args.first === undefined ? {} : { limit: args.first }),
-            ...(args.after === undefined ? {} : { cursor: args.after }),
-            ...(args.filter === undefined ? {} : { filter: args.filter }),
-            ...(args.sort === undefined ? {} : { sort: args.sort }),
-            // The count is the expensive half of a list read (#17). Ask for it
-            // only when the client selected the field it feeds.
-            ...(selectionIncludes(info, "totalCount") ? { includeTotalCount: true as const } : {}),
-          });
-          return toConnection(result.rows, result.nextCursor, result.totalCount);
+          return executeCanonicalGraphqlOperation(
+            table,
+            "list",
+            {
+              ...(args.first === undefined ? {} : { limit: args.first }),
+              ...(args.after === undefined ? {} : { cursor: args.after }),
+              ...(args.filter === undefined ? {} : { filter: args.filter }),
+              ...(args.sort === undefined ? {} : { sort: args.sort }),
+              // The count is the expensive half of a list read (#17). Ask for
+              // it only when the client selected the field it feeds.
+              ...(selectionIncludes(info, "totalCount")
+                ? { includeTotalCount: true as const }
+                : {}),
+            },
+            context,
+          );
         },
       ]] : []),
     ];
@@ -569,40 +780,60 @@ const queryResolvers = Object.fromEntries(
 const mutationResolvers = Object.fromEntries(
   tables.flatMap((table) => {
     const graphql = assertGraphqlMetadata(table);
-    const authorization = table.source?.authorization;
     return [
       ...(operationEnabled(table, "create") ? [[
         graphql.createMutationName,
         async (_parent: unknown, args: { input: Record<string, unknown> }, context: GraphqlContext) => {
-          const db = requireGeneratedDb(context);
-          assertOperationAllowed(authorization, context.session, "create", graphql.typeName);
-          return createGeneratedEntity(db, context.session, {
-            table: table.name,
-            values: args.input,
-          });
+          if (entityOperationContract(entityOperationRef(table, "create").id).implementation?.type === "plugin") {
+            return executeCanonicalGraphqlOperation(table, "create", args.input, context);
+          }
+          const { values, controls } = splitCanonicalGraphqlMutationInput(
+            args.input,
+            false,
+          );
+          return executeCanonicalGraphqlOperation(
+            table,
+            "create",
+            { values, ...controls },
+            context,
+          );
         },
       ]] : []),
       ...(operationEnabled(table, "update") ? [[
         graphql.updateMutationName,
         async (_parent: unknown, args: { input: Record<string, unknown> & { id: string } }, context: GraphqlContext) => {
-          const db = requireGeneratedDb(context);
-          assertOperationAllowed(authorization, context.session, "update", graphql.typeName);
-          return updateGeneratedEntity(db, context.session, {
-            table: table.name,
-            id: args.input.id,
-            values: args.input,
-          });
+          if (entityOperationContract(entityOperationRef(table, "update").id).implementation?.type === "plugin") {
+            return executeCanonicalGraphqlOperation(table, "update", args.input, context);
+          }
+          const { id, values, controls } = splitCanonicalGraphqlMutationInput(
+            args.input,
+            true,
+          );
+          return executeCanonicalGraphqlOperation(
+            table,
+            "update",
+            { ...(id === undefined ? {} : { id }), values, ...controls },
+            context,
+          );
         },
       ]] : []),
       ...(operationEnabled(table, "delete") ? [[
         graphql.deleteMutationName,
-        async (_parent: unknown, args: { id: string }, context: GraphqlContext) => {
-          const db = requireGeneratedDb(context);
-          assertOperationAllowed(authorization, context.session, "delete", graphql.typeName);
-          return deleteGeneratedEntity(db, context.session, {
-            table: table.name,
-            id: args.id,
-          });
+        async (
+          _parent: unknown,
+          args: { input: Record<string, unknown> & { id: string } },
+          context: GraphqlContext,
+        ) => {
+          const { id, controls } = splitCanonicalGraphqlMutationInput(
+            args.input,
+            true,
+          );
+          return executeCanonicalGraphqlOperation(
+            table,
+            "delete",
+            { ...(id === undefined ? {} : { id }), ...controls },
+            context,
+          );
         },
       ]] : []),
     ];
@@ -612,8 +843,10 @@ const mutationResolvers = Object.fromEntries(
 const objectResolvers = Object.fromEntries(
   tables.map((table) => {
     const graphql = assertGraphqlMetadata(table);
+    const relationNames = new Set((graphql.relationships ?? [])
+      .filter((relationship) => relationship.fieldKey).map((relationship) => relationship.name));
     const fields = Object.fromEntries(
-      table.columns.map((column) => [
+      table.columns.filter((column) => !relationNames.has(fieldNameForColumn(column))).map((column) => [
         fieldNameForColumn(column),
         (parent: Record<string, unknown>) => parent[column.name],
       ]),
@@ -628,7 +861,10 @@ const objectResolvers = Object.fromEntries(
         return [
           [
             relationship.name,
-            async (parent: Record<string, unknown>, _args: unknown, context: GraphqlContext) => {
+            // Projected like the root resolvers: a refusal inside the edge
+            // (FORBIDDEN on the target) must reach the client with its code,
+            // not as a masked "Unexpected error." (#471).
+            (parent: Record<string, unknown>, _args: unknown, context: GraphqlContext) => projectGraphqlOperation(async () => {
               const db = requireGeneratedDb(context);
               // Reading the related entity requires read authorization on the
               // TARGET entity (#94): a caller with no read grant on the target
@@ -643,11 +879,11 @@ const objectResolvers = Object.fromEntries(
               return relationship.resolve === "belongsTo"
                 ? result.rows[0] ?? null
                 : result.rows;
-            },
+            }),
           ],
           [
             `${relationship.name}Aggregate`,
-            async (parent: Record<string, unknown>, _args: unknown, context: GraphqlContext) => {
+            (parent: Record<string, unknown>, _args: unknown, context: GraphqlContext) => projectGraphqlOperation(async () => {
               const db = requireGeneratedDb(context);
               assertOperationAllowed(targetAuthorization, context.session, "read", relationship.target);
               // The count IS this field, so it is always computed here.
@@ -660,7 +896,7 @@ const objectResolvers = Object.fromEntries(
                 includeTotalCount: true,
               });
               return { count: result.totalCount };
-            },
+            }),
           ],
         ];
       }),

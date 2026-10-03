@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 import {
   PASSKEY_BROWSER_FLOW,
   PASSKEY_DIRECT_GRANT_FLOW,
+  PASSKEY_ORGANIZATION_FLOW,
   PASSKEY_REGISTRATION_FLOW,
   WEBAUTHN_PASSWORDLESS_REQUIRED_ACTION,
   buildPasskeyProfile,
@@ -58,6 +59,33 @@ describe("passkey profile — no password path for a human", () => {
     // assertion exists so that flipping it to REQUIRED — which would silently
     // change what every federated tenant experiences — has to be deliberate.
     expect(idp?.requirement).toBe("ALTERNATIVE");
+  });
+
+  it("routes an Organization domain to its provider before the passkey, and only then", () => {
+    const p = profile();
+    const byAlias = new Map(p.authenticationFlows.map((f) => [f.alias, f]));
+    const top = byAlias.get(PASSKEY_BROWSER_FLOW)!.authenticationExecutions;
+    // Order is behaviour: the identity-first step has to run before the
+    // passkey sub-flow, whose username page it replaces.
+    expect(top.map((e) => [e.authenticator ?? e.flowAlias, e.requirement])).toEqual([
+      ["auth-cookie", "ALTERNATIVE"],
+      ["identity-provider-redirector", "ALTERNATIVE"],
+      [PASSKEY_ORGANIZATION_FLOW, "ALTERNATIVE"],
+      ["passkey-browser-forms", "ALTERNATIVE"],
+    ]);
+    const [conditional] = byAlias.get(PASSKEY_ORGANIZATION_FLOW)!.authenticationExecutions;
+    expect(conditional).toMatchObject({ requirement: "CONDITIONAL", authenticatorFlow: true });
+    // Keycloak's own shape for this step: inert unless the realm has
+    // Organizations switched on.
+    expect(
+      byAlias.get(conditional!.flowAlias!)!.authenticationExecutions.map((e) => [e.authenticator, e.requirement]),
+    ).toEqual([
+      ["conditional-user-configured", "REQUIRED"],
+      ["organization", "ALTERNATIVE"],
+    ]);
+    // Aliases are realm-unique; Keycloak's stock flow already owns these two.
+    expect(byAlias.has("Organization")).toBe(false);
+    expect(byAlias.has("Browser - Conditional Organization")).toBe(false);
   });
 });
 

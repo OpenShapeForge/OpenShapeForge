@@ -21,11 +21,16 @@ function connector(
       provenance: "firstParty",
       license: { spdx: "LicenseRef-BatterAI-Commercial" },
     },
+    authorization: {
+      roles: {
+        read: `Connectors.${name}.Read`,
+        write: `Connectors.${name}.Write`,
+      },
+    },
     operations: [
       {
         key: "listThings",
         kind: "query",
-        authorization: { roles: { invoke: ["Connectors.All.Read"] } },
         output: { cardinality: "many", fields: [] },
       },
     ],
@@ -44,7 +49,7 @@ function manifestWith(
         schema: "erp",
         name: "relations",
         tenantScoped: true,
-        generatedCrud: true,
+        generatedCrudEligible: true,
         columns: [{ name: "id", type: "uuid", primaryKey: true }],
         source,
       },
@@ -142,6 +147,17 @@ describe("catalog collision audits", () => {
       /claims the MCP tool prefix "sync"/,
     );
   });
+
+  it("rejects a connector tool under the reserved osf_ prefix of the shared generic tools", () => {
+    const reserved = buildConnector(
+      connector("Osf", { exposure: { mcp: { toolPrefix: "osf" } } as never }),
+      "osf",
+      "o.yaml",
+    );
+    expect(() => buildConnectorCatalog([reserved], EMPTY_MANIFEST)).toThrow(
+      /"osf_list_things" \(osf\.listThings\) uses the reserved "osf_" prefix/,
+    );
+  });
 });
 
 describe("shared MCP tool budget", () => {
@@ -151,7 +167,7 @@ describe("shared MCP tool budget", () => {
       schema: "erp",
       name: `t${index}`,
       tenantScoped: true,
-      generatedCrud: true,
+      generatedCrudEligible: true,
       columns: [{ name: "id", type: "uuid" as const, primaryKey: true }],
       source: {
         mcp: {
@@ -175,13 +191,11 @@ describe("shared MCP tool budget", () => {
         {
           key: "listThings",
           kind: "query",
-          authorization: { roles: { invoke: ["R"] } },
           output: { cardinality: "many", fields: [] },
         },
         {
           key: "getThing",
           kind: "query",
-          authorization: { roles: { invoke: ["R"] } },
           output: { cardinality: "one", fields: [] },
         },
       ],
@@ -200,7 +214,6 @@ describe("shared MCP tool budget", () => {
         {
           key: "putThing",
           kind: "mutation",
-          authorization: { roles: { invoke: ["W"] } },
           output: { cardinality: "one", fields: [] },
         },
       ],

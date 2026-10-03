@@ -1,0 +1,11 @@
+kind: authorizationPatch
+clientRoles:
+  erp-provider:
+    - Connectors.Twinfield.Read
+clientRoleComposites:
+  erp-provider:
+    Connectors.Twinfield.Write:
+      description: Invoke write operations on the Twinfield connector
+      composites:
+        erp-provider:
+          - Connectors.Twinfield.Read

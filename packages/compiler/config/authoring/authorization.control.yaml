@@ -136,7 +136,7 @@ users:
     password: ${env:E2E_USER_PASSWORD_PLATFORM_OPERATOR:-test}
     realmRoles: [platform-operator]
 
-  # Holds no role at all. Mirrors `acme-noaccess` in the tenant realm: without
+  # Holds no role at all. Mirrors the tenant realm's no-access test identity: without
   # an authenticated-but-unauthorized identity there is no way to tell "the
   # control plane checks the operator role" from "the control plane lets in
   # anyone who can reach the login page".

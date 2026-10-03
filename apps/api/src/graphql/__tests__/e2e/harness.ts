@@ -2,10 +2,10 @@
 /**
  * Shared harness for the manifest-driven GraphQL e2e suite.
  *
- * Owns: transport (in-process graphql-yoga or E2E_API_URL over HTTP), the
- * trusted-context/bearer auth helpers, request + entity-event capture for the
- * HTML report, the describe/test wrappers that attribute captures to their
- * test, and row cleanup.
+ * Owns: transport (the in-process API app via inject, or E2E_API_URL over
+ * HTTP), the trusted-context/bearer auth helpers, request + entity-event
+ * capture for the HTML report, the describe/test wrappers that attribute
+ * captures to their test, and row cleanup.
  *
  * All mutable state lives in a globalThis store so the suite behaves the same
  * whether bun runs test files with a shared module cache or isolated ones.
@@ -31,9 +31,11 @@ import {
   readMigrateDatabaseUrl,
   type DatabaseRuntime,
 } from "../../../db/connection.js";
+import { SYSTEM_BYPASS_ROLE, withSystemSession } from "../../../db/session.js";
+import { loadRuntimeModules, type ModuleRegistry } from "../../../modules/registry.js";
 import { listEntityEvents } from "../../../platform/entity-events.js";
+import { createApiApp } from "../../../roles/api.js";
 import { getGeneratedCrudTables } from "../../generated-crud.js";
-import { createGraphqlYoga } from "../../yoga.js";
 import persistedManifest from "../../../generated/graphql/persisted-operations.json" with { type: "json" };
 import { seedKeycloakTokenPeople } from "./keycloak.js";
 export {
@@ -46,12 +48,27 @@ export { seedKeycloakTokenPeople };
 process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ??=
   "openshapeforge-local-dev-context-secret";
 process.env.DATABASE_URL ??=
+  "postgres://openshapeforge_app:openshapeforge_app@localhost:5434/openshapeforge_dev";
+process.env.OPENSHAPEFORGE_MIGRATE_DATABASE_URL ??=
   "postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev";
+// The realm a trusted-context session's identity is issued by: the session
+// layer refuses a linkable session that names none (503), so the harness's
+// signed identities need one. Unreachable on purpose — the opt-in bearer
+// tests still skip because no token can be fetched from it, and no JWKS is
+// configured, so no bearer verifier switches on.
+process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER ??= "http://127.0.0.1:9/realms/e2e";
+// The sweeps put thousands of requests a minute through one identity — a load
+// the API's per-caller limiter (600/min anonymous, five times that trusted)
+// rightly refuses in production, and not what these suites measure. A
+// deployment that set its own budget keeps it.
+process.env.API_RATE_LIMIT_MAX ??= "1000000";
+process.env.API_RATE_LIMIT_MAX_TRUSTED ??= "1000000";
 
 const SECRET = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
 
 export type Identity = { tenantId: string; userId: string; roles: string[] };
 export type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
+export type ApiApp = ReturnType<typeof createApiApp>;
 
 export type GqlResponse = {
   data?: Record<string, any> | null;
@@ -95,7 +112,7 @@ type Store = {
   createdRows: CreatedRow[];
   runtime: DatabaseRuntime | null;
   seedRuntime: DatabaseRuntime | null;
-  yoga: ReturnType<typeof createGraphqlYoga> | null;
+  app: Promise<{ instance: ApiApp }> | null;
   tenantRowsEnsured: Promise<void> | null;
 };
 
@@ -166,7 +183,7 @@ const store: Store = ((
   createdRows: [],
   runtime: null,
   seedRuntime: null,
-  yoga: null,
+  app: null,
   tenantRowsEnsured: null,
 } satisfies Store);
 
@@ -237,9 +254,32 @@ export function getSeedRuntime(): DatabaseRuntime {
   return store.seedRuntime;
 }
 
-function yogaHandler() {
-  store.yoga ??= createGraphqlYoga({ cors: false, db: getRuntime().db });
-  return store.yoga;
+/**
+ * The in-process API: the same Fastify app the deployed process runs, with
+ * the runtime modules loaded, so a plugin-backed Operation (a document's
+ * create) reaches its handler exactly as it does in production — the handler
+ * is bound to the app's own database runtime at boot, which a bare Yoga
+ * instance never sees. Built once per process and never closed, like the
+ * harness's database runtime: bun ends the process when the run is over.
+ * Shared with the REST-based lease helper and the REST suites.
+ */
+export async function apiApp(): Promise<ApiApp> {
+  // Held inside an object: a Fastify instance is itself a thenable, and a bare
+  // promise of one would unwrap it (booting the app early as a side effect).
+  store.app ??= (async () => {
+    const modules: ModuleRegistry = await loadRuntimeModules();
+    if (modules.failures.length > 0) {
+      throw new Error(`Runtime modules failed to load: ${JSON.stringify(modules.failures)}`);
+    }
+    return {
+      instance: createApiApp({
+        cors: false,
+        ...(process.env.DATABASE_URL ? { databaseUrl: process.env.DATABASE_URL } : {}),
+        modules,
+      }),
+    };
+  })();
+  return (await store.app).instance;
 }
 
 export async function gql(
@@ -259,8 +299,6 @@ export async function gql(
   const isPersisted =
     (persistedManifest.operations as Record<string, string>)[hash] ===
     canonical;
-  if (!remoteUrl && !isPersisted)
-    headers.set("x-openshapeforge-arbitrary-profile", "authenticated");
   const body = JSON.stringify(
     isPersisted
       ? {
@@ -269,18 +307,24 @@ export async function gql(
         }
       : { query, variables },
   );
-  const path =
-    remoteUrl && isPersisted ? "/api/graphql/persisted" : "/api/graphql";
-  const request = new Request(`${remoteUrl ?? "http://e2e.internal"}${path}`, {
-    method: "POST",
-    headers,
-    body,
-  });
+  const path = isPersisted ? "/api/graphql/persisted" : "/api/graphql";
   const startedAt = performance.now();
-  const response = remoteUrl
-    ? await fetch(request)
-    : await yogaHandler().fetch(request);
-  const parsed = (await response.json()) as GqlResponse;
+  let status: number;
+  let parsed: GqlResponse;
+  if (remoteUrl) {
+    const response = await fetch(`${remoteUrl}${path}`, { method: "POST", headers, body });
+    status = response.status;
+    parsed = (await response.json()) as GqlResponse;
+  } else {
+    const response = await (await apiApp()).inject({
+      method: "POST",
+      url: path,
+      headers: Object.fromEntries(headers.entries()),
+      payload: body,
+    });
+    status = response.statusCode;
+    parsed = JSON.parse(response.body) as GqlResponse;
+  }
   store.capturedRequests.push({
     suite: currentLabel?.suite ?? "(outside tests)",
     test: currentLabel?.test ?? "(setup/cleanup)",
@@ -291,7 +335,7 @@ export async function gql(
         : "none",
     query: query.replace(/\s+/g, " ").trim(),
     variables,
-    status: response.status,
+    status,
     durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
     response: parsed,
   });
@@ -375,10 +419,13 @@ function persistCapture() {
  * fine while nothing referenced a tenant, but the ERP catalog gave erp.tenants
  * inbound foreign keys (label_rules.tenant_id, tenant_settings.tenant_id), so
  * a row created under a tenant with no erp.tenants row now fails the
- * constraint. Insert the two identities' tenants once per run, through the
- * privileged connection the harness already holds. Remote mode skips this:
- * the deployed environment provisions its tenants for real, and most cluster
- * specs run without any database access.
+ * constraint — and the platform registry has its own: a keyed Operation (a
+ * plugin-backed create) records an execution receipt whose tenant must exist
+ * in platform.tenants, or the whole create is refused as REFERENCE_NOT_FOUND.
+ * Insert the two identities' tenants in both registries once per run, through
+ * the privileged connection the harness already holds. Remote mode skips
+ * this: the deployed environment provisions its tenants for real, and most
+ * cluster specs run without any database access.
  */
 export function ensureTenantRows(): Promise<void> {
   if (remoteUrl) return Promise.resolve();
@@ -392,6 +439,53 @@ export function ensureTenantRows(): Promise<void> {
         VALUES (${tenantId}, ${tenantId}, ${`e2e-${tenantId}`}, ${`e2e tenant ${tenantId}`})
         ON CONFLICT (id) DO NOTHING
       `.execute(db);
+      await sql`
+        INSERT INTO platform.tenants (id, slug, name, status)
+        VALUES (${tenantId}, ${`e2e-${tenantId}`}, ${`e2e tenant ${tenantId}`}, 'active')
+        ON CONFLICT (id) DO NOTHING
+      `.execute(db);
+    }
+    // The canonical create Operations that stamp an acting Relation must see
+    // the same admitted identity state production sessions require. Trusted
+    // context proves who signed the internal request; it deliberately does
+    // not invent an organization membership or Relation link. Seed one
+    // tenant-owned person and linked identity for every synthetic caller.
+    const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER!;
+    for (const identity of [tenantA, tenantB, readOnly, noRoles]) {
+      const relationId = randomUUID();
+      const identityId = randomUUID();
+      const email = `e2e-${identity.userId}@example.invalid`;
+      await sql`
+        insert into erp.relations (id, tenant_id, display_name, relation_type, status)
+        values (${relationId}, ${identity.tenantId}, ${`E2E ${identity.userId}`}, 'person', 'active')
+      `.execute(db);
+      await sql`
+        insert into platform.identities (id, issuer, subject, email, display_name)
+        values (${identityId}, ${issuer}, ${identity.userId}, ${email}, ${`E2E ${identity.userId}`})
+        on conflict (issuer, subject) do update set display_name = excluded.display_name
+      `.execute(db);
+      await withSystemSession(
+        db,
+        {
+          actorSubject: "e2e-seed",
+          roles: [SYSTEM_BYPASS_ROLE],
+          reason: "e2e: admit synthetic transport identity",
+          tenantId: identity.tenantId,
+        },
+        (trx) => sql`
+          insert into platform.identity_relations
+            (identity_id, tenant_id, status, relation_id, linked_at, linked_by, roles)
+          select i.id, ${identity.tenantId}, 'linked', ${relationId}, now(), 'e2e-seed',
+                 (select coalesce(array_agg(value), '{}'::text[])
+                    from jsonb_array_elements_text(${identity.roles}::jsonb))
+            from platform.identities i
+           where i.issuer = ${issuer} and i.subject = ${identity.userId}
+          on conflict (identity_id, tenant_id) do update
+            set status = 'linked', relation_id = excluded.relation_id,
+                linked_at = now(), linked_by = 'e2e-seed', roles = excluded.roles,
+                updated_at = now()
+        `.execute(trx),
+      );
     }
   })();
   return store.tenantRowsEnsured;
@@ -416,12 +510,20 @@ export function registerSuiteLifecycle() {
     for (let i = 0; i < rows.length; i += batchSize) {
       await Promise.all(
         rows.slice(i, i + batchSize).map((row) => {
-          const graphql = row.table.source!.graphql!;
-          return gql(
-            row.identity,
-            `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
-            { id: row.id },
-          ).catch(() => {});
+          // A canonical delete is a product interaction — lease, version,
+          // confirmation challenge — and an entity may have no GraphQL
+          // mutation at all. Test cleanup must not re-enact that interaction
+          // merely to remove a fixture, so the owner connection deletes the
+          // exact row.
+          if (!row.table.primaryKey) return Promise.resolve();
+          const tenantWhere = row.table.tenantScoped
+            ? sql`and ${sql.id("tenant_id")} = ${row.identity.tenantId}::uuid`
+            : sql``;
+          return sql`
+            delete from ${sql.id(row.table.schema, row.table.table)}
+            where ${sql.id(row.table.primaryKey)}::text = ${row.id}
+              ${tenantWhere}
+          `.execute(getSeedRuntime().db).then(() => {}).catch(() => {});
         }),
       );
     }

@@ -18,6 +18,7 @@
  *
  * Needs no database: nothing here touches tenant state.
  */
+import type { FetchLike } from "@openshapeforge/plugin-runtime/connector";
 import { describe, expect, test } from "bun:test";
 import { listConnectorContracts } from "../../apps/api/src/connectors/catalog.js";
 import { loadConnectorPackages } from "../../apps/api/src/connectors/loader.js";
@@ -25,7 +26,6 @@ import {
   ConnectorExecutionError,
   hostAllowed,
   invokeOperation,
-  type FetchLike,
 } from "../../apps/api/src/connectors/executor.js";
 
 const SLUG = "afas-profit";

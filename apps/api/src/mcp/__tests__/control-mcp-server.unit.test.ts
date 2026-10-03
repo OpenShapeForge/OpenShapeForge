@@ -1,0 +1,266 @@
+// SPDX-License-Identifier: BUSL-1.1
+/**
+ * The platform administrator MCP over the bound control Operations: the tool
+ * list a session sees is decided by the Operations' roles, tool names come
+ * from the MCP projection, an acknowledgement Operation carries its
+ * `confirmed` field, and a call goes through the canonical runtime — its
+ * refusals included.
+ *
+ * In-process over an in-memory transport, with a database that answers
+ * every query with no rows, so the reads that need one answer "nothing" and
+ * the ones that need Keycloak refuse by name.
+ */
+import { describe, expect, test } from "bun:test";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { DummyDriver, Kysely, PostgresAdapter, PostgresIntrospector, PostgresQueryCompiler } from "kysely";
+import { controlSessionFor, type ControlSessionContext } from "../../control/control-session.js";
+import type { ControlRuntime } from "../../control/runtime.js";
+import { controlOperationContracts } from "../../control/__tests__/control-operation-fixtures.js";
+import type { DB } from "../../generated/db/types.js";
+import type { RuntimeModule } from "../../modules/contract.js";
+import type { OperationContract } from "../../operations/runtime.js";
+import { PLATFORM_GUIDE, PLATFORM_SESSION_RESOURCE_URI } from "../../control/platform-tools.js";
+import { __buildPlatformServerForTests } from "../control-mcp-server.js";
+
+const administrator = {
+  subject: "0b2a3f1e-8a6b-4f30-9d2f-5f1c7a8e9b10",
+  issuer: "http://localhost:8181/realms/openshapeforge-control",
+  username: "platform-admin",
+  name: "Platform admin",
+  email: "platform-admin@example.com",
+  authorizedParty: "codex-platform",
+  expiresAtMs: null,
+};
+
+const db = new Kysely<DB>({
+  dialect: {
+    createAdapter: () => new PostgresAdapter(),
+    createDriver: () => new DummyDriver(),
+    createIntrospector: (database) => new PostgresIntrospector(database),
+    createQueryCompiler: () => new PostgresQueryCompiler(),
+  },
+});
+
+const runtime: ControlRuntime = {
+  config: { ok: false, missing: ["OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL"] },
+  provider: undefined,
+  operations: controlOperationContracts(),
+};
+
+async function connect(
+  session: ControlSessionContext,
+  options: {
+    operations?: readonly OperationContract[];
+    modules?: readonly RuntimeModule[];
+    currentSession?: () => ControlSessionContext;
+  } = {},
+) {
+  const server = __buildPlatformServerForTests({
+    context: { db, control: runtime },
+    session,
+    operations: options.operations ?? controlOperationContracts(),
+    modules: options.modules ?? [],
+    client: { name: "Claude Code", version: "2.1.0", capabilities: [] },
+    currentSession: options.currentSession,
+  });
+  const client = new Client({ name: "control-mcp-test", version: "1" }, { capabilities: {} });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  return { client, close: async () => { await client.close(); await server.close(); } };
+}
+
+const contracts = controlOperationContracts();
+const mcpName = (handler: string) => contracts.find((c) => c.handler === handler)!.transports.mcp.name!;
+
+describe("the control MCP tool list", () => {
+  test("uses the current request's single control role without reinitializing the transport", async () => {
+    const established = controlSessionFor(administrator, ["platform-operator"]);
+    let current = established;
+    const { client, close } = await connect(established, { currentSession: () => current });
+    try {
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("list_catalog_entries");
+      current = controlSessionFor(administrator, ["unrelated-role"]);
+      const refreshed = (await client.listTools()).tools.map((tool) => tool.name);
+      expect(refreshed).toHaveLength(0);
+      expect(refreshed).not.toContain("list_catalog_entries");
+      const refused = await client.callTool({ name: "list_catalog_entries", arguments: {} });
+      expect(refused.isError).toBe(true);
+      expect(refused.structuredContent).toMatchObject({ error: { code: "NOT_FOUND" } });
+    } finally {
+      await close();
+    }
+  });
+
+  test("platform-operator sees every control tool, with confirmation where declared", async () => {
+    const { client, close } = await connect(controlSessionFor(administrator, ["platform-operator"]));
+    try {
+      const listed = await client.listTools();
+      expect(listed.tools.map((tool) => tool.name).sort()).toEqual(
+        contracts.map((contract) => contract.transports.mcp.name!).sort(),
+      );
+      expect(contracts.every((contract) =>
+        contract.auth.mode === "control" &&
+        contract.auth.roles.length === 1 &&
+        contract.auth.roles[0] === "platform-operator"
+      )).toBe(true);
+      const retireCatalogEntry = listed.tools.find((tool) => tool.name === "retire_catalog_entry")!;
+      expect(retireCatalogEntry.inputSchema.properties).toHaveProperty("confirmed");
+      expect((retireCatalogEntry.inputSchema as { required?: string[] }).required).toEqual(["kind", "key"]);
+      expect(listed.tools.map((tool) => tool.name)).toContain("update_tenant");
+      expect(listed.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
+        "list_tenant_invitations",
+        "revoke_tenant_invitation",
+        "resend_tenant_invitation",
+      ]));
+      expect(listed.tools.find((tool) => tool.name === "list_tenants")!.inputSchema.properties).not.toHaveProperty("confirmed");
+      expect(listed.tools.find((tool) => tool.name === "retire_catalog_entry")!.annotations).toMatchObject({
+        readOnlyHint: false, idempotentHint: false,
+      });
+      expect(listed.tools.find((tool) => tool.name === "get_reconciliation_report")!.annotations).toMatchObject({
+        readOnlyHint: true, openWorldHint: true,
+      });
+    } finally {
+      await close();
+    }
+  });
+
+  test("includes a loaded plugin's control Operation without exposing tenant Operations", async () => {
+    const base = contracts.find((contract) => contract.handler === "listTenants")!;
+    const pluginControl: OperationContract = {
+      ...base,
+      key: "example-admin.seed-tenant",
+      plugin: "example-admin",
+      title: "Seed tenant",
+      description: "Seeds one tenant.",
+      handler: "seedTenant",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: { slug: { type: "string" } },
+        required: ["slug"],
+      },
+      outputSchema: { type: "object", additionalProperties: true },
+      transports: {
+        ...base.transports,
+        rest: { method: "POST", path: "/api/example/tenants/:slug/seed", response: { status: 200, kind: "json" } },
+        mcp: { enabled: true, name: "seed_tenant" },
+        typescript: { enabled: true, functionName: "exampleAdminSeedTenant" },
+      },
+    };
+    const tenantOperation: OperationContract = {
+      ...pluginControl,
+      key: "example-admin.tenant-only",
+      handler: "tenantOnly",
+      auth: { mode: "session", roles: ["employee"] },
+      tenancy: { mode: "required" },
+      transports: { ...pluginControl.transports, mcp: { enabled: true, name: "tenant_only" } },
+    };
+    const module: RuntimeModule = {
+      name: "example-admin",
+      operationHandlers: {
+        seedTenant: async (input) => ({
+          value: { tenantSlug: (input as Record<string, unknown>).slug },
+          status: 200,
+        }),
+        tenantOnly: async () => ({ value: { exposed: true }, status: 200 }),
+      },
+    };
+    const { client, close } = await connect(
+      controlSessionFor(administrator, ["platform-operator"]),
+      { operations: [...contracts, pluginControl, tenantOperation], modules: [module] },
+    );
+    try {
+      const names = (await client.listTools()).tools.map((tool) => tool.name);
+      expect(names).toContain("seed_tenant");
+      expect(names).not.toContain("tenant_only");
+      const result = await client.callTool({ name: "seed_tenant", arguments: { slug: "acme" } });
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toEqual({ tenantSlug: "acme" });
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe("calling a control tool", () => {
+  test("lists and dispatches invitation administration from the same session registry", async () => {
+    const { client, close } = await connect(controlSessionFor(administrator, ["platform-operator"]));
+    try {
+      const names = (await client.listTools()).tools.map((tool) => tool.name);
+      expect(names).toContain("list_tenant_invitations");
+      const result = await client.callTool({
+        name: "list_tenant_invitations",
+        arguments: { slug: "acme" },
+      });
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        error: { code: "CONTROL_PLANE_NOT_CONFIGURED", detail: "INVITATIONS_NOT_CONFIGURED" },
+      });
+    } finally {
+      await close();
+    }
+  });
+
+  test("goes through the canonical runtime: guide, whoami with the session's own counts, and the platform-session resource", async () => {
+    const { client, close } = await connect(controlSessionFor(administrator, ["platform-operator"]));
+    try {
+      const guide = await client.callTool({ name: mcpName("platformGuide"), arguments: {} });
+      expect(guide.isError).not.toBe(true);
+      expect(guide.structuredContent).toEqual({ guide: PLATFORM_GUIDE });
+
+      const listed = (await client.listTools()).tools.length;
+      const who = await client.callTool({ name: "whoami", arguments: {} });
+      expect(who.isError).not.toBe(true);
+      expect(who.structuredContent).toMatchObject({
+        role: "Platform operator",
+        scope: "platform",
+        tenants: 0,
+        connectedVia: "Claude Code 2.1.0",
+        access: { tools: listed, resources: 1 },
+      });
+
+      const resource = await client.readResource({ uri: PLATFORM_SESSION_RESOURCE_URI });
+      const text = resource.contents[0] as { text: string };
+      expect(JSON.parse(text.text)).toMatchObject({ scope: "platform", access: { tools: listed, resources: 1 } });
+    } finally {
+      await close();
+    }
+  });
+
+  test("refuses an unknown tool as NOT_FOUND and answers declared refusals as tool results", async () => {
+    const { client, close } = await connect(controlSessionFor(administrator, ["platform-operator"]));
+    try {
+      const refused = await client.callTool({ name: "finding_list", arguments: {} });
+      expect(refused.isError).toBe(true);
+      expect(refused.structuredContent).toMatchObject({ error: { code: "NOT_FOUND" } });
+      expect(JSON.stringify(refused)).not.toContain("publish_catalog_entry");
+      const unavailableCatalog = await client.callTool({ name: "list_catalog_entries", arguments: {} });
+      expect(unavailableCatalog.isError).toBe(true);
+      expect(unavailableCatalog.structuredContent).toMatchObject({
+        error: { code: "CONFLICT", detail: "PLATFORM_CATALOG_UNAVAILABLE" },
+      });
+      // Schema before anything else: an argument the Operation does not declare.
+      const unknownArgument = await client.callTool({ name: "list_tenants", arguments: { tenantId: "x" } });
+      expect(unknownArgument.isError).toBe(true);
+      expect(unknownArgument.structuredContent).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
+      // Acknowledgement before the handler.
+      const unconfirmed = await client.callTool({ name: "update_tenant", arguments: { slug: "acme", status: "suspended" } });
+      expect(unconfirmed.isError).toBe(true);
+      expect(unconfirmed.structuredContent).toMatchObject({ error: { code: "CONFIRMATION_REQUIRED" } });
+      // Confirmed, the handler runs and refuses in the declared vocabulary with its own code kept.
+      const unconfigured = await client.callTool({
+        name: "update_tenant",
+        arguments: { slug: "acme", status: "suspended", confirmed: true },
+      });
+      expect(unconfigured.isError).toBe(true);
+      expect(unconfigured.structuredContent).toMatchObject({
+        error: { code: "CONTROL_PLANE_NOT_CONFIGURED", detail: "CONTROL_PLANE_NOT_CONFIGURED" },
+      });
+      expect(JSON.stringify(unconfigured.structuredContent)).toContain("OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL");
+    } finally {
+      await close();
+    }
+  });
+});

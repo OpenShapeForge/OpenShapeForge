@@ -5,6 +5,9 @@
 # own authoring layers (see packages/compiler/src/plugins.ts).
 layers:
   - packages/compiler/config/authoring
+  # Neutral identities used only by this repository's local/e2e stack. The
+  # published compiler base contains no product personas or seeded users.
+  - test/fixtures/authoring/development-identities
   # One layer per connector, so a connector directory is self-contained: its
   # contract sits beside the package that implements it, and adding or dropping
   # an integration is one directory and one line here rather than an edit in
@@ -14,18 +17,10 @@ layers:
   - connectors/dynamics-finance/authoring
   - connectors/twinfield/authoring
 plugins:
+  - "@openshapeforge/versioning"
+  - "@openshapeforge/documents"
   - ./examples/plugins/entity-docs.ts
-  # Workflow node catalogs: contributes the platform workflow catalog tables,
-  # emits the api-side workflow artifacts (web-side ones only when apps/web
-  # exists), and ships its own authoring layer (workflow-nodes/** plus a
-  # Relation entityPatch). See examples/plugins/workflow/index.ts.
-  - ./examples/plugins/workflow/index.ts
-  # The domain node packs, as their own plugin so a deployment can drop them.
-  # Its authoring layer ships `domain-workflow-nodes/**` rather than
-  # `workflow-nodes/**` on purpose: every plugin's authoring layer merges into
-  # one tree, and the workflow plugin's generator globs `workflow-nodes/`
-  # recursively. A shared directory name would put these straight back into the
-  # standard catalog, which is the thing this split exists to prevent. The two
-  # catalogs are separate slices of one table (`catalog = 'domain'` here,
-  # `'standard'` there), each authoritative over its own rows.
-  - ./examples/plugins/workflow-domain-nodes/index.ts
+  # A versioned entity pair in its own schema (`notebook`), authored through
+  # the plugin's layer: proves the generic publish runtime binds storage from
+  # the compiled manifest rather than assuming the core schema.
+  - ./examples/plugins/notebook/index.ts

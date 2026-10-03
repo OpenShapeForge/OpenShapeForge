@@ -11,10 +11,8 @@ Endpoints (`src/roles/api.ts`):
 | Route | Purpose |
 | --- | --- |
 | `POST/GET /api/graphql` | GraphQL (GraphiQL enabled unless `NODE_ENV=production`) |
-| `/api/rest/v1/<basePath>[/:id]` | Generated REST (entities that opt in via the `rest:` block) |
+| `/api/rest/v1/<basePath>[/:id]` | Generated REST (entities that opt in via `interfaces.rest`) |
 | `GET /api/rest/openapi.json` | Generated OpenAPI 3.1 spec for the REST surface |
-| `POST /api/documents` | Atomically create a document and its first immutable version |
-| `POST /api/documents/:documentId/versions` | Atomically append a version and advance `currentVersion` |
 | `GET /api/health`, `/api/ready`, `/api/metrics` | liveness, readiness, and metrics |
 
 On startup (`onReady`) the API compares the database's applied
@@ -33,12 +31,30 @@ SQL. Per entity `Thing` it can emit:
 - `type Thing` — one field per column (snake_case → camelCase via
   `sourceField`), plus relationship fields and `<rel>Aggregate:
   AggregateResult!` (`{ count }`).
-- `ThingConnection` / `ThingEdge` / `PageInfo`, `ThingFilter`, `ThingSort`,
-  `CreateThingInput`, `UpdateThingInput`.
-- Queries `thing(id: ID!)` and `things(filter, sort, first, after)` when `get`
-  and `list` are enabled.
-- Mutations `createThing(input)`, `updateThing(input)` (input carries `id`),
-  `deleteThing(id): Boolean!`.
+- `ThingFilter`, `ThingSort`, `CreateThingInput`, `UpdateThingInput`
+  (`id` plus the writable values) and `DeleteThingInput` (`id` plus the
+  mutation controls).
+- Queries `thing(id: ID!): ThingOperationResult` and `things(filter, sort,
+  first, after): ThingCollectionOperationResult` when `get` and `list` are
+  enabled.
+- Mutations `createThing(input)` and `updateThing(input)`, each answering
+  `ThingOperationResult`, and `deleteThing(input): ThingDeleteOperationResult`.
+
+Every query and mutation answers the one canonical result envelope shared
+with REST, MCP and Web: `{ data, operations }` on success, `{ error }` on a
+refusal, where `data` is the record (`get`, `create`, `update`), the page
+`{ items: [{ data, operations }], nextCursor, totalCount }` (`list`) or
+`{ deleted: true }` (`delete`), and `operations` lists the Operation offers
+the current identity holds on that record. Version, edit-lease,
+acknowledgement and confirmation-challenge values use the same canonical
+control names in the GraphQL inputs as everywhere else. The resolver
+dispatches through `executeEntityOperation`; GraphQL does not implement a
+parallel write path.
+
+An `interfaces.graphql` block on an entity means "project every canonical
+Operation declared by this entity"; its optional `operations` map contains
+only interface-specific instructions or `false` exclusions — there is no
+`operations: all` authoring value.
 
 Engine semantics (`src/graphql/generated-crud.ts`):
 
@@ -49,8 +65,8 @@ Engine semantics (`src/graphql/generated-crud.ts`):
 - **Sort** — single field + direction; unknown fields fall back to the
   primary key; direction defaults to `asc`.
 - **Cursor pagination** — `first` is clamped to 1..200 (default 50);
-  `after` is a base64url-encoded offset cursor. Connections return
-  `pageInfo { hasNextPage, endCursor }` and `totalCount`.
+  `after` is a base64url-encoded offset cursor. A list answers
+  `data { items { data operations } nextCursor totalCount }`.
 - **`totalCount` is opt-in and costs a second pass.** It is a real `count(*)`
   under the same filter, so it cannot stop at `first`, and a text filter
   compiles to an unanchored `ilike '%value%'` that no b-tree index answers. On
@@ -67,22 +83,56 @@ Engine semantics (`src/graphql/generated-crud.ts`):
   `tenant_id`, `created_at`, and `updated_at`. Create injects `tenant_id`
   from the session; update always sets `updated_at = now()`; delete returns
   `true` only when a row (visible to this tenant) was actually removed.
+- **The compiled write contract is enforced once, for every interface.**
+  `executeEntityOperation` validates create and update `values` against the
+  Operation's compiled `inputSchema` (`operations/entity/input-validation.ts`)
+  before any SQL runs, so an authored `options` list, `validation.pattern`,
+  length or range bound holds over REST, GraphQL and MCP alike. A refusal is
+  the canonical `VALIDATION` error (REST 422) with one `violations[]` entry per
+  field: `{ field, code, message }`, codes such as `NOT_IN_OPTIONS`,
+  `PATTERN_MISMATCH`, `INVALID_TYPE`, `TOO_LONG`, `REQUIRED`, `UNKNOWN_FIELD`.
+  An update validates only the keys it carries; `null` clears a nullable
+  column and is a type violation on a required one. MCP checks only the argument
+  envelope (identity, controls, fields its session's tool advertises) at its
+  edge and relays this failure as it is. Collection Operations and blueprint
+  creates (the merged record) go through the same check.
+  The database carries `CHECK` constraints for static options and the
+  POSIX-safe subset of patterns (see [migrations.md](migrations.md)) as a
+  backstop; the runtime check is the one that names the field.
 
 ## The generated REST surface
 
 `src/rest/generated-rest-routes.ts` is the REST counterpart of the GraphQL
-schema builder. Entities opt in per entity with a `rest:` block in their YAML
+schema builder. Entities opt in per entity with an `interfaces.rest` block in their YAML
 (see [authoring.md](authoring.md#rest-generated-rest-exposure)); the compiler
 bridges it to `source.rest` in the manifest, and every such table gets routes
 under `/api/rest/v1/<basePath>`:
 
 | Route | Operation flag | Success |
 | --- | --- | --- |
-| `GET /api/rest/v1/<basePath>` | `list` | `200 { items, totalCount, nextCursor }` |
-| `GET /api/rest/v1/<basePath>/:id` | `get` | `200` row (`404` if not visible) |
-| `POST /api/rest/v1/<basePath>` | `create` | `201` row |
-| `PATCH /api/rest/v1/<basePath>/:id` | `update` | `200` row (partial update) |
-| `DELETE /api/rest/v1/<basePath>/:id` | `delete` | `204` |
+| `GET /api/rest/v1/<basePath>` | `list` | `200 { data: { items, totalCount, nextCursor }, operations }` |
+| `GET /api/rest/v1/<basePath>/:id` | `get` | `200 { data, operations }` (`404` if not visible) |
+| `POST /api/rest/v1/<basePath>` | `create` | `201 { data, operations }` |
+| `PATCH /api/rest/v1/<basePath>/:id` | `update` | `200 { data, operations }` (partial update) |
+| `DELETE /api/rest/v1/<basePath>/:id` | `delete` | `200 { data: { deleted }, operations }` |
+
+Numbers on the wire: an `integer` column is a JSON integer; a `numeric`
+(money, quantities) or `bigint` column is a **decimal string** (`"12.50"`,
+`"9007199254740993"`) on REST, MCP and GraphQL (the `Decimal` scalar),
+because a JSON number and a GraphQL Float are the same IEEE double and would
+round both. The row serializer prints every such value as text whatever the
+driver or a handler produced, and the record schemas declare `type: string`
+with the decimal pattern (`packages/operations/src/scalar-projection.ts` is
+the one table every projection reads). Inputs take the JSON number a form
+sends; GraphQL's `Decimal` also accepts the string.
+
+Every route is a projection of the entity's canonical Operation: the record,
+the writable values, the list page and the mutation controls are built once
+(`packages/compiler/src/entity-operation-json-schema.ts`) and `openapi.json`
+spells them flat, with the errors the Operation declares as its `4xx`
+responses (`packages/compiler/src/authoring/compiler/entity-operation-errors.ts`
+derives that list from the Operation's concurrency, confirmation and
+record-permission flags; MCP tools carry the same list).
 
 Handlers delegate to the same `generated-crud.ts` functions as the GraphQL
 resolvers — same auth (`resolveSessionContext`), same tenant scoping and RLS
@@ -126,9 +176,12 @@ REST-specific semantics:
 ## The generated MCP surface
 
 A third transport over the same CRUD core, for language models and agents.
-Entities opt in with an `mcp:` block; the compiler emits a tool catalog whose
-JSON Schemas are built from the authored field definitions (validation bounds,
-enumerations, labels), and `POST /api/mcp` serves it over Streamable HTTP.
+Entities opt in with an `interfaces.mcp` block; the compiler emits a tool
+catalog whose JSON Schemas are built from the authored field definitions
+(validation bounds, enumerations, labels), and `POST /api/mcp` serves it over
+Streamable HTTP. An entity may set `interfaces.mcp.tools` to `generic` to use
+the five shared `osf_*` CRUD tools; omission keeps the dedicated
+per-operation default.
 
 It differs from REST in two ways that matter for authorization: `tools/list` is
 resolved per session, so a caller is never shown a tool it lacks the roles for,
@@ -148,37 +201,52 @@ forms do not expose it, and a database guard rejects direct application-role
 changes. Optional `caseFileId`, `caseId`, `relationId`, and version `accountId`
 references must also resolve inside the authenticated tenant.
 
-Generated GraphQL, REST and MCP expose `DocumentVersion` read-only. The
-restricted application database role cannot insert, update or delete its rows
-directly, even if a broad grant is accidentally restored: a database trigger
-refuses the write. Mutations use two narrowly scoped commands instead:
-
-Generated `Document` create is disabled as well, so a new container cannot be
-created without its first version; existing metadata remains updateable.
-
-- `POST /api/documents` accepts `{ document, version }`, creates the container
-  and first version, and sets `currentVersion` in one transaction.
-- `POST /api/documents/:documentId/versions` accepts `{ version }`, locks the
-  container, inserts the immutable version, and advances `currentVersion` in
-  one transaction. The lock serializes concurrent appends.
-
-Both require an authenticated tenant/user session with
-`CaseFile.All.ReadWrite`. Success is `201` with
-`{ documentId, documentVersionId }`. A duplicate version label is `409`; bad
-references or values are `400`; an invisible document is `404`. A failure while
-creating the first version rolls back the document too.
+A `DocumentVersion` is immutable once written. The restricted application
+database role cannot update or delete its rows directly, even if a broad
+grant is accidentally restored: a database trigger refuses the write. The two
+writes that exist are the plugin-implemented Entity Operations
+`Document.create` and `DocumentVersion.create`, projected like any other —
+`POST /api/rest/v1/documents` and `POST /api/rest/v1/document-versions`,
+their MCP tools and GraphQL mutations — with an idempotency key, under an
+authenticated tenant/user session holding `CaseFile.All.ReadWrite`.
+`Document.create` takes the container and its first version and sets
+`currentVersion` in one transaction, so a container never exists without a
+version; `DocumentVersion.create` locks the container, inserts the immutable
+version and advances `currentVersion` in one transaction, which serializes
+concurrent appends. A duplicate version label is `409`; bad references or
+values are `400`; an invisible document is `404`. A failure while creating
+the first version rolls back the document too. There is no separate document
+command envelope: the generic projection is the transport.
 
 ## The tenant control surface
 
-| Route | Does |
+The platform's own administration is a catalog of canonical Operations
+(`osf-control`, authored in `packages/compiler/config/authoring/operations/
+control.yaml`, handlers in `src/control/operations.ts`), served here by the
+same operations runtime that serves every other Operation and, as tools, by
+the platform administrator MCP. The routes are the Operations' REST
+projections:
+
+| Route | Operation |
 | --- | --- |
-| `GET /api/control/v1/tenants` | The registry, ordered by slug, capped with a `truncated` flag. |
-| `GET /api/control/v1/tenants/{slug}` | One tenant, plus the Keycloak Organization read back as it actually is. |
-| `POST /api/control/v1/tenants` | Provision a tenant. `201` on create, `200` with `"created": false` on replay. |
-| `PATCH /api/control/v1/tenants/{slug}` | Change `status` and/or `name`. Nothing else is mutable. |
+| `GET /api/control/v1/whoami`, `GET /api/control/v1/guide` | The signed-in operator; the administration guide. |
+| `GET /api/control/v1/tenants` | `{ tenants: [...] }` — slug, name, status, Organization alias, catalog counts. |
+| `GET /api/control/v1/tenants/{slug}` | One tenant, the same projection. |
+| `POST /api/control/v1/tenants` | Provision a tenant; `201` with `"created": false` on an idempotent replay. |
+| `PATCH /api/control/v1/tenants/{slug}` | Change `status` and/or `name`, with `confirmed: true`. Nothing else is mutable. |
+| `GET`/`PUT /api/control/v1/tenants/{slug}/blueprint-library` | Read or assign (`{ blueprintTenantSlug }`, null to clear) the tenant's blueprint library. |
+| `POST /api/control/v1/tenants/{slug}/first-administrator` | Invite the first `org_admin` by email, with `confirmed: true`. |
 | `GET /api/control/v1/tenants/{slug}/organizations` | The tenant's sub-organisation tree, nested, in one query off `org_unit` + `org_unit_closure`. |
-| `POST /api/control/v1/tenants/{slug}/organizations` | Provision a sub-organisation. |
-| `PATCH /api/control/v1/tenants/{slug}/organizations/{orgUnitId}` | Rename and/or reparent one. `parentOrgUnitId: null` means the top level; the slug is refused. |
+| `POST /api/control/v1/tenants/{tenantSlug}/organizations` | Provision a sub-organisation. |
+| `PATCH /api/control/v1/tenants/{tenantSlug}/organizations/{orgUnitId}` | Rename and/or reparent one, with `confirmed: true`. `parentOrgUnitId: null` means the top level; the slug is refused. |
+| `GET /api/control/v1/reconciliation`, `POST …/reconciliation/reapply` | The drift report; the repair, with `confirmed: true`. |
+| `GET /api/control/v1/audit` | The platform audit projection, filtered by actor, action (an Operation key), result and window. |
+| `GET`/`POST /api/control/v1/catalog…`, `…/notices…` | The Service catalog and the update notices — `platform-operator` only. |
+
+Errors come in the Operations' declared vocabulary (`VALIDATION`,
+`NOT_FOUND`, `CONFLICT`, `IDENTITY_PROVIDER_ERROR`,
+`CONTROL_PLANE_NOT_CONFIGURED`, …) with the control plane's finer code kept in
+`error.detail` (`CONTROL_TENANT_NOT_FOUND`, `KEYCLOAK_ADMIN_UNAVAILABLE`, …).
 
 Everything about this surface is deliberately unlike the three above, because it
 is the one surface that is **not** per-tenant.
@@ -189,10 +257,13 @@ is the one surface that is **not** per-tenant.
   control plane off a public ingress is a path rule rather than an exception
   list.
 - **Its own realm.** Operators authenticate against `openshapeforge-control`,
-  never the tenant realm, and must hold the `platform-operator` realm role. The
-  pin is on `azp` rather than `aud`: the control realm has no resource-server
-  client, so operator tokens carry no audience, and without the pin a token from
-  Keycloak's built-in public `admin-cli` client would be accepted.
+  never the tenant realm (`src/control/control-session.ts`), and each
+  Operation names the single realm role that may invoke it:
+  `platform-operator`. It covers tenant lifecycle, organization state,
+  reconciliation, catalog, notices and audit. The pin is on `azp` rather than `aud`: the
+  control realm has no resource-server client, so operator tokens carry no
+  audience, and without the pin a token from Keycloak's built-in public
+  `admin-cli` client would be accepted.
 - **DB-first, Keycloak-second, link-third.** The row is written, then the
   Organization is created through the identity-configuration SPI, then
   `keycloak_organization_id` is stamped back. A failure between steps leaves a
@@ -201,7 +272,8 @@ is the one surface that is **not** per-tenant.
   that answers `200` with `"created": false` instead of `201`.
 - **Audited — reads included.** Every database access runs inside
   `withSystemSession`, so each one leaves a `platform.system_bypass_audit` row
-  naming the operation, its target, and the issuer-qualified operator. Reads go
+  naming the Operation by its canonical key, its target, and the
+  issuer-qualified operator. Reads go
   through it for two reasons: `platform.tenants` carries
   `USING (app.bypass_rls() OR id = app.current_tenant())`, so a session with no
   tenant sees nothing at all without the bypass; and a cross-tenant *read* of
@@ -242,10 +314,10 @@ single-hyphen groups, which is what makes `--` an unambiguous separator.
 ### The platform administrator MCP
 
 The control plane has one more surface, for a different job: `/api/control/mcp`
-(Streamable HTTP, `src/mcp/control-mcp-server.ts`) lets a **platform
-administrator** — a control-realm person, not a tenant member — perform bounded
-platform operations for *every* tenant and manage the integration catalog of a
-runtime module. It is a
+(Streamable HTTP, `src/mcp/control-mcp-server.ts`) lets an authorized
+**control-realm user** — not a tenant member — perform the bounded platform
+Operations allowed by the single `platform-operator` role: tenant lifecycle,
+organization changes, reconciliation, catalog, notices and audit. It is a
 separate small MCP server beside the generated one rather than a mode of it,
 for the reason the REST control plane is not on the GraphQL schema: the
 generated server is per-tenant by construction and a platform session names
@@ -255,7 +327,9 @@ no tenant.
   a party on `OPENSHAPEFORGE_CONTROL_MCP_AUTHORIZED_PARTIES` (default: the
   operator client; the reference realm setup adds a public PKCE client
   `codex-platform` for interactive sign-in from an MCP client), holding the
-  realm role `platform_admin` — looked for in `realm_access` only. API keys
+  realm role `platform-operator` — looked for in
+  `realm_access` only. The Operation's own role list then filters both discovery
+  and execution. API keys
   and trusted-context headers name a tenant and are refused; a tenant-realm
   token fails verification and is refused with the same 401 as no token.
   Its metadata document,
@@ -275,21 +349,27 @@ no tenant.
   get, publish, retire, apply for one tenant, installation counts) and
   `src/control/platform-catalog.ts` calls it with the cross-tenant session,
   mapping tenant ids to slugs so no id reaches a client.
-- **Tenant and organisation tools** (`src/control/platform-tools.ts`):
+- **Tenant, organisation, and identity tools** (`src/control/operations.ts`,
+  `platform-operator`):
   `list_tenants`, `get_tenant`, `create_tenant`, `update_tenant` (name and
   lifecycle state), `get_tenant_organization_tree`,
   `create_tenant_organization`, and `update_tenant_organization` (rename or
-  reparent). These delegate to the same audited control services as REST; the
-  MCP is not a generic Keycloak proxy and exposes no realm configuration,
-  credentials, tokens, or destructive tenant deletion.
-- **Reconciliation tools:** `get_reconciliation_report` and
-  `reapply_reconciliation`. A tenant-bound re-apply may change only that
+  reparent). Member, invitation, role, passkey-recovery, and credential
+  Operations expose the same bounded organization administration as REST.
+  Stable reads return only their closed, non-secret schemas. Sensitive
+  one-time material is created by explicit actions and delivered through its
+  secure handoff; tokens, credential material, and invitation links are never
+  returned by ordinary read Operations.
+- **Reconciliation tools:** `platform-operator` may inspect
+  `get_reconciliation_report` and invoke `reapply_reconciliation`. A tenant-bound re-apply may change only that
   tenant's Organization tree and audience scopes and never performs orphan
   cleanup. An all-tenant re-apply may reconcile realm-wide audience scopes and
   remove derived orphan scopes; it still never deletes an unclaimed Keycloak
   Organization.
-- **Identity, guide, catalog and audit tools:** `whoami` (role "Platform
-  administrator", scope `platform`, tenant count), `platform_guide`,
+- **Identity and guide tools:** `platform-operator` receives `whoami` (role
+  `Platform operator`; scope `platform`; tenant count) and `platform_guide`, whose
+  instructions tell the client to use only Operations offered to the session.
+- **Catalog, notice and audit tools** (`platform-operator`):
   `list_catalog_entries`, `get_catalog_entry`, `list_platform_audit`,
   `publish_catalog_entry` (version N+1 from a whole definition; tenants
   without overrides updated in place, overridden ones flagged),
@@ -429,9 +509,11 @@ tenant-scoped ones, business data included.
 So a table may instead name the worker role permitted to reach it across
 tenants:
 
-```ts
-{ schema: "workflow", name: "control_commands", tenantScoped: true,
-  workerAccess: "workflow-worker", /* … */ }
+```yaml
+- schema: platform
+  name: jobs
+  tenantScoped: true
+  workerAccess: job-worker
 ```
 
 which emits one extra disjunct in **that table's** policy and nowhere else:
@@ -439,7 +521,7 @@ which emits one extra disjunct in **that table's** policy and nowhere else:
 ```sql
 USING (app.bypass_rls()
        OR (current_user = 'openshapeforge_worker'
-           AND app.current_worker_role() = 'workflow-worker')
+           AND app.current_worker_role() = 'job-worker')
        OR (tenant_id = app.current_tenant()))
 ```
 
@@ -447,23 +529,23 @@ The two conditions answer different questions, and only one of them is a
 question the database can answer.
 
 - `current_user` is the **connected login role**. A worker process connects as
-  `openshapeforge_worker`, provisioned by the same migrate chain that
-  provisions `openshapeforge_app` and equally `NOSUPERUSER NOBYPASSRLS`. A
+  `openshapeforge_worker`, provisioned with `openshapeforge_app` by
+  `db:provision-roles` and equally `NOSUPERUSER NOBYPASSRLS`. A
   session cannot assume it: no membership is granted, so `SET ROLE
   openshapeforge_worker` from the app role is refused by PostgreSQL.
 - `app.current_worker_role()` reads the `app.worker_role` GUC, which a worker
-  sets on its own transaction (`applyWorkerSession` in the workflow plugin's
-  `control-command-worker.ts`). It says *which* worker, so two plugins' workers
-  sharing one login role keep separate queues.
+  sets on its own transaction (`withJobWorkerSession` in
+  `apps/api/src/jobs/worker.ts`). It says *which* worker, so two plugins'
+  workers sharing one login role keep separate queues.
 
 Nothing is bypassed, so nothing is audited — the break-glass trail stays
 readable rather than being buried under a poll loop's heartbeat.
 
-Five tables declare it today: `workflow.control_commands`,
-`workflow.schedules`, `workflow.schedule_fires`, `workflow.waits` and
-`workflow.collection_waits`. Notably *not* `workflow.instances` or
-`workflow.node_states` — those are reached only after a command is claimed,
-from a session scoped to that command's tenant.
+One table declares it in this repository: core's own `platform.jobs` for the
+`job-worker` ([jobs.md](jobs.md)); a plugin with a queue of its own declares
+it on that queue and on nothing else. Notably *not* the rows a job touches —
+`platform.entity_events`, for one — which are reached only after a job is
+claimed, from a session scoped to that job's tenant.
 
 Two properties worth being explicit about:
 
@@ -477,7 +559,7 @@ Two properties worth being explicit about:
   a code boundary. Both processes connected as the same role, so PostgreSQL
   could not tell them apart. The role comparison is what changed that. The
   verification is a raw count: connected as `openshapeforge_app` with
-  `app.worker_role = 'workflow-worker'` set by hand, `workflow.control_commands`
+  `app.worker_role = 'job-worker'` set by hand, `platform.jobs`
   counts **0** (`db/__tests__/worker-role-rls.test.ts`).
 
 ### The worker's grants
@@ -490,8 +572,7 @@ manifest instead (`db/migrations/worker-role.ts`):
 | source | what it covers |
 | --- | --- |
 | `workerAccess` | the queue a worker claims across tenants |
-| `workerDml: true` | everything reached inside one tenant's session — run tables, node catalog, trigger registry |
-| `generatedCrudEligible` | the business entities, because one or more generated `entity.<slug>.<action>` nodes may exist for them |
+| `workerDml: true` | everything reached inside one tenant's session — the entity journal, a plugin's run tables and catalogs |
 
 `workerDml` is the second declaration, a boolean rather than a role name: the
 grant is made to the single worker LOGIN role, and it is legal on a **global**
@@ -500,8 +581,8 @@ table, where there is no policy at all and the grant is the only gate.
 What that leaves out is the point. The worker holds nothing in the platform
 control plane — `platform.connector_secrets`, `platform.api_keys`,
 `platform.api_key_integrations`, `platform.tenants`,
-`platform.entity_page_configs`, `platform.org_unit`,
-`platform.entity_field_suggestions` and the connector installation tables. It
+`platform.entity_page_configs`, `platform.org_unit` and the connector
+installation tables. It
 also gets **no `ALTER DEFAULT PRIVILEGES`**: that is what makes the app role's
 sweep future-proof, and giving the worker the same would auto-grant it every
 table generated from that day on. A new table reaches the worker by declaring
@@ -530,12 +611,20 @@ token's `azp` claim to a comma-separated allowlist of OAuth client IDs. When
 the variable is configured, a missing or unlisted `azp` is rejected while
 issuer and audience checks remain in force; when it is absent, existing bearer
 behavior is unchanged. A configured empty value admits no client.
-Claims used: `tid` (tenant UUID — the dev realm sets it as a user attribute
-mapped to the `tid` claim), `sub` (user id), `realm_access.roles` **unioned
-with every `resource_access.<client>.roles` list** (Keycloak expands realm
-composites like `directie` into per-client entity roles under
-`resource_access`, so realm roles alone would never match the entity role
-lists), and `groups` (requires the group-membership protocol mapper).
+Claims used: `tid` (tenant UUID — the test fixture sets it as a user attribute
+mapped to the `tid` claim), `sub` (user id), `realm_access.roles`, and
+`groups` (requires the group-membership protocol mapper). **A person's
+organization roles do not come from the token.** They are the tenant's own
+record, `platform.identity_relations.roles` for that (identity, tenant) — the
+persona an invitation admitted them as (`org_admin`, `org_employee`) and the
+OSF baseline beside it — expanded by the API through the realm's composites
+(`generated/compiler/role-composites.json`, emitted beside the realm export)
+exactly as Keycloak would have expanded them, and unioned with the token's
+realm roles (`apps/api/src/auth/person-roles.ts`). `resource_access` is read
+for **service identities only** (configured service accounts and API-key
+exchanges, whose clients belong to one tenant): a client role on a Keycloak
+user would be user-wide and apply in every organization the account is a
+member of.
 
 **Tenant from Organization membership.** A token with no `tid` names its
 tenant through Keycloak's own `organization` claim instead — the Organization
@@ -620,6 +709,40 @@ no entity events. Details:
 - Trusted-context callers MUST send (and sign) `x-user-roles`; a session with
   no matching role is 403 on every entity operation.
 
+**Explicit field permissions:** persisted fields retain their own
+`authorization.roles.read` and `authorization.roles.write` rules in the
+runtime manifest, including nested JSON members and collection items. An
+entity write grant does not override an explicit field role. A permitted
+record remains readable, with unauthorized values returned as `null`; required
+protected output properties remain present but nullable. Filtering or sorting
+by a value containing unreadable members is refused rather than exposing an
+ordering or count oracle.
+
+Caller writes to unauthorized fields are refused, including a guessed value
+equal to the stored value. Entity web update forms submit only changed fields,
+including ordinary unprotected fields. Updates can omit protected values. At JSON object
+nodes with protected children, an update is a member patch: omitted members
+remain stored, and the complete merged value is validated before saving.
+Protected object collection items carry an opaque compiler-managed
+`__osfItemId`, generated by the runtime on create. Include that identity when
+editing or moving an existing row: patches match by identity within that
+collection, so reordering cannot transfer hidden information to another row.
+A new row omits the identity. Unknown or duplicate identities are refused;
+removing a row containing values the caller cannot remove is refused. The
+web renderer carries identities automatically and hides them from the form.
+JSON values without protected children keep their ordinary replacement
+semantics. Trusted writers also retain object replacement semantics, subject
+to immutability. Nested `immutable` and
+`writtenBy` rules retain their complete paths and cannot affect an unrelated
+top-level field with the same name. Trusted operation writers remain an
+internal boundary; caller input is checked before a plugin handler receives
+those write services.
+
+Runtime object-merge writes on protected JSON columns materialize the merged
+value against the locked stored row before checking its full saved schema and
+immutable members. Hidden or encrypted siblings stay stored and are never
+returned through that internal merge operation without read permission.
+
 **Field-level classification:** columns carrying a restricting data
 classification (`pii` / `bsn` / `confidential`, from the field's own
 `classification` block or its semantic type) are enforced in that same shared
@@ -637,8 +760,9 @@ transport inherits them:
 - A compiler-derived embedded default sort on a classified column is dropped
   for such a session (falling back to primary-key order) rather than failing
   an otherwise legitimate traversal.
-- Create/update responses are not redacted: the operation already required the
-  write grant that authorizes reading the column.
+- Create/update responses can expose classified values because the operation
+  already required an entity write grant. Explicit field read roles are still
+  enforced on those responses.
 - **A classified column is nullable in the GraphQL schema however it is
   authored.** Redaction produces a `null` the read contract has to admit;
   rendering a `required: true` classified column as `String!` would turn that
@@ -646,8 +770,9 @@ transport inherits them:
   parent, so one redacted field would null the whole row — and inside a
   non-null connection, the whole page. The column stays `NOT NULL` in Postgres
   and required on create; only reads may answer `null`.
-- No entity shipped in this repo declares a classification, so these controls
-  are inert here until an authoring layer adds one.
+- Shipped entities declare live classifications, including confidential
+  `Relation.notes`; these controls protect current data and are not merely an
+  extension hook.
 
 Entity-derived roles are appended to the `erp-provider` client during realm
 generation (deduplicated against the hand-authored role list, first wins);
@@ -658,6 +783,13 @@ Scope resolution: a role listed in `APP_TENANT_BYPASS_ROLES` (env,
 comma-separated) yields scope `tenant`; else `group` when groups exist; else
 `self`. With no rowScope policies live, scope currently has no effect on
 visibility.
+
+**4. Capability grants** — `Authorization: Grant <grantId>.<secret>`, accepted
+only by Operations declared with `auth.mode: capability`. Not a session
+resolver path: the operations runtime resolves the token into a grant
+session with a tenant, no user and no roles, so a grant reaches exactly the
+Operations it lists on exactly one record, and nothing else on this surface.
+See [capability-grants.md](capability-grants.md).
 
 ## The entity-event journal
 
@@ -673,9 +805,29 @@ single-query name (e.g. `relation`), `aggregate_id` = the row id, and payload
 `{ table, schema, operation }`. Reads append nothing; failed cross-tenant
 mutations journal nothing (the e2e suite asserts all of this).
 
-**What does not exist yet:** there are **no consumers** — no outbox enqueue,
-realtime dirty-marker projection, or cross-replica fanout ships in this
-runtime. There is also **no API query**
+**Realtime consumer:** authenticated `GET /api/events` streams committed entity
+changes across API replicas. Each `resource.changed` frame carries a canonical
+`entity`, record `id`, and `change` (`created`, `updated`, `deleted`), with the
+delivery cursor in the SSE `id`. Clients refetch through their existing Operations.
+Bearer credentials belong in request headers, never query parameters. Reconnect
+with `Last-Event-ID`; unavailable or expired cursors (24 hours), and initial
+connections, receive `stream.reset` with `reason: cursor_expired` and a current
+cursor. Refetch active views on reset. Comment heartbeats also carry checkpoints;
+clients retain these even when no visible change was emitted. Streams rotate
+after 55 seconds and revalidate the session while connected.
+
+Generated CRUD writes event and policy-column snapshots in its transaction.
+A short tenant-local projector transaction assigns delivery cursors only to
+committed journal rows. Writer transactions never wait for the projector lock;
+late commits receive later delivery cursors. Live reads enforce entity roles
+and current database RLS; deletion hints evaluate the generated read predicate
+against the retained policy columns with the reader's current session. No titles,
+record bodies, secrets, or mutation instructions are sent. Plugin event append
+joins the active Operation transaction; plugin writers must explicitly append
+events for their own mutations. Dynamic Service dependencies and native browser
+notification presentation are outside this transport.
+
+There is **no general API query**
 over the journal; `listEntityEvents` exists in code and is used by the e2e
 suite reading Postgres directly through the same RLS session layer. The
 journal is append-only by design (`test:perf` runs accumulate rows).
@@ -692,7 +844,7 @@ compose stack):
 | `NODE_ENV` | `production` disables GraphiQL and makes schema drift fatal |
 | `LOG_LEVEL` | fastify log level (`debug` surfaces the drift-ok line) |
 | `DATABASE_URL` | Postgres; without it the API serves `DATABASE_NOT_CONFIGURED` errors |
-| `OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI` / `_ISSUER` / `_AUDIENCE` | Keycloak bearer signature, issuer, and audience verification (JWKS URI or issuer unset ⇒ bearer ignored) |
+| `OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI` / `_ISSUER` / `_AUDIENCE` | Keycloak bearer signature, issuer, and audience verification (JWKS URI or issuer unset ⇒ a request presenting a bearer is refused as unavailable, 503 — never downgraded to trusted-context, never run as nobody; the web host forwards the person's token, so set these wherever a web app runs) |
 | `OPENSHAPEFORGE_API_VERIFY_BEARER_AUTHORIZED_PARTIES` | optional comma-separated exact allowlist for the verified token's `azp`; configured empty rejects every party |
 | `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` | trusted-context HMAC secret; the example default matches the repo's signing scripts (unset ⇒ trusted-context rejected) |
 | `APP_TENANT_BYPASS_ROLES` | comma-separated roles that grant `tenant` scope |
@@ -700,9 +852,12 @@ compose stack):
 | `OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL` + `KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API` | how provisioning reaches the SPI in the tenant realm; the secret shares its name with the realm generator's |
 | `OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM` / `_CLIENT_ID` | optional overrides (default `openshapeforge` / `openshapeforge-auth-api`) |
 | `OPENSHAPEFORGE_PUBLIC_ORIGIN` + `OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS` / `OPENSHAPEFORGE_MCP_CLIENTS` | the audiences and clients of the per-organization `mcp-resource:<alias>` scope the control plane provisions with every Organization; the public origin is required for the control plane, the other two optional — see [mcp.md](mcp.md#per-organization-resources) |
+| `OPENSHAPEFORGE_PRODUCT_NAME` | the name the deployment calls itself where a person or a model reads it: MCP browser handoff pages, the upload tool, the gateway client's name in `whoami` (default `OpenShapeForge`); `OSF_INTEGRATION_HOST_NAME` narrows the handoff pages' host name beside it |
 | `OPENSHAPEFORGE_CONTROL_MCP_AUTHORIZED_PARTIES` | comma-separated `azp` allow-list of the platform administrator MCP (`/api/control/mcp`); default: the operator client |
 | `API_RATE_LIMIT_MAX` / `_WINDOW_MS` | anonymous budget per window (default 600 / 60s) |
 | `API_RATE_LIMIT_MAX_TRUSTED` | budget for a signed trusted-context caller (default 5× the anonymous budget) |
+| `API_RATE_LIMIT_MAX_SUBJECT` | budget per verified bearer subject, i.e. per person (default: the anonymous budget) |
+| `API_RATE_LIMIT_MAX_SERVICE` | budget per organization service identity, e.g. the durable workflow worker (default: the trusted budget) |
 | `API_RATE_LIMIT_REDIS_URL` | shared limiter store; unset ⇒ in-memory, budget enforced per instance |
 | `API_REQUEST_TIMEOUT_MS` / `DB_STATEMENT_TIMEOUT_MS` | whole-request and per-request statement budgets |
 | `GRAPHQL_MAX_DEPTH` / `_ALIASES` / `_COST` / `_TOKENS` / `_DIRECTIVES` | query-hardening caps |
@@ -712,23 +867,67 @@ compose stack):
 The limiter runs **before** authentication — that ordering is the control, not
 an accident: it is what protects the authentication path itself. So the budget
 a request gets is chosen from what it can prove about itself *there*, with no
-network call, no JWKS fetch and no database read.
+database read and at most a bounded local signature check.
 
 | Tier | Key | Budget |
 | --- | --- | --- |
 | anonymous | client IP (via `trustProxy`) | `API_RATE_LIMIT_MAX` |
 | trusted | tenant + user from a trusted-context header whose **HMAC verifies** | `API_RATE_LIMIT_MAX_TRUSTED` |
+| subject | issuer + `sub` of a bearer token whose **signature and issuer verify** and whose `aud` names this API or an organization resource | `API_RATE_LIMIT_MAX_SUBJECT` |
+| service | issuer + `azp` of such a token from a **configured** organization service identity (`OPENSHAPEFORGE_ORGANIZATION_SERVICE_IDENTITIES`, `preferred_username` = `service-account-<azp>`) | `API_RATE_LIMIT_MAX_SERVICE` |
+
+`API_TRUST_PROXY` defaults to one reverse-proxy hop. A hop count trusts the
+immediate socket peer: use it only when every route to the API passes through
+the trusted ingress. A direct peer can otherwise supply its own forwarded IP.
+Where ingress addresses are known, prefer the supported IP/CIDR allowlist.
+`0` or `false` uses the socket address; hops beyond the configured count remain
+untrusted.
 
 Sending the identity headers without a valid signature does not buy the higher
 tier — it falls back to the IP-keyed anonymous budget. Trusted callers are keyed
 per tenant+user rather than per service, so one runaway integration cannot
 consume the allowance of everything else holding the same secret.
 
-There is deliberately **no bearer-token tier**. Keying on an unverified `sub`
-would hand out a fresh budget per forged token, and verifying the token here
-would put JWKS work in front of the limit that exists to protect it. Per-identity
-budgets for bearer callers belong after session resolution, keyed on the
-verified subject.
+Bearer callers are keyed on the **verified** subject (#886). Keyed on the
+client IP, every person behind one proxy address — a web app forwarding for all
+its users, or one office NAT — and the durable workflow worker shared a single
+anonymous budget, and the long-lived `/api/events` stream was refused. Keying on
+an unverified `sub` would hand out a fresh budget per forged token, so the
+token's signature and issuer are checked with the cached JWKS (the
+issuer-bound verifier; no audience, no database). The check is bounded at
+`VERIFY_BUDGET_MS` (250 ms): a cold or unreachable JWKS, a forged, expired or
+foreign token, or a token without `sub` all fall back to the IP-keyed anonymous
+budget, so the protection in front of the authentication path is unchanged.
+A token minted for another client of the realm (an `aud` that is neither
+`OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE` nor a URL under
+`OPENSHAPEFORGE_PUBLIC_ORIGIN` / `OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS`) earns no
+bucket of its own either.
+Unknown key ids trigger at most one JWKS refetch per cooldown.
+
+**How big a person's budget is (#939).** The subject default stays the
+anonymous budget, 600 requests a minute, and that is a deliberate choice from
+real use, not from the automated journeys. Since the web client stopped
+re-reading pages for every change hint (#954), a full page load costs a person
+about ten to fifteen requests and navigating inside the app fewer; 600 is
+forty or more page loads a minute, every minute, which no person clicking
+reaches, while a client that loops is stopped within the minute. The sales-flow
+browser journey (`bun run test:evidence --journey sales-flow`) is not a person:
+it does sixteen full page loads in about twenty seconds, about 260 requests of
+the seller's bucket per flow (its `request-budget` attachment records them),
+and three flows back to back put about 700 into one minute. Sandboxes therefore
+set `API_RATE_LIMIT_MAX_SUBJECT=1200` explicitly in their `.env` (written by
+`bun run dev:sandbox`); the journey itself asserts that one flow stays well
+inside the production budget, so a chatty client still fails the evidence.
+
+`/api/events` (also under an organization's short address) is counted in its
+own bucket per key, with the same tier: the stream reconnects about once a
+minute and is additionally capped per person by concurrent streams, so it can
+neither starve nor be starved by the same caller's ordinary requests.
+
+The limiter's 429 body carries `code: "RATE_LIMITED"` (besides the
+`x-ratelimit-*` headers). It is answered before any handler runs, which is how
+a caller such as the durable workflow worker tells it from an Operation's own
+429 and knows a write was not executed.
 
 **API keys get no tier of their own either**, for the same reason. It is
 tempting: a key is checksum-verifiable with no I/O, so the limiter could
@@ -774,18 +973,18 @@ needs a fresh volume rather than an in-place upgrade. A machine that ran an
 earlier revision of the compose file still has the unsuffixed
 `openshapeforge_platform-db-data` / `openshapeforge_keycloak-db-data` volumes:
 those are stale, and `docker volume rm` them once you have confirmed you do not
-want what is in them. The platform DB starts empty on its new volume — rerun
-`bun run db:migrate`.
+want what is in them. The platform DB starts empty on its new volume — run
+`bun run db:provision-roles` once, then `bun run db:migrate`.
 
 Keycloak imports **two generated** realms — regenerate both with `bun run
 generate` before first compose up. `--import-realm` imports every file in the
 import directory, and the compose file mounts one bind per realm.
 
 `keycloak/openshapeforge-realm.json` (realm `openshapeforge`) is the **tenant**
-realm. Dev users (password `test`) carry a `tid` tenant attribute:
-`acme-directie`, `acme-vastgoedbeheerder`, `acme-wijkbeheerder`,
-`acme-verhuurconsulent`, `acme-noaccess` (tenant `11111111-…`), and
-`beta-verhuurconsulent` (tenant `33333333-…`). The interactive client is
+realm. The repository's test-only authoring layer adds neutral identities
+(password `test`) with a `tid` tenant attribute: `tenant-a-admin`,
+`tenant-a-user`, `tenant-a-no-access` (tenant `11111111-…`) and
+`tenant-b-user` (tenant `33333333-…`). The interactive client is
 `openshapeforge-gateway` (secret `dev-secret`) — the e2e suite uses it for the
 password-grant bearer test.
 

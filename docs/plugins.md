@@ -21,7 +21,7 @@ Contracts and loaders: `packages/compiler/src/plugins.ts` (tests in
 Commands and purpose-built queries belong in `CompilerPlugin.operations`, not
 in transport-specific fragments. Each operation has one stable, plugin-prefixed
 key; method/path; JSON Schema 2020-12 input, output, and errors; authenticated
-session/public/custom authentication; tenant and idempotency semantics; a runtime handler key;
+session/public/capability/custom authentication; tenant and idempotency semantics; a runtime handler key;
 and explicit REST, MCP, GraphQL, and TypeScript projections.
 
 Generation validates the whole catalog before emitting anything. Duplicate
@@ -54,7 +54,12 @@ the runtime boundary on REST, MCP, and GraphQL. Session roles and OAuth scopes
 are enforced centrally across verified bearer, API-key, and signed trusted-context
 identities. API keys deliberately cannot invoke operations that require OAuth
 scopes until keys have their own persisted scope subset; a custom scheme is handler-owned, fully described as an OpenAPI
-security scheme, and only available through its REST projection.
+security scheme, and only available through its REST projection. A
+`capability` Operation is REST-only too, but core owns its credential: a
+hashed, expiring, recipient-bound **capability grant** that core resolves
+into a grant session (`credential: "grant"`, tenant, no roles,
+`session.grant`) before the handler runs, and counts as used inside the
+handler's transaction — see [capability-grants.md](capability-grants.md).
 
 A handler can return a declared failure without throwing an untyped transport
 error:
@@ -96,13 +101,76 @@ platform `HttpError` occurs before the handler, such as centralized session or
 role authorization. This keeps authentication in core while allowing a
 compatibility route to retain a previously published REST error body. Thrown
 errors without such a declaration keep the platform's standard normalization.
-Authentication-service unavailability remains the historical unauthenticated
-response unless the operation explicitly declares the
-`503 AUTHENTICATION_UNAVAILABLE` error.
+Authentication-service unavailability (a bearer verifier that is not
+configured or cannot be reached, an API key path that is not fully
+configured) is always answered with `503 AUTHENTICATION_UNAVAILABLE`, on every
+transport and whether or not the operation declares that error; a declaration
+only lets the operation carry a fixed body for it.
 
 For `idempotency-key` operations, the canonical input field is required on all
 transports. REST clients supply it only through the declared required header;
 the runtime injects that header into canonical input before validation.
+Core then binds the key to the verified tenant and actor, the canonical
+Operation contract, and normalized authored input. Completed JSON results are
+replayed before one-shot version, lease, or confirmation controls are consumed
+again; current session and record authorization is still checked on every
+call. A concurrent call receives `OPERATION_IN_PROGRESS`, while reusing the
+same key for different authored input receives `IDEMPOTENCY_KEY_REUSED`.
+Database-only effects and their receipt share one transaction. An external
+write first persists a running receipt; if its outcome is lost, core returns
+`OPERATION_OUTCOME_UNKNOWN` and never repeats the effect automatically.
+Schema, authorization, version, lease, and confirmation refusals that happen
+before authored effects leave no receipt, so corrected input may reuse the key.
+
+### Derived-tool execution bindings
+
+A plugin that projects stored rows as MCP tools through its temporary
+`executionCompatibility` seam names where the ordered binding
+rows live with **`bindingsRelation`**: an owned `hasMany` collection on the
+owner. The compiler resolves the collection's target, checks that the target
+carries the execution vocabulary (`operationRef` as a `belongsTo` relationship
+to `operationEntity` with a foreign key, `parentRef` as a `belongsTo` to the
+owner with a foreign key, plus required integer `order`, boolean `optional`,
+object `when`, object-collection `inputMapping` / `outputMapping`, and object
+`forEach`), and projects the target table and parent foreign key into the
+catalog. The runtime then joins those rows under the caller's session (RLS /
+tenant scope) and orders them by `order`. The compiler refuses a missing
+`bindingsRelation` and names the owner entity.
+
+Do not author `bindingsEntity` or `parentRef`: they are inferred from the
+owned collection. The catalog still carries the resolved names so the runtime
+can join without knowing the plugin.
+
+**Audience.** The roles a session must hold for the rows to project as tools
+and to execute are, by default, the roles of the definition entity's canonical
+read — "may use the tools" then means "may read the definitions". A plugin
+whose users may call what only its administrators may read names the wider
+set on the record as `audience: ["integration_user", "integration_admin"]`;
+the entity's read roles stay as authored. Every audience role must exist in
+the generated realm (declared in `authorization.yaml`, or named by an entity
+or Operation the realm generator emits); an unknown role or an empty audience
+fails the build.
+
+```ts
+executionCompatibility: {
+  version: 1,
+  records: [{
+    entity: "Service",
+    // ...
+    audience: ["integration_user", "integration_admin"], // optional; default: Service read roles
+    execution: {
+      bindingsRelation: "capabilityBindings", // owned hasMany on Service
+      operationRef: "capabilityId",
+      operationEntity: "Capability",
+      providerRef: "adapterId",
+      providerEntity: "Adapter",
+      connectionEntity: "Connection",
+      connectionProviderRef: "adapterId",
+      connectionValuesField: "configurationValues",
+    },
+  }],
+}
+```
 
 ## The compiler half
 
@@ -139,12 +207,20 @@ export type PluginBaseContext = {
 export type PluginGenerateContext = PluginBaseContext & {
   manifest: PlatformSchemaManifest;   // full merged manifest
   entities: CompiledEntityInfo[];     // every compiled entity contract
+  operationCatalog: {
+    version: 1;
+    operations: readonly (
+      | CompiledStaticEntityOperation
+      | CompiledPluginOperation
+    )[];
+  };                                  // complete static Operation catalog
+  fieldSchemas: FieldSchemaCompiler;  // canonical FieldDefinition projector
 };
 
 export type CompiledEntityInfo = {
   slug: string;
   path: string;                        // repo-root-relative provenance path
-  origin: "core" | "contextFull";
+  origin: "core";
   contract: CompiledEntityContract;    // storage, model, graphql, views, …
 };
 
@@ -154,6 +230,47 @@ export type GeneratedArtifact = { path: string; contents: string };
 A plugin module **default-exports** a `CompilerPlugin` with a non-empty
 string `name`; duplicate names across registered plugins are an error.
 
+`operationCatalog` is the public consumer boundary for plugins that derive
+workflow nodes, audit policy, or another projection from Operations. It is
+compiled once from the resolved layers, contains both canonical entity CRUD
+and authored entity/module plugin Operations, rejects duplicate ids across
+those sources, and is sorted by stable Operation id. Plugin Operations carry
+`id === key` and `intent: "invoke"`; entity Operations keep their canonical
+CRUD intent and symbolic entity input/output contract, and additionally carry
+concrete `inputSchema`/`outputSchema` for build-time consumers. Those schemas
+describe the shared executor boundary (`values` plus platform-owned mutation
+controls), not a flattened transport request. They are projected from the same
+compiled field-schema helpers as the generated interfaces, including writable
+field eligibility and implicit relationship keys. A plugin should consume this
+catalog instead of parsing entity YAML or inferring actions from transport
+routes.
+
+`fieldSchemas` is bound to the resolved component, osf-type and reference-
+data catalogs for the current host. A generator that publishes configurable
+fields can call `fieldSchemas.field(definition)` for one value schema or
+`fieldSchemas.object(definitions)` for a strict object schema. Both paths use
+the entity field compiler, including nested `children`/`item`, defaults,
+options, shared validation and collection cardinality bounds. The pure
+`createFieldSchemaCompiler`, `compiledFieldSchema`, `compiledObjectSchema` and
+`resolveModelFields` helpers are also exported from the compiler package root
+for build-time tooling. Runtime modules that must turn stored, user-authored
+FieldDefinitions into an Operation interaction schema use
+`context.platform.schemas.fields.object(definitions)`. The host validates the
+definitions against the generated authoring schema and binds the same projector
+to its active osf-type and reference-data registries; plugins neither
+import the compiler at runtime nor supply a fallback catalog.
+
+The compiler also emits
+`apps/api/src/generated/compiler/field-authoring-registry.json` for a host that
+mounts a shared FieldDefinition editor. Its stable envelope is
+`{ version: 1, fieldAuthoringProfiles, osfTypes, referentiedata }`. These
+are the raw, layer-resolved catalog values: profile and osf-type extension
+properties, reference-group metadata, and multilingual item labels are kept
+intact. A host may inject this JSON into an interface-specific renderer; the
+renderer must not parse authoring YAML or maintain a second field-schema
+compiler. The artifact lives API-side so it is available to headless and
+`apps/product-web` hosts without implying an `apps/web` implementation.
+
 ### Registration
 
 In `authoring.config.yaml`:
@@ -161,8 +278,8 @@ In `authoring.config.yaml`:
 ```yaml
 plugins:
   - ./examples/plugins/entity-docs.ts       # local module (relative/absolute path)
-  - ./examples/plugins/workflow/index.ts    # local package-style plugin
-  # - "@openshapeforge/plugin-workflow"         # or a workspace/npm package specifier
+  - ./examples/plugins/notebook/index.ts    # local package-style plugin
+  # - "@openshapeforge/plugin-notebook"         # or a workspace/npm package specifier
 ```
 
 Path specifiers must exist; bare specifiers resolve via `Bun.resolveSync`.
@@ -198,8 +315,8 @@ Two shape details worth knowing when consuming the manifest in a plugin:
   with separate `schema`/`table` fields. Render qualified names yourself:
   `` `${table.schema}.${table.name}` ``.
 - CRUD-eligible tables are selected with `isGeneratedCrudEligible(table)` and
-  a `source.graphql` block. The helper understands both the current
-  `generatedCrudEligible` marker and legacy manifests.
+  a `source.graphql` block: `generatedCrudEligible: true` and not
+  `domainInternal`.
 - A contributed table may declare **`workerAccess: "<role>"`** to let a
   background worker reach it across tenants without `app.bypass_rls`. It
   requires `tenantScoped: true`, widens rather than narrows, and belongs only
@@ -207,6 +324,12 @@ Two shape details worth knowing when consuming the manifest in a plugin:
   [api.md](api.md#the-worker-axis). The manifest loader validates the field
   for YAML-authored tables; the emitter repeats both checks, because
   `contributePlatformTables` never passes through the loader.
+- A column `references` into a **tenant-scoped** table must bind the tenant:
+  `references: { schema, table, column: "id", localColumns: ["tenant_id",
+  "<column>"], targetColumns: ["tenant_id", "id"] }`. A global table names
+  its own tenant column in `localColumns` instead. The emitter refuses the
+  single-column form and provisions the `(tenant_id, id)` unique key on the
+  target.
 - A contributed table must declare **`workerDml: true`** if a worker touches it
   at all, even inside a single tenant's session. A worker connects as its own
   PostgreSQL role, and that role gets an enumerated grant rather than the app
@@ -277,14 +400,18 @@ deterministically sorted and covered by the compiler's stale, orphan, and
 double-generation gates. With no contributions the file is absent, preserving
 the existing generated output byte-for-byte.
 
-`db:migrate` applies the registry after the generated tables and before the
-grant sweep. Each migration and its ledger write run in one transaction under
-`plugin:<plugin>:<version>` in `platform.schema_migrations`. The ledger stores
-the exact SQL checksum. A rerun skips an identical entry; changing its SQL or
-checksum fails migration and readiness. Ledger entries absent from an older
-registry are reported as unexpected but tolerated so an image rollback remains
-serviceable. Applied contributions are still immutable: retain old entries in
-forward builds and add a new version for an additive roll-forward.
+`db:migrate` applies every entry after the generated tables exist and before
+the grant sweep, on every run, in plugin-then-version order, each in its own
+transaction — and keeps no ledger. A database is built from the manifest, so
+there is no earlier phase in which legacy ownership could be transformed: a
+contributed table's shape is declared, not migrated to. `constraints` are
+rendered by the compiler as name-guarded DO blocks, so they are repeatable by
+construction; free-form `schemaMigrations` must be written that way by the
+plugin (`CREATE OR REPLACE`, `IF NOT EXISTS`, a guarded DO block), because an
+entry that fails on its second run is rolled back and named in the error.
+Changing a constraint moves the manifest checksum and the built database is
+refused until it is rebuilt with `bun run db:reset`; the version is an
+ordering key within the plugin, not a history.
 
 ### `ownedPaths` and the gates
 
@@ -295,9 +422,9 @@ the core enjoys:
 - **Orphan**: every existing file under an owned `root` (or listed `file`)
   that a fresh generation would **not** emit fails the check — so deleted
   outputs cannot rot on disk.
-- Declare roots that don't exist yet if you will emit into them later (the
-  workflow plugin declares its `apps/web/**` roots up front); missing roots
-  are simply skipped.
+- Declare roots that don't exist yet if you will emit into them later (a
+  plugin with web-side artifacts declares its `apps/web/**` roots up front);
+  missing roots are simply skipped.
 
 Artifact **path collisions** across core + all plugins are rejected globally
 (`collectAllArtifacts` throws if two artifacts share a path).
@@ -340,6 +467,7 @@ export type RuntimeModule = {
   restRoutes?(routes, ctx): void;                   // fastify, inside the rate-limited scope
   seeds?: ModuleSeed[];                             // appended to the migration chain
   workers?: Record<string, ModuleWorker>;           // background roles, keyed by role name
+  jobHandlers?: Record<string, ModuleJobHandler>;   // durable job kinds, keyed by kind — see jobs.md
 };
 ```
 
@@ -379,8 +507,13 @@ Seven properties are worth knowing:
   with `derivedTools.outputFieldsField`; core then removes secret-classified
   fields before exposing the allowlist to module refiners.
 
-`restRoutes` is declared but unimplemented by the shipped workflow module,
-which stays that way until the webhook trigger lands rather than being stubbed.
+`jobHandlers` is how a module takes part in the core job queue: an Operation
+handler enqueues (`platform.jobs.enqueue`) inside its own transaction, and the
+core `job-worker` runs the handler registered for that kind later, under a
+tenant session for the job's tenant. A kind two modules both register fails
+composition at boot. The queue, its states — including `outcome_unknown`, the
+job form of `OPERATION_OUTCOME_UNKNOWN` — the `mail.deliver` kind and the
+operator Operations are described in [jobs.md](jobs.md).
 
 ### Worker roles
 
@@ -390,18 +523,22 @@ server it always did. Any other value is looked up among the worker roles the
 loaded modules contribute:
 
 ```sh
-OPENSHAPEFORGE_ROLE=workflow-worker bun apps/api/src/index.ts
+OPENSHAPEFORGE_ROLE=job-worker bun apps/api/src/index.ts
 ```
 
 ```ts
 workers: {
-  "workflow-worker": {
+  "my-worker": {
     start({ db, log }) {
       return startTheLoop(db);          // -> { stop(): Promise<void> }
     },
   },
 },
 ```
+
+Core contributes one worker role of its own, `job-worker`, which drains the
+job queue every module enqueues into ([jobs.md](jobs.md#the-worker)); it is
+started the same way and holds the same contract.
 
 A worker is its own process rather than a timer inside the API, for three
 reasons: a poll loop and a request path have unrelated failure modes and
@@ -428,9 +565,9 @@ Where the API role degrades, the worker role fails closed:
 - **A role name claimed by two modules is refused at boot**, exactly as a
   colliding GraphQL field is.
 
-`init` runs before any worker starts — the workflow module hydrates its node
-catalog there, and a worker that claimed commands first would fail every one of
-them with `NO_BRIDGE`, spending the retry bound on a configuration problem.
+`init` runs before any worker starts — a module that hydrates a catalog there
+would otherwise have its worker claim commands it cannot resolve, spending the
+retry bound on a configuration problem.
 
 `stop()` must settle **after** the in-flight tick. `SIGTERM` (what a container
 runtime sends) drains before exiting; a `stop()` that returned early would
@@ -457,104 +594,52 @@ no Ingress and no probes, because a worker serves no traffic. See
 The output, `docs/entities.generated.md`, is the always-current entity
 reference for this repo (gitignored; recreate with `bun run generate`).
 
-## Shipped example 2: `workflow`
+## Shipped example 2: `notebook`
 
-`examples/plugins/workflow/` — a package-style plugin that exercises every
-extension point at once. It packages the workflow node-catalog machinery
-**as a standalone plugin** rather than as a built-in compiler feature: the
-generators live in the plugin and run behind the web-gated UI path, so the
-compiler core stays focused on the data layer.
+`examples/plugins/notebook/` — a plugin that is an authoring layer plus one
+canonical plugin Operation: no generators and no platform tables. Its two entities,
+`Notebook` and `NotebookVersion`, are declared in module `notebook`, so their
+tables are `notebook.notebooks` and `notebook.notebook_versions` rather than
+anything under `erp`, and `Notebook` declares the generic
+`versioning: publishedSnapshot`.
 
-**Contributed platform tables** (`contributePlatformTables`) — three global,
-tenant-agnostic catalog tables (`tenantScoped: false`, `domainInternal:
-true`, so no RLS and no generated CRUD/GraphQL surface):
+That is the case the versioning runtime has to handle without knowing the
+entity. The compiler binds the exact storage of both sides into the head
+table's manifest source (`source.versioning.storage`: head schema and table,
+version schema and table, and the version table's foreign key back to the
+head); the API serves that through `platform.schemas.versioning`, and
+`Notebook.publish` executes against those names and nothing derived from
+`"Notebook"`. `apps/api/src/graphql/__tests__/plugin-versioning.e2e.test.ts`
+creates a notebook, publishes it twice and reads the versions back through the
+generated GraphQL surface.
 
-| Table | Contents |
-| --- | --- |
-| `platform.workflow_node_catalog_entries` | one row per workflow node type (standard + entity catalogs), keyed by `catalog_checksum` |
-| `platform.entity_trigger_registry` | one row per workflow-triggerable entity + its designer filter fields |
-| `platform.entity_field_suggestions` | per-entity `Field[]` suggestion arrays for condition/variable pickers |
+`notebook.import` is the plugin Operation: a keyed command (`Idempotency-Key`
+on REST, `idempotencyKey` everywhere else) with a REST path parameter, an MCP
+tool and a GraphQL mutation, declared through the compiler contract's
+`operations` and bound to the handler in `runtime.ts`, which replaces a draft
+notebook's body inside the caller's tenant session. It is the one module-level
+plugin Operation this repository composes, so the operations runtime and the
+transport tests exercise every plugin-Operation path through it: binding
+(`bindOperationHandlers` refuses a catalog Operation without a loaded module),
+contract validation, idempotency keys and session authorization
+(`apps/api/src/operations/runtime.test.ts`).
 
-`db:migrate` fills them from the generated seed documents (see below). The
-node-catalog table is shared by two seeds discriminated on `catalog`, so each is
-authoritative over its own slice only — the mechanics live in
-`apps/api/src/db/migrations/catalog-seed.ts`.
+### Compiled runtime configuration
 
-It also contributes the tenant-scoped `workflow.*` data and execution tables.
-Five of those — `control_commands`, `schedules`, `schedule_fires`, `waits`,
-`collection_waits` — declare `workerAccess: "workflow-worker"`, the queue a
-worker claims across tenants; the rest get the plain tenant-isolation policy
-and declare `workerDml: true` so the worker role can reach them one tenant at a
-time. See [api.md](api.md#the-worker-axis).
+A compiler plugin may implement `runtimeConfiguration({ entities })` to derive
+nonsecret JSON from the host's compiled entity contracts. The compiler records
+that value in the module registry. Configuration must contain finite JSON data:
+cycles, undefined values, sparse arrays, accessors and symbol properties are
+refused. Credentials and request/session authority belong in the existing
+platform ports, never in this generated artifact.
 
-**Contributed worker role** (`workers`) — `workflow-worker`, one process
-draining `workflow.control_commands`. It connects as the `openshapeforge_worker`
-database role, so it needs its own connection string and will not start on the
-API's:
-
-```sh
-OPENSHAPEFORGE_ROLE=workflow-worker \
-OPENSHAPEFORGE_WORKER_DATABASE_URL=postgres://openshapeforge_worker:openshapeforge_worker@localhost:5434/openshapeforge_dev \
-  bun apps/api/src/index.ts
-```
-
-Whether it dispatches in-process or through a durable-execution service is the
-deployment's choice and is logged once at boot; correctness does not depend on
-the answer, because idempotency comes from the command row's conditional
-consume rather than from whoever dispatches.
-
-**Restored authoring layer** — `examples/plugins/workflow/authoring/` is
-picked up as a layer automatically and ships:
-
-- `workflow-nodes/**` — the node-config YAMLs the generators compile into
-  the `standard` catalog: `flow/`, `triggers/`, `integrations/` and
-  `orchestrator/`, fifteen node types in all. The packs that describe
-  capabilities this repo does not provide — `ai/`, `messaging/`, `billing/`,
-  case handling — moved to the `workflow-domain-nodes` plugin, which seeds
-  them into the same table under `catalog='domain'`.
-- `entities/core/relation.yaml` with `kind: entityPatch` — the **Relation
-  entityPatch**: it strategically merges a `workflow.nodes.actions` block
-  (create/getOne/list/update/delete: true) back onto the base Relation
-  entity, opting it into entity workflow-node generation. This is the
-  worked demonstration of plugin + authoring-layer + entityPatch
-  composition.
-
-**Generated artifacts** — `generate({ authoringDir, webPresent })` runs the
-extracted generators against the *resolved* authoring dir and maps their
-old repo paths to service paths:
-
-- **api-side (always emitted)**, under `apps/api/src/generated/workflow/`:
-  `node-catalog.ts` (types + the checksum that keys the runtime cache/seed —
-  the catalog *data* lives in the Postgres tables above),
-  `entity-workflow-nodes.generated.json` (one entry per entity action node,
-  e.g. `entity.core.relation.create`), and the four seed documents
-  `db:migrate` loads into the three tables above: `node-catalog.seed.json`
-  (`catalog='standard'`), `entity-catalog.seed.json` (`catalog='entity'`),
-  `entity-trigger-registry.seed.json` and `entity-field-suggestions.seed.json`.
-  The last three are produced by the entity-node generator, which names them
-  under web paths; the plugin maps them API-side because `apps/api` owns the
-  tables — the same split the core applies to the page-config catalog. A host
-  repo that deletes `apps/web` keeps its node catalogs.
-- **web-side (only when `apps/web` exists)**: the workflow contract, designer
-  registries, and renderer seeds under `apps/web/src/generated/workflow/`,
-  `apps/web/src/features/renderer/generated/`, and
-  `apps/web/src/features/workflow/lib/nodes/generated/` — mirroring the
-  core's web gating.
-- The `compiler/` and `generated/compiler/` prefixes carry the web client's
-  copies of the field contract. Despite the workflow-named generator these
-  are the *renderer's* core type surface — `@/generated/compiler/field-contract`
-  alone has ~87 importers across `features/renderer` and `components/entity` —
-  so both are mapped into `apps/web/src/`, with byte-identical content.
-- Any other unmapped prefix is dropped entirely, matching the core's
-  greenfield-safe behaviour.
-
-`ownedPaths.roots` declares the api root **and** all three web roots, so the
-stale/orphan gates cover the web side; they deactivate along with generation
-if a host repo removes `apps/web`.
-
-**Runtime half** — `examples/plugins/workflow/runtime.ts` contributes one seed
-step, `workflowCatalogs`, which loads the four generated documents into the three
-tables above. That is the whole reason the runtime contract exists here: before
-it, `apps/api` carried a hardcoded path to a plugin's generated output, and a
-repo that dropped the workflow plugin had to edit the migration chain to stop
-seeding. `db:migrate` reports the result under the seed's name.
+A configured runtime exports a factory `(configuration: unknown) => RuntimeModule`
+instead of a singleton module object. The loader passes a detached configuration
+and checks the returned module name against the compiler registration. The
+factory must validate its own configuration and create isolated handlers; an
+invalid factory is reported as a load failure, and canonical operation boot
+validation remains fail closed. Packages must never import configuration from a
+consumer source tree. For example, branding derives Tenant.logo transforms;
+another plugin can derive locale/format settings without sharing mutable state
+between hosts. Ordinary modules without build configuration export their module
+object directly.

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // ── Naming & pluralization helpers ──
 import type { Field } from "../types.js";
+import { cardinalityOf } from "@openshapeforge/operations";
 
 export const FIELD_VALUE_TYPE_TO_SQL: Record<string, string> = {
   string: "text",
@@ -16,49 +17,69 @@ export const FIELD_VALUE_TYPE_TO_SQL: Record<string, string> = {
 export const FIELD_VALUE_TYPE_TO_GQL: Record<string, string> = {
   string: "String",
   integer: "Int",
-  number: "Float",
+  number: "Decimal",
   boolean: "Boolean",
   date: "String",
   datetime: "String",
   object: "JSON",
 };
 
+const POSTGRES_INTEGER_MIN = -2_147_483_648;
+const POSTGRES_INTEGER_MAX = 2_147_483_647;
+
+function numericValidationRule(rule: unknown): number | undefined {
+  const value = rule && typeof rule === "object" ? (rule as { value?: unknown }).value : rule;
+  return typeof value === "number" ? value : undefined;
+}
+
+function needsWideInteger(field: Pick<Field, "baseType" | "validation">): boolean {
+  if (field.baseType !== "integer") return false;
+  const minimum = numericValidationRule(field.validation?.min);
+  const maximum = numericValidationRule(field.validation?.max);
+  return (
+    (minimum !== undefined && minimum < POSTGRES_INTEGER_MIN) ||
+    (maximum !== undefined && maximum > POSTGRES_INTEGER_MAX)
+  );
+}
+
 export function fieldCardinality(field: Pick<Field, "cardinality">): "single" | "collection" {
-  if (field.cardinality === "collection") return "collection";
-  if (field.cardinality && typeof field.cardinality === "object") {
-    if (field.cardinality.max === "unbounded") return "collection";
-    if (typeof field.cardinality.max === "number" && field.cardinality.max > 1) {
-      return "collection";
-    }
-  }
-  return "single";
+  return cardinalityOf(field.cardinality).cardinality;
 }
 
 export function isCollectionField(field: Pick<Field, "cardinality">): boolean {
   return fieldCardinality(field) === "collection";
 }
 
-export function isUuidField(field: Pick<Field, "valueType" | "validation">): boolean {
-  return field.valueType === "string" && field.validation?.format === "uuid";
+export function isUuidField(field: Pick<Field, "baseType" | "validation">): boolean {
+  return field.baseType === "string" && field.validation?.format === "uuid";
 }
 
-export function fieldSqlType(field: Pick<Field, "valueType" | "cardinality" | "validation">): string {
+export function fieldSqlType(
+  field: Pick<Field, "baseType" | "cardinality" | "validation">,
+): string {
   if (isCollectionField(field)) return "jsonb";
   if (isUuidField(field)) return "uuid";
-  return FIELD_VALUE_TYPE_TO_SQL[field.valueType] ?? "text";
+  if (needsWideInteger(field)) return "bigint";
+  return FIELD_VALUE_TYPE_TO_SQL[field.baseType] ?? "text";
 }
 
-export function fieldGraphqlBaseType(field: Pick<Field, "valueType" | "cardinality" | "validation">): string {
+export function fieldGraphqlBaseType(
+  field: Pick<Field, "baseType" | "cardinality" | "validation">,
+): string {
   if (isCollectionField(field)) {
-    const itemType = field.valueType === "object"
-      ? "JSON"
-      : isUuidField(field)
-        ? "ID"
-        : FIELD_VALUE_TYPE_TO_GQL[field.valueType] ?? "String";
+    const itemType =
+      field.baseType === "object"
+        ? "JSON"
+        : isUuidField(field)
+          ? "ID"
+          : needsWideInteger(field)
+            ? "Decimal"
+            : (FIELD_VALUE_TYPE_TO_GQL[field.baseType] ?? "String");
     return `[${itemType}]`;
   }
   if (isUuidField(field)) return "ID";
-  return FIELD_VALUE_TYPE_TO_GQL[field.valueType] ?? "String";
+  if (needsWideInteger(field)) return "Decimal";
+  return FIELD_VALUE_TYPE_TO_GQL[field.baseType] ?? "String";
 }
 
 export function deriveTableName(entityName: string): string {

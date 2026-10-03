@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: RelationGroup
@@ -7,30 +7,38 @@ description: A group that bundles multiple relations together.
 language: en
 displayTemplate: "{{name}}"
 filterField: name
+blueprint:
+  fields:
+    - name
+    - description
+    - groupType
+    - status
 labels:
   en: Relation Group
   nl: Relatiegroep
+pluralLabels:
+  en: Relation groups
+  nl: Relatiegroepen
 domains:
   - relations
-rest: true
-mcp: true
 authorization:
   roles:
     read:
       - Relations.All.Read
       - Relations.All.ReadWrite
+      - Relations.RelationGroups.ReadWrite
     create:
-      - Relations.All.ReadWrite
+      - Relations.RelationGroups.ReadWrite
     update:
-      - Relations.All.ReadWrite
+      - Relations.RelationGroups.ReadWrite
     delete:
-      - Relations.All.ReadWrite
+      - Relations.RelationGroups.ReadWrite
   rowAccess:
     enabled: true
     empty: public
 fields:
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -45,7 +53,7 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Description
@@ -58,27 +66,41 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 2000
+  - key: groupType
+    osfType: string
+    required: true
+    label:
+      en: Group type
+      nl: Groepstype
+    description:
+      en: Classification of this group, such as a department, team, project, or
+        committee.
+      nl: Classificatie van deze groep, zoals een afdeling, team, project of
+        commissie.
+    persisted:
+      column: group_type
+      storageClass: core
+    options:
+      type: referentiedata
+      referentieGroep: RELATIONGROUPTYPE
   - key: status
-    valueType: string
-    required: false
+    osfType: string
+    required: true
+    defaultValue: active
     label:
       en: Status
       nl: Status
     description:
       en: Lifecycle status of the relation group.
       nl: Levenscyclusstatus van de relatiegroep.
-    validation:
-      maxLength: 50
     persisted:
       column: status
       storageClass: core
+    options:
+      type: referentiedata
+      referentieGroep: RELATIONGROUPSTATUS
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -91,138 +113,309 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: members
-    kind: hasMany
-    target: Relation
-    foreignKey: relation_group_id
-    label:
-      en: Members
-      nl: Leden
-  - key: orgUnit
-    kind: belongsTo
-    target: OrgUnit
-    foreignKey: org_unit_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    osfType: Relation
+    relationship:
+      ownership: reference
+  - key: orgUnitId
     label:
       en: Org unit
       nl: Organisatorische eenheid
-ui:
-  routes:
-    list:
-      en: /relation-groups
-      nl: /relatiegroepen
-    detail:
-      en: /relation-groups/:id
-      nl: /relatiegroepen/:id
-    create:
-      en: /relation-groups/create
-      nl: /relatiegroepen/aanmaken
-    edit:
-      en: /relation-groups/:id/edit
-      nl: /relatiegroepen/:id/bewerken
-    delete:
-      en: /relation-groups/:id/delete
-      nl: /relatiegroepen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Relation Groups
-        nl: Relatiegroepen
-      columns:
-        - key: name
-          sortable: true
-      defaultSort:
-        key: name
-        direction: asc
-      rowLink:
-        en: /relation-groups/:id
-        nl: /relatiegroepen/:id
-    detail:
-      header:
+    persisted:
+      column: org_unit_id
+      storageClass: core
+    osfType: OrgUnit
+    relationship:
+      ownership: reference
+  - key: accessRoles
+    osfType: GroupRoleAssignment
+    cardinality: collection
+    label:
+      en: Roles
+      nl: Rollen
+    provider:
+      bindings:
+        relationGroupId: id
+operations:
+  list:
+    name:
+      en: List relation groups
+      nl: Relatiegroepen tonen
+    description:
+      en: Returns a filtered and sorted page of relation groups.
+      nl: Geeft een gefilterde en gesorteerde pagina met relatiegroepen terug.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name:
+      en: Get relation group
+      nl: Relatiegroep ophalen
+    description:
+      en: Returns one relation group by its canonical id.
+      nl: Geeft een relatiegroep terug op basis van het canonieke id.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name:
+      en: Create relation group
+      nl: Relatiegroep aanmaken
+    description:
+      en: Creates one relation group after validating its canonical fields.
+      nl: Maakt een relatiegroep aan na validatie van de canonieke velden.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Update relation group
+      nl: Relatiegroep wijzigen
+    description:
+      en: Updates one relation group while holding its server-issued edit lease and
+        current version.
+      nl: Wijzigt een relatiegroep met de server-uitgegeven bewerkingslease en actuele
+        versie.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    concurrency:
+      version:
+        mode: required
+        field: updatedAt
+      editLease:
+        mode: required
+        expiresAfterInactivity: PT15M
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete relation group
+      nl: Relatiegroep verwijderen
+    description:
+      en: Permanently deletes one relation group after a server-issued, version-bound
+        confirmation challenge.
+      nl: Verwijdert een relatiegroep definitief na een door de server uitgegeven,
+        versiegebonden bevestigingsvraag.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    concurrency:
+      version:
+        mode: required
+        field: updatedAt
+      editLease:
+        mode: required
+        expiresAfterInactivity: PT15M
+    confirmation:
+      mode: challenge
+      challenge:
+        kind: type-current-field
+        field: name
+        issuedBy: server
+        bindTo:
+          - subject
+          - tenant
+          - operation
+          - target.id
+          - target.version
+        expiresAfter: PT5M
+        singleUse: true
+interfaces:
+  rest:
+    operations:
+      list: {}
+      get: {}
+      create: {}
+      update: {}
+      delete: {}
+  graphql: {}
+  mcp:
+    operations:
+      list: {}
+      get: {}
+      create: {}
+      update:
+        instructions:
+          en: Acquire an edit lease first and submit its token with the version returned
+            by get.
+          nl: Vraag eerst een bewerkingslease aan en stuur het token mee met de versie uit
+            get.
+      delete:
+        instructions:
+          en: Acquire an edit lease first; request the confirmation challenge and answer
+            it with the exact current group name.
+          nl: Vraag eerst een bewerkingslease en bevestigingsvraag aan en beantwoord die
+            met exact de actuele groepsnaam.
+    resource:
+      uri: app://relation-groups
+      name: Relation groups
+      description: Read the relation groups available to the signed-in identity.
+      templateDescription: Read one relation group by its canonical id.
+  web:
+    operations:
+      list: {}
+      get: {}
+      create: {}
+      update: {}
+      delete: {}
+    views:
+      collection:
+        route:
+          en: /relation-groups
+          nl: /relatiegroepen
+        title:
+          en: Relation groups
+          nl: Relatiegroepen
+        columns:
+          - key: name
+            sortable: true
+          - key: groupType
+            sortable: true
+          - key: status
+            sortable: true
+        defaultSort:
+          key: name
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /relation-groups/:id
+            nl: /relatiegroepen/:id
+          create:
+            en: /relation-groups/new
+            nl: /relatiegroepen/nieuw
         title: "{{name}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: General
-                nl: Algemeen
-              fields:
-                - name
-                - status
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-        - id: members
-          label:
-            en: Members
-            nl: Leden
-          relationship: members
-    form:
-      variants:
-        create:
-          title:
-            en: Create relation group
-            nl: Relatiegroep aanmaken
-          groups:
-            - title:
-                en: General
-                nl: Algemeen
-              fields:
-                - name
-                - status
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-        edit:
-          extends: create
-          title:
-            en: Edit relation group
-            nl: Relatiegroep bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions:
+          - update
+          - delete
+        layout:
+          context:
+            fields:
+              - groupType
+              - status
+            relationships:
+              - relationId
+              - orgUnitId
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: General
+                    nl: Algemeen
+                  fields:
+                    - name
+                    - groupType
+                    - status
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+            - id: memberships
+              label:
+                en: Memberships
+                nl: Lidmaatschappen
+              relationship: memberships
+            - id: access-roles
+              label:
+                en: Roles
+                nl: Rollen
+              relationship: accessRoles
+        modes:
+          create:
+            title:
+              en: Create relation group
+              nl: Relatiegroep aanmaken
+            groups:
+              - title:
+                  en: General
+                  nl: Algemeen
+                fields:
+                  - name
+                  - groupType
+                  - status
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+          update:
+            title:
+              en: Update relation group
+              nl: Relatiegroep wijzigen
+            groups:
+              - title:
+                  en: General
+                  nl: Algemeen
+                fields:
+                  - name
+                  - groupType
+                  - status
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalCode

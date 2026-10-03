@@ -5,6 +5,14 @@
  * Keep this in the compiler package so tests and scripts can share the same
  * ownership boundary without duplicating path lists.
  */
+/** Roots kept solely as permanent ownership/ignore tombstones. */
+export const retiredCompilerGeneratedRoots = [
+  "apps/api/src/generated/workflow",
+  "apps/api/src/generated/workflow-domain-nodes",
+  "apps/web/src/features/renderer/generated",
+  "apps/web/src/features/workflow/lib/nodes/generated",
+] as const;
+
 export const compilerOwnedGeneratedRoots = [
   "apps/api/src/generated/db",
   // OpenAPI 3.1 spec for entities that opt into generated REST exposure —
@@ -31,6 +39,10 @@ export const compilerOwnedGeneratedRoots = [
   // Canonical plugin operations projected into REST, MCP, GraphQL, and
   // generated clients. Always emitted so runtime imports stay unconditional.
   "apps/api/src/generated/operations",
+  // Shared build-time authoring registries and canonical expression helpers.
+  // These are interface-neutral inputs consumed by host adapters rather than
+  // implementation code owned by a particular web application.
+  "apps/api/src/generated/compiler",
   // Optional immutable DDL contributed by compiler plugins. The registry is
   // absent when no plugin uses this contract and must not linger after the
   // final contribution is removed.
@@ -39,10 +51,12 @@ export const compilerOwnedGeneratedRoots = [
   // the web-gated UI generator (no apps/web -> no page configs -> no rows), but
   // owned API-side because apps/api owns the table.
   "apps/api/src/generated/page-configs",
-  // NOTE: workflow-generated roots (apps/api/src/generated/workflow, the web
-  // workflow/renderer feature roots) are owned by the example workflow plugin
-  // (examples/plugins/workflow) via its `ownedPaths.roots` — the check scripts
-  // merge plugin-owned paths into the same stale/orphan gates.
+  // Permanent tombstones for generators retired from the in-tree composition.
+  // Ownership must outlive a plugin: otherwise its stale output becomes both
+  // committable and invisible to the orphan gate when that plugin is removed.
+  ...retiredCompilerGeneratedRoots,
+  // Roots a plugin emits into are declared by that plugin's `ownedPaths.roots`;
+  // the check scripts merge plugin-owned paths into the same stale/orphan gates.
   "apps/web/src/actions/generated",
   "apps/web/src/app/(generated)",
   "apps/web/src/compiler",
@@ -61,6 +75,14 @@ export const compilerOwnedGeneratedRoots = [
   // under this root fails the same way.
   "keycloak",
 ];
+
+/** Existing owned files for which the current composition emitted nothing. */
+export function orphanCompilerGeneratedFiles(
+  existing: readonly string[],
+  emitted: ReadonlySet<string>,
+): string[] {
+  return existing.filter((path) => !emitted.has(path));
+}
 
 /** Emitted next to `(generated)/` rather than under a generated directory. */
 export const compilerGeneratedAppShellFiles = [

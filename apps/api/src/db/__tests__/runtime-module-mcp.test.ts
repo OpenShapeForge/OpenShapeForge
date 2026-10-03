@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
+import accountsRuntime from "../../accounts/runtime.js";
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql, type Kysely } from "kysely";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import documentsPluginRuntime from "@openshapeforge/documents/runtime";
+import versioningPluginRuntime from "@openshapeforge/versioning/runtime";
 import type { DB } from "../../generated/db/types.js";
 import rawCatalog from "../../generated/mcp/tools.json" with { type: "json" };
 import { createDatabaseRuntime } from "../connection.js";
@@ -16,10 +19,19 @@ import type {
   ModuleToolExecutionOptions,
   RuntimeModule,
 } from "../../modules/contract.js";
+
 import { ModulePlatformRuntime } from "../../modules/platform.js";
-import { __buildGeneratedMcpServerForTests } from "../../mcp/generated-mcp-server.js";
-import { connectionTokenSecretScope } from "../../mcp/entity-oauth.js";
+import {
+  __buildGeneratedMcpServerForTests,
+} from "../../mcp/generated-mcp-server.js";
+import { createRuntimeDeclarativeServiceExecutor } from "../../mcp/runtime-executors.js";
+import { connectionTokenSecretScope } from "../../connectors/secrets.js";
 import { encryptSecret, keyringFromEnv } from "../../platform/secrets.js";
+
+// The public plugin keeps its database generic unbound; the API runtime
+// specializes the same contract to the generated DB at its loader boundary.
+const documentsRuntime = documentsPluginRuntime as unknown as RuntimeModule;
+const versioningRuntime = versioningPluginRuntime as unknown as RuntimeModule;
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -92,7 +104,6 @@ function table(
     tenantScoped: true,
     domainInternal: false,
     generatedCrudEligible: true,
-    generatedCrud: true,
     primaryKey: "id",
     columns,
   };
@@ -115,8 +126,18 @@ describe("generated MCP runtime module security boundary", () => {
               definition_version integer not null,
               status text not null,
               visible_roles jsonb not null,
-              internal_only boolean not null,
-              bindings jsonb not null
+              internal_only boolean not null
+            )
+          `.execute(trx);
+          await sql`
+            create table public.module_binding_test (
+              id uuid primary key,
+              tenant_id uuid not null,
+              service_id uuid not null,
+              operation_id uuid not null,
+              "order" integer not null,
+              optional boolean,
+              "when" jsonb
             )
           `.execute(trx);
           await sql`
@@ -154,6 +175,7 @@ describe("generated MCP runtime module security boundary", () => {
           `.execute(trx);
           for (const tableName of [
             "module_service_test",
+            "module_binding_test",
             "module_operation_test",
             "module_provider_test",
             "module_connection_test",
@@ -161,7 +183,7 @@ describe("generated MCP runtime module security boundary", () => {
             await sql`alter table ${sql.id("public", tableName)} enable row level security`.execute(trx);
             await sql`alter table ${sql.id("public", tableName)} force row level security`.execute(trx);
             const ownerPredicate = tableName === "module_connection_test"
-              ? sql`and (owner_user_id is null or owner_user_id = app.current_user_id())`
+              ? sql`and (owner_user_id is null or owner_user_id = app.current_relation_id())`
               : sql``;
             await sql`
               create policy ${sql.id(`${tableName}_tenant_policy`)}
@@ -175,6 +197,14 @@ describe("generated MCP runtime module security boundary", () => {
         const tenantId = randomUUID();
         const userId = randomUUID();
         const otherUserId = randomUUID();
+        // The person acts as a Relation; a personal connection is owned by it.
+        const relationId = randomUUID();
+        const relation = {
+          identityId: randomUUID(), issuer: "https://issuer.example", subject: userId,
+          status: "linked" as const, relationId, relationType: "person" as const,
+          displayName: null, candidateRelationId: null, linkedBy: "jit" as const,
+          needsRoleAssignment: false, roles: [],
+        };
         const publicDefinitionId = randomUUID();
         const hiddenDefinitionId = randomUUID();
         const operationId = randomUUID();
@@ -200,33 +230,28 @@ describe("generated MCP runtime module security boundary", () => {
         await admin.connection().execute(async (trx) => {
           await sql`insert into public.module_service_test
             (id, tenant_id, key, description, input_fields, output_fields, definition_version,
-             status, visible_roles, internal_only, bindings)
+             status, visible_roles, internal_only)
           values
             (${publicDefinitionId}::uuid, ${tenantId}::uuid, 'public_read', 'Public read',
-             '[{"key":"sourceReference","valueType":"string"},{"key":"scope","valueType":"string"},{"key":"provider","valueType":"string"}]'::jsonb,
+             '[{"key":"sourceReference","osfType":"string"},{"key":"scope","osfType":"string"},{"key":"provider","osfType":"string"}]'::jsonb,
              '[{"key":"title","classification":{"sensitivity":"public"}},{"key":"privateNote","classification":{"sensitivity":"confidential"}}]'::jsonb,
-             1, 'published', '["reader"]'::jsonb, false,
-             jsonb_build_array(
-               jsonb_build_object(
-                 'order', 1,
-                 'operationId', ${operationId}::text,
-                 'when', jsonb_build_object('field', 'provider', 'equals', 'first')
-               ),
-               jsonb_build_object(
-                 'order', 2,
-                 'operationId', ${secondOperationId}::text,
-                 'optional', true,
-                 'when', jsonb_build_object('field', 'provider', 'equals', 'second')
-               )
-             )),
+             1, 'published', '["reader"]'::jsonb, false),
             (${hiddenDefinitionId}::uuid, ${tenantId}::uuid, 'hidden_read', 'Hidden read',
              '[]'::jsonb,
              '[{"key":"title","classification":{"sensitivity":"public"}},{"key":"privateNote","classification":{"sensitivity":"confidential"}}]'::jsonb,
-             7, 'published', '["reader"]'::jsonb, true,
-             jsonb_build_array(jsonb_build_object('order', 1, 'operationId', ${operationId}::text))),
+             7, 'published', '["reader"]'::jsonb, true),
             (${wrongKeyDefinitionId}::uuid, ${tenantId}::uuid, 'wrong_key_read', 'Wrong key read',
-             '[]'::jsonb, '[]'::jsonb, 1, 'published', '["reader"]'::jsonb, false,
-             jsonb_build_array(jsonb_build_object('order', 1, 'operationId', ${wrongKeyOperationId}::text)))
+             '[]'::jsonb, '[]'::jsonb, 1, 'published', '["reader"]'::jsonb, false)
+          `.execute(trx);
+          await sql`insert into public.module_binding_test
+            (id, tenant_id, service_id, operation_id, "order", optional, "when")
+          values
+            (${randomUUID()}::uuid, ${tenantId}::uuid, ${publicDefinitionId}::uuid, ${operationId}::uuid, 1, null,
+             '{"field":"provider","equals":"first"}'::jsonb),
+            (${randomUUID()}::uuid, ${tenantId}::uuid, ${publicDefinitionId}::uuid, ${secondOperationId}::uuid, 2, true,
+             '{"field":"provider","equals":"second"}'::jsonb),
+            (${randomUUID()}::uuid, ${tenantId}::uuid, ${hiddenDefinitionId}::uuid, ${operationId}::uuid, 1, null, null),
+            (${randomUUID()}::uuid, ${tenantId}::uuid, ${wrongKeyDefinitionId}::uuid, ${wrongKeyOperationId}::uuid, 1, null, null)
           `.execute(trx);
           await sql`insert into public.module_operation_test
             (id, tenant_id, key, kind, provider_id, operation, response_mapping, required_scopes)
@@ -281,7 +306,15 @@ describe("generated MCP runtime module security boundary", () => {
             column("status", "status"),
             column("visible_roles", "visibleRoles", "jsonb"),
             column("internal_only", "internalOnly", "boolean"),
-            column("bindings", "bindings", "jsonb"),
+          ]),
+          table("module_binding_test", [
+            column("id", "id", "uuid"),
+            column("tenant_id", "tenantId", "uuid"),
+            column("service_id", "serviceId", "uuid"),
+            column("operation_id", "operationId", "uuid"),
+            column("order", "order", "integer"),
+            column("optional", "optional", "boolean"),
+            column("when", "when", "jsonb"),
           ]),
           table("module_operation_test", [
             column("id", "id", "uuid"),
@@ -325,7 +358,10 @@ describe("generated MCP runtime module security boundary", () => {
           visibleToRolesField: "visibleRoles",
           internalOnlyField: "internalOnly",
           execution: {
-            bindingsField: "bindings",
+            bindingsRelation: "capabilityBindings",
+            bindingsEntity: "Binding",
+            bindingsTable: "public.module_binding_test",
+            parentRef: "serviceId",
             operationRef: "operationId",
             operationEntity: "Operation",
             operationTable: "public.module_operation_test",
@@ -389,7 +425,7 @@ describe("generated MCP runtime module security boundary", () => {
         let childToolsStarted = Promise.resolve();
         let childOutcome: Promise<unknown> | undefined;
         let moduleToolArgument: unknown;
-        let workflowCalls = 0;
+        let notebookCalls = 0;
         const egressRequests: any[] = [];
         let egressEntered!: () => void;
         let egressStarted = Promise.resolve();
@@ -707,7 +743,7 @@ describe("generated MCP runtime module security boundary", () => {
               const expectedVersion = uri.endsWith("/stale") ? 8 : 7;
               if (uri.endsWith("/override")) mode = "hidden-override";
               const toolName = uri.endsWith("/collision")
-                ? "workflow_start_webhook"
+                ? "notebook_import"
                 : "hidden_read";
               if (uri.endsWith("/collision")) mode = "hidden-collision";
               const outcome = await platform.services.mcp.callTool(
@@ -738,7 +774,7 @@ describe("generated MCP runtime module security boundary", () => {
               if (
                 call.name === "hidden_read" ||
                 (mode === "hidden-collision" &&
-                  call.name === "workflow_start_webhook")
+                  call.name === "notebook_import")
               ) {
                 hiddenInterceptors += 1;
                 if (mode === "hidden-block") {
@@ -821,16 +857,16 @@ describe("generated MCP runtime module security boundary", () => {
             },
           },
         };
-        const workflowModule: RuntimeModule = {
-          name: "workflow",
+        const notebookModule: RuntimeModule = {
+          name: "notebook",
           operationHandlers: {
-            startWebhook: async (input) => {
-              workflowCalls += 1;
+            importNotebook: async (input) => {
+              notebookCalls += 1;
               return {
                 value: {
                   status: "accepted",
-                  instanceId: "11111111-1111-4111-8111-111111111111",
-                  definitionId: input.definitionId,
+                  importId: "11111111-1111-4111-8111-111111111111",
+                  notebookId: input.notebookId,
                 },
               };
             },
@@ -847,8 +883,9 @@ describe("generated MCP runtime module security boundary", () => {
             oauthScopes: [],
             scope: "self",
             credential: "bearer",
+            relation,
           },
-          modules: [workflowModule, module],
+          modules: [accountsRuntime,documentsRuntime, versioningRuntime, notebookModule, module],
           modulePlatform: platform,
           egressOwner: module.egress,
           tables,
@@ -1213,12 +1250,9 @@ describe("generated MCP runtime module security boundary", () => {
           const beforeAmbiguousInterceptor = hiddenInterceptors;
           const beforeAmbiguousEgress = egressRequests.length;
           await admin.connection().execute((trx) => sql`
-            update public.module_service_test
-               set bindings = jsonb_build_array(
-                 jsonb_build_object('order', 1, 'operationId', ${operationId}::text),
-                 jsonb_build_object('order', 2, 'operationId', ${operationId}::text)
-               )
-             where id = ${hiddenDefinitionId}::uuid
+            insert into public.module_binding_test
+              (id, tenant_id, service_id, operation_id, "order")
+            values (${randomUUID()}::uuid, ${tenantId}::uuid, ${hiddenDefinitionId}::uuid, ${operationId}::uuid, 2)
           `.execute(trx));
           expect(JSON.parse(resourceText(
             await client.readResource({ uri: "app://internal/valid" }),
@@ -1226,26 +1260,23 @@ describe("generated MCP runtime module security boundary", () => {
           expect(hiddenInterceptors).toBe(beforeAmbiguousInterceptor);
           expect(egressRequests).toHaveLength(beforeAmbiguousEgress);
           await admin.connection().execute((trx) => sql`
-            update public.module_service_test
-               set bindings = jsonb_build_array(
-                 jsonb_build_object('order', 1, 'operationId', ${operationId}::text)
-               )
-             where id = ${hiddenDefinitionId}::uuid
+            delete from public.module_binding_test
+             where service_id = ${hiddenDefinitionId}::uuid and "order" = 2
           `.execute(trx));
 
           const beforeHiddenCollision = hiddenInterceptors;
-          const beforeWorkflow = workflowCalls;
+          const beforeNotebook = notebookCalls;
           const beforeCollisionEgress = egressRequests.length;
           await admin.connection().execute((trx) => sql`
             update public.module_service_test
-               set key = 'workflow_start_webhook'
+               set key = 'notebook_import'
              where id = ${hiddenDefinitionId}::uuid
           `.execute(trx));
           expect(JSON.parse(resourceText(
             await client.readResource({ uri: "app://internal/collision" }),
           )).isError).toBe(true);
           expect(hiddenInterceptors).toBe(beforeHiddenCollision);
-          expect(workflowCalls).toBe(beforeWorkflow);
+          expect(notebookCalls).toBe(beforeNotebook);
           expect(egressRequests).toHaveLength(beforeCollisionEgress);
           await admin.connection().execute((trx) => sql`
             update public.module_service_test
@@ -1358,14 +1389,14 @@ describe("generated MCP runtime module security boundary", () => {
              where id = ${providerId}::uuid
             `.execute(trx);
             await sql`update public.module_connection_test
-               set owner_user_id = ${userId}::uuid,
+               set owner_user_id = ${relationId}::uuid,
                    values = '{"apiKey":"obviously-fake","sourceReference":"config-reference","scope":"tenant"}'::jsonb
              where id = ${connectionId}::uuid
             `.execute(trx);
             await sql`insert into public.module_connection_test
               (id, tenant_id, owner_user_id, provider_id, values)
             values (${secondConnectionId}::uuid, ${tenantId}::uuid,
-              ${userId}::uuid, ${providerId}::uuid,
+              ${relationId}::uuid, ${providerId}::uuid,
               '{"apiKey":"obviously-fake-two","sourceReference":"other-config-reference","scope":"tenant"}'::jsonb)
             `.execute(trx);
           });
@@ -1467,6 +1498,51 @@ describe("generated MCP runtime module security boundary", () => {
             await sql`delete from public.module_connection_test
              where id in (${secondConnectionId}::uuid, ${sharedConnectionId}::uuid)
             `.execute(trx);
+          });
+
+          // Strict-v2 providers expose this same stored Service through the
+          // canonical Operation catalog. Its compatibility entry stays out of
+          // public MCP listing, while REST/GraphQL/workers can still execute
+          // the exact id/key/version through the transport-neutral engine.
+          (entry as typeof entry & {
+            compatibility?: { plugin: string; providerId: string };
+          }).compatibility = {
+            plugin: "example",
+            providerId: "example.services",
+          };
+          expect((await client.listTools()).tools.map((tool) => tool.name))
+            .not.toContain("public_read");
+          const directExecutor = createRuntimeDeclarativeServiceExecutor({
+            db,
+            modules: [accountsRuntime,documentsRuntime, versioningRuntime, notebookModule, module],
+            modulePlatform: platform,
+            egressOwner: module.egress,
+            tablesForTests: tables,
+          });
+          const direct = await platform.withActiveOperationSession(
+            {
+              tenantId,
+              userId,
+              roles: ["reader"],
+              groups: [],
+              oauthScopes: [],
+              scope: "self",
+              credential: "bearer",
+              relation,
+            },
+            (active) => directExecutor(active, {
+              definition: {
+                entity: "Definition",
+                id: publicDefinitionId,
+                key: "public_read",
+                version: 1,
+              },
+              input: {},
+            }),
+          );
+          expect(direct).toMatchObject({
+            data: { value: "ok" },
+            operations: [],
           });
 
           const beforeCollisionRead = moduleReads;

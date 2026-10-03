@@ -1,0 +1,115 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: DocumentRendition
+title: Document representation
+language: en
+labels: { en: Document representation, nl: Documentrepresentatie }
+pluralLabels: { en: Document representations, nl: Documentrepresentaties }
+description: An immutable derived file of one source document version. Content variants remain channel and locale variants.
+displayTemplate: "{{target}}"
+authorization:
+  roles:
+    read: [CaseFile.All.Read, CaseFile.All.ReadWrite, Organization.Access.Manage]
+indexes:
+  - { name: document_renditions_source_target_pipeline_uidx, fields: [tenantId, sourceDocumentVersion, target, pipelineHash], unique: true }
+fields:
+  - key: sourceDocumentVersion
+    osfType: DocumentVersion
+    required: true
+    immutable: true
+    label: { en: Source version, nl: Bronversie }
+    persisted: { column: source_document_version_id, storageClass: core }
+    relationship:
+      inverse: { key: renditions, label: { en: Representations, nl: Representaties }, ownership: owned }
+  - key: target
+    osfType: string
+    required: true
+    immutable: true
+    label: { en: target, nl: target }
+    persisted: { column: target, storageClass: core }
+  - key: artifactId
+    osfType: string
+    required: true
+    immutable: true
+    label: { en: artifactId, nl: artifactId }
+    persisted: { column: artifact_id, storageClass: core }
+  - key: artifactVersion
+    osfType: integer
+    required: true
+    immutable: true
+    label: { en: artifactVersion, nl: artifactVersion }
+    persisted: { column: artifact_version, storageClass: core }
+  - key: fileName
+    osfType: string
+    required: true
+    immutable: true
+    label: { en: fileName, nl: fileName }
+    persisted: { column: file_name, storageClass: core }
+  - key: mimeType
+    osfType: string
+    required: true
+    immutable: true
+    label: { en: mimeType, nl: mimeType }
+    persisted: { column: mime_type, storageClass: core }
+  - key: byteSize
+    osfType: integer
+    required: true
+    immutable: true
+    label: { en: byteSize, nl: byteSize }
+    persisted: { column: byte_size, storageClass: core }
+  - key: checksum
+    osfType: string
+    required: true
+    immutable: true
+    label: { en: checksum, nl: checksum }
+    persisted: { column: checksum, storageClass: core }
+  - key: width
+    osfType: integer
+    required: false
+    immutable: true
+    label: { en: width, nl: width }
+    persisted: { column: width, storageClass: core }
+  - key: height
+    osfType: integer
+    required: false
+    immutable: true
+    label: { en: height, nl: height }
+    persisted: { column: height, storageClass: core }
+  - key: pipelineHash
+    osfType: string
+    required: true
+    immutable: true
+    label: { en: pipelineHash, nl: pipelineHash }
+    persisted: { column: pipeline_hash, storageClass: core }
+  - key: provenance
+    osfType: object
+    required: true
+    immutable: true
+    label: { en: provenance, nl: provenance }
+    persisted: { column: provenance, storageClass: core }
+  - key: inlinePreview
+    osfType: string
+    required: false
+    immutable: true
+    label: { en: inlinePreview, nl: inlinePreview }
+    persisted: { column: inline_preview, storageClass: core }
+operations:
+  list:
+    name: List document representations
+    description: List immutable document representations.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read document representation
+    description: Read an immutable document representation.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }

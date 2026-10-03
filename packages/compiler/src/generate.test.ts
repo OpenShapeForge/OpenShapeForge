@@ -6,7 +6,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadManifest } from "./load-manifest.js";
+import { ensureCompositeReferenceKeys } from "./tenant-bound-references.js";
 import type { PlatformSchemaManifest, TableDefinition } from "./schema.js";
+import type { CompiledEntityContract } from "./authoring/types.js";
+import { buildEntityOperations } from "./authoring/compiler/entity-operations.js";
 
 const manifest: PlatformSchemaManifest = {
   version: 1,
@@ -112,9 +115,13 @@ describe("platform schema generator", () => {
             {
               name: "primary_group_id",
               type: "uuid",
-              references: { schema: "erp", table: "relation_groups", column: "id" },
+              references: {
+                schema: "erp", table: "relation_groups", column: "id",
+                localColumns: ["tenant_id", "primary_group_id"], targetColumns: ["tenant_id", "id"],
+              },
             },
           ],
+          indexes: [{ name: "relations_tenant_id_id_key", columns: ["tenant_id", "id"], unique: true }],
         },
         {
           schema: "erp",
@@ -126,9 +133,13 @@ describe("platform schema generator", () => {
             {
               name: "relation_id",
               type: "uuid",
-              references: { schema: "erp", table: "relations", column: "id" },
+              references: {
+                schema: "erp", table: "relations", column: "id",
+                localColumns: ["tenant_id", "relation_id"], targetColumns: ["tenant_id", "id"],
+              },
             },
           ],
+          indexes: [{ name: "relation_groups_tenant_id_id_key", columns: ["tenant_id", "id"], unique: true }],
         },
       ],
     };
@@ -140,8 +151,8 @@ describe("platform schema generator", () => {
     expect(sql.indexOf('CREATE TABLE IF NOT EXISTS "erp"."relation_groups"')).toBeLessThan(
       sql.indexOf("-- OpenShapeForge generated foreign keys"),
     );
-    expect(sql).toContain('ADD CONSTRAINT "relations_primary_group_id_fkey" FOREIGN KEY ("primary_group_id")');
-    expect(sql).toContain('ADD CONSTRAINT "relation_groups_relation_id_fkey" FOREIGN KEY ("relation_id")');
+    expect(sql).toContain('ADD CONSTRAINT "relations_primary_group_id_fkey" FOREIGN KEY ("tenant_id", "primary_group_id")');
+    expect(sql).toContain('ADD CONSTRAINT "relation_groups_relation_id_fkey" FOREIGN KEY ("tenant_id", "relation_id")');
   });
 
   it("emits multi-axis rowScope policy with OR-combined predicates and supporting indexes", () => {
@@ -189,8 +200,63 @@ describe("platform schema generator", () => {
       'CREATE INDEX IF NOT EXISTS "cases_tenant_owner_id_idx" ON "erp"."cases" ("tenant_id", "owner_id") WHERE "owner_id" IS NOT NULL;',
     );
     // The plain tenant-isolation policy should NOT be emitted alongside the
-    // row-scope policy; rowScope subsumes it.
-    expect(sql).not.toContain('CREATE POLICY "cases_tenant_isolation"');
+    // row-scope policy; rowScope subsumes it. Nothing drops it either: a
+    // database built under the other policy is rebuilt, not rolled forward.
+    expect(sql).not.toContain('"cases_tenant_isolation"');
+  });
+
+  it("emits only the tenant-isolation policy when a table has no row scope", () => {
+    const tenantOnlyManifest: PlatformSchemaManifest = {
+      version: 1,
+      tables: [
+        {
+          schema: "erp",
+          name: "cases",
+          tenantScoped: true,
+          columns: [
+            { name: "id", type: "uuid", primaryKey: true },
+            { name: "tenant_id", type: "uuid", required: true },
+          ],
+        },
+      ],
+    };
+
+    const sql = generateArtifacts(tenantOnlyManifest).find((artifact) =>
+      artifact.path.endsWith("schema.sql"),
+    )?.contents ?? "";
+
+    expect(sql).toContain('CREATE POLICY "cases_tenant_isolation"');
+    expect(sql).not.toContain('"cases_row_scope"');
+  });
+
+  it("ANDs record view permission into USING but keeps ACL handoff out of WITH CHECK", () => {
+    const manifest: PlatformSchemaManifest = {
+      version: 1,
+      tables: [{
+        schema: "erp",
+        name: "protected_records",
+        tenantScoped: true,
+        columns: [
+          { name: "id", type: "uuid", primaryKey: true },
+          { name: "tenant_id", type: "uuid", required: true },
+          { name: "authorization", type: "jsonb", required: true },
+        ],
+        rowScope: {
+          recordPermissions: { column: "authorization", empty: "public" },
+        },
+      }],
+    };
+    const contents = generateArtifacts(manifest).find((artifact) =>
+      artifact.path.endsWith("schema.sql")
+    )?.contents ?? "";
+
+    expect(contents).toContain(
+      `USING (app.bypass_rls() OR (tenant_id = app.current_tenant() AND app.record_permission_allows("authorization", 'view', true)))`,
+    );
+    expect(contents).toContain(
+      `WITH CHECK (app.bypass_rls() OR (tenant_id = app.current_tenant()));`,
+    );
+    expect(contents.match(/record_permission_allows/g)?.length).toBe(1);
   });
 
   it("fails compile if a rowScope column is missing from the table", () => {
@@ -730,9 +796,7 @@ describe("platform schema generator", () => {
         `DROP POLICY IF EXISTS "${table}_tenant_isolation" ON "erp"."${table}";`,
       );
       // The row-scope policy variant must NOT be present for these tables.
-      expect(schemaSql).not.toContain(
-        `CREATE POLICY "${table}_row_scope" ON "erp"."${table}"`,
-      );
+      expect(schemaSql).not.toContain(`"${table}_row_scope"`);
       expect(schemaSql).toContain(
         `CREATE POLICY "${table}_tenant_isolation" ON "erp"."${table}"\n  USING (app.bypass_rls() OR (tenant_id = app.current_tenant()))\n  WITH CHECK (app.bypass_rls() OR (tenant_id = app.current_tenant()));`,
       );
@@ -747,7 +811,7 @@ describe("platform schema generator", () => {
           schema: "messaging",
           name: "mail_accounts",
           tenantScoped: true,
-          generatedCrud: true,
+          generatedCrudEligible: true,
           columns: [
             { name: "id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -758,7 +822,7 @@ describe("platform schema generator", () => {
           name: "mail_account_credentials",
           tenantScoped: true,
           domainInternal: true,
-          generatedCrud: false,
+          generatedCrudEligible: false,
           columns: [
             { name: "account_id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -770,7 +834,6 @@ describe("platform schema generator", () => {
           name: "legacy_inconsistent_entities",
           tenantScoped: true,
           generatedCrudEligible: false,
-          generatedCrud: true,
           columns: [
             { name: "id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -781,7 +844,6 @@ describe("platform schema generator", () => {
           name: "partial_policy_entities",
           tenantScoped: true,
           generatedCrudEligible: true,
-          generatedCrud: true,
           columns: [
             { name: "id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -803,7 +865,6 @@ describe("platform schema generator", () => {
           name: "malformed_plugin_policy_entities",
           tenantScoped: true,
           generatedCrudEligible: true,
-          generatedCrud: true,
           columns: [
             { name: "id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -820,7 +881,6 @@ describe("platform schema generator", () => {
     const manifestPayload = JSON.parse(manifestJson ?? "{}") as {
       tables: Array<{
         name: string;
-        generatedCrud: boolean;
         generatedCrudEligible: boolean;
         domainInternal: boolean;
         primaryKey: string | null;
@@ -830,7 +890,7 @@ describe("platform schema generator", () => {
     expect(manifestPayload.tables).toContainEqual(
       expect.objectContaining({
         name: "messaging.mail_accounts",
-        generatedCrud: true,
+        generatedCrudEligible: true,
         domainInternal: false,
         primaryKey: "id",
       }),
@@ -838,7 +898,7 @@ describe("platform schema generator", () => {
     expect(manifestPayload.tables).toContainEqual(
       expect.objectContaining({
         name: "messaging.mail_account_credentials",
-        generatedCrud: false,
+        generatedCrudEligible: false,
         domainInternal: true,
         primaryKey: "account_id",
       }),
@@ -847,21 +907,18 @@ describe("platform schema generator", () => {
       expect.objectContaining({
         name: "messaging.legacy_inconsistent_entities",
         generatedCrudEligible: false,
-        generatedCrud: false,
       }),
     );
     expect(manifestPayload.tables).toContainEqual(
       expect.objectContaining({
         name: "messaging.partial_policy_entities",
         generatedCrudEligible: true,
-        generatedCrud: false,
       }),
     );
     expect(manifestPayload.tables).toContainEqual(
       expect.objectContaining({
         name: "messaging.malformed_plugin_policy_entities",
         generatedCrudEligible: true,
-        generatedCrud: false,
       }),
     );
   });
@@ -874,7 +931,7 @@ describe("platform schema generator", () => {
           schema: "erp",
           name: "label_rules",
           tenantScoped: true,
-          generatedCrud: true,
+          generatedCrudEligible: true,
           columns: [
             { name: "id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -898,7 +955,7 @@ describe("platform schema generator", () => {
           name: "mail_account_credentials",
           tenantScoped: true,
           domainInternal: true,
-          generatedCrud: false,
+          generatedCrudEligible: false,
           columns: [
             { name: "account_id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -980,7 +1037,7 @@ describe("platform schema generator", () => {
             rules: [
               {
                 id: "delete_closed_cases_after_7_years",
-                after: { years: 7 },
+                duration: { default: { years: 7 } },
                 action: "delete",
                 reason: "Reference assumption pending migrated compiler catalog policy.",
               },
@@ -1000,7 +1057,7 @@ describe("platform schema generator", () => {
         name: string;
         retention?: {
           clock: { column: string; fallbackColumns?: string[] };
-          rules: Array<{ id: string; after: { years: number }; action: string }>;
+          rules: Array<{ id: string; duration: { default: { years: number } }; action: string }>;
         };
       }>;
     };
@@ -1017,7 +1074,7 @@ describe("platform schema generator", () => {
           rules: [
             expect.objectContaining({
               id: "delete_closed_cases_after_7_years",
-              after: { years: 7 },
+              duration: { default: { years: 7 } },
               action: "delete",
             }),
           ],
@@ -1178,7 +1235,7 @@ tables:
     retention:
       clock: { column: closed_at, fallbackColumns: [created_at] }
       rules:
-        - { id: delete_after_7_years, after: { years: 7 }, action: delete }
+        - { id: delete_after_7_years, duration: { default: { years: 7 } }, action: delete }
 `,
       "utf8",
     );
@@ -1209,7 +1266,7 @@ tables:
     retention:
       clock: { column: status, fallbackColumns: [created_at] }
       rules:
-        - { id: delete_after_2_years, after: { years: 2 }, action: delete }
+        - { id: delete_after_2_years, duration: { default: { years: 2 } }, action: delete }
 `,
       "utf8",
     );
@@ -1240,7 +1297,7 @@ tables:
     retention:
       clock: { column: closed_at, fallbackColumns: [status] }
       rules:
-        - { id: delete_after_7_years, after: { years: 7 }, action: delete }
+        - { id: delete_after_7_years, duration: { default: { years: 7 } }, action: delete }
 `,
       "utf8",
     );
@@ -1270,7 +1327,7 @@ tables:
     retention:
       clock: { column: contract_end_date }
       rules:
-        - { id: delete_after_7_years, after: { years: 7 }, action: delete }
+        - { id: delete_after_7_years, duration: { default: { years: 7 } }, action: delete }
 `,
       "utf8",
     );
@@ -1309,7 +1366,7 @@ tables:
       clock: { column: closed_at }
       rules:
         - id: crypto_erase_after_7_years
-          after: { years: 7 }
+          duration: { default: { years: 7 } }
           action: redact
           disposition: cryptoDelete
           review: { required: true, queue: privacy-review }
@@ -1397,7 +1454,7 @@ tables:
     name: mail_account_credentials
     tenantScoped: true
     domainInternal: true
-    generatedCrud: true
+    generatedCrudEligible: true
     columns:
       - { name: account_id, type: uuid, primaryKey: true }
       - { name: tenant_id, type: uuid, required: true }
@@ -1722,7 +1779,7 @@ tables:
     }
   });
 
-  it("only marks tables generatedCrud when they opt in explicitly", () => {
+  it("only marks tables CRUD-eligible when they opt in explicitly", () => {
     const optInManifest: PlatformSchemaManifest = {
       version: 1,
       tables: [
@@ -1730,7 +1787,7 @@ tables:
           schema: "erp",
           name: "exposed",
           tenantScoped: true,
-          generatedCrud: true,
+          generatedCrudEligible: true,
           columns: [
             { name: "id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -1754,9 +1811,9 @@ tables:
       throw new Error("manifest.json artifact not found");
     }
     const parsed = JSON.parse(json) as {
-      tables: Array<{ table: string; generatedCrud: boolean }>;
+      tables: Array<{ table: string; generatedCrudEligible: boolean }>;
     };
-    const byName = new Map(parsed.tables.map((t) => [t.table, t.generatedCrud]));
+    const byName = new Map(parsed.tables.map((t) => [t.table, t.generatedCrudEligible]));
     expect(byName.get("exposed")).toBe(true);
     expect(byName.get("omitted")).toBe(false);
   });
@@ -1810,7 +1867,7 @@ describe("generated REST OpenAPI artifact", () => {
         schema: "erp",
         name: "widgets",
         tenantScoped: true,
-        generatedCrud: true,
+        generatedCrudEligible: true,
         columns: [
           { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
           { name: "tenant_id", type: "uuid", required: true },
@@ -1830,15 +1887,68 @@ describe("generated REST OpenAPI artifact", () => {
         schema: "erp",
         name: "gadgets",
         tenantScoped: true,
-        generatedCrud: true,
+        generatedCrudEligible: true,
         columns: [{ name: "id", type: "uuid", primaryKey: true }],
         source: { authoringEntityName: "Gadget" },
       },
     ],
   };
 
+  /** The compiled contract a REST table always has beside its manifest row. */
+  function contractFor(table: TableDefinition): CompiledEntityContract {
+    const name = table.source!.authoringEntityName!;
+    const crud = { operations: { list: true, get: true, create: true, update: true, delete: true } };
+    const authorization = {
+      entitySlug: name.toLowerCase(),
+      roles: { read: [], create: [], update: [], delete: [] },
+      compositeRoles: [],
+      fieldAuthorizations: [],
+      profileAuthorizations: {},
+    };
+    const contract = {
+      authoringVersion: 3,
+      contractVersion: 2,
+      kind: "compiledEntityContract",
+      entity: { id: `core.${name}`, name, module: "core", title: name, labels: { en: name }, domains: [] },
+      storage: {
+        table: table.name,
+        columns: table.columns.map((column) => ({
+          field: column.sourceField ?? column.name.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase()),
+          column: column.name,
+          type: column.type,
+          nullable: !(column.required === true || column.primaryKey === true),
+          storageClass: "core" as const,
+        })),
+      },
+      model: {
+        fields: table.columns
+          .filter((column) => !column.primaryKey && !["tenant_id", "created_at", "updated_at"].includes(column.name))
+          .map((column) => ({
+            key: column.sourceField ?? column.name.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase()),
+            baseType: column.type === "boolean" ? "boolean" : "string",
+            osfType: column.type === "boolean" ? "boolean" : "string",
+            cardinality: "single",
+            required: column.required === true,
+            label: { en: column.name },
+          })),
+        relationships: [],
+      },
+      crud,
+      graphql: {},
+      authorization,
+      views: {},
+      profiles: {},
+      entityOperations: {},
+    } as unknown as CompiledEntityContract;
+    contract.entityOperations = buildEntityOperations({ entity: contract.entity, crud, authorization: contract.authorization });
+    return contract;
+  }
+
   function openApiFor(input: PlatformSchemaManifest) {
-    const artifact = generateArtifacts(input).find((item) =>
+    const entities = input.tables
+      .filter((table) => table.source?.rest && table.source.authoringEntityName)
+      .map((table) => ({ contract: contractFor(table) }));
+    const artifact = generateArtifacts(input, { openApi: { entities } }).find((item) =>
       item.path.endsWith("rest/openapi.json"),
     );
     expect(artifact?.path).toBe("apps/api/src/generated/rest/openapi.json");
@@ -1850,7 +1960,8 @@ describe("generated REST OpenAPI artifact", () => {
 
   it("emits versioned paths only for rest-enabled tables and enabled operations", () => {
     const spec = openApiFor(restManifest);
-    expect(Object.keys(spec.paths)).toEqual([
+    // The artifact transport is documented for every host; entity paths follow the opt-in.
+    expect(Object.keys(spec.paths).filter((path) => !path.startsWith("/api/artifacts"))).toEqual([
       "/api/rest/v1/widgets",
       "/api/rest/v1/widgets/{id}",
     ]);
@@ -1870,8 +1981,9 @@ describe("generated REST OpenAPI artifact", () => {
       "displayName",
       "isActive",
       "createdAt",
+      "updatedAt",
     ]);
-    expect(widget.required).toEqual(["id", "tenantId", "displayName", "createdAt"]);
+    expect(widget.required).toEqual(["id", "tenantId", "displayName", "createdAt", "updatedAt"]);
 
     const input = spec.components.schemas.WidgetInput!;
     expect(Object.keys(input.properties ?? {})).toEqual(["displayName", "isActive"]);
@@ -1882,15 +1994,13 @@ describe("generated REST OpenAPI artifact", () => {
     expect(update.required).toBeUndefined();
   });
 
-  it("always emits the artifact — with empty paths when no table opts in", () => {
+  it("always emits the artifact — with only the artifact transport when no table opts in", () => {
     const spec = openApiFor(manifest);
-    expect(spec.paths).toEqual({});
+    expect(Object.keys(spec.paths).sort()).toEqual(["/api/artifacts", "/api/artifacts/{artifactId}/contents"]);
   });
 
   it("is deterministic: two renders are byte-identical", () => {
-    const render = () =>
-      generateArtifacts(restManifest).find((item) => item.path.endsWith("rest/openapi.json"))!
-        .contents;
+    const render = () => JSON.stringify(openApiFor(restManifest));
     expect(render()).toBe(render());
   });
 });
@@ -1900,7 +2010,7 @@ describe("writtenBy columns", () => {
     version: 1,
     tables: [
       {
-        schema: "pentest",
+        schema: "example",
         name: "findings",
         tenantScoped: true,
         columns: [
@@ -1919,9 +2029,11 @@ describe("writtenBy columns", () => {
   });
 
   const reviewOperation = {
-    key: "pentest.finding.review",
+    key: "example.finding.review",
+    id: "example.finding.review",
+    intent: "invoke",
     transports: {
-      rest: { method: "POST", path: "/api/pentest/findings/:findingId/review" },
+      rest: { method: "POST", path: "/api/example/findings/:findingId/review" },
       mcp: { enabled: false },
     },
     // biome-ignore lint/suspicious/noExplicitAny: only the fields read here matter.
@@ -1929,26 +2041,287 @@ describe("writtenBy columns", () => {
 
   it("resolves the authored operation key into a route a caller can use", () => {
     const manifestJson = JSON.parse(
-      generateArtifacts(writtenByManifest("pentest.finding.review"), {
+      generateArtifacts(writtenByManifest("example.finding.review"), {
         operations: [reviewOperation],
       }).find((artifact) => artifact.path.endsWith("db/manifest.json"))!.contents,
     );
     const column = manifestJson.tables
-      .find((table: { name: string }) => table.name === "pentest.findings")
+      .find((table: { name: string }) => table.name === "example.findings")
       .columns.find((candidate: { name: string }) => candidate.name === "reviewed_at");
     expect(column.writtenBy).toEqual([
       {
-        operation: "pentest.finding.review",
-        rest: "POST /api/pentest/findings/:findingId/review",
+        operation: "example.finding.review",
+        rest: "POST /api/example/findings/:findingId/review",
       },
     ]);
   });
 
+  it("resolves an entity create writer through its generated REST and generic MCP routes", () => {
+    const manifest = writtenByManifest("Finding.create");
+    manifest.tables[0]!.source = {
+      path: "entities/finding.yaml",
+      authoringEntityName: "Finding",
+      authoringEntitySlug: "finding",
+      generatedCrudEligibility: "explicitly_enabled",
+      crud: {
+        operations: { list: true, get: true, create: true, update: true, delete: true },
+      },
+      graphql: {
+        typeName: "Finding",
+        singleQueryName: "finding",
+        listQueryName: "findings",
+        createMutationName: "createFinding",
+        updateMutationName: "updateFinding",
+        deleteMutationName: "deleteFinding",
+        relationships: [],
+      },
+      rest: {
+        basePath: "findings",
+        operations: { list: true, get: true, create: true, update: true, delete: true },
+      },
+      mcp: {
+        toolPrefix: "finding",
+        tools: "generic",
+        operations: { list: true, get: true, create: true, update: true, delete: true },
+      },
+    };
+    const createOperation = {
+      id: "Finding.create",
+      key: "create",
+      intent: "create",
+      entityId: "example.Finding",
+      entityName: "Finding",
+    } as any;
+    const manifestJson = JSON.parse(
+      generateArtifacts(manifest, { operations: [createOperation] })
+        .find((artifact) => artifact.path.endsWith("db/manifest.json"))!.contents,
+    );
+    const column = manifestJson.tables[0].columns.find(
+      (candidate: { name: string }) => candidate.name === "reviewed_at",
+    );
+    expect(column.writtenBy).toEqual([{
+      operation: "Finding.create",
+      rest: "POST /api/rest/v1/findings",
+      mcp: "osf_create",
+    }]);
+  });
+
   it("fails the build when the named operation does not exist", () => {
     expect(() =>
-      generateArtifacts(writtenByManifest("pentest.finding.reviw"), {
+      generateArtifacts(writtenByManifest("example.finding.reviw"), {
         operations: [reviewOperation],
       }),
     ).toThrow(/no.*compiled operation has that key/i);
+  });
+});
+
+/**
+ * The shapes platform bookkeeping tables need and authored entities never do:
+ * a composite primary key, a text array, and a reference into a table that
+ * another layer promotes into the manifest later. Each exists so a runtime-
+ * owned table can be declared in platform-schema.yaml rather than in a
+ * hand-written migration next to it.
+ */
+describe("platform bookkeeping shapes", () => {
+  const linkManifest: PlatformSchemaManifest = {
+    version: 1,
+    tables: [
+      {
+        schema: "platform",
+        name: "identity_links",
+        tenantScoped: false,
+        domainInternal: true,
+        generatedCrudEligible: false,
+        columns: [
+          { name: "identity_id", type: "uuid", primaryKey: true },
+          { name: "tenant_id", type: "uuid", primaryKey: true },
+          { name: "guides_read", type: "text[]", required: true, default: "'{}'" },
+          { name: "linked_at", type: "timestamptz" },
+        ],
+      },
+    ],
+  };
+
+  it("renders a composite primary key once, as a table constraint", () => {
+    const artifacts = generateArtifacts(linkManifest);
+    const sql = artifacts.find((artifact) => artifact.path.endsWith("schema.sql"))!.contents;
+
+    expect(sql).toContain(
+      [
+        'CREATE TABLE IF NOT EXISTS "platform"."identity_links" (',
+        '  "identity_id" uuid NOT NULL,',
+        '  "tenant_id" uuid NOT NULL,',
+        "  \"guides_read\" text[] NOT NULL DEFAULT '{}',",
+        '  "linked_at" timestamptz,',
+        '  PRIMARY KEY ("identity_id", "tenant_id")',
+        ");",
+      ].join("\n"),
+    );
+    // Neither member carries an inline key of its own.
+    expect(sql).not.toContain('"identity_id" uuid PRIMARY KEY');
+
+    const manifestJson = JSON.parse(
+      artifacts.find((artifact) => artifact.path.endsWith("manifest.json"))!.contents,
+    );
+    // Generated CRUD addresses a row by ONE column; a composite key has none.
+    expect(manifestJson.tables[0].primaryKey).toBeNull();
+    expect(
+      manifestJson.tables[0].columns.map((column: { name: string; primaryKey: boolean }) => [
+        column.name,
+        column.primaryKey,
+      ]),
+    ).toEqual([
+      ["identity_id", true],
+      ["tenant_id", true],
+      ["guides_read", false],
+      ["linked_at", false],
+    ]);
+
+    const types = artifacts.find((artifact) => artifact.path.endsWith("types.ts"))!.contents;
+    expect(types).toContain("  identity_id: string;");
+    expect(types).toContain("  tenant_id: string;");
+    expect(types).toContain("  guides_read: Generated<string[]>;");
+  });
+
+  it("keeps the inline PRIMARY KEY for a single-column key", () => {
+    const sql = generateArtifacts(manifest).find((artifact) =>
+      artifact.path.endsWith("schema.sql"),
+    )!.contents;
+    expect(sql).toContain('"id" uuid PRIMARY KEY NOT NULL DEFAULT gen_random_uuid()');
+    expect(sql).not.toContain("  PRIMARY KEY (");
+  });
+
+  it("defers a registered cross-module reference to the merged manifest", async () => {
+    // The base platform schema links a tenant to its Relation, a table the
+    // authoring layer promotes into the manifest later. The loader accepts
+    // the registered reference; rendering the merged manifest checks it.
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+relationshipRegister:
+  - from: { schema: platform, table: tenants, column: relation_id }
+    to: { schema: erp, table: relations, column: id }
+tables:
+  - schema: platform
+    name: tenants
+    tenantScoped: false
+    tenantIdentityColumn: id
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - name: relation_id
+        type: uuid
+        references:
+          schema: erp
+          table: relations
+          column: id
+          onDelete: SET NULL
+          localColumns: [id, relation_id]
+          targetColumns: [tenant_id, id]
+`,
+      "utf8",
+    );
+
+    try {
+      const loaded = await loadManifest(path);
+      expect(() => generateArtifacts(loaded)).toThrow(
+        /platform\.tenants\.relation_id references unknown table erp\.relations/,
+      );
+
+      const relations: TableDefinition = {
+        schema: "erp",
+        name: "relations",
+        tenantScoped: true,
+        columns: [
+          { name: "id", type: "uuid", primaryKey: true },
+          { name: "tenant_id", type: "uuid", required: true },
+        ],
+      };
+      const merged = { ...loaded, tables: [...loaded.tables, relations] };
+      ensureCompositeReferenceKeys(merged);
+      expect(relations.indexes).toEqual([
+        { name: "relations_tenant_id_id_key", columns: ["tenant_id", "id"], unique: true },
+      ]);
+      const sql = generateArtifacts(merged).find(
+        (artifact) => artifact.path.endsWith("schema.sql"),
+      )!.contents;
+      expect(sql).toContain(
+        'ADD CONSTRAINT "tenants_relation_id_fkey" FOREIGN KEY ("id", "relation_id")',
+      );
+      expect(sql).toContain('REFERENCES "erp"."relations"("tenant_id", "id") ON DELETE SET NULL ("relation_id");');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still refuses an unregistered or same-schema reference to an unknown table", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+tables:
+  - schema: platform
+    name: tenants
+    tenantScoped: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: parent_id, type: uuid, references: { schema: platform, table: organizations, column: id } }
+`,
+      "utf8",
+    );
+
+    try {
+      await expect(loadManifest(path)).rejects.toThrow(
+        /platform\.tenants\.parent_id references unknown table platform\.organizations/,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("deriveOnCreate columns", () => {
+  it("publishes the compiler-resolved source and race-safe conflict target", () => {
+    const source: PlatformSchemaManifest = {
+      version: 1,
+      tables: [{
+        schema: "erp",
+        name: "templates",
+        tenantScoped: true,
+        columns: [
+          { name: "tenant_id", type: "uuid", required: true },
+          { name: "name", type: "text", required: true, sourceField: "name" },
+          {
+            name: "key",
+            type: "text",
+            required: true,
+            sourceField: "key",
+            deriveOnCreate: {
+              sourceField: "name",
+              sourceColumn: "name",
+              transform: "slug",
+              onConflict: "suffix",
+              conflictColumns: ["tenant_id", "key"],
+              maxLength: 100,
+            },
+          },
+        ],
+      }],
+    };
+    const generated = JSON.parse(
+      generateArtifacts(source).find((artifact) => artifact.path.endsWith("db/manifest.json"))!.contents,
+    );
+    expect(generated.tables[0].columns[2].deriveOnCreate).toEqual({
+      sourceField: "name",
+      sourceColumn: "name",
+      transform: "slug",
+      onConflict: "suffix",
+      conflictColumns: ["tenant_id", "key"],
+      maxLength: 100,
+    });
   });
 });

@@ -6,11 +6,19 @@ check-script ownership model travels with it.
 
 ## Getting the package
 
-`@openshapeforge/compiler` is published to the **GitHub Packages npm
-registry** (not npmjs.com) by the **Package compiler** workflow
-(`.github/workflows/package-compiler.yml`) on pushes to `main`, whenever the
-version in `packages/compiler/package.json` is not there yet — releasing is
-"bump the version and merge".
+`@openshapeforge/compiler` — and every other non-private package under
+`packages/` — is published to the **GitHub Packages npm registry** (not
+npmjs.com) by the **Package compiler** workflow
+(`.github/workflows/package-compiler.yml`, driven by
+`scripts/publish-packages.mjs`) on two channels:
+
+- **`latest`**, from pushes to `main`, whenever the version in the package's
+  `package.json` is not there yet — releasing is "bump the version and merge".
+- **`dev`**, from every push to the `hans/dev` integration branch, as
+  `<version>-dev.<8-char sha>`. Every package in one run pins its sibling
+  packages to that same version, so `bun add @openshapeforge/compiler@dev`
+  (or an exact `0.2.0-dev.<sha>`) installs one commit of the workspace, not a
+  mix.
 
 GitHub's npm registry requires authentication even for public packages, so
 consumers need a token with `read:packages` (a classic PAT, or
@@ -28,13 +36,17 @@ then install by name (Bun and npm both read `.npmrc`):
 bun add @openshapeforge/compiler
 ```
 
-Alternatively, every workflow run — including pull requests touching
-`packages/compiler` — also uploads the tarball as a run artifact named
-`openshapeforge-compiler-npm-<sha>` (90-day retention). Download it from the
-run's Artifacts section (or `gh run download`) and install from the file:
+Alternatively, every workflow run — including pull requests touching the
+compiler or either public runtime contract package — uploads all three tarballs
+as one run artifact named `openshapeforge-compiler-npm-<sha>` (90-day
+retention). Download it from the run's Artifacts section (or `gh run
+download`) and install the dependency tarballs together:
 
 ```sh
-bun add ./openshapeforge-compiler-0.1.0.tgz
+npm install \
+  ./openshapeforge-operations-0.1.0.tgz \
+  ./openshapeforge-interface-web-0.1.0.tgz \
+  ./openshapeforge-compiler-0.2.0.tgz
 ```
 
 Either way the content is proven before it ships: CI installs the tarball into
@@ -124,9 +136,8 @@ layer:
   renderer serves the previous layout.
 - The `check:generated` web-shard coverage checks (entity-manifest and action
   shard counts must equal `expectedGeneratedCrudEntityCount`).
-- Plugins receive `webPresent: true` — the workflow example plugin then also
-  emits its web-side artifacts (field contract, designer registries, renderer
-  seeds) under the `apps/web/**` roots it declares in `ownedPaths`.
+- Plugins receive `webPresent: true`, so a plugin with web-side artifacts
+  emits them under the `apps/web/**` roots it declares in `ownedPaths`.
 
 A host repo that wants the data layer and API only can **delete `apps/web`**;
 the compiler stops emitting UI artifacts with no compiler changes, and the
@@ -158,26 +169,27 @@ repo bundling this package needs to do the same.
   `platform.entity_events`, since the API runtime and migrator assume both.
 - **Bun is required** — the CLI and plugin/package resolution use Bun APIs;
   there is no Node fallback.
-- **Generated CRUD policy is entity-authored.** The common `crud.operations`
-  block is the upper bound for GraphQL, REST, MCP and workflow. Stock generated
-  entity pages require the full five-operation policy; partial policies use a
-  purpose-built UI.
-  External layers/packages can narrow that policy with `entityPatch`; the
-  layer resolver rejects attempts to re-enable an operation disabled earlier.
+- **Generated CRUD is the set of implemented Operations.** The compiled
+  `crud.operations` section is derived from the entity's `operations` and is
+  the upper bound for GraphQL, REST and MCP; each `interfaces.*`
+  block may withhold an Operation from its transport, never add one. Stock
+  generated entity pages require all five intents; smaller sets use a
+  purpose-built UI declared under `interfaces.web`.
 - **The `core` module maps to the `erp` schema** via a default
   (`schemaByModule: { core: "erp" }`) that host repos cannot override
   through configuration; other module names fall back to their snake_cased
   module name as the schema.
-- **The example plugins are not portable.** Both live under
-  `examples/plugins/` and the workflow plugin deep-imports compiler
-  internals by relative path (`../../../../packages/compiler/src/…`); they
-  demonstrate the contract but would need packaging work before a host repo
-  could register them from node_modules.
-- **Relationships only resolve inside the compile.** Entity relationships
-  may only target entities present in the host's resolved authoring tree;
-  anything else is skipped (recorded in
-  `relationshipStatus.skippedReferences`), and cross-module FKs additionally
-  require `relationshipRegister` entries in the platform schema.
+- **The example plugins are not portable.** They live under
+  `examples/plugins/` and reach into the compiler and the API by relative
+  path (`../../../packages/compiler/src/…`); they demonstrate the contract
+  but would need packaging work before a host repo could register them from
+  node_modules.
+- **Relationships only resolve inside the compile.** A single reference may
+  only target an entity present in the host's resolved authoring tree; one
+  that is absent fails the build. An inverse collection whose referencing
+  entity is absent is not lowered (recorded in
+  `relationshipStatus.skippedReferences`). Cross-module FKs between entities
+  are registered by the compiler itself.
 - **Retention is advisory metadata; there is no enforcement runtime.** The
   compiler emits a `retention` block (clock, rules, legal hold, review gates,
   crypto-delete key, erasure cascades) into the DB manifest, but nothing reads
@@ -186,11 +198,15 @@ repo bundling this package needs to do the same.
   [retention.md](retention.md); building the enforcement job and the erasure
   primitive are tracked as follow-up issues.
 - **A host that does not use the reference API migrator must consume the
-  plugin migration registry itself.** Apply its ordered SQL after generated
-  tables exist, transactionally record the exact checksums under the emitted
-  plugin/version identities, fail on changed applied entries, and report but
-  tolerate ledger entries absent from an older registry so image rollback
-  remains possible.
+  plugin migration registry itself.** Apply every entry, in registry order,
+  after the generated tables exist, on every run — each in its own
+  transaction, with no ledger: the entries are idempotent SQL by contract
+  (the compiler renders constraints as name-guarded DO blocks; a plugin's
+  free-form `schemaMigrations` must repeat safely), and an entry that fails
+  is rolled back and named. Do not record checksums or skip entries that
+  were "already applied"; a changed constraint moves the manifest checksum,
+  and the host's generated-schema step must refuse a built database whose
+  recorded checksum differs (the reset model, [migrations.md](migrations.md)).
   The reference implementation is
   `apps/api/src/db/migrations/generated-plugin-migrations.ts`.
 - The host repo owns everything downstream of the artifacts: the API

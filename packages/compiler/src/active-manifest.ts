@@ -3,12 +3,12 @@ import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
   compileAuthoringBackendManifest,
-  listAuthoringContextEntitySpecs,
   listAuthoringEntitySlugs,
 } from "./authoring/backend-manifest.js";
 import { resolveAuthoringLayers } from "./authoring/layers.js";
 import { buildConnector } from "./authoring/compiler/connector.js";
 import { listConnectorFiles, loadConnector } from "./authoring/connector-loader.js";
+import { loadOsfTypes } from "./authoring/loader.js";
 import type { CompiledConnectorContract } from "./authoring/types/connector.js";
 import { loadManifest } from "./load-manifest.js";
 import { canonicalRepoRelativePath, resolvePackagedConfigPath } from "./packaged-config.js";
@@ -20,9 +20,17 @@ import {
   type LoadedCompilerPlugin,
 } from "./plugins.js";
 import type { PlatformSchemaManifest, TableDefinition } from "./schema.js";
+import {
+  buildCoreReferentiedataSnapshot,
+  loadCoreReferentiedataCatalog,
+  type CoreReferentiedataCatalog,
+  type CoreReferentiedataSnapshot,
+} from "./core-referentiedata-artifacts.js";
+import { materializeEntityInputSources } from "./entity-input-sources.js";
+import { ensureCompositeReferenceKeys } from "./tenant-bound-references.js";
 
 export const activeManifestSource =
-  "packages/compiler/config/platform-schema.yaml + authoring layers (entities + contexts/*/full)";
+  "packages/compiler/config/platform-schema.yaml + authoring layers (entities)";
 
 const resolvedAuthoringDirs = new Map<string, string>();
 
@@ -46,7 +54,7 @@ function tableKey(table: Pick<TableDefinition, "schema" | "name">) {
   return `${table.schema}.${table.name}`;
 }
 
-function mergePromotedTables(
+export function mergePromotedTables(
   baseManifest: PlatformSchemaManifest,
   promotedManifest: PlatformSchemaManifest,
 ): PlatformSchemaManifest {
@@ -63,22 +71,37 @@ function mergePromotedTables(
   );
   const retainedTables = baseManifest.tables.filter((table) => !promotedKeys.has(tableKey(table)));
   const insertAt = firstPromotedIndex < 0 ? retainedTables.length : firstPromotedIndex;
+  const relationships = new Map(
+    [...(baseManifest.relationshipRegister ?? []), ...(promotedManifest.relationshipRegister ?? [])].map((entry) => [
+      `${entry.from.schema}.${entry.from.table}.${entry.from.column}->${entry.to.schema}.${entry.to.table}.${entry.to.column}`,
+      entry,
+    ]),
+  );
 
-  return {
+  const merged: PlatformSchemaManifest = {
     ...baseManifest,
+    ...(promotedManifest.entityValues ? { entityValues: promotedManifest.entityValues } : {}),
     description:
       "Greenfield platform schema with authoring-catalog generated backend tables.",
-    relationshipRegister: baseManifest.relationshipRegister ?? [],
+    relationshipRegister: [...relationships.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, entry]) => entry),
     tables: [
       ...retainedTables.slice(0, insertAt),
       ...promotedManifest.tables,
       ...retainedTables.slice(insertAt),
     ],
   };
+  // Platform and plugin tables declare their compound references in YAML or
+  // TypeScript; the unique target key such a reference needs is provisioned
+  // here, once every table is in one manifest.
+  ensureCompositeReferenceKeys(merged);
+  return merged;
 }
 
 export type ActivePlatformCompile = {
   manifest: PlatformSchemaManifest;
+  /** Current source catalog and value snapshot shared by every projection. */
+  referentiedataCatalog: CoreReferentiedataCatalog;
+  referentiedata: CoreReferentiedataSnapshot;
   /** Compiled entity contracts, in deterministic allowlist order. */
   entities: CompiledEntityInfo[];
   /** Compiled connector contracts, sorted by slug. */
@@ -97,10 +120,11 @@ function compileActiveConnectors(
   authoringDir: string,
   sourcePathPrefix: string,
 ): CompiledConnectorContract[] {
+  const osfTypes = loadOsfTypes(authoringDir);
   return listConnectorFiles(authoringDir)
     .map(({ slug, path }) => {
       const origin = join(sourcePathPrefix, "connectors", `${slug}.yaml`);
-      return buildConnector(loadConnector(path, slug, origin), slug, origin);
+      return buildConnector(loadConnector(path, slug, origin), slug, origin, osfTypes);
     })
     .sort((a, b) => a.slug.localeCompare(b.slug));
 }
@@ -126,31 +150,42 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
       mergePluginPlatformTables(baseManifest, plugins, { repoRoot, authoringDir, webPresent });
 
       const authoringEntitySlugs = listAuthoringEntitySlugs(authoringDir);
-      const contextEntitySpecs = listAuthoringContextEntitySpecs(authoringDir);
       const entities: CompiledEntityInfo[] = [];
+      const referentiedataCatalog = await loadCoreReferentiedataCatalog(repoRoot);
+      const referentiedata = buildCoreReferentiedataSnapshot(referentiedataCatalog);
       const promotedManifest = compileAuthoringBackendManifest(
         authoringDir,
         {
           mode: "promote",
           sourcePathPrefix: canonicalRepoRelativePath(repoRoot, authoringDir),
           entityAllowlist: authoringEntitySlugs,
-          contextEntityAllowlist: contextEntitySpecs,
           schemaByModule: { core: "erp" },
           relationshipRegister: baseManifest.relationshipRegister ?? [],
           generatedCrudAllowlist: authoringEntitySlugs,
-          contextEntityGeneratedCrudAllowlist: contextEntitySpecs,
+          referentiedata,
           onCandidate: (candidate) => entities.push(candidate),
         },
       );
 
+      // Public compile consumers must receive executable schemas too, not just
+      // consumers of collectAllArtifacts. Resolve once before caching contracts.
+      materializeEntityInputSources(entities.map(entity => entity.contract), referentiedata);
+
       return {
         manifest: mergePromotedTables(baseManifest, promotedManifest),
+        referentiedataCatalog,
+        referentiedata,
         entities,
         connectors: compileActiveConnectors(authoringDir, canonicalRepoRelativePath(repoRoot, authoringDir)),
         plugins,
         pluginEntries,
       };
-    })();
+    })().catch((error) => {
+      // A repaired input must be re-resolved, including a materialized overlay.
+      compileCache.delete(repoRoot);
+      resolvedAuthoringDirs.delete(repoRoot);
+      throw error;
+    });
     compileCache.set(repoRoot, cached);
   }
   return cached;

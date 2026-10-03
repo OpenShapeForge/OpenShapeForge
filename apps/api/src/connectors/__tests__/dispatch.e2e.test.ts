@@ -200,7 +200,7 @@ describe("the full dispatch chain", () => {
       () =>
         invokeConnectorOperation(
           {
-            ...invocationContext(TENANT, ["Connectors.All.Read"]),
+            ...invocationContext(TENANT, ["Connectors.ExampleObjectStore.Read"]),
             egressSource: trustedSource,
             egressOwner: {
               fetch: async (request) => {
@@ -252,7 +252,7 @@ describe("the full dispatch chain", () => {
   test("another tenant cannot reach this tenant's installation", async () => {
     await expect(
       invokeConnectorOperation(
-        invocationContext(OTHER_TENANT, ["Connectors.All.Read"]),
+        invocationContext(OTHER_TENANT, ["Connectors.ExampleObjectStore.Read"]),
         contract(),
         operation("listObjects"),
         {},
@@ -269,7 +269,7 @@ describe("the full dispatch chain", () => {
     );
     await expect(
       invokeConnectorOperation(
-        invocationContext(TENANT, ["Connectors.All.Read"]),
+        invocationContext(TENANT, ["Connectors.ExampleObjectStore.Read"]),
         contract(),
         operation("listObjects"),
         {},
@@ -288,7 +288,7 @@ describe("the full dispatch chain", () => {
       () => Response.json({ ok: true }),
       () =>
         invokeConnectorOperation(
-          invocationContext(TENANT, ["Connectors.All.ReadWrite"]),
+          invocationContext(TENANT, ["Connectors.ExampleObjectStore.Write"]),
           contract(),
           operation("putObject"),
           { key: "a/2.txt", requestId: "req-dispatch-1" },
@@ -305,7 +305,7 @@ describe("the full dispatch chain", () => {
       async () => {
         try {
           await invokeConnectorOperation(
-            invocationContext(TENANT, ["Connectors.All.Read"]),
+            invocationContext(TENANT, ["Connectors.ExampleObjectStore.Read"]),
             contract(),
             operation("listObjects"),
             {},
@@ -329,7 +329,7 @@ describe("the full dispatch chain", () => {
       setExternalOwnerMode(kind);
       const failure = (await invokeConnectorOperation(
         {
-          ...invocationContext(TENANT, ["Connectors.All.Read"]),
+          ...invocationContext(TENANT, ["Connectors.ExampleObjectStore.Read"]),
           egressOwner: externalRuntimeModule.egress,
         },
         contract(),
@@ -410,7 +410,7 @@ describe("the full dispatch chain", () => {
     const before = await telemetry();
     const failure = (await invokeConnectorOperation(
       {
-        ...invocationContext(TENANT, ["Connectors.All.Read"]),
+        ...invocationContext(TENANT, ["Connectors.ExampleObjectStore.Read"]),
         registry: hostileRegistry,
         egressOwner: {
           fetch: async () => new Response(null, {
@@ -457,7 +457,7 @@ describe("the full dispatch chain", () => {
     await expect(
       invokeConnectorOperation(
         {
-          ...invocationContext(TENANT, ["Connectors.All.Read"]),
+          ...invocationContext(TENANT, ["Connectors.ExampleObjectStore.Read"]),
           signal: before.signal,
           egressOwner: {
             fetch: async () => {
@@ -478,7 +478,7 @@ describe("the full dispatch chain", () => {
     const started = new Promise<void>((resolve) => { entered = resolve; });
     const pending = invokeConnectorOperation(
       {
-        ...invocationContext(TENANT, ["Connectors.All.Read"]),
+        ...invocationContext(TENANT, ["Connectors.ExampleObjectStore.Read"]),
         signal: during.signal,
         egressOwner: {
           fetch: async (request) => {
@@ -520,7 +520,7 @@ describe("the full dispatch chain", () => {
       async () => {
         try {
           await invokeConnectorOperation(
-            invocationContext(TENANT, ["Connectors.All.Read"]),
+            invocationContext(TENANT, ["Connectors.ExampleObjectStore.Read"]),
             contract(),
             operation("listObjects"),
             {},
@@ -591,7 +591,7 @@ describe("the full dispatch chain", () => {
       () => Response.json({ objects: [] }),
       () =>
         invokeConnectorOperation(
-          invocationContext(TENANT, ["Connectors.All.Read"]),
+          invocationContext(TENANT, ["Connectors.ExampleObjectStore.Read"]),
           contract(),
           operation("listObjects"),
           {},
@@ -664,7 +664,10 @@ describe("secret rotation", () => {
       () => Response.json({ objects: [] }),
       () =>
         invokeConnectorOperation(
-          { ...invocationContext(TENANT, ["Connectors.All.Read"]), keyring: rotatedKeyring },
+          {
+            ...invocationContext(TENANT, ["Connectors.ExampleObjectStore.Read"]),
+            keyring: rotatedKeyring,
+          },
           contract(),
           operation("listObjects"),
           {},

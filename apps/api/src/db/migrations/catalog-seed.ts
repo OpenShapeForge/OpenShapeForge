@@ -3,7 +3,7 @@
  * The shared shape of a compiler-emitted catalog seed.
  *
  * The compiler writes global, tenant-agnostic configuration — page configs,
- * workflow node catalogs, entity trigger registries — as JSON documents rather
+ * a plugin's catalogs — as JSON documents rather
  * than as generated `.ts`, and `db:migrate` makes the database match them. Every
  * one of those steps wants the same three properties, so they live here once:
  *
@@ -17,8 +17,8 @@
  *   so rows it no longer describes are deleted. A catalog entry that stops being
  *   generated must not linger for a reader to find.
  *
- * "Its slice" is load-bearing: two seeds may share one table (the standard and
- * entity workflow node catalogs do), so both the checksum probe and the delete
+ * "Its slice" is load-bearing: two seeds may share one table (two plugins'
+ * catalogs can), so both the checksum probe and the delete
  * are supplied by the caller and scoped to the rows that seed owns. A helper
  * that assumed whole-table ownership would have each catalog delete the other's
  * rows on every migrate.

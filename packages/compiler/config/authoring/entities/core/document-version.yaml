@@ -1,15 +1,19 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: DocumentVersion
 title: Document Version
-description: An immutable binary or logical revision that is owned by exactly one document.
+description: An immutable version owned by exactly one document, either an uploaded file or a frozen snapshot of the
+  document's editable content published through Document.publish. See docs/document-content.md.
 language: en
 displayTemplate: "{{versionLabel}}"
 filterField: versionLabel
 labels:
   en: Document Version
   nl: Documentversie
+pluralLabels:
+  en: Document versions
+  nl: Documentversies
 domains:
   - cases
   - records
@@ -26,18 +30,26 @@ indexes:
       - documentId
       - id
     unique: true
-crud:
-  operations:
-    create: false
-    update: false
-    delete: false
-rest: true
-mcp: true
+  - name: document_versions_tenant_document_number_uidx
+    fields:
+      - tenantId
+      - documentId
+      - versionNumber
+    unique: true
+  # A storage artifact is bound to one version: the open path resolves a
+  # version by (document, artifact) and must never find two.
+  - name: document_versions_tenant_artifact_uidx
+    fields:
+      - tenantId
+      - artifactId
+    unique: true
 authorization:
   roles:
     read:
       - CaseFile.All.Read
       - CaseFile.All.ReadWrite
+      # Core RLS admits this role only through the tenant-owned avatar.
+      - Organization.Access.Manage
     create:
       - CaseFile.All.ReadWrite
     update:
@@ -49,7 +61,7 @@ authorization:
     empty: public
 fields:
   - key: versionLabel
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Version label
@@ -61,7 +73,7 @@ fields:
       column: version_label
       storageClass: core
   - key: status
-    valueType: string
+    osfType: referenceDataCode
     required: true
     label:
       en: Status
@@ -69,13 +81,11 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: DOCUMENTVERSIONSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: DOCUMENTVERSIONSTATUS
   - key: createdBy
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Created by
@@ -86,9 +96,10 @@ fields:
       column: created_by
       storageClass: core
   - key: fileName
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
+    writtenBy: [Document.materialize]
     label:
       en: File name
       nl: Bestandsnaam
@@ -97,10 +108,58 @@ fields:
     persisted:
       column: file_name
       storageClass: core
-  - key: mimeType
-    valueType: string
+  - key: artifactId
+    osfType: string
     required: false
     readOnly: true
+    writtenBy: [Document.materialize]
+    immutable: true
+    label:
+      en: Artifact
+      nl: Bestandreferentie
+    description:
+      en: Opaque identity of the storage-managed file bound to this version.
+      nl: Ondoorzichtige referentie naar het door opslag beheerde bestand van deze versie.
+    validation:
+      format: uuid
+    persisted:
+      column: artifact_id
+      storageClass: core
+  - key: artifactVersion
+    osfType: integer
+    required: false
+    readOnly: true
+    writtenBy: [Document.materialize]
+    immutable: true
+    label:
+      en: Artifact version
+      nl: Bestandreferentieversie
+    validation:
+      min: 1
+      max: 9007199254740991
+    persisted:
+      column: artifact_version
+      storageClass: core
+  - key: byteSize
+    osfType: integer
+    required: false
+    readOnly: true
+    writtenBy: [Document.materialize]
+    immutable: true
+    label:
+      en: File size in bytes
+      nl: Bestandsgrootte in bytes
+    validation:
+      min: 0
+      max: 9007199254740991
+    persisted:
+      column: byte_size
+      storageClass: core
+  - key: mimeType
+    osfType: string
+    required: false
+    readOnly: true
+    writtenBy: [Document.materialize]
     label:
       en: MIME type
       nl: MIME-type
@@ -110,8 +169,11 @@ fields:
       column: mime_type
       storageClass: core
   - key: storageLocation
-    valueType: string
+    osfType: fileStorageLocation
     required: false
+    readOnly: true
+    writtenBy: [Document.materialize]
+    immutable: true
     label:
       en: File
       nl: Bestand
@@ -120,16 +182,11 @@ fields:
     persisted:
       column: storage_location
       storageClass: core
-    render:
-      component: FileUpload
-      props:
-        fileNameField: fileName
-        mimeTypeField: mimeType
-        checksumField: checksum
   - key: checksum
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
+    writtenBy: [Document.materialize]
     label:
       en: Checksum
       nl: Checksum
@@ -139,7 +196,7 @@ fields:
       column: checksum
       storageClass: core
   - key: isMajorVersion
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Major version
@@ -149,7 +206,7 @@ fields:
       column: is_major_version
       storageClass: core
   - key: changeSummary
-    valueType: string
+    osfType: multilineText
     required: false
     label:
       en: Change summary
@@ -159,15 +216,59 @@ fields:
     persisted:
       column: change_summary
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+  # Snapshot columns, written only by Document.publish (packages/versioning);
+  # null on an uploaded version. Names follow TemplateVersion so the generic
+  # publish stores both the same way.
+  - key: versionNumber
+    osfType: integer
+    required: false
+    readOnly: true
+    immutable: true
+    writtenBy: [Document.publish]
+    validation: { min: 1 }
+    label: { en: Version number, nl: Versienummer }
+    persisted: { column: version_number, storageClass: core }
+  - key: snapshot
+    osfType: object
+    required: false
+    readOnly: true
+    immutable: true
+    writtenBy: [Document.publish]
+    label: { en: Frozen content, nl: Vastgelegde inhoud }
+    persisted: { column: snapshot, storageClass: core }
+  - key: contentHash
+    osfType: string
+    required: false
+    readOnly: true
+    immutable: true
+    writtenBy: [Document.publish]
+    validation: { pattern: "^[a-f0-9]{64}$" }
+    label: { en: Content checksum, nl: Inhoudschecksum }
+    persisted: { column: content_hash, storageClass: core }
+  - key: publishedBy
+    osfType: string
+    required: false
+    readOnly: true
+    immutable: true
+    writtenBy: [Document.publish]
+    validation: { format: uuid }
+    label: { en: Published by, nl: Gepubliceerd door }
+    persisted: { column: published_by, storageClass: core }
+  - key: publishedAt
+    osfType: datetime
+    required: false
+    readOnly: true
+    immutable: true
+    writtenBy: [Document.publish]
+    label: { en: Published at, nl: Gepubliceerd op }
+    persisted: { column: published_at, storageClass: core }
   - key: documentId
-    valueType: string
     required: true
     readOnly: true
+    # DocumentVersion.create names the document it adds a version to (its own
+    # input requires documentId); listing it keeps that field its own rather
+    # than refused as Document.materialize's.
+    writtenBy: [Document.materialize, DocumentVersion.create]
     immutable: true
     label:
       en: Document ID
@@ -175,32 +276,205 @@ fields:
     description:
       en: Immutable identifier of the document that owns this version.
       nl: Onveranderlijke identifier van het document waartoe deze versie behoort.
-    semanticType: documentId
+    osfType: Document
     validation:
       format: uuid
     persisted:
       column: document_id
       storageClass: core
-relationships:
-  - key: document
-    kind: belongsTo
-    target: Document
-    foreignKey: document_id
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      ownership: reference
+      inverse:
+        key: versions
+        label:
+          en: Versions
+          nl: Versies
+  - key: accountId
     label:
-      en: Document
-      nl: Document
-  - key: account
-    kind: belongsTo
-    target: Account
-    foreignKey: account_id
-    label:
-      en: Account
-      nl: Account
-workflow:
-  nodes:
-    actions:
-      create: false
-      getOne: true
-      list: true
-      update: false
-      delete: false
+      en: Person
+      nl: Persoon
+    persisted:
+      column: account_id
+      storageClass: core
+    osfType: Relation
+    relationship:
+      ownership: reference
+      inverse: false
+operations:
+  list:
+    name: { en: List document versions, nl: Documentversies tonen }
+    description:
+      en: Returns a filtered and sorted page of document versions.
+      nl: Geeft een gefilterde en gesorteerde pagina met documentversies terug.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+  get:
+    name: { en: Get document version, nl: Documentversie ophalen }
+    description:
+      en: Returns one immutable document version by its canonical id.
+      nl: Geeft één onveranderlijke documentversie terug op basis van het canonieke id.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+
+  create:
+    name: { en: Add document version, nl: Documentversie toevoegen }
+    description:
+      en: Add a new version to this document. You can attach a file.
+      nl: Voeg een nieuwe versie aan dit document toe. U kunt een bestand bijvoegen.
+
+    implementation: { type: plugin, plugin: documents, handler: createDocumentVersion, action: create }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        required:
+          - documentId
+          - version
+          - idempotencyKey
+        additionalProperties: false
+        properties:
+          idempotencyKey:
+            type: string
+            minLength: 1
+            maxLength: 200
+            x-osf-i18n:
+              title:
+                en: Idempotency Key
+                nl: Aanvraagreferentie
+          artifact:
+            type: object
+            x-osf-control: artifact-upload
+            description: Optional storage-issued handle; file facts are verified server-side.
+            required:
+              - artifactId
+              - expectedArtifactVersion
+            additionalProperties: false
+            properties:
+              artifactId:
+                type: string
+                format: uuid
+                x-osf-i18n:
+                  title:
+                    en: Artifact
+                    nl: Bestand
+              expectedArtifactVersion:
+                type: integer
+                minimum: 1
+                maximum: 9007199254740991
+                x-osf-i18n:
+                  title:
+                    en: Expected Artifact Version
+                    nl: Verwachte bestandsversie
+            x-osf-i18n:
+              title:
+                en: Artifact
+                nl: Bestand
+              description:
+                en: Optionally attach a file to this version.
+                nl: Voeg desgewenst een bestand aan deze versie toe.
+          documentId:
+            type: string
+            format: uuid
+            x-osf-reference:
+              entity: Document
+            x-osf-i18n:
+              title:
+                en: Document
+                nl: Document
+          version:
+            x-osf-entityInput:
+              entity: DocumentVersion
+              fields:
+                - versionLabel
+                - status
+                - isMajorVersion
+                - changeSummary
+                - accountId
+            x-osf-i18n:
+              title:
+                en: Version
+                nl: Versie
+    output:
+      schema:
+        type: object
+        required:
+          - id
+          - documentId
+        properties:
+          id:
+            type: string
+            format: uuid
+            x-osf-i18n:
+              title:
+                en: Record
+                nl: Record
+          documentId:
+            type: string
+            format: uuid
+            x-osf-i18n:
+              title:
+                en: Document
+                nl: Document
+        additionalProperties: true
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: keyed, inputField: idempotencyKey } }
+    confirmation: { mode: none }
+    errors:
+      - { status: 400, code: VALIDATION, description: The version input is invalid. }
+      - { status: 403, code: FORBIDDEN, description: The owning document is not accessible. }
+      - { status: 503, code: STORAGE_UNAVAILABLE, description: No artifact storage provider is available. }
+      - { status: 409, code: ALREADY_EXISTS, description: The document version label already exists. }
+      - { status: 404, code: REFERENCE_NOT_FOUND, description: A referenced record is unavailable. }
+
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: {}
+  web:
+    views:
+      collection:
+        route: /document-versions
+        title: { en: Document versions, nl: Documentversies }
+        columns:
+          - { key: versionLabel, sortable: true }
+          - { key: status, sortable: true }
+          - { key: fileName, sortable: true }
+          - { key: createdBy, sortable: true }
+        defaultSort: { key: versionLabel, direction: asc }
+      record:
+        routes:
+          read: /document-versions/:id
+          create: /document-versions/new
+        title: "{{versionLabel}}"
+        subtitle: "{{status}}"
+        layout:
+          context:
+            fields: [ isMajorVersion, createdBy, mimeType, byteSize ]
+            relationships: [ documentId, accountId ]
+          tabs:
+            - id: overview
+              label: { en: Overview, nl: Overzicht }
+              groups:
+                - title: { en: Version, nl: Versie }
+                  fields: [ versionLabel, status, isMajorVersion, createdBy, changeSummary ]
+                - title: { en: File, nl: Bestand }
+                  fields: [ fileName, mimeType, byteSize ]
+                - title: { en: File integrity, nl: Bestandsintegriteit }
+                  fields: [ checksum ]
+                - title: { en: Published content, nl: Gepubliceerde inhoud }
+                  fields: [ versionNumber, publishedAt, publishedBy, contentHash ]
+        modes:
+          create:
+            title: { en: Add document version, nl: Documentversie toevoegen }
+            groups:
+              - title: { en: Version, nl: Versie }
+                fields: [ versionLabel, status, changeSummary ]

@@ -64,7 +64,7 @@ describe('first-administrator preflight reads', () => {
 
 type Call = { url: string; init: RequestInit };
 
-function stubFetch(admin: () => Response): { fetch: typeof globalThis.fetch; calls: Call[] } {
+function stubFetch(admin: (url: string) => Response): { fetch: typeof globalThis.fetch; calls: Call[] } {
   const calls: Call[] = [];
   const fetch = (async (input: unknown, init: RequestInit = {}) => {
     const url = String(input);
@@ -72,12 +72,23 @@ function stubFetch(admin: () => Response): { fetch: typeof globalThis.fetch; cal
     if (url.includes("/protocol/openid-connect/token")) {
       return Response.json({ access_token: "service-account-token", expires_in: 900 });
     }
-    return admin();
+    return admin(url);
   }) as unknown as typeof globalThis.fetch;
   return { fetch, calls };
 }
 
 describe("inviting a member", () => {
+  it("carries Keycloak's own 409 wording and status so the caller can name the conflict", async () => {
+    for (const errorMessage of ["User already a member of the organization", "User already has a pending invitation"]) {
+      const { fetch } = stubFetch(() => Response.json({ errorMessage }, { status: 409 }));
+      const failure = await createKeycloakOrganizationMembersClient(config, { fetch })
+        .inviteUser("acme", { email: "hans@example.com" }).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(KeycloakAdminError);
+      expect(failure).toMatchObject({ code: "KEYCLOAK_ADMIN_REJECTED", status: 409, operation: "invite_member" });
+      expect((failure as KeycloakAdminError).message).toContain(errorMessage);
+    }
+  });
+
   it("identifies the timed-out admin subcall without carrying request data", async () => {
     const readings = [0, 10, 10_010];
     const tokens: ServiceAccountTokenProvider = {
@@ -254,7 +265,7 @@ const invitationRow = {
   expiresAt: 1788691160,
   status: "PENDING",
   inviteLink:
-    "https://auth.hubble.localhost/realms/openshapeforge/protocol/openid-connect/" +
+    "https://auth.example.localhost/realms/openshapeforge/protocol/openid-connect/" +
     "registrations?response_type=code&client_id=account&token=eyJhbGciOiJIUzI1NiJ9.ORGIVT-SECRET",
 };
 
@@ -267,7 +278,7 @@ describe("listing pending invitations", () => {
 
     const call = calls[1]!;
     expect(call.url).toBe(
-      "http://keycloak.test:8080/admin/realms/openshapeforge/organizations/acme/invitations",
+      "http://keycloak.test:8080/admin/realms/openshapeforge/organizations/acme/invitations?first=0&max=100",
     );
     expect(call.init.method).toBe("GET");
     expect((call.init.headers as Record<string, string>).authorization).toBe(
@@ -327,16 +338,38 @@ describe("listing pending invitations", () => {
     });
   });
 
-  it("drops a row without an id, which nothing could cancel or refer to", async () => {
+  it("refuses a malformed row instead of returning an incomplete administrative list", async () => {
     const { fetch } = stubFetch(() =>
       Response.json([{ email: "ghost@example.com" }, invitationRow]),
     );
-    const invitations = await createKeycloakOrganizationMembersClient(config, {
-      fetch,
-    }).listInvitations("acme");
-    expect(invitations.map((invitation) => invitation.id)).toEqual([
-      "77e9e1af-12ed-44a9-b8fa-485bf12f485e",
-    ]);
+    await expect(
+      createKeycloakOrganizationMembersClient(config, { fetch }).listInvitations("acme"),
+    ).rejects.toMatchObject({ code: "KEYCLOAK_ADMIN_UNAVAILABLE" });
+  });
+
+  it("reads subsequent invitation pages and omits secret links on every page", async () => {
+    const { fetch, calls } = stubFetch((url) =>
+      Response.json(
+        url.includes("first=100")
+          ? [{ ...invitationRow, id: "last" }]
+          : Array.from({ length: 100 }, (_, index) => ({ ...invitationRow, id: `invite-${index}` })),
+      ),
+    );
+    const rows = await createKeycloakOrganizationMembersClient(config, { fetch }).listInvitations("acme");
+    expect(rows).toHaveLength(101);
+    expect(calls).toHaveLength(3);
+    expect(JSON.stringify(rows)).not.toContain("ORGIVT-SECRET");
+  });
+
+  it("uses the native resend endpoint without changing recipient or role", async () => {
+    const { fetch, calls } = stubFetch(() => new Response(null, { status: 204 }));
+    await createKeycloakOrganizationMembersClient(config, { fetch }).resendInvitation!(
+      "acme",
+      "invite-1",
+    );
+    expect(calls[1]!.url).toEndWith("/organizations/acme/invitations/invite-1/resend");
+    expect(calls[1]!.init.method).toBe("POST");
+    expect(calls[1]!.init.body).toBeUndefined();
   });
 
   it("names the organization as not found on 404", async () => {
@@ -421,6 +454,71 @@ describe("cancelling an invitation", () => {
       expect(error).toBeInstanceOf(KeycloakAdminError);
       expect((error as KeycloakAdminError).message).toContain("boom");
     }
+  });
+});
+
+describe("tenant member and credential administration", () => {
+  it("finds an existing organization member by e-mail without reading roles", async () => {
+    const { fetch, calls } = stubFetch((url) => {
+      if (url.includes("first=0")) {
+        return Response.json(Array.from({ length: 100 }, (_, index) => ({
+          id: `member-${index}`,
+          email: index === 99 ? "Hans@Example.com" : `person-${index}@example.com`,
+        })));
+      }
+      return Response.json([]);
+    });
+    const client = createKeycloakOrganizationMembersClient(config, { fetch });
+
+    await expect(client.hasMemberByEmail("acme", " hans@example.COM ")).resolves.toBe(true);
+    await expect(client.hasMemberByEmail("acme", "absent@example.com")).resolves.toBe(false);
+    expect(calls.some(({ url }) => url.includes("/organizations/acme/members?first=100&max=100")))
+      .toBe(true);
+    expect(calls.some(({ url }) => url.includes("role-mappings"))).toBe(false);
+  });
+
+  it("lists only members of the named organization, and never reads their Keycloak user roles", async () => {
+    const { fetch, calls } = stubFetch((url) => {
+      if (url.includes("/organizations/acme/members?")) return Response.json([{
+        id: "member-1", username: "hans", email: "hans@example.com", firstName: "Hans", lastName: "Eilers",
+        enabled: true, emailVerified: true,
+      }]);
+      return Response.json([]);
+    });
+    const members = await createKeycloakOrganizationMembersClient(config, { fetch }).listMembers("acme");
+    expect(members).toEqual([{
+      memberId: "member-1", username: "hans", email: "hans@example.com", firstName: "Hans", lastName: "Eilers",
+      enabled: true, emailVerified: true,
+    }]);
+    expect(calls.some(({ url }) => url.includes("/organizations/acme/members?first=0&max=100"))).toBe(true);
+    // A member's roles are the tenant's record, not a Keycloak user mapping.
+    expect(calls.some(({ url }) => url.includes("role-mappings"))).toBe(false);
+  });
+
+  it("returns safe credential metadata and never provider secrets", async () => {
+    const { fetch } = stubFetch((url) => url.endsWith("/users/member-1/credentials")
+      ? Response.json([{ id: "credential-1", type: "webauthn-passwordless", userLabel: "MacBook", createdDate: 123, secretData: "private" }])
+      : Response.json([]));
+    const credentials = await createKeycloakOrganizationMembersClient(config, { fetch }).listCredentials("member-1");
+    expect(credentials).toEqual([{ credentialId: "credential-1", type: "webauthn-passwordless", label: "MacBook", createdAt: 123 }]);
+    expect(JSON.stringify(credentials)).not.toContain("private");
+  });
+
+  it("sends only the fixed passwordless registration action with a short lifetime", async () => {
+    const { fetch, calls } = stubFetch(() => new Response(null, { status: 204 }));
+    await createKeycloakOrganizationMembersClient(config, { fetch }).sendPasskeyRecovery("member/1");
+    expect(calls[1]!.url).toEndWith("/users/member%2F1/execute-actions-email?lifespan=900");
+    expect(calls[1]!.init.method).toBe("PUT");
+    expect(calls[1]!.init.body).toBe('["webauthn-register-passwordless"]');
+  });
+
+  it("removes only the organization membership and treats an absent credential as converged", async () => {
+    const { fetch, calls } = stubFetch(() => new Response(null, { status: 404 }));
+    const client = createKeycloakOrganizationMembersClient(config, { fetch });
+    await expect(client.removeMember("acme", "member-1")).resolves.toBe(false);
+    await expect(client.deleteCredential("member-1", "credential-1")).resolves.toBe(false);
+    expect(calls[1]!.url).toEndWith("/organizations/acme/members/member-1");
+    expect(calls[2]!.url).toEndWith("/users/member-1/credentials/credential-1");
   });
 });
 

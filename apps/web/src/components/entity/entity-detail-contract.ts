@@ -82,9 +82,9 @@ export type DetailGroup = {
 
 export type DetailFieldConfig = Pick<
   EntityFieldConfig,
-  "key" | "label" | "render" | "options" | "semanticType"
+  "key" | "label" | "render" | "options" | "osfType"
 > & {
-  valueType?: Field["valueType"];
+  baseType?: Field["baseType"];
   cardinality?: Field["cardinality"];
   /** Omit label row in detail/workspace panes (merged into {@link RendererFieldConfig.hideLabel}). */
   hideLabel?: boolean;
@@ -142,7 +142,7 @@ type DetailRendererDefinitionOptions = {
   metadata?: Record<string, unknown>;
 };
 
-function inferRendererFieldValueType(field: DetailFieldConfig | undefined): Field["valueType"] {
+function inferRendererFieldValueType(field: DetailFieldConfig | undefined): NonNullable<Field["baseType"]> {
   switch (field?.render?.component) {
     case "DatePicker":
       return "date";
@@ -167,7 +167,9 @@ function mapRelationshipField(field: DetailFieldConfig) {
           ...(field.render.props ? { props: field.render.props } : {}),
         }
       : undefined,
-    options: field.options?.type ? (field.options as Field["options"]) : undefined,
+    options: Array.isArray(field.options)
+      ? ({ type: "static", items: field.options } as Field["options"])
+      : field.options?.type ? (field.options as Field["options"]) : undefined,
   };
 }
 
@@ -287,18 +289,21 @@ function createRendererDefinitionFromDetailGroups(
 }
 
 function mapDetailFieldToRendererField(field: DetailFieldConfig): Field {
+  const baseType = field.baseType ?? inferRendererFieldValueType(field);
   return {
     key: field.key,
-    valueType: field.valueType ?? inferRendererFieldValueType(field),
+    osfType: field.osfType ?? baseType,
+    baseType,
     cardinality: field.cardinality,
     label: field.label,
-    semanticType: field.semanticType,
     layoutFraction: field.layoutFraction,
     render: field.render?.component ? {
       component: field.render.component,
       ...(field.render.props ? { props: field.render.props } : {}),
     } : undefined,
-    options: field.options?.type ? (field.options as Field["options"]) : undefined,
+    options: Array.isArray(field.options)
+      ? ({ type: "static", items: field.options } as Field["options"])
+      : field.options?.type ? (field.options as Field["options"]) : undefined,
     suggestions: field.suggestions,
     children: field.children?.map(mapDetailFieldToRendererField),
     item: field.item ? mapDetailFieldToRendererField(field.item) : undefined,
@@ -434,6 +439,7 @@ export function resolveDetailPageHeader(
     }),
     actionsContext: {
       entityId: id,
+      expectedVersion: typeof entity.updatedAt === "string" ? entity.updatedAt : undefined,
       baseRoute: translateDetailText(config.listRoute ?? null, lang) || undefined,
       deleteMutationName: config.deleteMutationName,
       lang,

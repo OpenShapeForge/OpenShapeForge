@@ -74,7 +74,7 @@ which is exactly what the chart's other fail-closed guards exist for.
 {{- define "openshapeforge-api.workerRole" -}}
 {{- $role := .Values.workers.role | default "" | trim -}}
 {{- if or (not $role) (eq $role "api") -}}
-{{- fail "workers.enabled=true requires workers.role to name a module-contributed worker role (e.g. workflow-worker). Empty, or \"api\", would start a second copy of the HTTP server with no Service and no probes." -}}
+{{- fail "workers.enabled=true requires workers.role to name a module-contributed worker role (e.g. job-worker). Empty, or \"api\", would start a second copy of the HTTP server with no Service and no probes." -}}
 {{- end -}}
 {{- $role -}}
 {{- end -}}
@@ -160,6 +160,14 @@ NODE_ENV=production is always set, which triggers the production env validator.
   value: {{ .Values.limits.rateLimit.windowMs | quote }}
 {{- with .Values.limits.rateLimit.maxTrusted }}
 - name: API_RATE_LIMIT_MAX_TRUSTED
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.limits.rateLimit.maxSubject }}
+- name: API_RATE_LIMIT_MAX_SUBJECT
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.limits.rateLimit.maxService }}
+- name: API_RATE_LIMIT_MAX_SERVICE
   value: {{ . | quote }}
 {{- end }}
 {{- if and .Values.limits.rateLimit.redisUrl .Values.limits.rateLimit.redisUrlSecret.name }}

@@ -85,7 +85,7 @@ export type ControlPlaneEnv = {
   /**
    * The runtime's own public origin, e.g. `https://api.example.com`. Required:
    * it is the first audience every per-organization MCP scope carries
-   * (`<origin>/api/mcp/organizations/<alias>`), and a scope with no audience
+   * (`<origin>/<alias>`), and a scope with no audience
    * would let provisioning "succeed" while every token for the resource is
    * refused. The same variable the MCP server reads for its callback URL, so
    * one deployment has one answer to "where am I served".
@@ -102,8 +102,9 @@ export type ControlPlaneEnv = {
    * Optional comma-separated `clientId`s the scope is attached to as an
    * optional client scope. Defaults to `codex`, `openshapeforge-gateway`,
    * `openshapeforge-inspector`; a listed client the realm does not have is
-   * skipped. The realm's default optional scopes are always extended, so
-   * dynamically registered MCP clients need no entry here.
+   * skipped. Tenant resource scopes are never realm defaults: a realm may
+   * serve multiple Organizations and a control MCP, so each client must ask
+   * for or be assigned only the resource it is connecting to.
    */
   OPENSHAPEFORGE_MCP_CLIENTS?: string | undefined;
   /**

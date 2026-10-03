@@ -26,9 +26,9 @@ import {
   __configurationAppResultForTests as configurationAppResult,
   __configurationFallbackLeadForTests as configurationFallbackLead,
   __configurationHandoffResultForTests as configurationHandoffResult,
-  __publicOriginIsHttpsForTests as publicOriginIsHttps,
   __describeEntityResourceForTests as describeEntityResource,
   __describeToolForTests as describeTool,
+  __publicOriginIsHttpsForTests as publicOriginIsHttps,
   __sessionMayInvokeForTests as sessionMayInvoke,
   __withholdClassifiedForTests as withholdClassified,
 } from "../generated-mcp-server.js";
@@ -204,6 +204,7 @@ const session = (...roles: string[]) =>
 const table = (columns: AnyRecord[] = []) =>
   ({
     name: "erp.payment_details",
+    generatedCrudEligible: true,
     columns,
     source: {
       crud: {
@@ -240,6 +241,33 @@ const tool = (inputSchema: AnyRecord) =>
     title: "Create Payment Detail",
     description: "Creates a new record.",
     inputSchema,
+    outputSchema: {
+      type: "object",
+      oneOf: [
+        {
+          type: "object",
+          required: ["data", "operations"],
+          properties: {
+            data: {
+              type: "object",
+              properties: {
+                accountHolder: { type: "string" },
+                iban: { type: "string" },
+                status: { type: "string" },
+              },
+              required: ["accountHolder", "iban"],
+              additionalProperties: true,
+            },
+            operations: { type: "array" },
+          },
+        },
+        {
+          type: "object",
+          required: ["error"],
+          properties: { error: { type: "object" } },
+        },
+      ],
+    },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   }) as never;
 
@@ -263,7 +291,7 @@ describe("entity schema resource classification", () => {
     fields: [
       {
         key: "accountHolder",
-        valueType: "string",
+        osfType: "string",
         cardinality: "single",
         required: true,
         readOnly: false,
@@ -272,7 +300,7 @@ describe("entity schema resource classification", () => {
       },
       {
         key: "iban",
-        valueType: "string",
+        osfType: "string",
         cardinality: "single",
         required: true,
         readOnly: false,
@@ -313,7 +341,7 @@ describe("entity schema resource classification", () => {
 describe("entity schema resource relationships", () => {
   const relatedField = {
     key: "relationId",
-    valueType: "string",
+    osfType: "string",
     cardinality: "single",
     required: true,
     readOnly: false,
@@ -504,6 +532,10 @@ describe("describeTool", () => {
     );
     const properties = (described.inputSchema as AnyRecord).properties as AnyRecord;
     expect(Object.keys(properties)).not.toContain("iban");
+    const success = (described.outputSchema!.oneOf as AnyRecord[])[0]!;
+    const output = (success.properties as AnyRecord).data as AnyRecord;
+    expect(Object.keys(output.properties as AnyRecord)).not.toContain("iban");
+    expect(output.required).toEqual(["accountHolder"]);
   });
 
   it("advertises them to a caller holding a write grant", () => {
@@ -515,6 +547,9 @@ describe("describeTool", () => {
     );
     const properties = (described.inputSchema as AnyRecord).properties as AnyRecord;
     expect(Object.keys(properties)).toContain("iban");
+    const success = (described.outputSchema!.oneOf as AnyRecord[])[0]!;
+    const output = (success.properties as AnyRecord).data as AnyRecord;
+    expect(Object.keys(output.properties as AnyRecord)).toContain("iban");
   });
 
   it("carries the operation annotations through either way", () => {

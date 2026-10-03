@@ -13,10 +13,65 @@
     "crud",
     "graphql",
     "views",
-    "canonical",
     "profiles"
   ],
   "properties": {
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind"], "properties": { "kind": { "const": "operations" },
+        "query": { "type": "object", "additionalProperties": false, "required": ["filterFields", "sortFields"], "properties": {
+          "filterFields": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+          "sortFields": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
+        } }
+      }
+    },
+    "blueprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fields",
+        "labelField",
+        "operations"
+      ],
+      "properties": {
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "labelField": {
+          "type": "string"
+        },
+        "operations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "list",
+            "status",
+            "reset",
+            "publish"
+          ],
+          "properties": {
+            "list": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "reset": {
+              "type": "string"
+            },
+            "publish": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
     "contractVersion": { "type": "integer", "const": 2 },
     "kind": { "type": "string", "const": "compiledEntityContract" },
     "entity": {
@@ -141,7 +196,7 @@
               "type": { "type": "string" },
               "resolve": {
                 "type": "string",
-                "enum": ["hasMany", "belongsTo", "manyToMany"]
+                "enum": ["hasMany", "belongsTo"]
               },
               "foreignKey": { "type": "string" },
               "via": { "type": "string" }
@@ -169,7 +224,7 @@
                     "mappedFrom": { "type": "string" },
                     "label": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
                     "description": { "type": "string" },
-                    "semanticType": { "type": "string" },
+                    "osfType": { "type": "string" },
                     "render": { "$ref": "#/$defs/compiledViewRender" },
                     "displayRender": { "$ref": "#/$defs/compiledViewRender" },
                     "validation": { "type": "object" },
@@ -260,11 +315,13 @@
         }
       }
     },
-    "hooks": {
-      "$ref": "core-entity.schema.json#/properties/hooks"
-    },
-    "permissions": {
-      "$ref": "core-entity.schema.json#/properties/permissions"
+    "hardDelete": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requireNeverPublished"],
+      "properties": {
+        "requireNeverPublished": { "type": "boolean", "const": true }
+      }
     },
     "authorization": {
       "type": "object",
@@ -274,19 +331,6 @@
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/compiledViewContext"
-      }
-    },
-    "canonical": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["contexts"],
-      "properties": {
-        "contexts": {
-          "type": "object",
-          "additionalProperties": {
-            "$ref": "#/$defs/canonicalCompilerContext"
-          }
-        }
       }
     },
     "profiles": {
@@ -364,25 +408,6 @@
         }
       }
     },
-    "formFieldDefinition": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["key", "valueType", "label"],
-      "properties": {
-        "key": { "type": "string" },
-        "valueType": { "type": "string" },
-        "cardinality": { "type": "string", "enum": ["single", "collection"] },
-        "semanticType": { "type": "string" },
-        "label": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
-        "required": { "type": "boolean" },
-        "description": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
-        "options": { "type": "object" },
-        "render": { "type": "object" },
-        "validation": { "type": "object" },
-        "children": { "type": "array", "items": { "$ref": "#/$defs/formFieldDefinition" } },
-        "item": { "$ref": "#/$defs/formFieldDefinition" }
-      }
-    },
     "compiledViewAction": {
       "type": "object",
       "additionalProperties": false,
@@ -396,7 +421,7 @@
         "visibleWhen": { "type": "object" },
         "disabledWhen": { "type": "object" },
         "disabledMessage": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
-        "formFields": { "type": "array", "items": { "$ref": "#/$defs/formFieldDefinition" } },
+        "formFields": { "type": "array", "items": { "$ref": "core-entity.schema.json#/$defs/field" } },
         "actionRef": { "type": "string" },
         "route": { "type": "string" },
         "mutation": { "type": "string" },
@@ -589,7 +614,7 @@
                   "key": { "type": "string" },
                   "resolver": {
                     "type": "string",
-                    "enum": ["entityFields", "templateParameters", "workflowGraphVariables"]
+                    "enum": ["chips", "entityFields", "templateParameters", "workflowGraphVariables"]
                   },
                   "params": { "type": "object" }
                 }
@@ -693,28 +718,6 @@
         "groups": {
           "type": "array",
           "items": { "$ref": "#/$defs/compiledViewGroup" }
-        }
-      }
-    },
-    "canonicalCompilerContext": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["fields", "presentations"],
-      "properties": {
-        "fields": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "array",
-            "items": {
-              "$ref": "core-entity.schema.json#/$defs/field"
-            }
-          }
-        },
-        "presentations": {
-          "type": "object",
-          "additionalProperties": {
-            "$ref": "core-entity.schema.json#/$defs/presentations"
-          }
         }
       }
     },

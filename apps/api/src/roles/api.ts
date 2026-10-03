@@ -3,10 +3,11 @@
  * API role: fastify server hosting the GraphQL endpoint at /api/graphql.
  *
  * Trimmed from the full apps/api service — the metrics route, erp document
- * routes, messaging/whatsapp webhooks, workflow node bridges, realtime dirty
+ * routes, messaging/whatsapp webhooks, realtime dirty
  * worker, and entity-event fanout wiring are intentionally absent.
  */
 import rateLimit from "@fastify/rate-limit";
+import { registerEntityOperationAvailability } from "../operations/entity/availability.js";
 import {
   registerOperationalRoutes,
   type OperationalRoutesOptions,
@@ -21,7 +22,11 @@ import type { GraphqlCorsPolicy } from "@openshapeforge/observability/yoga";
 import Fastify from "fastify";
 import { readApiLimits } from "../config/limits.js";
 import { readGraphqlCorsPolicy } from "../config/graphql-cors.js";
-import { rewriteShortAddress } from "../mcp/organization-resource.js";
+import {
+  ORGANIZATION_ADDRESS_HEADER,
+  organizationAddressOf,
+  rewriteShortAddress,
+} from "../mcp/organization-resource.js";
 import { assertProductionEnv } from "../config/production-guard.js";
 import {
   createDatabaseRuntime,
@@ -33,14 +38,22 @@ import {
 } from "../graphql/yoga.js";
 import { headersFromFastify } from "../http/headers.js";
 import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
+import { registerEntityChangeStream } from "../rest/entity-change-stream.js";
+import { registerEditLeaseRestRoutes } from "../rest/edit-lease-routes.js";
 import { registerConnectorRestRoutes } from "../connectors/rest-routes.js";
 import { registerConnectorOAuthRoutes } from "../connectors/oauth-routes.js";
 import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
-import { registerControlRestRoutes } from "../control/rest-routes.js";
+import { createControlRuntime } from "../control/runtime.js";
+import { CONTROL_PLUGIN } from "../control/operations.js";
 import { registerControlMcpServer } from "../mcp/control-mcp-server.js";
-import { registerAgreementMilestoneRestRoutes } from "../billing/rest-routes.js";
-import { registerDocumentRestRoutes } from "../documents/rest-routes.js";
-import { registerGeneratedMcpServer } from "../mcp/generated-mcp-server.js";
+import { registerArtifactRestRoutes } from "../artifacts/rest-routes.js";
+import {
+  registerGeneratedMcpServer,
+} from "../mcp/generated-mcp-server.js";
+import {
+  createRuntimeDeclarativeServiceExecutor,
+  createRuntimeHostOperationExecutor,
+} from "../mcp/runtime-executors.js";
 import {
   registerAuthorizationServerMetadataAliases,
   registerProtectedResourceMetadata,
@@ -56,13 +69,20 @@ import {
   loadRuntimeModules,
   type ModuleRegistry,
 } from "../modules/registry.js";
+import type { ModuleRuntimeContext } from "../modules/contract.js";
+import type { InitializedMaintenanceOwner } from "../modules/maintenance.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
+import { composeJobHandlers } from "../jobs/handlers.js";
+import { createJobsRuntimeModule } from "../jobs/module.js";
 import {
   classifyRequest,
   createRateLimitMetrics,
   createRedisRateLimitStore,
   type RateLimitMetrics,
 } from "./rate-limit.js";
+import { limitKey, limitPolicyFromEnv, tierOfKey } from "./rate-limit-subject.js";
+import { getBearerVerifier } from "../auth/bearer-verifier.js";
+import { RATE_LIMITED_CODE } from "../operations/durable-worker-http.js";
 import {
   API_READINESS_ERROR_CODES,
   createApiReadinessChecks,
@@ -70,11 +90,19 @@ import {
 } from "./api-readiness.js";
 import {
   bindOperationHandlers,
+  entityPluginOperationContracts,
   operationModulesConfigured,
   listOperationContracts,
+  registerRuntimeOperationRestRoutes,
   registerOperationRestRoutes,
+  runtimeStaticOperationRegistrations,
   type OperationContract,
 } from "../operations/runtime.js";
+import {
+  createEntityPluginExecutor,
+  registerEntityPluginExecutor,
+  verifiedSession,
+} from "../operations/entity/plugin-executor.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -150,6 +178,7 @@ export function createApiApp(options: {
   };
   const operationContracts = options.operationContracts ?? listOperationContracts();
   const limits = readApiLimits();
+  const trustProxy = limits.trustProxy;
 
   // Default level stays "info"; LOG_LEVEL=debug surfaces the drift "ok" line.
   // trustProxy lets Fastify derive the real client IP from X-Forwarded-For (the
@@ -175,14 +204,18 @@ export function createApiApp(options: {
       },
       ...(options.logStream ? { stream: options.logStream } : {}),
     },
-    trustProxy: limits.trustProxy,
+    // Express the configured hop count through Fastify's supported trust function.
+    // The socket is hop zero; addresses beyond that count stay untrusted.
+    trustProxy: typeof trustProxy === "number"
+      ? (_address, hop) => hop < trustProxy
+      : trustProxy,
     requestTimeout: limits.requestTimeoutMs,
     // Browser handoff tokens (`/api/entity-configuration/<token>`,
     // mcp/handoff-store.ts) are `<tenant>.<handoff>.<secret>` — 117
     // characters — and the router's default of 100 answered them with 414
     // before the route ever ran (found live). Generous but bounded.
     maxParamLength: 512,
-    // Short addresses: `https://hubble.com/zerocopter/...`.
+    // Short addresses: `https://app.example.test/acme/...`.
     //
     // One organization, one prefix, every surface underneath it —
     // `/<alias>` and `/<alias>/mcp` are the MCP resource, `/<alias>/api/...`
@@ -200,6 +233,16 @@ export function createApiApp(options: {
     // A first segment that is one of the server's own names, or not a
     // well-formed alias, is left alone — see RESERVED_ROOT_SEGMENTS.
     rewriteUrl: (request) => rewriteShortAddress(request.url) ?? request.url ?? "/",
+  });
+
+  // The alias a short address named, for the session resolver (see
+  // ORGANIZATION_ADDRESS_HEADER). Set from the ORIGINAL URL on every request
+  // and deleted otherwise, so the header is the server's and never the
+  // client's.
+  app.addHook("onRequest", async (request) => {
+    const alias = organizationAddressOf(request.originalUrl);
+    if (alias) request.headers[ORGANIZATION_ADDRESS_HEADER] = alias;
+    else delete request.headers[ORGANIZATION_ADDRESS_HEADER];
   });
 
   // Request-rate boundary, before GraphQL/REST execution — that ordering is
@@ -232,30 +275,32 @@ export function createApiApp(options: {
     );
   }
 
+  const limitPolicy = limitPolicyFromEnv(() => getBearerVerifier(false, true));
   void app.register(rateLimit, {
     // Per-request budget, so a trusted service-to-service caller does not
     // compete with anonymous traffic for one allowance.
-    max: (request) =>
-      limits.rateLimitTiers[classifyRequest(request, contextSecret).tier],
-    keyGenerator: (request) => classifyRequest(request, contextSecret).key,
+    // The key carries its tier, so the budget follows what the key generator
+    // proved (trusted context, verified bearer subject, or IP) — #886.
+    max: (_request, key) => limits.rateLimitTiers[tierOfKey(key)],
+    keyGenerator: (request) => limitKey(request, contextSecret, limitPolicy),
     timeWindow: limits.rateLimitWindowMs,
     allowList: (request) => isRateLimitExempt(request.url),
     ...(sharedStore ? { store: sharedStore.Store as never } : {}),
     // A store outage must not become an API outage: the request proceeds
     // uncounted, and createRedisRateLimitStore records it in storeErrors.
     skipOnError: true,
-    onExceeding: (request) => {
-      rateLimitMetrics.allowed[classifyRequest(request, contextSecret).tier] +=
-        1;
+    onExceeding: (_request, key) => {
+      rateLimitMetrics.allowed[tierOfKey(key)] += 1;
     },
-    onExceeded: (request) => {
-      rateLimitMetrics.throttled[
-        classifyRequest(request, contextSecret).tier
-      ] += 1;
+    onExceeded: (_request, key) => {
+      rateLimitMetrics.throttled[tierOfKey(key)] += 1;
     },
     // 429 with Retry-After (added by the plugin); body carries no limiter internals.
     errorResponseBuilder: () => ({
       statusCode: 429,
+      // Names the limiter, so a caller can tell this refusal (answered before
+      // any handler ran) from an Operation's own 429 (durable-worker-http.ts).
+      code: RATE_LIMITED_CODE,
       error: "Too Many Requests",
       message: "Rate limit exceeded. Please retry later.",
     }),
@@ -277,8 +322,16 @@ export function createApiApp(options: {
     });
 
     const runtime = databaseRuntime;
+    const databaseUrl = options.databaseUrl;
     app.addHook("onReady", async () => {
-      await enforceGeneratedSchemaFreshness(app.log, runtime.db);
+      // Runs after the module plugin below has initialised, so the seeds an
+      // empty-database bootstrap applies are the ones this process loaded.
+      await enforceGeneratedSchemaFreshness(app.log, runtime.db, {
+        databaseUrl,
+        moduleSeeds: initialisedModules.flatMap((module) => module.seeds ?? []),
+        maintenanceModules: initialisedModules,
+        ...(maintenanceRuntime ? { maintenanceRuntime } : {}),
+      });
     });
   } else {
     app.log.warn("DATABASE_URL is not set; GraphQL runs without a database.");
@@ -294,6 +347,7 @@ export function createApiApp(options: {
   // constructing.
   let ready: { yoga: ReturnType<typeof createGraphqlYoga> } | null = null;
   let initialisedModules: ModuleRegistry["loaded"] = [];
+  let maintenanceRuntime: InitializedMaintenanceOwner | undefined;
   const databaseToClose = databaseRuntime;
 
   app.addHook("onClose", async () => {
@@ -323,22 +377,92 @@ export function createApiApp(options: {
     const modulePlatform = databaseRuntime
       ? new ModulePlatformRuntime(databaseRuntime.db)
       : undefined;
-    const moduleContext = {
+    const moduleContext: ModuleRuntimeContext = {
       ...dbOptions,
       ...(modulePlatform ? { platform: modulePlatform.services } : {}),
     };
     const initialised = await initRuntimeModules(modules, moduleContext);
     initialisedModules = initialised.loaded;
+    if (modulePlatform) {
+      maintenanceRuntime = { platform: modulePlatform.services, modules: initialised.loaded };
+    }
+    // A job kind two modules both register is refused here, at API boot, and
+    // not only in the worker: the worker may not be running, and the API is
+    // what would enqueue jobs into a queue nothing can drain unambiguously.
+    composeJobHandlers([createJobsRuntimeModule({ modules: () => initialised.loaded }), ...initialised.loaded]);
+    // The control plane the `osf-control` Operations run against: its
+    // configuration, Keycloak clients and the loaded module that administers
+    // a catalog. Assembled after init so a module that failed to initialise
+    // cannot supply the catalog, and set on the one context every transport
+    // reads at request time.
+    moduleContext.control = createControlRuntime({
+      modules: initialised.loaded,
+      operations: operationContracts.filter((operation) => operation.plugin === CONTROL_PLUGIN),
+      log: (error) => app.log.error({ err: error }, "Control operation failed."),
+    });
+    modulePlatform?.registerArtifactStorage(initialised.loaded);
+    modulePlatform?.registerOperationProviders(initialised.loaded);
     const egressOwner = assertSingleModuleEgressOwner(initialised.loaded);
+    if (modulePlatform) {
+      modulePlatform.registerDeclarativeServiceExecutor(
+        createRuntimeDeclarativeServiceExecutor({
+          db: databaseRuntime!.db,
+          modules: initialised.loaded,
+          modulePlatform,
+          ...(egressOwner ? { egressOwner } : {}),
+        }),
+      );
+      modulePlatform.registerHostOperationExecutor(
+        createRuntimeHostOperationExecutor({
+          db: databaseRuntime!.db,
+          modules: initialised.loaded,
+          modulePlatform,
+          ...(egressOwner ? { egressOwner } : {}),
+        }),
+      );
+    }
     // Ordinary runtime modules remain fail-soft. A canonical operation is a
     // stronger promise: every generated transport points at its handler, so a
     // load/init failure must stop boot instead of silently deleting the API.
     // A failed module counts as configured for exactly that reason.
+    // A controlled catalog override is complete: the generated entity-backed
+    // plugin operations belong to the generated catalog it replaces.
+    const entityPluginContracts = options.operationContracts ? [] : entityPluginOperationContracts();
+    const allOperationContracts = [...operationContracts, ...entityPluginContracts];
     const operationsConfigured = operationModulesConfigured(
       [...modules.loaded, ...modules.failures],
-      operationContracts,
+      allOperationContracts,
     );
-    if (operationsConfigured) bindOperationHandlers(initialised.loaded, operationContracts);
+    // The core operations always bind; plugin operations — entity-backed
+    // ones included — are required as soon as any operation module was
+    // configured, loaded or failed. A process without one has none of them.
+    {
+      const bindings = bindOperationHandlers(
+        initialised.loaded,
+        allOperationContracts,
+        { pluginOperations: operationsConfigured ? "required" : "absent" },
+      );
+      if (databaseRuntime) registerEntityOperationAvailability(databaseRuntime.db, bindings);
+      if (databaseRuntime && entityPluginContracts.length > 0) {
+        const executeEntityPlugin = createEntityPluginExecutor({ bindings, runtime: moduleContext });
+        registerEntityPluginExecutor(
+          databaseRuntime.db,
+          modulePlatform
+            ? (session, operation, input) => modulePlatform.withActiveOperationSession(
+                verifiedSession(session),
+                (activeSession) => executeEntityPlugin(activeSession, operation, input),
+              )
+            : executeEntityPlugin,
+        );
+      }
+      modulePlatform?.registerStaticOperations(
+        runtimeStaticOperationRegistrations(
+          initialised.loaded,
+          moduleContext,
+          operationContracts,
+        ),
+      );
+    }
     // Read once, served twice: REST and GraphQL answer from the same
     // configuration, so a deployment cannot mint keys on one transport and
     // say NOT_CONFIGURED on the other.
@@ -453,8 +577,25 @@ export function createApiApp(options: {
       });
 
     registerGeneratedRestRoutes(routes, dbOptions);
-    registerDocumentRestRoutes(routes, dbOptions);
-    registerAgreementMilestoneRestRoutes(routes, dbOptions);
+    registerEntityChangeStream(routes, dbOptions);
+    registerRuntimeOperationRestRoutes(routes, moduleContext);
+    registerEditLeaseRestRoutes(routes, dbOptions);
+    if (modulePlatform) {
+      registerArtifactRestRoutes(routes, {
+        ...dbOptions,
+        artifacts: {
+          stage: (session, input) => modulePlatform.withActiveOperationSession(
+            session, (activeSession) => modulePlatform.services.artifacts.stage(activeSession, input),
+          ),
+          bind: (session, input) => modulePlatform.withActiveOperationSession(
+            session, (activeSession) => modulePlatform.services.artifacts.bind(activeSession, input),
+          ),
+          read: (session, input) => modulePlatform.withActiveOperationSession(
+            session, (activeSession) => modulePlatform.services.artifacts.read(activeSession, input),
+          ),
+        },
+      });
+    }
     registerConnectorRestRoutes(routes, {
       ...dbOptions,
       config: readConnectorRuntimeConfig(),
@@ -481,21 +622,26 @@ export function createApiApp(options: {
       ...dbOptions,
       config: apiKeyConfig,
     });
-    // The tenant control plane, on its own mount and its own realm. Registered
-    // unconditionally so an unconfigured deployment answers 503 naming what is
-    // missing rather than 404, which reads like a version mismatch.
-    registerControlRestRoutes(routes, dbOptions);
-    // The platform administrator MCP (`/api/control/mcp`): same realm as the
-    // control plane, its own small server (mcp/control-mcp-server.ts), and the
-    // loaded modules so the one that administers a catalog can be found.
-    registerControlMcpServer(routes, { ...dbOptions, modules: initialised.loaded });
+    // The platform administrator MCP (`/api/control/mcp`): the control realm,
+    // its own small server (mcp/control-mcp-server.ts) over the same bound
+    // control Operations the REST routes below serve under /api/control/v1.
+    registerControlMcpServer(routes, {
+      context: moduleContext,
+      modules: initialised.loaded,
+      operations: operationContracts,
+    });
 
     for (const module of initialised.loaded) {
       module.restRoutes?.(routes, moduleContext);
     }
-    if (operationsConfigured) {
-      registerOperationRestRoutes(routes, initialised.loaded, moduleContext, operationContracts);
-    }
+    // The core Operations — blueprints and the control plane — always have
+    // their REST routes; with an operation module configured the plugin
+    // Operations join them. An unconfigured control plane keeps its routes
+    // and answers 503 naming what is missing rather than 404, which reads
+    // like a version mismatch.
+    registerOperationRestRoutes(routes, initialised.loaded, moduleContext, operationContracts, {
+      pluginOperations: operationsConfigured ? "required" : "absent",
+    });
   });
 
   return app;

@@ -10,13 +10,14 @@
  * Deliberately separate from auth/identity-link.ts: that module links a LOGIN
  * to the Relation a PERSON acts as; this one links the TENANT itself to the
  * Relation that represents the organization as a whole. Both are one-Relation
- * pointers gated the same way (`Organization.All.ReadWrite`,
- * `IDENTITY_LINK_ADMIN_ROLE` — reused here rather than duplicated under a new
+ * pointers gated the same way (`IDENTITY_LINK_ADMIN_ROLE`,
+ * reused here rather than duplicated under a new
  * name, since it is the same role and the same reasoning: an organization
  * administrator, not an ordinary member, decides what the assistant is told
  * this company is).
  */
 import { sql } from "kysely";
+import { actingPartyColumns, actingPartyTable, IDENTITY_CONTRACT } from "./identity-contract.js";
 import { IDENTITY_LINK_ADMIN_ROLE } from "./identity-link.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
@@ -56,20 +57,23 @@ export async function setOrganizationRelation(
   }
 
   return withDbSession(db, session, async (trx) => {
+    const party = actingPartyColumns();
     const relation = await sql<{ id: string; display_name: string; relation_type: string }>`
-      select id, display_name, relation_type
-        from erp.relations
-       where id = ${relationId} and tenant_id = ${session.tenantId}
+      select ${sql.id(party.id)} as id, ${sql.id(party.name)} as display_name,
+             ${sql.id(party.type)} as relation_type
+        from ${sql.table(actingPartyTable())}
+       where ${sql.id(party.id)} = ${relationId} and ${sql.id(party.tenantId)} = ${session.tenantId}
     `.execute(trx);
     if (relation.rows.length === 0) {
       throw new HttpError(404, "RELATION_NOT_FOUND", "No such Relation in this organization.");
     }
     const found = relation.rows[0]!;
-    if (found.relation_type !== "organization") {
+    const { typeField, organizationType } = IDENTITY_CONTRACT.actingParty;
+    if (found.relation_type !== organizationType) {
       throw new HttpError(
         422,
         "NOT_AN_ORGANIZATION",
-        `Relation ${found.id} has relationType "${found.relation_type}", not "organization".`,
+        `Relation ${found.id} has ${typeField} "${found.relation_type}", not "${organizationType}".`,
       );
     }
 
@@ -106,15 +110,17 @@ export async function getOrganizationProfile(
         configured: false,
         message:
           "No organization Relation is configured yet. An organization administrator can run " +
-          "set_organization_relation with the id of the Relation (relationType: organization) " +
+          `set_organization_relation with the id of the ${IDENTITY_CONTRACT.actingParty.entity} ` +
+          `(${IDENTITY_CONTRACT.actingParty.typeField}: ${IDENTITY_CONTRACT.actingParty.organizationType}) ` +
           "that represents this company.",
       };
     }
 
+    const party = actingPartyColumns();
     const relation = await sql<{ display_name: string; business_context: string | null }>`
-      select display_name, business_context
-        from erp.relations
-       where id = ${relationId} and tenant_id = ${session.tenantId}
+      select ${sql.id(party.name)} as display_name, ${sql.id(party.profile)} as business_context
+        from ${sql.table(actingPartyTable())}
+       where ${sql.id(party.id)} = ${relationId} and ${sql.id(party.tenantId)} = ${session.tenantId}
     `.execute(trx);
     const found = relation.rows[0];
     if (!found) {

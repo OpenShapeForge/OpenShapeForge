@@ -30,10 +30,13 @@
              another surfaces as NoSuchMethodError at first request, not as a build
              failure. `bun run check:keycloak-lockstep` fails the build if the two
              drift. -->
-        <keycloak.version>26.5.3</keycloak.version>
+        <keycloak.version>26.7.3</keycloak.version>
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>junit</groupId><artifactId>junit</artifactId><version>4.13.2</version><scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-core</artifactId>

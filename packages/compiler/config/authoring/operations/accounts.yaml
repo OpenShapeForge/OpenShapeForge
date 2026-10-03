@@ -1,0 +1,50 @@
+schemaVersion: 1
+kind: operationCatalog
+plugin: accounts
+operations:
+  inviteAccount:
+    id: accounts.create
+    name: { en: Create account, nl: Account aanmaken }
+    description: { en: Invite a login for this relation. Group roles provide access; a direct role is optional., nl: Nodig een login uit voor deze relatie. Groepsrollen geven toegang; een directe rol is optioneel. }
+    implementation: { type: plugin, plugin: accounts, handler: inviteAccount }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [ relationId, email ]
+        properties:
+          relationId: { type: string, format: uuid, x-osf-i18n: { title: { en: Relation, nl: Relatie } } }
+          email: { type: string, format: email, maxLength: 320, x-osf-i18n: { title: { en: Email, nl: E-mail } }, x-osf-reference: { entity: ContactDetail, valueField: value, constraints: { type: { eq: email } }, bindings: { relationId: relationId } } }
+          role: { type: string, x-osf-i18n: { title: { en: Role, nl: Rol } }, x-osf-reference: { entity: AccessRole, valueField: key } }
+    output:
+      schema:
+        type: object
+        required: [ id, email, status, delivery ]
+        properties:
+          id: { type: string, x-osf-i18n: { title: { en: Invitation, nl: Uitnodiging } } }
+          email: { type: string, x-osf-i18n: { title: { en: Email, nl: E-mail } } }
+          status: { type: string, x-osf-i18n: { title: { en: Status, nl: Status } } }
+          delivery:
+            type: string
+            x-osf-i18n:
+              title: { en: Delivery, nl: Bezorging }
+              enum:
+                sent: { en: Invitation email sent. Open the link to sign in., nl: Uitnodiging per e-mail verstuurd. Open de link om aan te melden. }
+                not_required: { en: This account is already a member. No email is needed; sign in again to activate access., nl: Dit account is al lid. Er is geen e-mail nodig; meld opnieuw aan om de toegang te activeren. }
+                already_pending: { en: An invitation is already pending. Use the link in the earlier email., nl: Er staat al een uitnodiging open. Gebruik de link in de eerdere e-mail. }
+    auth: { mode: session, roles: [ Organization.Access.Manage ] }
+    tenancy: { mode: required }
+    effects: { data: write, external: write }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors:
+      - { status: 400, code: VALIDATION, description: Invalid account details. }
+      - { status: 401, code: UNAUTHENTICATED, description: Sign in first. }
+      - { status: 403, code: FORBIDDEN, description: Organization administrator required. }
+      - { status: 404, code: NOT_FOUND, description: Relation not found. }
+      - { status: 409, code: CONFLICT, description: Account belongs to another relation. }
+      - { status: 503, code: OPERATION_UNAVAILABLE, description: Invitations unavailable. }
+interfaces:
+  rest:
+    operations:
+      inviteAccount: { method: POST, path: /api/accounts/create, response: { status: 200, kind: json } }

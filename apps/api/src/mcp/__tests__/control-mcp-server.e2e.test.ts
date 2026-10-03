@@ -10,7 +10,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createSign, generateKeyPairSync, type KeyObject } from "node:crypto";
 import { __resetControlVerifiersForTests } from "../../control/authorization.js";
-import { PLATFORM_ADMIN_ROLE } from "../../control/platform-admin.js";
+import { PLATFORM_OPERATOR_ROLE } from "../../control/authorization.js";
+import { loadRuntimeModules } from "../../modules/registry.js";
 import { createApiApp } from "../../roles/api.js";
 import { CONTROL_MCP_METADATA_PATH, CONTROL_MCP_PATH } from "../control-mcp-server.js";
 import { PROTECTED_RESOURCE_METADATA_PATH } from "../protected-resource-metadata.js";
@@ -72,7 +73,7 @@ if (!EXTERNAL_CONTROL_REALM) beforeAll(async () => {
   process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = ORIGIN;
   process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = TENANT_ISSUER;
   __resetControlVerifiersForTests();
-  app = createApiApp({ cors: false });
+  app = createApiApp({ cors: false, modules: await loadRuntimeModules() });
   await app.ready();
 });
 
@@ -98,7 +99,7 @@ const adminToken = (overrides: Record<string, unknown> = {}) =>
     sub: "0b2a3f1e-8a6b-4f30-9d2f-5f1c7a8e9b10",
     azp: "codex-platform",
     preferred_username: "hubble-platform-admin",
-    realm_access: { roles: [PLATFORM_ADMIN_ROLE] },
+    realm_access: { roles: [PLATFORM_OPERATOR_ROLE] },
     ...overrides,
   });
 
@@ -137,10 +138,31 @@ if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP discovery", ()
       `Bearer resource_metadata="${ORIGIN}${CONTROL_MCP_METADATA_PATH}", scope="roles profile email mcp-resource:control"`,
     );
   });
+
+  test("a bare discovery probe — no body, a media type without a parser — is challenged, not a 500", async () => {
+    // aiohttp-based hosted clients open with exactly this request.
+    const response = await app.inject({
+      method: "POST",
+      url: CONTROL_MCP_PATH,
+      headers: { "content-type": "application/octet-stream" },
+    });
+    expect(response.statusCode).toBe(401);
+    expect(String(response.headers["www-authenticate"])).toContain(CONTROL_MCP_METADATA_PATH);
+  });
+
+  test("a credentialed request under an unparsable media type is 415, never authenticated", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: CONTROL_MCP_PATH,
+      headers: { authorization: "Bearer not-a-real-token", "content-type": "application/octet-stream" },
+      payload: "{}",
+    });
+    expect(response.statusCode).toBe(415);
+  });
 });
 
 if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP admission", () => {
-  test("a platform_admin token from the PKCE client is admitted (and only then reaches the database)", async () => {
+  test("a platform-operator token from the PKCE client is admitted (and only then reaches the database)", async () => {
     const response = await call(adminToken());
     expect(response.statusCode).toBe(503);
     expect(JSON.parse(response.body).error.code).toBe("DATABASE_NOT_CONFIGURED");
@@ -154,7 +176,7 @@ if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP admission", ()
       aud: ["hubble-api"],
       organization: { "zerocopter-dev": { id: "8ba94fb8-08d3-4907-9af3-5bd1e2018f46" } },
       resource_access: { "hubble-api": { roles: ["org_admin"] } },
-      realm_access: { roles: [PLATFORM_ADMIN_ROLE] },
+      realm_access: { roles: [PLATFORM_OPERATOR_ROLE] },
     });
     const refused = await call(tenantToken);
     const anonymous = await call();
@@ -167,8 +189,8 @@ if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP admission", ()
     expect(message).not.toContain("issuer");
   });
 
-  test("a control-realm token without platform_admin is 403, the operator role notwithstanding", async () => {
-    const response = await call(adminToken({ realm_access: { roles: ["platform-operator"] } }));
+  test("a control-realm token holding no platform role is 403", async () => {
+    const response = await call(adminToken({ realm_access: { roles: ["default-roles-openshapeforge-control"] } }));
     expect(response.statusCode).toBe(403);
     expect(JSON.parse(response.body).error.code).toBe("FORBIDDEN");
   });
@@ -189,7 +211,7 @@ if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP admission", ()
         accept: "application/json, text/event-stream",
         "content-type": "application/json",
         "x-openshapeforge-user-id": "0b2a3f1e-8a6b-4f30-9d2f-5f1c7a8e9b10",
-        "x-openshapeforge-roles": PLATFORM_ADMIN_ROLE,
+        "x-openshapeforge-roles": PLATFORM_OPERATOR_ROLE,
       },
       payload: { jsonrpc: "2.0", id: 1, method: "tools/list" },
     });

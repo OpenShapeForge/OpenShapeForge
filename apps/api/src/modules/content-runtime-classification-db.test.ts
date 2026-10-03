@@ -98,9 +98,9 @@ describe("persisted content classification through the canonical PostgreSQL runt
       contracts,
     ));
 
-    const template = await execute(["Organization.All.ReadWrite"], "Template.get", "get", { id: ids.template });
+    const template = await execute(["Templates.Manage"], "Template.get", "get", { id: ids.template });
     if ("error" in template) throw new Error(`Synthetic template read failed: ${template.error.code}`);
-    const published = await execute(["Organization.All.ReadWrite"], "Template.publish", "invoke", {
+    const published = await execute(["Templates.Manage"], "Template.publish", "invoke", {
       id: ids.template,
       expectedVersion: String((template.data as Record<string, unknown>).updatedAt),
     });

@@ -28,7 +28,7 @@ const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL ??
 const scratchName = `template_snapshot_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
 const tenantId = randomUUID();
 const ids = { template: randomUUID(), variant: randomUUID(), first: randomUUID(), second: randomUUID(), late: randomUUID() };
-const session = { tenantId, userId: randomUUID(), roles: ["Organization.All.ReadWrite"], groups: [], relationGroupIds: [], scope: "tenant" as const, credential: "bearer" as const };
+const session = { tenantId, userId: randomUUID(), roles: ["Templates.Manage"], groups: [], relationGroupIds: [], scope: "tenant" as const, credential: "bearer" as const };
 const nested = { template: randomUUID(), variant: randomUUID(), block: randomUUID(), outer: randomUUID(), outerVariant: randomUUID(), include: randomUUID(), outerText: randomUUID() };
 /** Input shapes as authored in entities/core/markdown-block.yaml and template-block.yaml. */
 const operations: Record<string, unknown> = {

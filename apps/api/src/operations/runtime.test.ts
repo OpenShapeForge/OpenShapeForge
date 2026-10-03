@@ -9,6 +9,7 @@ import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime"
 import { operationFailure } from "@openshapeforge/operations";
 import documentsPluginRuntime from "@openshapeforge/documents/runtime";
 import versioningPluginRuntime from "@openshapeforge/versioning/runtime";
+import accountsRuntime from "../accounts/runtime.js";
 import Fastify from "fastify";
 import { GraphQLError } from "graphql";
 import {
@@ -66,7 +67,7 @@ const completeModuleSets = new WeakMap<readonly RuntimeModule[], RuntimeModule[]
 function withDocuments(modules: readonly RuntimeModule[]): RuntimeModule[] {
   let complete = completeModuleSets.get(modules);
   if (!complete) {
-    complete = [documentsRuntime, versioningRuntime, ...modules];
+    complete = [accountsRuntime, documentsRuntime, versioningRuntime, ...modules];
     completeModuleSets.set(modules, complete);
   }
   return complete;
@@ -77,8 +78,8 @@ const bindOperationHandlers: typeof bindCanonicalOperationHandlers = (modules, o
     : bindCanonicalOperationHandlers(modules, operations);
 
 const session = {
-  tenantId: "tenant-a",
-  userId: "user-a",
+  tenantId: "11111111-1111-4111-8111-111111111111",
+  userId: "33333333-3333-4333-8333-333333333333",
   roles: ["Organization.All.ReadWrite"],
   groups: [],
   scope: "tenant" as const,
@@ -864,7 +865,7 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
   const secret = "operation-rest-test-context-secret";
   process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = secret;
   delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI;
-  delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+  process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = "https://issuer.example.test/realms/runtime-test";
   __resetSessionResolverForTests();
   const observations: unknown[] = [];
   const module: RuntimeModule = {
@@ -918,8 +919,8 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
 
     const wrongRole = new Headers({ "content-type": "application/json" });
     applyTrustedContextHeaders(wrongRole, {
-      tenantId: "tenant-a",
-      userId: "user-a",
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      userId: "33333333-3333-4333-8333-333333333333",
       roles: ["reader"],
       groups: [],
     }, { secret });
@@ -934,8 +935,8 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
 
     const authorized = new Headers({ "content-type": "application/json" });
     applyTrustedContextHeaders(authorized, {
-      tenantId: "tenant-a",
-      userId: "user-a",
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      userId: "33333333-3333-4333-8333-333333333333",
       roles: ["quote-publisher"],
       groups: ["/sales"],
     }, { secret });
@@ -1023,7 +1024,7 @@ test("explicit canonical handler envelopes preserve offers and resources without
   const envelope = { data: { status: "waiting" }, operations: [{
     operation: { id: "example.respond", intent: "invoke" }, available: true as const,
     interaction: { kind: "userInput" as const, offerId: "server-issued", expiresAt: "2026-09-12T13:15:00Z",
-      bindTo: { tenant: "tenant-a", subject: "user-a", instance: "instance-a" }, choices: [{ value: "yes", label: "Ja" }] },
+      bindTo: { tenant: "11111111-1111-4111-8111-111111111111", subject: "33333333-3333-4333-8333-333333333333", instance: "instance-a" }, choices: [{ value: "yes", label: "Ja" }] },
   }], resources: [{ uri: "osf://example/result", name: "result" }] };
   for (const explicit of [true, false]) {
     const modules: RuntimeModule[] = [{ name: "demo", operationHandlers: {
@@ -1046,6 +1047,8 @@ test("explicit canonical handler envelopes preserve offers and resources without
 
 test("the generic runtime Operation route parses JSON inside a raw-buffer parent", async () => {
   const previousSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+  const previousIssuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+  process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = "https://issuer.example.test/realms/runtime-test";
   const secret = "runtime-operation-rest-json-test-secret";
   process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = secret;
   __resetSessionResolverForTests();
@@ -1086,8 +1089,8 @@ test("the generic runtime Operation route parses JSON inside a raw-buffer parent
     "idempotency-key": "request-raw-buffer",
   });
   applyTrustedContextHeaders(headers, {
-    tenantId: "tenant-a",
-    userId: "user-a",
+    tenantId: "11111111-1111-4111-8111-111111111111",
+    userId: "33333333-3333-4333-8333-333333333333",
     roles: ["quote-publisher"],
     groups: [],
   }, { secret });
@@ -1115,8 +1118,8 @@ test("the generic runtime Operation route parses JSON inside a raw-buffer parent
       data: {
         quoteId: "quote-raw-buffer",
         idempotencyKey: "request-raw-buffer",
-        tenantId: "tenant-a",
-        userId: "user-a",
+        tenantId: "11111111-1111-4111-8111-111111111111",
+        userId: "33333333-3333-4333-8333-333333333333",
       },
     });
     expect(seen).toEqual([{
@@ -1166,6 +1169,8 @@ test("the generic runtime Operation route parses JSON inside a raw-buffer parent
     await db.destroy();
     if (previousSecret === undefined) delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
     else process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = previousSecret;
+    if (previousIssuer === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+    else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = previousIssuer;
     __resetSessionResolverForTests();
   }
 });
@@ -1307,8 +1312,8 @@ test("REST applies the exact status-and-code fixed representation to core author
 
     const wrongRole = new Headers({ "content-type": "application/json" });
     applyTrustedContextHeaders(wrongRole, {
-      tenantId: "tenant-a",
-      userId: "user-a",
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      userId: "33333333-3333-4333-8333-333333333333",
       roles: ["reader"],
       groups: [],
     }, { secret: "declared-auth-error-test-secret" });
@@ -1332,8 +1337,8 @@ test("REST applies the exact status-and-code fixed representation to core author
 
     const authorized = new Headers({ "content-type": "application/json" });
     applyTrustedContextHeaders(authorized, {
-      tenantId: "tenant-a",
-      userId: "user-a",
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      userId: "33333333-3333-4333-8333-333333333333",
       roles: ["seller"],
       groups: [],
     }, { secret: "declared-auth-error-test-secret" });

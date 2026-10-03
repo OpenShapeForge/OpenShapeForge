@@ -23,7 +23,7 @@ let admin: SQL | undefined, privileged: DatabaseRuntime | undefined, restricted:
 let created = false;
 const tenant = randomUUID(), otherTenant = randomUUID(), actor = randomUUID();
 const binding: CollectionMutationBinding = { entityName: "TemplateVariant", field: "blocks", action: "insert" };
-const session = { tenantId: tenant, userId: actor, scope: "self" as const, roles: ["General.All.Read", "General.All.ReadWrite", "Organization.All.ReadWrite"] };
+const session = { tenantId: tenant, userId: actor, scope: "self" as const, roles: ["General.All.Read", "General.All.ReadWrite", "Templates.Manage"] };
 const column = (name: string, type: string, extra: Partial<GeneratedCrudColumn> = {}): GeneratedCrudColumn => ({ name, type, required: true, primaryKey: name === "id", generated: null, ...extra });
 
 function fixture(entityValues = createEntityValueRegistry({ version: 1, carriers: [], collections: [] })) {

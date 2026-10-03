@@ -3,7 +3,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { sql, type Transaction } from "kysely";
-import type { OpenShapeForgeDatabase } from "../db/connection.js";
+import { assertSameDatabase, type OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession } from "../db/session.js";
 import { enqueueJob } from "../jobs/store.js";
 import { appendEntityEventInTransaction } from "../platform/entity-events.js";
@@ -1011,7 +1011,8 @@ export class ModulePlatformRuntime {
    * authority. AsyncLocalStorage keeps concurrent requests disjoint, while the
    * live set makes continuations retained past completion fail closed.
    */
-  async assertRestrictedOperationConnection(): Promise<void> {
+  async assertRestrictedOperationConnection(expectedDatabase?: OpenShapeForgeDatabase): Promise<void> {
+    if (expectedDatabase) await assertSameDatabase(this.#db, expectedDatabase);
     const result = await sql<{ rolbypassrls: boolean; rolsuper: boolean }>`select rolbypassrls, rolsuper from pg_roles where rolname = current_user`.execute(this.#db);
     if (!result.rows[0] || result.rows[0].rolbypassrls || result.rows[0].rolsuper) throw new Error("Maintenance Operations require the restricted application connection.");
   }
@@ -1328,8 +1329,8 @@ export function assertLiveModuleOperationSession(platform: ModulePlatformService
   current.runtime.assertActiveOperationSession(session);
 }
 
-export async function assertRestrictedModuleOperationConnection(platform: ModulePlatformServices): Promise<void> {
+export async function assertRestrictedModuleOperationConnection(platform: ModulePlatformServices, expectedDatabase?: OpenShapeForgeDatabase): Promise<void> {
   const runtime = platformRuntimes.get(platform);
   if (!runtime) throw new Error("Maintenance platform is not core owned.");
-  await runtime.assertRestrictedOperationConnection();
+  await runtime.assertRestrictedOperationConnection(expectedDatabase);
 }

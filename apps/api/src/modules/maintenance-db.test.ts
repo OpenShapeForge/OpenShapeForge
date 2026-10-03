@@ -182,3 +182,28 @@ test("a job owner drains handled failed runs without replacing a successful reco
   expect(rows.some(row => row.actor_subject === "maintenance-job:recovery-job" && !row.succeeded)).toBe(true);
   expect(rows.some(row => row.actor_subject === "maintenance-job:recovery-job" && row.succeeded)).toBe(true);
 });
+
+test("different store, app or live platform databases refuse before the callback", async () => {
+  const otherName = `maintenance_${randomUUID().replaceAll("-", "")}`;
+  await server.unsafe(`create database "${otherName}"`);
+  const otherUrl = new URL(url()); otherUrl.pathname = `/${otherName}`;
+  const other = createDatabaseRuntime({ databaseUrl: otherUrl.toString() });
+  let called = false;
+  const previous = process.env.DATABASE_URL;
+  try {
+    await expect(runRegisteredSeedJob(owner, other.db, seed.name, "mismatched-job", async () => { called = true; })).rejects.toThrow("same database");
+    expect(called).toBe(false);
+    const appUrl = new URL(otherUrl); appUrl.username = "openshapeforge_app"; appUrl.password = "openshapeforge_app";
+    process.env.DATABASE_URL = appUrl.toString();
+    work = async runner => runner!(request, async () => { called = true; });
+    await expect(dispatch()).rejects.toThrow("same database"); expect(called).toBe(false);
+    // Store/app agree with each other, but differ from the verified live platform.
+    const oldMigrate = process.env.OPENSHAPEFORGE_MIGRATE_DATABASE_URL;
+    process.env.OPENSHAPEFORGE_MIGRATE_DATABASE_URL = otherUrl.toString();
+    try { await expect(dispatch()).rejects.toThrow("same database"); expect(called).toBe(false); }
+    finally { process.env.OPENSHAPEFORGE_MIGRATE_DATABASE_URL = oldMigrate; }
+  } finally {
+    process.env.DATABASE_URL = previous;
+    await other.close(); await server.unsafe(`drop database "${otherName}" with (force)`);
+  }
+});

@@ -121,7 +121,10 @@ Operations it lists, and a capability Operation accepts exactly a grant
 session (a bearer session presented to one is `401 GRANT_INVALID`). When the
 Operation declares a record target with an `inputField`, core sets that
 field to the grant's subject id before validation; a different value in the
-request is `403 GRANT_SCOPE`.
+request is `403 GRANT_SCOPE`. A handler's nested `platform.operations.execute`
+gets no such completion: there the field must already hold the subject id,
+and an Operation whose target entity is not the grant's subject entity is
+`403 GRANT_SCOPE` on every path.
 
 ### What a grant session may reach
 

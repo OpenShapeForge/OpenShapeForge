@@ -335,6 +335,67 @@ describe("canonical operation runtime", () => {
     } finally { await db.destroy(); }
   });
 
+  test("a grant session reaches only its subject, on paths that skip the REST binding too", async () => {
+    const disabled = { enabled: false as const, reason: "A grant token is presented on REST only." };
+    const operation: OperationContract = {
+      ...restOperation,
+      key: "envelopes.envelope.sign",
+      plugin: "envelopes",
+      handler: "signEnvelope",
+      target: { entityId: "Envelope", entityName: "Envelope", scope: "record", inputField: "envelopeId" },
+      inputSchema: { type: "object", required: ["envelopeId"], properties: { envelopeId: { type: "string" } } },
+      outputSchema: { type: "object" },
+      errors: [
+        { status: 401, code: "GRANT_INVALID", description: "Invalid." },
+        { status: 403, code: "GRANT_SCOPE", description: "Scope." },
+      ],
+      auth: { mode: "capability" },
+      idempotency: { mode: "intrinsic" },
+      transports: {
+        rest: { method: "POST", path: "/api/envelopes/:envelopeId/sign", response: { status: 200, kind: "json" } },
+        mcp: disabled,
+        graphql: disabled,
+        typescript: { enabled: true, functionName: "signEnvelope" },
+      },
+    };
+    const subjectId = "55555555-5555-4555-8555-555555555555";
+    const grantSession = (entity: string) => ({
+      tenantId: session.tenantId,
+      userId: "66666666-6666-4666-8666-666666666666",
+      roles: [],
+      groups: [],
+      scope: "self" as const,
+      credential: "grant" as const,
+      grant: {
+        id: "66666666-6666-4666-8666-666666666666",
+        subject: { entity, id: subjectId },
+        recipient: { kind: "email" },
+        operations: [operation.key],
+        records: [],
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        maxUses: null,
+      },
+    });
+    expect(() => requireOperationAuthorization(operation, grantSession("Relation")))
+      .toThrow(expect.objectContaining({ code: "GRANT_SCOPE" }));
+    expect(() => requireOperationAuthorization(operation, grantSession("Envelope"))).not.toThrow();
+
+    let calls = 0;
+    const module: RuntimeModule = {
+      name: operation.plugin,
+      operationHandlers: { signEnvelope: async () => { calls++; return { value: {} }; } },
+    };
+    const bound = bindOperationHandlers([module], [operation]).get(operation.key)!;
+    // No platform: a call that passes the subject check stops at the grant
+    // transaction with GRANT_INVALID instead of reaching the handler.
+    const context = { transport: "operation" as const, session: grantSession("Envelope") };
+    for (const input of [{ envelopeId: "77777777-7777-4777-8777-777777777777" }, {}]) {
+      await expect(invokeOperation(bound, input, context)).rejects.toMatchObject({ code: "GRANT_SCOPE" });
+    }
+    await expect(invokeOperation(bound, { envelopeId: subjectId }, context)).rejects.toMatchObject({ code: "GRANT_INVALID" });
+    expect(calls).toBe(0);
+  });
+
   test("availability cannot be registered outside the owning authored record operation", () => {
     const module: RuntimeModule = { name: restOperation.plugin,
       operationHandlers: { [restOperation.handler]: async () => ({ value: {} }) },

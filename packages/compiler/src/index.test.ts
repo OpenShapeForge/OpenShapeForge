@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { parse, stringify } from "yaml";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -14,7 +15,7 @@ afterEach(async () => {
   );
 });
 
-async function hostRoot(options: { web?: boolean; plugin?: string } = {}) {
+async function hostRoot(options: { web?: boolean; plugin?: string; minimalAuthoring?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "osf-compiler-host-"));
   roots.push(root);
   await mkdir(join(root, "documents-plugin"), { recursive: true });
@@ -35,11 +36,32 @@ async function hostRoot(options: { web?: boolean; plugin?: string } = {}) {
     join(root, "versioning-plugin", "runtime.ts"),
     'export default { name: "core-versioning", operationHandlers: {} };\n',
   );
+  if (options.minimalAuthoring) {
+    await mkdir(join(root, "packages/compiler/config"), { recursive: true });
+    await writeFile(join(root, "packages/compiler/config/platform-schema.yaml"), "version: 1\ntables: []\n");
+    await mkdir(join(root, "path-fixture/entities"), { recursive: true });
+    await cp(join(import.meta.dir, "../config/authoring/entities/_base.yaml"), join(root, "path-fixture/entities/_base.yaml"));
+    const identityFields: Record<string, string[]> = {
+      relation: ["displayName", "relationType", "status", "businessContext"],
+      "natural-person": ["relationId", "firstName", "lastName"],
+      "contact-detail": ["relationId", "type", "value", "isPrimary", "status"],
+    };
+    for (const [slug, fields] of Object.entries(identityFields)) {
+      const source = parse(await readFile(join(import.meta.dir, `../config/authoring/entities/core/${slug}.yaml`), "utf8"));
+      const entity = Object.fromEntries(["schemaVersion", "kind", "module", "entity", "title", "description", "language", "authorization", "operations", "interfaces"]
+        .map(key => [key, source[key]]));
+      entity.interfaces = { ...source.interfaces, web: { operations: source.interfaces.web.operations } };
+      entity.fields = source.fields.filter((field: { key: string }) => fields.includes(field.key));
+      await writeFile(join(root, `path-fixture/entities/${slug}.yaml`), stringify(entity));
+    }
+    await cp(join(import.meta.dir, "../config/authoring/authorization.yaml"), join(root, "path-fixture/authorization.yaml"));
+    await cp(join(import.meta.dir, "../config/authoring/catalogs"), join(root, "path-fixture/catalogs"), { recursive: true });
+  }
   await writeFile(
     join(root, "authoring.config.yaml"),
     [
       "layers:",
-      "  - packages/compiler/config/authoring",
+      options.minimalAuthoring ? "  - path-fixture" : "  - packages/compiler/config/authoring",
       "plugins:",
       "  - ./versioning-plugin/index.ts",
       "  - ./documents-plugin/index.ts",
@@ -56,7 +78,9 @@ async function hostRoot(options: { web?: boolean; plugin?: string } = {}) {
 describe("compiler host artifact assembly", () => {
   test("rejects traversal and aliased artifact paths before writing any output", async () => {
     const plugin = "path-plugin.ts";
-    const root = await hostRoot({ plugin });
+    // Artifact assembly security does not depend on the full entity corpus.
+    // Keep all path cases on the real compiler with a minimal host instead.
+    const root = await hostRoot({ plugin, minimalAuthoring: true });
     await writeFile(join(root, plugin), `
       export const artifact = { path: "placeholder", contents: "replacement" };
       export default { name: "path-fixture", generate: () => [artifact] };

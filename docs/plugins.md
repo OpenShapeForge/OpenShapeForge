@@ -515,6 +515,21 @@ composition at boot. The queue, its states — including `outcome_unknown`, the
 job form of `OPERATION_OUTCOME_UNKNOWN` — the `mail.deliver` kind and the
 operator Operations are described in [jobs.md](jobs.md).
 
+`platform.webhookSecrets`, when the host provides it, is how a plugin accepts
+signed inbound webhooks without reading the signing secret: `seal` encrypts a
+credential's secret under the host keyring, and `verify` /
+`withVerifiedSignature` check a delivery's hex HMAC-SHA256 over
+`timestamp + "." + eventId + "." + rawBody`, with the timestamp at most 300
+seconds from the host clock (`packages/plugin-runtime/src/webhook-secrets.ts`).
+A valid signature proves who sent the bytes, not that this is the first time
+they arrived: core keeps no record of accepted deliveries, so the same signed
+delivery verifies again for as long as its timestamp is inside the window.
+**A plugin that accepts webhooks must dedupe them itself** — record each
+accepted delivery's credential id, event id and signature for at least the
+300-second window, refuse one whose event id or signature was already accepted,
+and make the effect of a delivery idempotent where the provider's own retries
+can repeat it.
+
 ### Worker roles
 
 `apps/api` has one entry point and several roles. `OPENSHAPEFORGE_ROLE` picks

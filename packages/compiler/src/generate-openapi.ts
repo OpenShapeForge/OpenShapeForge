@@ -473,7 +473,6 @@ export function renderOpenApiSpec(
               id: { type: "string" },
               intent: {
                 type: "string",
-                enum: ["list", "get", "create", "update", "delete"],
               },
             },
           },

@@ -300,6 +300,10 @@ describe("buildMcpCatalog", () => {
       {
         operation: { id: "Widget.publish", intent: "invoke" },
         available: true,
+        binding: {
+          target: { entityId: "core.Widget", id: recordValue.id, version: instant },
+          input: { id: recordValue.id },
+        },
       },
       {
         operation: { id: "Widget.custom", intent: "plugin.custom" },

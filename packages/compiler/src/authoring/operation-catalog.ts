@@ -80,6 +80,7 @@ function assertWebInterface(path: string, catalog: OperationCatalogDefinition): 
     const placements = [
       entity.operations.list.operation,
       ...(entity.operations.get ? [entity.operations.get.operation] : []),
+        ...(entity.operations.create ? [entity.operations.create.operation] : []),
       ...(entity.operations.collectionActions ?? []),
       ...(entity.operations.recordActions ?? []).map((action) =>
         typeof action === "string" ? action : action.operation

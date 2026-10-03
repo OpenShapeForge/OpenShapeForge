@@ -54,6 +54,8 @@ export class ArtifactStorageRuntime<Session, Transaction> {
     currentTransaction(session: Session): Transaction | undefined;
     withTransaction<T>(session: Session, work: (transaction: Transaction) => Promise<T>): Promise<T>;
     records: RuntimeRecordAccessServices<Session>;
+    /** Staged registry rows survive a later owning Operation rollback, so GC can expire their bytes. */
+    withStageTransaction?<T>(session: Session, work: (transaction: Transaction) => Promise<T>): Promise<T>;
   }) {
     const provider = (session: Session) => {
       if (!options.acceptsSession(session)) throw operationFailure({ code: "FORBIDDEN", message: "File access requires the live verified session." });
@@ -67,7 +69,16 @@ export class ArtifactStorageRuntime<Session, Transaction> {
       },
     });
     this.services = Object.freeze<RuntimeArtifactServices<Session>>({
-      stage: async (session, input) => descriptor(await provider(session).stage(context(session), input)),
+      stage: async (session, input) => {
+        const active = provider(session);
+        const stageContext = options.withStageTransaction ? { session,
+          withTransaction: <T>(work: (transaction: Transaction) => Promise<T>) => {
+            provider(session);
+            return options.withStageTransaction!(session, work);
+          },
+        } : context(session);
+        return descriptor(await active.stage(stageContext, input));
+      },
       bind: async (session, input) => {
         const active = provider(session);
         owner(input);

@@ -388,6 +388,18 @@ describe("template variants and local/global variables", () => {
     await rejectsCode(f.run(), "MISSING_VARIABLE");
   });
 
+  test("a variable filled into a Markdown field is escaped text, other fields keep the raw value", async () => {
+    const f = fixture([text("md", "**Client:** {{local.name}}"), text("whole", "{{local.name}}"), text("plain", "Plain {{local.name}}")]);
+    f.registry.TextSection = { ...f.registry.TextSection!, fields: { body: { osfType: "markdown", baseType: "string", required: true } } };
+    const escaped = await materializeTemplateContent({ ...f.request, parameters: { name: "Bouw*Groep* _Acme_ 2*3\\4" } }, f.registry, f.resolvers);
+    expect(escaped.blocks.map((block) => block.values.body)).toEqual([
+      "**Client:** Bouw\\*Groep\\* \\_Acme\\_ 2\\*3\\\\4", "Bouw\\*Groep\\* \\_Acme\\_ 2\\*3\\\\4", "Plain Bouw\\*Groep\\* \\_Acme\\_ 2\\*3\\\\4",
+    ]);
+    const g = fixture([text("rich", "Rich {{local.name}}")]);
+    const raw = await materializeTemplateContent({ ...g.request, parameters: { name: "Bouw*Groep*" } }, g.registry, g.resolvers);
+    expect(raw.blocks[0]!.values.body).toBe("Rich Bouw*Groep*");
+  });
+
   test("resolved values are data, not recursively evaluated template expressions", async () => {
     const f = fixture([text("raw", "{{local.name}}")]);
     const snapshot = await materializeTemplateContent(

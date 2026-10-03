@@ -8,6 +8,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
+  configuredRuntimeModule,
   assertSingleModuleEgressOwner,
   initRuntimeModules,
   loadRuntimeModules,
@@ -33,10 +34,11 @@ describe("runtime module registry", () => {
       },
     });
 
-    // Three plugins ship a runtime half. Order follows
+    // The built-in accounts runtime precedes three registered plugins. Their order follows
     // `authoring.config.yaml`, which the seed order depends on.
     expect(result.failures).toEqual([]);
     expect(result.loaded.map((module) => module.name)).toEqual([
+      "accounts",
       "core-versioning",
       "documents",
       "notebook",
@@ -58,7 +60,7 @@ describe("runtime module registry", () => {
 
     // Fail-soft is per module: all registered runtime halves throw here, and
     // all are recorded rather than the first one aborting the load.
-    expect(result.loaded).toEqual([]);
+    expect(result.loaded.map((module) => module.name)).toEqual(["accounts"]);
     expect(result.failures).toHaveLength(3);
     for (const failure of result.failures) {
       expect(failure.reason).toBe("module_missing");
@@ -71,7 +73,7 @@ describe("runtime module registry", () => {
       importModule: async () => ({ default: { seeds: [] } }),
     });
 
-    expect(result.loaded).toEqual([]);
+    expect(result.loaded.map((module) => module.name)).toEqual(["accounts"]);
     expect(result.failures[0]?.reason).toBe("invalid_module");
   });
 
@@ -82,7 +84,7 @@ describe("runtime module registry", () => {
       importModule: async () => ({ default: { name: "something-else" } }),
     });
 
-    expect(result.loaded).toEqual([]);
+    expect(result.loaded.map((module) => module.name)).toEqual(["accounts"]);
     expect(result.failures[0]?.reason).toBe("name_mismatch");
     expect(result.failures[0]?.message).toContain("something-else");
   });
@@ -111,4 +113,19 @@ describe("runtime module registry", () => {
     ])).toThrow(/exactly one loaded module may own it/);
     expect(assertSingleModuleEgressOwner([{ name: "only", egress: owner }])).toBe(owner);
   });
+});
+
+test("configured runtime factories isolate each host and reject invalid configuration", () => {
+  const factory = { default: (configuration: unknown) => {
+    if (!configuration || typeof configuration !== "object" || !("locale" in configuration)) throw new Error("locale required");
+    return { name: "formatting", configuration };
+  } };
+  const input = { locale: "nl" };
+  const first = configuredRuntimeModule(factory, input) as RuntimeModule & { configuration: { locale: string } };
+  const second = configuredRuntimeModule(factory, { locale: "en" }) as typeof first;
+  input.locale = "de";
+  expect(first.configuration.locale).toBe("nl");
+  expect(second.configuration.locale).toBe("en");
+  expect(() => configuredRuntimeModule(factory)).toThrow("locale required");
+  expect(() => configuredRuntimeModule({ default: { name: "formatting" } }, input)).toThrow("must export a factory");
 });

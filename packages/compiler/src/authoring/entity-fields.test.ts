@@ -17,6 +17,20 @@ const catalog = () => deriveEntityOsfTypes([page, block], {
 });
 
 describe("one relational field contract", () => {
+  test("semantic image refinement retains the Document UUID relation and ordered transforms", () => {
+    const document = entity("Document", []);
+    const image = { label: { en: "Image" }, baseType: "string" as const, entity: "Document", validation: { maxLength: 36 } };
+    const refined = deriveEntityOsfTypes([document], { image });
+    expect(refined.image).toMatchObject({ kind: "entity", entity: "Document", validation: { format: "uuid", maxLength: 36 } });
+    const owner = normalizeEntityFields(entity("Owner", [{ key: "logo", osfType: "image", transform: [{ use: "logo" }, { use: "image.optimize" }] }]), refined);
+    expect(resolveRelationships({ coreEntity: owner, profiles: [] } as unknown as LoadedArtifacts)).toMatchObject([{ key: "logo", target: "Document", foreignKey: "logo_id" }]);
+    expect(resolveStorageColumns(owner.fields, [])).toMatchObject([{ field: "logo", type: "uuid" }]);
+    const fields = resolveModelFields(owner.fields, { defaults: {}, components: {}, viewDefaults: {}, schemaVersion: 1, kind: "componentCatalog" }, refined);
+    expect(fields[0]?.transform).toEqual([{ use: "logo" }, { use: "image.optimize" }]);
+    expect(() => deriveEntityOsfTypes([], { image })).toThrow("loaded entity reference");
+    expect(() => deriveEntityOsfTypes([document], { image: { ...image, baseType: "object" } })).toThrow("baseType string");
+  });
+
   test("derives an entity type and its presentation from the loaded entity", () => {
     expect(catalog().Block).toMatchObject({ kind: "entity", entity: "Block", baseType: "string", shape: block.fields });
     expect(catalog().Page).toMatchObject({ shape: [{ key: "blocks", osfType: "Block", cardinality: "collection", sortable: true, relationship: { inverse: "page", ownership: "owned" } }] });

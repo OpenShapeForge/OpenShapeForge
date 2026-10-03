@@ -374,6 +374,7 @@ context-full entity at load time. It contributes:
 | `sourceAuthority` | `source_authority` | responsible authority / data steward |
 | `sourceOrganization` | `source_organization` | owning external organization |
 | `sourceAdministration` | `source_administration` | sub-ledger within the source |
+| `sourceVersion` | `source_version` | the source's change marker, sortable as text; the highest per source and administration is the incremental-import watermark |
 
 Redeclaring one of these fields in an entity is a compile error
 (strict-replace semantics). `tenant_id` is deliberately **not** part of the

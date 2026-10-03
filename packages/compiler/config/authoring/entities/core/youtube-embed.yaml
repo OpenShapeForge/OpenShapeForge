@@ -11,7 +11,7 @@ baseEntity: false
 displayTemplate: "{{title}}"
 authorization:
   roles:
-    read: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
+    read: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite]
 fields:
   - key: title
     osfType: string
@@ -55,7 +55,7 @@ operations:
           value:
             x-osf-entityInput: { entity: YouTubeEmbed, fields: [title, url, showControls] }
     errors: []
-    auth: { mode: session, roles: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite] }
+    auth: { mode: session, roles: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite] }
     tenancy: { mode: required }
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }

@@ -315,6 +315,7 @@ describe("canonical operation runtime", () => {
     expect(bound.has("grants.revoke")).toBe(true);
     expect(bound.has("AgreementMilestone.trigger")).toBe(true);
     expect(bound.has("BillingRun.execute")).toBe(true);
+    expect(bound.has("source-sync.upsert")).toBe(true);
     expect(
       [...bound.values()].every(({ operation }) =>
         operation.implementation?.type === "collection" ||
@@ -325,6 +326,7 @@ describe("canonical operation runtime", () => {
         operation.plugin === "osf-control" ||
         operation.plugin === "osf-grants" ||
         operation.plugin === "osf-jobs" ||
+        operation.plugin === "osf-source-sync" ||
         operation.plugin === "osf-transitions"
       ),
     ).toBe(true);
@@ -2032,4 +2034,23 @@ test("REST coerces typed GET and DELETE query values before canonical validation
     headers: {},
   } as never;
   expect(operationRestInput(request, operation)).toEqual({ limit: 5, enabled: true });
+});
+
+test("REST binds server-supplied input (a grant's record target) before a GET query is validated", () => {
+  const operation = {
+    key: "demo.signing.status",
+    inputSchema: {
+      type: "object",
+      required: ["envelopeId"],
+      properties: { envelopeId: { type: "string", format: "uuid" } },
+      additionalProperties: false,
+    },
+    idempotency: { mode: "none" },
+    effects: { data: "write", external: "none" },
+    transports: { rest: { method: "GET", path: "/api/demo/signing/status" } },
+  } as unknown as OperationContract;
+  const request = { body: undefined, query: {}, params: {}, headers: {} } as never;
+  const subject = "11111111-1111-4111-8111-111111111111";
+  expect(() => operationRestInput(request, operation)).toThrow(/canonical schema/);
+  expect(operationRestInput(request, operation, (input) => ({ ...input, envelopeId: subject }))).toEqual({ envelopeId: subject });
 });

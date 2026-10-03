@@ -15,7 +15,7 @@ test("sending alone grants no template source access; Templates.Read covers ever
     for (const action of ["create", "update", "delete"]) {
       const roles = entity.authorization.roles[action];
       if (roles) {
-        expect(roles).toEqual(["Organization.All.ReadWrite"]);
+        expect(roles).toEqual(["Templates.Manage"]);
         expect(sessionOperationRolesAllow(roles, ["Templates.Read"])).toBe(false);
       }
     }

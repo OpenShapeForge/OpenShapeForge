@@ -32,6 +32,7 @@
  * which wires this in with a few delimited hunks.
  */
 import { ownedByActingRelation } from "../db/acting-relation.js";
+import { IDENTITY_LINK_ADMIN_ROLE } from "../auth/organization-roles.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { sql } from "kysely";
 import type { IdentityLinkState } from "../auth/identity-link.js";
@@ -532,7 +533,7 @@ const ROLE_INTEGRATION_ADMIN = "integration_admin";
 
 export function isOrganizationAdministrator(roles: readonly string[] | null | undefined): boolean {
   const granted = new Set(roles ?? []);
-  return granted.has(ROLE_ADMIN) || granted.has("Organization.All.ReadWrite");
+  return granted.has(ROLE_ADMIN) || granted.has(IDENTITY_LINK_ADMIN_ROLE);
 }
 
 /** The process for the assistant, worded for the caller's role. */

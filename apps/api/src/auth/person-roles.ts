@@ -27,7 +27,6 @@
 import type { AuthIdentity } from "@openshapeforge/auth";
 import generatedComposites from "../generated/compiler/role-composites.json" with { type: "json" };
 import { memberRoleClientId } from "./employee-invitations.js";
-import { NEEDS_ROLE_ASSIGNMENT_ROLES } from "./organization-roles.js";
 
 export type RoleCompositeMember = { realm: string } | { client: string; role: string };
 export type RealmRoleComposites = {
@@ -82,8 +81,8 @@ export type PersonMembership = {
 
 /**
  * Realm roles ∪ the expanded membership roles. A linked member whose row
- * carries nothing yet runs on the just-in-time minimum beside their realm
- * roles until an administrator records a persona. `membership` is never null
+ * carries nothing yet receives no implicit organization permissions. Group
+ * grants are resolved separately and unioned by bearer-session. `membership` is never null
  * here: identity.ts refuses a person whose membership could not be resolved.
  */
 export function personSessionRoles(
@@ -92,8 +91,6 @@ export function personSessionRoles(
   realm: string | undefined,
 ): string[] {
   const organizationRoles =
-    membership.needsRoleAssignment && membership.roles.length === 0
-      ? NEEDS_ROLE_ASSIGNMENT_ROLES
-      : expandRoleComposites(realm, membership.roles);
+    expandRoleComposites(realm, membership.roles);
   return [...new Set([...identity.roles, ...organizationRoles])].sort();
 }

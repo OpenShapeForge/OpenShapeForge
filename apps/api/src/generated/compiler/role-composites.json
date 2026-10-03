@@ -44,6 +44,18 @@
           },
           {
             "client": "erp-provider",
+            "role": "Organization.Access.Manage"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Organization.Accounts.Manage"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Organization.Accounts.Read"
+          },
+          {
+            "client": "erp-provider",
             "role": "Organization.All.Read"
           },
           {
@@ -65,13 +77,13 @@
           {
             "client": "erp-provider",
             "role": "Relations.All.ReadWrite"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Templates.Manage"
           }
         ],
         "org_employee": [
-          {
-            "client": "erp-provider",
-            "role": "General.All.Read"
-          },
           {
             "client": "erp-provider",
             "role": "Relations.All.Read"

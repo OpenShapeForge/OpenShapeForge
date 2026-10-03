@@ -10,7 +10,7 @@
  *   revoke_invitation  — cancel a pending admission and withdraw any matching
  *                        Keycloak invitation that still exists.
  *
- * All three are shown only to a session holding `Organization.All.ReadWrite`
+ * All three are shown only to a session holding the configured administrator role
  * — the same role `link_identity` requires, and for the same reason: both are
  * ways to shape who acts as whom in this organization. Wired into
  * the MCP server (session-surface.ts, dispatch-platform-tools.ts) by delimited hunks next to the identity-link ones,
@@ -19,7 +19,6 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
   EMPLOYEE_INVITATION_ADMIN_ROLE,
-  EMPLOYEE_INVITATION_ROLES,
   inviteEmployee,
   listInvitations,
   revokeInvitation,
@@ -44,7 +43,7 @@ const INVITE_EMPLOYEE: Tool = {
     "A person not yet in the Keycloak organization receives an invitation e-mail. Someone who is " +
     "already a member receives no redundant mail and can sign in again immediately. An " +
     "existing pending invitation is reused without resending it. Report the returned delivery " +
-    "and nextStep exactly: status pending means the Hubble role awaits sign-in, not that an " +
+    "and nextStep exactly: status pending means the application role awaits sign-in, not that an " +
     "e-mail was sent or must be accepted. For organization administrators.",
   inputSchema: {
     type: "object",
@@ -54,8 +53,8 @@ const INVITE_EMPLOYEE: Tool = {
       lastName: { type: "string", description: "Optional last name, used if an invitation e-mail is needed." },
       role: {
         type: "string",
-        enum: [...EMPLOYEE_INVITATION_ROLES],
-        description: "The role to apply once this person signs in.",
+        description: "A role key from this organization's AccessRole catalogue, applied on first sign-in. Read the catalogue before choosing; do not invent a key.",
+        "x-osf-reference": { entity: "AccessRole", valueField: "key" },
       },
     },
     required: ["email", "role"],

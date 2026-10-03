@@ -7,14 +7,13 @@
  * optional entity resource, and secure-input handoff metadata.
  */
 import type {
-  CrudOperationKey,
   CrudSection,
   McpOperationKey,
   McpSection,
 } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
 import { limitCrudOperations } from "./crud.js";
-import { operationByAction, projectedActions } from "../entity-model.js";
+import { completeProjectedActions, operationByAction } from "../entity-model.js";
 
 export const MCP_OPERATION_KEYS: readonly McpOperationKey[] = [
   "list",
@@ -36,15 +35,6 @@ export function deriveToolPrefix(entityName: string): string {
     .toLowerCase();
 }
 
-function completeProjectedActions(
-  coreEntity: LoadedArtifacts["coreEntity"],
-): Record<CrudOperationKey, boolean> {
-  const projected = projectedActions(coreEntity, "mcp");
-  return Object.fromEntries(
-    MCP_OPERATION_KEYS.map((action) => [action, projected[action] === true]),
-  ) as Record<CrudOperationKey, boolean>;
-}
-
 /** The entity's MCP exposure, projected only from `interfaces.mcp`. */
 export function buildMcp(
   coreEntity: LoadedArtifacts["coreEntity"],
@@ -54,7 +44,7 @@ export function buildMcp(
   if (!authored) return undefined;
 
   const tools = authored.tools ?? "dedicated";
-  const requestedOperations = completeProjectedActions(coreEntity);
+  const requestedOperations = completeProjectedActions(coreEntity, "mcp");
   const operations = crud
     ? limitCrudOperations(requestedOperations, crud)
     : requestedOperations;

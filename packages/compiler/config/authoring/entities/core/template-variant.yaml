@@ -9,10 +9,10 @@ pluralLabels: { en: Template variants, nl: Templatevarianten }
 domains: [documents]
 authorization:
   roles:
-    read: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
-    create: [Organization.All.ReadWrite]
-    update: [Organization.All.ReadWrite]
-    delete: [Organization.All.ReadWrite]
+    read: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite]
+    create: [Templates.Manage]
+    update: [Templates.Manage]
+    delete: [Templates.Manage]
 displayTemplate: "{{channel}} · {{locale}}"
 indexes:
   - { name: template_variants_tenant_channel_locale_uidx, fields: [tenantId, template, channel, locale], unique: true }

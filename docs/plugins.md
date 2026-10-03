@@ -623,3 +623,23 @@ transport tests exercise every plugin-Operation path through it: binding
 (`bindOperationHandlers` refuses a catalog Operation without a loaded module),
 contract validation, idempotency keys and session authorization
 (`apps/api/src/operations/runtime.test.ts`).
+
+### Compiled runtime configuration
+
+A compiler plugin may implement `runtimeConfiguration({ entities })` to derive
+nonsecret JSON from the host's compiled entity contracts. The compiler records
+that value in the module registry. Configuration must contain finite JSON data:
+cycles, undefined values, sparse arrays, accessors and symbol properties are
+refused. Credentials and request/session authority belong in the existing
+platform ports, never in this generated artifact.
+
+A configured runtime exports a factory `(configuration: unknown) => RuntimeModule`
+instead of a singleton module object. The loader passes a detached configuration
+and checks the returned module name against the compiler registration. The
+factory must validate its own configuration and create isolated handlers; an
+invalid factory is reported as a load failure, and canonical operation boot
+validation remains fail closed. Packages must never import configuration from a
+consumer source tree. For example, branding derives Tenant.logo transforms;
+another plugin can derive locale/format settings without sharing mutable state
+between hosts. Ordinary modules without build configuration export their module
+object directly.

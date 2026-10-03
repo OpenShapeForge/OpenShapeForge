@@ -33,6 +33,7 @@
  *     and operation inputs. An unresolved placeholder fails the call.
  */
 import { randomUUID } from "node:crypto";
+import { allPagesPlan, collectMappedPages } from "./declarative-pagination.js";
 import { HttpError } from "../rest/http-error.js";
 import { applyResponseTransforms } from "./response-transforms.js";
 import { hostAllowed } from "../connectors/executor.js";
@@ -1535,6 +1536,9 @@ function isBoundedTimeout(error: unknown): boolean {
 export async function executeBinding(
   input: ExecuteBindingInput,
 ): Promise<JsonRecord> {
+  const paging = allPagesPlan(input.operationRow.pagination, input.operationRow.kind,
+    input.providerRow.transport, (input.operationRow.operation as JsonRecord | undefined)?.method);
+  if (paging) input = { ...input, signal: boundedAbortSignal(input.signal, 120_000) };
   input.signal?.throwIfAborted();
   const { binding, operationRow, providerRow } = input;
   const egressInvocation = createModuleEgressInvocation(input.egress);
@@ -1582,73 +1586,82 @@ export async function executeBinding(
     throw error;
   }
 
-  const requestSignal = boundedAbortSignal(input.signal, REQUEST_TIMEOUT_MS);
-  let response: Response;
-  let text: string;
-  try {
-    response = await fetchWithAllowedRedirects(
-      request.url,
-      {
-        method: request.method,
-        headers: request.headers,
-        ...(request.body !== undefined ? { body: request.body } : {}),
-        signal: requestSignal,
-      },
-      egress,
-      fetchImpl,
-      egressInvocation.dispatch,
-      protocolPolicy,
-    );
-    requestSignal.throwIfAborted();
-  } catch (error) {
-    input.signal?.throwIfAborted();
-    const failureKind = egressInvocation.consumeFailure(error);
-    if (failureKind) throw moduleEgressFailure(operationRow, failureKind);
-    if (isBoundedTimeout(error)) {
-      throw moduleEgressFailure(operationRow, "timeout");
+  const fetchPage = async (pageUrl: URL) => {
+    const requestSignal = boundedAbortSignal(input.signal, REQUEST_TIMEOUT_MS);
+    let response: Response;
+    let text: string;
+    try {
+      response = await fetchWithAllowedRedirects(
+        pageUrl,
+        {
+          method: request.method,
+          headers: request.headers,
+          ...(request.body !== undefined ? { body: request.body } : {}),
+          signal: requestSignal,
+        },
+        egress,
+        fetchImpl,
+        egressInvocation.dispatch,
+        protocolPolicy,
+      );
+      requestSignal.throwIfAborted();
+    } catch (error) {
+      input.signal?.throwIfAborted();
+      const failureKind = egressInvocation.consumeFailure(error);
+      if (failureKind) throw moduleEgressFailure(operationRow, failureKind);
+      if (isBoundedTimeout(error)) {
+        throw moduleEgressFailure(operationRow, "timeout");
+      }
+      if (!(error instanceof HttpError) || error.code === "PROVIDER_ERROR") {
+        throw providerFailure(operationRow);
+      }
+      throw error;
     }
-    if (!(error instanceof HttpError) || error.code === "PROVIDER_ERROR") {
+    if (!response.ok) {
+      throw providerFailure(operationRow, response);
+    }
+    try {
+      text = await response.text();
+      requestSignal.throwIfAborted();
+    } catch (error) {
+      input.signal?.throwIfAborted();
+      if (isBoundedTimeout(error)) {
+        throw moduleEgressFailure(operationRow, "timeout");
+      }
       throw providerFailure(operationRow);
     }
-    throw error;
-  }
-  if (!response.ok) {
-    throw providerFailure(operationRow, response);
-  }
-  try {
-    text = await response.text();
-    requestSignal.throwIfAborted();
-  } catch (error) {
-    input.signal?.throwIfAborted();
-    if (isBoundedTimeout(error)) {
-      throw moduleEgressFailure(operationRow, "timeout");
-    }
-    throw providerFailure(operationRow);
-  }
-  let parsed: unknown = null;
-  try {
-    parsed = text ? JSON.parse(text) : null;
-  } catch {
-    throw providerFailure(
-      operationRow,
-      undefined,
-      `${operationSubject(operationRow)} returned an invalid response.`,
-    );
-  }
-
-  if (isGraphql) {
-    const errors = (parsed as JsonRecord | null)?.errors;
-    if (Array.isArray(errors) && errors.length > 0) {
+    let parsed: unknown = null;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
       throw providerFailure(
         operationRow,
         undefined,
-        `${operationSubject(operationRow)} answered with GraphQL errors.`,
+        `${operationSubject(operationRow)} returned an invalid response.`,
       );
     }
-    parsed = (parsed as JsonRecord | null)?.data ?? null;
-  }
 
-  return mapOperationResponse(binding, operationRow, parsed);
+    if (isGraphql) {
+      const errors = (parsed as JsonRecord | null)?.errors;
+      if (Array.isArray(errors) && errors.length > 0) {
+        throw providerFailure(
+          operationRow,
+          undefined,
+          `${operationSubject(operationRow)} answered with GraphQL errors.`,
+        );
+      }
+      parsed = (parsed as JsonRecord | null)?.data ?? null;
+    }
+
+    return {
+      mapped: mapOperationResponse(binding, operationRow, parsed),
+      nextLink: paging ? extractPath(parsed, paging.cursorPath) : undefined,
+      bytes: Buffer.byteLength(text, "utf8"),
+    };
+  };
+  return paging
+    ? collectMappedPages({ firstUrl: request.url, plan: paging, signal: input.signal, fetchPage })
+    : (await fetchPage(request.url)).mapped;
 }
 
 /**

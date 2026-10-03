@@ -1,6 +1,6 @@
 {
   "name": "@openshapeforge/documents",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Canonical Document and DocumentVersion runtime commands for OpenShapeForge.",
   "repository": {
     "type": "git",

@@ -3,347 +3,239 @@ kind: coreEntity
 module: core
 entity: Account
 title: Account
-description: A user account for platform access, linked to a natural person.
+description: A login identity in the current organization, resolved through canonical account Operations.
 language: en
-displayTemplate: "{{username}}"
-filterField: username
-labels:
-  en: Account
-  nl: Account
-pluralLabels:
-  en: Accounts
-  nl: Accounts
-domains:
-  - relations
+labels: { en: Account, nl: Account }
+pluralLabels: { en: Accounts, nl: Accounts }
+domains: [organization]
+displayTemplate: "{{label}}"
+filterField: label
+source:
+  kind: operations
+  query:
+    filterFields: [id, label, email, status, issuer, relationId]
+    sortFields: [id, label, email, status, issuer, relationId]
 authorization:
   roles:
-    read:
-      - Relations.All.Read
-      - Relations.All.ReadWrite
-    create:
-      - Relations.All.ReadWrite
-    update:
-      - Relations.All.ReadWrite
-    delete:
-      - Relations.All.ReadWrite
-  rowAccess:
-    enabled: true
-    empty: public
+    read: [Organization.Accounts.Read, Organization.Accounts.Manage]
 fields:
-  - key: username
-    osfType: string
-    required: true
-    label:
-      en: Username
-      nl: Gebruikersnaam
-    description:
-      en: Unique username for login.
-      nl: Unieke gebruikersnaam voor inloggen.
-    validation:
-      minLength: 1
-      maxLength: 100
-    persisted:
-      column: username
-      storageClass: core
-  - key: email
-    osfType: string
-    required: true
-    label:
-      en: Email
-      nl: E-mail
-    description:
-      en: Email address associated with the account.
-      nl: E-mailadres gekoppeld aan het account.
-    validation:
-      minLength: 1
-      maxLength: 254
-    persisted:
-      column: email
-      storageClass: core
-  - key: keycloakSub
-    osfType: string
-    required: false
-    readOnly: true
-    # Reserved for the canonical identity lifecycle replacing generic Account CRUD (#662).
-    writtenBy: [Account.create, Account.update]
-    label:
-      en: Keycloak subject
-      nl: Keycloak subject
-    description:
-      en: Keycloak user identifier (sub claim) linked to this account. Set on first authenticated request.
-      nl: Keycloak-gebruikersidentifier (sub-claim) gekoppeld aan dit account. Wordt gezet bij eerste geverifieerde verzoek.
-    validation:
-      maxLength: 255
-    persisted:
-      column: keycloak_sub
-      storageClass: core
+  - { key: id, osfType: string, required: true, readOnly: true, validation: { format: uuid }, label: { en: Account, nl: Account } }
+  - { key: label, osfType: string, required: true, readOnly: true, label: { en: Name, nl: Naam } }
+  - { key: email, osfType: string, required: true, readOnly: true, label: { en: Email, nl: E-mail } }
+  - { key: issuer, osfType: string, required: true, readOnly: true, label: { en: Technical issuer, nl: Technische uitgever } }
   - key: status
+    osfType: string
     required: true
-    label:
-      en: Status
-      nl: Status
-    description:
-      en: Current status of the account (e.g. active, inactive, locked).
-      nl: Huidige status van het account (bijv. actief, inactief, vergrendeld).
-    validation:
-      minLength: 1
-      maxLength: 50
-    persisted:
-      column: status
-      storageClass: core
+    readOnly: true
+    label: { en: Organization access, nl: Organisatietoegang }
     options:
-      type: referentiedata
-      referentieGroep: ACCOUNTSTATUS
-    osfType: referenceDataCode
-  - key: lastLoginAt
-    osfType: datetime
-    required: false
+      type: static
+      items:
+        - { value: linked, label: { en: Active, nl: Actief } }
+        - { value: blocked, label: { en: Blocked, nl: Geblokkeerd } }
+        - { value: pending_confirmation, label: { en: Awaiting confirmation, nl: Wacht op bevestiging } }
+  - { key: relationId, osfType: string, readOnly: true, validation: { format: uuid }, label: { en: Linked relation ID, nl: Gekoppelde relatie-ID } }
+  - { key: linkedAt, osfType: datetime, readOnly: true, label: { en: Linked at, nl: Gekoppeld op } }
+  - { key: revision, osfType: string, required: true, readOnly: true, label: { en: Account revision, nl: Accountrevisie } }
+  - { key: directRoles, osfType: string, cardinality: collection, required: true, readOnly: true, label: { en: Direct role keys, nl: Directe rolkeys } }
+  - { key: groupRoles, osfType: string, cardinality: collection, required: true, readOnly: true, label: { en: Group role keys, nl: Groepsrolkeys } }
+  - { key: effectiveRoles, osfType: string, cardinality: collection, required: true, readOnly: true, label: { en: Effective role keys, nl: Effectieve rolkeys } }
+  - { key: groups, osfType: string, cardinality: collection, required: true, readOnly: true, label: { en: Relation groups, nl: Relatiegroepen } }
+  - key: providers
+    osfType: object
+    cardinality: collection
     readOnly: true
-    # Reserved for the canonical identity lifecycle replacing generic Account CRUD (#662).
-    writtenBy: [Account.create, Account.update]
-    label:
-      en: Last login
-      nl: Laatste login
-    description:
-      en: Date and time of the most recent login.
-      nl: Datum en tijd van de meest recente login.
-    persisted:
-      column: last_login_at
-      storageClass: core
-  - key: validFrom
-    osfType: datetime
-    required: false
-    label:
-      en: Valid from
-      nl: Geldig vanaf
-    description:
-      en: Date and time from which this account is valid.
-      nl: Datum en tijd vanaf wanneer dit account geldig is.
-    persisted:
-      column: valid_from
-      storageClass: core
-  - key: validUntil
-    osfType: datetime
-    required: false
-    label:
-      en: Valid until
-      nl: Geldig tot
-    description:
-      en: Date and time until which this account remains valid.
-      nl: Datum en tijd tot wanneer dit account geldig blijft.
-    persisted:
-      column: valid_until
-      storageClass: core
-  - key: passwordChangedAt
-    osfType: datetime
-    required: false
+    label: { en: Linked login providers, nl: Gekoppelde loginproviders }
+    children:
+      - { key: key, osfType: string, required: true, label: { en: Provider key, nl: Providerkey } }
+      - { key: label, osfType: string, required: true, label: { en: Provider, nl: Provider } }
+      - { key: type, osfType: string, required: true, label: { en: Provider type, nl: Providertype } }
+  - key: providerState
+    osfType: string
     readOnly: true
-    # Reserved for the canonical identity lifecycle replacing generic Account CRUD (#662).
-    writtenBy: [Account.create, Account.update]
-    label:
-      en: Password changed at
-      nl: Wachtwoord gewijzigd op
-    description:
-      en: Date and time when the password was last changed.
-      nl: Datum en tijd waarop het wachtwoord voor het laatst is gewijzigd.
-    persisted:
-      column: password_changed_at
-      storageClass: core
-  - key: relationId
-    label:
-      en: Relation
-      nl: Relatie
-    persisted:
-      column: relation_id
-      storageClass: core
-    osfType: Relation
-    relationship:
-      ownership: reference
-  - key: naturalPersonId
-    label:
-      en: Natural person
-      nl: Natuurlijk persoon
-    persisted:
-      column: natural_person_id
-      storageClass: core
-    osfType: NaturalPerson
-    relationship:
-      ownership: reference
+    label: { en: Provider verification, nl: Providercontrole }
+    options:
+      type: static
+      items:
+        - { value: available, label: { en: Checked, nl: Gecontroleerd } }
+        - { value: unavailable, label: { en: Unavailable, nl: Niet beschikbaar } }
+        - { value: unsupported, label: { en: Cannot verify all linked providers, nl: Niet alle gekoppelde providers verifieerbaar } }
+        - { value: not_configured, label: { en: Provider labels not configured for this organization, nl: Providerlabels niet ingesteld voor deze organisatie } }
+        - { value: external_identity, label: { en: Account uses another identity service, nl: Account gebruikt een andere identiteitsdienst } }
+  - { key: providersCheckedAt, osfType: datetime, readOnly: true, label: { en: Providers checked at, nl: Providers gecontroleerd op } }
 operations:
   list:
-    name: List Account
-    description: List Account records.
-    implementation:
-      type: entity
-      action: list
-    effects:
-      data: read
-      external: none
-    reliability:
-      idempotency:
-        mode: natural
-    confirmation:
-      mode: none
-  get:
-    name: Get Account
-    description: Get Account records.
-    implementation:
-      type: entity
-      action: get
-    effects:
-      data: read
-      external: none
-    reliability:
-      idempotency:
-        mode: natural
-    confirmation:
-      mode: none
-  create:
-    name: Create Account
-    description: Create Account records.
-    implementation:
-      type: entity
-      action: create
-    effects:
-      data: write
-      external: none
-    reliability:
-      idempotency:
-        mode: none
-    confirmation:
-      mode: none
-  update:
-    name:
-      en: Edit
-      nl: Bewerken
-    description: Update Account records.
-    implementation:
-      type: entity
-      action: update
-    effects:
-      data: write
-      external: none
-    reliability:
-      idempotency:
-        mode: none
-    confirmation:
-      mode: none
-  delete:
-    name:
-      en: Delete
-      nl: Verwijderen
+    name: { en: List accounts, nl: Accounts tonen }
     description:
-      en: Are you sure?
-      nl: Weet je het zeker?
-    implementation:
-      type: entity
-      action: delete
-    effects:
-      data: delete
-      external: none
-    reliability:
-      idempotency:
-        mode: natural
-    confirmation:
-      mode: acknowledgement
+      en: "A bounded page of real accounts in the current organization, without invitations."
+      nl: "Een begrensde pagina echte accounts in de huidige organisatie, zonder uitnodigingen."
+    implementation: { type: plugin, plugin: accounts, handler: listOrganizationAccounts, action: list }
+    input: { schema: {} }
+    output: { schema: {} }
+    errors: []
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: { en: View account, nl: Account bekijken }
+    description: { en: Read one organization-bound account and check its linked login providers., nl: Lees één organisatiegebonden account en controleer de gekoppelde loginproviders. }
+    implementation: { type: plugin, plugin: accounts, handler: getOrganizationAccount, action: get }
+    input: { schema: {} }
+    output: { schema: {} }
+    errors: []
+    effects: { data: read, external: read }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  block:
+    name: { en: Block organization access, nl: Organisatietoegang blokkeren }
+    description: { en: Block organization access for this account in the current organization., nl: Organisatietoegang blokkeren voor dit account in de huidige organisatie. }
+    implementation: { type: plugin, plugin: accounts, handler: blockOrganizationAccount }
+    target: { scope: record, inputField: id, inputBindings: { revision: revision } }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, revision]
+        properties:
+          id: { type: string, format: uuid, x-osf-i18n: { title: { en: Account, nl: Account } } }
+          revision: { type: string, pattern: "^[a-f0-9]{32}$", x-osf-i18n: { title: { en: Current account revision, nl: Huidige accountrevisie } } }
+    output: { schema: { type: object, additionalProperties: false, required: [updated], properties: { updated: { type: boolean, x-osf-i18n: { title: { en: Changed, nl: Gewijzigd } } } } } }
+    auth: { mode: session, roles: [Organization.Accounts.Manage] }
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors:
+      - { status: 400, code: VALIDATION, description: Invalid account or revision. }
+      - { status: 401, code: UNAUTHENTICATED, description: Sign in first. }
+      - { status: 401, code: TENANT_REQUIRED, description: Select an organization. }
+      - { status: 403, code: FORBIDDEN, description: Account management permission required. }
+      - { status: 404, code: NOT_FOUND, description: Account not found in this organization. }
+      - { status: 409, code: VERSION_CONFLICT, description: Read the changed account again. }
+      - { status: 409, code: INVALID_STATE, description: Account access is already blocked. }
+      - { status: 409, code: SELF_BLOCK, description: You cannot block your own access. }
+      - { status: 409, code: LAST_ADMINISTRATOR, description: Keep one active directly assigned administrator. }
+      - { status: 503, code: OPERATION_UNAVAILABLE, description: Account storage unavailable. }
+  restore:
+    name: { en: Restore organization access, nl: Organisatietoegang herstellen }
+    description: { en: Restore organization access for this account in the current organization., nl: Organisatietoegang herstellen voor dit account in de huidige organisatie. }
+    implementation: { type: plugin, plugin: accounts, handler: restoreOrganizationAccount }
+    target: { scope: record, inputField: id, inputBindings: { revision: revision } }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, revision]
+        properties:
+          id: { type: string, format: uuid, x-osf-i18n: { title: { en: Account, nl: Account } } }
+          revision: { type: string, pattern: "^[a-f0-9]{32}$", x-osf-i18n: { title: { en: Current account revision, nl: Huidige accountrevisie } } }
+    output: { schema: { type: object, additionalProperties: false, required: [updated], properties: { updated: { type: boolean, x-osf-i18n: { title: { en: Changed, nl: Gewijzigd } } } } } }
+    auth: { mode: session, roles: [Organization.Accounts.Manage] }
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors:
+      - { status: 400, code: VALIDATION, description: Invalid account or revision. }
+      - { status: 401, code: UNAUTHENTICATED, description: Sign in first. }
+      - { status: 401, code: TENANT_REQUIRED, description: Select an organization. }
+      - { status: 403, code: FORBIDDEN, description: Account management permission required. }
+      - { status: 404, code: NOT_FOUND, description: Account not found in this organization. }
+      - { status: 409, code: VERSION_CONFLICT, description: Read the changed account again. }
+      - { status: 409, code: INVALID_STATE, description: Account access is already active. }
+      - { status: 409, code: LAST_ADMINISTRATOR, description: Keep one active directly assigned administrator. }
+      - { status: 503, code: OPERATION_UNAVAILABLE, description: Account storage unavailable. }
+  assignRole:
+    name: { en: Assign account role, nl: Accountrol toekennen }
+    description: { en: Assign account role for this account in the current organization., nl: Accountrol toekennen voor dit account in de huidige organisatie. }
+    implementation: { type: plugin, plugin: accounts, handler: assignOrganizationAccountRole }
+    target: { scope: record, inputField: id, inputBindings: { revision: revision } }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, revision, roleKey]
+        properties:
+          id: { type: string, format: uuid, x-osf-i18n: { title: { en: Account, nl: Account } } }
+          revision: { type: string, pattern: "^[a-f0-9]{32}$", x-osf-i18n: { title: { en: Current account revision, nl: Huidige accountrevisie } } }
+          roleKey: { type: string, minLength: 1, x-osf-i18n: { title: { en: Role, nl: Rol } }, x-osf-reference: { entity: AccessRole, valueField: key } }
+    output: { schema: { type: object, additionalProperties: false, required: [updated], properties: { updated: { type: boolean, x-osf-i18n: { title: { en: Changed, nl: Gewijzigd } } } } } }
+    auth: { mode: session, roles: [Organization.Access.Manage] }
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors:
+      - { status: 400, code: VALIDATION, description: Invalid account or role. }
+      - { status: 401, code: UNAUTHENTICATED, description: Sign in first. }
+      - { status: 401, code: TENANT_REQUIRED, description: Select an organization. }
+      - { status: 403, code: FORBIDDEN, description: Organization access management permission required. }
+      - { status: 404, code: NOT_FOUND, description: Account not found in this organization. }
+      - { status: 409, code: VERSION_CONFLICT, description: Read the changed account again. }
+      - { status: 409, code: INVALID_STATE, description: Link the account before assigning roles. }
+      - { status: 409, code: LAST_ADMINISTRATOR, description: Keep one active directly assigned administrator. }
+      - { status: 503, code: OPERATION_UNAVAILABLE, description: Account storage unavailable. }
+  revokeRole:
+    name: { en: Revoke account role, nl: Accountrol intrekken }
+    description: { en: Revoke account role for this account in the current organization., nl: Accountrol intrekken voor dit account in de huidige organisatie. }
+    implementation: { type: plugin, plugin: accounts, handler: revokeOrganizationAccountRole }
+    target: { scope: record, inputField: id, inputBindings: { revision: revision } }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, revision, roleKey]
+        properties:
+          id: { type: string, format: uuid, x-osf-i18n: { title: { en: Account, nl: Account } } }
+          revision: { type: string, pattern: "^[a-f0-9]{32}$", x-osf-i18n: { title: { en: Current account revision, nl: Huidige accountrevisie } } }
+          roleKey: { type: string, minLength: 1, x-osf-i18n: { title: { en: Role, nl: Rol } }, x-osf-reference: { entity: AccessRole, valueField: key } }
+    output: { schema: { type: object, additionalProperties: false, required: [updated], properties: { updated: { type: boolean, x-osf-i18n: { title: { en: Changed, nl: Gewijzigd } } } } } }
+    auth: { mode: session, roles: [Organization.Access.Manage] }
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors:
+      - { status: 400, code: VALIDATION, description: Invalid account or role. }
+      - { status: 401, code: UNAUTHENTICATED, description: Sign in first. }
+      - { status: 401, code: TENANT_REQUIRED, description: Select an organization. }
+      - { status: 403, code: FORBIDDEN, description: Organization access management permission required. }
+      - { status: 404, code: NOT_FOUND, description: Account not found in this organization. }
+      - { status: 409, code: VERSION_CONFLICT, description: Read the changed account again. }
+      - { status: 409, code: INVALID_STATE, description: Link the account before revoking roles. }
+      - { status: 409, code: LAST_ADMINISTRATOR, description: Keep one active directly assigned administrator. }
+      - { status: 503, code: OPERATION_UNAVAILABLE, description: Account storage unavailable. }
 interfaces:
-  rest: {}
+  rest:
+    operations:
+      list: { method: GET, path: /api/accounts/account/list }
+      get: { method: GET, path: /api/accounts/account/:id/get }
+      block: { method: POST, path: /api/accounts/account/:id/block }
+      restore: { method: POST, path: /api/accounts/account/:id/restore }
+      assignRole: { method: POST, path: /api/accounts/account/:id/assign-role }
+      revokeRole: { method: POST, path: /api/accounts/account/:id/revoke-role }
   graphql: {}
+  mcp: {}
   web:
     views:
       collection:
-        route:
-          en: /accounts
-          nl: /accounts
-        columns:
-          - key: username
-            sortable: true
-          - key: email
-            sortable: true
-          - key: status
-            sortable: true
-          - key: validUntil
-            sortable: true
-          - key: lastLoginAt
-            sortable: true
-        title:
-          en: Accounts
-          nl: Accounts
-        defaultSort:
-          key: username
-          direction: asc
+        route: /accounts
+        title: { en: Accounts, nl: Accounts }
+        columns: [{ key: label }, { key: email }, { key: status }, { key: groups }]
+        defaultSort: { key: label, direction: asc }
       record:
-        routes:
-          read:
-            en: /accounts/:id
-            nl: /accounts/:id
-          create:
-            en: /accounts/create
-            nl: /accounts/aanmaken
-        title: "{{username}}"
+        routes: { read: /accounts/:id }
+        title: "{{label}}"
         subtitle: "{{email}}"
-        badges:
-          - status
-        actions:
-          - update
-          - delete
+        actions: [block, restore, assignRole, revokeRole]
         layout:
           tabs:
             - id: overview
-              label:
-                en: Overview
-                nl: Overzicht
-              groups:
-                - title:
-                    en: Account details
-                    nl: Accountgegevens
-                  fields:
-                    - username
-                    - email
-                    - status
-                    - validFrom
-                    - validUntil
-                    - passwordChangedAt
-                    - lastLoginAt
-        modes:
-          create:
-            title:
-              en: Create account
-              nl: Account aanmaken
-            groups:
-              - title:
-                  en: Account details
-                  nl: Accountgegevens
-                fields:
-                  - username
-                  - email
-                  - status
-                  - validFrom
-                  - validUntil
-          update:
-            title:
-              en: Edit account
-              nl: Account bewerken
-    fields:
-      status:
-        render:
-          component: ReferenceSelect
-          props:
-            referentieGroep: ACCOUNTSTATUS
-            clearable: false
-      lastLoginAt:
-        render:
-          component: DateTimePicker
-          props: {}
-      validFrom:
-        render:
-          component: DateTimePicker
-          props: {}
-      validUntil:
-        render:
-          component: DateTimePicker
-          props: {}
-      passwordChangedAt:
-        render:
-          component: DateTimePicker
-          props: {}
+              label: { en: Account, nl: Account }
+              fields: [label, email, status, linkedAt, relationId]
+            - id: access
+              label: { en: Access, nl: Toegang }
+              fields: [groups, directRoles, groupRoles, effectiveRoles]
+            - id: providers
+              label: { en: Login providers, nl: Loginproviders }
+              fields: [providers, providerState, providersCheckedAt]

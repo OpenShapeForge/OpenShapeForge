@@ -35,8 +35,12 @@ registerSuiteLifecycle();
 
 const contextSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET!;
 
+const persistedEntries = Object.entries(persistedManifest.operations).map(([hash, query]): [string, string] => {
+  if (typeof query !== "string") throw new Error(`Persisted operation ${hash} has no query document.`);
+  return [hash, query];
+});
 const persistedNames = new Set(
-  Object.values(persistedManifest.operations).flatMap((query) => {
+  persistedEntries.flatMap(([, query]) => {
     const name = getOperationAST(parse(query))?.name?.value;
     return name ? [name] : [];
   }),
@@ -51,7 +55,7 @@ const table = tables.find(
 );
 
 function operation(operationName: string): { hash: string; query: string } {
-  const candidates = Object.entries(persistedManifest.operations)
+  const candidates = persistedEntries
     .filter(([, query]) => getOperationAST(parse(query))?.name?.value === operationName)
     .sort((left, right) => left[1].length - right[1].length);
   const [hash, query] = candidates[0] ?? [];

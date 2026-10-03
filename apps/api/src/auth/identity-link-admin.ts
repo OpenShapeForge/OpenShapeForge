@@ -4,14 +4,16 @@
  * for the just-in-time half and the model): the person confirming a
  * candidate, and the organization administrator's tools — linking a login to
  * a Relation, listing members who hold no roles here yet, and recording a
- * member's roles for this tenant (`set_member_role`).
+ * member's roles for this tenant (`canonical Account role Operations`).
  */
 import { sql } from "kysely";
+import { appendScopedEntityEventInTransaction } from "../platform/entity-events.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { UUID_PATTERN } from "../db/session.js";
-import { withDbSession } from "../db/session.js";
+import { withDbSession, registerDbSessionAfterCommit } from "../db/session.js";
 import { HttpError } from "../rest/http-error.js";
 import { actingPartyColumns, actingPartyTable } from "./identity-contract.js";
+import { confirmCandidateLink } from "./identity-link-store.js";
 import {
   invalidateIdentityLink,
   readLinkRow,
@@ -21,6 +23,7 @@ import {
   type SessionInput,
 } from "./identity-link.js";
 import { IDENTITY_LINK_ADMIN_ROLE } from "./organization-roles.js";
+import { protectDirectAdministrator } from './member-administrator.js';
 
 
 /**
@@ -51,30 +54,19 @@ export async function confirmPendingLink(
     );
   }
   const state = await withDbSession(db, session, async (trx) => {
-    const row = await readLinkRow(trx, current.identityId, session.tenantId);
-    if (!row || row.status !== "pending_confirmation" || !row.candidate_relation_id) {
+    if (!(await confirmCandidateLink(trx, current.identityId, session.tenantId, current.identityId))) {
       throw new HttpError(409, "NO_CANDIDATE", "There is no pending candidate to confirm any more.");
     }
-    await sql`
-      update platform.identity_relations
-         set status = 'linked',
-             relation_id = ${row.candidate_relation_id},
-             candidate_relation_id = null,
-             linked_at = now(),
-             linked_by = ${current.identityId},
-             updated_at = now()
-       where identity_id = ${current.identityId}
-         and tenant_id = ${session.tenantId}
-    `.execute(trx);
     const updated = await readLinkRow(trx, current.identityId, session.tenantId);
     if (!updated) throw new HttpError(500, "INTERNAL", "The link vanished while confirming it.");
-    return toState(updated, current);
+    const state = toState(updated, current);
+    registerDbSessionAfterCommit(() => invalidateIdentityLink(state.issuer, state.subject, session.tenantId));
+    return state;
   });
   console.info(
     `[auth] Identity ${state.identityId} confirmed its link to Relation ${state.relationId} ` +
       `in tenant ${session.tenantId}.`,
   );
-  invalidateIdentityLink(state.issuer, state.subject, session.tenantId);
   session.relation = state;
   return state;
 }
@@ -183,13 +175,14 @@ export async function linkIdentityToRelation(
     `.execute(trx);
     const row = await readLinkRow(trx, identity.id, session.tenantId);
     if (!row) throw new HttpError(500, "INTERNAL", "The link vanished while writing it.");
-    return toState(row, { issuer: identity.issuer, subject: identity.subject });
+    const state = toState(row, { issuer: identity.issuer, subject: identity.subject });
+    registerDbSessionAfterCommit(() => invalidateIdentityLink(state.issuer, state.subject, session.tenantId));
+    return state;
   });
   console.info(
     `[auth] ${actor} linked identity ${state.identityId} to Relation ${state.relationId} ` +
       `in tenant ${session.tenantId}.`,
   );
-  invalidateIdentityLink(state.issuer, state.subject, session.tenantId);
   if (session.relation?.identityId === state.identityId) session.relation = state;
   return state;
 }
@@ -300,7 +293,7 @@ export async function listPendingRoleAssignments(
 }
 
 /**
- * `set_member_role`: record the roles an identity holds in THIS tenant and
+ * `canonical Account role Operations`: record the roles an identity holds in THIS tenant and
  * clear `needs_role_assignment`. Replaces the whole set rather than adding to
  * it, so demoting an administrator to an employee is the same call as the
  * promotion. Gated on `IDENTITY_LINK_ADMIN_ROLE` here and again by the
@@ -326,6 +319,7 @@ export async function setMembershipRoles(
     );
   }
   const state = await withDbSession(db, session, async (trx) => {
+    await protectDirectAdministrator(trx, session.tenantId, identityId, roles);
     const written = await writeMembershipRoles(trx, session.tenantId, identityId, roles);
     if (!written) {
       // No linked row for this identity here: unknown, or still pending
@@ -339,13 +333,14 @@ export async function setMembershipRoles(
     }
     const row = await readLinkRow(trx, identityId, session.tenantId);
     if (!row) throw new HttpError(500, "INTERNAL", "The link vanished while writing its roles.");
-    return toState(row, { issuer: row.issuer, subject: row.subject });
+    const state = toState(row, { issuer: row.issuer, subject: row.subject });
+    registerDbSessionAfterCommit(() => invalidateIdentityLink(state.issuer, state.subject, session.tenantId));
+    return state;
   });
-  invalidateIdentityLink(state.issuer, state.subject, session.tenantId);
   return state;
 }
 
-/** Resolve a relationId to its linked identityId in this tenant, for `set_member_role`. */
+/** Resolve a relationId to its linked identityId in this tenant, for `canonical Account role Operations`. */
 export async function identityIdForRelation(
   db: OpenShapeForgeDatabase,
   session: SessionInput,
@@ -364,3 +359,37 @@ export async function identityIdForRelation(
   });
 }
 
+
+/** Add/remove one direct exception under a row lock; unrelated grants survive concurrent edits. */
+export async function mutateMembershipRole(
+  db: OpenShapeForgeDatabase,
+  session: SessionInput,
+  identityId: string,
+  role: string,
+  assign: boolean,
+): Promise<IdentityLinkState> {
+  if (!(session.roles ?? []).includes(IDENTITY_LINK_ADMIN_ROLE)) {
+    throw new HttpError(403, "FORBIDDEN", "Role assignment requires an organization administrator.");
+  }
+  const state = await withDbSession(db, session, async (trx) => {
+    await sql`select pg_advisory_xact_lock(hashtextextended(${session.tenantId}, 7921))`.execute(trx);
+    const locked = await sql<{ roles: string[] }>`select roles from platform.identity_relations
+      where tenant_id = ${session.tenantId}::uuid and identity_id = ${identityId}::uuid
+        and status = 'linked' for update`.execute(trx);
+    const current = locked.rows[0];
+    if (!current) throw new HttpError(404, "NOT_FOUND", "Account not found in this organization.");
+    const roles = assign ? [...new Set([...current.roles, role])] : current.roles.filter(value => value !== role);
+    await protectDirectAdministrator(trx, session.tenantId, identityId, roles);
+    await writeMembershipRoles(trx, session.tenantId, identityId, roles);
+    await appendScopedEntityEventInTransaction(trx, {
+      aggregateType: "UserAccount", aggregateId: identityId, eventType: "updated",
+      payload: { action: assign ? "roleAssigned" : "roleRevoked", role, actor: session.userId },
+    });
+    const row = await readLinkRow(trx, identityId, session.tenantId);
+    if (!row) throw new HttpError(500, "INTERNAL", "Account vanished during role assignment.");
+    const state = toState(row, { issuer: row.issuer, subject: row.subject });
+    registerDbSessionAfterCommit(() => invalidateIdentityLink(state.issuer, state.subject, session.tenantId));
+    return state;
+  });
+  return state;
+}

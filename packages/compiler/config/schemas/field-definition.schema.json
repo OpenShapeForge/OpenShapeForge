@@ -256,6 +256,11 @@
           "minLength": 1,
           "description": "The one type axis: a base type (string, integer, number, boolean, date, datetime, object), a camelCase osf-type catalog key, or a PascalCase entity name. The compiler derives the base type from the catalog."
         },
+        "transform": {
+          "type": "array", "minItems": 1, "maxItems": 8,
+          "items": { "type": "object", "additionalProperties": false, "required": ["use"],
+            "properties": { "use": { "type": "string", "minLength": 1 }, "profile": { "type": "string", "minLength": 1 } } }
+        },
         "cardinality": { "$ref": "#/$defs/cardinality" },
         "entityValue": {
           "type": "object", "additionalProperties": false, "required": ["definitionField"],
@@ -311,7 +316,7 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": { "type": "string", "minLength": 1 },
-          "description": "API contract: operation contract keys (e.g. `pentest.finding.review`) that are the only writers of this field. The field is absent from the generated create AND update schemas on every transport, and a caller sending it anyway is refused with a message naming these operations. Use it for fields that record that a process took place — a review signed off, a scope approved, a retest concluded — where the operation is the only place the preconditions are checked. Not to be confused with `readOnly`, which selects a display component and enforces nothing. A key no compiled operation answers to fails the build."
+          "description": "API contract: operation contract keys (e.g. `advies.finding.review`) that are the only writers of this field. The field is absent from the generated create AND update schemas on every transport, and a caller sending it anyway is refused with a message naming these operations. Use it for fields that record that a process took place — a review signed off, a scope approved, a retest concluded — where the operation is the only place the preconditions are checked. Not to be confused with `readOnly`, which selects a display component and enforces nothing. A key no compiled operation answers to fails the build."
         },
         "transitions": {
           "type": "object",
@@ -339,6 +344,7 @@
                     "minProperties": 1,
                     "properties": {
                       "roles": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+                      "alsoRequire": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "description": "A second, conjunctive role gate: the caller holds one of `roles` (default: the entity's update roles) AND one of these. `roles` alone replaces the update roles." },
                       "recordPermission": { "type": "string", "enum": ["edit"], "description": "A transition writes the record: on an entity with record-level permissions it always requires `edit` (this may only restate it); refused on an entity without record permissions." }
                     }
                   },
@@ -353,7 +359,8 @@
                           "required": ["field", "present"],
                           "properties": {
                             "field": { "type": "string", "minLength": 1 },
-                            "present": { "type": "boolean" }
+                            "present": { "type": "boolean" },
+                            "refusal": { "$ref": "#/$defs/localizedText", "description": "What a person reads when this precondition refuses the transition, in plain product language per locale. Without it the refusal names the field." }
                           }
                         },
                         {
@@ -363,7 +370,8 @@
                           "properties": {
                             "via": { "type": "string", "minLength": 1, "description": "Single entity reference field on this row." },
                             "field": { "type": "string", "minLength": 1, "description": "Persisted single field on the referenced entity." },
-                            "present": { "type": "boolean" }
+                            "present": { "type": "boolean" },
+                            "refusal": { "$ref": "#/$defs/localizedText", "description": "What a person reads when this precondition refuses the transition, in plain product language per locale. Without it the refusal names the field." }
                           }
                         },
                         {
@@ -385,7 +393,8 @@
                                 ]
                               },
                               "description": "Closed set of values the referenced field must hold. When that field has static options, each value must be one of them."
-                            }
+                            },
+                            "refusal": { "$ref": "#/$defs/localizedText", "description": "What a person reads when this precondition refuses the transition, in plain product language per locale. Without it the refusal names the field." }
                           }
                         }
                       ]

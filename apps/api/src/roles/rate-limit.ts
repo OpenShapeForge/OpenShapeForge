@@ -22,10 +22,14 @@ import type { FastifyRequest } from "fastify";
 import type { ApiLimits } from "../config/limits.js";
 import { headersFromFastify } from "../http/headers.js";
 
-export type RateLimitTier = "anonymous" | "trusted";
+/**
+ * `subject` and `service` are budgets for a locally verified bearer token: a
+ * person, and an organization's service identity (#886, rate-limit-subject.ts).
+ */
+export type RateLimitTier = "anonymous" | "trusted" | "subject" | "service";
 
 /** Prefix on the limiter key, so a key can never be mistaken for another tier's. */
-const TIER_PREFIX: Record<RateLimitTier, string> = {
+const TIER_PREFIX: Record<"anonymous" | "trusted", string> = {
   anonymous: "ip",
   trusted: "svc",
 };
@@ -41,7 +45,7 @@ const TIER_PREFIX: Record<RateLimitTier, string> = {
 export function classifyRequest(
   request: FastifyRequest,
   secret: string | undefined,
-): { tier: RateLimitTier; key: string } {
+): { tier: "anonymous" | "trusted"; key: string } {
   if (secret) {
     const headers = headersFromFastify(request.headers);
     if (hasValidTrustedContextSignature(headers, { secret })) {
@@ -74,8 +78,8 @@ export type RateLimitMetrics = {
 };
 
 export function createRateLimitMetrics(): RateLimitMetrics {
-  const allowed: Record<RateLimitTier, number> = { anonymous: 0, trusted: 0 };
-  const throttled: Record<RateLimitTier, number> = { anonymous: 0, trusted: 0 };
+  const allowed: Record<RateLimitTier, number> = { anonymous: 0, trusted: 0, subject: 0, service: 0 };
+  const throttled: Record<RateLimitTier, number> = { anonymous: 0, trusted: 0, subject: 0, service: 0 };
   return {
     allowed,
     throttled,

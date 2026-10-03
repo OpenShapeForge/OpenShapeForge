@@ -415,12 +415,13 @@ describe("web manifest projection", () => {
   test("a system-written reference key from the corpus is never create-writable and its collection offers no create", () => {
     // Comment.authorId is authored readOnly (attribution, not an input); the
     // derived Relation.comments collection therefore cannot pre-fill it.
-    const entries = ["comment", "relation"].map((slug) => ({
+    const entries = ["comment", "relation", "account"].map((slug) => ({
       slug, path: `entities/core/${slug}.yaml`, origin: "core" as const, contract: compile(loadEntity(authoringDir, slug)),
     }));
     const authorId = entries[0]!.contract.model.fields.find(({ key }) => key === "authorId")!;
     expect(authorId.readOnly).toBe(true);
-    const web = buildWebManifest(entries);
+    const catalogs = ["accounts", "accounts-members"].map(name => parse(readFileSync(join(authoringDir, `operations/${name}.yaml`), "utf8")) as OperationCatalogDefinition);
+    const web = buildWebManifest(entries, {}, { catalogs, operations: collectAuthoredModulePluginOperations(catalogs, operationContext) });
     expect(web.entities.Comment!.fields.authorId?.supports).toEqual({ read: true, create: false, update: false });
     expect(web.entities.Relation!.relationships.comments).toMatchObject({ kind: "hasMany", recordField: "authorId" });
     expect(web.entities.Relation!.relationships.comments?.operations.create).toBeUndefined();
@@ -1280,6 +1281,42 @@ describe("standalone Operation pages", () => {
     expect(composed.entities.Tenant?.entityId).toBe("Tenant");
   });
 
+  test("a result property typed as an entity is that entity's belongsTo, like a core reference field", () => {
+    const listTenants = controlCatalog.operations.listTenants!;
+    const catalog: OperationCatalogDefinition = {
+      ...controlCatalog,
+      operations: { ...controlCatalog.operations, listTenants: { ...listTenants,
+        output: { schema: { type: "object", additionalProperties: false, properties: {
+          tenants: { type: "array", items: { type: "object", additionalProperties: false, properties: {
+            slug: { type: "string", "x-osf-i18n": { title: text("Slug") } },
+            // The compiler types every reference in an operation schema this way.
+            relationId: { type: "string", format: "uuid", "x-osf-type": "Relation", "x-osf-i18n": { title: text("Relation", "Relatie") } },
+            // Not an entity: stays its own base type.
+            status: { type: "string", "x-osf-type": "referenceDataCode" },
+          }, required: ["slug", "relationId", "status"] } },
+        }, required: ["tenants"] } },
+      } },
+      interfaces: { ...controlCatalog.interfaces, web: { pages: {}, operations: {}, entities: {
+        Tenant: {
+          title: text("Tenants"), route: "/tenants", recordRoute: "/tenants/:slug", idField: "slug", displayField: "slug",
+          fields: ["slug", "relationId", "status"], columns: ["slug"],
+          operations: { list: { operation: "listTenants", resultField: "tenants" }, get: { operation: "getTenant" } },
+        },
+      } } },
+    };
+    const relation = entity("Relation", "relation", [field("displayName")], coreView());
+    const manifest = buildWebManifest([relation], {}, standalone(catalog));
+    const tenant = manifest.entities.Tenant!;
+    expect(tenant.fields.relationId).toMatchObject({ osfType: "Relation", baseType: "string", relationship: { targetEntityId: "Relation" } });
+    expect(tenant.relationships.relationId).toMatchObject({
+      kind: "belongsTo", targetEntityId: "Relation", recordField: "relationId", ownership: "reference",
+      operations: { get: manifest.entities.Relation!.views.record!.operations.read },
+    });
+    expect(tenant.fields.status).toMatchObject({ osfType: "string" });
+    expect(tenant.fields.status?.relationship).toBeUndefined();
+    expect(Object.keys(tenant.relationships)).toEqual(["relationId"]);
+  });
+
   test("projects catalog pages and their Operations next to the entities", () => {
     const manifest = buildWebManifest([], {}, standalone(controlCatalog));
     expect(Object.keys(manifest.operations!)).toEqual([
@@ -1477,5 +1514,30 @@ describe("provider-backed relationships", () => {
     expect(() => buildWebManifest([relation({ relationId: "nope" })], {}, standalone(accounts)))
       .toThrow("Relation.account: provider.bindings.relationId names unknown field Relation.nope");
     expect(() => buildWebManifest([relation()])).toThrow("Relation.account: provider entity Account is not projected to the web");
+  });
+
+  test('provider placement narrows canonical query controls without rewriting the invoke schema', () => {
+    const catalog = structuredClone(accounts);
+    const operation = catalog.operations.listAccounts!;
+    Object.assign((operation.input!.schema as any).properties, {
+      first: { type: 'integer', default: 50, maximum: 200 }, after: { type: 'string' },
+      email: { type: 'string' }, sortField: { type: 'string', enum: ['id', 'email'], default: 'email' },
+      sortDirection: { type: 'string', enum: ['asc', 'desc'], default: 'asc' },
+    });
+    Object.assign((operation.output!.schema as any).properties, { nextCursor: { type: ['string', 'null'] }, totalCount: { type: 'integer' } });
+    const parent = relation();
+    const usage = parent.contract.views.core!.detail!.groups.items[1]!.relationship!;
+    usage.overrides = { filters: ['email'], sortFields: ['email'], pageSize: 10, sort: { key: 'email', direction: 'desc' } };
+    const web = buildWebManifest([parent], {}, standalone(catalog));
+    const placement = web.entities.Relation!.relationships.account!;
+    expect(placement.source?.query?.input).toEqual({ kind: 'collection-query', filterFields: ['email'], sortFields: ['email'],
+      pagination: { kind: 'cursor', defaultLimit: 10, maxLimit: 200 } });
+    expect(placement.collection!.defaultSort).toEqual({ key: 'email', direction: 'desc' });
+    expect(placement.operations.list!.input?.kind).toBe('json-schema');
+    expect(web.entities.Account!.operationSource!.collection.query!.input.pagination.defaultLimit).toBe(50);
+    usage.overrides.filters = ['unknown'];
+    expect(() => buildWebManifest([parent], {}, standalone(catalog))).toThrow('filters expands');
+    usage.overrides.filters = ['email']; usage.overrides.pageSize = 201;
+    expect(() => buildWebManifest([parent], {}, standalone(catalog))).toThrow('pageSize must be between');
   });
 });

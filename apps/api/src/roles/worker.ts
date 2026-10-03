@@ -226,11 +226,13 @@ export async function startWorkerRole(
           "Durable execution cannot run without both an exact claim resolver and an atomic contract pin.",
       );
     }
+    const marker = resolved.worker.markOperationDispatch;
     const durableOperations = resolver && pinner
       ? configuredDurableWorkerBroker(
           (reference) => resolver(context, reference),
           (reference, fingerprint) => pinner(context, reference, fingerprint),
           options.env,
+          marker ? (reference, state) => marker(context, reference, state) : undefined,
         )
       : undefined;
     const handle: ModuleWorkerHandle = await resolved.worker.start({

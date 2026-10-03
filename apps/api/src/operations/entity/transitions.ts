@@ -14,7 +14,7 @@ import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
 import type { ModuleOperationAvailabilityHandler, ModuleOperationHandler } from "../../modules/contract.js";
 import { sessionRelation } from "../../auth/identity-link.js";
-import { readDatabaseError } from "../../db/database-refusals.js";
+import { TRANSITION_LOCK_ATTEMPTS, isTransitionLockRetry } from "./transition-lock-retry.js";
 import { generatedCrudError, getGeneratedCrudTables } from "./catalog.js";
 import { fieldNameForColumn } from "./columns.js";
 import { updateGeneratedEntityForTable } from "./mutations.js";
@@ -30,6 +30,7 @@ import {
   referencedViaSignature,
   type TransitionReferencedRow,
 } from "./transitions-referenced.js";
+import { stateRefusal, unlinkedActorRefusal } from "./transition-refusal-text.js";
 
 export { referencedInHoldsKey, type TransitionReferencedRow } from "./transitions-referenced.js";
 
@@ -55,6 +56,7 @@ export type TransitionReferencedPrecondition = {
   target: GeneratedCrudTable;
   present?: boolean;
   in?: Array<string | number | boolean>;
+  refusal?: { en?: string; nl?: string };
 };
 
 export type TransitionBinding = {
@@ -127,6 +129,7 @@ function referencedBindings(table: GeneratedCrudTable, rule: TransitionRule): Tr
       target,
       ...(precondition.present !== undefined ? { present: precondition.present } : {}),
       ...(precondition.in ? { in: [...precondition.in] } : {}),
+      ...(precondition.refusal ? { refusal: precondition.refusal } : {}),
     };
   });
 }
@@ -152,8 +155,15 @@ export function transitionBinding(operation: { key: string; target?: { entityNam
   throw new Error(`Operation "${operation.key}" is not a status transition of a generated entity.`);
 }
 
-function invalidState(message: string): OperationError {
-  return { code: "INVALID_STATE", message, retryable: false };
+/**
+ * A precondition's authored `refusal` is what a person reads: its English is
+ * the message, and both languages travel as `data.localized`, the runtime's
+ * bilingual convention a host renders in the viewer's language. Without it
+ * the message names the field.
+ */
+function invalidState(message: string, refusal?: { en?: string; nl?: string }): OperationError {
+  if (!refusal?.en || !refusal.nl) return { code: "INVALID_STATE", message, retryable: false };
+  return { code: "INVALID_STATE", message: refusal.en, retryable: false, data: { localized: { en: refusal.en, nl: refusal.nl } } };
 }
 
 /**
@@ -171,15 +181,18 @@ export function transitionRefusal(
   const entity = binding.table.source?.authoringEntityName ?? binding.table.name;
   const current = row[binding.statusColumn.name];
   if (!binding.rule.from.includes(String(current))) {
-    return invalidState(
-      `${entity} is ${String(current)}; ${binding.rule.key} moves ${binding.status.field} from ${binding.rule.from.join(" or ")} to ${binding.rule.to}.`,
-    );
+    return {
+      ...invalidState(
+        `${entity} is ${String(current)}; ${binding.rule.key} moves ${binding.status.field} from ${binding.rule.from.join(" or ")} to ${binding.rule.to}.`,
+      ),
+      data: { localized: stateRefusal(binding, String(current)) },
+    };
   }
   for (const precondition of binding.rule.preconditions ?? []) {
     if (precondition.via) continue;
     const column = columnForField(binding.table, precondition.field);
     if (precondition.present !== undefined && present(row[column.name]) !== precondition.present) {
-      return invalidState(`${binding.rule.key} requires ${precondition.field} to be ${precondition.present ? "set" : "empty"}.`);
+      return invalidState(`${binding.rule.key} requires ${precondition.field} to be ${precondition.present ? "set" : "empty"}.`, precondition.refusal);
     }
   }
   for (const precondition of binding.referenced) {
@@ -187,14 +200,14 @@ export function transitionRefusal(
     const named = `${precondition.via}.${precondition.field}`;
     if (!remote) {
       const target = precondition.target.source?.authoringEntityName ?? precondition.target.name;
-      return invalidState(`${binding.rule.key} requires ${named} on the ${target} that ${precondition.via} names in this tenant.`);
+      return invalidState(`${binding.rule.key} requires ${named} on the ${target} that ${precondition.via} names in this tenant.`, precondition.refusal);
     }
     const value = remote.row[precondition.fieldColumn.name];
     if (precondition.present !== undefined && present(value) !== precondition.present) {
-      return invalidState(`${binding.rule.key} requires ${named} to be ${precondition.present ? "set" : "empty"}.`);
+      return invalidState(`${binding.rule.key} requires ${named} to be ${precondition.present ? "set" : "empty"}.`, precondition.refusal);
     }
     if (precondition.in && remote.inHolds.get(referencedInHoldsKey(precondition)) !== true) {
-      return invalidState(`${binding.rule.key} requires ${named} to be one of ${precondition.in.join(", ")}.`);
+      return invalidState(`${binding.rule.key} requires ${named} to be one of ${precondition.in.join(", ")}.`, precondition.refusal);
     }
   }
   return undefined;
@@ -230,7 +243,7 @@ export function transitionAvailabilityFor(binding: TransitionBinding): ModuleOpe
         decisions.push([id, { available: false, error: { code: "NOT_FOUND", message: "Resource not found.", retryable: false } }]);
         continue;
       }
-      const error = transitionRefusal(binding, row, referencedById.get(id) ?? new Map());
+      const error = transitionRefusal(binding, row, referencedById.get(id) ?? new Map()) ?? unlinkedActorRefusal(binding, context.session);
       decisions.push([id, error ? { available: false, error } : { available: true }]);
     }
     return Object.fromEntries(decisions);
@@ -257,13 +270,7 @@ function stampValues(binding: TransitionBinding, session: DbSessionInput): Recor
     }
     if (stamp.actor === "relation") {
       const relation = sessionRelation(session as Parameters<typeof sessionRelation>[0]);
-      if (!relation) {
-        throw operationFailure({
-          code: "FORBIDDEN",
-          message: `${binding.rule.key} records the acting Relation, and this session is not linked to one.`,
-          retryable: false,
-        });
-      }
+      if (!relation) throw operationFailure(unlinkedActorRefusal(binding, session)!);
       values[stamp.field] = relation.relationId;
       continue;
     }
@@ -321,29 +328,6 @@ async function writtenValues(
     }
   }
   return values;
-}
-
-const TRANSITION_LOCK_ATTEMPTS = 3;
-
-function sqlstateOf(error: unknown): string | undefined {
-  const seen = new Set<unknown>();
-  let current: unknown = error;
-  while (current && typeof current === "object" && !seen.has(current)) {
-    seen.add(current);
-    const facts = current instanceof Error ? readDatabaseError(current) : undefined;
-    if (facts) return facts.sqlstate;
-    const raw = current as { errno?: unknown; code?: unknown; cause?: unknown };
-    const direct = [raw.errno, raw.code].find(
-      (candidate): candidate is string => typeof candidate === "string" && /^[0-9A-Z]{5}$/.test(candidate),
-    );
-    if (direct) return direct;
-    current = raw.cause;
-  }
-  return undefined;
-}
-
-function isTransitionLockRetry(error: unknown): boolean {
-  return (error instanceof Error && error.name === "TransitionLockRetry") || sqlstateOf(error) === "40P01";
 }
 
 /**

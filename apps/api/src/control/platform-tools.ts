@@ -37,10 +37,12 @@ export const PLATFORM_SERVER_INSTRUCTIONS =
   "publish, retirement or forced update with the administrator before " +
   "calling it. Inspect tenant and organization state before mutating it, and inspect " +
   "get_reconciliation_report before reapplying drift. When offered, use invite_first_tenant_admin " +
-  "to invite the first organization " +
-  "administrator for one existing tenant by email; this never makes you a tenant member. " +
+  "to admit the first organization " +
+  "administrator of one existing tenant; this never makes you a tenant member. " +
   "Use list_tenant_invitations to inspect outstanding invitations, " +
-  "revoke_tenant_invitation to withdraw one, and resend_tenant_invitation only for an explicit resend.";
+  "revoke_tenant_invitation to withdraw one, and resend_tenant_invitation only for an explicit resend. " +
+  "Every invite result has a delivery outcome and a nextStep: relay the nextStep, and never say an e-mail " +
+  "is on its way unless delivery is email_sent. An existing account gets no e-mail; give them the signInUrl.";
 
 export const PLATFORM_SESSION_RESOURCE_URI = "osf://platform-session";
 
@@ -60,7 +62,7 @@ export const PLATFORM_GUIDE = [
   "When update_tenant is offered, use it for display-name or lifecycle changes. Suspending or deactivating a tenant disables its root Organization and can interrupt access; confirm that consequence first. Use get_tenant_organization_tree before creating or moving a sub-organization, and pass only its opaque org-unit ids — never invent or accept a Keycloak Organization id.",
   "Use get_reconciliation_report to compare the authoritative registry with Keycloak. When reapply_reconciliation is offered, it pushes repairable registry state into Keycloak for one tenant or every affected tenant; it never deletes an unclaimed Organization. Confirm an all-tenant run first.",
   "",
-  "When invite_first_tenant_admin is offered, use it for an existing tenant without an organization administrator after confirming the exact slug and recipient email. The role is fixed to org_admin. Working SMTP on the tenant Keycloak realm is required; a pending invitation is not proof the person accepted. Repeating the same request does not resend mail. Use list_tenant_invitations to inspect current provider state. Revoke only an invitation id from that list; this invalidates the delivered link but never removes an accepted member. Resend only after explicit confirmation and never retry automatically after an uncertain response. Once an administrator exists, use that tenant administrator's invite_employee workflow. The control-realm user stays outside the tenant.",
+  "When invite_first_tenant_admin is offered, use it for an existing tenant without an organization administrator after confirming the exact slug and recipient email. The role is fixed to org_admin. Working SMTP on the tenant Keycloak realm is required only when an invitation e-mail has to be sent; a pending invitation is not proof the person accepted. Repeating the same request does not resend mail. The result's `delivery` says what happened and `nextStep` says what to tell the person: email_sent (the person follows the invitation e-mail), no_email_existing_account (they already have an account; no e-mail is sent, ever — they sign in at `signInUrl` and the role applies then), already_pending (an earlier e-mail is still outstanding; nothing new was sent) or already_accepted (already a member; nothing was sent). create_tenant_invitation answers the same way for a further member or a role for someone who has not signed in yet. Use list_tenant_invitations to inspect current provider state; an `unresolved` row with status awaiting_sign_in is that no-mail case working as intended, provider_missing is drift. Revoke only an invitation id from that list; this invalidates the delivered link but never removes an accepted member. Resend only after explicit confirmation and never retry automatically after an uncertain response. Once an administrator exists, use that tenant administrator's invite_employee workflow. The control-realm user stays outside the tenant.",
   "1. list_tenants and list_catalog_entries to see what exists and who overrode what.",
   "2. get_catalog_entry for the full current definition; start every change from it (publish takes the WHOLE definition, not a patch).",
   "3. Show the administrator the exact change and which tenants will be updated versus flagged; get confirmation.",

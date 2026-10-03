@@ -7,7 +7,7 @@
  * NaturalPerson and e-mail contact, through the generated CRUD path so the
  * rows get the same defaults, events and projections a REST create would),
  * the link row with the invited roles, and the claim of the invitation. The
- * session is deliberately elevated to `Organization.All.ReadWrite`: the
+ * session is deliberately elevated to the configured administrator role: the
  * invitation table's write policy and the trigger on
  * `identity_relations.roles` both demand it, and the person signing in has
  * nothing of the sort — it is the RUNTIME recording, on behalf of the
@@ -23,6 +23,7 @@
  * this transaction wins — no row comes back and the person is refused, or
  * the changed role is what gets recorded.
  */
+import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
 import {
@@ -82,8 +83,16 @@ export async function admitInvitedPerson(
   const linked = await withDbSession(db, runtime, async (trx) => {
     const role = await claimPendingInvitation(trx, session.tenantId, invitation.id);
     if (!role) throw notInvited(session, claims);
-    const roles = employeeInvitationRoleGrants(role);
-    const relationId = await createPersonRelation(db, runtime, claims, displayName);
+    const roles = employeeInvitationRoleGrants(role.role);
+    // The claim locks the invitation; re-read its target in this transaction.
+    const target = await sql<{ relation_id: string | null }>`select relation_id from platform.employee_invitations
+      where id = ${invitation.id} and tenant_id = ${session.tenantId}`.execute(trx);
+    let relationId = target.rows[0]?.relation_id;
+    if (relationId) {
+      const party = await sql`select id from ${sql.table(actingPartyTable())}
+        where id = ${relationId} and tenant_id = ${session.tenantId} for share`.execute(trx);
+      if (!party.rows.length) throw notInvited(session, claims);
+    } else relationId = await createPersonRelation(db, runtime, claims, displayName);
     const inserted = await insertLinkRow(trx, {
       identityId,
       tenantId: session.tenantId,
@@ -96,20 +105,21 @@ export async function admitInvitedPerson(
       // The row may already exist, empty and pending: a session that could
       // not be admitted by an e-mail (an API key's, a token without one)
       // recorded it. The invitation claims that row rather than losing to it.
-      await linkEmptyPendingRow(trx, { identityId, tenantId: session.tenantId, relationId, linkedBy: "jit", roles })
+      await linkEmptyPendingRow(trx, { identityId, tenantId: session.tenantId, relationId, linkedBy: "jit", roles, allowCandidate: Boolean(target.rows[0]?.relation_id) })
         ? await readLinkRow(trx, identityId, session.tenantId)
         : null
     );
     if (inserted) {
       console.info(
-        `[auth] Linked identity ${identityId} (${claims.subject}) to new Relation ` +
+        `[auth] Linked identity ${identityId} (${claims.subject}) to Relation ` +
           `${relationId} "${displayName}" in tenant ${session.tenantId} (just in time, on ` +
-          `invitation ${invitation.id}; holds ${role} here).`,
+          `invitation ${invitation.id}; holds ${role.role ?? "group-derived access"} here).`,
       );
     }
     // Lost a race with another replica: keep its link; this transaction's
     // Relation and claim roll back with the refusal below.
     const row = inserted ?? (await readLinkRow(trx, identityId, session.tenantId));
+    if (target.rows[0]?.relation_id && row?.relation_id !== relationId) throw notInvited(session, claims);
     return row ? toState(row, claims) : null;
   });
   if (!linked) {
@@ -135,7 +145,13 @@ export async function acceptPendingInvitation(
   const roles = await withDbSession(db, elevated(session), async (trx) => {
     const role = await claimPendingInvitation(trx, session.tenantId, invitation.id);
     if (!role) return null;
-    const granted = employeeInvitationRoleGrants(role);
+    const target = await sql<{ relation_id: string | null }>`select relation_id from platform.employee_invitations
+      where id = ${invitation.id} and tenant_id = ${session.tenantId}`.execute(trx);
+    if (target.rows[0]?.relation_id) {
+      const link = await readLinkRow(trx, identityId, session.tenantId);
+      if (link?.relation_id !== target.rows[0].relation_id) throw new SessionAuthenticationUnavailableError("The invitation belongs to another relation.");
+    }
+    const granted = employeeInvitationRoleGrants(role.role);
     if (!(await writeMembershipRoles(trx, session.tenantId, identityId, granted))) {
       throw new SessionAuthenticationUnavailableError("The identity link vanished while accepting; try again.");
     }

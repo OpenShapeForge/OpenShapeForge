@@ -79,6 +79,9 @@ import {
   createRedisRateLimitStore,
   type RateLimitMetrics,
 } from "./rate-limit.js";
+import { limitKey, limitPolicyFromEnv, tierOfKey } from "./rate-limit-subject.js";
+import { getBearerVerifier } from "../auth/bearer-verifier.js";
+import { RATE_LIMITED_CODE } from "../operations/durable-worker-http.js";
 import {
   API_READINESS_ERROR_CODES,
   createApiReadinessChecks,
@@ -199,14 +202,15 @@ export function createApiApp(options: {
       },
       ...(options.logStream ? { stream: options.logStream } : {}),
     },
-    trustProxy: limits.trustProxy,
+    // Fastify 5.12 refuses numeric-only proxy trust; preserve that fail-closed behavior.
+    trustProxy: typeof limits.trustProxy === "number" ? false : limits.trustProxy,
     requestTimeout: limits.requestTimeoutMs,
     // Browser handoff tokens (`/api/entity-configuration/<token>`,
     // mcp/handoff-store.ts) are `<tenant>.<handoff>.<secret>` — 117
     // characters — and the router's default of 100 answered them with 414
     // before the route ever ran (found live). Generous but bounded.
     maxParamLength: 512,
-    // Short addresses: `https://hubble.com/zerocopter/...`.
+    // Short addresses: `https://app.example.test/acme/...`.
     //
     // One organization, one prefix, every surface underneath it —
     // `/<alias>` and `/<alias>/mcp` are the MCP resource, `/<alias>/api/...`
@@ -266,30 +270,32 @@ export function createApiApp(options: {
     );
   }
 
+  const limitPolicy = limitPolicyFromEnv(() => getBearerVerifier(false, true));
   void app.register(rateLimit, {
     // Per-request budget, so a trusted service-to-service caller does not
     // compete with anonymous traffic for one allowance.
-    max: (request) =>
-      limits.rateLimitTiers[classifyRequest(request, contextSecret).tier],
-    keyGenerator: (request) => classifyRequest(request, contextSecret).key,
+    // The key carries its tier, so the budget follows what the key generator
+    // proved (trusted context, verified bearer subject, or IP) — #886.
+    max: (_request, key) => limits.rateLimitTiers[tierOfKey(key)],
+    keyGenerator: (request) => limitKey(request, contextSecret, limitPolicy),
     timeWindow: limits.rateLimitWindowMs,
     allowList: (request) => isRateLimitExempt(request.url),
     ...(sharedStore ? { store: sharedStore.Store as never } : {}),
     // A store outage must not become an API outage: the request proceeds
     // uncounted, and createRedisRateLimitStore records it in storeErrors.
     skipOnError: true,
-    onExceeding: (request) => {
-      rateLimitMetrics.allowed[classifyRequest(request, contextSecret).tier] +=
-        1;
+    onExceeding: (_request, key) => {
+      rateLimitMetrics.allowed[tierOfKey(key)] += 1;
     },
-    onExceeded: (request) => {
-      rateLimitMetrics.throttled[
-        classifyRequest(request, contextSecret).tier
-      ] += 1;
+    onExceeded: (_request, key) => {
+      rateLimitMetrics.throttled[tierOfKey(key)] += 1;
     },
     // 429 with Retry-After (added by the plugin); body carries no limiter internals.
     errorResponseBuilder: () => ({
       statusCode: 429,
+      // Names the limiter, so a caller can tell this refusal (answered before
+      // any handler ran) from an Operation's own 429 (durable-worker-http.ts).
+      code: RATE_LIMITED_CODE,
       error: "Too Many Requests",
       message: "Rate limit exceeded. Please retry later.",
     }),

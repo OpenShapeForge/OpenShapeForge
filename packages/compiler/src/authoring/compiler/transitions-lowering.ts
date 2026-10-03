@@ -198,6 +198,8 @@ export function ruleOperation(
     auth: {
       mode: "session",
       roles: [...(rule.auth?.roles ?? entity.authorization?.roles?.update ?? [])],
+      // Conjunctive with `roles`: both gates must admit the caller (#944).
+      ...(rule.auth?.alsoRequire?.length ? { roleGroups: [[...rule.auth.alsoRequire]] } : {}),
       ...(recordPermission ? { recordPermission } : {}),
     },
     tenancy: { mode: "required" },

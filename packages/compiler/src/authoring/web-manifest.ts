@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { collectBlueprintOperations } from "../blueprint-operations.js";
+/** A REST-driven browser must positively project both its collection and transport. */
+export function hasWebRestCollection(contract: CompiledEntityContract): boolean {
+  return contract.source
+    ? contract.pluginOperations?.some(operation => operation.key === "list"
+      && Boolean(operation.interfaces.web) && Boolean(operation.interfaces.rest)) === true
+    : contract.interfaces?.web?.operations.list === true && contract.rest?.operations.list === true;
+}
 /**
  * Web interface projection.
  *
@@ -217,6 +224,7 @@ function customOperation(
     output: { kind: "json-schema", schema: definition.output.schema },
     ...(source.interfaces.web?.resultRenderer ? { resultRenderer: source.interfaces.web.resultRenderer } : {}),
     effects: definition.effects,
+    ...(definition.auth ? { auth: standaloneAuth({ auth: definition.auth } as CompiledPluginOperation) } : {}),
     reliability: {
       idempotency: {
         mode: definition.reliability.idempotency.mode,
@@ -358,7 +366,7 @@ function collectionFor(
   return {
     id: `${entityName}.collection`,
     kind: "collection",
-    renderer: contract.interfaces?.web?.renderers?.collection ?? "entity.collection",
+    renderer: contract.interfaces?.web?.renderers?.collection ?? (contract.source ? "operation.entity.collection" : "entity.collection"),
     modes: ["read"],
     route,
     operations: {
@@ -405,7 +413,7 @@ function projectableEntities(
   return entities.flatMap(({ slug, contract }) => {
     if (contract.entity.valueDefinition) return [];
     const exposed = contract.interfaces?.web?.operations;
-    if (!contract.entityOperations.list || !exposed?.list) return [];
+    if (!contract.source && (!contract.entityOperations.list || !exposed?.list)) return [];
     const view = contextFor(contract, options.context);
     const operations = Object.fromEntries(
       (["list", "get", "create", "update", "delete"] as const)
@@ -426,6 +434,11 @@ function projectableEntities(
         return projected ? [[source.key, projected]] : [];
       }),
     );
+    if (contract.source) {
+      if (!customOperations.list) return [];
+      operations.list = customOperations.list;
+      if (customOperations.get) operations.get = customOperations.get;
+    }
     return [{
       slug,
       contract,
@@ -536,6 +549,14 @@ function projectProviderRelationship(
   const bindings = relationship.provider!.bindings;
   const list = provider.views.collection.operations.read;
   const get = provider.views.record?.operations.read;
+  const create = provider.views.collection.operations.create;
+  const createBindings: Record<string, string> = {};
+  for (const [inputField, context] of Object.entries(provider.operationSource?.create?.bindings ?? {})) {
+    const listInput = Object.entries(provider.operationSource?.collection.bindings ?? {}).find(([, value]) => value === context)?.[0] ?? context;
+    const ownField = bindings[listInput];
+    if (!ownField || !fields[ownField]) throw new Error(`${origin}: create context ${context} has no parent binding.`);
+    createBindings[inputField] = ownField;
+  }
   const input = objectProperties("input" in list && list.input?.kind === "json-schema" ? list.input.schema : undefined);
   for (const [inputField, ownField] of Object.entries(bindings)) {
     if (!input[inputField]) throw new Error(`${origin}: provider.bindings.${inputField} is not an input of ${list.id}.`);
@@ -550,8 +571,9 @@ function projectProviderRelationship(
     targetRoute: provider.views.collection.route,
     ...(relationship.fieldKey ? { fieldKey: relationship.fieldKey } : {}),
     ...(relationship.cardinality ? { cardinality: relationship.cardinality } : {}),
-    source: { kind: "provider", bindings: { ...bindings } },
-    operations: { list, ...(get ? { get } : {}) },
+    source: { kind: "provider", bindings: { ...bindings }, ...(create ? { createBindings } : {}),
+      ...(provider.operationSource?.collection.query ? { query: structuredClone(provider.operationSource.collection.query) } : {}) },
+    operations: { list, ...(get ? { get } : {}), ...(create ? { create } : {}) },
     collection: { ...provider.views.collection, id: `${provider.entityId}.relationship.collection` },
   }]];
 }
@@ -634,6 +656,12 @@ function narrowRelationshipList(
   if (operation.intent !== "list" || input?.kind !== "collection-query") {
     throw new Error(`${origin}: related collection has no canonical list query contract.`);
   }
+  return { ...operation, input: narrowRelationshipQuery(input, usage, origin, boundFilterField) };
+}
+
+function narrowRelationshipQuery(
+  input: WebCollectionQueryContract, usage: CompiledRelationshipUsage, origin: string, boundFilterField?: string,
+): WebCollectionQueryContract {
   const overrides = usage.overrides;
   const narrow = (requested: readonly string[] | undefined, available: readonly string[], name: string): readonly string[] => {
     if (!requested) return available;
@@ -647,45 +675,51 @@ function narrowRelationshipList(
   }
   const filterFields = narrow(overrides?.filters, input.filterFields, "filters");
   return {
-    ...operation,
-    input: {
       ...input,
       filterFields: boundFilterField && !filterFields.includes(boundFilterField)
         ? [...filterFields, boundFilterField]
         : filterFields,
       sortFields: narrow(overrides?.sortFields, input.sortFields, "sortFields"),
       pagination: { ...input.pagination, defaultLimit },
-    },
   };
 }
 
 function applyRelationshipUsage(
   relationship: WebRelationshipProjection,
   usage: CompiledRelationshipUsage | undefined,
-  target: ProjectableEntity | undefined,
+  target: ProjectableEntity | WebEntityInterface | undefined,
   origin: string,
 ): WebRelationshipProjection {
   if (!usage?.overrides || !relationship.collection || !relationship.operations.list || !target) return relationship;
   const overrides = usage.overrides;
-  const list = narrowRelationshipList(relationship.operations.list, usage, origin, relationship.recordField);
+  const providerQuery = relationship.source?.query;
+  // Keep the executable invoke schema intact; only its UI query projection is
+  // narrowed. Parent bindings remain mandatory and are never search controls.
+  const narrowedQuery = providerQuery ? {
+    ...providerQuery, input: narrowRelationshipQuery(providerQuery.input, usage, origin),
+  } : undefined;
+  const list = narrowedQuery ? relationship.operations.list
+    : narrowRelationshipList(relationship.operations.list, usage, origin, relationship.recordField);
   const allowedActions = overrides.actions ? new Set(overrides.actions) : undefined;
   const operations = { ...relationship.operations, list };
   for (const key of relationshipActionKeys) {
     if (allowedActions && !allowedActions.has(key)) delete operations[key];
   }
   const columnByKey = new Map(relationship.collection.columns.map((column) => [column.key, column]));
-  const fieldByKey = new Map(target.contract.model.fields.map((field) => [field.key, field]));
+  const fieldByKey = new Map(('contract' in target ? target.contract.model.fields : Object.values(target.fields))
+    .map((field) => [field.key, field]));
+  const targetName = 'contract' in target ? target.contract.entity.name : target.entityId;
   const columns = overrides.columns?.map((entry) => {
     const key = typeof entry === "string" ? entry : entry.key;
     const field = fieldByKey.get(key);
-    if (!field) throw new Error(`${origin}: column ${key} is not a field of ${target.contract.entity.name}.`);
+    if (!field) throw new Error(`${origin}: column ${key} is not a field of ${targetName}.`);
     return {
-      fieldId: `${target.contract.entity.name}.${key}`,
+      fieldId: `${targetName}.${key}`,
       key,
       label: localized(typeof entry === "string" ? columnByKey.get(key)?.label ?? field.label : entry.label ?? field.label, key),
     };
   }) ?? relationship.collection.columns;
-  const sortFields = list.input?.kind === "collection-query" ? list.input.sortFields : [];
+  const sortFields = narrowedQuery?.input.sortFields ?? (list.input?.kind === "collection-query" ? list.input.sortFields : []);
   const defaultSort = overrides.sort ?? relationship.collection.defaultSort;
   if (defaultSort && !sortFields.includes(defaultSort.key)) {
     throw new Error(`${origin}: default sort ${defaultSort.key} is not exposed by this placement.`);
@@ -694,6 +728,7 @@ function applyRelationshipUsage(
   if (!operations.create) delete collectionOperations.create;
   return {
     ...relationship,
+    ...(narrowedQuery ? { source: { ...relationship.source!, query: narrowedQuery } } : {}),
     operations,
     collection: {
       ...relationship.collection,
@@ -789,7 +824,7 @@ function projectEntity(
   for (const tab of view?.detail?.groups.items ?? []) {
     const usage = tab.relationship;
     if (!usage?.name || !relationships[usage.name]) continue;
-    const target = all.get(relationships[usage.name]!.targetEntityId);
+    const target = all.get(relationships[usage.name]!.targetEntityId) ?? providers.get(relationships[usage.name]!.targetEntityId);
     relationships = {
       ...relationships,
       [usage.name]: applyRelationshipUsage(relationships[usage.name]!, usage, target, `${entityName}.${tab.id}.${usage.name}`),
@@ -847,8 +882,8 @@ function projectEntity(
   const record = modes.length > 0 ? {
     id: `${entityName}.record`,
     kind: "record" as const,
-    renderer: contract.interfaces?.web?.renderers?.record ?? "entity.record",
-    preset: "inbox-main-context" as const,
+    renderer: contract.interfaces?.web?.renderers?.record ?? (contract.source ? "operation.entity.record" : "entity.record"),
+    preset: contract.interfaces?.web?.recordPreset ?? "inbox-main-context",
     formGroups: { create: authoredCreateGroups, update: updateGroups },
     modes,
     routes: {
@@ -920,6 +955,17 @@ function projectEntity(
   // Named records use exactly the same projection as the default record. Their
   // relationship overrides stay local to the selected view, not the entity.
   const named = Object.fromEntries(Object.entries(contract.interfaces?.web?.namedViews ?? {}).map(([name, definition]) => {
+    if (definition.kind === "collection" && definition.collectionLayout === "matrix") {
+      const { rowField, columnField, valueField } = definition.matrix;
+      for (const key of [rowField, columnField, valueField]) {
+        if (!fields[key]?.supports.read || fields[key]?.cardinality !== "one") throw new Error(`${entityName}.${name}: matrix field ${key} must be readable and single.`);
+      }
+      for (const key of [rowField, columnField]) {
+        if (fields[key]!.baseType !== "string") throw new Error(`${entityName}.${name}: matrix axes require string or entity-reference fields.`);
+      }
+      if (!["number", "integer"].includes(fields[valueField]!.baseType)) throw new Error(`${entityName}.${name}: matrix sum requires a numeric value field.`);
+      return [name, definition];
+    }
     if (definition.kind !== "record" || "fields" in definition) return [name, definition];
     const { namedViews: _named, recordContext: _context, renderers: _renderers, ...web } = contract.interfaces!.web!;
     const { form: _form, ...readView } = view!;
@@ -946,6 +992,13 @@ function projectEntity(
 
   return {
     ...(contract.blueprint ? { blueprint: contract.blueprint } : {}),
+    ...(contract.source ? { operationSource: {
+      idField: "id",
+      collection: { resultField: "items", query: operationEntityCollectionQuery(
+        customOperations.list!.id, customOperations.list!.input.schema, customOperations.list!.output.schema, Object.keys(fields),
+      )! },
+      ...(operations.get ? { record: { bindings: { id: "id" } } } : {}),
+    } } : {}),
     ...(contract.transitions
       ? { transitions: contract.transitions.map((status) => ({
           ...status,
@@ -994,6 +1047,8 @@ function standaloneAuth(
       return {
         mode: "session",
         ...(auth.roles ? { roles: auth.roles } : {}),
+        // Conjunctive with roles; dropping them would show what the server refuses.
+        ...(auth.roleGroups ? { roleGroups: auth.roleGroups } : {}),
         ...(auth.scopes ? { scopes: auth.scopes } : {}),
       };
     case "custom":
@@ -1113,8 +1168,18 @@ function operationEntityCollectionQuery(
  * authored id and routed at `/<id>` relative to the surface root; the host
  * mounts them beside the entity routes.
  */
+/** The core entity an operation schema property is typed as, when its `x-osf-type` names one. */
+function referenceTarget(
+  schema: Record<string, unknown>,
+  targets: ReadonlyMap<string, ProjectableEntity>,
+): ProjectableEntity | undefined {
+  const osfType = schema["x-osf-type"];
+  return typeof osfType === "string" ? targets.get(osfType) : undefined;
+}
+
 function projectStandalone(
   input: WebStandaloneOperationsInput,
+  targets: ReadonlyMap<string, ProjectableEntity> = new Map(),
 ): ProjectedStandalone | undefined {
   const operations: Record<string, WebStandaloneOperationRef> = {};
   const pages: Record<string, WebPage> = {};
@@ -1201,6 +1266,7 @@ function projectStandalone(
       const operationKeys = [
         entity.operations.list.operation,
         ...(entity.operations.get ? [entity.operations.get.operation] : []),
+        ...(entity.operations.create ? [entity.operations.create.operation] : []),
         ...(entity.operations.collectionActions ?? []),
         ...recordActionKeys,
       ];
@@ -1239,6 +1305,7 @@ function projectStandalone(
           enum?: Record<string, CompiledLocalizedText>;
         } | undefined;
         const title = i18n?.title;
+        const target = referenceTarget(schema, targets);
         const rawType = Array.isArray(schema.type) ? schema.type.find((value) => value !== "null") : schema.type;
         const baseType = schema.format === "date-time"
           ? "datetime"
@@ -1253,7 +1320,7 @@ function projectStandalone(
           key,
           label: localized(title, key),
           description: localized(undefined, ""),
-          osfType: baseType,
+          osfType: target ? target.contract.entity.name : baseType,
           baseType,
           ...(enumValues.length ? {
             options: enumValues.map((value) => ({
@@ -1261,10 +1328,33 @@ function projectStandalone(
               label: localized(i18n?.enum?.[value], value),
             })),
           } : {}),
+          ...(target ? { relationship: { targetEntityId: target.contract.entity.name } } : {}),
           cardinality: "one" as const,
           required: false,
           supports: { read: true, create: false, update: false },
         }];
+      }));
+      // A field typed as another entity (`x-osf-type: Relation`, as the compiler types every
+      // reference in an operation schema) is that entity's belongsTo, the same projection a
+      // core entity's reference field gets — so the record reads it by name, not by id.
+      const relationships = Object.fromEntries(entity.fields.flatMap((key) => {
+        const target = referenceTarget(recordProperties[key]!, targets);
+        if (!target) return [];
+        const { list, get } = target.operations;
+        const projected: WebRelationshipProjection = {
+          id: `${entityName}.${key}`,
+          key,
+          label: fields[key]!.label,
+          kind: "belongsTo",
+          targetEntityId: target.contract.entity.name,
+          targetRoute: target.route,
+          recordField: key,
+          ownership: "reference",
+          operations: { ...(list ? { list } : {}), ...(get ? { get } : {}) },
+          ...(list ? { collection: { ...target.collection, operations: withoutCreate(target.collection.operations),
+            id: `${target.contract.entity.name}.relationship.collection` } } : {}),
+        };
+        return [[key, projected]];
       }));
       const listRef = refs[entity.operations.list.operation]!;
       const listQuery = operationEntityCollectionQuery(
@@ -1274,6 +1364,16 @@ function projectStandalone(
         entity.fields,
       );
       const getRef = entity.operations.get ? refs[entity.operations.get.operation]! : undefined;
+      const createRef = entity.operations.create ? refs[entity.operations.create.operation]! : undefined;
+      if (createRef) {
+        const properties = objectProperties(createRef.input.schema);
+        for (const [input, context] of Object.entries(entity.operations.create?.bindings ?? {})) {
+          if (!properties[input]) throw new Error(`${entityName}.create binding names unknown input ${input}.`);
+          if (!Object.values(entity.operations.list.bindings ?? {}).includes(context)) {
+            throw new Error(`${entityName}.create binding names unknown collection context ${context}.`);
+          }
+        }
+      }
       // The same target every plugin action carries: the web places a
       // collection action on the collection page and binds a record action to
       // the record it is opened on, without knowing which catalog authored it.
@@ -1301,6 +1401,7 @@ function projectStandalone(
         operations: Object.fromEntries(Object.values(refs).map((ref) => [ref.key, ref])),
         operationSource: {
           idField: entity.idField,
+          ...(entity.operations.create ? { create: { bindings: entity.operations.create.bindings ?? {} } } : {}),
           collection: {
             resultField: entity.operations.list.resultField,
             ...(entity.operations.list.bindings ? { bindings: entity.operations.list.bindings } : {}),
@@ -1322,9 +1423,9 @@ function projectStandalone(
           collection: {
             id: `${entityName}.collection`, kind: "collection", renderer: "operation.entity.collection", modes: ["read"],
             route: entity.route,
-            operations: { read: listRef, ...(collectionActions.length ? { actions: collectionActions } : {}) },
+            operations: { read: listRef, ...(createRef ? { create: createRef } : {}), ...(collectionActions.length ? { actions: collectionActions } : {}) },
             title: localized(entity.title, entityName),
-            searchPlaceholder: localized(undefined, `Search ${entityName}`),
+            searchPlaceholder: { en: `Search ${localized(entity.title, entityName).en}`, nl: `Zoeken in ${localized(entity.title, entityName).nl}` },
             displayField: entity.displayField,
             ...(listQuery?.defaultSort ? { defaultSort: listQuery.defaultSort } : {}),
             columns: entity.columns.map((key) => ({ fieldId: `${entityName}.${key}`, key, label: fields[key]!.label })),
@@ -1338,7 +1439,7 @@ function projectStandalone(
             labels: {},
           } } : {}),
         },
-        relationships: {},
+        relationships,
       } as unknown as WebEntityInterface;
     }
   }
@@ -1381,11 +1482,18 @@ export function buildWebManifest(
       ...(materialize ? { materializeOperationId: materialize.id } : {}),
     }];
   }));
-  // Provider-backed entities project first: a core entity may reference one.
-  const pages = projectStandalone(standalone);
-  const providers = new Map(Object.entries(pages?.entities ?? {}));
   const byName = new Map(projectable.map((entity) => [entity.contract.entity.name, entity]));
-  const projected = projectable.map((entity) => projectEntity(entity, byName, providers));
+  // Provider-backed entities project first: a core entity may reference one. They may in turn
+  // reference a core entity, which only needs its projectable (operations, route), not its projection.
+  const pages = projectStandalone(standalone, byName);
+  const providers = new Map(Object.entries(pages?.entities ?? {}));
+  // Operation-backed normal entities resolve through the same projection as any
+  // relationship provider, but their fields and Operations belong to the entity.
+  for (const entity of projectable.filter(entity => entity.contract.source)) {
+    providers.set(entity.contract.entity.name, projectEntity(entity, byName, providers));
+  }
+  const projected = projectable.map((entity) => entity.contract.source
+    ? providers.get(entity.contract.entity.name)! : projectEntity(entity, byName, providers));
   const missing = missingUiTranslations(projected);
   missing.push(...missingUiTranslations(pages?.operations ?? {}));
   if (resolved.requireTranslations) for (const entity of projectable) {

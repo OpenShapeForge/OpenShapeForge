@@ -4,6 +4,7 @@ import { withSessionRelation } from "./identity-link.js";
 import { assertSessionAddressesOrganization } from "./organization-address.js";
 import type { TrustedSessionContext } from "./trusted-context.js";
 import { EMPTY_SESSION, resolveCredentialSession, type ResolveSessionOptions } from "./session-resolver.js";
+import { assertMemberAccessActive } from './member-access-state.js';
 
 // The credential resolution itself — API key, bearer, trusted context — lives
 // in ./session-resolver.ts; re-exported so every importer keeps one address.
@@ -20,6 +21,7 @@ export async function resolveSessionContext(
   options: ResolveSessionOptions = {},
 ): Promise<TrustedSessionContext> {
   const session = await withSessionRelation(await resolveCredentialSession(headers, options), options);
+  await assertMemberAccessActive(options.db, session);
   return assertSessionAddressesOrganization(
     headers,
     session,

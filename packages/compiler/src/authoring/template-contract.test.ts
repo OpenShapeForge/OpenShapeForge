@@ -20,7 +20,7 @@ describe("the authored template chain", () => {
       const entity = loadEntity(authoring, slug).coreEntity;
       expect(entity.schemaVersion).toBe(3);
       expect("relationships" in entity).toBe(false);
-      expect(entity.authorization?.roles.create).toEqual(["Organization.All.ReadWrite"]);
+      expect(entity.authorization?.roles.create).toEqual(["Templates.Manage"]);
     }
   });
   test("projects four real routes without advertising unsupported child creation", () => {

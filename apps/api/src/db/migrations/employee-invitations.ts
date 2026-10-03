@@ -37,11 +37,9 @@ export async function applyEmployeeInvitationsMigration(db: OpenShapeForgeDataba
       where status = 'pending';
   `.execute(db);
 
-  await ensureCheckConstraint(db, {
-    table: "platform.employee_invitations",
-    name: "employee_invitations_role_check",
-    expression: "role in ('org_admin', 'org_employee')",
-  });
+  // Assignable role names come from the generated authorization catalog.
+  await sql`alter table platform.employee_invitations drop constraint if exists employee_invitations_role_check`.execute(db);
+
   await ensureCheckConstraint(db, {
     table: "platform.employee_invitations",
     name: "employee_invitations_status_check",

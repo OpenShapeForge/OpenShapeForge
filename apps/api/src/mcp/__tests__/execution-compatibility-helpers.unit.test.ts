@@ -189,4 +189,24 @@ describe("execution compatibility helpers", () => {
       expect(errorOf(outcome)?.code).toBe("OPERATION_NOT_FOUND");
     });
   });
+  it("refuses the bridge when a role group of the Operation does not admit the caller (#944)", async () => {
+    const undo = __registerExecutionCompatibilityForTests({
+      plugin: "osf-integration",
+      operation: "osf-integration.service.connect",
+      toolName: "connect_service",
+      auth: { mode: "session", roles: ["integration_admin"], roleGroups: [["Finance.All.Read"]] },
+    });
+    try {
+      const call = (server: ReturnType<typeof __buildGeneratedMcpServerForTests>) =>
+        runtimeHostOperationExecutors.get(server)!({ operation: "osf-integration.service.connect", input: {} }, "request-3", undefined, undefined);
+      await withServer(["integration_admin"], async (_client, server) => {
+        expect(errorOf(await call(server))?.code).toBe("OPERATION_NOT_FOUND");
+      });
+      await withServer(["integration_admin", "Finance.All.Read"], async (_client, server) => {
+        expect(errorOf(await call(server))?.code).not.toBe("OPERATION_NOT_FOUND");
+      });
+    } finally {
+      undo();
+    }
+  });
 });

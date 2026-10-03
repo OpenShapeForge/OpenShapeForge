@@ -26,8 +26,31 @@ export function registerEntityChangeStream(app: FastifyInstance, options: { db?:
     active.set(key, (active.get(key) ?? 0) + 1);
     const abort = new AbortController();
     controllers.add(abort);
-    const close = () => abort.abort();
+    // Released once, by whichever comes first: the generator ending, or the
+    // client leaving — also before the first frame was ever pulled, when the
+    // generator never starts and its finally never runs.
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      reply.raw.off("close", close);
+      request.raw.off("aborted", close);
+      socket?.off("close", close);
+      controllers.delete(abort);
+      const remaining = (active.get(key) ?? 1) - 1;
+      if (remaining) active.set(key, remaining); else active.delete(key);
+    };
+    const close = () => { abort.abort(); release(); };
+    // A client that goes away must release its stream slot at once. Under Bun
+    // the reply never emits "close" for a disconnected client — the request
+    // emits "aborted" and its socket "close" — so a navigation left its stream
+    // counted until rotation and the sixth one within a minute was refused
+    // STREAM_LIMIT (#886). (The request's own "close" is avoided: some Node
+    // versions emit it once the body is read, which would end every stream.)
+    const socket = request.raw.socket;
     reply.raw.on("close", close);
+    request.raw.on("aborted", close);
+    socket?.on("close", close);
     async function* frames() {
       const started = Date.now();
       let validateCursor = true;
@@ -47,10 +70,7 @@ export function registerEntityChangeStream(app: FastifyInstance, options: { db?:
       } catch (error) {
         if (!abort.signal.aborted) request.log.warn({ code: "STREAM_INTERRUPTED" }, "Entity stream interrupted; client may reconnect.");
       } finally {
-        reply.raw.off("close", close);
-        controllers.delete(abort);
-        const remaining = (active.get(key) ?? 1) - 1;
-        if (remaining) active.set(key, remaining); else active.delete(key);
+        release();
       }
     }
     return reply.header("content-type", "text/event-stream; charset=utf-8")

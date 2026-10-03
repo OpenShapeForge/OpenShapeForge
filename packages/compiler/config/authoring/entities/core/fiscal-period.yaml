@@ -112,14 +112,19 @@ fields:
 authorization:
   roles:
     read:
+      - Finance.FiscalPeriod.Read
       - Finance.All.Read
       - Finance.All.ReadWrite
+      - Finance.FiscalPeriod.ReadWrite
     create:
       - Finance.All.ReadWrite
+      - Finance.FiscalPeriod.ReadWrite
     update:
       - Finance.All.ReadWrite
+      - Finance.FiscalPeriod.ReadWrite
     delete:
       - Finance.All.ReadWrite
+      - Finance.FiscalPeriod.ReadWrite
   rowAccess:
     enabled: true
     empty: public

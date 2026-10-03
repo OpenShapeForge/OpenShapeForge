@@ -21,6 +21,7 @@ import {
   tenantRealmName,
 } from "./authoring/role-composites.js";
 import { buildRoleLabels, renderRoleLabels, ROLE_LABELS_PATH } from "./authoring/role-labels.js";
+import { buildAccessPolicy } from "./authoring/access-policy.js";
 import {
   buildIdentityContract,
   IDENTITY_CONTRACT_PATH,
@@ -132,7 +133,7 @@ export type {
   StaticOperationCatalog,
 } from "./plugins.js";
 export type { TableDefinition } from "./schema.js";
-export { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
+export { buildWebManifest, renderWebManifest, hasWebRestCollection } from "./authoring/web-manifest.js";
 export { collectPluginSeedFixtures, prepareRuntimeModules } from "./prepare-runtime.js";
 export { resolveModelFields } from "./authoring/compiler/model.js";
 export { BASE_TYPES, isBaseType, resolveBaseType, osfTypeDefinitionOf, withBaseTypes } from "./authoring/entity-fields.js";
@@ -410,7 +411,7 @@ export async function collectAllArtifacts(
     }
   }
   const entityOperations = collectEntityOperations(entities);
-  const moduleRegistry = buildModuleRegistry(repoRoot, pluginEntries);
+  const moduleRegistry = buildModuleRegistry(repoRoot, pluginEntries, { entities });
   assertOperationRuntimeModules(operations, [
     ...CORE_OPERATION_MODULES,
     ...moduleRegistry.modules.map((module) => module.name),
@@ -556,6 +557,10 @@ export async function collectAllArtifacts(
           ],
     settings: [
       {
+        path: "apps/api/src/generated/compiler/access-policy.json",
+        contents: JSON.stringify(buildAccessPolicy(loadAuthorizationConfigs(authoringDir), keycloakArtifacts), null, 2) + "\n",
+      },
+      {
         path: SETTINGS_POLICY_PATH,
         contents: renderSettingsPolicy(settingsPolicy),
       },
@@ -584,7 +589,8 @@ export async function collectAllArtifacts(
               // authored there because it is loaded before the entities are
               // compiled, and held to the contract here.
               platformPartyReferences: (manifest.relationshipRegister ?? [])
-                .filter((entry) => entry.from.schema === "platform")
+                .filter((entry) => entry.from.schema === "platform" &&
+                  ["tenants.relation_id", "identity_relations.relation_id", "identity_relations.candidate_relation_id"].includes(`${entry.from.table}.${entry.from.column}`))
                 .map((entry) => ({
                   from: `${entry.from.schema}.${entry.from.table}.${entry.from.column}`,
                   to: `${entry.to.schema}.${entry.to.table}`,

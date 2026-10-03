@@ -10,8 +10,8 @@ import {
 } from "./employee-invitation-tools.js";
 
 describe("sessionMayInviteEmployees", () => {
-  test("requires Organization.All.ReadWrite, same as link_identity", () => {
-    expect(sessionMayInviteEmployees({ roles: ["Organization.All.ReadWrite"] })).toBe(true);
+  test("requires Organization.Access.Manage, same as link_identity", () => {
+    expect(sessionMayInviteEmployees({ roles: ["Organization.Access.Manage"] })).toBe(true);
     expect(sessionMayInviteEmployees({ roles: ["org_employee"] })).toBe(false);
     expect(sessionMayInviteEmployees({ roles: [] })).toBe(false);
     expect(sessionMayInviteEmployees({ roles: [] })).toBe(false);
@@ -21,7 +21,7 @@ describe("sessionMayInviteEmployees", () => {
 describe("employeeInvitationToolsForSession", () => {
   test("an administrator is shown all three tools", () => {
     const names = employeeInvitationToolsForSession({
-      roles: ["Organization.All.ReadWrite"],
+      roles: ["Organization.Access.Manage"],
     }).map((tool) => tool.name);
     expect(names.sort()).toEqual(
       [INVITE_EMPLOYEE_TOOL, LIST_INVITATIONS_TOOL, REVOKE_INVITATION_TOOL].sort(),
@@ -33,21 +33,22 @@ describe("employeeInvitationToolsForSession", () => {
     expect(employeeInvitationToolsForSession({ roles: [] })).toEqual([]);
   });
 
-  test("invite_employee's input schema requires email and role, and pins the role enum", () => {
+  test("invite_employee requires a role from the shared organization catalogue", () => {
     const invite = employeeInvitationToolsForSession({
-      roles: ["Organization.All.ReadWrite"],
+      roles: ["Organization.Access.Manage"],
     }).find((tool) => tool.name === INVITE_EMPLOYEE_TOOL)!;
     const schema = invite.inputSchema as unknown as {
       required: string[];
-      properties: { role: { enum: string[] } };
+      properties: { role: { enum?: string[]; "x-osf-reference": { entity: string; valueField: string } } };
     };
     expect(schema.required).toEqual(["email", "role"]);
-    expect(schema.properties.role.enum.sort()).toEqual(["org_admin", "org_employee"]);
+    expect(schema.properties.role.enum).toBeUndefined();
+    expect(schema.properties.role["x-osf-reference"]).toEqual({ entity: "AccessRole", valueField: "key" });
   });
 
   test("invite_employee describes admission and conditional delivery truthfully", () => {
     const invite = employeeInvitationToolsForSession({
-      roles: ["Organization.All.ReadWrite"],
+      roles: ["Organization.Access.Manage"],
     }).find((tool) => tool.name === INVITE_EMPLOYEE_TOOL)!;
     expect(invite.title).toBe("Admit an employee");
     expect(invite.description).toContain("receives no redundant mail");

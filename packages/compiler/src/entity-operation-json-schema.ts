@@ -238,6 +238,15 @@ function openOperationOffers(): JsonObject {
   return { type: "array", items: { type: "object", additionalProperties: true } };
 }
 
+/** Shared canonical record envelope; offers are additionally checked by core execution. */
+export function entityRecordEnvelopeSchema(record: JsonObject): JsonObject {
+  return { type: "object", additionalProperties: false, required: ["data", "operations"],
+    properties: {
+      data: { ...record, "x-osf-i18n": { title: { en: "Record", nl: "Record" } } },
+      operations: { ...openOperationOffers(), "x-osf-i18n": { title: { en: "Available actions", nl: "Beschikbare acties" } } },
+    } };
+}
+
 function exactFilter(schema: JsonObject): JsonObject {
   return {
     type: "object",

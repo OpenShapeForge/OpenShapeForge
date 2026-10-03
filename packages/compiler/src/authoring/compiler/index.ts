@@ -36,6 +36,7 @@ import { buildEntityOperations } from "./entity-operations.js";
 import { resolveDerivedOnCreateBindings } from "./derive-on-create.js";
 import { withStatusTransitions } from "./transitions.js";
 import { pluginOperations, webOperationActions, webUi } from "../entity-model.js";
+import { operationSourceEntity } from "./operation-source.js";
 
 /**
  * Make trusted Operation stamps the field's writer contract before any input
@@ -309,6 +310,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
         : {}),
     },
     storage: { table: tableName, columns },
+    ...(coreEntity.source ? { source: coreEntity.source } : {}),
     ...(blueprint ? { blueprint } : {}),
     ...(transitions.length ? { transitions } : {}),
     ...(coreEntity.workerAccess ? { workerAccess: coreEntity.workerAccess } : {}),
@@ -328,11 +330,12 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     ...(coreEntity.hardDelete ? { hardDelete: coreEntity.hardDelete } : {}),
     crud,
     entityOperations,
-    pluginOperations: pluginOperations(coreEntity),
+    pluginOperations: pluginOperations(operationSourceEntity(coreEntity, modelFields, profiles.length > 0)),
     interfaces: {
       ...(coreEntity.interfaces?.web
         ? {
             web: {
+              ...(coreEntity.interfaces.web.views?.record?.layout.preset ? { recordPreset: coreEntity.interfaces.web.views.record.layout.preset } : {}),
               ...(Object.keys(namedViews).length ? { namedViews } : {}),
               ...(coreEntity.interfaces.web.fields
                 ? { fields: coreEntity.interfaces.web.fields }

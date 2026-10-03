@@ -594,11 +594,12 @@ operations:
       en: Invite first tenant administrator
       nl: Eerste tenantbeheerder uitnodigen
     description:
-      en: Invites the first organization administrator by email for ONE existing active tenant, through the Keycloak organization
-        invitation flow. Repeating the same request reuses the invitation without resending. Refuses a different
-        first administrator once one exists or is pending.
-      nl: Nodigt per e-mail de eerste org_admin uit voor ÉÉN bestaande actieve tenant, via de Keycloak-organisatie-uitnodiging.
-        Herhalen hergebruikt de uitnodiging zonder opnieuw te versturen. Weigert een andere eerste beheerder zodra
+      en: Invites the first organization administrator for ONE existing active tenant. Sends an invitation e-mail only to an
+        address without an account in the organization; an existing account gets no e-mail and just signs in. Repeating the
+        same request never resends. Refuses a different first administrator once one exists or is pending. The result's
+        delivery, signInUrl and nextStep say whether mail went out and what to tell the person.
+      nl: Nodigt de eerste org_admin uit voor ÉÉN bestaande actieve tenant. Alleen een adres zonder account in de organisatie
+        krijgt een uitnodigingsmail; een bestaand account meldt zich gewoon aan. Herhalen verstuurt nooit opnieuw. Weigert een andere eerste beheerder zodra
         er één bestaat of in afwachting is.
     implementation:
       type: plugin
@@ -621,7 +622,23 @@ operations:
         - slug
         - email
     output:
-      schema: *id004
+      schema: &invitationResultOutput
+        type: object
+        additionalProperties: true
+        properties:
+          delivery:
+            type: string
+            enum: [email_sent, no_email_existing_account, already_pending, already_accepted]
+            x-osf-i18n:
+              title: { en: Delivery, nl: Bezorging }
+              enum:
+                email_sent: { en: Invitation e-mail requested, nl: Uitnodigingsmail aangevraagd }
+                no_email_existing_account: { en: 'No e-mail, existing account', nl: 'Geen mail, bestaand account' }
+                already_pending: { en: Earlier invitation outstanding, nl: Eerdere uitnodiging staat open }
+                already_accepted: { en: Already a member, nl: Al lid }
+          signInUrl: { type: [string, 'null'], x-osf-i18n: { title: { en: Sign-in URL, nl: Aanmeld-URL } } }
+          nextStep: { type: string, x-osf-i18n: { title: { en: Next step, nl: Volgende stap } } }
+        required: [delivery, signInUrl, nextStep]
     auth:
       mode: control
       roles:
@@ -642,7 +659,7 @@ operations:
       en: List tenant invitations
       nl: Tenantuitnodigingen bekijken
     description:
-      en: Lists the outstanding Keycloak invitations for one tenant together with their stored roles, delivery dates, expiry and any pending local role assignments missing at the provider. Never returns invitation links.
+      en: Lists the outstanding Keycloak invitations for one tenant together with their stored roles, delivery dates, expiry, plus unresolved pending role assignments without a provider invitation, either an existing account awaiting sign-in (no e-mail by design; see signInUrl) or drift. Never returns invitation links.
       nl: Toont de openstaande Keycloak-uitnodigingen voor één tenant met hun opgeslagen rollen, verzenddata, vervaldatum en lokale roltoekenningen die bij de provider ontbreken. Geeft nooit uitnodigingslinks terug.
     implementation:
       type: plugin
@@ -698,7 +715,20 @@ operations:
               required: [tenantSlug, invitationId, email, firstName, lastName, status, sentAt, expiresAt, role, registrationStatus, canResend, canRevoke]
           unresolved:
             type: array
-            items: { type: object, additionalProperties: true }
+            items:
+              type: object
+              additionalProperties: true
+              properties:
+                status:
+                  type: string
+                  enum: [awaiting_sign_in, provider_missing]
+                  x-osf-i18n:
+                    title: { en: Status, nl: Status }
+                    enum:
+                      awaiting_sign_in: { en: 'Existing account, awaiting sign-in', nl: 'Bestaand account, wacht op aanmelding' }
+                      provider_missing: { en: Provider invitation missing, nl: Uitnodiging ontbreekt bij provider }
+                signInUrl: { type: [string, 'null'], x-osf-i18n: { title: { en: Sign-in URL, nl: Aanmeld-URL } } }
+              required: [status]
             x-osf-i18n: { title: { en: Unresolved invitations, nl: Onopgeloste uitnodigingen } }
         required: [tenant, invitations, unresolved]
     auth:
@@ -740,7 +770,13 @@ operations:
   createTenantInvitation:
     id: control.create-tenant-invitation
     name: { en: Invite tenant member, nl: Tenantlid uitnodigen }
-    description: { en: Invites one member through Keycloak and records the allowlisted role applied after acceptance., nl: Nodigt één lid uit via Keycloak en legt de toegestane rol vast die na acceptatie wordt toegepast. }
+    description:
+      en: Admits one person with an allowlisted role, applied at their next sign-in. Sends an invitation e-mail only to an
+        address without an account in the organization; an existing account (including one assign_tenant_member_roles
+        refused because they never signed in) gets no e-mail. The result's delivery, signInUrl and nextStep say what to
+        tell the person.
+      nl: Laat één persoon toe met een toegestane rol, toegepast bij de volgende aanmelding. Stuurt alleen een
+        uitnodigingsmail naar een adres zonder account in de organisatie; een bestaand account krijgt geen mail.
     implementation: { type: plugin, plugin: osf-control, handler: createTenantInvitation }
     input:
       schema:
@@ -756,7 +792,7 @@ operations:
             enum: [org_admin, org_employee]
             x-osf-i18n: { title: { en: Role, nl: Rol }, enum: { org_admin: { en: Organization administrator, nl: Organisatiebeheerder }, org_employee: { en: Employee, nl: Medewerker } } }
         required: [slug, email, role]
-    output: { schema: *id004 }
+    output: { schema: *invitationResultOutput }
     auth: { mode: control, roles: [platform-operator] }
     tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
     effects: { data: write, external: write }
@@ -840,7 +876,7 @@ operations:
         - slug
         - invitationId
     output:
-      schema: *id004
+      schema: *invitationResultOutput
     auth:
       mode: control
       roles:
@@ -1714,7 +1750,16 @@ operations:
                 roles: { type: array, items: { type: string }, x-osf-i18n: { title: { en: Roles, nl: Rollen } } }
                 credentialCount: { type: integer, x-osf-i18n: { title: { en: Credentials, nl: Credentials } } }
                 credentialTypes: { type: array, items: { type: string }, x-osf-i18n: { title: { en: Credential types, nl: Credentialtypen } } }
-              required: [tenantSlug, memberId, username, email, firstName, lastName, enabled, emailVerified, roles, credentialCount, credentialTypes]
+                linkStatus:
+                  type: [string, 'null']
+                  enum: [linked, pending_confirmation, null]
+                  description: How the member's sign-in stands in this tenant; null when they never signed in here. Roles are written only while linked.
+                  x-osf-i18n:
+                    title: { en: Relation link, nl: Koppeling met relatie }
+                    enum: { linked: { en: Linked, nl: Gekoppeld }, pending_confirmation: { en: Pending confirmation, nl: Wacht op bevestiging } }
+                relationName: { type: [string, 'null'], description: The Relation a linked member is., x-osf-i18n: { title: { en: Relation, nl: Relatie } } }
+                candidateRelationName: { type: [string, 'null'], description: The Relation a pending sign-in matched; confirm_tenant_member_link links exactly this one., x-osf-i18n: { title: { en: Candidate relation, nl: Voorgestelde relatie } } }
+              required: [tenantSlug, memberId, username, email, firstName, lastName, enabled, emailVerified, roles, credentialCount, credentialTypes, linkStatus, relationName, candidateRelationName]
         required: [tenantSlug, members]
     auth: { mode: control, roles: [platform-operator] }
     tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
@@ -1770,7 +1815,17 @@ operations:
     effects: { data: write, external: write }
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: acknowledgement }
-    errors: *id002
+    errors: &memberRoleErrors
+    - { status: 400, code: VALIDATION, description: "The input does not describe a valid request." }
+    - { status: 401, code: UNAUTHENTICATED, description: "A control-realm operator token is required." }
+    - { status: 403, code: FORBIDDEN, description: "The operator lacks a required control-realm role." }
+    - { status: 404, code: NOT_FOUND, description: "The tenant, organization, entry or notice does not exist." }
+    - { status: 409, code: CONFLICT, description: "The request contradicts the current platform state." }
+    - { status: 409, code: MEMBER_NOT_SIGNED_IN, description: "The account has not signed in to this tenant yet; create a tenant invitation with the intended role so it is applied on first sign-in." }
+    - { status: 409, code: MEMBER_LINK_PENDING, description: "The member's sign-in awaits confirmation of its candidate Relation; confirm_tenant_member_link first, then assign roles." }
+    - { status: 409, code: MEMBER_NOT_LINKED, description: "The member's sign-in matched no Relation to confirm; an organization administrator of the tenant links them to their Relation first." }
+    - { status: 502, code: IDENTITY_PROVIDER_ERROR, description: "The identity provider refused or failed the request." }
+    - { status: 503, code: CONTROL_PLANE_NOT_CONFIGURED, description: "The control plane is not configured on this deployment." }
   removeTenantMemberRoles:
     id: control.remove-tenant-member-roles
     name: { en: Remove member roles, nl: Lidrollen intrekken }
@@ -1781,6 +1836,28 @@ operations:
     auth: { mode: control, roles: [platform-operator] }
     tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
     effects: { data: write, external: write }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors: *memberRoleErrors
+  confirmTenantMemberLink:
+    id: control.confirm-tenant-member-link
+    name: { en: Confirm link, nl: Koppeling bevestigen }
+    description:
+      en: Confirms, on the member's behalf, the candidate Relation their own sign-in matched in this tenant, so roles can be assigned. Links exactly that Relation, never another; say which one to the person first.
+      nl: Bevestigt namens het lid de voorgestelde relatie waarmee de eigen aanmelding in deze tenant overeenkwam, zodat rollen kunnen worden toegekend. Koppelt precies die relatie en nooit een andere.
+    implementation: { type: plugin, plugin: osf-control, handler: confirmTenantMemberLink }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+        required: [slug, memberId]
+    output: { schema: *tenantMemberOutput }
+    auth: { mode: control, roles: [platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: write, external: none }
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: acknowledgement }
     errors: *id002
@@ -2008,6 +2085,10 @@ interfaces:
         method: POST
         path: /api/control/v1/tenants/:slug/members/:memberId/roles/remove
         response: { status: 200, kind: json }
+      confirmTenantMemberLink:
+        method: POST
+        path: /api/control/v1/tenants/:slug/members/:memberId/link/confirm
+        response: { status: 200, kind: json }
       removeTenantMembership:
         method: DELETE
         path: /api/control/v1/tenants/:slug/members/:memberId
@@ -2150,6 +2231,8 @@ interfaces:
         name: assign_tenant_member_roles
       removeTenantMemberRoles:
         name: remove_tenant_member_roles
+      confirmTenantMemberLink:
+        name: confirm_tenant_member_link
       removeTenantMembership:
         name: remove_tenant_membership
       requestPasskeyRecovery:
@@ -2245,7 +2328,7 @@ interfaces:
         page: platform
         order: 4
     entities:
-      Tenant:
+      PlatformTenant:
         title: { en: Tenants, nl: Tenants }
         route: /tenants
         recordRoute: /tenants/:slug
@@ -2267,12 +2350,18 @@ interfaces:
         recordRoute: /tenants/:slug/members/:memberId
         idField: memberId
         displayField: email
-        fields: [tenantSlug, memberId, username, email, firstName, lastName, enabled, emailVerified, roles, credentialCount, credentialTypes]
-        columns: [email, username, enabled, emailVerified, roles, credentialCount]
+        fields: [tenantSlug, memberId, username, email, firstName, lastName, enabled, emailVerified, linkStatus, relationName, candidateRelationName, roles, credentialCount, credentialTypes]
+        columns: [email, username, enabled, linkStatus, roles, credentialCount]
         operations:
           list: { operation: listTenantMembers, resultField: members }
           get: { operation: getTenantMember }
-          recordActions: [assignTenantMemberRoles, removeTenantMemberRoles, removeTenantMembership, requestPasskeyRecovery]
+          recordActions:
+            - operation: confirmTenantMemberLink
+              visibleWhen: { conditions: [{ field: linkStatus, operator: eq, value: pending_confirmation }, { field: candidateRelationName, operator: isNotEmpty }] }
+            - assignTenantMemberRoles
+            - removeTenantMemberRoles
+            - removeTenantMembership
+            - requestPasskeyRecovery
         related:
           - { entity: TenantCredential, label: { en: Credentials, nl: Credentials }, route: /tenants/:slug/members/:memberId/credentials }
       TenantInvitation:

@@ -183,6 +183,7 @@
                     "properties": {
                       "list": { "$ref": "#/$defs/entityRead" },
                       "get": { "$ref": "#/$defs/entityRead" },
+                      "create": { "$ref": "#/$defs/entityRead" },
                       "collectionActions": { "$ref": "#/$defs/operationKeys" },
                       "recordActions": { "$ref": "#/$defs/recordActions" }
                     }

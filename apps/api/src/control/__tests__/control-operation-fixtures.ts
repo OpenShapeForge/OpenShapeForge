@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The runtime contracts of the 37 `osf-control` Operations, as the compiler
+ * The runtime contracts of the 38 `osf-control` Operations, as the compiler
  * lowers the authored catalog (`packages/compiler/config/authoring/
  * operations/control.yaml`): key = the authored `id`, `handler` = the
  * authored handler, `auth: { mode: control, roles }`, `tenancy: none`,
@@ -193,6 +193,11 @@ const AUTHORED: readonly Authored[] = [
     input: { properties: { slug, memberId: { type: "string" }, roles: { type: "array", items: { type: "string", enum: ["org_admin", "org_employee"] } } }, required: ["slug", "memberId", "roles"] },
     rest: { method: "POST", path: `/api/control/v1/tenants/:slug/members/:memberId/roles/${mode}`, status: 200 }, mcp: `${mode}_tenant_member_roles`,
   })),
+  {
+    id: "control.confirm-tenant-member-link", handler: "confirmTenantMemberLink", title: "Confirm link",
+    description: "Confirms, on the member's behalf, the candidate Relation their own sign-in matched.", roles: [CONTROL_ROLE], effects: WRITE, idempotency: "natural", acknowledgement: true,
+    input: { properties: { slug, memberId: { type: "string" } }, required: ["slug", "memberId"] }, rest: { method: "POST", path: "/api/control/v1/tenants/:slug/members/:memberId/link/confirm", status: 200 }, mcp: "confirm_tenant_member_link",
+  },
   {
     id: "control.remove-tenant-membership", handler: "removeTenantMembership", title: "Remove tenant membership",
     description: "Removes an organization membership without deleting the realm user.", roles: [CONTROL_ROLE], effects: WRITE_EXTERNAL, idempotency: "natural", acknowledgement: true,

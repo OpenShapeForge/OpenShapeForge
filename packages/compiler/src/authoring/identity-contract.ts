@@ -22,7 +22,26 @@ import type { AuthorizationConfigFile, CompiledEntityContract, CompiledField } f
 
 export const IDENTITY_CONTRACT_PATH = "apps/api/src/generated/compiler/identity.json";
 
-export type IdentityContract = NonNullable<AuthorizationConfigFile["identity"]>;
+export type PublicIdentityProvider = { realm: string; organizationAlias: string; alias: string; label: string; type: string };
+export type IdentityContract = NonNullable<AuthorizationConfigFile["identity"]> & { publicProviders: PublicIdentityProvider[] };
+
+/** Only explicitly organization-bound presentation metadata, never broker configuration. */
+export function publicIdentityProviders(configs: readonly AuthorizationConfigFile[]): PublicIdentityProvider[] {
+  const result: PublicIdentityProvider[] = [];
+  const seen = new Set<string>();
+  for (const config of configs) for (const provider of config.keycloak.identityProviders ?? []) {
+    const organizationAlias = provider.config?.["organization.alias"];
+    if (organizationAlias === undefined) continue; // Realm-wide configuration is not tenant permission.
+    if (typeof organizationAlias !== "string" || !organizationAlias.trim()) throw new Error("Identity provider organization alias must be an explicit nonempty string.");
+    const realm = config.realm?.name;
+    if (!realm || !provider.displayName) throw new Error("Organization-bound identity providers require an authored realm and displayName.");
+    const key = JSON.stringify([realm, organizationAlias, provider.alias]);
+    if (seen.has(key)) throw new Error("Duplicate organization-bound identity provider metadata.");
+    seen.add(key);
+    result.push({ realm, organizationAlias, alias: provider.alias, label: provider.displayName, type: provider.providerId });
+  }
+  return result.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+}
 
 type Entity = Pick<CompiledEntityContract, "entity" | "model" | "storage" | "authorization">;
 
@@ -127,6 +146,7 @@ export function buildIdentityContract(
     actingParty: { ...actingParty },
     person: { ...person },
     loginContact: { ...loginContact },
+    publicProviders: publicIdentityProviders(configs),
   };
 }
 

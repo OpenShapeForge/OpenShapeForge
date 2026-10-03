@@ -4,23 +4,23 @@ OpenShapeForge is distributed under the Business Source License 1.1 (see [LICENS
 
 These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a source-available one.
 
-Regenerate with `bun run notices`. 510 packages.
+Regenerate with `bun run notices`. 505 packages.
 
 ## License summary
 
 | License | Packages |
 | --- | --- |
-| MIT | 391 |
-| Apache-2.0 | 56 |
+| MIT | 389 |
+| Apache-2.0 | 55 |
 | ISC | 31 |
 | BSD-3-Clause | 16 |
 | BlueOak-1.0.0 | 5 |
-| MPL-2.0 | 4 |
-| LGPL-3.0-or-later | 2 |
+| MPL-2.0 | 3 |
 | 0BSD | 1 |
 | BSD-2-Clause | 1 |
 | CC-BY-4.0 | 1 |
 | EPL-2.0 | 1 |
+| LGPL-3.0-or-later | 1 |
 | Unlicense | 1 |
 
 ## Packages
@@ -215,20 +215,12 @@ Regenerate with `bun run notices`. 510 packages.
 ### @img/colour@1.1.0
 - License: **MIT** — git+https://github.com/lovell/colour.git
 
-### @img/sharp-libvips-linux-x64@1.3.2
-- License: **LGPL-3.0-or-later** — https://sharp.pixelplumbing.com
-- Author: Lovell Fuller <npm@lovell.info>
-
-### @img/sharp-libvips-linuxmusl-x64@1.3.2
-- License: **LGPL-3.0-or-later** — https://sharp.pixelplumbing.com
-- Author: Lovell Fuller <npm@lovell.info>
-
-### @img/sharp-linux-x64@0.35.3
+### @img/sharp-darwin-arm64@0.35.3
 - License: **Apache-2.0** — https://sharp.pixelplumbing.com
 - Author: Lovell Fuller <npm@lovell.info>
 
-### @img/sharp-linuxmusl-x64@0.35.3
-- License: **Apache-2.0** — https://sharp.pixelplumbing.com
+### @img/sharp-libvips-darwin-arm64@1.3.2
+- License: **LGPL-3.0-or-later** — https://sharp.pixelplumbing.com
 - Author: Lovell Fuller <npm@lovell.info>
 
 ### @ioredis/commands@1.10.0
@@ -275,10 +267,7 @@ Regenerate with `bun run notices`. 510 packages.
 - License: **MIT** — https://github.com/vercel/next.js
 - Author: Next.js Team <support@vercel.com>
 
-### @next/swc-linux-x64-gnu@16.2.11
-- License: **MIT** — https://github.com/vercel/next.js
-
-### @next/swc-linux-x64-musl@16.2.11
+### @next/swc-darwin-arm64@16.2.11
 - License: **MIT** — https://github.com/vercel/next.js
 
 ### @opentelemetry/api@1.9.1
@@ -594,10 +583,7 @@ Regenerate with `bun run notices`. 510 packages.
 ### @tailwindcss/oxide@4.3.3
 - License: **MIT** — git+https://github.com/tailwindlabs/tailwindcss.git
 
-### @tailwindcss/oxide-linux-x64-gnu@4.3.3
-- License: **MIT** — git+https://github.com/tailwindlabs/tailwindcss.git
-
-### @tailwindcss/oxide-linux-x64-musl@4.3.3
+### @tailwindcss/oxide-darwin-arm64@4.3.3
 - License: **MIT** — git+https://github.com/tailwindlabs/tailwindcss.git
 
 ### @tailwindcss/postcss@4.3.3
@@ -1046,7 +1032,7 @@ Regenerate with `bun run notices`. 510 packages.
 - License: **BSD-3-Clause** — https://github.com/fastify/fast-uri
 - Author: Vincent Le Goff <vince.legoff@gmail.com> (https://github.com/zekth)
 
-### fastify@5.10.0
+### fastify@5.12.2
 - License: **MIT** — https://fastify.dev/
 - Author: Matteo Collina <hello@matteocollina.com>
 
@@ -1242,10 +1228,7 @@ Regenerate with `bun run notices`. 510 packages.
 ### lightningcss@1.32.0
 - License: **MPL-2.0** — https://github.com/parcel-bundler/lightningcss.git
 
-### lightningcss-linux-x64-gnu@1.32.0
-- License: **MPL-2.0** — https://github.com/parcel-bundler/lightningcss.git
-
-### lightningcss-linux-x64-musl@1.32.0
+### lightningcss-darwin-arm64@1.32.0
 - License: **MPL-2.0** — https://github.com/parcel-bundler/lightningcss.git
 
 ### lodash.camelcase@4.3.0
@@ -2681,7 +2664,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ```
 </details>
 
-<details><summary>@img/sharp-linux-x64@0.35.3, @img/sharp-linuxmusl-x64@0.35.3, sharp@0.35.3</summary>
+<details><summary>@img/sharp-darwin-arm64@0.35.3, sharp@0.35.3</summary>
 
 ```
 Apache License
@@ -4229,7 +4212,7 @@ limitations under the License.
 ```
 </details>
 
-<details><summary>@tailwindcss/node@4.3.3, @tailwindcss/oxide@4.3.3, @tailwindcss/oxide-linux-x64-gnu@4.3.3, @tailwindcss/oxide-linux-x64-musl@4.3.3, @tailwindcss/postcss@4.3.3, tailwindcss@4.3.3</summary>
+<details><summary>@tailwindcss/node@4.3.3, @tailwindcss/oxide@4.3.3, @tailwindcss/oxide-darwin-arm64@4.3.3, @tailwindcss/postcss@4.3.3, tailwindcss@4.3.3</summary>
 
 ```
 MIT License
@@ -7262,7 +7245,7 @@ The complete list of contributors can be found at:
 ```
 </details>
 
-<details><summary>fastify@5.10.0</summary>
+<details><summary>fastify@5.12.2</summary>
 
 ```
 MIT License
@@ -8307,7 +8290,7 @@ The complete list of contributors can be found at:
 ```
 </details>
 
-<details><summary>lightningcss@1.32.0, lightningcss-linux-x64-gnu@1.32.0, lightningcss-linux-x64-musl@1.32.0</summary>
+<details><summary>lightningcss@1.32.0, lightningcss-darwin-arm64@1.32.0</summary>
 
 ```
 Mozilla Public License Version 2.0

@@ -48,6 +48,8 @@ authorization:
     read:
       - CaseFile.All.Read
       - CaseFile.All.ReadWrite
+      # Core RLS admits this role only through the tenant-owned avatar.
+      - Organization.Access.Manage
     create:
       - CaseFile.All.ReadWrite
     update:
@@ -263,7 +265,10 @@ fields:
   - key: documentId
     required: true
     readOnly: true
-    writtenBy: [Document.materialize]
+    # DocumentVersion.create names the document it adds a version to (its own
+    # input requires documentId); listing it keeps that field its own rather
+    # than refused as Document.materialize's.
+    writtenBy: [Document.materialize, DocumentVersion.create]
     immutable: true
     label:
       en: Document ID

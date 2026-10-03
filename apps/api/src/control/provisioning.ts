@@ -188,6 +188,8 @@ export async function provisionTenant(
         values (${result.rows[0].id}, ${result.rows[0].id}, ${slug}, ${name})
         on conflict (id) do update set name = excluded.name
       `.execute(trx);
+      const { seedStarterGroups } = await import('../accounts/starter-groups.js');
+      await seedStarterGroups(trx, result.rows[0].id);
       return result.rows[0];
     },
   );

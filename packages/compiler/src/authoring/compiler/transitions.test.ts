@@ -98,6 +98,12 @@ describe("status transitions", () => {
   test("the compiled rule table reaches the contract and the web manifest with the record action", () => {
     expect(contract.transitions).toEqual([{
       field: "status", initial: "pending",
+      // The field's and the states' labels, for the refusal a person reads.
+      label: { en: "Status", nl: "Status" },
+      values: {
+        pending: { en: "Pending", nl: "In afwachting" }, triggered: { en: "Triggered", nl: "Getriggerd" },
+        invoiced: { en: "Invoiced", nl: "Gefactureerd" }, cancelled: { en: "Cancelled", nl: "Geannuleerd" },
+      },
       rules: [
         {
           key: "trigger", operation: "AgreementMilestone.trigger", from: ["pending"], to: "triggered", label: { en: "Trigger", nl: "Triggeren" },

@@ -235,6 +235,10 @@ clientRoleComposites:
       composites:
         erp-provider:
           - Organization.All.ReadWrite
+          - Organization.Access.Manage
+          - Organization.Accounts.Read
+          - Organization.Accounts.Manage
+          - Templates.Manage
           - Organization.All.Read
           - General.All.ReadWrite
           - General.All.Read
@@ -246,7 +250,6 @@ clientRoleComposites:
       description: Organization employee — invited or assigned per organization
       composites:
         erp-provider:
-          - General.All.Read
           - Relations.All.Read
 
 # What a role means to the person holding it, in the languages the deployment
@@ -294,6 +297,8 @@ clientRoles:
     - Quality.All.Read
     - Maintenance.All.ReadWrite
     - Organization.All.ReadWrite
+    - Organization.Access.Manage
+    - Templates.Manage
     - Agreements.All.ReadWrite
     - Agreements.All.Read
     - ProjectDevelopment.All.ReadWrite
@@ -567,7 +572,7 @@ clientRoles:
 # entity has.
 identity:
   administratorRole: Organization.All.ReadWrite
-  memberRoles: [General.All.Read]
+  memberRoles: [Relations.All.Read]
   actingParty:
     entity: Relation
     nameField: displayName

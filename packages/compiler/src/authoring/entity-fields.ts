@@ -74,18 +74,23 @@ export function deriveEntityOsfTypes(
     if (!/^[a-z][A-Za-z0-9]*$/.test(key)) throw new Error(`Osf type ${key} must be camelCase; PascalCase names are entities.`);
   }
   const names = new Set(entities.map((entity) => entity.entity));
-  const isEntityType = (osfType: string) => names.has(osfType);
-  const sources = entities.map(inverseSource);
+  const isEntityType = (osfType: string) => names.has(osfType) && !entities.find(entity => entity.entity === osfType)?.source;
+  const sources = entities.filter(entity => !entity.source).map(inverseSource);
   for (const entity of entities) {
     if (!/^[A-Z][A-Za-z0-9]*$/.test(entity.entity)) throw new Error(`Invalid entity osf type name: ${entity.entity}.`);
     if (result[entity.entity]) throw new Error(`Osf type ${entity.entity} duplicates a loaded entity.`);
+    if (entity.source) for (const owner of entities) for (const field of owner.fields) {
+      if (field.osfType === entity.entity && !field.provider && !field.relationship?.provider) {
+        throw new Error(`${owner.entity}.${field.key}: Operation-backed source ${entity.entity} cannot silently replace a stored entity reference. Preserve/migrate existing columns explicitly; new references require provider.bindings.`);
+      }
+    }
     assertNoAuthoredCollections(entity, isEntityType);
     result[entity.entity] = {
-      kind: "entity",
+      kind: entity.source ? "provider" : "entity",
       entity: entity.entity,
       entityIdentity: entity.baseEntity !== false || entity.fields.some((field) => field.key === "id"),
-      baseType: "string",
-      validation: { format: "uuid" },
+      baseType: entity.source ? "object" : "string",
+      ...(entity.source ? {} : { validation: { format: "uuid" } }),
       label: entity.labels ?? { en: entity.title ?? entity.entity },
       pluralLabel: defaultInverseLabel(entity),
       shape: withInverseCollections(entity.entity, entity.fields, deriveInverseCollections(entity.entity, sources, isEntityType)),
@@ -111,7 +116,8 @@ export function deriveEntityOsfTypes(
     result[identityKey] = {
       kind: "entityId", entity: entity.entity, baseType: "string",
       label: entity.labels ?? { en: entity.title ?? entity.entity },
-      validation: { format: "uuid" },
+      ...(entity.source ? (entity.fields.find(field => field.key === "id")?.validation
+        ? { validation: entity.fields.find(field => field.key === "id")!.validation } : {}) : { validation: { format: "uuid" } }),
       ...(enumerable ? { optionSource: { type: "entity", source: entity.entity, valueField: "id" } } : {}),
       displayTemplate: entity.displayTemplate ?? "{{id}}",
       filterField: entity.filterField ?? "id",
@@ -125,6 +131,14 @@ export function deriveEntityOsfTypes(
     const target = result[versionEntity];
     if (target?.kind !== "entity") throw new Error(`${entity.entity}: versioning.versionEntity ${versionEntity} is not a loaded entity.`);
     target.versionEntityOf = entity.entity;
+  }
+  for (const [key, definition] of Object.entries(catalog)) {
+    if (!definition.entity) continue;
+    const target = result[definition.entity];
+    if (!target || target.kind !== "entity" || definition.baseType !== "string") {
+      throw new Error(`Osf type ${key}: entity must refine a loaded entity reference with baseType string.`);
+    }
+    result[key] = { ...target, ...definition, validation: { ...definition.validation, format: "uuid" }, kind: "entity", entity: definition.entity };
   }
   return result;
 }

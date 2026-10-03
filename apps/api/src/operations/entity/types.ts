@@ -108,6 +108,8 @@ export type GeneratedCrudTable = {
     /** Status state machines declared on fields; each rule is the Operation `operation`. */
     transitions?: Array<{
       field: string;
+      label?: { en?: string; nl?: string };
+      values?: Record<string, { en?: string; nl?: string }>;
       initial: string;
       rules: Array<{
         key: string;
@@ -116,12 +118,14 @@ export type GeneratedCrudTable = {
         to: string;
         label: { en?: string; nl?: string };
         recordPermission?: "edit";
-        preconditions?: Array<{ field: string; present?: boolean; via?: string; in?: Array<string | number | boolean> }>;
+        preconditions?: Array<{ field: string; present?: boolean; via?: string; in?: Array<string | number | boolean>; refusal?: { en?: string; nl?: string } }>;
         writes?: Array<{ field: string; required: boolean; agreesOn?: string[] }>;
         stamps?: Array<{ field: string; value: "now" | "actor"; actor?: "relation" | "user" }>;
       }>;
     }>;
     authoringEntityName?: string;
+    /** The entity's authored name in both languages, for what a person reads. */
+    labels?: { en?: string; nl?: string };
     versioning?: {
       strategy: "publishedSnapshot";
       versionEntity: string;

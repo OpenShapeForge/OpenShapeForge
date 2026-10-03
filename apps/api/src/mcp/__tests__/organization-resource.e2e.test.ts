@@ -18,10 +18,10 @@ import { PROTECTED_RESOURCE_METADATA_PATH } from "../protected-resource-metadata
 const ISSUER = "https://keycloak.test/realms/openshapeforge";
 const HOST = "127.0.0.1:3161";
 const ORIGIN = `http://${HOST}`;
-const ZEROCOPTER_ORG = "8ba94fb8-08d3-4907-9af3-5bd1e2018f46";
-const HUBBLE_ORG = "2e45b405-2acc-4199-b1e3-9a9dc1236ec3";
-const ZEROCOPTER_TENANT = "33333333-3333-4333-8333-333333333333";
-const HUBBLE_TENANT = "292a5b94-76f4-43f2-82cd-df09656e912f";
+const ACME_ORG = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const EXAMPLE_ORG = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const ACME_TENANT = "33333333-3333-4333-8333-333333333333";
+const EXAMPLE_TENANT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 const MANAGED_ENV = [
   "OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI",
@@ -57,13 +57,13 @@ beforeAll(async () => {
   jwks = Bun.serve({ port: 0, fetch: () => Response.json({ keys: [jwk] }) });
   process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI = new URL("/certs", jwks.url).href;
   process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = ISSUER;
-  process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = "hubble-api";
+  process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = "example-api";
   process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUTHORIZED_PARTIES = "codex";
   __resetSessionResolverForTests();
   __setTenantForOrganizationForTests(async (realm, organizationId) => {
     if (realm !== "openshapeforge") return null;
-    if (organizationId === ZEROCOPTER_ORG) return ZEROCOPTER_TENANT;
-    if (organizationId === HUBBLE_ORG) return HUBBLE_TENANT;
+    if (organizationId === ACME_ORG) return ACME_TENANT;
+    if (organizationId === EXAMPLE_ORG) return EXAMPLE_TENANT;
     return null;
   });
   app = createApiApp({ cors: false, modules: await loadRuntimeModules() });
@@ -85,8 +85,8 @@ beforeEach(() => {
   // The tenant lookup seam is cleared by the reset; keep it for every test.
   __setTenantForOrganizationForTests(async (realm, organizationId) => {
     if (realm !== "openshapeforge") return null;
-    if (organizationId === ZEROCOPTER_ORG) return ZEROCOPTER_TENANT;
-    if (organizationId === HUBBLE_ORG) return HUBBLE_TENANT;
+    if (organizationId === ACME_ORG) return ACME_TENANT;
+    if (organizationId === EXAMPLE_ORG) return EXAMPLE_TENANT;
     return null;
   });
 });
@@ -103,7 +103,7 @@ async function mint(shape: TokenShape): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   return signJwt({
     iss: ISSUER,
-    sub: shape.sub ?? "user-zerocopter-admin",
+    sub: shape.sub ?? "user-acme-admin",
     iat: now,
     exp: now + 300,
     aud: shape.aud,
@@ -111,7 +111,7 @@ async function mint(shape: TokenShape): Promise<string> {
     scope: shape.scope ?? "openid",
     ...(shape.organization ? { organization: shape.organization } : {}),
     ...(shape.tid ? { tid: shape.tid } : {}),
-    resource_access: { "hubble-api": { roles: ["Pentest.All.Read"] } },
+    resource_access: { "example-api": { roles: ["Advies.All.Read"] } },
   });
 }
 
@@ -124,7 +124,7 @@ const resource = (alias: string) => `${ORIGIN}/${alias}`;
 async function boundToken(alias: string, organizationId: string, sub?: string) {
   return mint({
     ...(sub ? { sub } : {}),
-    aud: ["hubble-api", resource(alias), "account"],
+    aud: ["example-api", resource(alias), "account"],
     organization: { [alias]: { id: organizationId } },
     scope: `openid organization:${alias} mcp-resource:${alias}`,
   });
@@ -147,19 +147,19 @@ async function call(path: string, token?: string, extraHeaders: Record<string, s
 
 describe("per-organization MCP resource admission", () => {
   test("an unauthenticated request is challenged with the per-path metadata and its scopes", async () => {
-    const response = await call("/zerocopter-dev");
+    const response = await call("/acme-dev");
     expect(response.statusCode).toBe(401);
     const challenge = String(response.headers["www-authenticate"]);
     expect(challenge).toContain(
-      `resource_metadata="${ORIGIN}${PROTECTED_RESOURCE_METADATA_PATH}/zerocopter-dev"`,
+      `resource_metadata="${ORIGIN}${PROTECTED_RESOURCE_METADATA_PATH}/acme-dev"`,
     );
-    expect(challenge).toContain('scope="organization mcp-resource:zerocopter-dev"');
+    expect(challenge).toContain('scope="organization mcp-resource:acme-dev"');
     expect(challenge).not.toContain("insufficient_scope");
   });
 
-  test("a bound Zerocopter token is admitted on Zerocopter's resource (and only then needs the database)", async () => {
-    const token = await boundToken("zerocopter-dev", ZEROCOPTER_ORG);
-    const response = await call("/zerocopter-dev", token);
+  test("a bound Acme token is admitted on Acme's resource (and only then needs the database)", async () => {
+    const token = await boundToken("acme-dev", ACME_ORG);
+    const response = await call("/acme-dev", token);
     // Bound, and then refused as a person no membership record can be read
     // for: this app has no database, and a person is never admitted from the
     // token alone (503, not a session).
@@ -167,41 +167,41 @@ describe("per-organization MCP resource admission", () => {
     expect(JSON.parse(response.body).error.code).toBe("AUTHENTICATION_UNAVAILABLE");
   });
 
-  test("the same Zerocopter token on Hubble's resource is refused like an unknown alias", async () => {
-    const token = await boundToken("zerocopter-dev", ZEROCOPTER_ORG);
-    const onHubble = await call("/hubble", token);
+  test("the same Acme token on Example's resource is refused like an unknown alias", async () => {
+    const token = await boundToken("acme-dev", ACME_ORG);
+    const onExample = await call("/example", token);
     const onUnknown = await call("/no-such-org", token);
-    expect(onHubble.statusCode).toBe(403);
+    expect(onExample.statusCode).toBe(403);
     expect(onUnknown.statusCode).toBe(403);
-    const hubbleBody = JSON.parse(onHubble.body);
+    const exampleBody = JSON.parse(onExample.body);
     const unknownBody = JSON.parse(onUnknown.body);
-    expect(hubbleBody.error.code).toBe("ORGANIZATION_RESOURCE_FORBIDDEN");
+    expect(exampleBody.error.code).toBe("ORGANIZATION_RESOURCE_FORBIDDEN");
     expect(unknownBody.error.code).toBe("ORGANIZATION_RESOURCE_FORBIDDEN");
-    expect(hubbleBody.error.message.replaceAll("hubble", "X")).toBe(
+    expect(exampleBody.error.message.replaceAll("example", "X")).toBe(
       unknownBody.error.message.replaceAll("no-such-org", "X"),
     );
-    const challenge = String(onHubble.headers["www-authenticate"]);
+    const challenge = String(onExample.headers["www-authenticate"]);
     expect(challenge).toContain('error="insufficient_scope"');
-    expect(challenge).toContain('scope="organization mcp-resource:hubble"');
+    expect(challenge).toContain('scope="organization mcp-resource:example"');
     expect(challenge).toContain(
-      `resource_metadata="${ORIGIN}${PROTECTED_RESOURCE_METADATA_PATH}/hubble"`,
+      `resource_metadata="${ORIGIN}${PROTECTED_RESOURCE_METADATA_PATH}/example"`,
     );
   });
 
   test("a member's token that was not requested for the resource says which scopes to request", async () => {
     // Legacy-shaped token: membership present, no per-resource audience.
     const token = await mint({
-      aud: ["hubble-api", "account"],
-      organization: { "zerocopter-dev": { id: ZEROCOPTER_ORG } },
+      aud: ["example-api", "account"],
+      organization: { "acme-dev": { id: ACME_ORG } },
       scope: "openid",
     });
-    const response = await call("/zerocopter-dev", token);
+    const response = await call("/acme-dev", token);
     expect(response.statusCode).toBe(403);
     const body = JSON.parse(response.body);
     expect(body.error.code).toBe("ORGANIZATION_RESOURCE_FORBIDDEN");
     expect(body.error.message).toContain("`organization`");
-    expect(body.error.message).toContain("`mcp-resource:zerocopter-dev`");
-    expect(body.error.message).toContain(resource("zerocopter-dev"));
+    expect(body.error.message).toContain("`mcp-resource:acme-dev`");
+    expect(body.error.message).toContain(resource("acme-dev"));
     // ...and the legacy mount still takes it (tenant from the membership).
     const legacy = await call(MCP_MOUNT_PATH, token);
     expect(legacy.statusCode).toBe(503);
@@ -210,27 +210,27 @@ describe("per-organization MCP resource admission", () => {
 
   test("the audience Keycloak mints for a non-member is not admission", async () => {
     const token = await mint({
-      aud: ["hubble-api", resource("hubble")],
-      organization: { "zerocopter-dev": { id: ZEROCOPTER_ORG } },
-      scope: "openid mcp-resource:hubble",
+      aud: ["example-api", resource("example")],
+      organization: { "acme-dev": { id: ACME_ORG } },
+      scope: "openid mcp-resource:example",
     });
-    const response = await call("/hubble", token);
+    const response = await call("/example", token);
     expect(response.statusCode).toBe(403);
   });
 
   test("a token for the same alias on another origin is refused (audience is the exact resource URL)", async () => {
     const token = await mint({
-      aud: ["hubble-api", "http://127.0.0.1:3121/zerocopter-dev"],
-      organization: { "zerocopter-dev": { id: ZEROCOPTER_ORG } },
-      scope: "openid organization:zerocopter-dev mcp-resource:zerocopter-dev",
+      aud: ["example-api", "http://127.0.0.1:3121/acme-dev"],
+      organization: { "acme-dev": { id: ACME_ORG } },
+      scope: "openid organization:acme-dev mcp-resource:acme-dev",
     });
-    const response = await call("/zerocopter-dev", token);
+    const response = await call("/acme-dev", token);
     expect(response.statusCode).toBe(403);
   });
 
   test("a bound token whose organization no tenant links to is refused the same way", async () => {
     const token = await mint({
-      aud: ["hubble-api", resource("orphan")],
+      aud: ["example-api", resource("orphan")],
       organization: { orphan: { id: "00000000-0000-4000-8000-000000000000" } },
       scope: "openid organization:orphan mcp-resource:orphan",
     });
@@ -240,7 +240,7 @@ describe("per-organization MCP resource admission", () => {
   });
 
   test("a malformed alias is not a resource", async () => {
-    const token = await boundToken("zerocopter-dev", ZEROCOPTER_ORG);
+    const token = await boundToken("acme-dev", ACME_ORG);
     const response = await call("/-not-an-alias", token);
     expect(response.statusCode).toBe(404);
   });
@@ -253,11 +253,11 @@ describe("per-organization MCP resource admission", () => {
       const headers = new Headers();
       applyTrustedContextHeaders(
         headers,
-        { tenantId: HUBBLE_TENANT, userId: "user-hubble-admin", roles: ["Pentest.All.Read"] },
+        { tenantId: EXAMPLE_TENANT, userId: "user-example-admin", roles: ["Advies.All.Read"] },
         { secret: "organization-resource-test-secret" },
       );
       const response = await call(
-        "/hubble",
+        "/example",
         undefined,
         Object.fromEntries(headers.entries()),
       );
@@ -273,13 +273,13 @@ describe("per-organization protected resource metadata", () => {
   test("names the exact resource and the scopes to request", async () => {
     const response = await app.inject({
       method: "GET",
-      url: `${PROTECTED_RESOURCE_METADATA_PATH}/hubble`,
+      url: `${PROTECTED_RESOURCE_METADATA_PATH}/example`,
       headers: { host: HOST },
     });
     expect(response.statusCode).toBe(200);
     const body = JSON.parse(response.body);
-    expect(body.resource).toBe(resource("hubble"));
-    expect(body.scopes_supported).toEqual(["organization", "mcp-resource:hubble"]);
+    expect(body.resource).toBe(resource("example"));
+    expect(body.scopes_supported).toEqual(["organization", "mcp-resource:example"]);
     expect(body.authorization_servers).toEqual([ISSUER]);
     expect(body.bearer_methods_supported).toEqual(["header"]);
   });

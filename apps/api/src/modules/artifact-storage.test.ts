@@ -51,7 +51,7 @@ function provider(
   };
 }
 
-function harness(options: { refuse?: boolean } = {}) {
+function harness(options: { refuse?: boolean; independent?: boolean } = {}) {
   const live = new Set<Session>();
   let active: { session: Session; transaction: Transaction } | undefined;
   let transactionCalls = 0;
@@ -66,6 +66,7 @@ function harness(options: { refuse?: boolean } = {}) {
         if (options.refuse) throw operationFailure({ code: "FORBIDDEN", message: "Not authorized to access this record." });
       },
     },
+    ...(options.independent ? { withStageTransaction: async <T>(_session: Session, work: (transaction: Transaction) => Promise<T>) => work({ id: "independent-stage" }) } : {}),
     acceptsSession: session => live.has(session),
     currentTransaction: session => active?.session === session ? active.transaction : undefined,
     withTransaction: async (session, work) => {
@@ -97,6 +98,21 @@ const ownerInput = { artifactId, owner: { entity: "Document", id: documentId } }
 const bindInput = { ...ownerInput, expectedArtifactVersion: descriptor.version };
 
 describe("ArtifactStorageRuntime", () => {
+  test("independent staging still refuses retained provider callbacks after session expiry", async () => {
+    const h = harness({ independent: true });
+    const session = { id: "live" };
+    h.live.add(session);
+    let retained: RuntimeArtifactSessionContext<Session, Transaction> | undefined;
+    h.runtime.configure([{ name: "storage", artifactStorage: provider({ stage: async context => {
+      retained = context;
+      expect((await context.withTransaction(async trx => trx)).id).toBe("independent-stage");
+      return descriptor;
+    } }) }], [providerId]);
+    await h.runtime.services.stage(session, stageInput);
+    h.live.delete(session);
+    await expectFailure(Promise.resolve().then(() => retained!.withTransaction(async () => undefined)), "FORBIDDEN");
+  });
+
   test("accepts only the exact live session and rejects forged or stale handles", async () => {
     const { runtime, live } = harness();
     const session = { id: "session-a" };

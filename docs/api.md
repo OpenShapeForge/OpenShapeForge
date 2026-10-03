@@ -821,6 +821,8 @@ compose stack):
 | `OPENSHAPEFORGE_CONTROL_MCP_AUTHORIZED_PARTIES` | comma-separated `azp` allow-list of the platform administrator MCP (`/api/control/mcp`); default: the operator client |
 | `API_RATE_LIMIT_MAX` / `_WINDOW_MS` | anonymous budget per window (default 600 / 60s) |
 | `API_RATE_LIMIT_MAX_TRUSTED` | budget for a signed trusted-context caller (default 5× the anonymous budget) |
+| `API_RATE_LIMIT_MAX_SUBJECT` | budget per verified bearer subject, i.e. per person (default: the anonymous budget) |
+| `API_RATE_LIMIT_MAX_SERVICE` | budget per organization service identity, e.g. the durable workflow worker (default: the trusted budget) |
 | `API_RATE_LIMIT_REDIS_URL` | shared limiter store; unset ⇒ in-memory, budget enforced per instance |
 | `API_REQUEST_TIMEOUT_MS` / `DB_STATEMENT_TIMEOUT_MS` | whole-request and per-request statement budgets |
 | `GRAPHQL_MAX_DEPTH` / `_ALIASES` / `_COST` / `_TOKENS` / `_DIRECTIVES` | query-hardening caps |
@@ -830,23 +832,60 @@ compose stack):
 The limiter runs **before** authentication — that ordering is the control, not
 an accident: it is what protects the authentication path itself. So the budget
 a request gets is chosen from what it can prove about itself *there*, with no
-network call, no JWKS fetch and no database read.
+database read and at most a bounded local signature check.
 
 | Tier | Key | Budget |
 | --- | --- | --- |
 | anonymous | client IP (via `trustProxy`) | `API_RATE_LIMIT_MAX` |
 | trusted | tenant + user from a trusted-context header whose **HMAC verifies** | `API_RATE_LIMIT_MAX_TRUSTED` |
+| subject | issuer + `sub` of a bearer token whose **signature and issuer verify** and whose `aud` names this API or an organization resource | `API_RATE_LIMIT_MAX_SUBJECT` |
+| service | issuer + `azp` of such a token from a **configured** organization service identity (`OPENSHAPEFORGE_ORGANIZATION_SERVICE_IDENTITIES`, `preferred_username` = `service-account-<azp>`) | `API_RATE_LIMIT_MAX_SERVICE` |
 
 Sending the identity headers without a valid signature does not buy the higher
 tier — it falls back to the IP-keyed anonymous budget. Trusted callers are keyed
 per tenant+user rather than per service, so one runaway integration cannot
 consume the allowance of everything else holding the same secret.
 
-There is deliberately **no bearer-token tier**. Keying on an unverified `sub`
-would hand out a fresh budget per forged token, and verifying the token here
-would put JWKS work in front of the limit that exists to protect it. Per-identity
-budgets for bearer callers belong after session resolution, keyed on the
-verified subject.
+Bearer callers are keyed on the **verified** subject (#886). Keyed on the
+client IP, every person behind one proxy address — a web app forwarding for all
+its users, or one office NAT — and the durable workflow worker shared a single
+anonymous budget, and the long-lived `/api/events` stream was refused. Keying on
+an unverified `sub` would hand out a fresh budget per forged token, so the
+token's signature and issuer are checked with the cached JWKS (the
+issuer-bound verifier; no audience, no database). The check is bounded at
+`VERIFY_BUDGET_MS` (250 ms): a cold or unreachable JWKS, a forged, expired or
+foreign token, or a token without `sub` all fall back to the IP-keyed anonymous
+budget, so the protection in front of the authentication path is unchanged.
+A token minted for another client of the realm (an `aud` that is neither
+`OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE` nor a URL under
+`OPENSHAPEFORGE_PUBLIC_ORIGIN` / `OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS`) earns no
+bucket of its own either.
+Unknown key ids trigger at most one JWKS refetch per cooldown.
+
+**How big a person's budget is (#939).** The subject default stays the
+anonymous budget, 600 requests a minute, and that is a deliberate choice from
+real use, not from the automated journeys. Since the web client stopped
+re-reading pages for every change hint (#954), a full page load costs a person
+about ten to fifteen requests and navigating inside the app fewer; 600 is
+forty or more page loads a minute, every minute, which no person clicking
+reaches, while a client that loops is stopped within the minute. The sales-flow
+browser journey (`bun run test:evidence --journey sales-flow`) is not a person:
+it does sixteen full page loads in about twenty seconds, about 260 requests of
+the seller's bucket per flow (its `request-budget` attachment records them),
+and three flows back to back put about 700 into one minute. Sandboxes therefore
+set `API_RATE_LIMIT_MAX_SUBJECT=1200` explicitly in their `.env` (written by
+`bun run dev:sandbox`); the journey itself asserts that one flow stays well
+inside the production budget, so a chatty client still fails the evidence.
+
+`/api/events` (also under an organization's short address) is counted in its
+own bucket per key, with the same tier: the stream reconnects about once a
+minute and is additionally capped per person by concurrent streams, so it can
+neither starve nor be starved by the same caller's ordinary requests.
+
+The limiter's 429 body carries `code: "RATE_LIMITED"` (besides the
+`x-ratelimit-*` headers). It is answered before any handler runs, which is how
+a caller such as the durable workflow worker tells it from an Operation's own
+429 and knows a write was not executed.
 
 **API keys get no tier of their own either**, for the same reason. It is
 tempting: a key is checksum-verifiable with no I/O, so the limiter could

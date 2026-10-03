@@ -402,7 +402,7 @@ function buildToolsForEntity(
   // Fields that create/update deliberately do not offer, and who does write
   // them. A model that reads "reviewedAt is missing" concludes the schema is
   // incomplete and tries anyway; a model that reads "reviewedAt is written by
-  // pentest.finding.review" calls that instead. The sentence is worth more
+  // example.finding.review" calls that instead. The sentence is worth more
   // than the refusal it prevents.
   const writerNote = operationWrittenNote(fields);
   const sortable = entitySortableFieldKeys(contract, mcp.elicitOnCreate?.into);

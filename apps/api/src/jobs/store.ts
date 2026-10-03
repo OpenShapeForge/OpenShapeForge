@@ -21,7 +21,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
 import type { RuntimeJobEnqueueResult, RuntimeJobError, RuntimeJobSubject } from "@openshapeforge/plugin-runtime";
-import type { DB } from "../generated/db/types.js";
+import type { DB, Json } from "../generated/db/types.js";
+import { jsonbLiteral } from "../db/sql-helpers.js";
 import { JOB_STATUSES, type JobStatus } from "../db/migrations/jobs.js";
 import { actorSessionOf, type JobActorSession } from "./actor-session.js";
 
@@ -174,9 +175,9 @@ export async function enqueueJob(db: JobExecutor, input: EnqueueJobInput): Promi
     .values({
       tenant_id: input.tenantId,
       actor_id: input.actorId,
-      actor_session: JSON.stringify(actorSession),
+      actor_session: jsonbLiteral(actorSession).$castTo<Json>(),
       kind: input.kind,
-      payload: JSON.stringify(input.payload),
+      payload: jsonbLiteral(input.payload).$castTo<Json>(),
       delivery_key: input.deliveryKey ?? null,
       max_attempts: input.maxAttempts ?? DEFAULT_MAX_ATTEMPTS,
       // The database clock, which is also the one the claim compares against;

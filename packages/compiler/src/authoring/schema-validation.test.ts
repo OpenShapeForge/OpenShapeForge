@@ -555,13 +555,15 @@ describe("coreEntity properties the compiler implements", () => {
       "web.views->webViewsV2.record.badges[]",
       "web.views->webViewsV2.record.layout.context.fields[]",
       "web.views->webViewsV2.record.layout.context.relationships[]",
-      "web.views->webViewsV2.record.layout.tabs[]->webViewGroupV2.relationship",
-      "web.views->webViewsV2.record.layout.tabs[]->webViewGroupV2.fields[]->webFieldEntryV2|oneOf1.render",
       "web.fields.<key>",
       "web.fields.*.render->render.component",
       "web.operations->webInterfaceOperationsV2.<key>",
       "web.operations->webInterfaceOperationsV2.*|oneOf1.resultRenderer",
     ]) expect(seen).toContain(expected);
+    // Shared definitions can be visited first from a named view or a record.
+    // Assert the choice site independently of that traversal order.
+    expect(seen.some(path => path.endsWith("->webViewGroupV2.relationship"))).toBe(true);
+    expect(seen.some(path => path.endsWith("->webFieldEntryV2|oneOf1.render"))).toBe(true);
     expect(seen.some((path) => path.includes("variableSources"))).toBe(false);
   });
 
@@ -586,7 +588,7 @@ describe("coreEntity properties the compiler implements", () => {
       for (const [index, variant] of ((schema.oneOf as unknown[] | undefined) ?? []).entries()) walk(variant, `${path}|${index}`);
     };
     walk((defs.entityInterfacesV2 as { properties: { web: unknown } }).properties.web, "web");
-    for (const def of ["webViewsV2", "webNamedViewV2", "webViewGroupV2", "webWriteModeV2", "webFieldEntryV2"]) walk(defs[def], def);
+    for (const def of ["webViewsV2", "webNamedViewV2", "webViewGroupV2", "webWriteModeV2", "webFieldEntryV2", "webMatrixView"]) walk(defs[def], def);
     expect(untitled).toEqual([]);
   });
 

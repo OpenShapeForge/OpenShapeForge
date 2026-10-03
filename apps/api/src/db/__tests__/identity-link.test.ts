@@ -16,6 +16,7 @@ import { APP_ROLE } from "../migrations/app-role.js";
 import { withDbSession } from "../session.js";
 import { updateGeneratedEntity } from "../../operations/entity/mutations.js";
 import { personSessionRoles } from "../../auth/person-roles.js";
+import { NEEDS_ROLE_ASSIGNMENT_ROLES } from "../../auth/organization-roles.js";
 import {
   __resetIdentityLinkForTests,
   confirmPendingLink,
@@ -40,7 +41,7 @@ const ADMIN_URL =
 const APP_ROLE_PASSWORD = "openshapeforge_app";
 const TEST_TIMEOUT = 120_000;
 const ISSUER = "http://localhost:8181/realms/openshapeforge";
-const ADMIN_ROLES = ["Organization.All.ReadWrite", "Relations.All.ReadWrite"];
+const ADMIN_ROLES = ["Organization.Access.Manage", "Relations.All.ReadWrite"];
 
 function databaseUrl(name: string, app = false): string {
   const url = new URL(ADMIN_URL);
@@ -358,14 +359,14 @@ describe("identity ↔ Relation link", () => {
         // the membership row — nothing was asked of Keycloak, and nothing on
         // the session comes from the token's client roles.
         expect(state!.needsRoleAssignment).toBe(false);
-        expect(state!.roles).toEqual(["Organization.All.ReadWrite", "org_admin"]);
+        expect(state!.roles).toEqual(["Organization.Access.Manage", "org_admin"]);
         const row = (
           await sql<{ roles: string[]; needs_role_assignment: boolean }>`
             select roles, needs_role_assignment from platform.identity_relations
              where identity_id = ${state!.identityId} and tenant_id = ${tenantA}
           `.execute(adminDb)
         ).rows[0]!;
-        expect(row).toEqual({ roles: ["Organization.All.ReadWrite", "org_admin"], needs_role_assignment: false });
+        expect(row).toEqual({ roles: ["Organization.Access.Manage", "org_admin"], needs_role_assignment: false });
         expect(
           await listPendingRoleAssignments(
             appDb,
@@ -380,7 +381,7 @@ describe("identity ↔ Relation link", () => {
 
         // A later session reads the same roles back from the row.
         const again = await signIn(appDb, dave, tenantA);
-        expect(again.state!.roles).toEqual(["Organization.All.ReadWrite", "org_admin"]);
+        expect(again.state!.roles).toEqual(["Organization.Access.Manage", "org_admin"]);
       });
     },
     TEST_TIMEOUT,
@@ -413,12 +414,12 @@ describe("identity ↔ Relation link", () => {
           status: "linked",
           relationId,
           needsRoleAssignment: false,
-          roles: ["Organization.All.ReadWrite", "org_admin"],
+          roles: ["Organization.Access.Manage", "org_admin"],
         });
         expect(await invitationRows(adminDb, tenantA)).toMatchObject([{ status: "accepted" }]);
         // And it sticks: the next session reads it from the row.
         expect((await signIn(appDb, fay, tenantA)).state!.roles).toEqual([
-          "Organization.All.ReadWrite",
+          "Organization.Access.Manage",
           "org_admin",
         ]);
       });
@@ -427,7 +428,7 @@ describe("identity ↔ Relation link", () => {
   );
 
   test(
-    "an invited org_admin holds what the realm's composite says, and can update a Relation with it",
+    "an invited org_admin holds access-administration rights but no business Relation write right",
     async () => {
       // The generated realm composites of the shipped base authorization —
       // the same artifact production runs on, no injected table.
@@ -441,19 +442,18 @@ describe("identity ↔ Relation link", () => {
 
         const admin = await signIn(appDb, gina, tenantA);
         const adminRoles = personSessionRoles({ roles: [] }, admin.state!, "openshapeforge");
-        expect(adminRoles).toContain("Relations.All.ReadWrite");
-        expect(adminRoles).toContain("Organization.All.ReadWrite");
+        expect(adminRoles).not.toContain("Relations.All.ReadWrite");
+        expect(adminRoles).toContain("Organization.Access.Manage");
         expect(adminRoles).toContain("org_admin");
-        const updated = await updateGeneratedEntity(
+        await expect(updateGeneratedEntity(
           appDb,
           { tenantId: tenantA, userId: gina.claims.subject, roles: adminRoles, groups: [], scope: "tenant" },
           { table: "erp.relations", id: relationId, values: { displayName: "Renamed Client" } },
-        );
-        expect(updated).toMatchObject({ display_name: "Renamed Client" });
+        )).rejects.toThrow(/Not authorized to update Relation/);
 
         const employee = await signIn(appDb, hal, tenantA);
         const employeeRoles = personSessionRoles({ roles: [] }, employee.state!, "openshapeforge");
-        expect(employeeRoles).toEqual(["General.All.Read", "Relations.All.Read", "org_employee"]);
+        expect(employeeRoles).toEqual([...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort());
         await expect(
           updateGeneratedEntity(
             appDb,
@@ -494,7 +494,7 @@ describe("identity ↔ Relation link", () => {
            where tenant_id = ${tenantA} and lower(email) = 'jo@example.com' and status = 'pending'
         `.execute(adminDb);
         const { state } = await signIn(appDb, jo, tenantA);
-        expect(state!.roles).toEqual(["General.All.Read", "org_employee"]);
+        expect(state!.roles).toEqual([...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort());
         expect(await invitationRows(adminDb, tenantA)).toMatchObject([
           { email: "ian@example.com", status: "revoked" },
           { email: "jo@example.com", role: "org_employee", status: "accepted" },
@@ -516,8 +516,8 @@ describe("identity ↔ Relation link", () => {
         const inA = await signIn(appDb, erin, tenantA);
         const inB = await signIn(appDb, erin, tenantB);
         expect(inA.state!.identityId).toBe(inB.state!.identityId);
-        expect(inA.state!.roles).toEqual(["Organization.All.ReadWrite", "org_admin"]);
-        expect(inB.state!.roles).toEqual(["General.All.Read", "org_employee"]);
+        expect(inA.state!.roles).toEqual(["Organization.Access.Manage", "org_admin"]);
+        expect(inB.state!.roles).toEqual([...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort());
 
         // The grant in A is not visible from B's row, through RLS as the app
         // role and through the resolver alike.
@@ -531,10 +531,10 @@ describe("identity ↔ Relation link", () => {
             ).rows,
           );
         expect(await rolesSeenFrom(tenantB)).toEqual([
-          { tenant_id: tenantB, roles: ["General.All.Read", "org_employee"] },
+          { tenant_id: tenantB, roles: [...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort() },
         ]);
         expect(await rolesSeenFrom(tenantA)).toEqual([
-          { tenant_id: tenantA, roles: ["Organization.All.ReadWrite", "org_admin"] },
+          { tenant_id: tenantA, roles: ["Organization.Access.Manage", "org_admin"] },
         ]);
 
         // The person cannot raise their own roles: the row is theirs to
@@ -543,13 +543,13 @@ describe("identity ↔ Relation link", () => {
           withDbSession(appDb, sessionFor(erin, tenantB), (trx) =>
             sql`
               update platform.identity_relations
-                 set roles = array['Organization.All.ReadWrite']::text[]
+                 set roles = array['Organization.Access.Manage']::text[]
                where identity_id = ${inB.state!.identityId} and tenant_id = ${tenantB}
             `.execute(trx),
           ),
         ).rejects.toMatchObject({ errno: "42501" });
         __resetIdentityLinkForTests();
-        expect((await signIn(appDb, erin, tenantB)).state!.roles).toEqual(["General.All.Read", "org_employee"]);
+        expect((await signIn(appDb, erin, tenantB)).state!.roles).toEqual([...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort());
       });
     },
     TEST_TIMEOUT,
@@ -651,7 +651,6 @@ describe("identity ↔ Relation link", () => {
         expect(identityLinkToolsForSession(adminSignIn.session).map((tool) => tool.name)).toEqual([
           "link_identity",
           "list_pending_members",
-          "set_member_role",
         ]);
         expect(identityLinkToolsForSession(employeeSignIn.session)).toEqual([]);
 
@@ -791,7 +790,7 @@ describe("identity ↔ Relation link", () => {
   );
 
   test(
-    "a member with no roles here is listed for admins and set_member_role records them, for this tenant only",
+    "a member with no roles here is listed for admins and internal admission records them, for this tenant only",
     async () => {
       await withScratchDb(async (appDb, adminDb) => {
         await seedTenants(adminDb);
@@ -802,7 +801,7 @@ describe("identity ↔ Relation link", () => {
         const ivy = person("ivy");
         const first = await invitedSignIn(appDb, adminDb, ivy, tenantA);
         expect(first.state!.needsRoleAssignment).toBe(false);
-        expect(first.state!.roles).toEqual(["General.All.Read", "org_employee"]);
+        expect(first.state!.roles).toEqual([...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort());
 
         // 2. A person whose Relation already existed is linked by confirming
         //    the candidate. That link carries NO roles yet — nobody invited
@@ -831,23 +830,18 @@ describe("identity ↔ Relation link", () => {
           code: "FORBIDDEN",
         });
 
-        // 3. set_member_role, by relationId: writes the roles on THIS tenant's
+        // 3. Internal admission helper writes roles on THIS tenant's
         //    row and clears the flag. No Keycloak call is made — there is no
         //    control plane configured in this test, and none is needed.
         expect(
           await identityIdForRelation(appDb, adminInA.session, confirmed.relationId!),
         ).toBe(jackFirst.state!.identityId);
-        const result = await callIdentityLinkTool(
-          "set_member_role",
-          { relationId: confirmed.relationId, role: "org_admin" },
-          appDb,
-          adminInA.session,
-        );
-        expect(result?.isError).not.toBe(true);
-        expect(result?.structuredContent).toMatchObject({
-          granted: true,
-          role: "org_admin",
-          roles: ["Organization.All.ReadWrite", "org_admin"],
+        await expect(setMembershipRoles(appDb, plainSession, jackFirst.state!.identityId, ["org_admin"]))
+          .rejects.toMatchObject({ code: "FORBIDDEN" });
+        const result = await setMembershipRoles(appDb, adminInA.session,
+          jackFirst.state!.identityId, ["Organization.Access.Manage", "org_admin"]);
+        expect(result).toMatchObject({
+          roles: ["Organization.Access.Manage", "org_admin"],
         });
         const row = (
           await sql<{ needs_role_assignment: boolean; roles: string[] }>`
@@ -855,24 +849,25 @@ describe("identity ↔ Relation link", () => {
              where identity_id = ${jackFirst.state!.identityId} and tenant_id = ${tenantA}
           `.execute(adminDb)
         ).rows[0]!;
-        expect(row).toEqual({ needs_role_assignment: false, roles: ["Organization.All.ReadWrite", "org_admin"] });
+        expect(row).toEqual({ needs_role_assignment: false, roles: ["Organization.Access.Manage", "org_admin"] });
 
         // The next session carries them, and the person is no longer pending.
         __resetIdentityLinkForTests();
         const third = await signIn(appDb, jack, tenantA);
-        expect(third.state).toMatchObject({ needsRoleAssignment: false, roles: ["Organization.All.ReadWrite", "org_admin"] });
+        expect(third.state).toMatchObject({ needsRoleAssignment: false, roles: ["Organization.Access.Manage", "org_admin"] });
         expect(
           (await listPendingRoleAssignments(appDb, adminInA.session)).map((row) => row.identityId),
         ).toEqual([]);
 
-        // 4. Demotion is the same call, and it replaces rather than adds.
-        const demoted = await callIdentityLinkTool(
-          "set_member_role",
-          { identityId: jackFirst.state!.identityId, role: "org_employee" },
-          appDb,
-          adminInA.session,
-        );
-        expect(demoted?.structuredContent).toMatchObject({ roles: ["General.All.Read", "org_employee"] });
+        // 4. The last direct administrator cannot be demoted. Add another
+        // direct administrator before proving the replacement semantics.
+        await expect(setMembershipRoles(appDb, adminInA.session, jackFirst.state!.identityId,
+          [...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort()))
+          .rejects.toMatchObject({ code: "LAST_ADMINISTRATOR" });
+        await setMembershipRoles(appDb, adminInA.session, adminInA.state!.identityId, ["org_admin"]);
+        const demoted = await setMembershipRoles(appDb, adminInA.session, jackFirst.state!.identityId,
+          [...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort());
+        expect(demoted).toMatchObject({ roles: [...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort() });
 
         // 5. Tenant B is untouched. Jack's row in B (once he is invited there)
         //    carries B's grant, and B's administrator cannot reach his row in
@@ -880,13 +875,13 @@ describe("identity ↔ Relation link", () => {
         const adminInB = await invitedSignIn(appDb, adminDb, person("admin2", ADMIN_ROLES), tenantB);
         expect(await listPendingRoleAssignments(appDb, adminInB.session)).toEqual([]);
         const jackInB = await invitedSignIn(appDb, adminDb, jack, tenantB);
-        expect(jackInB.state!.roles).toEqual(["General.All.Read", "org_employee"]);
+        expect(jackInB.state!.roles).toEqual([...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort());
         await expect(
-          setMembershipRoles(appDb, adminInB.session, jackFirst.state!.identityId, ["Organization.All.ReadWrite", "org_admin"]),
-        ).resolves.toMatchObject({ roles: ["Organization.All.ReadWrite", "org_admin"] });
+          setMembershipRoles(appDb, adminInB.session, jackFirst.state!.identityId, ["Organization.Access.Manage", "org_admin"]),
+        ).resolves.toMatchObject({ roles: ["Organization.Access.Manage", "org_admin"] });
         __resetIdentityLinkForTests();
-        expect((await signIn(appDb, jack, tenantA)).state!.roles).toEqual(["General.All.Read", "org_employee"]);
-        expect((await signIn(appDb, jack, tenantB)).state!.roles).toEqual(["Organization.All.ReadWrite", "org_admin"]);
+        expect((await signIn(appDb, jack, tenantA)).state!.roles).toEqual([...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort());
+        expect((await signIn(appDb, jack, tenantB)).state!.roles).toEqual(["Organization.Access.Manage", "org_admin"]);
       });
     },
     TEST_TIMEOUT,

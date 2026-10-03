@@ -169,7 +169,7 @@ function raisedRefusal(message: string, hint: string): Error {
     errno: "P0001",
     hint,
     routine: "exec_stmt_raise",
-    where: "PL/pgSQL function pentest.assert_status_transition() line 9 at RAISE",
+    where: "PL/pgSQL function advies.assert_status_transition() line 9 at RAISE",
   });
   return error;
 }

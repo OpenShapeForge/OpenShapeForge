@@ -112,7 +112,8 @@ fields:
           from: [draft]
           to: submitted
           label: { en: Submit, nl: Indienen }
-          auth: { roles: [Cases.All.ReadWrite] }        # default: the entity's update roles
+          auth: { roles: [Cases.All.ReadWrite] }        # replaces the entity's update roles (the default)
+          # auth: { alsoRequire: [Finance.All.ReadWrite] }  # instead: update roles AND this right
           preconditions:
             - { field: reviewerId, present: true }      # a field of this row
             - { via: quoteId, field: approvalStatus, in: [approved] }  # a field of the record quoteId names
@@ -153,6 +154,12 @@ What the compiler makes of it:
   field is filled by the server at execution — `now` is the transaction time
   on a datetime field, `actor` the session's linked Relation on a Relation
   reference or the user id on a string field — and is refused as input.
+- Roles: without `auth` the Operation takes the entity's update roles.
+  `auth.roles` **replaces** them (any one of `roles` suffices), so naming only
+  a second right there drops the record-write requirement. To require both,
+  use `auth.alsoRequire`: the caller holds one of `roles` (default: the update
+  roles) **and** one of `alsoRequire`, lowered to the Operation's `roleGroups`
+  (#944; `Deal.win` needs the deal write and the quote right).
 - On an entity with `authorization.rowAccess.recordPermissions` every rule
   requires the record's `edit` permission — a transition is a write, so
   `auth.recordPermission` may only restate `edit` — checked before the offer

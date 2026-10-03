@@ -32,6 +32,11 @@
  * "unknown language" state for a caller to handle.
  */
 
+import { baseLanguage } from "@openshapeforge/plugin-runtime/language";
+
+/** Shared with plugins (notification language, #946); re-exported for this transport's callers. */
+export { baseLanguage };
+
 /** The token claim Keycloak's `profile` client scope carries the language in. */
 export const LOCALE_CLAIM = "locale";
 
@@ -54,24 +59,6 @@ export type ResolvedLocale = {
   /** The step of the fallback order this came from. */
   source: LocaleSource;
 };
-
-/**
- * The base language of a tag: `nl-NL` and `nl` are the same language, and an
- * authored text is keyed by language, never by region. Returns null for
- * anything that is not a usable tag, so a malformed claim falls through to the
- * next step of the order instead of becoming a language nobody speaks.
- */
-export function baseLanguage(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (trimmed.length === 0) return null;
-  try {
-    const language = new Intl.Locale(trimmed.replace(/_/g, "-")).language;
-    return language && language !== "und" ? language.toLowerCase() : null;
-  } catch {
-    return null;
-  }
-}
 
 function languageName(tag: string, inLocale: string): string {
   try {

@@ -109,7 +109,7 @@ export function projectedActions(
   return result;
 }
 
-function completeProjectedActions(
+export function completeProjectedActions(
   entity: CoreEntity,
   interfaceName: "rest" | "mcp" | "web" | "graphql",
 ): Record<CrudOperationKey, boolean> {
@@ -144,8 +144,8 @@ export function graphqlOperationActions(
 }
 
 /**
- * Lower the v2 web layout into the existing compiler view IR. This is a
- * one-way compiler lowering, not a compatibility fallback: v2 YAML cannot
+ * Lower the v3 web layout into the existing compiler view IR. This is a
+ * one-way compiler lowering, not a compatibility fallback: v3 YAML cannot
  * contain `ui`, and the generated WebManifest stays the public output.
  */
 export function webUi(entity: CoreEntity): UIDefinition | undefined {

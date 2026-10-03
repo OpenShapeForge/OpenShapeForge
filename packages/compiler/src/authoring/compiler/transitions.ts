@@ -186,6 +186,9 @@ export function withStatusTransitions(
     }
     compiled.push({
       field: field.key,
+      // What a refusal names: the field and its states in both languages.
+      label: text(field.label, field.key),
+      values: Object.fromEntries(field.options!.items!.map((item) => [item.value, text(item.label, item.value)])),
       initial: field.transitions!.initial,
       rules: rules.map((rule) => ({
         key: rule.key,

@@ -87,6 +87,13 @@ export function assertEntityAuthoring(entity: CoreEntity, origin: string): void 
         for (const field of keys) {
           if (!fieldsByKey.has(field)) throw new Error(`${origin} named Web view ${name} references unknown field ${field}.`);
         }
+      } else if (namedView.collectionLayout === "matrix") {
+        const { rowField, columnField, valueField } = namedView.matrix;
+        if (new Set([rowField, columnField, valueField]).size !== 3) throw new Error(`${origin} matrix ${name} requires distinct row, column and value fields.`);
+        for (const key of [rowField, columnField, valueField]) {
+          const field = fieldsByKey.get(key);
+          if (!field || field.cardinality === "collection") throw new Error(`${origin} matrix ${name} requires a single field: ${key}.`);
+        }
       } else {
         if (namedView.collectionLayout !== "table" && !namedView.itemView) {
           throw new Error(`${origin} named Web collection view ${name} requires itemView.`);

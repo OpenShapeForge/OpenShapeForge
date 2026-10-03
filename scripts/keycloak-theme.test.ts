@@ -22,7 +22,7 @@ describe("OpenShapeForge Keycloak login theme", () => {
     );
   });
 
-  test("keeps the stock WebAuthn form contract and suggests an editable unique label", () => {
+  test("keeps the stock WebAuthn form contract and saves an automatic unique label", () => {
     for (const field of [
       "clientDataJSON",
       "attestationObject",
@@ -35,6 +35,10 @@ describe("OpenShapeForge Keycloak login theme", () => {
       expect(template).toContain(`name="${field}"`);
     }
     expect(template).toContain('import { registerByWebAuthn }');
+    const script = readFileSync(join(root, "theme/openshapeforge/login/resources/js/webauthnRegisterAutoLabel.js"), "utf8");
+    expect(script).not.toContain("window.prompt");
+    expect(script).toContain('document.getElementById("authenticatorLabel").value = initLabel');
+    expect(script).toContain("navigator.credentials.create({publicKey})");
     expect(template).toContain("realm.displayName");
     expect(template).toContain("navigator.userAgentData?.platform");
     expect(template).toContain("new Intl.DateTimeFormat");

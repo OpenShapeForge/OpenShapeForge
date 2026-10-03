@@ -8,6 +8,20 @@ import { applyAuthorizationPatch, renameClientReferences } from "./authorization
 import { generateAuthoringKeycloakArtifacts } from "./generate-keycloak-artifacts.js";
 import { resolveAuthoringLayers, strategicMerge } from "./layers.js";
 
+test('explicit persona replacement narrows grants without mutating the base', () => {
+  const base = baseRealm();
+  const snapshot = structuredClone(base);
+  const client = Object.keys(base.clientRoleComposites)[0]!;
+  const role = Object.keys((base.clientRoleComposites as any)[client])[0]!;
+  const replacement = {composites: {[client]: ['Relations.All.ReadWrite']}};
+  const result = applyAuthorizationPatch(base as any, {kind:'authorizationPatch',
+    replaceClientRoleComposites: {[client]: {[role]: replacement}}}, {strategicMerge, origin:'test'});
+  expect((result.clientRoleComposites as any)[client][role]).toEqual(replacement);
+  expect(base).toEqual(snapshot);
+  expect(() => applyAuthorizationPatch(base as any, {kind:'authorizationPatch',
+    replaceClientRoleComposites: {[client]: {missing: replacement}}}, {strategicMerge, origin:'test'})).toThrow('undeclared role');
+});
+
 /**
  * A realm small enough to read, shaped like the base `authorization.yaml`:
  * one gateway, one bearer-only entity-role client referenced from every place

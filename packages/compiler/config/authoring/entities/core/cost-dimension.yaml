@@ -78,6 +78,7 @@ fields:
 authorization:
   roles:
     read:
+      - Finance.CostDimension.Read
       - Finance.All.Read
       - Finance.All.ReadWrite
     create:

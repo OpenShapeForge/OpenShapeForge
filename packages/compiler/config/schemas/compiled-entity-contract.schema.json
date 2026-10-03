@@ -16,6 +16,15 @@
     "profiles"
   ],
   "properties": {
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind"], "properties": { "kind": { "const": "operations" },
+        "query": { "type": "object", "additionalProperties": false, "required": ["filterFields", "sortFields"], "properties": {
+          "filterFields": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+          "sortFields": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
+        } }
+      }
+    },
     "blueprint": {
       "type": "object",
       "additionalProperties": false,

@@ -38,7 +38,7 @@ afterAll(() => {
 
 const TENANT_ID = "33333333-3333-4333-8333-333333333333";
 const USER_ID = "22222222-2222-4222-8222-222222222222";
-const ORGANIZATION_ID = "8ba94fb8-08d3-4907-9af3-5bd1e2018f46";
+const ORGANIZATION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const NOW = Date.parse("2026-09-04T10:00:00.000Z");
 
 const KEYCLOAK_NOISE = [
@@ -52,12 +52,12 @@ const KEYCLOAK_NOISE = [
 
 const bearer = (overrides: Partial<SessionIdentity> = {}): SessionIdentity => ({
   credential: "bearer",
-  name: "Hans Eilers",
-  email: "hans@example.com",
+  name: "Alex Example",
+  email: "alex@example.com",
   authorizedParty: "codex",
   expiresAtMs: NOW + 12 * 60_000,
   locale: null,
-  organizations: [{ alias: "zerocopter-dev", active: true }],
+  organizations: [{ alias: "acme-dev", active: true }],
   boundOrganization: null,
   ...overrides,
 });
@@ -71,7 +71,7 @@ const linked: IdentityLinkState = {
   subject: USER_ID,
   status: "linked",
   relationId: RELATION_ID,
-  displayName: "Zerocopter Admin",
+  displayName: "Acme Admin",
   relationType: "person",
   candidateRelationId: null,
   linkedBy: "jit",
@@ -103,7 +103,7 @@ const expectNoIdentifiers = (info: unknown) => {
   expect(text).not.toContain(ORGANIZATION_ID);
   expect(text).not.toContain(IDENTITY_ID);
   expect(text).not.toContain(RELATION_ID);
-  expect(text).not.toContain("zerocopter-dev");
+  expect(text).not.toContain("acme-dev");
   expect(text).not.toContain("resource_access");
   expect(text).not.toContain("azp");
 };
@@ -115,25 +115,25 @@ describe("buildSessionInfo", () => {
       roles: [
         ...KEYCLOAK_NOISE,
         "org_admin",
-        "Pentest.All.ReadWrite",
+        "Advies.All.ReadWrite",
         "Relations.All.ReadWrite",
         "integration_admin",
       ],
-      organization: { name: "Zerocopter" },
+      organization: { name: "Acme" },
       access: { tools: 68, resources: 13 },
       nowMs: NOW,
     });
 
-    expect(info.name).toBe("Hans Eilers");
-    expect(info.email).toBe("hans@example.com");
-    expect(info.organization).toBe("Zerocopter");
+    expect(info.name).toBe("Alex Example");
+    expect(info.email).toBe("alex@example.com");
+    expect(info.organization).toBe("Acme");
     expect(info.role).toBe("Organization administrator");
     expect(info.permissions).toEqual([
+      "Advies.All.ReadWrite",
       "integration_admin",
-      "Pentest.All.ReadWrite",
       "Relations.All.ReadWrite",
     ]);
-    expect(info.groups).toEqual([{ name: "Zerocopter", active: true }]);
+    expect(info.groups).toEqual([{ name: "Acme", active: true }]);
     expect(info.signedInVia).toBe("Codex");
     expect(info.accessTokenExpiresAt).toBe("2026-09-04T10:12:00.000Z");
     expect(info.accessTokenExpiresIn).toBe("in 12 minutes");
@@ -147,7 +147,7 @@ describe("buildSessionInfo", () => {
       explanation: RELATION_EXPLANATION,
     });
     expect(info.summary).toBe(
-      "You are Hans Eilers, organization administrator of Zerocopter, signed in via Codex. " +
+      "You are Alex Example, organization administrator of Acme, signed in via Codex. " +
         "Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. You can use 68 tools and 13 resources.",
     );
     expectNoIdentifiers(info);
@@ -156,20 +156,20 @@ describe("buildSessionInfo", () => {
   it("describes an employee and names the gateway client after the product", () => {
     const info = buildSessionInfo({
       identity: bearer({
-        name: "Hans Dev",
+        name: "Alex Dev",
         authorizedParty: "openshapeforge-gateway",
       }),
-      roles: [...KEYCLOAK_NOISE, "org_employee", "Pentest.All.Read"],
-      organization: { name: "Zerocopter" },
+      roles: [...KEYCLOAK_NOISE, "org_employee", "Advies.All.Read"],
+      organization: { name: "Acme" },
       access: { tools: 12, resources: 3 },
       nowMs: NOW,
     });
 
     expect(info.role).toBe("Employee");
-    expect(info.permissions).toEqual(["Pentest.All.Read"]);
+    expect(info.permissions).toEqual(["Advies.All.Read"]);
     expect(info.signedInVia).toBe("Atlas");
     expect(info.summary).toStartWith(
-      "You are Hans Dev, employee of Zerocopter, signed in via Atlas.",
+      "You are Alex Dev, employee of Acme, signed in via Atlas.",
     );
     expectNoIdentifiers(info);
   });
@@ -178,7 +178,7 @@ describe("buildSessionInfo", () => {
     const info = buildSessionInfo({
       identity: bearer({ authorizedParty: "openshapeforge-gateway" }),
       roles: [...KEYCLOAK_NOISE, "org_employee"],
-      organization: { name: "Zerocopter" },
+      organization: { name: "Acme" },
       client: { name: "Claude Desktop", version: "1.2.3", capabilities: ["elicitation", "sampling"] },
       access: { tools: 12, resources: 3 },
       nowMs: NOW,
@@ -192,7 +192,7 @@ describe("buildSessionInfo", () => {
     });
     expect(info.connectedVia).toBe("Claude Desktop 1.2.3");
     expect(info.summary).toStartWith(
-      "You are Hans Eilers, employee of Zerocopter, signed in via Atlas. " +
+      "You are Alex Example, employee of Acme, signed in via Atlas. " +
         "Connected through Claude Desktop 1.2.3.",
     );
     expectNoIdentifiers(info);
@@ -202,7 +202,7 @@ describe("buildSessionInfo", () => {
     const info = buildSessionInfo({
       identity: bearer(),
       roles: ["org_employee"],
-      organization: { name: "Zerocopter" },
+      organization: { name: "Acme" },
       access: { tools: 12, resources: 3 },
       nowMs: NOW,
     });
@@ -215,7 +215,7 @@ describe("buildSessionInfo", () => {
     const info = buildSessionInfo({
       identity: bearer({ authorizedParty: "openshapeforge-inspector" }),
       roles: [...KEYCLOAK_NOISE, "Relations.All.Read", "CaseFile.All.ReadWrite"],
-      organization: { name: "Hubble" },
+      organization: { name: "Example" },
       access: { tools: 1, resources: 1 },
       nowMs: NOW,
     });
@@ -223,7 +223,7 @@ describe("buildSessionInfo", () => {
     expect(info.role).toBe("CaseFile.All.ReadWrite, Relations.All.Read");
     expect(info.signedInVia).toBe("MCP Inspector");
     expect(info.summary).toBe(
-      "You are Hans Eilers, a member of Hubble with the roles CaseFile.All.ReadWrite, " +
+      "You are Alex Example, a member of Example with the roles CaseFile.All.ReadWrite, " +
         "Relations.All.Read, signed in via MCP Inspector. " +
         "Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. " +
         "You can use 1 tool and 1 resource.",
@@ -234,36 +234,36 @@ describe("buildSessionInfo", () => {
     const info = buildSessionInfo({
       identity: bearer({ authorizedParty: "some-other-client" }),
       roles: KEYCLOAK_NOISE,
-      organization: { name: "Zerocopter" },
+      organization: { name: "Acme" },
       access: { tools: 1, resources: 1 },
       nowMs: NOW,
     });
     expect(info.role).toBe("No role");
     expect(info.permissions).toEqual([]);
     expect(info.signedInVia).toBe("some-other-client");
-    expect(info.summary).toContain("a member of Zerocopter without any roles");
+    expect(info.summary).toContain("a member of Acme without any roles");
   });
 
   it("lists every organization membership as a group, the active one by display name", () => {
     const info = buildSessionInfo({
       identity: bearer({
         organizations: [
-          { alias: "hubble", active: false },
-          { alias: "zerocopter-dev", active: true },
+          { alias: "example", active: false },
+          { alias: "acme-dev", active: true },
         ],
       }),
       roles: ["org_admin"],
-      organization: { name: "Zerocopter" },
+      organization: { name: "Acme" },
       access: { tools: 5, resources: 2 },
       nowMs: NOW,
     });
 
     expect(info.groups).toEqual([
-      { name: "hubble", active: false },
-      { name: "Zerocopter", active: true },
+      { name: "example", active: false },
+      { name: "Acme", active: true },
     ]);
     expect(info.summary).toContain(
-      "You belong to 2 groups; Zerocopter is the active one.",
+      "You belong to 2 groups; Acme is the active one.",
     );
   });
 
@@ -271,20 +271,20 @@ describe("buildSessionInfo", () => {
     const info = buildSessionInfo({
       identity: bearer(),
       roles: ["org_admin"],
-      organization: { name: "Zerocopter" },
+      organization: { name: "Acme" },
       relation: linked,
       access: { tools: 5, resources: 2 },
       nowMs: NOW,
     });
     expect(info.relation).toEqual({
       status: "Linked",
-      name: "Zerocopter Admin",
+      name: "Acme Admin",
       kind: "person",
       explanation: RELATION_EXPLANATION,
     });
     expect(info.summary).toBe(
-      "You are Hans Eilers, organization administrator of Zerocopter, signed in via Codex. " +
-        "Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. You act as the record Zerocopter Admin. " +
+      "You are Alex Example, organization administrator of Acme, signed in via Codex. " +
+        "Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. You act as the record Acme Admin. " +
         "You can use 5 tools and 2 resources.",
     );
     expectNoIdentifiers(info);
@@ -294,13 +294,13 @@ describe("buildSessionInfo", () => {
     const info = buildSessionInfo({
       identity: bearer(),
       roles: ["org_employee"],
-      organization: { name: "Zerocopter" },
+      organization: { name: "Acme" },
       relation: {
         ...linked,
         status: "pending_confirmation",
         relationId: null,
         candidateRelationId: RELATION_ID,
-        displayName: "Hans Dev (HR record)",
+        displayName: "Alex Dev (HR record)",
         relationType: "employee",
         linkedBy: null,
       },
@@ -309,7 +309,7 @@ describe("buildSessionInfo", () => {
     });
     expect(info.relation).toEqual({
       status: "Pending confirmation",
-      name: "Hans Dev (HR record)",
+      name: "Alex Dev (HR record)",
       kind: "employee",
       explanation: RELATION_EXPLANATION,
     });
@@ -343,26 +343,26 @@ describe("buildSessionInfo", () => {
       identity: bearer({
         authorizedParty: "openshapeforge-gateway",
         organizations: [
-          { alias: "hubble", active: false },
-          { alias: "zerocopter-dev", active: true },
+          { alias: "example", active: false },
+          { alias: "acme-dev", active: true },
         ],
-        boundOrganization: "zerocopter-dev",
+        boundOrganization: "acme-dev",
       }),
       roles: ["org_admin"],
-      organization: { name: "Zerocopter" },
+      organization: { name: "Acme" },
       relation: linked,
       access: { tools: 5, resources: 2 },
       nowMs: NOW,
     });
     expect(info.groups).toEqual([
-      { name: "hubble", active: false },
-      { name: "Zerocopter", active: true },
+      { name: "example", active: false },
+      { name: "Acme", active: true },
     ]);
     expect(info.signedInVia).toBe("Atlas");
     expect(info.summary).toBe(
-      "You are Hans Eilers, organization administrator of Zerocopter, signed in via Atlas " +
-        "on the Zerocopter endpoint. You belong to 2 groups; Zerocopter is the active one. " +
-        "Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. You act as the record Zerocopter Admin. " +
+      "You are Alex Example, organization administrator of Acme, signed in via Atlas " +
+        "on the Acme endpoint. You belong to 2 groups; Acme is the active one. " +
+        "Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. You act as the record Acme Admin. " +
         "You can use 5 tools and 2 resources.",
     );
     expectNoIdentifiers(info);
@@ -372,18 +372,18 @@ describe("buildSessionInfo", () => {
     const info = buildSessionInfo({
       identity: bearer({ organizations: [] }),
       roles: ["org_admin"],
-      organization: { name: "Zerocopter" },
+      organization: { name: "Acme" },
       access: { tools: 5, resources: 2 },
       nowMs: NOW,
     });
-    expect(info.groups).toEqual([{ name: "Zerocopter", active: true }]);
+    expect(info.groups).toEqual([{ name: "Acme", active: true }]);
   });
 
   it("describes the development identity without an expiry", () => {
     const info = buildSessionInfo({
       identity: identityFromSession(session({ credential: "trusted-context" })),
-      roles: ["Relations.All.ReadWrite", "Pentest.All.ReadWrite"],
-      organization: { name: "Zerocopter" },
+      roles: ["Relations.All.ReadWrite", "Advies.All.ReadWrite"],
+      organization: { name: "Acme" },
       access: { tools: 40, resources: 9 },
       nowMs: NOW,
     });
@@ -395,10 +395,10 @@ describe("buildSessionInfo", () => {
     expect("accessTokenExpiresIn" in info).toBe(false);
     expect("sessionEndsAfterInactivity" in info).toBe(false);
     expect("signOut" in info).toBe(false);
-    expect(info.groups).toEqual([{ name: "Zerocopter", active: true }]);
+    expect(info.groups).toEqual([{ name: "Acme", active: true }]);
     expect(info.summary).toBe(
-      "You are the development identity, a member of Zerocopter with the roles " +
-        "Pentest.All.ReadWrite, Relations.All.ReadWrite, signed in using the development " +
+      "You are the development identity, a member of Acme with the roles " +
+        "Advies.All.ReadWrite, Relations.All.ReadWrite, signed in using the development " +
         "identity. You can use 40 tools and 9 resources.",
     );
     expectNoIdentifiers(info);
@@ -413,7 +413,7 @@ describe("buildSessionInfo", () => {
       nowMs: NOW,
     });
     expect(info.organization).toBeNull();
-    expect(info.groups).toEqual([{ name: "zerocopter-dev", active: true }]);
+    expect(info.groups).toEqual([{ name: "acme-dev", active: true }]);
     expect(info.summary).toContain("organization administrator of an unknown organization");
     expect(JSON.stringify(info)).not.toContain(TENANT_ID);
   });
@@ -422,7 +422,7 @@ describe("buildSessionInfo", () => {
     const info = buildSessionInfo({
       identity: bearer({ expiresAtMs: NOW - 3 * 60_000 }),
       roles: ["org_admin"],
-      organization: { name: "Zerocopter" },
+      organization: { name: "Acme" },
       access: { tools: 1, resources: 1 },
       nowMs: NOW,
     });
@@ -436,7 +436,7 @@ describe("buildSessionInfo", () => {
     const custom = buildSessionInfo({
       identity: bearer(),
       roles: ["org_admin"],
-      organization: { name: "Zerocopter" },
+      organization: { name: "Acme" },
       access: { tools: 1, resources: 1 },
       sessionIdleDays: 30,
       nowMs: NOW,
@@ -474,11 +474,11 @@ describe("identity from the credential", () => {
     iss: "http://localhost:8181/realms/openshapeforge",
     azp: "codex",
     exp: Math.floor((NOW + 12 * 60_000) / 1000),
-    name: "Zerocopter Admin",
-    preferred_username: "zerocopter-admin",
-    email: "zerocopter-admin@example.com",
-    organization: { "zerocopter-dev": { id: ORGANIZATION_ID } },
-    resource_access: { "hubble-api": { roles: ["org_admin"] } },
+    name: "Acme Admin",
+    preferred_username: "acme-admin",
+    email: "acme-admin@example.com",
+    organization: { "acme-dev": { id: ORGANIZATION_ID } },
+    resource_access: { "example-api": { roles: ["org_admin"] } },
     scope: "openid email organization profile",
   };
 
@@ -486,14 +486,14 @@ describe("identity from the credential", () => {
     const identity = identityFromBearerClaims(claims);
     expect(identity).toEqual({
       credential: "bearer",
-      name: "Zerocopter Admin",
-      email: "zerocopter-admin@example.com",
+      name: "Acme Admin",
+      email: "acme-admin@example.com",
       authorizedParty: "codex",
       // No `locale` on this token: the claim exists only once the realm has
       // internationalisation on and the person has chosen a language.
       locale: null,
       expiresAtMs: NOW + 12 * 60_000,
-      organizations: [{ alias: "zerocopter-dev", active: true }],
+      organizations: [{ alias: "acme-dev", active: true }],
       boundOrganization: null,
     });
   });
@@ -503,17 +503,17 @@ describe("identity from the credential", () => {
       {
         ...claims,
         organization: {
-          hubble: { id: "11111111-1111-4111-8111-111111111111" },
-          "zerocopter-dev": { id: ORGANIZATION_ID },
+          example: { id: "11111111-1111-4111-8111-111111111111" },
+          "acme-dev": { id: ORGANIZATION_ID },
         },
-        scope: "openid organization:hubble organization:zerocopter-dev",
+        scope: "openid organization:example organization:acme-dev",
       },
-      { alias: "zerocopter-dev" },
+      { alias: "acme-dev" },
     );
-    expect(identity.boundOrganization).toBe("zerocopter-dev");
+    expect(identity.boundOrganization).toBe("acme-dev");
     expect(identity.organizations).toEqual([
-      { alias: "hubble", active: false },
-      { alias: "zerocopter-dev", active: true },
+      { alias: "example", active: false },
+      { alias: "acme-dev", active: true },
     ]);
   });
 
@@ -522,15 +522,15 @@ describe("identity from the credential", () => {
       ...claims,
       name: undefined,
       organization: {
-        hubble: { id: "11111111-1111-4111-8111-111111111111" },
-        "zerocopter-dev": { id: ORGANIZATION_ID },
+        example: { id: "11111111-1111-4111-8111-111111111111" },
+        "acme-dev": { id: ORGANIZATION_ID },
       },
-      scope: "openid organization:zerocopter-dev",
+      scope: "openid organization:acme-dev",
     });
-    expect(identity.name).toBe("zerocopter-admin");
+    expect(identity.name).toBe("acme-admin");
     expect(identity.organizations).toEqual([
-      { alias: "hubble", active: false },
-      { alias: "zerocopter-dev", active: true },
+      { alias: "example", active: false },
+      { alias: "acme-dev", active: true },
     ]);
   });
 
@@ -538,8 +538,8 @@ describe("identity from the credential", () => {
     const identity = identityFromBearerClaims({
       ...claims,
       organization: {
-        hubble: { id: "11111111-1111-4111-8111-111111111111" },
-        "zerocopter-dev": { id: ORGANIZATION_ID },
+        example: { id: "11111111-1111-4111-8111-111111111111" },
+        "acme-dev": { id: ORGANIZATION_ID },
       },
       scope: "openid organization",
     });
@@ -548,7 +548,7 @@ describe("identity from the credential", () => {
 
   it("reads the bearer payload of the request only for a bearer session", () => {
     const headers = new Headers({ authorization: `Bearer ${unsignedJwt(claims)}` });
-    expect(readSessionIdentity(session(), headers).name).toBe("Zerocopter Admin");
+    expect(readSessionIdentity(session(), headers).name).toBe("Acme Admin");
     expect(
       readSessionIdentity(session({ credential: "trusted-context" }), headers),
     ).toEqual(identityFromSession(session({ credential: "trusted-context" })));
@@ -578,9 +578,9 @@ describe("identity from the credential", () => {
     rememberSessionIdentity(
       bound,
       new Headers({ authorization: `Bearer ${unsignedJwt(claims)}` }),
-      { alias: "zerocopter-dev" },
+      { alias: "acme-dev" },
     );
-    expect(sessionIdentityOf(bound).boundOrganization).toBe("zerocopter-dev");
+    expect(sessionIdentityOf(bound).boundOrganization).toBe("acme-dev");
   });
 });
 
@@ -593,7 +593,7 @@ describe("identity from the credential", () => {
 describe("the language a person reads", () => {
   const base = {
     roles: ["org_employee"],
-    organization: { name: "Zerocopter" },
+    organization: { name: "Acme" },
     access: { tools: 9, resources: 3 },
     nowMs: NOW,
   };
@@ -632,8 +632,8 @@ describe("the language a person reads", () => {
 
   it("reads the claim off a token without letting it decide anything else", () => {
     const identity = identityFromBearerClaims({
-      name: "Zoë Pentester",
-      email: "zc-pentester@example.com",
+      name: "Zoë Consultant",
+      email: "zc-consultant@example.com",
       azp: "openshapeforge-gateway",
       locale: "nl",
       exp: Math.floor(NOW / 1000) + 900,
@@ -647,7 +647,7 @@ describe("the language a person reads", () => {
   });
 
   it("says nothing about the language when the token carries none", () => {
-    const identity = identityFromBearerClaims({ name: "Hans", exp: 1 });
+    const identity = identityFromBearerClaims({ name: "Alex", exp: 1 });
     expect(identity.locale).toBeNull();
   });
 });

@@ -1,0 +1,33 @@
+schemaVersion: 1
+kind: operationCatalog
+plugin: accounts
+operations:
+  listPermissions:
+    id: accounts.list-permissions
+    name: { en: Assignable permissions, nl: Beschikbare rechten }
+    description: { en: Choose an explicitly permitted application capability., nl: Kies een toegestaan applicatierecht. }
+    implementation: { type: plugin, plugin: accounts, handler: listPermissions }
+    input: { schema: { type: object, additionalProperties: false, required: [], properties: {} } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [ permissions ]
+        properties: { permissions: { type: array, items: { type: object, additionalProperties: false, required: [ key, label ], properties: { key: { type: string, x-osf-i18n: { title: { en: Key, nl: Sleutel } } }, label: { type: string, x-osf-i18n: { title: { en: Permission, nl: Recht } } } } }, x-osf-i18n: { title: { en: Permissions, nl: Rechten } } } }
+    auth: { mode: session, roles: [ Organization.Access.Manage ] }
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors:
+      - { status: 400, code: VALIDATION, description: Invalid input. }
+      - { status: 409, code: READ_ONLY_ROLE, description: Default roles are read-only. }
+      - { status: 409, code: VERSION_CONFLICT, description: Refresh the role before editing. }
+      - { status: 503, code: OPERATION_UNAVAILABLE, description: Database unavailable. }
+      - { status: 401, code: UNAUTHENTICATED, description: Sign in first. }
+      - { status: 403, code: FORBIDDEN, description: Organization administrator required. }
+      - { status: 404, code: NOT_FOUND, description: The target is not available in this organization. }
+      - { status: 409, code: CONFLICT, description: The assignment conflicts with the current organization state. }
+interfaces:
+  rest: { operations: { listPermissions: { method: POST, path: /api/accounts/list-permissions, response: { status: 200, kind: json } } } }
+  web: { entities: { AccessPermission: { title: { en: Permissions, nl: Rechten }, route: /access-permissions, idField: key, displayField: label, fields: [ key, label ], columns: [ label ], operations: { list: { operation: listPermissions, resultField: permissions } } } } }

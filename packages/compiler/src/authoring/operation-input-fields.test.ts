@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { standaloneOperationFixture } from "./standalone-operation.fixtures.js";
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
@@ -30,7 +31,7 @@ test("input-field annotation uses the target record's fieldDefinition collection
   const operation = contract.pluginOperations!.find(operation => operation.key === "materialize")!;
   expect((operation.definition.input!.schema.properties as Record<string, unknown>).parameters).toMatchObject({ "x-osf-inputFields": "parameters" });
   const active = await loadActivePlatformCompile(join(import.meta.dir, "../../../.."));
-  const web = buildWebManifest(active.entities, { requireTranslations: true });
+  const web = buildWebManifest(active.entities, { requireTranslations: true }, standaloneOperationFixture());
   expect(web.entities.TemplateVersion!.operations.materialize).toBeDefined();
   expect(web.entities.TemplateVersion!.operations.materialize!.input).toMatchObject({ kind: "json-schema" });
   expect(web.entities.LabelRule!.views.record!.badges).toEqual(["variant", "active"]);
@@ -63,4 +64,23 @@ test("shared AJV keyword is presentation only and validates its source-key shape
   const validate = ajv.compile({ type: "object", "x-osf-inputFields": "parameters" });
   expect(validate({ arbitrary: "still requires canonical handler validation" })).toBe(true);
   expect(() => ajv.compile({ type: "object", "x-osf-inputFields": ["parameters"] })).toThrow();
+});
+
+test("input.field names the collection of the record a sibling reference input picks; the sibling must be a reference", () => {
+  const ajv = new Ajv2020({ strict: true });
+  ajv.addKeyword(operationInputFieldsKeyword);
+  expect(() => ajv.compile({ type: "object", "x-osf-inputFields": "templateVersionId.parameters" })).not.toThrow();
+  for (const bad of ["a.b.c", ".parameters", "templateVersionId."]) expect(() => ajv.compile({ type: "object", "x-osf-inputFields": bad })).toThrow();
+  const withSibling = (sibling: Record<string, unknown> | undefined) => {
+    const { coreEntity } = source();
+    const operation = coreEntity.operations!.materialize!;
+    operation.target = { scope: "collection" };
+    const properties = operation.input!.schema.properties as Record<string, Record<string, unknown>>;
+    properties.parameters!["x-osf-inputFields"] = "pick.parameters";
+    if (sibling) properties.pick = sibling;
+    return coreEntity;
+  };
+  expect(() => assertEntityAuthoring(withSibling({ type: "string", format: "uuid", "x-osf-reference": { entity: "Template", valueField: "publishedVersionId" } }), "test.yaml")).not.toThrow();
+  expect(() => assertEntityAuthoring(withSibling(undefined), "test.yaml")).toThrow("sibling input with an x-osf-reference");
+  expect(() => assertEntityAuthoring(withSibling({ type: "string" }), "test.yaml")).toThrow("sibling input with an x-osf-reference");
 });

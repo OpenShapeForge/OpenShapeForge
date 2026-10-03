@@ -325,6 +325,23 @@
       "items": { "$ref": "#/$defs/authorizationGroupNode" }
     },
 
+    "organizationAccess": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["permissions", "roles", "groups"],
+      "properties": {
+        "permissions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "roles": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "groups": {"type": "array", "items": {
+          "type": "object", "additionalProperties": false, "required": ["key", "name", "roles"],
+          "properties": {
+            "key": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+            "name": {"type": "string", "minLength": 1},
+            "roles": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+          }
+        }}
+      }
+    },
     "identity": {
       "type": "object",
       "description": "Who a login is, in entity terms: the party it acts as, the person record beside it, where its e-mail lives and which role administers the organization. Emitted as identity.json for the API.",

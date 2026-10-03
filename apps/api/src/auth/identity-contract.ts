@@ -17,6 +17,8 @@ import generatedContract from "../generated/compiler/identity.json" with { type:
 import { entityColumnName, entityTableName } from "../db/manifest-lookup.js";
 
 export type IdentityContract = {
+  /** Minimal authored tenant binding; no Keycloak client configuration or secrets. */
+  publicProviders?: readonly { realm: string; organizationAlias: string; alias: string; label: string; type: string }[];
   /** The organization-administrator role; gates every membership tool. */
   administratorRole: string;
   /** What a session may do before an administrator assigned it a role. */

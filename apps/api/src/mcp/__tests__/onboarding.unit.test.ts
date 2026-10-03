@@ -4,6 +4,7 @@
  * in-memory environment. No database, no server.
  */
 import { describe, expect, it } from "bun:test";
+import { IDENTITY_LINK_ADMIN_ROLE } from "../../auth/organization-roles.js";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import type { DerivedToolsCatalogEntry } from "../derived-tools.js";
 import {
@@ -17,6 +18,7 @@ import {
   ONBOARDING_STATUS_TOOL,
   ONBOARDING_VERSION,
   onboardingGuideText,
+  isOrganizationAdministrator,
   onboardingIndex,
   onboardingToolProjection,
   onboardingToolsForSession,
@@ -41,7 +43,7 @@ const linked = {
   status: "linked" as const,
   relationId: RELATION_ID,
   relationType: "person" as const,
-  displayName: "Hans Dev",
+  displayName: "Alex Dev",
   candidateRelationId: null,
   linkedBy: "jit",
   needsRoleAssignment: false,
@@ -166,10 +168,10 @@ describe("computeOnboarding", () => {
 
   it("follows the role guides read", () => {
     expect(step(computeOnboarding(facts({ guides: [] })), "guide").status).toBe("not_applicable");
-    const unread = computeOnboarding(facts({ guides: [{ name: "pentest_guide", read: false }] }));
+    const unread = computeOnboarding(facts({ guides: [{ name: "advies_guide", read: false }] }));
     expect(step(unread, "guide").status).toBe("todo");
-    expect(step(unread, "guide").howTo).toContain("pentest_guide");
-    const read = computeOnboarding(facts({ guides: [{ name: "pentest_guide", read: true }] }));
+    expect(step(unread, "guide").howTo).toContain("advies_guide");
+    const read = computeOnboarding(facts({ guides: [{ name: "advies_guide", read: true }] }));
     expect(step(read, "guide").status).toBe("done");
   });
 
@@ -222,6 +224,12 @@ describe("computeOnboarding", () => {
 });
 
 describe("guide text and instructions", () => {
+  it("uses the authored access administrator permission, not people-management authority", () => {
+    expect(isOrganizationAdministrator([IDENTITY_LINK_ADMIN_ROLE])).toBe(true);
+    expect(isOrganizationAdministrator(["org_admin"])).toBe(true);
+    expect(isOrganizationAdministrator(["people_manager"])).toBe(false);
+    expect(isOrganizationAdministrator([])).toBe(false);
+  });
   it("words the guide for the role", () => {
     const employee = onboardingGuideText(["org_employee"]);
     expect(employee).toContain("ask an organization administrator to run link_identity");

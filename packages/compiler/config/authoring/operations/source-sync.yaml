@@ -1,0 +1,264 @@
+# Keeping records in step with an external source system (an ERP, a
+# bookkeeping package) by the base source fields every entity carries:
+# externalId, sourceAuthority, sourceAdministration and sourceVersion. An
+# import step hands a page of records in the entity's own shape; these
+# Operations match them on (tenant, sourceAuthority, sourceAdministration,
+# externalId), and the watermark — where the next incremental read resumes —
+# is read back from the data instead of being stored beside it. Bound to the
+# core `osf-source-sync` runtime (operations/source-sync-operations.ts).
+#
+# The session gate is deliberately open: what a caller may do is decided per
+# call by the TARGET entity's own create/update/delete/list roles, the same
+# roles its ordinary CRUD Operations enforce.
+schemaVersion: 1
+kind: operationCatalog
+plugin: osf-source-sync
+operations:
+  upsert:
+    id: source-sync.upsert
+    name:
+      en: Upsert records from a source system
+      nl: Records uit een bronsysteem bijwerken
+    description:
+      en: >-
+        Creates or updates up to 1000 records of one entity from one source system and administration, matched on
+        externalId. A key <field>ExternalId (for example ledgerAccountExternalId) is resolved to the record of that
+        reference's entity with the same source and externalId. All or nothing: one record that fails leaves the whole
+        page unwritten, so the watermark never moves past a record that did not land.
+      nl: >-
+        Maakt of wijzigt tot 1000 records van één entiteit uit één bronsysteem en administratie, gekoppeld op externalId.
+        Een sleutel <veld>ExternalId wordt omgezet naar het record met dezelfde bron. Alles of niets.
+    implementation:
+      type: plugin
+      plugin: osf-source-sync
+      handler: upsertBySource
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [entity, sourceAuthority, sourceAdministration, records]
+        properties:
+          entity: { type: string, minLength: 1, maxLength: 200 }
+          sourceAuthority: { type: string, minLength: 1, maxLength: 200 }
+          sourceAdministration: { type: string, minLength: 1, maxLength: 200 }
+          records:
+            type: array
+            maxItems: 1000
+            items: { type: object }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [created, updated, skipped, highestSourceVersion]
+        properties:
+          created: { type: integer, minimum: 0 }
+          updated: { type: integer, minimum: 0 }
+          skipped:
+            type: integer
+            minimum: 0
+            description: Records Hubble already holds at a newer sourceVersion (a replayed older page); left as they are.
+          highestSourceVersion: { type: [string, "null"] }
+    auth:
+      mode: session
+    tenancy:
+      mode: required
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: &sourceSyncErrors
+      - status: 400
+        code: BAD_USER_INPUT
+        description: The entity, a record or a reference is malformed, unknown or ambiguous.
+      - status: 403
+        code: FORBIDDEN
+        description: The caller lacks the target entity's role for this change.
+  applyPage:
+    id: source-sync.apply-page
+    name:
+      en: Apply a related source page atomically
+      nl: Een samenhangende bronpagina atomair verwerken
+    description:
+      en: >-
+        Applies ordered entity batches in one transaction, up to 10000 records total. References created in earlier
+        batches are available to later ones. Any failed write rolls back every batch and leaves the watermark unchanged.
+        Entity permissions, validation and events are identical to ordinary entity writes.
+    implementation:
+      type: plugin
+      plugin: osf-source-sync
+      handler: applySourcePage
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [sourceAuthority, sourceAdministration, batches]
+        properties:
+          sourceAuthority: { type: string, minLength: 1, maxLength: 200 }
+          sourceAdministration: { type: string, minLength: 1, maxLength: 200 }
+          batches:
+            type: array
+            minItems: 1
+            maxItems: 10
+            items:
+              type: object
+              additionalProperties: false
+              required: [entity, action, records]
+              properties:
+                entity: { type: string, minLength: 1, maxLength: 200 }
+                action: { type: string, enum: [upsert, remove] }
+                records: { type: array, maxItems: 10000, items: { type: object } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [batches]
+        properties:
+          batches: { type: array, items: { type: object } }
+    auth: { mode: session }
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+    errors: *sourceSyncErrors
+  watermark:
+    id: source-sync.watermark
+    name:
+      en: Where an incremental import resumes
+      nl: Waar een incrementele import verdergaat
+    description:
+      en: >-
+        The highest sourceVersion held for one entity (or several), source system and administration, and the value to pass to the
+        source as its next "changed since": a zero-padded integer version without its padding, a time as stored, or
+        `initial` when nothing was imported yet.
+      nl: >-
+        De hoogste sourceVersion voor één entiteit, bronsysteem en administratie, en de waarde om de bron als volgende
+        "gewijzigd sinds" te geven; `initial` als er nog niets is geïmporteerd.
+    implementation:
+      type: plugin
+      plugin: osf-source-sync
+      handler: sourceWatermark
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [entity, sourceAuthority, sourceAdministration]
+        properties:
+          entity:
+            description: >-
+              One entity, or several whose records one source read returns together (a journal entry's posting and
+              lines): the watermark is then the highest across them, so a page of only one kind still moves it.
+            oneOf:
+              - { type: string, minLength: 1, maxLength: 200 }
+              - { type: array, minItems: 1, maxItems: 10, items: { type: string, minLength: 1, maxLength: 200 } }
+          sourceAuthority: { type: string, minLength: 1, maxLength: 200 }
+          sourceAdministration: { type: string, minLength: 1, maxLength: 200 }
+          initial: { type: string, minLength: 1, maxLength: 200 }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [since, sourceVersion]
+        properties:
+          since: { type: [string, "null"] }
+          sourceVersion: { type: [string, "null"] }
+    auth:
+      mode: session
+    tenancy:
+      mode: required
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *sourceSyncErrors
+  remove:
+    id: source-sync.remove
+    name:
+      en: Remove records a source system deleted
+      nl: Records verwijderen die een bronsysteem verwijderde
+    description:
+      en: >-
+        Deletes the records of one entity, source system and administration whose externalId is listed (up to 1000,
+        as externalIds or as records naming their entity),
+        through the entity's ordinary delete and its deletion guards. An externalId Hubble does not hold is already
+        gone and counts as done. All or nothing.
+      nl: >-
+        Verwijdert de records van één entiteit, bronsysteem en administratie met de opgegeven externalIds, via de gewone
+        verwijdering van die entiteit. Alles of niets.
+    implementation:
+      type: plugin
+      plugin: osf-source-sync
+      handler: removeBySource
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [entity, sourceAuthority, sourceAdministration]
+        properties:
+          entity: { type: string, minLength: 1, maxLength: 200 }
+          sourceAuthority: { type: string, minLength: 1, maxLength: 200 }
+          sourceAdministration: { type: string, minLength: 1, maxLength: 200 }
+          externalIds:
+            type: array
+            maxItems: 1000
+            items: { type: string, minLength: 1, maxLength: 200 }
+          records:
+            description: >-
+              Deletions as a source reports them, {externalId, entity}; those naming another entity are left for that
+              entity's call, so one list of mixed deletions can be handed to each. Instead of externalIds.
+            type: array
+            maxItems: 1000
+            items: { type: object }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [removed]
+        properties:
+          removed: { type: integer, minimum: 0 }
+    auth:
+      mode: session
+    tenancy:
+      mode: required
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *sourceSyncErrors
+interfaces:
+  rest:
+    operations:
+      upsert:
+        method: POST
+        path: /api/source-sync/upsert
+        response:
+          status: 200
+          kind: json
+      applyPage:
+        method: POST
+        path: /api/source-sync/apply-page
+        response: { status: 200, kind: json }
+      watermark:
+        method: POST
+        path: /api/source-sync/watermark
+        response:
+          status: 200
+          kind: json
+      remove:
+        method: POST
+        path: /api/source-sync/remove
+        response:
+          status: 200
+          kind: json

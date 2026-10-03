@@ -233,7 +233,7 @@ export async function withDbSession<TDatabase, TResult>(
   db: Kysely<TDatabase>,
   input: DbSessionInput,
   callback: (trx: Transaction<TDatabase>, session: DbSessionContext) => Promise<TResult>,
-  options: { isolationLevel?: "repeatable read" | "serializable" } = {},
+  options: { isolationLevel?: "repeatable read" | "serializable"; independent?: boolean } = {},
 ): Promise<TResult> {
   const session = createDbSessionContext(input);
   const active = activeDbSession.getStore();
@@ -253,7 +253,7 @@ export async function withDbSession<TDatabase, TResult>(
     if (!sameSession) {
       throw new Error("Nested database work cannot replace the active session.");
     }
-    return callback(
+    if (!options.independent) return callback(
       active.trx as Transaction<TDatabase>,
       active.session,
     );

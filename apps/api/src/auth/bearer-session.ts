@@ -16,7 +16,9 @@ import {
 } from "./identity-link.js";
 import { loginSessionBindingFromClaims } from "./login-session-binding.js";
 import { configuredOrganizationServiceAccount } from "./organization-service-identities.js";
+import { resolveGroupRoles } from "./group-roles.js";
 import { personSessionRoles } from "./person-roles.js";
+import { resolveCustomRolePermissions } from "../accounts/custom-roles.js";
 import { SessionAuthenticationUnavailableError } from "./session-unavailable.js";
 import { resolveRelationGroupMembershipIds } from "./relation-group-memberships.js";
 import { OrganizationBindingError, sameTenantId } from "./organization-binding.js";
@@ -180,10 +182,10 @@ export async function resolveVerifiedBearerSession(
         "The membership record could not be resolved; try again.",
       );
     }
-    const effectiveRoles = isPerson && relation
+    let effectiveRoles = isPerson && relation
       ? personSessionRoles(identity, relation, realmFromIssuer(claims.iss))
       : sessionIdentityRoles(identity);
-    const effectiveScope = resolveScope(effectiveRoles, groups);
+    let effectiveScope = resolveScope(effectiveRoles, groups);
     const loginSessionBinding = loginSessionBindingFromClaims(
       claims as Record<string, unknown>,
     );
@@ -201,6 +203,19 @@ export async function resolveVerifiedBearerSession(
             { issuer: personClaims.issuer, subject: personClaims.subject },
           )
         : [];
+    if (isPerson && relation && options.db && tenantId && identity.userId) {
+      const groupRoles = await resolveGroupRoles(options.db, {
+        tenantId, userId: identity.userId, roles: effectiveRoles, groups, scope: effectiveScope,
+      }, relationGroupIds);
+      effectiveRoles = personSessionRoles(identity, {
+        ...relation, roles: [...relation.roles, ...groupRoles],
+      }, realmFromIssuer(claims.iss));
+      const customPermissions = await resolveCustomRolePermissions(options.db, {
+        tenantId, userId: identity.userId, roles: effectiveRoles, groups, scope: effectiveScope,
+      }, [...relation.roles, ...groupRoles]);
+      effectiveRoles = [...new Set([...effectiveRoles, ...customPermissions])].sort();
+      effectiveScope = resolveScope(effectiveRoles, groups);
+    }
     // ---- end identity ↔ Relation link ----
     return {
       tenantId,
@@ -210,6 +225,10 @@ export async function resolveVerifiedBearerSession(
       userDisplayName: relation?.displayName ?? null,
       ...(typeof claims.locale === "string" && claims.locale.trim() ? { locale: claims.locale.trim() } : {}),
       roles: effectiveRoles,
+      ...(isPerson ? { principalKind: "person" as const }
+        : serviceAccount || isServiceAccountToken(claims as Record<string, unknown>)
+          ? { principalKind: "service" as const } : {}),
+      ...(isPerson ? { issuerRoles: [...identity.roles] } : {}),
       oauthScopes: identity.scopes ?? [],
       groups,
       relationGroupIds,

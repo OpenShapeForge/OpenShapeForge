@@ -97,7 +97,7 @@ export function applyBaseEntityToCore(
   source: { kind: "core"; path: string },
 ): CoreEntity {
   if (base === null) return coreEntity;
-  if ((coreEntity as { baseEntity?: boolean }).baseEntity === false) {
+  if (coreEntity.source || (coreEntity as { baseEntity?: boolean }).baseEntity === false) {
     return coreEntity;
   }
 

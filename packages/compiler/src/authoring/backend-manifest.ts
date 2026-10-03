@@ -1257,6 +1257,7 @@ export function compileAuthoringBackendManifest(
     assertEntityValueDefinition(definition);
   }
   const physicalCandidates = candidates.filter((candidate) => {
+    if (candidate.contract.source) return false;
     if (!candidate.contract.entity.valueDefinition) return true;
     if (!definitionNames.has(candidate.contract.entity.name)) {
       throw new Error(`${candidate.contract.entity.name}: identity-less entities must be used as entityValue definitions.`);

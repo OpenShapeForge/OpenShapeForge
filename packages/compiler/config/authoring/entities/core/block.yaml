@@ -15,15 +15,15 @@ authorization:
     read:
       [
         Templates.Read,
-        Organization.All.ReadWrite,
+        Templates.Manage,
         General.All.Read,
         General.All.ReadWrite,
         CaseFile.All.Read,
         CaseFile.All.ReadWrite
       ]
-    create: [Organization.All.ReadWrite]
-    update: [Organization.All.ReadWrite]
-    delete: [Organization.All.ReadWrite]
+    create: [Templates.Manage]
+    update: [Templates.Manage]
+    delete: [Templates.Manage]
   # One table, two owners: a template-owned block is readable with
   # TemplateVariant's read roles, a document-owned block with DocumentVariant's,
   # as those entities author them (compiled to the restrictive policy

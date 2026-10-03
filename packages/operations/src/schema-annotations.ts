@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: BUSL-1.1
-/** Form fields from an authorized record; execution still validates its canonical definition. */
+/**
+ * Form fields from an authorized record; execution still validates its
+ * canonical definition. `field` is a FieldDefinition collection on the
+ * Operation's target record; `input.field` is that collection on the record
+ * chosen in the sibling input `input` (through its `x-osf-reference`).
+ */
 export const operationInputFieldsKeyword = {
   keyword: "x-osf-inputFields",
   schemaType: "string" as const,
   valid: true,
-  metaSchema: { type: "string", pattern: "^[A-Za-z_][A-Za-z0-9_]*$" },
+  metaSchema: { type: "string", pattern: "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?$" },
 };
 
 const equalityConstraint = {
@@ -42,6 +47,11 @@ export const operationReferenceKeyword = {
       valueField: { type: "string", pattern: "^[A-Za-z_][A-Za-z0-9_]*$" },
       recordIdSourceField: { type: "string", pattern: "^[A-Za-z_][A-Za-z0-9_]*$" },
       constraints: relationshipConstraints,
+      bindings: {
+        type: "object",
+        propertyNames: { pattern: "^[A-Za-z_][A-Za-z0-9_]*$" },
+        additionalProperties: { type: "string", pattern: "^[A-Za-z_][A-Za-z0-9_]*$" },
+      },
     },
   },
 };

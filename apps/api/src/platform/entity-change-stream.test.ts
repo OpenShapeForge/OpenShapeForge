@@ -142,3 +142,21 @@ test("real HTTP SSE receives another session's mutation and reconnect replays it
   expect((await fetch(`${origin}/api/events`)).status).toBe(401);
   expect((await fetch(`${origin}/api/events`, { headers: { "last-event-id": "invalid" } })).status).toBe(400);
 }, 15_000);
+
+test("a client that disconnects releases its stream slot at once (#886)", async () => {
+  // Five concurrent streams per person are allowed. Seven opened and dropped
+  // one after another must all be admitted: a navigation is not a new stream
+  // on top of the old one until the old one rotates.
+  const headers = new Headers({ accept: "text/event-stream" });
+  applyTrustedContextHeaders(headers, { ...reader, userId: randomUUID() }, { secret });
+  const statuses: number[] = [];
+  for (let i = 0; i < 7; i++) {
+    const controller = new AbortController();
+    const response = await fetch(`${origin}/api/events`, { headers, signal: controller.signal });
+    statuses.push(response.status);
+    if (response.ok) await response.body!.getReader().read();
+    controller.abort();
+    await delay(150);
+  }
+  expect(statuses).toEqual([200, 200, 200, 200, 200, 200, 200]);
+}, 15_000);

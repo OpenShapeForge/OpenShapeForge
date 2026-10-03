@@ -136,14 +136,19 @@ fields:
 authorization:
   roles:
     read:
+      - Finance.LedgerAccount.Read
       - Finance.All.Read
       - Finance.All.ReadWrite
+      - Finance.LedgerAccount.ReadWrite
     create:
       - Finance.All.ReadWrite
+      - Finance.LedgerAccount.ReadWrite
     update:
       - Finance.All.ReadWrite
+      - Finance.LedgerAccount.ReadWrite
     delete:
       - Finance.All.ReadWrite
+      - Finance.LedgerAccount.ReadWrite
   rowAccess:
     enabled: true
     empty: public

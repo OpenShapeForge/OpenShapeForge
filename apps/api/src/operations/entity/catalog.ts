@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import { operationFailure } from "@openshapeforge/operations";
+import { notAuthorizedRefusal } from "./authorization-refusal-text.js";
 import { redactElicitedValues } from "../../connectors/secrets.js";
 import type { DbSessionInput } from "../../db/session.js";
 import {
@@ -116,10 +117,7 @@ export function requireEntityOperation(
   }
   const sessionRoles = session.roles ?? [];
   if (!sessionRoles.some((role) => allowed.has(role))) {
-    throw operationFailure({
-      code: "FORBIDDEN",
-      message: `Not authorized to ${operation} ${table.source?.authoringEntityName ?? table.name}.`,
-    });
+    throw operationFailure(notAuthorizedRefusal(table, operation));
   }
 }
 

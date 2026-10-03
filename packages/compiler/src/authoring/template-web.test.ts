@@ -11,7 +11,7 @@ const slugs = ["template", "template-version", "template-variant", "block", "tex
 test("template editors can read the records they are allowed to create", () => {
   for (const slug of slugs) {
     const entity = loadEntity(directory, slug).coreEntity;
-    expect(entity.authorization?.roles?.read).toContain("Organization.All.ReadWrite");
+    expect(entity.authorization?.roles?.read).toContain("Templates.Manage");
     if (entity.baseEntity !== false) expect(entity.authorization?.roles?.create?.length).toBeGreaterThan(0);
     for (const role of entity.authorization?.roles?.create ?? []) {
       expect(entity.authorization?.roles?.read).toContain(role);

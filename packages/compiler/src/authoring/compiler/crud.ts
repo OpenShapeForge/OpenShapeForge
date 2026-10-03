@@ -24,7 +24,7 @@ export function buildCrud(
   const operations = operationByAction(coreEntity);
   return {
     operations: Object.fromEntries(
-      CRUD_OPERATION_KEYS.map((operation) => [operation, Boolean(operations[operation])]),
+      CRUD_OPERATION_KEYS.map((operation) => [operation, !coreEntity.source && Boolean(operations[operation])]),
     ) as Record<CrudOperationKey, boolean>,
   };
 }

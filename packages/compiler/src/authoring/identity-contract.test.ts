@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { buildIdentityContract } from "./identity-contract.js";
+import { buildIdentityContract, publicIdentityProviders } from "./identity-contract.js";
 import type { AuthorizationConfigFile } from "./types.js";
 
 const identity: NonNullable<AuthorizationConfigFile["identity"]> = {
@@ -47,6 +47,19 @@ const entities = [
   ]),
 ];
 const platform = { schemaByModule: { core: "erp" }, platformPartyReferences: [{ from: "platform.tenants.relation_id", to: "erp.relations" }] };
+
+test("public IdP metadata requires authored organization binding and excludes every config/secret", () => {
+  const input = config(); input.realm = { name: "test-realm" };
+  input.keycloak.identityProviders = [
+    { alias: "google", providerId: "google", displayName: "Google Workspace", config: { "organization.alias": "acme", hostedDomain: "private.example", clientId: "private-id" }, secrets: { clientSecret: "never-publish" } },
+    { alias: "global", providerId: "oidc", displayName: "Not organization-bound" },
+  ];
+  const result = publicIdentityProviders([input]);
+  expect(result).toEqual([{ realm: "test-realm", organizationAlias: "acme", alias: "google", label: "Google Workspace", type: "google" }]);
+  expect(JSON.stringify(result)).not.toContain("private");
+  expect(JSON.stringify(result)).not.toContain("never-publish");
+  expect(() => publicIdentityProviders([input, input])).toThrow("Duplicate");
+});
 
 describe("identity contract", () => {
   test("carries the authored vocabulary, roles sorted", () => {

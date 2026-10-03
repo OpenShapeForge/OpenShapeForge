@@ -108,6 +108,17 @@ afterAll(async () => {
 });
 
 describe("platform.jobs", () => {
+  test("enqueue stores structured payload and actor session as JSONB objects", async () => {
+    const { id } = await enqueue(sessionA, "test.json-object", {
+      payload: { nested: { artifactId: "owned-artifact" } },
+      actorSession: { roles: [MANAGE_ROLE], groups: [], scope: "tenant" },
+    });
+    const rows = await sql<{ payload_type: string; actor_type: string; artifact: string }>`
+      select jsonb_typeof(payload) as payload_type, jsonb_typeof(actor_session) as actor_type,
+        payload->'nested'->>'artifactId' as artifact
+      from platform.jobs where id=${id}::uuid`.execute(suite.root.db);
+    expect(rows.rows).toEqual([{ payload_type: "object", actor_type: "object", artifact: "owned-artifact" }]);
+  });
   test("the manifest names the same worker role the worker presents", () => {
     const table = manifest.tables.find((entry) => entry.schema === "platform" && entry.table === "jobs") as { workerAccess?: string } | undefined;
     expect(table?.workerAccess).toBe(JOB_WORKER_ROLE);

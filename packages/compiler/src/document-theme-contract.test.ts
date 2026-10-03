@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { standaloneOperationFixture } from "./authoring/standalone-operation.fixtures.js";
 import { expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { loadActivePlatformCompile } from "./active-manifest.js";
@@ -10,15 +11,15 @@ test("document themes are tenant-owned, selected on templates, and projected gen
   const contract = compile.entities.find((entity) => entity.contract.entity.name === "DocumentTheme")!.contract;
   expect(contract.authorization.roles.read).toEqual([
     "Templates.Read",
-    "Organization.All.ReadWrite",
+    "Templates.Manage",
     "General.All.Read",
     "General.All.ReadWrite",
     "CaseFile.All.Read",
     "CaseFile.All.ReadWrite",
   ]);
-  expect(contract.authorization.roles.create).toEqual(["Organization.All.ReadWrite"]);
-  expect(contract.authorization.roles.update).toEqual(["Organization.All.ReadWrite"]);
-  expect(contract.authorization.roles.delete).toEqual(["Organization.All.ReadWrite"]);
+  expect(contract.authorization.roles.create).toEqual(["Templates.Manage"]);
+  expect(contract.authorization.roles.update).toEqual(["Templates.Manage"]);
+  expect(contract.authorization.roles.delete).toEqual(["Templates.Manage"]);
   expect(Object.keys(contract.entityOperations).sort()).toEqual(["create", "delete", "get", "list", "update"]);
   const resolve = contract.pluginOperations?.find((operation) => operation.key === "resolve");
   expect(resolve?.definition.implementation).toEqual({
@@ -77,7 +78,7 @@ test("document themes are tenant-owned, selected on templates, and projected gen
   const block = compile.entities.find((entity) => entity.contract.entity.name === "Block")!.contract;
   expect(block.model.fields.some((field) => /theme|color|font|css/i.test(field.key))).toBe(false);
 
-  const web = buildWebManifest(compile.entities);
+  const web = buildWebManifest(compile.entities, {}, standaloneOperationFixture());
   expect(web.entities.DocumentTheme?.views.collection.route).toBe("/document-themes");
   expect(web.entities.DocumentTheme?.views.record?.routes.create).toBe("/document-themes/new");
   expect(web.entities.DocumentTheme?.operations.setDefault).toMatchObject({ target: { scope: "record" } });

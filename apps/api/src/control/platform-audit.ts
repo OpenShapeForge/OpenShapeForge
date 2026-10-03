@@ -80,6 +80,7 @@ const TARGET_PATTERNS: Readonly<Record<string, RegExp | null>> = Object.fromEntr
     ["control.get-tenant-member", "get_tenant_member", /^tenant="[a-z][a-z0-9-]*" member="[A-Za-z0-9._:-]{1,128}"$/],
     ["control.assign-tenant-member-roles", "assign_tenant_member_roles", /^tenant="[a-z][a-z0-9-]*" member="[A-Za-z0-9._:-]{1,128}"$/],
     ["control.remove-tenant-member-roles", "remove_tenant_member_roles", /^tenant="[a-z][a-z0-9-]*" member="[A-Za-z0-9._:-]{1,128}"$/],
+    ["control.confirm-tenant-member-link", "confirm_tenant_member_link", /^tenant="[a-z][a-z0-9-]*" member="[A-Za-z0-9._:-]{1,128}"$/],
     ["control.remove-tenant-membership", "remove_tenant_membership", /^tenant="[a-z][a-z0-9-]*" member="[A-Za-z0-9._:-]{1,128}"$/],
     ["control.request-passkey-recovery", "request_passkey_recovery", /^tenant="[a-z][a-z0-9-]*" member="[A-Za-z0-9._:-]{1,128}"$/],
     ["control.list-tenant-credentials", "list_tenant_credentials", /^tenant="[a-z][a-z0-9-]*" member="[A-Za-z0-9._:-]{1,128}"$/],

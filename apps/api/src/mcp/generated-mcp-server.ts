@@ -167,10 +167,12 @@ export function buildServer(
   moduleSessionOverride?: TrustedSessionContext,
   /** @internal Test-only projection override. */
   operationToolProjectionOverride?: OperationToolProjection,
+  /** Already validated, tenant-scoped initialize presentation metadata. */
+  serverIcons?: import("@modelcontextprotocol/sdk/types.js").Icon[],
 ): Server {
   const scope = createServerScope({
     db, session, modules, modulePlatform, egressOwner, onDerivedDefinitionChanged,
-    stateful, tableOverride, opening, moduleSessionOverride, operationToolProjectionOverride,
+    stateful, tableOverride, opening, moduleSessionOverride, operationToolProjectionOverride, serverIcons,
   });
   const { server } = scope;
 

@@ -48,3 +48,5 @@ cookies.txt
 .e2e-report/
 .perf-report/
 docs/entities.generated.md
+
+apps/api/src/generated/compiler/access-policy.json

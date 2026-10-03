@@ -5,7 +5,7 @@
  * is step 1's output — must take BOTH steps when a runtime module selects
  * the call's source in `default` mode. Before the composed selection, the
  * one-source-per-call rule ran step 1 and silently skipped step 2 (the
- * pentest plugin's record_finding_with_evidence found it).
+ * advies plugin's record_finding_with_evidence found it).
  *
  * Also pinned here: what happens when it cannot complete. A required step
  * without a usable source refuses BEFORE the first write; a step that fails

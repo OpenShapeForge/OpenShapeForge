@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import roleComposites from "../generated/compiler/role-composites.json" with { type: "json" };
 import { __setRoleCompositesForTests, expandRoleComposites, personSessionRoles } from "./person-roles.js";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -242,35 +243,26 @@ describe("personSessionRoles (a person's effective roles in the selected organiz
     ).toEqual(["General.All.Read", "Platform.ApiKeys.Manage", "default-roles-openshapeforge"]);
   });
 
-  test("a membership row with nothing recorded yet yields the just-in-time minimum beside the realm roles", () => {
+  test("an unassigned membership grants no implicit organization permissions", () => {
     expect(personSessionRoles(identity, { roles: [], needsRoleAssignment: true }, realm)).toEqual([
-      "General.All.Read",
       "Platform.ApiKeys.Manage",
       "default-roles-openshapeforge",
     ]);
   });
 
   test("the shipped realm expands the personas the invitation path records", () => {
-    // From the generated artifact, i.e. the base authorization.yaml: what an
-    // invited administrator and employee actually hold.
-    expect(expandRoleComposites(realm, ["org_admin"])).toEqual([
-      "General.All.Read",
-      "General.All.ReadWrite",
-      "Organization.All.Read",
-      "Organization.All.ReadWrite",
-      "Platform.ApiKeys.Manage",
-      "Platform.Jobs.Manage",
-      "Relations.All.Read",
-      "Relations.All.ReadWrite",
-      "org_admin",
-    ]);
-    expect(expandRoleComposites(realm, ["org_employee"])).toEqual([
-      "General.All.Read",
-      "Relations.All.Read",
-      "org_employee",
-    ]);
-    // The dev layer's administrator composite, transitively.
-    expect(expandRoleComposites(realm, ["Test.Admin"])).toContain("Relations.All.ReadWrite");
+    // Hosts rename the audience client and add permissions; the baseline
+    // organization boundary must hold in both base and composed artifacts.
+    const clients = (roleComposites as any)[realm].clients;
+    const audience = Object.keys(clients).find(key => clients[key].org_admin);
+    expect(audience).toBeDefined();
+    expect(expandRoleComposites(realm, ["org_admin"], audience)).toEqual(
+      expect.arrayContaining(["org_admin", "Organization.All.ReadWrite"]),
+    );
+    const employee = expandRoleComposites(realm, ["org_employee"], audience);
+    expect(employee).toContain("Relations.All.Read");
+    expect(employee).not.toContain("Organization.All.ReadWrite");
+    expect(employee).not.toContain("General.All.Read");
     // A realm the artifact does not know expands nothing.
     expect(expandRoleComposites("other-realm", ["org_admin"])).toEqual(["org_admin"]);
     expect(expandRoleComposites(undefined, ["org_admin"])).toEqual(["org_admin"]);
@@ -314,9 +306,9 @@ describe("tenant from Keycloak Organization membership", () => {
   test("selects the single membership that carries an organization id", () => {
     expect(
       selectOrganizationMembership({
-        organizations: { "zerocopter-dev": { id: "org-1" } },
+        organizations: { "acme-dev": { id: "org-1" } },
       }),
-    ).toEqual({ alias: "zerocopter-dev", id: "org-1" });
+    ).toEqual({ alias: "acme-dev", id: "org-1" });
   });
 
   test("fails closed without an id, and on several memberships with no organization:<alias> scope", () => {

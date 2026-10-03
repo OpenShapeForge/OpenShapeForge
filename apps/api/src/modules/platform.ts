@@ -258,6 +258,18 @@ export function createModuleSessionCapability(
     configurable: false,
     get: () => Object.freeze([...(session.relationGroupIds ?? [])]),
   });
+  // The acting Relation is request-scoped on a stateful MCP session too (a
+  // getter there); a copy taken when the capability was minted would be the
+  // Relation of no request, and person-owned rows would be written as nobody.
+  Object.defineProperty(capability, "relation", {
+    enumerable: true,
+    configurable: false,
+    // A frozen copy per read: a plugin can never rewrite whom core acts as.
+    get: () => {
+      const link = session.relation;
+      return link ? Object.freeze({ ...link, roles: Object.freeze([...(link.roles ?? [])]) }) : link;
+    },
+  });
   return Object.freeze(capability) as unknown as TrustedSessionContext;
 }
 
@@ -290,6 +302,12 @@ export class ModulePlatformRuntime {
     session: TrustedSessionContext;
     trx: Transaction<DB>;
   }>();
+  // Temporary object registry and expiry outbox must survive an enclosing
+  // Operation rollback; bytes already written outside SQL still need GC.
+  readonly #artifactStageTransactionStorage = new AsyncLocalStorage<{
+    session: TrustedSessionContext;
+    trx: Transaction<DB>;
+  }>();
   readonly #recordAccessTransactionStorage = new AsyncLocalStorage<{
     session: TrustedSessionContext;
     trx: Transaction<DB>;
@@ -304,8 +322,8 @@ export class ModulePlatformRuntime {
    * row or not at all. A different session inside it is a bug, not a case.
    */
   #activeTransaction(session: TrustedSessionContext, what: string): Transaction<DB> | undefined {
-    const active = this.#operationTransactionStorage.getStore() ??
-      this.#recordAccessTransactionStorage.getStore();
+    const active = this.#artifactStageTransactionStorage.getStore() ??
+      this.#operationTransactionStorage.getStore() ?? this.#recordAccessTransactionStorage.getStore();
     if (!active) return undefined;
     if (active.session !== session) throw new Error(`${what} belongs to another session.`);
     return active.trx;
@@ -333,6 +351,8 @@ export class ModulePlatformRuntime {
       },
     });
     this.#artifactStorage = new ArtifactStorageRuntime({
+      withStageTransaction: (session, work) => withDbSession(this.#db, session, trx =>
+        this.#artifactStageTransactionStorage.run({ session, trx }, () => work(trx)), { independent: true }),
       records: records.services,
       acceptsSession: (session) => this.#acceptsScopedSession(session),
       currentTransaction: (session) => {

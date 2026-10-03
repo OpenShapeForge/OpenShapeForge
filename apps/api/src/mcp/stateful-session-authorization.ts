@@ -67,7 +67,7 @@ function sameClaims(left: readonly string[] = [], right: readonly string[] = [])
  * login session, identity or token claims. Roles and the scope derived from
  * them are NOT in this tuple: a person's roles are the membership row's
  * (auth/person-roles.ts), refreshed on every request below, so
- * `set_member_role` applies in place rather than ending the session. Both
+ * `canonical Account role Operations` applies in place rather than ending the session. Both
  * absent login bindings retain compatibility for API-key and trusted-context
  * sessions.
  */

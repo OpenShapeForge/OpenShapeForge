@@ -150,23 +150,35 @@ describe("sameStatefulMcpAuthorization", () => {
     });
     const established = { ...authorization(), relation: link("relation-at-initialize") } as TrustedSessionContext;
     const stateful = createStatefulMcpSessionContext(established);
+    // A plugin's capability is minted once per server; it reads the request's link, never a copy.
+    const moduleCapability = createModuleSessionCapability(stateful);
     // No request: no link authority, and the initialize snapshot is not it.
     expect(stateful.relation).toBeNull();
+    expect(moduleCapability.relation).toBeNull();
 
     // An administrator re-linked the person between two requests; the second
     // request resolved the new link, and that is what the session answers.
     const relinked = { ...authorization(), relation: link("relation-after-relink") } as TrustedSessionContext;
     await withFreshRelationGroupMemberships(relinked, async () => {
       expect(stateful.relation?.relationId).toBe("relation-after-relink");
+      expect(moduleCapability.relation?.relationId).toBe("relation-after-relink");
+      // A plugin cannot rewrite whom core acts as.
+      expect(() => { (moduleCapability.relation as { relationId: string }).relationId = "forged"; }).toThrow();
+      expect(stateful.relation?.relationId).toBe("relation-after-relink");
+      expect(() => { (moduleCapability.relation!.roles as string[]).push("Forged.Role"); }).toThrow();
+      expect(stateful.relation?.roles).toEqual(["General.All.Read"]);
       // A tool updating the link mid-request (confirm_my_link) is seen by the
       // rest of that request only.
       stateful.relation = link("relation-confirmed-now");
       expect(stateful.relation?.relationId).toBe("relation-confirmed-now");
+      expect(moduleCapability.relation?.relationId).toBe("relation-confirmed-now");
     });
     expect(stateful.relation).toBeNull();
+    expect(moduleCapability.relation).toBeNull();
     const unlinked = { ...authorization(), relation: null } as TrustedSessionContext;
     await withFreshRelationGroupMemberships(unlinked, async () => {
       expect(stateful.relation).toBeNull();
+      expect(moduleCapability.relation).toBeNull();
     });
   });
 

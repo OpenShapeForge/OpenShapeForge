@@ -2010,7 +2010,7 @@ describe("writtenBy columns", () => {
     version: 1,
     tables: [
       {
-        schema: "pentest",
+        schema: "example",
         name: "findings",
         tenantScoped: true,
         columns: [
@@ -2029,11 +2029,11 @@ describe("writtenBy columns", () => {
   });
 
   const reviewOperation = {
-    key: "pentest.finding.review",
-    id: "pentest.finding.review",
+    key: "example.finding.review",
+    id: "example.finding.review",
     intent: "invoke",
     transports: {
-      rest: { method: "POST", path: "/api/pentest/findings/:findingId/review" },
+      rest: { method: "POST", path: "/api/example/findings/:findingId/review" },
       mcp: { enabled: false },
     },
     // biome-ignore lint/suspicious/noExplicitAny: only the fields read here matter.
@@ -2041,17 +2041,17 @@ describe("writtenBy columns", () => {
 
   it("resolves the authored operation key into a route a caller can use", () => {
     const manifestJson = JSON.parse(
-      generateArtifacts(writtenByManifest("pentest.finding.review"), {
+      generateArtifacts(writtenByManifest("example.finding.review"), {
         operations: [reviewOperation],
       }).find((artifact) => artifact.path.endsWith("db/manifest.json"))!.contents,
     );
     const column = manifestJson.tables
-      .find((table: { name: string }) => table.name === "pentest.findings")
+      .find((table: { name: string }) => table.name === "example.findings")
       .columns.find((candidate: { name: string }) => candidate.name === "reviewed_at");
     expect(column.writtenBy).toEqual([
       {
-        operation: "pentest.finding.review",
-        rest: "POST /api/pentest/findings/:findingId/review",
+        operation: "example.finding.review",
+        rest: "POST /api/example/findings/:findingId/review",
       },
     ]);
   });
@@ -2089,7 +2089,7 @@ describe("writtenBy columns", () => {
       id: "Finding.create",
       key: "create",
       intent: "create",
-      entityId: "pentest.Finding",
+      entityId: "example.Finding",
       entityName: "Finding",
     } as any;
     const manifestJson = JSON.parse(
@@ -2108,7 +2108,7 @@ describe("writtenBy columns", () => {
 
   it("fails the build when the named operation does not exist", () => {
     expect(() =>
-      generateArtifacts(writtenByManifest("pentest.finding.reviw"), {
+      generateArtifacts(writtenByManifest("example.finding.reviw"), {
         operations: [reviewOperation],
       }),
     ).toThrow(/no.*compiled operation has that key/i);

@@ -15,6 +15,7 @@ import {
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { DB } from "../generated/db/types.js";
 import type { RuntimeModule } from "./contract.js";
+import { bindOperationHandlers, invokeOperation, type OperationContract } from "../operations/runtime.js";
 
 const providerId = "test-artifact-provider";
 
@@ -122,6 +123,45 @@ function database(observations: QueryObservation[]): Kysely<DB> {
 }
 
 describe("artifact record authorization transaction scope", () => {
+  test("unguarded custom data writes bind artifacts in their owning Operation transaction", async () => {
+    const observations: QueryObservation[] = [];
+    const db = database(observations);
+    const platform = new ModulePlatformRuntime(db);
+    const storage = stagingModule(platform, async () => undefined);
+    storage.artifactStorage!.bind = async (context) => {
+      await sql`select 1 as provider_bind_marker`.execute(context.transaction);
+      return descriptor;
+    };
+    platform.registerArtifactStorage([storage]);
+    const operation: OperationContract = {
+      key: "test.attach", plugin: "test", title: "Attach file", description: "Attach file",
+      handler: "attach", inputSchema: { type: "object" }, outputSchema: { type: "object" }, errors: [],
+      auth: { mode: "session", roles: ["CaseFile.All.Read"] }, tenancy: { mode: "required" },
+      idempotency: { mode: "none" }, effects: { data: "write", external: "none" },
+      transports: { rest: { method: "POST", path: "/api/test/attach", response: { kind: "json", status: 200 } },
+        mcp: { enabled: false, reason: "Test" }, graphql: { enabled: false, reason: "Test" },
+        typescript: { enabled: false, reason: "Test" } },
+    };
+    const module: RuntimeModule = { name: "test", operationHandlers: { attach: async (_input, context) => {
+      await context.platform!.db.withSession(context.session!, async (trx) => {
+        await sql`select 1 as record_write_marker`.execute(trx);
+      });
+      await context.platform!.artifacts.bind(context.session!, {
+        artifactId, owner: { entity: "Document", id: documentId }, expectedArtifactVersion: 1,
+      });
+      return { value: {} };
+    } } };
+    try {
+      const bound = bindOperationHandlers([module], [operation]).get(operation.key)!;
+      expect(await invokeOperation(bound, {}, { db, platform: platform.services, session: trustedSession(userId), transport: "rest" }))
+        .toEqual({ value: {} });
+      const record = observations.find(entry => entry.sql.includes("record_write_marker"));
+      const binding = observations.find(entry => entry.sql.includes("provider_bind_marker"));
+      expect(record).toBeDefined();
+      expect(binding?.connectionId).toBe(record!.connectionId);
+      expect(observations.filter(entry => entry.sql === "<commit>")).toHaveLength(1);
+    } finally { await db.destroy(); }
+  });
   test("shares the read transaction with record checks without granting bind authority", async () => {
     const observations: QueryObservation[] = [];
     const db = database(observations);
@@ -390,22 +430,25 @@ describe("artifact record authorization transaction scope", () => {
     }
   });
 
-  test("the production path: an Operation stages a file, and the stage's enqueue lands on the Operation transaction", async () => {
+  test("the production path: staged bytes and GC outbox survive an enclosing Operation rollback", async () => {
     const observations: QueryObservation[] = [];
     const db = database(observations);
     const platform = new ModulePlatformRuntime(db);
     platform.registerArtifactStorage([stagingModule(platform, (context) => platform.services.jobs.enqueue(context.session, gcJob).then(() => undefined))]);
     try {
-      await withModuleOperationSession(platform.services, trustedSession(userId), (active) =>
+      await expect(withModuleOperationSession(platform.services, trustedSession(userId), (active) =>
         platform.withOperationTransaction(active!, async (trx) => {
           await sql`select 1 as operation_marker`.execute(trx);
           await platform.services.artifacts.stage(active!, stageInput());
-        }));
-      const ids = ["operation_marker", "provider_stage_marker", 'into "platform"."jobs"']
-        .map((marker) => observations.find((entry) => entry.sql.includes(marker))?.connectionId);
-      expect(ids.every((id) => id !== undefined && id === ids[0])).toBe(true);
-      expect(connectionsOf(observations).size).toBe(1);
-      expect(observations.filter((entry) => entry.sql === "<commit>")).toHaveLength(1);
+          throw new Error("activation failed");
+        }))).rejects.toThrow("activation failed");
+      const operation = observations.find(entry => entry.sql.includes("operation_marker"))!;
+      const stage = observations.find(entry => entry.sql.includes("provider_stage_marker"))!;
+      const enqueue = observations.find(entry => entry.sql.includes('into "platform"."jobs"'))!;
+      expect(stage.connectionId).not.toBe(operation.connectionId);
+      expect(enqueue.connectionId).toBe(stage.connectionId);
+      expect(observations.filter(entry => entry.sql === "<commit>")).toEqual([{ connectionId: stage.connectionId, sql: "<commit>" }]);
+      expect(observations.at(-1)).toEqual({ connectionId: operation.connectionId, sql: "<rollback>" });
     } finally {
       await db.destroy();
     }

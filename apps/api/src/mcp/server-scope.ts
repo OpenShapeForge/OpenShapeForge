@@ -25,6 +25,7 @@ import {
 } from "./catalog.js";
 import { toolsForSession } from "./session-projection.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import type { Icon } from "@modelcontextprotocol/sdk/types.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { ARTIFACT_UPLOAD_APP_URI } from "./artifact-upload.js";
 import { editLeaseOperationIdsForSession } from "./edit-lease-tools.js";
@@ -59,6 +60,7 @@ function createServerScopePrologue(input: {
   opening: string | null;
   moduleSessionOverride: TrustedSessionContext | undefined;
   operationToolProjectionOverride: OperationToolProjection | undefined;
+  serverIcons: Icon[] | undefined;
 }) {
   const {
     db,
@@ -94,7 +96,7 @@ function createServerScopePrologue(input: {
       module.mcp?.resourceTemplates !== undefined,
   );
   const tables = tableOverride ?? tablesByName();
-  const server = new Server(SERVER_INFO, {
+  const server = new Server({ ...SERVER_INFO, ...(input.serverIcons ? { icons: input.serverIcons } : {}) }, {
     capabilities: {
       // listChanged is advertised only when the tool list can actually change
       // mid-session — i.e. when stored rows project as tools.

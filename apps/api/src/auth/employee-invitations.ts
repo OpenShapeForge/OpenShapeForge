@@ -1,3 +1,4 @@
+import generatedRoleComposites from "../generated/compiler/role-composites.json" with { type: "json" };
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * An organization administrator inviting a colleague — the step BEFORE
@@ -21,7 +22,7 @@
  * ---------------------------------------------------------------------------
  * An earlier version of this header said Keycloak exposes no admin-API
  * resource for an unaccepted invitation, so revoking could only ever be
- * Hubble-side bookkeeping. That was wrong. `/organizations/{id}/invitations`
+ * application-side bookkeeping. That was wrong. `/organizations/{id}/invitations`
  * exists, lists pending invitations, and accepts a DELETE — measured against
  * the running local Keycloak by sending a real invitation and withdrawing it
  * (keycloak-organization-members.ts's header carries the verbatim responses).
@@ -71,7 +72,10 @@ import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
+import { validateInvitationTarget } from "./invitation-target.js";
+import { deliverOrganizationInvitation } from "./keycloak-invitation-delivery.js";
 import { HttpError } from "../rest/http-error.js";
+import { accessPolicy, customRoleId } from '../accounts/access-policy.js';
 // From the leaf module, NOT from ./identity-link.js: this module and that one
 // import each other, and EMPLOYEE_INVITATION_ROLE_GRANTS below reads both of
 // these while evaluating. See ./organization-roles.ts.
@@ -80,25 +84,27 @@ import {
   KeycloakAdminError,
   type KeycloakAdminErrorCode,
 } from "../control/keycloak-organization-admin.js";
-import type {
-  KeycloakOrganizationInvitation,
-  KeycloakOrganizationMembersClient,
-} from "../control/keycloak-organization-members.js";
+import type { KeycloakOrganizationMembersClient } from "../control/keycloak-organization-members.js";
 
 export { IDENTITY_LINK_ADMIN_ROLE as EMPLOYEE_INVITATION_ADMIN_ROLE };
 
 export const EMPLOYEE_INVITATION_ROLES = ["org_admin", "org_employee"] as const;
-export type EmployeeInvitationRole = (typeof EMPLOYEE_INVITATION_ROLES)[number];
+export type EmployeeInvitationRole = string;
 
 export function isEmployeeInvitationRole(value: string): value is EmployeeInvitationRole {
-  return (EMPLOYEE_INVITATION_ROLES as readonly string[]).includes(value);
+  if (customRoleId(value)) return true;
+  if (accessPolicy.roles.length && !accessPolicy.roles.includes(value)) return false;
+  const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER ?? "http://localhost/realms/openshapeforge";
+  const realm = new URL(issuer).pathname.split("/realms/")[1]?.split("/")[0] ?? "";
+  const table = (generatedRoleComposites as Record<string, { clients: Record<string, Record<string, unknown>> }>)[realm]?.clients[memberRoleClientId()];
+  return Boolean(table && Object.hasOwn(table, value));
 }
 
 /**
  * The organization-scoped roles each invited role carries — what lands in
  * `platform.identity_relations.roles` for the tenant, as DECLARED names. One
  * table, read by both the automatic path (first sign-in) and the manual one
- * (`set_member_role`, mcp/identity-link-tools.ts) — a second copy of a table
+ * (Account.assignRole in accounts/account-management.ts) — a second copy of a table
  * that decides what an administrator can do is the kind of duplication that
  * drifts silently.
  *
@@ -114,7 +120,7 @@ export function isEmployeeInvitationRole(value: string): value is EmployeeInvita
  * off the session to say what the person is.
  */
 export const EMPLOYEE_INVITATION_ROLE_GRANTS: Readonly<
-  Record<EmployeeInvitationRole, readonly string[]>
+  Record<"org_admin" | "org_employee", readonly string[]>
 > = {
   org_admin: ["org_admin", IDENTITY_LINK_ADMIN_ROLE],
   org_employee: ["org_employee", ...NEEDS_ROLE_ASSIGNMENT_ROLES],
@@ -126,9 +132,11 @@ export const EMPLOYEE_INVITATION_ROLE_GRANTS: Readonly<
  * and identity tools must not depend on a host role name.
  */
 export function employeeInvitationRoleGrants(
-  role: EmployeeInvitationRole,
+  role: EmployeeInvitationRole | null,
   env: NodeJS.ProcessEnv = process.env,
 ): readonly string[] {
+  if (role === null) return [];
+  if (role !== "org_admin" && role !== "org_employee") return [role];
   const configured = (role === "org_admin"
     ? env.OPENSHAPEFORGE_ORG_ADMIN_CLIENT_ROLE
     : env.OPENSHAPEFORGE_ORG_EMPLOYEE_CLIENT_ROLE)?.trim();
@@ -154,15 +162,16 @@ type SessionInput = DbSessionInput & { tenantId: string; userId: string };
 
 export type InviteEmployeeInput = {
   email: string;
+  relationId?: string;
   firstName?: string | undefined;
   lastName?: string | undefined;
-  role: EmployeeInvitationRole;
+  role?: EmployeeInvitationRole | null;
 };
 
 export type EmployeeInvitation = {
   id: string;
   email: string;
-  role: EmployeeInvitationRole;
+  role: EmployeeInvitationRole | null;
   firstName: string | null;
   lastName: string | null;
   status: "pending" | "revoked" | "accepted";
@@ -174,14 +183,6 @@ export type EmployeeInvitation = {
 export type EmployeeAdmission = EmployeeInvitation & {
   delivery: "sent" | "not_required" | "already_pending";
 };
-
-function isReusableInvitation(
-  invitation: KeycloakOrganizationInvitation | null,
-): boolean {
-  return invitation?.status?.toUpperCase() === "PENDING" &&
-    invitation.expiresAt !== null &&
-    invitation.expiresAt >= Math.floor(Date.now() / 1000);
-}
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -251,7 +252,7 @@ async function tenantOrganization(
 type InvitationRow = {
   id: string;
   email: string;
-  role: string;
+  role: string | null;
   first_name: string | null;
   last_name: string | null;
   status: "pending" | "revoked" | "accepted";
@@ -264,7 +265,7 @@ export function toInvitation(row: InvitationRow): EmployeeInvitation {
   return {
     id: row.id,
     email: row.email,
-    role: row.role as EmployeeInvitationRole,
+    role: row.role as EmployeeInvitationRole | null,
     firstName: row.first_name,
     lastName: row.last_name,
     status: row.status,
@@ -290,48 +291,34 @@ export async function inviteEmployee(
 ): Promise<EmployeeAdmission> {
   requireAdmin(session);
   const email = normalisedEmail(input.email);
-  if (!isEmployeeInvitationRole(input.role)) {
+  if (input.role != null && !isEmployeeInvitationRole(input.role)) {
     throw new HttpError(
       400,
       "VALIDATION",
-      `role must be one of ${EMPLOYEE_INVITATION_ROLES.join(", ")}.`,
+      "role must be a declared organization role.",
     );
   }
   const actor = session.relation?.identityId ?? session.userId;
+  const customId = input.role ? customRoleId(input.role) : undefined;
+  if (customId) {
+    const found = await withDbSession(db, session, tx => sql`select id from platform.organization_access_roles
+      where tenant_id=${session.tenantId}::uuid and id=${customId}::uuid`.execute(tx));
+    if (!found.rows.length) throw new HttpError(400, 'VALIDATION', 'Choose a role from this organization.');
+  }
 
   const { organizationId } = await withDbSession(db, session, (trx) =>
     tenantOrganization(trx, session.tenantId),
   );
 
+  if (input.relationId) await withDbSession(db, session, trx => validateInvitationTarget(trx, session.tenantId, input.relationId!, email));
+
   let delivery: EmployeeAdmission["delivery"];
   try {
-    const existingMember = await keycloak.hasMemberByEmail(organizationId, email);
-    if (existingMember) {
-      delivery = "not_required";
-    } else {
-      const existingInvitation = await keycloak.findPendingInvitationByEmail(organizationId, email);
-      if (isReusableInvitation(existingInvitation)) {
-        delivery = "already_pending";
-      } else {
-        try {
-          await keycloak.inviteUser(organizationId, {
-            email,
-            firstName: input.firstName,
-            lastName: input.lastName,
-          });
-          delivery = "sent";
-        } catch (error) {
-          if (!(error instanceof KeycloakAdminError) || error.status !== 409) throw error;
-          if (await keycloak.hasMemberByEmail(organizationId, email)) {
-            delivery = "not_required";
-          } else if (await keycloak.findPendingInvitationByEmail(organizationId, email)) {
-            delivery = "already_pending";
-          } else {
-            throw error;
-          }
-        }
-      }
-    }
+    delivery = await deliverOrganizationInvitation(keycloak, organizationId, {
+      email,
+      firstName: input.firstName,
+      lastName: input.lastName,
+    });
   } catch (error) {
     console.warn("[employee-invitation] " + JSON.stringify({
       outcome: "keycloak_failed", tenantId: session.tenantId, organizationId,
@@ -357,23 +344,29 @@ export async function recordEmployeeInvitation(
   trx: Transaction<DB>, tenantId: string, actor: string, input: InviteEmployeeInput,
   email = normalisedEmail(input.email),
 ): Promise<EmployeeInvitation> {
+    if (input.relationId) await validateInvitationTarget(trx, tenantId, input.relationId, email);
     const inserted = await sql<InvitationRow>`
       insert into platform.employee_invitations
-        (tenant_id, email, role, first_name, last_name, invited_by)
+        (tenant_id, email, role, first_name, last_name, invited_by, relation_id)
       values
-        (${tenantId}, ${email}, ${input.role},
-         ${input.firstName ?? null}, ${input.lastName ?? null}, ${actor})
+        (${tenantId}, ${email}, ${input.role ?? null},
+         ${input.firstName ?? null}, ${input.lastName ?? null}, ${actor}, ${input.relationId ?? null})
       on conflict (tenant_id, lower(email)) where status = 'pending'
       do update set
+        relation_id = coalesce(excluded.relation_id, platform.employee_invitations.relation_id),
         role = excluded.role,
         first_name = excluded.first_name,
         last_name = excluded.last_name,
         invited_by = excluded.invited_by,
         invited_at = now(),
         updated_at = now()
+      where platform.employee_invitations.relation_id is null
+         or excluded.relation_id is null
+         or platform.employee_invitations.relation_id = excluded.relation_id
       returning id, email, role, first_name, last_name, status, invited_by, invited_at, revoked_at
     `.execute(trx);
-    return toInvitation(inserted.rows[0]!);
+    if (!inserted.rows[0]) throw new HttpError(409, "CONFLICT", "Invitation already belongs to another relation.");
+    return toInvitation(inserted.rows[0]);
 }
 
 /** Every invitation this tenant still has `status = 'pending'`, newest first. */
@@ -401,7 +394,7 @@ export async function listInvitations(
 // module owns `platform.employee_invitations` — its RLS, its status shape and
 // the meaning of each status live in one place.
 
-export type PendingInvitationMatch = { id: string; role: EmployeeInvitationRole };
+export type PendingInvitationMatch = { id: string; role: EmployeeInvitationRole | null; relationId?: string | null };
 
 /**
  * The tenant's still-pending invitation for `email`, or null. A plain read
@@ -414,8 +407,8 @@ export async function findPendingInvitation(
   tenantId: string,
   email: string,
 ): Promise<PendingInvitationMatch | null> {
-  const result = await sql<{ id: string; role: string }>`
-    select id, role
+  const result = await sql<{ id: string; role: EmployeeInvitationRole | null; relation_id: string | null }>`
+    select id, role, relation_id
       from platform.employee_invitations
      where tenant_id = ${tenantId}
        and lower(email) = lower(${email})
@@ -424,8 +417,8 @@ export async function findPendingInvitation(
      limit 1
   `.execute(trx);
   const row = result.rows[0];
-  if (!row || !isEmployeeInvitationRole(row.role)) return null;
-  return { id: row.id, role: row.role };
+  if (!row || (row.role !== null && !isEmployeeInvitationRole(row.role))) return null;
+  return { id: row.id, role: row.role, ...(row.relation_id ? { relationId: row.relation_id } : {}) };
 }
 
 /**
@@ -443,8 +436,8 @@ export async function claimPendingInvitation(
   trx: Transaction<DB>,
   tenantId: string,
   invitationId: string,
-): Promise<EmployeeInvitationRole | null> {
-  const result = await sql<{ role: string }>`
+): Promise<{ role: EmployeeInvitationRole | null } | null> {
+  const result = await sql<{ role: EmployeeInvitationRole | null }>`
     update platform.employee_invitations
        set status = 'accepted',
            accepted_at = now(),
@@ -454,8 +447,8 @@ export async function claimPendingInvitation(
        and status = 'pending'
     returning role
   `.execute(trx);
-  const role = result.rows[0]?.role;
-  return role && isEmployeeInvitationRole(role) ? role : null;
+  const row = result.rows[0];
+  return row && (row.role === null || isEmployeeInvitationRole(row.role)) ? row : null;
 }
 
 export type RevokeInvitationInput = { email: string };
@@ -465,7 +458,7 @@ export type RevokedInvitation = EmployeeInvitation & {
    * True when Keycloak still held the invitation and it was deleted there —
    * the delivered link is now dead. False when Keycloak had nothing left
    * (already accepted, already withdrawn, or expired), in which case only the
-   * Hubble row changed. Reported rather than hidden: "the mail no longer
+   * application row changed. Reported rather than hidden: "the mail no longer
    * works" and "there was nothing left to stop" are different answers to an
    * administrator who is revoking because something went wrong.
    */
@@ -479,7 +472,7 @@ export type RevokedInvitation = EmployeeInvitation & {
  *
  * Keycloak first, mirroring `inviteEmployee`. If the admin API fails, nothing
  * is marked revoked and the administrator can retry — the opposite order
- * would leave Hubble claiming an invitation was withdrawn while the link in
+ * would leave the application claiming an invitation was withdrawn while the link in
  * somebody's inbox still lets them in, which is the one outcome a revoke must
  * never produce.
  *

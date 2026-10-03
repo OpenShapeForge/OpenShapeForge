@@ -102,7 +102,7 @@ describe("a refusal RAISEd by a trigger or guard function", () => {
   });
 
   it("a raised foreign_key_violation keeps the guard's wording as REFERENCE_NOT_FOUND 404", () => {
-    // The pentest tenant-consistency guard: identical text for absent and other-tenant.
+    // The advies tenant-consistency guard: identical text for absent and other-tenant.
     expect(
       classifyDatabaseError(
         postgresError("Referenced record is not available.", { sqlstate: "23503", routine: RAISE }),

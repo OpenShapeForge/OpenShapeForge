@@ -82,6 +82,7 @@ const operationCatalog = rawOperationCatalog as unknown as {
       entityName: string;
       scope: "collection" | "record";
       inputField?: string;
+      inputBindings?: Record<string, string>;
     };
     auth:
       | { mode: "public" }
@@ -682,7 +683,12 @@ export function getEntityOperationOffers(
         hasRecordPermissions([operation.auth.recordPermission]))
     )
     .map((operation) => {
-      const error = unavailable[operation.key];
+      const bindings = Object.entries(operation.target?.inputBindings ?? {});
+      const missingBinding = target && bindings.some(([, fieldKey]) =>
+        target.row?.[fieldKey] === undefined || target.row?.[fieldKey] === null);
+      const error = unavailable[operation.key] ?? (missingBinding
+        ? { code: "OPERATION_UNAVAILABLE", message: "The record is missing an action input. Read it again before continuing.", retryable: false }
+        : undefined);
       const reference = { id: operation.key, intent: "invoke" as const };
       if (error) return { operation: reference, available: false as const, error };
       return {
@@ -697,7 +703,9 @@ export function getEntityOperationOffers(
                   id: target.id,
                   ...(target.version ? { version: target.version } : {}),
                 },
-                input: { [operation.target.inputField]: target.id },
+                input: { [operation.target.inputField]: target.id,
+                  ...Object.fromEntries(Object.entries(operation.target.inputBindings ?? {}).map(([inputKey, fieldKey]) =>
+                    [inputKey, target.row?.[fieldKey]])) },
               },
             }
           : {}),

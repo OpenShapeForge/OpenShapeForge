@@ -68,6 +68,43 @@ describe("buildMcp", () => {
     expect(section?.operationInstructions).toEqual({ get: { en: "Use the exact id." } });
   });
 
+  it("projects custom Operation keys by intent, including plugin-backed writes", () => {
+    const value = entity();
+    const create = value.operations!.create!;
+    const update = value.operations!.update!;
+    delete value.operations!.create;
+    delete value.operations!.update;
+    value.operations!.register = {
+      ...create,
+      implementation: { type: "plugin", plugin: "contacts", handler: "register", action: "create" },
+    };
+    value.operations!.revise = update;
+    value.interfaces!.mcp!.operations = {
+      register: { name: "register_contact", instructions: { en: "Register a contact." } },
+      revise: false,
+    };
+
+    const section = buildMcp(value);
+    expect(section?.operations).toEqual({ list: true, get: true, create: true, update: false, delete: true });
+    expect(section?.toolOverrides).toEqual({ create: { name: "register_contact" } });
+    expect(section?.operationInstructions).toEqual({ create: { en: "Register a contact." } });
+  });
+
+  it("cannot expose Operations beyond the generated CRUD upper bound", () => {
+    const value = entity();
+    value.interfaces!.mcp!.operations = { create: { name: "register_contact" } };
+    const section = buildMcp(value, {
+      operations: { list: true, get: true, create: false, update: false, delete: false },
+    });
+    expect(section?.operations).toEqual({ list: true, get: true, create: false, update: false, delete: false });
+  });
+
+  it("rejects a projection that references an unknown canonical Operation", () => {
+    const value = entity();
+    value.interfaces!.mcp!.operations = { missing: false };
+    expect(() => buildMcp(value)).toThrow(/interfaces\.mcp\.operations\.missing does not reference a canonical operation/);
+  });
+
   it("rejects names outside the supported dedicated projection", () => {
     const generic = entity("generic");
     generic.interfaces!.mcp!.operations = { get: { name: "read_contact" } };

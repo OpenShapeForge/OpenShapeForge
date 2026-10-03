@@ -5,6 +5,7 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withSystemSession } from "../db/session.js";
 import { FirstAdministratorError, invitationDeliveryUnconfirmed, type FirstAdministratorClients } from "./first-tenant-administrator.js";
 import { KeycloakAdminError } from "./keycloak-organization-admin.js";
+import { deliverInvitation, invitationOutcome, tenantSignInUrl } from "./invitation-outcome.js";
 import { systemSessionForAdministrator, type PlatformAdministrator } from "./platform-admin.js";
 
 type Dependencies = {
@@ -107,6 +108,20 @@ export async function manageTenantInvitations(
         const pending = await clients.members.listInvitations(organization.id);
         const localFor = (email: string) => rows.find((row) => row.email.toLowerCase() === email.toLowerCase());
         if (action === "list") {
+          const withoutProvider = rows.filter((row) => row.status === "pending" &&
+            !pending.some((invitation) => invitation.email.toLowerCase() === row.email.toLowerCase()));
+          // A pending intent for an existing account is the intended no-mail
+          // state (it waits for their sign-in); only an intent with neither an
+          // account nor a provider invitation is drift. One member read, not one per row.
+          const accounts = withoutProvider.length === 0 ? new Set<string>() : new Set(
+            (await clients.members.listMembers(organization.id)).flatMap((member) => member.email ? [member.email.trim().toLowerCase()] : []),
+          );
+          const signInUrl = tenantSignInUrl(input.slug);
+          const unresolved = withoutProvider.map((row) => {
+            const member = accounts.has(row.email.trim().toLowerCase());
+            return { tenantSlug: input.slug, invitationId: row.id, ...toInvitation(row),
+              status: member ? "awaiting_sign_in" : "provider_missing", ...(member ? { signInUrl } : {}) };
+          });
           return {
             tenant: input.slug,
             invitations: pending.map((invitation) => {
@@ -128,12 +143,7 @@ export async function manageTenantInvitations(
                 canRevoke: invitationCanBeRevoked(invitation.status),
               };
             }),
-            unresolved: rows
-              .filter(
-                (row) => row.status === "pending" &&
-                  !pending.some((invitation) => invitation.email.toLowerCase() === row.email.toLowerCase()),
-              )
-              .map((row) => ({ tenantSlug: input.slug, invitationId: row.id, ...toInvitation(row), status: "provider_missing" })),
+            unresolved,
           };
         }
 
@@ -143,14 +153,24 @@ export async function manageTenantInvitations(
           catch { throw new FirstAdministratorError("INVALID_INPUT", "A valid email address is required."); }
           if (!input.role || !isEmployeeInvitationRole(input.role)) throw new FirstAdministratorError("INVALID_INPUT", "role must be org_admin or org_employee.");
           if (tenant.status !== "active" || !organization.enabled) throw new FirstAdministratorError("TENANT_NOT_READY", "Inviting requires an active tenant and organization.");
-          const existing = await clients.members.findPendingInvitationByEmail(organization.id, email);
-          if (!existing) {
-            if (!(await clients.members.hasInvitationMailConfiguration())) throw new FirstAdministratorError("SMTP_NOT_CONFIGURED", "Configure SMTP before sending invitations.");
-            await clients.members.inviteUser(organization.id, { email, ...(input.firstName ? { firstName: input.firstName } : {}), ...(input.lastName ? { lastName: input.lastName } : {}) });
+          const names = { ...(input.firstName ? { firstName: input.firstName } : {}), ...(input.lastName ? { lastName: input.lastName } : {}) };
+          // An existing account gets no mail: Keycloak would refuse invite-user
+          // for a member, and the local intent is what their sign-in consumes.
+          const member = await clients.members.hasMemberByEmail(organization.id, email);
+          const accepted = rows.find((row) => row.status === "accepted" && row.email.toLowerCase() === email);
+          if (member && accepted) {
+            return { tenantSlug: input.slug, invitationId: accepted.id, ...toInvitation(accepted), ...invitationOutcome(input.slug, "already_accepted") };
           }
+          const delivery = member
+            ? "no_email_existing_account" as const
+            : await deliverInvitation(clients.members, organization.id, { email, ...names }, { knownNonMember: true });
           const invitation = await recordEmployeeInvitation(trx, tenant.id, `${deps.administrator.issuer}#${deps.administrator.subject}`,
-            { email, role: input.role, ...(input.firstName ? { firstName: input.firstName } : {}), ...(input.lastName ? { lastName: input.lastName } : {}) });
-          return { tenantSlug: input.slug, invitationId: existing?.id ?? invitation.id, ...invitation };
+            { email, role: input.role, ...names });
+          const keycloakInvitation = delivery === "already_pending"
+            ? await clients.members.findPendingInvitationByEmail(organization.id, email)
+            : null;
+          return { tenantSlug: input.slug, invitationId: keycloakInvitation?.id ?? invitation.id, ...invitation,
+            ...invitationOutcome(input.slug, delivery) };
         }
 
         const invitation = pending.find((row) => row.id === input.invitationId);
@@ -254,6 +274,7 @@ export async function manageTenantInvitations(
           email: invitation.email,
           role: local.role,
           status: "resent",
+          ...invitationOutcome(input.slug, "email_sent"),
         };
       },
     );

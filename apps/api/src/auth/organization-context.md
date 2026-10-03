@@ -9,7 +9,7 @@ baseline beside it. The invitation path writes it on first sign-in, in one
 transaction with the Relation, the link and the claim of the invitation
 (auth/identity-link-admission.ts — the invitation is claimed with
 `UPDATE … RETURNING role`, so a revoke or role change in between wins);
-`set_member_role` and the platform operator's member-role operations replace
+`canonical Account role Operations` and the platform operator's member-role operations replace
 it, on linked rows only, and removing a member clears the row. A person's
 session expands the row's names through the realm's composites
 (`generated/compiler/role-composites.json`, per realm and per owning client;

@@ -77,10 +77,12 @@ export interface FieldDefinitionTransitionWrite {
  * the record named by `via` is present/absent, or holds one of `in`. An empty
  * string is a present value. A missing referenced record is a refusal.
  */
-export type FieldDefinitionTransitionPrecondition =
+/** `refusal`: what a person reads when the precondition refuses, per locale; without it the refusal names the field. */
+export type FieldDefinitionTransitionPrecondition = (
   | { field: string; present: boolean }
   | { via: string; field: string; present: boolean }
-  | { via: string; field: string; in: Array<string | number | boolean> };
+  | { via: string; field: string; in: Array<string | number | boolean> }
+) & { refusal?: LocalizedText };
 
 export interface FieldDefinitionTransitionRule {
   /** Operation key; becomes `<Entity>.<key>`, the REST segment and the web action. */
@@ -92,12 +94,16 @@ export interface FieldDefinitionTransitionRule {
   label?: LocalizedText;
   description?: LocalizedText;
   /**
-   * Who may invoke. `roles` defaults to the entity's update roles. A
-   * transition writes the record, so on an entity with record-level
-   * permissions it always requires `edit`; `recordPermission` may only restate
-   * that, and is refused on an entity without record permissions.
+   * Who may invoke. `roles` defaults to the entity's update roles and, when
+   * authored, REPLACES them: any one of `roles` suffices. `alsoRequire` adds a
+   * second, conjunctive gate instead — the caller holds one of `roles` (so by
+   * default the update roles) AND one of `alsoRequire` (#944: winning a deal
+   * is a deal write and a quote act). A transition writes the record, so on an
+   * entity with record-level permissions it always requires `edit`;
+   * `recordPermission` may only restate that, and is refused on an entity
+   * without record permissions.
    */
-  auth?: { roles?: string[]; recordPermission?: "edit" };
+  auth?: { roles?: string[]; alsoRequire?: string[]; recordPermission?: "edit" };
   /**
    * Record facts that must hold besides the current status. Deliberately a
    * small vocabulary: a field is present (not null) or absent (null), on this
@@ -250,6 +256,8 @@ export interface FieldDefinition {
    * name; the compiler derives the base type from the catalog.
    */
   osfType: string;
+  /** Ordered plugin transformations, executed by an explicit owning Operation. */
+  transform?: readonly { use: string; profile?: string }[];
   cardinality?: FieldDefinitionCardinality;
   variables?: FieldDefinitionVariableMode;
   sortable?: boolean;
@@ -281,7 +289,7 @@ export interface FieldDefinition {
   /**
    * API contract: this field is written ONLY by the named operations, never
    * through generated create/update. Operation contract keys, e.g.
-   * `["pentest.finding.review"]`.
+   * `["example.finding.review"]`.
    *
    * The third writability word next to `required` and `immutable`, and
    * deliberately not a fourth meaning for `readOnly` — that one picks a

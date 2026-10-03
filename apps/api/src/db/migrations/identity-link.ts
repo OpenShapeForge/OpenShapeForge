@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
 import { IDENTITY_LINK_ADMIN_ROLE } from "../../auth/organization-roles.js";
+import { ACCOUNT_MANAGE } from "../../accounts/account-session.js";
 import type { OpenShapeForgeDatabase } from "../connection.js";
 import { databaseRole } from "../database-roles.js";
 import { ensureCheckConstraint } from "./sql-invariants.js";
@@ -224,6 +225,7 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
           tenant_id = app.current_tenant()
           and (
             app.identity_subject(identity_id)
+            or ${sql.lit(ACCOUNT_MANAGE)} = any(string_to_array(coalesce(current_setting('app.roles', true), ''), ','))
             or ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
               string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
             )
@@ -236,6 +238,7 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
           tenant_id = app.current_tenant()
           and (
             app.identity_subject(identity_id)
+            or ${sql.lit(ACCOUNT_MANAGE)} = any(string_to_array(coalesce(current_setting('app.roles', true), ''), ','))
             or ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
               string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
             )

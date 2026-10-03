@@ -14,6 +14,15 @@
     "fields"
   ],
   "properties": {
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind"], "properties": { "kind": { "const": "operations" },
+        "query": { "type": "object", "additionalProperties": false, "required": ["filterFields", "sortFields"], "properties": {
+          "filterFields": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+          "sortFields": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
+        } }
+      }
+    },
     "blueprint": {
       "type": "object",
       "additionalProperties": false,
@@ -381,7 +390,7 @@
                   "type": "string",
                   "pattern": "^[_A-Za-z][_0-9A-Za-z]*$"
                 },
-                "action": { "enum": ["create", "update", "delete"] }
+                "action": { "enum": ["list", "get", "create", "update", "delete"] }
               }
             }
           ]
@@ -469,7 +478,7 @@
               "implementation": {
                 "properties": {
                   "type": { "const": "plugin" },
-                  "action": { "enum": ["create", "update", "delete"] }
+                  "action": { "enum": ["list", "get", "create", "update", "delete"] }
                 },
                 "required": ["type", "action"]
               }
@@ -545,7 +554,12 @@
           "required": ["scope", "inputField"],
           "properties": {
             "scope": { "const": "record" },
-            "inputField": { "$ref": "#/$defs/fieldKey" }
+            "inputField": { "$ref": "#/$defs/fieldKey" },
+            "inputBindings": {
+              "type": "object", "minProperties": 1,
+              "propertyNames": { "$ref": "#/$defs/fieldKey" },
+              "additionalProperties": { "$ref": "#/$defs/fieldKey" }
+            }
           }
         }
       ]
@@ -962,9 +976,102 @@
         "templateDescription": { "type": "string" }
       }
     },
+    "webMatrixView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "collectionLayout",
+        "matrix"
+      ],
+      "properties": {
+        "kind": {
+          "const": "collection",
+          "x-osf-i18n": {
+            "title": {
+              "en": "Kind",
+              "nl": "Soort"
+            }
+          }
+        },
+        "collectionLayout": {
+          "const": "matrix",
+          "x-osf-i18n": {
+            "title": {
+              "en": "Collection layout",
+              "nl": "Collectie-indeling"
+            }
+          }
+        },
+        "matrix": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "rowField",
+            "columnField",
+            "valueField",
+            "aggregate"
+          ],
+          "properties": {
+            "rowField": {
+              "$ref": "#/$defs/fieldKey",
+              "x-osf-choice": "field",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Row field",
+                  "nl": "Rijveld"
+                }
+              }
+            },
+            "columnField": {
+              "$ref": "#/$defs/fieldKey",
+              "x-osf-choice": "field",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Column field",
+                  "nl": "Kolomveld"
+                }
+              }
+            },
+            "valueField": {
+              "$ref": "#/$defs/fieldKey",
+              "x-osf-choice": "field",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Value field",
+                  "nl": "Waardeveld"
+                }
+              }
+            },
+            "aggregate": {
+              "const": "sum",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Aggregation",
+                  "nl": "Aggregatie"
+                }
+              }
+            }
+          },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Matrix",
+              "nl": "Matrix"
+            }
+          }
+        }
+      },
+      "x-osf-i18n": {
+        "title": {
+          "en": "Matrix view",
+          "nl": "Matrixweergave"
+        }
+      }
+    },
     "webNamedViewV2": {
       "x-osf-i18n": { "title": { "en": "View", "nl": "Weergave" } },
       "oneOf": [
+        { "$ref": "#/$defs/webMatrixView" },
         {
           "type": "object",
           "x-osf-i18n": { "title": { "en": "Record view", "nl": "Recordweergave" } },
@@ -1205,6 +1312,7 @@
               "additionalProperties": false,
               "required": ["tabs"],
               "properties": {
+                "preset": { "enum": ["main", "inbox-main-context"], "x-osf-i18n": { "title": { "en": "Page layout", "nl": "Pagina-indeling" }, "enum": { "main": { "en": "Main", "nl": "Hoofdinhoud" }, "inbox-main-context": { "en": "List, main and context", "nl": "Lijst, hoofdinhoud en context" } } } },
                 "context": {
                   "type": "object",
                   "additionalProperties": false,

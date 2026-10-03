@@ -2,18 +2,17 @@
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withSystemSession } from "../db/session.js";
-import { normalisedEmail, recordEmployeeInvitation, toInvitation, memberRoleClientId } from "../auth/employee-invitations.js";
+import { normalisedEmail, recordEmployeeInvitation, toInvitation, memberRoleClientId, type EmployeeInvitation } from "../auth/employee-invitations.js";
 import { IDENTITY_LINK_ADMIN_ROLE } from "../auth/organization-roles.js";
 import { systemSessionForAdministrator, type PlatformAdministrator } from "./platform-admin.js";
 import { KeycloakAdminError, type KeycloakOrganizationAdminClient } from "./keycloak-organization-admin.js";
-import type { KeycloakOrganizationMembersClient, OrganizationBootstrapReads } from "./keycloak-organization-members.js";
-
-export class FirstAdministratorError extends Error {
-  constructor(readonly code: string, message: string) { super(message); }
-}
+import type { KeycloakOrganizationMembersClient, KeycloakTenantMemberAdminClient, OrganizationBootstrapReads } from "./keycloak-organization-members.js";
+import { deliverInvitation, invitationOutcome, type InvitationDelivery } from "./invitation-outcome.js";
+import { FirstAdministratorError } from "./first-administrator-error.js";
+export { FirstAdministratorError };
 export type FirstAdministratorClients = {
   tenantRealm: string;
-  members: KeycloakOrganizationMembersClient & OrganizationBootstrapReads;
+  members: KeycloakOrganizationMembersClient & OrganizationBootstrapReads & Pick<KeycloakTenantMemberAdminClient, "listMembers">;
   organizations: Pick<KeycloakOrganizationAdminClient, "getOrganization">;
 };
 
@@ -86,28 +85,25 @@ export async function inviteFirstTenantAdministrator(
       if (admins.some(a => a.email?.toLowerCase() !== email))
         throw new FirstAdministratorError("FIRST_ADMIN_ALREADY_ASSIGNED", "This organization already has an administrator.");
       const previous = prior.find(p => p.email.toLowerCase() === email);
-      if (previous?.status === "accepted") return { tenant: input.slug, ...toInvitation(previous) };
-      if (admins.length) {
+      const result = (invitation: EmployeeInvitation, delivery: InvitationDelivery) =>
+        ({ tenant: input.slug, ...invitation, ...invitationOutcome(input.slug, delivery) });
+      const existingAccount = admins.length > 0 || await clients.members.hasMemberByEmail(organization.id, email);
+      // An accepted admission whose membership was since removed is re-invited below.
+      if (previous?.status === "accepted" && existingAccount) return result(toInvitation(previous), "already_accepted");
+      if (existingAccount) {
         // Keycloak membership and its role do not create the OSF Relation or
         // identity link required by tenant admission. Record the same local
         // intent as an e-mailed invitation, without sending redundant mail;
         // first sign-in will consume it and converge both identity stores.
-        if (previous) return { tenant: input.slug, ...toInvitation(previous) };
-        const invitation = await recordEmployeeInvitation(
-          trx, tenant.id, actor, { email, role: "org_admin" },
-        );
-        return { tenant: input.slug, ...invitation };
+        if (previous) return result(toInvitation(previous), "no_email_existing_account"); // pending here
+        const invitation = await recordEmployeeInvitation(trx, tenant.id, actor, { email, role: "org_admin" });
+        return result(invitation, "no_email_existing_account");
       }
-      const pending = await clients.members.findPendingInvitationByEmail(organization.id, email);
-      if (pending && previous) return { tenant: input.slug, ...toInvitation(previous) };
-      if (!pending) {
-        if (!await clients.members.hasInvitationMailConfiguration())
-          throw new FirstAdministratorError("SMTP_NOT_CONFIGURED", "Configure working SMTP (host and sender) on the tenant Keycloak realm before sending invitations.");
-        await clients.members.inviteUser(organization.id, { email });
-      }
+      const delivery = await deliverInvitation(clients.members, organization.id, { email }, { knownNonMember: true });
+      if (delivery === "already_pending" && previous?.status === "pending") return result(toInvitation(previous), delivery);
       // Also repairs a confirmed Keycloak invite whose earlier DB commit failed.
       const invitation = await recordEmployeeInvitation(trx, tenant.id, actor, { email, role: "org_admin" });
-      return { tenant: input.slug, ...invitation };
+      return result(invitation, delivery);
     });
   } catch (error) {
     if (error instanceof KeycloakAdminError) {

@@ -73,6 +73,12 @@ export type WebSchemaOperationRef<
   };
   concurrency?: OperationConcurrency;
   confirmation: OperationConfirmation;
+  /** Canonical caller policy, also used by Operation-backed entity projections. */
+  auth?:
+    | { mode: "public" }
+    | { mode: "session"; roles?: readonly string[]; scopes?: readonly string[] }
+    | { mode: "control"; roles: readonly string[] };
+  prerequisites?: readonly WebOperationPrerequisite[];
   /** Authenticated browser execution endpoint, including honest binary output. */
   rest?: {
     method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -90,7 +96,7 @@ export type WebEntityPluginOperationRef = WebSchemaOperationRef<"create" | "upda
   implementation: { type: "plugin"; plugin: string; handler: string };
   prerequisites?: readonly WebOperationPrerequisite[];
 };
-export type WebOperationRef = WebBuiltinOperationRef | WebEntityPluginOperationRef;
+export type WebOperationRef = WebBuiltinOperationRef | WebEntityPluginOperationRef | WebCustomOperationRef;
 export type WebViewMode = "read" | "create" | "update";
 
 /** Opaque layout-renderer registry key. A host must reject unknown keys clearly. */
@@ -226,7 +232,13 @@ export type WebRelationshipProjection = {
    * The browser runs the target's Operations, filling each input field named
    * in `bindings` from the field of the current record it maps to.
    */
-  source?: { kind: "provider"; bindings: Record<string, string> };
+  source?: {
+    kind: "provider";
+    bindings: Record<string, string>;
+    createBindings?: Record<string, string>;
+    /** Canonical list capabilities narrowed for this relationship placement. */
+    query?: NonNullable<WebEntityInterface["operationSource"]>["collection"]["query"];
+  };
   operations: {
     list?: WebOperationRef;
     get?: WebOperationRef;
@@ -252,7 +264,7 @@ export type WebRecordView = {
   id: string;
   kind: "record";
   renderer: WebRendererKey;
-  preset: "inbox-main-context";
+  preset: "main" | "inbox-main-context";
   modes: WebViewMode[];
   routes: {
     read?: string;
@@ -293,7 +305,8 @@ export type WebNamedView =
       titleTemplate?: string;
       layout: { tabs: WebRecordTab[] };
     }
-  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string };
+  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string }
+  | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
 
 export type WebEntityView = WebCollectionView | WebRecordView | WebNamedView;
 
@@ -313,7 +326,7 @@ export type WebStatusTransitions = {
     to: string;
     label: LocalizedText;
     recordPermission?: "edit";
-    preconditions?: Array<{ field: string; present?: boolean; via?: string; in?: Array<string | number | boolean> }>;
+    preconditions?: Array<{ field: string; present?: boolean; via?: string; in?: Array<string | number | boolean>; refusal?: { en?: string; nl?: string } }>;
     writes?: Array<{ field: string; required: boolean; agreesOn?: string[] }>;
     stamps?: Array<{ field: string; value: "now" | "actor"; actor?: "relation" | "user" }>;
   }>;
@@ -338,6 +351,7 @@ export type WebEntityInterface = {
    */
   operationSource?: {
     idField: string;
+    create?: { bindings?: Record<string, string> };
     collection: {
       resultField: string;
       /** Operation input field -> route parameter. Equal names need no entry. */
@@ -390,7 +404,7 @@ export type WebStandaloneOperationRef = Omit<WebSchemaOperationRef<"invoke">, "t
   /** Who may invoke it; the web hides what the session cannot invoke. */
   auth:
     | { mode: "public" }
-    | { mode: "session"; roles?: readonly string[]; scopes?: readonly string[] }
+    | { mode: "session"; roles?: readonly string[]; roleGroups?: readonly (readonly string[])[]; scopes?: readonly string[] }
     | { mode: "control"; roles: readonly string[] };
   prerequisites?: readonly WebOperationPrerequisite[];
   page: string;

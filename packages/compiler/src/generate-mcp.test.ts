@@ -857,7 +857,7 @@ describe("buildMcpCatalog", () => {
                 field({ key: "name" }),
                 field({
                   key: "reviewedAt",
-                  writtenBy: ["pentest.finding.review"],
+                  writtenBy: ["example.finding.review"],
                 }),
               ],
             }),
@@ -878,7 +878,7 @@ describe("buildMcpCatalog", () => {
       // A model that only sees the field missing tries anyway; both tool
       // descriptions name the operation that does write it.
       for (const tool of [create, update]) {
-        expect(tool.description).toContain("reviewedAt (pentest.finding.review)");
+        expect(tool.description).toContain("reviewedAt (example.finding.review)");
       }
     });
 
@@ -1583,7 +1583,7 @@ describe("relationship keys", () => {
 
   it("advertises <key>Id on create, update.values and list.filter, never the hasMany side", () => {
     const catalog = buildMcpCatalog(
-      [input(finding(), "finding", "pentest.findings"), input(assessment, "assessment", "pentest.assessments")],
+      [input(finding(), "finding", "example.findings"), input(assessment, "assessment", "example.assessments")],
       "test",
     );
 
@@ -1700,14 +1700,14 @@ describe("relationship keys", () => {
       },
     });
     const withGeneric = buildMcpCatalog(
-      [input(finding(), "finding", "pentest.findings"), input(generic, "assessment", "pentest.assessments")],
+      [input(finding(), "finding", "example.findings"), input(generic, "assessment", "example.assessments")],
       "test",
     );
     expect(
       prop(toolNamed(withGeneric, "finding_create").inputSchema, "assessmentId").description,
     ).toBe("Identifier of the Widget this Finding belongs to, as returned by `osf_list`.");
 
-    const alone = buildMcpCatalog([input(finding(), "finding", "pentest.findings")], "test");
+    const alone = buildMcpCatalog([input(finding(), "finding", "example.findings")], "test");
     expect(
       prop(toolNamed(alone, "finding_create").inputSchema, "assessmentId").description,
     ).toBe("Identifier of the Assessment this Finding belongs to.");
@@ -1715,7 +1715,7 @@ describe("relationship keys", () => {
 
   it("emits relationship keys deterministically", () => {
     const build = () =>
-      JSON.stringify(buildMcpCatalog([input(finding(), "finding", "pentest.findings")], "test"));
+      JSON.stringify(buildMcpCatalog([input(finding(), "finding", "example.findings")], "test"));
     expect(build()).toBe(build());
   });
 });

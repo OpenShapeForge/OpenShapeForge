@@ -64,25 +64,22 @@ test("the Tenant registry row is provisioned, never created or deleted through a
   expect(schema).toContain('CREATE POLICY "tenants_registry_delete" ON "erp"."tenants"\n  AS RESTRICTIVE FOR DELETE\n  USING (app.bypass_rls());');
 
   // MCP: the tool catalog carries one entry per entity operation
-  // (osf_create/osf_get/... with an `entity`); Tenant contributes none at
-  // all - it has no interfaces.mcp - so there is no create or delete to find.
+  // (osf_create/osf_get/... with an `entity`). The registry exposes reads
+  // for tenant settings, while provisioning remains its only lifecycle writer.
   const tools = JSON.parse(artifacts.groups.mcp.find(artifact => artifact.path.endsWith("tools.json"))!.contents);
-  expect((tools.entities as Array<{ entity: string }>).some(entry => entry.entity === "Tenant")).toBe(false);
+  expect((tools.entities as Array<{ entity: string }>).some(entry => entry.entity === "Tenant")).toBe(true);
   const entityTools = (tools.tools as Array<{ name: string; entity?: string; operation?: string }>)
     .filter(tool => tool.entity === "Tenant");
-  expect(entityTools).toEqual([]);
+  expect(entityTools.some(tool => ["create", "update", "delete"].includes(tool.operation ?? ""))).toBe(false);
   expect((tools.tools as Array<{ entity?: string; operation?: string }>)
     .some(tool => tool.entity === "Tenant" && ["create", "delete"].includes(tool.operation ?? ""))).toBe(false);
 
-  // REST: Tenant has no REST projection (no rest: block, and aab4e7b0 keeps
-  // it off tenant REST); the only /tenants paths are the control plane's
-  // provisioning routes, none of them a tenant-scoped POST or DELETE on the
-  // registry row.
+  // Tenant-scoped reads serve organisation settings; no generic REST write
+  // is exposed. Control provisioning keeps its own routes and authority.
   const openapi = JSON.parse(artifacts.groups.db.find(artifact => artifact.path.endsWith("openapi.json"))!.contents);
-  const tenantPaths = Object.keys(openapi.paths).filter(path => /\/tenants(\/|$)/.test(path));
-  expect(tenantPaths.length).toBeGreaterThan(0);
-  expect(tenantPaths.every(path => path.startsWith("/api/control/"))).toBe(true);
-  expect(Object.keys(openapi.paths).some(path => path.startsWith("/api/rest/") && /tenants/.test(path))).toBe(false);
+  const registryPaths = Object.entries(openapi.paths).filter(([path]) => path.startsWith("/api/rest/") && /tenants(\/|$)/.test(path));
+  expect(registryPaths.length).toBeGreaterThan(0);
+  expect(registryPaths.every(([, methods]) => Object.keys(methods as object).filter(method => ["get", "post", "put", "patch", "delete"].includes(method)).every(method => method === "get"))).toBe(true);
   expect(JSON.stringify(openapi)).not.toMatch(/"operationId":"(create|delete)Tenant"/);
 
   // Web: no page or action shard for the entity, no page configs, and the

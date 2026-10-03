@@ -18,7 +18,7 @@ const expected = {
     entity: "Quote",
     fields: [
       "id", "createdAt", "updatedAt", "externalId", "sourceAuthority",
-      "sourceOrganization", "sourceAdministration", "quoteStatus", "quoteNumber",
+      "sourceOrganization", "sourceAdministration", "sourceVersion", "quoteStatus", "quoteNumber",
       "issueDate", "expiresAt", "currencyCode", "amountBase", "amountVat",
       "amountTotal", "description", "externalCode",
     ],
@@ -29,7 +29,7 @@ const expected = {
     entity: "QuoteLine",
     fields: [
       "id", "createdAt", "updatedAt", "externalId", "sourceAuthority",
-      "sourceOrganization", "sourceAdministration", "lineNumber", "description",
+      "sourceOrganization", "sourceAdministration", "sourceVersion", "lineNumber", "description",
       "quantity", "unitId", "unitPrice", "amountBase", "amountVat", "amountTotal",
     ],
     relationships: [
@@ -42,7 +42,7 @@ const expected = {
     entity: "Agreement",
     fields: [
       "id", "createdAt", "updatedAt", "externalId", "sourceAuthority",
-      "sourceOrganization", "sourceAdministration", "code", "role", "agreementType",
+      "sourceOrganization", "sourceAdministration", "sourceVersion", "code", "role", "agreementType",
       "agreementSubType", "status", "startDate", "endDate", "billingStartDate",
       "billingEndDate", "conceptSentAt", "sentAt", "dispatchStatus", "noticeDate",
       "noticeTerm", "terminationReason", "terminationReasonDetail", "sequenceNumber",
@@ -61,7 +61,7 @@ const expected = {
     entity: "AgreementMilestone",
     fields: [
       "id", "createdAt", "updatedAt", "externalId", "sourceAuthority",
-      "sourceOrganization", "sourceAdministration", "description", "basisAmount",
+      "sourceOrganization", "sourceAdministration", "sourceVersion", "description", "basisAmount",
       "percentOfBasis", "amount", "status", "expectedAt", "triggeredAt", "triggeredBy",
     ],
     relationships: ["agreementId", "producedInvoiceId", "billingRunItems"],
@@ -93,12 +93,16 @@ describe("field-relational outcome entities", () => {
     }
   });
 
-  test("keeps Account identity-provider fields out of generic create and update", () => {
+  test("Account reads are normal source Operations, never SQL CRUD or a second IAM table", () => {
     const contract = compile(loadEntity(authoringDir, "account"));
-    for (const field of ["keycloakSub", "lastLoginAt", "passwordChangedAt"]) {
-      expect(contract.model.fields.find((candidate) => candidate.key === field)?.writtenBy)
-        .toEqual(["Account.create", "Account.update"]);
-    }
+    expect(contract.source).toMatchObject({ kind: 'operations' });
+    expect(contract.storage.columns).toEqual([]);
+    expect(contract.entityOperations).toEqual({});
+    expect(contract.pluginOperations?.map(operation => operation.id)).toEqual(['Account.list', 'Account.get', 'Account.block', 'Account.restore', 'Account.assignRole', 'Account.revokeRole']);
+    expect(contract.model.fields.every(field => field.readOnly)).toBe(true);
+    expect(contract.model.fields.map(field => field.key)).not.toContain('keycloakSub');
+    expect(contract.model.fields.map(field => field.key)).not.toContain('lastLoginAt');
+    expect(contract.model.fields.map(field => field.key)).toContain('providers');
   });
 
   test("rejects a bare persisted readOnly field and accepts an explicit caller source", () => {

@@ -71,6 +71,10 @@ export type TrustedSessionContext = {
   /** Display language from verified identity claims; never a permission or client input. */
   locale?: string;
   roles: string[];
+  /** Verified issuer-wide grants before mutable organization grants are added. */
+  issuerRoles?: readonly string[];
+  /** Explicit bearer principal kind; absence never proves a service account. */
+  principalKind?: "person" | "service";
   /** OAuth scopes from a verified bearer token; empty on non-bearer carriers. */
   oauthScopes?: string[];
   /**

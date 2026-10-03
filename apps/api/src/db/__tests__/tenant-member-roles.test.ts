@@ -14,6 +14,7 @@ import type { KeycloakTenantMemberAdminClient } from "../../control/keycloak-org
 import type { PlatformAdministrator } from "../../control/platform-admin.js";
 import {
   changeTenantMemberRoles,
+  confirmTenantMemberLink,
   getTenantMember,
   listTenantMembers,
   removeTenantMembership,
@@ -107,7 +108,12 @@ describe("tenant member roles from the control plane", () => {
         // Not signed in yet: nothing to write to.
         await expect(
           changeTenantMemberRoles(deps, "acme", subject, ["org_admin"], "assign"),
-        ).rejects.toMatchObject({ message: expect.stringContaining("has not signed in") });
+        ).rejects.toMatchObject({
+          status: 409,
+          code: "MEMBER_NOT_SIGNED_IN",
+          detail: "MEMBER_NOT_SIGNED_IN",
+          message: expect.stringContaining("has not signed in"),
+        });
 
         // Invited as an employee in acme and in other, signed in to both.
         for (const tenant of [TENANT, OTHER_TENANT]) {
@@ -142,32 +148,101 @@ describe("tenant member roles from the control plane", () => {
         const patDeps = { db: appDb, administrator, members: membersClient(pendingSubject, "pat@example.com") };
         await expect(
           changeTenantMemberRoles(patDeps, "acme", pendingSubject, ["org_admin"], "assign"),
-        ).rejects.toMatchObject({ message: expect.stringContaining("pending confirmation") });
-        expect(
-          (await sql<{ roles: string[] }>`
-            select ir.roles from platform.identity_relations ir join platform.identities i on i.id = ir.identity_id
+        ).rejects.toMatchObject({ status: 409, code: "MEMBER_LINK_PENDING", message: expect.stringContaining('candidate Relation "Pat Existing"') });
+        const patRow = async () => (await sql<{ roles: string[]; status: string; linked_by: string | null }>`
+            select ir.roles, ir.status, ir.linked_by from platform.identity_relations ir join platform.identities i on i.id = ir.identity_id
              where i.subject = ${pendingSubject} and ir.tenant_id = ${TENANT}
-          `.execute(adminDb)).rows[0]!.roles,
-        ).toEqual([]);
+          `.execute(adminDb)).rows[0]!;
+        expect((await patRow()).roles).toEqual([]);
+        // The operator sees why, and whom the sign-in matched — by name.
+        expect(await getTenantMember(patDeps, "acme", pendingSubject)).toMatchObject({
+          linkStatus: "pending_confirmation", candidateRelationName: "Pat Existing", relationName: null, roles: [],
+        });
+        // A pending row holding roles (never written by the product) is not
+        // confirmed: that would switch on grants nobody assigned while linked.
+        const setPatRoles = (roles: string) => adminDb.transaction().execute(async (trx) => {
+          await sql`select set_config('app.bypass_rls', 'true', true)`.execute(trx);
+          await sql`
+            update platform.identity_relations ir set roles = ${roles}::text[] from platform.identities i
+             where i.id = ir.identity_id and i.subject = ${pendingSubject} and ir.tenant_id = ${TENANT}
+          `.execute(trx);
+        });
+        await setPatRoles("{org_admin}");
+        await expect(confirmTenantMemberLink(patDeps, "acme", pendingSubject))
+          .rejects.toMatchObject({ status: 409, detail: "NO_PENDING_LINK" });
+        expect(await patRow()).toMatchObject({ status: "pending_confirmation" });
+        await setPatRoles("{}");
+        // Confirming links exactly that candidate, as the operator; then roles can be written.
+        const confirmed = await confirmTenantMemberLink(patDeps, "acme", pendingSubject);
+        expect(confirmed).toMatchObject({ linkStatus: "linked", relationName: "Pat Existing", candidateRelationName: null });
+        expect(await patRow()).toMatchObject({ status: "linked", linked_by: expect.stringContaining("#operator") });
+        await expect(confirmTenantMemberLink(patDeps, "acme", pendingSubject))
+          .rejects.toMatchObject({ status: 409, detail: "NO_PENDING_LINK" });
+        expect(await changeTenantMemberRoles(patDeps, "acme", pendingSubject, ["org_admin"], "assign"))
+          .toMatchObject({ roles: ["Organization.Access.Manage", "org_admin"] });
+
+        // A pending sign-in whose candidate is gone (deleted Relation) has
+        // nothing to confirm: a different refusal, and confirming refuses too.
+        const quinnSubject = randomUUID();
+        await sql`
+          insert into erp.relations (id, tenant_id, display_name, relation_type, status)
+          values (gen_random_uuid(), ${TENANT}, 'Quinn Gone', 'person', 'active')
+        `.execute(adminDb);
+        await sql`
+          insert into erp.contact_details (tenant_id, relation_id, type, value, is_primary)
+          select tenant_id, id, 'email', 'quinn@example.com', true from erp.relations
+           where tenant_id = ${TENANT} and display_name = 'Quinn Gone'
+        `.execute(adminDb);
+        __resetIdentityLinkForTests();
+        await resolveIdentityLink(appDb, { tenantId: TENANT, userId: quinnSubject, roles: [], groups: [], scope: "self" },
+          { issuer: ISSUER, subject: quinnSubject, email: "quinn@example.com" });
+        await sql`delete from erp.contact_details where tenant_id = ${TENANT} and value = 'quinn@example.com'`.execute(adminDb);
+        await sql`delete from erp.relations where tenant_id = ${TENANT} and display_name = 'Quinn Gone'`.execute(adminDb);
+        const quinnDeps = { db: appDb, administrator, members: membersClient(quinnSubject, "quinn@example.com") };
+        expect(await getTenantMember(quinnDeps, "acme", quinnSubject))
+          .toMatchObject({ linkStatus: "pending_confirmation", candidateRelationName: null });
+        await expect(changeTenantMemberRoles(quinnDeps, "acme", quinnSubject, ["org_admin"], "assign"))
+          .rejects.toMatchObject({ status: 409, code: "MEMBER_NOT_LINKED" });
+        await expect(confirmTenantMemberLink(quinnDeps, "acme", quinnSubject))
+          .rejects.toMatchObject({ status: 409, detail: "NO_PENDING_LINK" });
+
+        // One member id, rows from two issuers: the operator is refused
+        // rather than acting on whichever row happened to win.
+        await sql`
+          with other as (
+            insert into platform.identities (issuer, subject, email)
+            values ('https://elsewhere.example/realms/other', ${pendingSubject}, 'someone-else@example.com')
+            returning id
+          )
+          insert into platform.identity_relations (identity_id, tenant_id, status)
+          select id, ${TENANT}, 'pending_confirmation' from other
+        `.execute(adminDb);
+        await expect(changeTenantMemberRoles(patDeps, "acme", pendingSubject, ["org_admin"], "remove"))
+          .rejects.toMatchObject({ status: 409, detail: "AMBIGUOUS_MEMBER_IDENTITY" });
+        await expect(confirmTenantMemberLink(patDeps, "acme", pendingSubject))
+          .rejects.toMatchObject({ status: 409, detail: "AMBIGUOUS_MEMBER_IDENTITY" });
+        expect((await listTenantMembers(patDeps, "acme")).members[0]).toMatchObject({ linkStatus: null, roles: [] });
+        expect(await patRow()).toMatchObject({ status: "linked" });
+        await sql`delete from platform.identities where issuer = 'https://elsewhere.example/realms/other'`.execute(adminDb);
 
         const assigned = await changeTenantMemberRoles(deps, "acme", subject, ["org_admin"], "assign");
         expect(assigned).toMatchObject({
           action: "assigned",
-          roles: ["General.All.Read", "Organization.All.ReadWrite", "org_admin", "org_employee"],
+          roles: ["Notifications.Self.Read", "Notifications.Self.Write", "Organization.Access.Manage", "org_admin", "org_employee"],
         });
         const listed = await listTenantMembers(deps, "acme");
-        expect(listed.members[0]).toMatchObject({ memberId: subject, roles: assigned.roles });
+        expect(listed.members[0]).toMatchObject({ memberId: subject, roles: assigned.roles, linkStatus: "linked" });
         expect((await getTenantMember(deps, "acme", subject)).roles).toEqual(assigned.roles);
 
         // The other tenant's row is untouched, and so is the next session there.
         __resetIdentityLinkForTests();
         const inOther = await resolveIdentityLink(appDb, { tenantId: OTHER_TENANT, userId: subject, roles: [], groups: [], scope: "self" }, claims);
-        expect(inOther!.roles).toEqual(["General.All.Read", "org_employee"]);
+        expect(inOther!.roles).toEqual(["Notifications.Self.Read", "Notifications.Self.Write", "org_employee"]);
         const inAcme = await resolveIdentityLink(appDb, { tenantId: TENANT, userId: subject, roles: [], groups: [], scope: "self" }, claims);
         expect(inAcme!.roles).toEqual(assigned.roles);
 
         const removed = await changeTenantMemberRoles(deps, "acme", subject, ["org_admin"], "remove");
-        expect(removed.roles).toEqual(["General.All.Read", "org_employee"]);
+        expect(removed.roles).toEqual(["Notifications.Self.Read", "Notifications.Self.Write", "org_employee"]);
         // Nothing in Keycloak was asked to grant anything: the stub has no such method.
         expect("grantClientRoles" in deps.members).toBe(false);
 
@@ -198,7 +273,7 @@ describe("tenant member roles from the control plane", () => {
         await confirmPendingLink(appDb, { ...noraSession, relation: back });
         __resetIdentityLinkForTests();
         const again = await resolveIdentityLink(appDb, noraSession, claims);
-        expect(again!.roles).toEqual(["Organization.All.ReadWrite", "org_admin"]);
+        expect(again!.roles).toEqual(["Organization.Access.Manage", "org_admin"]);
       });
     },
     TEST_TIMEOUT,

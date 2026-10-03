@@ -479,6 +479,14 @@ export type RuntimeResolvedOperationWork = {
   serviceIdentityId: string;
   /** Persisted before first dispatch; prevents changed contracts reopening unsafe retries. */
   operationContractFingerprint?: string;
+  /**
+   * Present only when the resolver persists dispatch facts
+   * (`markOperationDispatch`). `attempt` is the claim attempt that last
+   * started a dispatch and did not prove it never reached the Operation;
+   * absent means no attempt ever did, so a later attempt is not an uncertain
+   * repeat. Without this field core infers uncertainty from `attempt > 1`.
+   */
+  dispatch?: { tracked: true; attempt?: number };
   operation: { id: string; input?: Record<string, unknown>; idempotencyKey: string };
 };
 
@@ -629,6 +637,18 @@ export type RuntimeWorkerContract<Context> = {
     context: Context,
     reference: RuntimeDurableWorkReference,
     fingerprint: string,
+  ): Promise<void>;
+  /**
+   * Optional. Persist, under the exact active claim and committed before core
+   * dispatches, that this attempt `started` a dispatch; or, once core has
+   * proof nothing reached the Operation (only rate-limiter refusals), that it
+   * was `not-dispatched`. Lets a transient failure retry without being taken
+   * for an uncertain repeat (#885). Reported back as `dispatch`.
+   */
+  markOperationDispatch?(
+    context: Context,
+    reference: RuntimeDurableWorkReference,
+    state: "started" | "not-dispatched",
   ): Promise<void>;
 };
 
@@ -796,3 +816,6 @@ export type RuntimeModule = RuntimeModuleContract<
   ModuleSeed,
   RuntimeOperationProvider
 >;
+
+/** Creates an isolated module using its compiler-authored, nonsecret configuration. */
+export type RuntimeModuleFactory = (configuration: unknown) => RuntimeModule;

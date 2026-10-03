@@ -78,6 +78,8 @@ export interface CompiledField {
   key: string;
   /** The authored type axis: a base type, a osf-type key or an entity name. */
   osfType: string;
+  /** Ordered plugin transformations, executed by an explicit owning Operation. */
+  transform?: readonly { use: string; profile?: string }[];
   /** Derived from `osfType`: the base every transport maps to storage, GraphQL and JSON Schema. */
   baseType: FieldDefinitionValueType;
   cardinality: "single" | "collection";
@@ -430,7 +432,8 @@ export type CompiledEntityWebNamedViewDefinition =
       title?: string;
       layout: { tabs: CompiledViewGroup[] };
     }
-  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string };
+  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string }
+  | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
 
 export interface CompiledViewAction extends ViewAction {}
 
@@ -662,6 +665,9 @@ export interface CompiledBlueprint {
 /** One status field lowered from `transitions`; the rule table the runtime handler and the interfaces read. */
 export interface CompiledTransitionField {
   field: string;
+  /** The status field's own label, and each state's, for the refusal a person reads. */
+  label?: LocalizedText;
+  values?: Record<string, LocalizedText>;
   initial: string;
   rules: Array<{
     key: string;
@@ -672,7 +678,7 @@ export interface CompiledTransitionField {
     label: LocalizedText;
     /** Record permission the rule checks on an entity with record-level permissions. */
     recordPermission?: "edit";
-    preconditions?: Array<{ field: string; present?: boolean; via?: string; in?: Array<string | number | boolean> }>;
+    preconditions?: Array<{ field: string; present?: boolean; via?: string; in?: Array<string | number | boolean>; refusal?: LocalizedText }>;
     /** Input fields the rule may set; `agreesOn` names fields the referenced record must share with this one. */
     writes?: Array<{ field: string; required: boolean; agreesOn?: string[] }>;
     stamps?: Array<{ field: string; value: "now" | "actor"; actor?: "relation" | "user" }>;
@@ -680,6 +686,7 @@ export interface CompiledTransitionField {
 }
 
 export interface CompiledEntityContract {
+  source?: { kind: "operations"; query?: { filterFields: string[]; sortFields: string[] } };
   blueprint?: CompiledBlueprint;
   /** Status state machines declared on fields; absent when the entity has none. */
   transitions?: CompiledTransitionField[];
@@ -745,6 +752,7 @@ export interface CompiledEntityContract {
   interfaces?: {
     web?: {
       namedViews?: Record<string, CompiledEntityWebNamedViewDefinition>;
+      recordPreset?: "main" | "inbox-main-context";
       fields?: Record<string, { render: import("./common.js").FieldRender }>;
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];

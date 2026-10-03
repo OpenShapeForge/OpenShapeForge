@@ -105,12 +105,16 @@ authorization:
     read:
       - Finance.All.Read
       - Finance.All.ReadWrite
+      - Finance.Budget.ReadWrite
     create:
       - Finance.All.ReadWrite
+      - Finance.Budget.ReadWrite
     update:
       - Finance.All.ReadWrite
+      - Finance.Budget.ReadWrite
     delete:
       - Finance.All.ReadWrite
+      - Finance.Budget.ReadWrite
   rowAccess:
     enabled: true
     empty: public
@@ -229,7 +233,15 @@ interfaces:
           - update
           - delete
         layout:
+          preset: main
           tabs:
+            - id: lines
+              label:
+                en: Budget lines
+                nl: Begrotingsregels
+              relationship:
+                name: budgetLines
+                view: matrix
             - id: overview
               label:
                 en: Overview

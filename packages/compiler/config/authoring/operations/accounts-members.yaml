@@ -1,0 +1,328 @@
+schemaVersion: 1
+kind: operationCatalog
+plugin: accounts
+operations:
+  listMembers:
+    id: accounts.list-members
+    name: { en: Members, nl: Leden }
+    description: { en: Accounts and invitations in this organization., nl: Accounts en uitnodigingen in deze organisatie. }
+    implementation: { type: plugin, plugin: accounts, handler: listMembers }
+    input:
+      schema: { type: object, additionalProperties: false, properties: {} }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [members]
+        properties:
+          members:
+            type: array
+            x-osf-i18n: { title: { en: Members, nl: Leden } }
+            items: &member
+              type: object
+              additionalProperties: false
+              required: [id, label, email, status, relationId, directRoles, effectiveRoles, groups, linkedAt]
+              properties:
+                id: { type: string, format: uuid, x-osf-i18n: { title: { en: Account, nl: Account } } }
+                label: { type: string, x-osf-i18n: { title: { en: Name, nl: Naam } } }
+                email: { type: string, x-osf-i18n: { title: { en: Email, nl: E-mail } } }
+                status:
+                  type: string
+                  x-osf-i18n:
+                    title: { en: Status, nl: Status }
+                    enum:
+                      linked: { en: Active, nl: Actief }
+                      invited: { en: Invited, nl: Uitgenodigd }
+                      blocked: { en: Blocked, nl: Geblokkeerd }
+                      revoked: { en: Invitation withdrawn, nl: Uitnodiging ingetrokken }
+                      pending_confirmation: { en: Awaiting confirmation, nl: Wacht op bevestiging }
+                relationId: { type: [string, "null"], format: uuid, x-osf-i18n: { title: { en: Person, nl: Persoon } } }
+                directRoles: { type: string, x-osf-i18n: { title: { en: Direct roles, nl: Directe rollen } } }
+                effectiveRoles: { type: string, x-osf-i18n: { title: { en: Effective roles, nl: Effectieve rollen } } }
+                groups: { type: string, x-osf-i18n: { title: { en: Groups, nl: Groepen } } }
+                linkedAt: { type: [string, "null"], format: date-time, x-osf-i18n: { title: { en: Linked at, nl: Gekoppeld op } } }
+                credentialTypes: { type: string, x-osf-i18n: { title: { en: Sign-in methods, nl: Aanmeldmethoden } } }
+    auth: &admin { mode: session, roles: [Organization.Access.Manage] }
+    tenancy: &tenant { mode: required }
+    effects: { data: read, external: none }
+    reliability: &natural { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors: &errors
+      - { status: 400, code: VALIDATION, description: Invalid member details. }
+      - { status: 401, code: UNAUTHENTICATED, description: Sign in first. }
+      - { status: 403, code: FORBIDDEN, description: Organization administrator required. }
+      - { status: 404, code: NOT_FOUND, description: Member not found in this organization. }
+      - { status: 409, code: CONFLICT, description: The action conflicts with the current member state. }
+      - { status: 409, code: ALREADY_MEMBER, description: This account is already a member. }
+      - { status: 409, code: NO_PENDING_EMAIL, description: No pending invitation email exists. }
+      - { status: 409, code: EXTERNAL_IDENTITY, description: Recovery belongs to another identity provider. }
+      - { status: 409, code: MEMBER_UNAVAILABLE, description: The provider account needs attention. }
+      - { status: 409, code: LAST_ADMINISTRATOR, description: Keep an active organization administrator. }
+      - { status: 409, code: SELF_BLOCK, description: You cannot block yourself. }
+      - { status: 409, code: TENANT_NOT_PROVISIONED, description: Organization admission is not configured. }
+      - { status: 404, code: INVITATION_NOT_FOUND, description: Invitation is no longer pending. }
+      - { status: 503, code: OPERATION_UNAVAILABLE, description: Account administration unavailable. }
+      - { status: 503, code: IDENTITY_PROVIDER_UNAVAILABLE, description: Identity provider could not complete the action. }
+  listInvitationRelations:
+    id: accounts.list-invitation-relations
+    name: { en: Invitation relations, nl: Relaties voor uitnodiging }
+    description: Read active people in this organization for explicit invitation targeting.
+    implementation: { type: plugin, plugin: accounts, handler: listInvitationRelations }
+    input: { schema: { type: object, additionalProperties: false, properties: {} } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [relations]
+        properties:
+          relations:
+            x-osf-i18n: { title: { en: Relations, nl: Relaties } }
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [id, label]
+              properties:
+                id: { type: string, format: uuid, x-osf-i18n: { title: { en: Relation, nl: Relatie } } }
+                label: { type: string, x-osf-i18n: { title: { en: Name, nl: Naam } } }
+    auth: *admin
+    tenancy: *tenant
+    effects: { data: read, external: none }
+    reliability: *natural
+    confirmation: { mode: none }
+    errors: *errors
+  getMember:
+    id: accounts.get-member
+    name: { en: View member, nl: Lid bekijken }
+    description: { en: View an account or invitation in this organization., nl: Bekijk een account of uitnodiging in deze organisatie. }
+    implementation: { type: plugin, plugin: accounts, handler: getMember }
+    input: &memberInput
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id]
+        properties:
+          id: { type: string, format: uuid, x-osf-i18n: { title: { en: Member, nl: Lid } } }
+    output: { schema: *member }
+    auth: *admin
+    tenancy: *tenant
+    effects: { data: read, external: none }
+    reliability: *natural
+    confirmation: { mode: none }
+    errors: *errors
+  inviteMember:
+    id: accounts.invite-member
+    name: { en: Invite employee, nl: Medewerker uitnodigen }
+    description: { en: Invite a person to this organization., nl: Nodig een persoon uit voor deze organisatie. }
+    implementation: { type: plugin, plugin: accounts, handler: inviteMember }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [email, firstName, lastName, role]
+        properties:
+          email: { type: string, format: email, maxLength: 320, x-osf-i18n: { title: { en: Email, nl: E-mail } } }
+          firstName: { type: string, minLength: 1, maxLength: 120, x-osf-i18n: { title: { en: First name, nl: Voornaam } } }
+          lastName: { type: string, minLength: 1, maxLength: 120, x-osf-i18n: { title: { en: Last name, nl: Achternaam } } }
+          role: { type: string, x-osf-i18n: { title: { en: Role, nl: Rol } }, x-osf-reference: { entity: AccessRole, valueField: key } }
+          relationId: { type: string, format: uuid, x-osf-i18n: { title: { en: Existing relation, nl: Bestaande relatie } }, x-osf-reference: { entity: AccessInvitationRelation, valueField: id } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, email, status, delivery]
+        properties:
+          id: { type: string, x-osf-i18n: { title: { en: Invitation, nl: Uitnodiging } } }
+          email: { type: string, x-osf-i18n: { title: { en: Email, nl: E-mail } } }
+          status: { type: string, x-osf-i18n: { title: { en: Status, nl: Status } } }
+          delivery: { type: string, x-osf-i18n: { title: { en: Delivery, nl: Bezorging } } }
+    auth: *admin
+    tenancy: *tenant
+    effects: { data: write, external: write }
+    reliability: *natural
+    confirmation: { mode: none }
+    errors: *errors
+  requestMemberPasswordReset:
+    id: accounts.request-member-password-reset
+    name: { en: Send password reset, nl: Wachtwoordherstel versturen }
+    description: { en: Email the member a secure password reset link., nl: Mail het lid een veilige link voor wachtwoordherstel. }
+    implementation: { type: plugin, plugin: accounts, handler: requestMemberPasswordReset }
+    input: *memberInput
+    output: &updated
+      schema:
+        type: object
+        additionalProperties: false
+        required: [updated]
+        properties:
+          updated: { type: boolean, x-osf-i18n: { title: { en: Updated, nl: Bijgewerkt } } }
+          message: { type: string, x-osf-i18n: { title: { en: Result, nl: Resultaat } } }
+    auth: *admin
+    tenancy: *tenant
+    effects: { data: write, external: write }
+    reliability: *natural
+    confirmation: &acknowledgement { mode: acknowledgement }
+    errors: *errors
+  requestMemberPasskeyRecovery:
+    id: accounts.request-member-passkey-recovery
+    name: { en: Send passkey recovery, nl: Passkeyherstel versturen }
+    description: { en: Email the member a link to register a passkey., nl: Mail het lid een link om een passkey te registreren. }
+    implementation: { type: plugin, plugin: accounts, handler: requestMemberPasskeyRecovery }
+    input: *memberInput
+    output: *updated
+    auth: *admin
+    tenancy: *tenant
+    effects: { data: write, external: write }
+    reliability: *natural
+    confirmation: *acknowledgement
+    errors: *errors
+  resendMemberInvitation:
+    id: accounts.resend-member-invitation
+    name: { en: Resend invitation, nl: Uitnodiging opnieuw versturen }
+    description: { en: Resend a pending invitation for this organization., nl: Verstuur een openstaande uitnodiging voor deze organisatie opnieuw. }
+    implementation: { type: plugin, plugin: accounts, handler: resendMemberInvitation }
+    input: *memberInput
+    output: *updated
+    auth: *admin
+    tenancy: *tenant
+    effects: { data: write, external: write }
+    reliability: *natural
+    confirmation: *acknowledgement
+    errors: *errors
+  revokeMemberInvitation:
+    id: accounts.revoke-member-invitation
+    name: { en: Revoke invitation, nl: Uitnodiging intrekken }
+    description: { en: Revoke a pending invitation for this organization., nl: Trek een openstaande uitnodiging voor deze organisatie in. }
+    implementation: { type: plugin, plugin: accounts, handler: revokeMemberInvitation }
+    input: *memberInput
+    output: *updated
+    auth: *admin
+    tenancy: *tenant
+    effects: { data: write, external: write }
+    reliability: *natural
+    confirmation: *acknowledgement
+    errors: *errors
+  addMemberGroup:
+    id: accounts.add-member-group
+    name: { en: Add to group, nl: Aan groep toevoegen }
+    description: { en: Add this member to an access group., nl: Voeg dit lid toe aan een toegangsgroep. }
+    implementation: { type: plugin, plugin: accounts, handler: addMemberGroup }
+    input: &groupInput
+      schema:
+        type: object
+        additionalProperties: false
+        required: [relationId, groupId]
+        properties:
+          relationId: { type: string, format: uuid, x-osf-reference: { entity: AccessMember, valueField: relationId, recordIdSourceField: id }, x-osf-i18n: { title: { en: Member, nl: Lid } } }
+          groupId: { type: string, format: uuid, x-osf-i18n: { title: { en: Group, nl: Groep } }, x-osf-reference: { entity: RelationGroup, valueField: id } }
+    output: *updated
+    auth: *admin
+    tenancy: *tenant
+    effects: { data: write, external: none }
+    reliability: *natural
+    confirmation: *acknowledgement
+    errors: *errors
+  removeMemberGroup:
+    id: accounts.remove-member-group
+    name: { en: Remove from group, nl: Uit groep verwijderen }
+    description: { en: Remove this member from an access group., nl: Verwijder dit lid uit een toegangsgroep. }
+    implementation: { type: plugin, plugin: accounts, handler: removeMemberGroup }
+    input: *groupInput
+    output: *updated
+    auth: *admin
+    tenancy: *tenant
+    effects: { data: write, external: none }
+    reliability: *natural
+    confirmation: *acknowledgement
+    errors: *errors
+  listMemberAudit:
+    id: accounts.list-member-audit
+    name: { en: Member activity, nl: Beheerhistorie }
+    description: { en: View account administration activity in this organization., nl: Bekijk accountbeheerwijzigingen binnen deze organisatie. }
+    implementation: { type: plugin, plugin: accounts, handler: listMemberAudit }
+    input: *memberInput
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [events]
+        properties:
+          events:
+            type: array
+            x-osf-i18n: { title: { en: Activity, nl: Beheerhistorie } }
+            items:
+              type: object
+              additionalProperties: false
+              required: [id, occurredAt, action, actor, details]
+              properties:
+                id: { type: string, x-osf-i18n: { title: { en: Event, nl: Gebeurtenis } } }
+                occurredAt: { type: string, format: date-time, x-osf-i18n: { title: { en: Time, nl: Tijdstip } } }
+                action: { type: string, x-osf-i18n: { title: { en: Action, nl: Actie } } }
+                actor: { type: string, x-osf-i18n: { title: { en: Administrator, nl: Beheerder } } }
+                details: { type: string, x-osf-i18n: { title: { en: Details, nl: Details } } }
+    auth: *admin
+    tenancy: *tenant
+    effects: { data: read, external: none }
+    reliability: *natural
+    confirmation: { mode: none }
+    errors: *errors
+interfaces:
+  rest:
+    operations:
+      listMembers: { method: POST, path: /api/accounts/list-members, response: { status: 200, kind: json } }
+      getMember: { method: POST, path: /api/accounts/get-member, response: { status: 200, kind: json } }
+      listInvitationRelations: { method: POST, path: /api/accounts/list-invitation-relations, response: { status: 200, kind: json } }
+      inviteMember: { method: POST, path: /api/accounts/invite-member, response: { status: 200, kind: json } }
+      requestMemberPasswordReset: { method: POST, path: /api/accounts/request-member-password-reset, response: { status: 200, kind: json } }
+      requestMemberPasskeyRecovery: { method: POST, path: /api/accounts/request-member-passkey-recovery, response: { status: 200, kind: json } }
+      resendMemberInvitation: { method: POST, path: /api/accounts/resend-member-invitation, response: { status: 200, kind: json } }
+      revokeMemberInvitation: { method: POST, path: /api/accounts/revoke-member-invitation, response: { status: 200, kind: json } }
+      addMemberGroup: { method: POST, path: /api/accounts/add-member-group, response: { status: 200, kind: json } }
+      removeMemberGroup: { method: POST, path: /api/accounts/remove-member-group, response: { status: 200, kind: json } }
+      listMemberAudit: { method: POST, path: /api/accounts/list-member-audit, response: { status: 200, kind: json } }
+  web:
+    entities:
+      AccessInvitationRelation:
+        title: { en: Invitation relations, nl: Relaties voor uitnodiging }
+        route: /invitation-relations
+        idField: id
+        displayField: label
+        fields: [id, label]
+        columns: [label]
+        operations: { list: { operation: listInvitationRelations, resultField: relations } }
+      AccessMember:
+        title: { en: Members, nl: Leden }
+        route: /access-members
+        recordRoute: /access-members/:id
+        idField: id
+        displayField: label
+        fields: [id, label, email, status, relationId, directRoles, effectiveRoles, groups, linkedAt, credentialTypes]
+        columns: [label, email, status, groups, effectiveRoles]
+        operations:
+          list: { operation: listMembers, resultField: members }
+          get: { operation: getMember, bindings: { id: id } }
+          create: { operation: inviteMember }
+          recordActions:
+            - operation: addMemberGroup
+              visibleWhen: &linkedPerson
+                conditions: [{ field: status, operator: eq, value: linked }, { field: relationId, operator: isNotEmpty }]
+            - operation: removeMemberGroup
+              visibleWhen: *linkedPerson
+            - operation: requestMemberPasswordReset
+              visibleWhen: &accountExists { conditions: [{ field: status, operator: in, value: [linked, blocked] }] }
+            - operation: requestMemberPasskeyRecovery
+              visibleWhen: *accountExists
+            - operation: resendMemberInvitation
+              visibleWhen: &pending { conditions: [{ field: status, operator: eq, value: invited }] }
+            - operation: revokeMemberInvitation
+              visibleWhen: *pending
+        related:
+          - { entity: AccessMemberAudit, label: { en: Activity, nl: Beheerhistorie }, route: /access-members/:id/audit }
+      AccessMemberAudit:
+        title: { en: Member activity, nl: Beheerhistorie }
+        route: /access-members/:id/audit
+        idField: id
+        displayField: action
+        fields: [id, occurredAt, action, actor, details]
+        columns: [occurredAt, action, actor, details]
+        operations:
+          list: { operation: listMemberAudit, resultField: events, bindings: { id: id } }

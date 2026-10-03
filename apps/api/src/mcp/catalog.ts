@@ -191,7 +191,7 @@ export type Catalog = {
     toolName: string;
     auth:
       | { mode: "public" }
-      | { mode: "session"; roles: string[]; scopes?: string[] };
+      | { mode: "session"; roles?: string[]; roleGroups?: string[][]; scopes?: string[] };
   }>;
 };
 export const catalog = rawCatalog as unknown as Catalog;

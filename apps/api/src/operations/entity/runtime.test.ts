@@ -350,6 +350,15 @@ describe("entity operation runtime", () => {
     ).toEqual(["Relation.get"]);
   });
 
+  test("does not offer a source action with a missing required record binding", () => {
+    const id = "00000000-0000-4000-8000-000000000001";
+    const offers = getEntityOperationOffers("Account", { roles: ["Organization.Accounts.Manage"] }, [], {},
+      { id, row: { id, status: "linked" } });
+    expect(offers.find(offer => offer.operation.id === "Account.block")).toMatchObject({
+      available: false, error: { code: "OPERATION_UNAVAILABLE" },
+    });
+  });
+
   test("refuses an unauthorized mutation before inspecting its controls", async () => {
     const result = await executeEntityOperation(
       {} as never,

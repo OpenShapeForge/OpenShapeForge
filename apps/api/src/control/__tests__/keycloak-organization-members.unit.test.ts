@@ -78,6 +78,17 @@ function stubFetch(admin: (url: string) => Response): { fetch: typeof globalThis
 }
 
 describe("inviting a member", () => {
+  it("carries Keycloak's own 409 wording and status so the caller can name the conflict", async () => {
+    for (const errorMessage of ["User already a member of the organization", "User already has a pending invitation"]) {
+      const { fetch } = stubFetch(() => Response.json({ errorMessage }, { status: 409 }));
+      const failure = await createKeycloakOrganizationMembersClient(config, { fetch })
+        .inviteUser("acme", { email: "hans@example.com" }).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(KeycloakAdminError);
+      expect(failure).toMatchObject({ code: "KEYCLOAK_ADMIN_REJECTED", status: 409, operation: "invite_member" });
+      expect((failure as KeycloakAdminError).message).toContain(errorMessage);
+    }
+  });
+
   it("identifies the timed-out admin subcall without carrying request data", async () => {
     const readings = [0, 10, 10_010];
     const tokens: ServiceAccountTokenProvider = {
@@ -254,7 +265,7 @@ const invitationRow = {
   expiresAt: 1788691160,
   status: "PENDING",
   inviteLink:
-    "https://auth.hubble.localhost/realms/openshapeforge/protocol/openid-connect/" +
+    "https://auth.example.localhost/realms/openshapeforge/protocol/openid-connect/" +
     "registrations?response_type=code&client_id=account&token=eyJhbGciOiJIUzI1NiJ9.ORGIVT-SECRET",
 };
 

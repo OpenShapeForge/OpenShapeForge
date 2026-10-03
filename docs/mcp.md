@@ -319,12 +319,12 @@ never the token: no claims, no ids, no slugs, no tenant keys.
 
 ```json
 {
-  "name": "Hans Eilers",
-  "email": "hans@example.com",
-  "organization": "Zerocopter",
+  "name": "Alex Example",
+  "email": "alex@example.com",
+  "organization": "Acme",
   "role": "Organization administrator",
-  "permissions": ["Pentest.All.ReadWrite", "Relations.All.ReadWrite"],
-  "groups": [{ "name": "Zerocopter", "active": true }],
+  "permissions": ["Advies.All.ReadWrite", "Relations.All.ReadWrite"],
+  "groups": [{ "name": "Acme", "active": true }],
   "signedInVia": "Codex",
   "accessTokenExpiresAt": "2026-09-04T10:12:00.000Z",
   "accessTokenExpiresIn": "in 12 minutes",
@@ -332,10 +332,10 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   "signOut": "Sign out in your client (Codex: codex mcp logout <entry>; ChatGPT: the connector's menu).",
   "access": { "tools": 68, "resources": 13 },
   "relation": {
-    "status": "Linked", "name": "Hans Eilers", "kind": "person",
+    "status": "Linked", "name": "Alex Example", "kind": "person",
     "explanation": "The record you act as in this organization; roles like employee or supplier are assigned by an administrator."
   },
-  "summary": "You are Hans Eilers, organization administrator of Zerocopter, signed in via Codex. Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. You act as the record Hans Eilers. You can use 68 tools and 13 resources."
+  "summary": "You are Alex Example, organization administrator of Acme, signed in via Codex. Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. You act as the record Alex Example. You can use 68 tools and 13 resources."
 }
 ```
 
@@ -365,7 +365,7 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   `openshapeforge-inspector` → "MCP Inspector", `openshapeforge-gateway` →
   the product name, `OPENSHAPEFORGE_PRODUCT_NAME`, any other `azp` as is). A trusted-context session reports
   "Development identity" and has no expiry. On a per-organization endpoint the
-  summary adds "on the Zerocopter endpoint" (the organization's display name).
+  summary adds "on the Acme endpoint" (the organization's display name).
 - `accessTokenExpiresAt` / `accessTokenExpiresIn` are the access token's own
   expiry, which a client refreshes silently, and are named for it: published as
   `signInExpiresAt` they read as the end of the sign-in and regularly showed a
@@ -447,7 +447,7 @@ contract keys:
 
 ```yaml
   - key: reviewedAt
-    writtenBy: [pentest.finding.review]
+    writtenBy: [advies.finding.review]
 ```
 
 Use it for a field that records that a process took place — a review signed
@@ -632,7 +632,7 @@ naming the exact next call:
 | `organization_connections` | **organization administrators only** (`org_admin`): for every Adapter in the organization whose auth needs organization-level configuration — it declares `configurationFields`, or its auth profile references credential values (an API key, basic credentials, the OAuth client behind a personal sign-in) — a tenant-owned Connection exists and passes the same required-values check `test_connection` runs. The `howTo` names `create_connection` with the `adapterId`, lists the form fields with secret ones marked, and for an OAuth Adapter the redirect URL to register (`<OPENSHAPEFORGE_PUBLIC_ORIGIN>/api/entity-oauth/callback`); an incomplete Connection is named with its missing values. Shared vocabulary: `apps/api/src/mcp/connection-guidance.ts`. | the person is not an organization administrator, or no Adapter needs organization-level configuration |
 | `connections` | for every published Service this person can use whose provider needs a **personal** sign-in (`auth.connectionScope: user`, or an `oauth2AuthorizationCode` profile), a Connection row owned by this person exists. The `howTo` names `connect_service` with the tool that binds the widest set of that provider's capabilities — the natural entry point, since one consent covers the provider. | no such Service is published for this person (a fresh tenant, or a person outside the Services' audience) |
 | `preferences` | at least one PersonalInstruction of this person exists (`set_my_preferences`), or the person skipped the step (`complete_onboarding { skip: true }`) | the deployment offers no personal instructions to this person |
-| `guide` | every role guide the session is shown (`pentest_guide` for pentest roles, `provider_setup_guide` for integration administrators) was read — in this session, or recorded at an earlier completion | no guide applies to the person's roles |
+| `guide` | every role guide the session is shown (`advies_guide` for advies roles, `provider_setup_guide` for integration administrators) was read — in this session, or recorded at an earlier completion | no guide applies to the person's roles |
 
 **Status.** `Completed` once `complete_onboarding` succeeded under the current
 `ONBOARDING_VERSION`; otherwise `In progress` when any applicable step is done

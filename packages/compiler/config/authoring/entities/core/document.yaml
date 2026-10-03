@@ -44,6 +44,8 @@ authorization:
     read:
       - CaseFile.All.Read
       - CaseFile.All.ReadWrite
+      # Core RLS admits this role only through the tenant-owned avatar.
+      - Organization.Access.Manage
     create:
       - CaseFile.All.ReadWrite
     update:

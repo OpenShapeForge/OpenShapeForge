@@ -26,7 +26,8 @@ import { IDENTITY_CONTRACT } from "./identity-contract.js";
 
 /**
  * Gates every organization-admin surface: link_identity, invite_employee,
- * set_member_role. Declared as `identity.administratorRole` in the contract.
+ * Account.assignRole/revokeRole in accounts/account-management.ts.
+ * Declared as `identity.administratorRole` in the contract.
  */
 export const IDENTITY_LINK_ADMIN_ROLE: string = IDENTITY_CONTRACT.administratorRole;
 

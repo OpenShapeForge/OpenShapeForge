@@ -763,19 +763,19 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
 
       const targetTableKey = tableKey(column.references.schema, column.references.table);
       const crossModule = table.schema !== column.references.schema;
+      const key = referenceKey({
+        from: {
+          schema: table.schema,
+          table: table.name,
+          column: column.name,
+        },
+        to: {
+          schema: column.references.schema,
+          table: column.references.table,
+          column: column.references.column,
+        },
+      });
       if (crossModule) {
-        const key = referenceKey({
-          from: {
-            schema: table.schema,
-            table: table.name,
-            column: column.name,
-          },
-          to: {
-            schema: column.references.schema,
-            table: column.references.table,
-            column: column.references.column,
-          },
-        });
         if (!relationshipRegisterKeys.has(key)) {
           throw new Error(
             `${sourceTableKey}.${column.name} crosses module boundary to ${targetTableKey}.${column.references.column} but is not listed in relationshipRegister.`,
@@ -785,14 +785,14 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
 
       const targetColumns = tableColumns.get(targetTableKey);
       if (!targetColumns) {
-        // A registered cross-module reference may point at a table this file
+        // An explicitly registered reference may point at a table this file
         // does not declare: the authoring layer promotes its entities into the
         // same manifest later (active-manifest.ts), which is how a platform
-        // bookkeeping row links to a Relation. The reference is checked again
+        // bookkeeping or retained legacy row links to a Relation. The reference is checked again
         // against the merged manifest in generateArtifacts, where the target
-        // either exists or the build fails naming it; a same-schema reference
-        // has no later layer to wait for and is refused here.
-        if (crossModule) continue;
+        // either exists or the build fails naming it. An unregistered missing
+        // target is refused, even when it is within the same schema.
+        if (relationshipRegisterKeys.has(key)) continue;
         throw new Error(`${sourceTableKey}.${column.name} references unknown table ${targetTableKey}.`);
       }
       if (!targetColumns.has(column.references.column)) {

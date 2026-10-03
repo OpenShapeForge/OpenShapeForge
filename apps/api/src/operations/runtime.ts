@@ -57,6 +57,8 @@ import {
   validateEntityVersionInTransaction,
 } from "./entity/edit-leases.js";
 import { getGeneratedCrudTables } from "./entity/catalog.js";
+import { getEntityOperationOffers } from "./entity/runtime.js";
+import { entityBusinessUnavailability } from "./entity/availability.js";
 import type { EntityOperationContract, GeneratedCrudTable } from "./entity/types.js";
 import {
   assertRecordPermission,
@@ -74,6 +76,7 @@ import type { DB } from "../generated/db/types.js";
 import { evaluateOperationAvailability } from "./availability.js";
 import { nativeEntityTypeListHandler } from "./entity-type-list.js";
 import { GRANTS_PLUGIN, grantsOperationHandler } from "./grants-operations.js";
+import { SOURCE_SYNC_PLUGIN, sourceSyncOperationHandler } from "./source-sync-operations.js";
 import { BILLING_PLUGIN, billingOperationHandler } from "./billing/module.js";
 import {
   capabilityGrantRefusal,
@@ -85,6 +88,8 @@ import { nativeCollectionHandler } from "./collection-runtime.js";
 import { nativeConstrainedReferenceCreateHandler } from "./constrained-reference-create.js";
 
 export type OperationContract = {
+  /** Compiler-owned source-adapter normalization. No shape guessing or authored override. */
+  resultProjection?: { kind: "entity-record"; entityName: string; idField: string };
   key: string;
   /** Built-in executor selected only by the compiler, never request input. */
   implementation?:
@@ -102,6 +107,7 @@ export type OperationContract = {
     entityName: string;
     scope: "collection" | "record";
     inputField?: string;
+    inputBindings?: Record<string, string>;
   };
   inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown>;
@@ -615,6 +621,14 @@ export function bindOperationHandlers(
       bound.set(operation.key, { operation, handler: grantsOperationHandler(operation) });
       continue;
     }
+    // Importing records from an external source system by their base source
+    // fields is core: it writes through the entities' own CRUD, so it binds
+    // wherever those entities do (operations/source-sync-operations.ts).
+    if (operation.plugin === SOURCE_SYNC_PLUGIN) {
+      if (modulesByName.has(SOURCE_SYNC_PLUGIN)) throw new Error("The core source-sync runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: sourceSyncOperationHandler(operation) });
+      continue;
+    }
     // Billing is core as well: the milestone run and the milestone create
     // (operations/billing) bind in every process, entity-authored plugin
     // Operations included, so the ERP entities carry their own behaviour.
@@ -767,7 +781,7 @@ function targetTable(operation: OperationContract): GeneratedCrudTable {
   if (!table?.primaryKey) {
     throw operationFailure({
       code: "INTERNAL_SERVER_ERROR",
-      message: "The Operation target is not available.",
+      message: "The Operation target has no generated CRUD table for record authorization.",
     });
   }
   return table;
@@ -826,7 +840,7 @@ function protectedCustomOperation(
   if (!operation.target || intent === "create") {
     throw operationFailure({
       code: "INTERNAL_SERVER_ERROR",
-      message: "The Operation target is not available.",
+      message: "The protected Operation has no valid record target.",
     });
   }
   return {
@@ -875,6 +889,16 @@ async function invokeCustomOperationWithControls(
       await consumeCapabilityGrantInTransaction(trx, session, operation.key);
       return invokeGuardedCustomOperation(bound, input, context, invokeHandler);
     });
+  }
+  // Data-writing plugin handlers need the same owning Operation transaction
+  // even when their invoke contract has no record/version/confirmation guard.
+  // This joins a keyed receipt transaction and keeps artifact binding and
+  // canonical data changes atomic. Control handlers own audited system
+  // transactions: their verified operator session deliberately has no tenant.
+  // Unhosted contract tests may have no platform.
+  if (operation.auth.mode !== "control" && operation.effects.data === "write" && context.platform && context.session) {
+    return withModuleOperationTransaction(context.platform, context.session, () =>
+      invokeGuardedCustomOperation(bound, input, context, invokeHandler));
   }
   return invokeGuardedCustomOperation(bound, input, context, invokeHandler);
 }
@@ -966,12 +990,16 @@ async function invokeGuardedCustomOperation(
   const leaseToken = operation.concurrency?.editLease
     ? requireStringControl(input, "leaseToken")
     : undefined;
-  const table = targetTable(operation);
+  // Source-backed record Operations can have business availability without a
+  // generated CRUD table. Only platform-owned record guards require one.
+  const table = recordPermissions.length > 0 || expectedVersion || confirmation.mode === "challenge"
+    ? targetTable(operation)
+    : undefined;
   for (const permission of recordPermissions) {
     await assertRecordPermission(
       context.db,
       context.session,
-      table,
+      table!,
       targetValue,
       permission,
     );
@@ -996,7 +1024,7 @@ async function invokeGuardedCustomOperation(
       }
       const error = await issueEntityConfirmationChallenge(context.db, context.session, {
         operation: protectedOperation,
-        table,
+        table: table!,
         targetId: targetValue,
         expectedVersion,
         ...(leaseToken ? { leaseToken } : {}),
@@ -1020,7 +1048,7 @@ async function invokeGuardedCustomOperation(
         await assertRecordPermissionInTransaction(
           trx,
           context.session!,
-          table,
+          table!,
           targetValue,
           permission,
         );
@@ -1028,7 +1056,7 @@ async function invokeGuardedCustomOperation(
       if (expectedVersion) {
         await validateEntityVersionInTransaction(trx, context.session!, {
           operation: protectedOperation,
-          table,
+          table: table!,
           targetId: targetValue,
           expectedVersion,
         });
@@ -1286,6 +1314,22 @@ export async function invokeOperation(
         throw new DeclaredOperationError(declaration, result);
       }
       let success = result as ModuleOperationSuccessResult;
+      if (bound.operation.resultProjection) {
+        const projection = bound.operation.resultProjection;
+        const record = success.value as Record<string, unknown> | undefined;
+        const id = record?.[projection.idField];
+        if (success.resultKind || !record || typeof record !== "object" || Array.isArray(record) ||
+            typeof id !== "string" || id !== input[bound.operation.target?.inputField ?? "id"]) {
+          throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "The source adapter must return the requested record, not an envelope or another target.");
+        }
+        const visible = getEntityOperationOffers(projection.entityName, activeContext.session!, [], {}, { id, row: record });
+        const unavailable = activeContext.db && activeContext.session
+          ? (await entityBusinessUnavailability(activeContext.db, activeContext.session,
+              [{ id, operationIds: visible.map(offer => offer.operation.id) }])).get(id) ?? {}
+          : {};
+        success = { ...success, resultKind: "operation-envelope", value: { data: record,
+          operations: getEntityOperationOffers(projection.entityName, activeContext.session!, [], unavailable, { id, row: record }) } };
+      }
       if (options.prepareSuccess) {
         success = await options.prepareSuccess(success, activeContext);
         if (!success || typeof success !== "object" || Array.isArray(success)) {
@@ -1532,11 +1576,12 @@ function sendOperationRestFailure(
 export function operationRestInput(
   request: FastifyRequest,
   operation: OperationContract,
+  bind: (input: Record<string, unknown>) => Record<string, unknown> = (input) => input,
 ): Record<string, unknown> {
   let body: Record<string, unknown> = {};
   if (request.body instanceof Uint8Array) {
     if (request.body.byteLength === 0) {
-      return operationRestInputFromParts(request, operation, body);
+      return operationRestInputFromParts(request, operation, body, bind);
     }
     try {
       const parsed = JSON.parse(new TextDecoder().decode(request.body));
@@ -1550,13 +1595,14 @@ export function operationRestInput(
   } else if (request.body && typeof request.body === "object" && !Array.isArray(request.body)) {
     body = request.body as Record<string, unknown>;
   }
-  return operationRestInputFromParts(request, operation, body);
+  return operationRestInputFromParts(request, operation, body, bind);
 }
 
 function operationRestInputFromParts(
   request: FastifyRequest,
   operation: OperationContract,
   body: Record<string, unknown>,
+  bind: (input: Record<string, unknown>) => Record<string, unknown>,
 ): Record<string, unknown> {
   const query = request.query && typeof request.query === "object" ? request.query as Record<string, unknown> : {};
   const params = request.params && typeof request.params === "object" ? request.params as Record<string, unknown> : {};
@@ -1583,7 +1629,10 @@ function operationRestInputFromParts(
       throw new HttpError(400, "BAD_USER_INPUT", `Declared operation input must not be supplied through query parameters: ${collisions.sort().join(", ")}.`);
     }
   }
-  const input = readsInputFromQuery ? { ...query, ...params } : { ...body, ...params };
+  // Server-supplied input (a capability grant's subject) joins before the
+  // query is validated: a GET whose record target the grant names must not be
+  // refused for leaving out the field the caller may not choose.
+  const input = bind(readsInputFromQuery ? { ...query, ...params } : { ...body, ...params });
   if (operation.idempotency.mode === "idempotency-key") {
     const field = operation.idempotency.inputField!;
     if (field in input) {
@@ -1693,7 +1742,7 @@ export function registerOperationRestRoutes(
       }
       let input: Record<string, unknown>;
       try {
-        input = bindGrantSubject(entry.operation, session, operationRestInput(request, entry.operation));
+        input = operationRestInput(request, entry.operation, (parts) => bindGrantSubject(entry.operation, session, parts));
       } catch (error) {
         return sendOperationRestFailure(reply, entry.operation, error, false);
       }

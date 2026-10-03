@@ -9,6 +9,8 @@ import {
 } from "../db/connection.js";
 import { runMigrationChain } from "../db/migration-chain.js";
 import { APP_ROLE } from "../db/migrations/app-role.js";
+import { withDbSession } from "../db/session.js";
+import { resolveGroupRoles } from "./group-roles.js";
 import { resolveRelationGroupMembershipIds } from "./relation-group-memberships.js";
 
 const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -177,3 +179,66 @@ describe("RelationGroup membership resolution", () => {
     ).toEqual([]);
   }, TEST_TIMEOUT);
 });
+
+
+test("dated memberships, grant revocation and non-admin escalation guards", async () => {
+  const administrator = { ...session, roles: ["Organization.All.ReadWrite"], scope: "tenant" as const };
+  await withDbSession(restricted.db, administrator, async trx => {
+    await sql`update erp.relation_group_memberships set status='active', start_date=current_date+1
+      where tenant_id=${tenantId}::uuid and relation_group_id=${activeGroupId}::uuid`.execute(trx);
+    await sql`insert into platform.relation_group_roles (tenant_id,relation_group_id,role)
+      values (${tenantId}::uuid,${activeGroupId}::uuid,'Finance.Budget.ReadWrite')`.execute(trx);
+  });
+  expect(await resolveRelationGroupMembershipIds(restricted.db, session, identity)).toEqual([]);
+  await withDbSession(restricted.db, administrator, async trx => {
+    await sql`update erp.relation_group_memberships set start_date=current_date, end_date=current_date
+      where tenant_id=${tenantId}::uuid and relation_group_id=${activeGroupId}::uuid`.execute(trx);
+  });
+  expect(await resolveRelationGroupMembershipIds(restricted.db, session, identity)).toEqual([activeGroupId]);
+  expect(await resolveGroupRoles(restricted.db, session, [activeGroupId])).toEqual(['Finance.Budget.ReadWrite']);
+  expect(await resolveGroupRoles(restricted.db, { ...session, tenantId: otherTenantId }, [activeGroupId])).toEqual([]);
+  await expect(withDbSession(restricted.db, session, async trx => {
+    await sql`update erp.relation_group_memberships set end_date=null
+      where tenant_id=${tenantId}::uuid and relation_group_id=${activeGroupId}::uuid`.execute(trx);
+  })).rejects.toThrow();
+  await expect(withDbSession(restricted.db, session, async trx => {
+    await sql`delete from platform.relation_group_roles where tenant_id=${tenantId}::uuid`.execute(trx);
+  })).resolves.toBeUndefined(); // RLS hides write targets; the grant remains.
+  expect(await resolveGroupRoles(restricted.db, session, [activeGroupId])).toEqual(['Finance.Budget.ReadWrite']);
+  await withDbSession(restricted.db, administrator, async trx => {
+    await sql`delete from platform.relation_group_roles where tenant_id=${tenantId}::uuid`.execute(trx);
+  });
+  expect(await resolveGroupRoles(restricted.db, session, [activeGroupId])).toEqual([]);
+}, TEST_TIMEOUT);
+
+test("core group role operations enforce administrator and tenant boundaries", async () => {
+  const {assignGroupRole, revokeGroupRole, roleCatalog}=await import('../accounts/roles.js');
+  const role=roleCatalog().find(row=>row.key==='financien')?.key ?? roleCatalog()[0]?.key;
+  expect(role).toBeTruthy();
+  const administrator={...session,roles:['Organization.All.ReadWrite'],scope:'tenant' as const};
+  const context={db:restricted.db,session:administrator} as any;
+  const assigned=await assignGroupRole({relationGroupId:activeGroupId,roleKey:role},context) as any;
+  expect(assigned.value.roleKey).toBe(role);
+  expect(await resolveGroupRoles(restricted.db,session,[activeGroupId])).toEqual([role!]);
+  const denied=await assignGroupRole({relationGroupId:activeGroupId,roleKey:role},{...context,session}) as any;
+  expect(denied.status).toBe(403);
+  const crossTenant=await assignGroupRole({relationGroupId:otherTenantGroupId,roleKey:role},context) as any;
+  expect(crossTenant.status).toBe(404);
+  const unknown=await assignGroupRole({relationGroupId:activeGroupId,roleKey:'invented-role'},context) as any;
+  expect(unknown.status).toBe(400);
+  await revokeGroupRole({id:assigned.value.id,relationGroupId:activeGroupId},context);
+  expect(await resolveGroupRoles(restricted.db,session,[activeGroupId])).toEqual([]);
+},TEST_TIMEOUT);
+
+test("direct exceptions preserve other roles and cannot remove the last direct administrator", async () => {
+  const {setMembershipRoles,mutateMembershipRole}=await import('./identity-link-admin.js');
+  const administrator={...session,roles:['Organization.All.ReadWrite'],scope:'tenant' as const};
+  await setMembershipRoles(restricted.db,administrator,identityId,['org_admin']);
+  const state=await mutateMembershipRole(restricted.db,administrator,identityId,'Finance.Budget.ReadWrite',true);
+  expect(state.roles).toContain('org_admin');
+  expect(state.roles).toContain('Finance.Budget.ReadWrite');
+  await expect(mutateMembershipRole(restricted.db,administrator,identityId,'org_admin',false)).rejects.toThrow('Keep at least one');
+  await expect(setMembershipRoles(restricted.db,administrator,identityId,[])).rejects.toThrow('Keep at least one');
+  const removed=await mutateMembershipRole(restricted.db,administrator,identityId,'Finance.Budget.ReadWrite',false);
+  expect(removed.roles).toEqual(['org_admin']);
+},TEST_TIMEOUT);

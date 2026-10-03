@@ -80,7 +80,10 @@ import { applyWorkerRoleMigration, applyWorkerRoleGrants } from "./migrations/wo
 import { applyAppHelpersMigration } from "./migrations/app-helpers.js";
 import { applyCoreInvariants } from "./migrations/core-invariants.js";
 import { applyDocumentContentGuards } from "./migrations/document-content.js";
+import { applyRelationGroupRolesMigration } from "./migrations/relation-group-roles.js";
+import { applyOrganizationAccessMigration } from "./migrations/organization-access.js";
 import { applyIdentityLinkMigration } from "./migrations/identity-link.js";
+import { applyMemberAccessStateMigration } from "./migrations/member-access-state.js";
 import { applyEmployeeInvitationsMigration } from "./migrations/employee-invitations.js";
 import { applyCapabilityGrantsMigration } from "./migrations/capability-grants.js";
 import { applyApiKeysMigration } from "./migrations/api-keys.js";
@@ -144,6 +147,9 @@ export async function runMigrationChain(
   // referenced by a plugin's invariant DDL, so they land before the plugin
   // migrations run.
   await applyIdentityLinkMigration(db);
+  await applyMemberAccessStateMigration(db);
+  await applyRelationGroupRolesMigration(db);
+  await applyOrganizationAccessMigration(db);
   const pluginMigrations = await applyGeneratedPluginMigrations(
     db,
     options.pluginMigrations ?? (await loadGeneratedPluginMigrations()),

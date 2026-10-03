@@ -74,6 +74,9 @@ const PATCH_BODY_KEYS = new Set([
   "groups",
   "users",
   "roleLabels",
+  "identity",
+  "organizationAccess",
+  "replaceClientRoleComposites",
 ]);
 
 function isPlainObject(value: JsonValue | undefined): value is JsonObject {
@@ -334,7 +337,21 @@ export function applyAuthorizationPatch(
     base = renameClientReferences(base, parseRename(renameClient, origin), origin);
   }
 
-  const merged = mergeValue(base, body, [], strategicMerge) as JsonObject;
+  const { replaceClientRoleComposites, ...mergeBody } = body;
+  const merged = mergeValue(base, mergeBody, [], strategicMerge) as JsonObject;
+  // Explicit replacement is required to narrow a persona; ordinary patches still union grants.
+  if (replaceClientRoleComposites !== undefined) {
+    if (!isPlainObject(replaceClientRoleComposites)) throw new Error(`${origin}: role replacements must be an object.`);
+    const clients = structuredClone(merged.clientRoleComposites) as JsonObject;
+    merged.clientRoleComposites = clients;
+    for (const [client, roles] of Object.entries(replaceClientRoleComposites)) {
+      if (!isPlainObject(roles) || !isPlainObject(clients?.[client])) throw new Error(`${origin}: unknown role replacement client ${client}`);
+      for (const [role, definition] of Object.entries(roles)) {
+        if (!(clients[client] as JsonObject)[role]) throw new Error(`${origin}: cannot replace undeclared role ${role}`);
+        (clients[client] as JsonObject)[role] = definition;
+      }
+    }
+  }
 
   // The merged document is what the generator reads; the validator names the
   // patch so an author is pointed at the file they can edit.

@@ -205,7 +205,7 @@ It does **not** carry what the person may do in any of them. OpenShapeForge
 records that per organization, on the membership row
 (`platform.identity_relations.roles`): an organization administrator's
 invitation admits the person as `org_admin` or `org_employee`, and
-`set_member_role` changes it later — for that organization only. What such a
+`canonical Account role Operations` changes it later — for that organization only. What such a
 persona lets the person do is still the realm's decision: a realm that
 declares `org_admin` as a composite (a host's `clientRoleComposites`) has it
 expanded by the API from the generated realm export, member for member, the
@@ -296,21 +296,47 @@ laptop.
 
 ### A federated login is an alternative to a passkey, on purpose
 
-`identity-provider-redirector` sits at `ALTERNATIVE` next to the passkey
-sub-flow, so a broker login admits the person on its own. For a provider linked
-to one tenant's Keycloak Organization — the Google Workspace case — that tenant
-*is* the identity authority for their domain, and their own Workspace MFA
-policy is what guards the account. Requiring a second, product-specific passkey
-on top would make the SSO they bought pointless.
+The passkey browser flow (`keycloak-passkey-browser-flow.ts`) asks for the
+e-mail address first, with Keycloak's own Organization identity-first step:
+
+```
+passkey-browser
+  auth-cookie                         ALTERNATIVE
+  identity-provider-redirector        ALTERNATIVE   (kc_idp_hint)
+  passkey-browser-organization        ALTERNATIVE
+    conditional-user-configured + organization     (identity-first, by domain)
+  passkey-browser-forms               ALTERNATIVE
+    auth-username-form + webauthn-authenticator-passwordless
+```
+
+An address on a domain of an Organization whose linked provider has
+`kc.org.broker.redirect.mode.email-matches` set is redirected to that provider;
+every other address goes on to the passkey prompt, and the username page is not
+asked twice. Keycloak makes one exception, measured on 26.5.3 and 26.7.3: a
+person who already holds a passkey is shown the passkey prompt instead of the
+redirect. On an Organization domain the provider is therefore the way in for
+everybody who has no passkey yet, and `kc_idp_hint` still reaches it for anyone.
+In a realm with Organizations switched off the step is inert.
+
+Both routes to a provider sit at `ALTERNATIVE` next to the passkey sub-flow, so
+a broker login admits the person on its own. For a provider linked to one
+tenant's Keycloak Organization — the Google Workspace case — that tenant *is*
+the identity authority for their domain, and their own Workspace MFA policy is
+what guards the account. Requiring a second, product-specific passkey on top
+would make the SSO they bought pointless.
 
 State the consequence plainly when you author a provider: **the passkey-only
 guarantee is then only as strong as that tenant's own policy.** A Workspace that
 still allows bare passwords re-opens a password path — at the provider, not
 here. Two things stop it happening by accident: `hideOnLogin: true` keeps the
-button off the realm login page so only members of a linked Organization are
-routed to it, and `webauthn-register-passwordless` being a default action means
-somebody who arrives over the provider is walked through enrolling a passkey
-and leaves with one.
+button off the realm login page so only addresses on a linked Organization's
+domains are routed to it, and `webauthn-register-passwordless` being a default
+action means somebody who arrives over the provider is walked through enrolling
+a passkey and leaves with one.
+
+A running realm picks the changed flow up from the same reconcilers that
+installed it: they compare the live flow with the generated artifact and
+rebuild it when the shape differs.
 
 ### Somebody whose device cannot make a passkey
 
@@ -326,7 +352,7 @@ a plan.
    attachment plus the empty `acceptableAaguids`; an AAGUID allow-list is a
    hardware allow-list and would exclude most keys and every phone.
 3. **An admin-issued enrolment link**, for somebody with neither. A realm
-   administrator holding `realm-management` `manage-users` — in the Hubble
+   administrator holding `realm-management` `manage-users` — in the the host application
    deployment that is the `openshapeforge-auth-api` service account, the same
    privilege the employee invitation runs on — calls:
 

@@ -55,6 +55,19 @@ describe("status transition binding", () => {
     expect(table.columns.find((column) => column.name === "status")?.writtenBy?.[0]?.operation).toBe(trigger.key);
   });
 
+  test("an authored refusal is what a person reads, in both languages; without one the field is named", () => {
+    const base = transitionBinding(trigger);
+    const refusal = { en: "Set the expected date first.", nl: "Vul eerst de verwachte datum in." };
+    const binding: TransitionBinding = { ...base, referenced: [], rule: { ...base.rule, preconditions: [{ field: "expectedAt", present: true, refusal }] } };
+    expect(transitionRefusal(binding, { status: "pending", expected_at: null })).toEqual({
+      code: "INVALID_STATE", message: "Set the expected date first.", retryable: false, data: { localized: refusal },
+    });
+    const partial: TransitionBinding = { ...binding, rule: { ...base.rule, preconditions: [{ field: "expectedAt", present: true, refusal: { en: "Only English." } }] } };
+    expect(transitionRefusal(partial, { status: "pending", expected_at: null })).toEqual({ code: "INVALID_STATE", message: "trigger requires expectedAt to be set.", retryable: false });
+    const referenced: TransitionBinding = { ...base, rule: { ...base.rule, preconditions: [] }, referenced: base.referenced.map((entry) => ({ ...entry, refusal })) };
+    expect(transitionRefusal(referenced, { status: "pending" }, new Map())).toMatchObject({ message: refusal.en, data: { localized: refusal } });
+  });
+
   test("refuses a referenced precondition that fails present, in, or names no record in this tenant", () => {
     const base = transitionBinding(trigger);
     expect(base.referenced).toEqual([expect.objectContaining({ via: "agreementId", field: "code", present: true })]);

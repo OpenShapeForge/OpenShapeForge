@@ -20,6 +20,7 @@ authorization:
     read:
       - Organization.All.Read
       - Organization.All.ReadWrite
+      - Organization.Access.Manage
 fields:
   - key: slug
     osfType: string
@@ -171,6 +172,8 @@ operations:
     confirmation:
       mode: none
 interfaces:
+  rest: {}
+  mcp: { tools: generic }
   graphql: {}
   web:
     views:

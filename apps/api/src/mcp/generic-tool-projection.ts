@@ -305,7 +305,7 @@ export function withoutEntitySelector(
  * `osf_*` tool call carries the `entity` argument. Taking the first entry
  * instead ran the binding against whichever generic entity sorts first —
  * which is why plugins/cpq-catalog documents entity CRUD as unbindable and
- * why a pentest Service cannot maintain its VulnerabilityType catalogue.
+ * why a Service cannot maintain its entity catalogue.
  * Ambiguity is refused, loudly and at the binding, rather than guessed.
  */
 export function resolveNativeCrudTool(

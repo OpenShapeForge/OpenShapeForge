@@ -93,12 +93,16 @@ authorization:
     read:
       - Finance.All.Read
       - Finance.All.ReadWrite
+      - Finance.PeriodBalance.ReadWrite
     create:
       - Finance.All.ReadWrite
+      - Finance.PeriodBalance.ReadWrite
     update:
       - Finance.All.ReadWrite
+      - Finance.PeriodBalance.ReadWrite
     delete:
       - Finance.All.ReadWrite
+      - Finance.PeriodBalance.ReadWrite
   rowAccess:
     enabled: true
     empty: public

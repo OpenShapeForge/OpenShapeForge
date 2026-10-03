@@ -44,6 +44,8 @@ export type PluginBaseContext = {
 
 /** A static plugin-backed Operation after compiler ownership is attached. */
 export type CompiledPluginOperation = PluginOperationContract & {
+  /** Compiler-owned adapter result normalization, never supplied by plugins. */
+  resultProjection?: { kind: "entity-record"; entityName: string; idField: string };
   /** Compiler-owned native dispatch; never accepted from plugin contributions. */
   implementation?:
     | { type: "collection"; entityName: string; field: string; action: "insert" | "move" | "update" | "remove" }
@@ -256,6 +258,7 @@ export type PluginOperationContract = {
     entityName: string;
     scope: "collection" | "record";
     inputField?: string;
+    inputBindings?: Record<string, string>;
   };
   inputSchema: JsonSchema;
   outputSchema: JsonSchema;
@@ -330,6 +333,8 @@ export type CompilerPlugin = {
   schemaMigrations?:
     | PluginSchemaMigration[]
     | ((context: PluginBaseContext) => PluginSchemaMigration[]);
+  /** Nonsecret, JSON-serializable build configuration bound to this runtime module. */
+  runtimeConfiguration?(context: Pick<PluginGenerateContext, "entities">): unknown;
   /** Emit artifacts; paths are repo-root-relative like all compiler output. */
   generate?(
     context: PluginGenerateContext,

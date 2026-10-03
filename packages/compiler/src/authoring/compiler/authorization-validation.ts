@@ -57,7 +57,8 @@ export function validateTransitionAuthorizationReferences(
       ) {
         continue;
       }
-      for (const role of operation.definition.auth.roles ?? []) {
+      const { roles, roleGroups } = operation.definition.auth;
+      for (const role of [...(roles ?? []), ...(roleGroups?.flat() ?? [])]) {
         if (!declared.has(role)) {
           errors.push(
             `[${contract.entity.name}] transition Operation "${operation.id}" ` +

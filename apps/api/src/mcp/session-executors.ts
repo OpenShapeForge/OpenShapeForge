@@ -6,6 +6,7 @@
 import { deriveToolName } from "./derived-tools.js";
 import { HttpError } from "../rest/http-error.js";
 import { compatibilityOperationByKey } from "./catalog.js";
+import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "../operations/session-authorization.js";
 import {
   type RuntimeDeclarativeServiceExecutor,
   type RuntimeHostOperationExecutor,
@@ -103,11 +104,12 @@ export function registerSessionExecutors(
         new HttpError(404, "OPERATION_NOT_FOUND", "The host Operation is unavailable."),
       ));
     }
-    const roles = new Set(session.roles);
     const scopes = new Set(session.oauthScopes ?? []);
+    // The same decision as every other surface: roles any-of AND each role group (#944).
     if (
       implementation.auth.mode !== "session" ||
-      !implementation.auth.roles.some((role) => roles.has(role)) ||
+      !sessionOperationRolesAllow(implementation.auth.roles, session.roles) ||
+      !sessionOperationRoleGroupsAllow(implementation.auth.roleGroups, session.roles) ||
       !(implementation.auth.scopes ?? []).every((scope) => scopes.has(scope))
     ) {
       return runtimeOperationResult(failed(

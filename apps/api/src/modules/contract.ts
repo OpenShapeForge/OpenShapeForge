@@ -66,6 +66,7 @@ import type { Kysely, Transaction } from "kysely";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type {
   CallToolResult,
+  Icon,
   ReadResourceResult,
   Resource,
   ResourceTemplate,
@@ -431,6 +432,11 @@ export type McpToolCallSource =
   | "module";
 
 export type RuntimeMcpContribution = {
+  /** Project presentation metadata through one active, tenant-bound capability. */
+  serverIcons?(ctx: {
+    session: TrustedSessionContext;
+    platform: ModulePlatformServices;
+  }): Promise<readonly Icon[] | undefined>;
   /**
    * Refine core authorization or claim a registered module-owned MCP surface.
    * Return `undefined` to abstain. This hook deliberately receives no platform

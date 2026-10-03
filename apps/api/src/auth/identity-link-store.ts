@@ -127,6 +127,40 @@ export async function writeMembershipRoles(
 }
 
 /**
+ * Confirm a pending row's RECORDED candidate: the row becomes linked to
+ * exactly the Relation the just-in-time path proposed, never another one.
+ * Shared by the person confirming for themselves and by a platform operator
+ * confirming on their behalf; both decide explicitly, nothing calls this on
+ * its own. Returns whether a row was confirmed — false when there is no
+ * pending row with a candidate (any more), and false for a pending row that
+ * holds roles: confirming must never switch on grants nobody assigned to a
+ * linked person, so such a row fails closed instead.
+ */
+export async function confirmCandidateLink(
+  trx: Transaction<DB>,
+  identityId: string,
+  tenantId: string,
+  linkedBy: string,
+): Promise<boolean> {
+  const result = await sql<{ identity_id: string }>`
+    update platform.identity_relations
+       set status = 'linked',
+           relation_id = candidate_relation_id,
+           candidate_relation_id = null,
+           linked_at = now(),
+           linked_by = ${linkedBy},
+           updated_at = now()
+     where identity_id = ${identityId}
+       and tenant_id = ${tenantId}
+       and status = 'pending_confirmation'
+       and candidate_relation_id is not null
+       and cardinality(roles) = 0
+    returning identity_id
+  `.execute(trx);
+  return result.rows.length > 0;
+}
+
+/**
  * Turn an existing EMPTY pending row (no Relation, no candidate — what a
  * session that could not be admitted by an e-mail recorded) into the linked
  * row admission would have inserted. Returns whether a row was claimed; a
@@ -134,11 +168,12 @@ export async function writeMembershipRoles(
  */
 export async function linkEmptyPendingRow(
   trx: Transaction<DB>,
-  row: { identityId: string; tenantId: string; relationId: string; linkedBy: string; roles: readonly string[] },
+  row: { identityId: string; tenantId: string; relationId: string; linkedBy: string; roles: readonly string[]; allowCandidate?: boolean },
 ): Promise<boolean> {
   const result = await sql<{ identity_id: string }>`
     update platform.identity_relations
        set status = 'linked',
+           candidate_relation_id = null,
            relation_id = ${row.relationId},
            linked_at = now(),
            linked_by = ${row.linkedBy},
@@ -149,7 +184,7 @@ export async function linkEmptyPendingRow(
        and tenant_id = ${row.tenantId}
        and status = 'pending_confirmation'
        and relation_id is null
-       and candidate_relation_id is null
+       and (${row.allowCandidate === true} or candidate_relation_id is null)
     returning identity_id
   `.execute(trx);
   return result.rows.length > 0;

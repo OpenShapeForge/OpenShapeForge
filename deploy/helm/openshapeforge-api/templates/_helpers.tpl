@@ -162,6 +162,14 @@ NODE_ENV=production is always set, which triggers the production env validator.
 - name: API_RATE_LIMIT_MAX_TRUSTED
   value: {{ . | quote }}
 {{- end }}
+{{- with .Values.limits.rateLimit.maxSubject }}
+- name: API_RATE_LIMIT_MAX_SUBJECT
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.limits.rateLimit.maxService }}
+- name: API_RATE_LIMIT_MAX_SERVICE
+  value: {{ . | quote }}
+{{- end }}
 {{- if and .Values.limits.rateLimit.redisUrl .Values.limits.rateLimit.redisUrlSecret.name }}
 {{- fail "Set limits.rateLimit.redisUrl OR limits.rateLimit.redisUrlSecret, not both — two sources for one URL is a silent-precedence bug waiting to happen." }}
 {{- end }}

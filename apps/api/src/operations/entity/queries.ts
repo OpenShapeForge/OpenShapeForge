@@ -266,8 +266,11 @@ function buildSortExpression(
     );
   }
   const direction = normalizeSortDirection(sort?.direction);
+  // Postgres puts NULL first on desc. An empty value is not the highest one:
+  // "sort sourceVersion desc, take one" must yield the watermark, never an
+  // unversioned row.
   return direction === "desc"
-    ? sql`${sql.id("row_source", column.name)} desc`
+    ? sql`${sql.id("row_source", column.name)} desc nulls last`
     : sql`${sql.id("row_source", column.name)} asc`;
 }
 

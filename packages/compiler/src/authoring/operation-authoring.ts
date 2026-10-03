@@ -23,9 +23,22 @@ export function assertOperationAuthoring(
   context: OperationAuthoringContext,
 ): void {
   const { entity, origin, fieldsByKey } = context;
-  for (const [inputKey, property] of Object.entries(operation.input?.schema?.properties ?? {})) {
+  const inputProperties = operation.input?.schema?.properties ?? {};
+  for (const [inputKey, property] of Object.entries(inputProperties)) {
     if (!property || typeof property !== "object" || Array.isArray(property) || !("x-osf-inputFields" in property)) continue;
     const source = (property as Record<string, unknown>)["x-osf-inputFields"];
+    // `input.field`: the collection on the record a sibling input references.
+    // The target entity's field is resolved and validated by the form at run
+    // time (it fails closed); here the sibling must exist and be a reference.
+    const dotted = typeof source === "string" ? /^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(source) : null;
+    if (dotted) {
+      const sibling = dotted[1] !== inputKey ? (inputProperties as Record<string, unknown>)[dotted[1]!] : undefined;
+      const reference = sibling && typeof sibling === "object" ? (sibling as Record<string, unknown>)["x-osf-reference"] : undefined;
+      if (!reference || typeof reference !== "object" || typeof (reference as Record<string, unknown>).entity !== "string") {
+        throw new Error(`${origin} Operation ${operationKey} input ${inputKey}: x-osf-inputFields ${source} must name a sibling input with an x-osf-reference.`);
+      }
+      continue;
+    }
     const field = typeof source === "string" ? fieldsByKey.get(source) : undefined;
     if (operation.target?.scope !== "record" || !field || field.osfType !== "fieldDefinition" || fieldCardinality(field) !== "collection") {
       throw new Error(`${origin} Operation ${operationKey} input ${inputKey}: x-osf-inputFields must reference a fieldDefinition collection on its target record.`);
@@ -48,6 +61,20 @@ export function assertOperationAuthoring(
     return;
   }
   const action = operationAction(operation);
+  if (entity.source && (action === "list" || action === "get")) {
+    if (operation.implementation.type !== "plugin" || operation.auth || operation.tenancy || operation.target ||
+        !operation.input || Object.keys(operation.input.schema).length ||
+        !operation.output || Object.keys(operation.output.schema).length ||
+        !operation.errors || operation.effects.data !== "read" ||
+        operation.confirmation.mode !== "none" || operation.reliability.idempotency.mode !== "natural" ||
+        operation.concurrency || operation.interaction || operation.prerequisites || operation.stamps) {
+      throw new Error(`${origin} ${operationKey}: Operation-backed entity reads require a plugin, empty compiler-derived input/output schemas, natural idempotency and no mutation controls; auth, tenancy and target derive from the entity.`);
+    }
+    return;
+  }
+  if (action === "list" || action === "get") {
+    if (operation.implementation.type === "plugin") throw new Error(`${origin}: plugin read intents require source.kind operations.`);
+  }
   const operationKind = action ?? "plugin";
   const version = operation.concurrency?.version;
   const editLease = operation.concurrency?.editLease;
@@ -209,6 +236,9 @@ export function assertOperationAuthoring(
       }
     }
     if (operation.target.scope === "record") {
+      if (operation.target.inputBindings && !entity.source) {
+        throw new Error(`${origin}: record inputBindings currently require an Operation-backed source.`);
+      }
       const properties = operation.input.schema.properties;
       const required = operation.input.schema.required;
       if (!properties || typeof properties !== "object" || Array.isArray(properties) ||

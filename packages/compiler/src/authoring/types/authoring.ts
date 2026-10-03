@@ -345,12 +345,12 @@ export interface EntityOperationDefinition {
         plugin: string;
         handler: string;
         /** Canonical entity CRUD intent implemented by this handler. */
-        action?: "create" | "update" | "delete";
+        action?: "list" | "get" | "create" | "update" | "delete";
       };
   /** How a record-scoped plugin Operation binds the current record to input. */
   target?:
     | { scope: "collection" }
-    | { scope: "record"; inputField: string };
+    | { scope: "record"; inputField: string; inputBindings?: Record<string, string> };
   input?: { schema: Record<string, unknown> };
   output?: { schema: Record<string, unknown> };
   errors?: Array<{
@@ -420,6 +420,7 @@ export type EntityInterfaceOperationProjection =
   | EntityInterfaceOperationProjectionConfig;
 
 export interface EntityWebRecordLayout {
+  preset?: "main" | "inbox-main-context";
   tabs: import("./views.js").ViewGroup[];
   /** Deliberately selected summary, independent of the full record tabs. */
   context?: { fields: string[]; relationships?: string[] };
@@ -428,7 +429,8 @@ export interface EntityWebRecordLayout {
 export type EntityWebNamedViewDefinition =
     | { kind: "record"; title?: string; fields: string[] }
     | { kind: "record"; title?: string; layout: EntityWebRecordLayout }
-    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string };
+    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string }
+    | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
 
 export interface EntityWebViewDefinition {
   /** Additional target-owned views, addressable by relationship placements. */
@@ -521,6 +523,7 @@ export interface OperationCatalogWebInterface {
     operations: {
       list: { operation: string; resultField: string; bindings?: Record<string, string> };
       get?: { operation: string; resultField?: string; bindings?: Record<string, string> };
+      create?: { operation: string; bindings?: Record<string, string> };
       collectionActions?: string[];
       recordActions?: Array<string | { operation: string; visibleWhen?: VisibilityConfig }>;
     };
@@ -538,6 +541,8 @@ export interface OperationCatalogDefinition {
 }
 
 export interface CoreEntity {
+  /** Canonical read Operations resolve records; this entity owns no SQL table. */
+  source?: { kind: "operations"; query?: { filterFields: string[]; sortFields: string[] } };
   /** Explicit safe scalar content copied from a published blueprint. */
   blueprint?: { fields: string[] };
   /** Named cross-tenant worker; enforced together with the dedicated DB role. */
@@ -907,6 +912,11 @@ export interface AuthorizationRoleLabel {
 }
 
 export interface AuthorizationConfigFile {
+  organizationAccess?: {
+    permissions: string[];
+    roles: string[];
+    groups: { key: string; name: string; roles: string[] }[];
+  };
   schemaVersion: number;
   kind: "authorizationConfig";
 

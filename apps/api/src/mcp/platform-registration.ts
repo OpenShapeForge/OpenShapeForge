@@ -72,7 +72,7 @@ export function registerSessionWithPlatform(
           // the same question the listing answered when it merged them into
           // one tool. Resolving the name to its first entry instead would
           // authorize every caller against whichever entity sorts first:
-          // a pentest-only session asking about `osf_list` was measured
+          // a single-entity session asking about `osf_list` was measured
           // against Deal and told NOT_FOUND for a tool it can use.
           const named = crudToolsNamed(subject.name);
           if (named.length > 0) {

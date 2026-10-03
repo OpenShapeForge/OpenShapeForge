@@ -9,10 +9,10 @@ pluralLabels: { en: Template versions, nl: Templateversies }
 domains: [documents]
 authorization:
   roles:
-    read: [Templates.Read, General.All.Read, General.All.ReadWrite, Organization.All.ReadWrite]
-    create: [Organization.All.ReadWrite]
-    update: [Organization.All.ReadWrite]
-    delete: [Organization.All.ReadWrite]
+    read: [Templates.Read, General.All.Read, General.All.ReadWrite, Templates.Manage]
+    create: [Templates.Manage]
+    update: [Templates.Manage]
+    delete: [Templates.Manage]
 displayTemplate: "{{versionNumber}}"
 indexes:
   - { name: template_versions_tenant_number_uidx, fields: [tenantId, template, versionNumber], unique: true }
@@ -121,7 +121,7 @@ operations:
             pattern: "^[a-f0-9]{64}$"
             x-osf-i18n: { title: { en: Content checksum, nl: Inhoudschecksum } }
     errors: []
-    auth: { mode: session, roles: [Templates.Read, General.All.Read, General.All.ReadWrite, Organization.All.ReadWrite] }
+    auth: { mode: session, roles: [Templates.Read, General.All.Read, General.All.ReadWrite, Templates.Manage] }
     tenancy: { mode: required }
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }
@@ -161,7 +161,7 @@ operations:
             x-osf-i18n: { title: { en: Parameters, nl: Parameters } }
     output: { schema: { type: object } }
     errors: []
-    auth: { mode: session, roles: [Templates.Read, General.All.Read, General.All.ReadWrite, Organization.All.ReadWrite] }
+    auth: { mode: session, roles: [Templates.Read, General.All.Read, General.All.ReadWrite, Templates.Manage] }
     tenancy: { mode: required }
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }
@@ -282,7 +282,7 @@ operations:
       - { status: 503, code: STORAGE_UNAVAILABLE, description: Artifact storage is unavailable. }
       - { status: 503, code: OPERATION_UNAVAILABLE, description: A required canonical Operation is unavailable. }
       - { status: 409, code: ALREADY_EXISTS, description: The document version label already exists. }
-    auth: { mode: session, roles: [CaseFile.All.ReadWrite, Organization.All.ReadWrite] }
+    auth: { mode: session, roles: [CaseFile.All.ReadWrite, Templates.Manage] }
     tenancy: { mode: required }
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: keyed, inputField: idempotencyKey } }

@@ -123,6 +123,11 @@ limits:
     # Budget for a caller presenting a trusted-context header whose HMAC
     # verifies — keyed per tenant+user, not per service. Empty => 5 × max.
     maxTrusted: ""
+    # Budget per verified bearer subject (a person), and per organization
+    # service identity (the durable workflow worker). Empty => max and
+    # maxTrusted respectively (#886).
+    maxSubject: ""
+    maxService: ""
     # Shared store, so the budget is EXACT across replicas. Left empty the
     # store is in-memory and the budget is per instance: with replicaCount 2 a
     # client can reach up to 2 × max before being throttled.

@@ -27,6 +27,7 @@ import { isGeneratedCrudEligible } from "./schema.js";
 import { materializeCollectionOperations } from "./authoring/collection-operations.js";
 
 const nativeBindings = new WeakMap<PluginOperationContract, NonNullable<CompiledPluginOperation["implementation"]>>();
+const resultProjections = new WeakMap<PluginOperationContract, NonNullable<CompiledPluginOperation["resultProjection"]>>();
 const verifiedNativeOperations = new WeakMap<CompiledPluginOperation, string>();
 import {
   SEARCHABLE_OPERATION_TOOL_NAMES,
@@ -44,10 +45,11 @@ export type { CompiledPluginOperation } from "./plugins.js";
  * blueprint Operations, `osf-control` the platform's own administration,
  * `osf-grants` the operator side of capability grants, `osf-jobs` the
  * durable job queue, `osf-transitions` the status transitions declared on
- * entity fields and `osf-billing` the milestone billing run and the
- * milestone create that freezes a computed amount.
+ * entity fields, `osf-source-sync` the import of records from an external
+ * source system by their base source fields, and `osf-billing` the milestone
+ * billing run and the milestone create that freezes a computed amount.
  */
-export const CORE_OPERATION_MODULES: readonly string[] = ["osf-billing", "osf-blueprints", "osf-control", "osf-grants", "osf-jobs", "osf-transitions"];
+export const CORE_OPERATION_MODULES: readonly string[] = ["accounts", "osf-billing", "osf-blueprints", "osf-control", "osf-grants", "osf-jobs", "osf-source-sync", "osf-transitions"];
 
 /**
  * The one OpenAPI security scheme every `auth.mode: capability` Operation is
@@ -633,6 +635,7 @@ function collectOperationContracts(
       : plugin.operations ?? [];
     for (const authoredOperation of declared) {
       if (Object.hasOwn(authoredOperation, "implementation")) throw new Error(`Plugin ${plugin.name} cannot supply compiler-native implementation metadata.`);
+      if (Object.hasOwn(authoredOperation, "resultProjection")) throw new Error(`Plugin ${plugin.name} cannot supply compiler-owned result projection metadata.`);
       const operation = withCapabilityGrantErrors(authoredOperation);
       validateOperation(plugin.name, operation, authored);
       const restKey = normalizedRestRoute(
@@ -682,6 +685,8 @@ function collectOperationContracts(
         intent: "invoke",
       };
       const native = authored ? nativeBindings.get(authoredOperation) : undefined;
+      const resultProjection = authored ? resultProjections.get(authoredOperation) : undefined;
+      if (resultProjection) compiled.resultProjection = { ...resultProjection };
       if (native) {
         compiled.implementation = { ...native };
         verifiedNativeOperations.set(compiled, JSON.stringify(native));
@@ -763,7 +768,8 @@ export function collectAuthoredEntityPluginOperations(
           entityName: authored.entityName,
           scope: definition.target!.scope,
           ...(definition.target!.scope === "record"
-            ? { inputField: definition.target!.inputField }
+            ? { inputField: definition.target!.inputField,
+                ...(definition.target!.inputBindings ? { inputBindings: definition.target!.inputBindings } : {}) }
             : {}),
         },
         inputSchema,
@@ -824,6 +830,9 @@ export function collectAuthoredEntityPluginOperations(
       };
       if (implementation.type === "collection") nativeBindings.set(operation, {
         type: "collection", entityName: authored.entityName, field: implementation.field, action: implementation.action,
+      });
+      if (contract.source && authored.key === "get") resultProjections.set(operation, {
+        kind: "entity-record", entityName: authored.entityName, idField: "id",
       });
       const current = byPlugin.get(pluginName) ?? [];
       current.push(operation);

@@ -7,6 +7,12 @@ description: "Greenfield platform schema foundation for apps/api."
 # reference on the strength of its entry here and generateArtifacts checks
 # that the merged manifest really declares the target.
 relationshipRegister:
+  - from: { schema: erp, table: accounts, column: relation_id }
+    to: { schema: erp, table: relations, column: id }
+  - from: { schema: erp, table: accounts, column: natural_person_id }
+    to: { schema: erp, table: natural_persons, column: id }
+  - from: { schema: platform, table: relation_group_roles, column: relation_group_id }
+    to: { schema: erp, table: relation_groups, column: id }
   - from: { schema: platform, table: tenants, column: relation_id }
     to: { schema: erp, table: relations, column: id }
   - from: { schema: platform, table: identity_relations, column: relation_id }
@@ -15,6 +21,42 @@ relationshipRegister:
     to: { schema: erp, table: relations, column: id }
 
 tables:
+  # Historical ERP Account storage is retained, not migrated into login
+  # identities. The public Account entity now projects platform identities;
+  # keeping this explicit table prevents a reset/cutover from dropping old
+  # ERP data and does not create another account-management interface.
+  - schema: erp
+    name: accounts
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, required: true, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+      - { name: external_id, type: text }
+      - { name: source_authority, type: text }
+      - { name: source_organization, type: text }
+      - { name: source_administration, type: text }
+      - { name: source_version, type: text }
+      - { name: username, type: text, required: true }
+      - { name: email, type: text, required: true }
+      - { name: keycloak_sub, type: text }
+      - { name: status, type: text, required: true }
+      - { name: last_login_at, type: timestamptz }
+      - { name: valid_from, type: timestamptz }
+      - { name: valid_until, type: timestamptz }
+      - { name: password_changed_at, type: timestamptz }
+      - name: relation_id
+        type: uuid
+        references: { schema: erp, table: relations, column: id, localColumns: [tenant_id, relation_id], targetColumns: [tenant_id, id] }
+      - name: natural_person_id
+        type: uuid
+        references: { schema: erp, table: natural_persons, column: id, localColumns: [tenant_id, natural_person_id], targetColumns: [tenant_id, id] }
+    indexes:
+      - { name: accounts_tenant_id_relation_id_idx, columns: [tenant_id, relation_id] }
+      - { name: accounts_tenant_id_natural_person_id_idx, columns: [tenant_id, natural_person_id] }
   - schema: platform
     name: schema_migrations
     tenantScoped: false
@@ -830,9 +872,9 @@ tables:
   # the acting session to BE the identity or to hold Organization.All.ReadWrite.
   #
   # needs_role_assignment is true only for a Relation the just-in-time path
-  # CREATED whose invited role could not be recorded: while set, auth/identity.ts
-  # overrides the session's roles to a minimal working set. Cleared by
-  # set_member_role, which also writes `roles`.
+  # CREATED whose invited role could not be recorded. Cleared by the shared
+  # identity-link-store.writeMembershipRoles writer, used by admission,
+  # control and Account.assignRole/revokeRole in accounts/account-management.ts.
   #
   # The onboarding_* columns are first-use onboarding state (mcp/onboarding.ts),
   # kept on this row because they have the same lifetime and owner — one
@@ -872,9 +914,10 @@ tables:
       # of whoever linked: the person (confirm_my_link) or an administrator.
       - { name: linked_by, type: text }
       - { name: needs_role_assignment, type: boolean, required: true, default: "false" }
+      - { name: access_blocked, type: boolean, required: true, default: "false" }
       # The roles this identity holds IN THIS TENANT, and nowhere else: the
-      # organization-scoped grant an invitation or set_member_role records
-      # (auth/employee-invitations.ts, mcp/identity-link-tools.ts) and that
+      # organization-scoped grant an invitation or Account.assignRole records
+      # (auth/employee-invitations.ts, accounts/account-management.ts) and that
       # auth/identity.ts unions onto the session for the selected tenant. A
       # Keycloak user-wide client role would be visible in every organization
       # the same account is a member of; this column is what replaced that.
@@ -913,6 +956,57 @@ tables:
   # Organization.All.ReadWrite. `invited_by` carries the same shape as
   # identity_relations.linked_by.
   - schema: platform
+    name: relation_group_roles
+    tenantScoped: false
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - name: relation_group_id
+        type: uuid
+        required: true
+        references:
+          schema: erp
+          table: relation_groups
+          column: id
+          onDelete: CASCADE
+          localColumns: [tenant_id, relation_group_id]
+          targetColumns: [tenant_id, id]
+      - { name: role, type: text, required: true }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+    indexes:
+      - name: relation_group_roles_unique
+        columns: [tenant_id, relation_group_id, role]
+        unique: true
+
+  - schema: platform
+    name: organization_access_roles
+    tenantScoped: false
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: label, type: text, required: true }
+      - { name: permissions, type: "text[]", required: true, default: "'{}'::text[]" }
+      - { name: version, type: integer, required: true, default: "1" }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+    indexes:
+      - { name: organization_access_roles_label, columns: [tenant_id, label], unique: true }
+
+  - schema: platform
+    name: organization_access_seed
+    tenantScoped: false
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+
+  - schema: platform
     name: employee_invitations
     tenantScoped: false
     domainInternal: true
@@ -920,8 +1014,9 @@ tables:
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: relation_id, type: uuid }
       - { name: email, type: text, required: true }
-      - { name: role, type: text, required: true }
+      - { name: role, type: text }
       - { name: first_name, type: text }
       - { name: last_name, type: text }
       - { name: status, type: text, required: true, default: "'pending'::text" }

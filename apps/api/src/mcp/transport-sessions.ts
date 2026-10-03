@@ -21,6 +21,7 @@ import { sessionOpeningSentence } from "./session-opening.js";
 import { catalogDerivedTools } from "./catalog.js";
 import type { McpRegistrationOptions, McpRouteContext } from "./route-context.js";
 import type { BuildServer } from "./generated-mcp-server.js";
+import { resolveServerIcons } from "./server-icons.js";
 /**
  * The stateful transport sessions of the MCP plugin scope, keyed by the
  * SDK-issued session id and bound to the identity that initialized them,
@@ -203,6 +204,9 @@ export function createTransportSessions(input: {
         true,
         undefined,
         await sessionOpeningSentence({ db, session: statefulSession }),
+        undefined,
+        undefined,
+        await resolveServerIcons(options.modules, options.modulePlatform, statefulSession),
       );
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),

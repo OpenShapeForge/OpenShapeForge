@@ -96,17 +96,27 @@ fields:
     osfType: CostDimension
     relationship:
       ownership: reference
+# Embedded and standalone grants permit identical CRUD. Hosts can omit the
+# Embedded grant from standalone navigation; it does not restrict API routes.
 authorization:
   roles:
     read:
       - Finance.All.Read
       - Finance.All.ReadWrite
+      - Finance.BudgetLine.ReadWrite
+      - Finance.BudgetLine.Embedded.ReadWrite
     create:
       - Finance.All.ReadWrite
+      - Finance.BudgetLine.ReadWrite
+      - Finance.BudgetLine.Embedded.ReadWrite
     update:
       - Finance.All.ReadWrite
+      - Finance.BudgetLine.ReadWrite
+      - Finance.BudgetLine.Embedded.ReadWrite
     delete:
       - Finance.All.ReadWrite
+      - Finance.BudgetLine.ReadWrite
+      - Finance.BudgetLine.Embedded.ReadWrite
   rowAccess:
     enabled: true
     empty: public
@@ -192,6 +202,14 @@ interfaces:
   graphql: {}
   web:
     views:
+      matrix:
+        kind: collection
+        collectionLayout: matrix
+        matrix:
+          rowField: ledgerAccountId
+          columnField: fiscalPeriodId
+          valueField: amount
+          aggregate: sum
       collection:
         route:
           en: /budget-lines

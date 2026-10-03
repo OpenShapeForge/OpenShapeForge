@@ -1,7 +1,7 @@
 {
   "administratorRole": "Organization.All.ReadWrite",
   "memberRoles": [
-    "General.All.Read"
+    "Relations.All.Read"
   ],
   "actingParty": {
     "entity": "Relation",
@@ -28,5 +28,6 @@
     "primaryField": "isPrimary",
     "statusField": "status",
     "activeStatus": "active"
-  }
+  },
+  "publicProviders": []
 }

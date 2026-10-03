@@ -54,7 +54,7 @@
  * THE ROW ALSO CARRIES THE PERSON'S ROLES IN THIS TENANT
  * ---------------------------------------------------------------------------
  * `platform.identity_relations.roles` is the organization-scoped grant: what
- * an invitation admitted the person as, or what `set_member_role` later
+ * an invitation admitted the person as, or what `canonical Account role Operations` later
  * assigned — for this (identity, tenant) and no other. identity.ts unions it
  * onto the session for the tenant the token selected. One Keycloak account
  * that is a member of several organizations therefore holds a separate role
@@ -93,6 +93,7 @@ import { SessionAuthenticationUnavailableError } from "./session-unavailable.js"
 import {
   insertLinkRow,
   readLinkRow,
+  readLinkRowByIdentity,
   relationsWithEmail,
   toState,
   upsertIdentity,
@@ -161,7 +162,7 @@ export type IdentityLinkState = {
   /**
    * The roles this identity holds in THIS tenant (see the module header).
    * identity.ts unions them onto the session; empty until an invitation was
-   * accepted or an administrator ran `set_member_role`.
+   * accepted or an administrator ran `canonical Account role Operations`.
    */
   roles: readonly string[];
 };
@@ -231,7 +232,17 @@ export async function resolveIdentityLink(
   // Only a linked state is settled; anything else (pending, a candidate, a
   // session-side "no row") is an admission question this path must ask again.
   const cached = cachedLinkState(key);
-  if (cached?.state?.status === "linked") return cached.state;
+  if (cached?.state?.status === "linked") {
+    // Admission may be cached; organization authority may not. Re-read the
+    // membership on every bearer request so another replica's revocation wins.
+    try {
+      const row = await withDbSession(db, session, tx => readLinkRowByIdentity(tx, claims, session.tenantId));
+      if (row?.status === "linked") return toState(row, claims);
+      invalidateIdentityLink(claims.issuer, claims.subject, session.tenantId);
+    } catch {
+      throw new SessionAuthenticationUnavailableError("The current organization membership could not be verified; try again.");
+    }
+  }
 
   const pending = inFlight.get(key);
   if (pending) return pending;
@@ -313,6 +324,10 @@ async function ensureIdentityLink(
   // admitted by an e-mail recorded (an API key's, a token without one), kept
   // so `link_identity` can find the identity. It settles nothing — phase 2
   // asks the invitation question for it exactly as for no row at all.
+  const targeted = claims.email ? await withDbSession(db, session, trx => findPendingInvitation(trx, session.tenantId, claims.email!)) : null;
+  if (targeted?.relationId && found.state?.status !== "linked") {
+    return admitInvitedPerson(db, session, claims, found.identityId, targeted);
+  }
   const emptyPending = found.state !== null &&
     found.state.status === "pending_confirmation" &&
     !found.state.relationId &&

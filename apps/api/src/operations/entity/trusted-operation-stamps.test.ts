@@ -51,17 +51,12 @@ test("a plugin Operation may accept only the process fields it owns", () => {
   ).toThrow("AgreementMilestone.invoice");
 });
 
-test("Account IdP lifecycle fields are unavailable to generic create and update", () => {
+test("Account source has no SQL table or generic credential writes", () => {
   const account = (manifest.tables as GeneratedCrudTable[]).find(
     (candidate) => candidate.source?.authoringEntityName === "Account",
-  )!;
+  );
+  expect(account).toBeUndefined();
   for (const id of ["Account.create", "Account.update"]) {
-    const operation = catalog.entityOperations.find((candidate) => candidate.id === id)!;
-    const values = operation.inputSchema.properties.values as { properties: Record<string, unknown> };
-    for (const field of ["keycloakSub", "lastLoginAt", "passwordChangedAt"]) {
-      expect(values.properties[field]).toBeUndefined();
-      expect(() => assertNoOperationWrittenValues(account, { [field]: "caller-choice" }))
-        .toThrow("cannot be set through create or update");
-    }
+    expect(catalog.entityOperations.find((candidate) => candidate.id === id)).toBeUndefined();
   }
 });

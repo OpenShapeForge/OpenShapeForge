@@ -10,8 +10,8 @@
  * Deliberately separate from auth/identity-link.ts: that module links a LOGIN
  * to the Relation a PERSON acts as; this one links the TENANT itself to the
  * Relation that represents the organization as a whole. Both are one-Relation
- * pointers gated the same way (`Organization.All.ReadWrite`,
- * `IDENTITY_LINK_ADMIN_ROLE` — reused here rather than duplicated under a new
+ * pointers gated the same way (`IDENTITY_LINK_ADMIN_ROLE`,
+ * reused here rather than duplicated under a new
  * name, since it is the same role and the same reasoning: an organization
  * administrator, not an ordinary member, decides what the assistant is told
  * this company is).

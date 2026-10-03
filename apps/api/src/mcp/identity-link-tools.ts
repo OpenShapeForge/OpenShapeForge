@@ -3,7 +3,7 @@
  * The MCP tools that make an identity ↔ Relation link explicit
  * (auth/identity-link.ts):
  *
- *   link_identity        — an organization administrator (Organization.All.ReadWrite)
+ *   link_identity        — an organization administrator (configured identity administrator role)
  *                          links a person's login to a Relation of the tenant.
  *   confirm_my_link      — the person confirms the candidate the just-in-time
  *                          path recorded for them. No arguments: it can only
@@ -16,30 +16,23 @@
  *                          session (a login the web host forwarded, an API
  *                          key) that have no record and no candidate yet —
  *                          the input for link_identity.
- *   set_member_role      — an organization administrator records the roles an
- *                          identity holds IN THIS ORGANIZATION (`org_admin` or
- *                          `org_employee`) on its membership row and clears
- *                          the flag. Nothing is written to Keycloak: a client
- *                          role on the user would apply in every organization
- *                          the account is a member of.
+ * Role assignment is owned by the canonical revision-bound Account Operations,
+ * not by the former unversioned set_member_role shortcut.
  *
- * Listed per session like every other tool: link_identity/list_pending_members/
- * set_member_role only for administrators, confirm_my_link only while there is
+ * Listed per session like every other tool: link_identity/list_pending_members
+ * only for administrators, confirm_my_link only while there is
  * a candidate to confirm. Calling a tool the session was not shown answers the
- * same NOT_FOUND an unknown tool gets. All four are wired into
+ * same NOT_FOUND an unknown tool gets. All three are wired into
  * the MCP server (session-surface.ts, dispatch-platform-tools.ts) by the same two delimited hunks; everything else
  * lives here.
  */
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-import { employeeInvitationRoleGrants } from "../auth/employee-invitations.js";
 import {
   confirmPendingLink,
-  identityIdForRelation,
   IDENTITY_LINK_ADMIN_ROLE,
   linkIdentityToRelation,
   listPendingRoleAssignments,
   listUnlinkedIdentities,
-  setMembershipRoles,
   type IdentityLinkState,
 } from "../auth/identity-link.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
@@ -49,14 +42,8 @@ import { HttpError, toHttpError } from "../rest/http-error.js";
 export const LINK_IDENTITY_TOOL = "link_identity";
 export const CONFIRM_MY_LINK_TOOL = "confirm_my_link";
 export const LIST_PENDING_MEMBERS_TOOL = "list_pending_members";
-export const SET_MEMBER_ROLE_TOOL = "set_member_role";
 
-/**
- * What each role grants comes from auth/employee-invitations.ts. This tool
- * applies the same table the invitation path applies automatically on first
- * sign-in; the two must never be able to disagree about what `org_admin`
- * means, so there is one table.
- */
+/** Explicit linking does not assign roles; role changes use canonical Account Operations. */
 const LINK_IDENTITY: Tool = {
   name: LINK_IDENTITY_TOOL,
   title: "Link a login to a Relation",
@@ -124,7 +111,7 @@ const LIST_PENDING_MEMBERS: Tool = {
   description:
     "List identities this organization has recorded but not settled: `pending` are members " +
     "whose very first sign-in already created their Relation but who still run on read-only " +
-    "access because nobody assigned them a role (set_member_role); `unlinked` are logins " +
+    "access because nobody assigned them a role (use the canonical Account Operations); `unlinked` are logins " +
     "recorded without a Relation — an integration's API key, a web-only login — each with " +
     "the identityId link_identity takes. Check this after employees start signing in " +
     "through a newly linked identity provider, or after issuing an API key. For organization " +
@@ -136,44 +123,6 @@ const LIST_PENDING_MEMBERS: Tool = {
   },
   annotations: {
     readOnlyHint: true,
-    destructiveHint: false,
-    idempotentHint: true,
-  },
-};
-
-const SET_MEMBER_ROLE: Tool = {
-  name: SET_MEMBER_ROLE_TOOL,
-  title: "Assign a member's role",
-  description:
-    "Set a member's role in this organization — organization administrator or employee — " +
-    "replacing whatever they held here before, including the read-only access their first " +
-    "sign-in started with. Applies to this organization only; the same person's role in " +
-    "another organization is unchanged. Takes effect on their next request (within a " +
-    "minute across replicas); no sign-out is needed. For organization administrators.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      identityId: {
-        type: "string",
-        format: "uuid",
-        description: "The identity to grant a role to, from list_pending_members.",
-      },
-      relationId: {
-        type: "string",
-        format: "uuid",
-        description: "Or the Relation the identity is linked to, instead of identityId.",
-      },
-      role: {
-        type: "string",
-        enum: ["org_admin", "org_employee"],
-        description: "org_admin: full organization administration. org_employee: ordinary access.",
-      },
-    },
-    required: ["role"],
-    additionalProperties: false,
-  },
-  annotations: {
-    readOnlyHint: false,
     destructiveHint: false,
     idempotentHint: true,
   },
@@ -196,7 +145,7 @@ export function identityLinkToolsForSession(
 ): Tool[] {
   const tools: Tool[] = [];
   if (sessionMayLinkIdentities(session)) {
-    tools.push(LINK_IDENTITY, LIST_PENDING_MEMBERS, SET_MEMBER_ROLE);
+    tools.push(LINK_IDENTITY, LIST_PENDING_MEMBERS);
   }
   if (hasPendingCandidate(session)) tools.push(CONFIRM_MY_LINK);
   return tools;
@@ -259,8 +208,7 @@ export async function callIdentityLinkTool(
   if (
     name !== LINK_IDENTITY_TOOL &&
     name !== CONFIRM_MY_LINK_TOOL &&
-    name !== LIST_PENDING_MEMBERS_TOOL &&
-    name !== SET_MEMBER_ROLE_TOOL
+    name !== LIST_PENDING_MEMBERS_TOOL
   ) {
     return undefined;
   }
@@ -303,47 +251,6 @@ export async function callIdentityLinkTool(
         listUnlinkedIdentities(db, scoped),
       ]);
       return succeeded({ pending, unlinked });
-    } catch (error) {
-      return failed(error);
-    }
-  }
-
-  if (name === SET_MEMBER_ROLE_TOOL) {
-    // Refuse if the caller isn't org_admin for this tenant — the same gate
-    // link_identity and list_pending_members use, checked BEFORE anything
-    // that would reveal whether the identity/relation even exists.
-    if (!sessionMayLinkIdentities(session)) return notFound(name);
-    try {
-      const role = stringArgument(args, "role");
-      if (role !== "org_admin" && role !== "org_employee") {
-        throw new HttpError(400, "VALIDATION", 'Argument "role" must be org_admin or org_employee.');
-      }
-      let identityId = stringArgument(args, "identityId");
-      const relationId = stringArgument(args, "relationId");
-      if (!identityId && !relationId) {
-        throw new HttpError(400, "VALIDATION", "Give identityId or relationId.");
-      }
-      if (!identityId && relationId) {
-        identityId = (await identityIdForRelation(db, scoped, relationId)) ?? undefined;
-      }
-      if (!identityId) {
-        throw new HttpError(
-          404,
-          "IDENTITY_NOT_FOUND",
-          "No linked identity found for that relationId in this organization.",
-        );
-      }
-      const roles = employeeInvitationRoleGrants(role);
-      const state = await setMembershipRoles(db, scoped, identityId, roles);
-
-      return succeeded({
-        granted: true,
-        identityId,
-        role,
-        roles: state.roles,
-        note:
-          "The role applies in this organization only and takes effect on their next request.",
-      });
     } catch (error) {
       return failed(error);
     }

@@ -49,6 +49,7 @@ export function resolveModelFields(
       render: resolveRender(field, componentCatalog, semType),
       osfType: field.osfType,
     };
+    if (field.transform) compiled.transform = field.transform.map(step => ({ ...step }));
     if (field.readOnly) compiled.readOnly = true;
     if (field.writeSource) compiled.writeSource = field.writeSource;
     if (field.immutable) compiled.immutable = true;

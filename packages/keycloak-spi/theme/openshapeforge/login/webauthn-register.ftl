@@ -1,6 +1,6 @@
 <#--
   Derived from Keycloak 26.7.3's keycloak.v2 passwordless WebAuthn registration
-  template (Apache-2.0). Modified to suggest an editable, distinguishable label.
+  template (Apache-2.0). Modified to save a distinguishable label without a browser prompt.
 -->
 <#import "template.ftl" as layout>
 <#import "password-commons.ftl" as passwordCommons>
@@ -28,7 +28,7 @@
 
         <script type="module">
             <#outputformat "JavaScript">
-            import { registerByWebAuthn } from "${url.resourcesPath}/js/webauthnRegister.js";
+            import { registerByWebAuthn } from "${url.resourcesPath}/js/webauthnRegisterAutoLabel.js";
             const registerButton = document.getElementById('registerWebAuthn');
             registerButton.addEventListener("click", function() {
                 const realmDisplayName = <#if realm.displayName?has_content>${realm.displayName?c}<#else>${realm.name?c}</#if>;

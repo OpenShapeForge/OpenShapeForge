@@ -136,7 +136,7 @@ export type SessionInfo = {
   organization: string | null;
   /** "Organization administrator", "Employee", or the raw role list. */
   role: string;
-  /** The permission names behind the role, e.g. `Pentest.All.ReadWrite`. */
+  /** The permission names behind the role, e.g. `Advies.All.ReadWrite`. */
   permissions: string[];
   /** The organizations (groups) the person belongs to; exactly one is active. */
   groups: Array<{ name: string; active: boolean }>;

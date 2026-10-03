@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 // SPDX-License-Identifier: BUSL-1.1
 import { sql, type RawBuilder } from "kysely";
 import type { OpenShapeForgeDatabase } from "../connection.js";
@@ -359,4 +360,5 @@ export async function applyDocumentCommands(db: OpenShapeForgeDatabase): Promise
     grant execute on function document_internal.create_with_first_version(jsonb, jsonb) to ${sql.ref(APP_ROLE)};
     grant execute on function document_internal.append_version(uuid, jsonb) to ${sql.ref(APP_ROLE)};
   `.execute(db);
+  await sql.raw(readFileSync(new URL("./tenant-avatar-access.sql", import.meta.url), "utf8")).execute(db);
 }

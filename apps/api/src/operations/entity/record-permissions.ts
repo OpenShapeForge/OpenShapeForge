@@ -5,6 +5,8 @@ import type { DB } from "../../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { generatedCrudError } from "./catalog.js";
+import { notAuthorizedRefusal } from "./authorization-refusal-text.js";
+import { operationFailure } from "@openshapeforge/operations";
 import type { GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
 
 export type RecordPermissionAction = "view" | "edit" | "delete";
@@ -209,10 +211,7 @@ export async function assertRecordPermissionInTransaction(
     limit 1
   `.execute(trx);
   if (result.rows[0]?.allowed !== true) {
-    throw generatedCrudError(
-      `Not authorized to ${permission} ${table.source?.authoringEntityName ?? table.name}.`,
-      "FORBIDDEN",
-    );
+    throw operationFailure(notAuthorizedRefusal(table, permission));
   }
 }
 

@@ -70,6 +70,7 @@ import {
   type ModuleRegistry,
 } from "../modules/registry.js";
 import type { ModuleRuntimeContext } from "../modules/contract.js";
+import type { InitializedMaintenanceOwner } from "../modules/maintenance.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
 import { composeJobHandlers } from "../jobs/handlers.js";
 import { createJobsRuntimeModule } from "../jobs/module.js";
@@ -329,6 +330,7 @@ export function createApiApp(options: {
         databaseUrl,
         moduleSeeds: initialisedModules.flatMap((module) => module.seeds ?? []),
         maintenanceModules: initialisedModules,
+        ...(maintenanceRuntime ? { maintenanceRuntime } : {}),
       });
     });
   } else {
@@ -345,6 +347,7 @@ export function createApiApp(options: {
   // constructing.
   let ready: { yoga: ReturnType<typeof createGraphqlYoga> } | null = null;
   let initialisedModules: ModuleRegistry["loaded"] = [];
+  let maintenanceRuntime: InitializedMaintenanceOwner | undefined;
   const databaseToClose = databaseRuntime;
 
   app.addHook("onClose", async () => {
@@ -380,6 +383,9 @@ export function createApiApp(options: {
     };
     const initialised = await initRuntimeModules(modules, moduleContext);
     initialisedModules = initialised.loaded;
+    if (modulePlatform) {
+      maintenanceRuntime = { platform: modulePlatform.services, modules: initialised.loaded };
+    }
     // A job kind two modules both register is refused here, at API boot, and
     // not only in the worker: the worker may not be running, and the API is
     // what would enqueue jobs into a queue nothing can drain unambiguously.

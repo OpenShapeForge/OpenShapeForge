@@ -112,3 +112,24 @@ without these database mutations; the audited read remains. The SPI upsert may
 already have provider effects. Fresh tenants keep normal partial-commit
 provisioning and replay recovery; this command does not claim distributed
 atomicity or replace the host's identity/member orchestration.
+
+The optional seed CLI flag `--input-stdin` accepts up to 64 KiB of JSON object
+data for the installed descriptor (for example a verified provider subject).
+Contribution, tenant and opt-in remain command flags; session/provenance/role
+fields are refused. Action and snapshot date flags cannot be overridden by input.
+This is descriptor data, not a seed language or a caller-provided authority.
+
+Use the pinned connection inside `store.pinned`, and use the supplied query inside
+a transaction. Acquiring the base store again, nesting pinned scopes or acquiring
+another transaction from the pinned connection inside its transaction fails
+immediately. The facade cannot sandbox arbitrary raw SQL from trusted seed code;
+start `runSeed` outside a separately owned raw migration transaction.
+
+An owner drains already started work. A discarded failing job fails its enclosing
+migration/CLI owner; an explicitly awaited/caught refusal can be reconciled by the
+trusted callback. Borrowed initialized modules/platform are reused without a
+second `init` or a caller-owned `close`; headless CLI modules initialize once.
+Registered seed roles are the union of the stable operation contracts, including
+required transitive business reads. These are trusted seed authority, not browser
+credentials. The outward executor remains bounded by the immutable contribution
+allowlist, while ordinary authorization and business guards still run.

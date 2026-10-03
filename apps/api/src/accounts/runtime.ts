@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { listInvitationRelations } from "./invitation-relations.js";
 import * as roles from "./roles.js";
 import * as custom from './custom-roles.js';

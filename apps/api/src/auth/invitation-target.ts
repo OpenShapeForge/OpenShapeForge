@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { sql, type Transaction } from "kysely";
 import type { DB } from "../generated/db/types.js";
 import { HttpError } from "../rest/http-error.js";

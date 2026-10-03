@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { compile } from "./compiler/index.js";

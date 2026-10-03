@@ -5,7 +5,7 @@ import Fastify from "fastify";
 import { __resetSessionResolverForTests } from "../auth/identity.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { registerArtifactRestRoutes } from "./rest-routes.js";
-import { assertUploadFileName, limitUploadBody } from "./upload-input.js";
+import { ARTIFACT_UPLOAD_LIMIT_BYTES, assertUploadFileName, limitUploadBody } from "./upload-input.js";
 
 const SECRET = "artifact-route-test-secret";
 const ARTIFACT_ID = "1658ad0b-e44b-4ef3-86ca-953dc6783885";
@@ -77,6 +77,26 @@ describe("artifact REST adapter", () => {
     expect(response.headers["x-content-type-options"]).toBe("nosniff");
     expect(response.headers["cache-control"]).toBe("private, no-store");
     expect(owner).toEqual({ artifactId: ARTIFACT_ID, owner: { entity: "Document", id: DOCUMENT_ID } });
+    await app.close();
+  });
+
+  test("refuses a body over the upload limit before storage is called", async () => {
+    const app = Fastify();
+    let called = false;
+    registerArtifactRestRoutes(app, {
+      artifacts: {
+        async stage() { called = true; throw new Error("must not run"); },
+        async bind() { throw new Error("unused"); },
+        async read() { throw new Error("unused"); },
+      },
+    });
+    const response = await app.inject({
+      method: "POST", url: "/api/artifacts", headers: authorizationHeaders(),
+      payload: Buffer.alloc(ARTIFACT_UPLOAD_LIMIT_BYTES + 1),
+    });
+    expect(response.statusCode).toBe(413);
+    expect(response.json().error.code).toBe("ARTIFACT_TOO_LARGE");
+    expect(called).toBeFalse();
     await app.close();
   });
 

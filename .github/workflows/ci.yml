@@ -255,8 +255,10 @@ jobs:
           java-version: "17"
           cache: maven
 
+      # This job is the SPI's gate, so its unit tests run here (the image
+      # build and the e2e job only need the jar and keep skipping them).
       - name: Package SPI
-        run: mvn -B -f packages/keycloak-spi/pom.xml -DskipTests package
+        run: mvn -B -f packages/keycloak-spi/pom.xml package
 
   helm:
     name: Lint and template Helm chart

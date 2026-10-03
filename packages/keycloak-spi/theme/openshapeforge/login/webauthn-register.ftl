@@ -1,6 +1,9 @@
 <#--
+  SPDX-License-Identifier: BUSL-1.1 AND Apache-2.0
   Derived from Keycloak 26.7.3's keycloak.v2 passwordless WebAuthn registration
-  template (Apache-2.0). Modified to save a distinguishable label without a browser prompt.
+  template, themes/src/main/resources/theme/keycloak.v2/login/webauthn-register.ftl
+  (Apache-2.0; see packages/keycloak-spi/THIRD-PARTY-NOTICES.md). Modified to save a
+  distinguishable label without a browser prompt.
 -->
 <#import "template.ftl" as layout>
 <#import "password-commons.ftl" as passwordCommons>

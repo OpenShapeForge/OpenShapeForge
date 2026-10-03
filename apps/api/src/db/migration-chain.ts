@@ -105,6 +105,8 @@ import {
   applyEntityPageConfigsSeed,
   type EntityPageConfigsSeedResult,
 } from "./migrations/entity-page-configs-seed.js";
+import { runRegisteredSeedJob } from "../modules/maintenance.js";
+import type { RuntimeModule } from "../modules/contract.js";
 import type { ModuleSeed } from "../modules/contract.js";
 import type { CatalogSeedResult } from "./migrations/catalog-seed.js";
 
@@ -118,6 +120,8 @@ export type MigrationChainOptions = {
    * every caller that only migrates schema.
    */
   moduleSeeds?: readonly ModuleSeed[];
+  /** Exact installed owners of the contributed seeds. */
+  maintenanceModules?: readonly RuntimeModule[];
 };
 
 export type MigrationChainResult = GeneratedSchemaMigrationResult & {
@@ -173,10 +177,24 @@ export async function runMigrationChain(
   const pageConfigs = await applyEntityPageConfigsSeed(db);
   const moduleSeeds: Record<string, CatalogSeedResult> = {};
   for (const seed of options.moduleSeeds ?? []) {
-    moduleSeeds[seed.name] = await seed.apply(db, {
-      schemas: { fields: generatedRuntimeFieldSchemas, json: runtimeJsonSchemas },
-      seedDirectory: fileURLToPath(new URL("../../../../authoring/seeds/", import.meta.url)),
-    });
+    let active = true;
+    const pending: Promise<unknown>[] = [];
+    try {
+      moduleSeeds[seed.name] = await seed.apply(db, {
+        schemas: { fields: generatedRuntimeFieldSchemas, json: runtimeJsonSchemas },
+        seedDirectory: fileURLToPath(new URL("../../../../authoring/seeds/", import.meta.url)),
+        ...(seed.maintenanceOptIn ? { runSeed: (request, callback) => {
+          if (!active) throw new Error("Maintenance seed callback has finished.");
+          if (!seed.maintenanceOptIn!()) throw new Error("Maintenance seed is not explicitly opted in.");
+          const owners = (options.maintenanceModules ?? []).filter(module => module.seeds?.includes(seed));
+          if (owners.length !== 1) throw new Error("Maintenance seed has no unique installed owner.");
+          const child = runRegisteredSeedJob(owners[0]!, db, seed.name, options.appliedBy ?? "migration", runner => runner(request, callback));
+          pending.push(child); void child.catch(() => {}); return child;
+        } } : {}),
+      });
+      active = false;
+      await Promise.allSettled(pending);
+    } finally { active = false; await Promise.allSettled(pending); }
   }
   return {
     ...generated,

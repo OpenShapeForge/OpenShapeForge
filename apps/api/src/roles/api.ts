@@ -324,6 +324,7 @@ export function createApiApp(options: {
       await enforceGeneratedSchemaFreshness(app.log, runtime.db, {
         databaseUrl,
         moduleSeeds: initialisedModules.flatMap((module) => module.seeds ?? []),
+        maintenanceModules: initialisedModules,
       });
     });
   } else {

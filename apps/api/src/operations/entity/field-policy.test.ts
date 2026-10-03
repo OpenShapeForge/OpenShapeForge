@@ -161,3 +161,17 @@ test("protected JSON writes refuse unevaluated SQL values instead of erasing the
   expect(() => prepare(sql`coalesce(payload, '{}'::jsonb) || '{}'::jsonb`, ["Edit"], false))
     .toThrow("concrete value");
 });
+
+test("an unreadable immutable item refuses a guess the same way whether or not it matches", () => {
+  const hidden: GeneratedCrudColumn = { ...column, fieldPolicy: { item: { immutable: true, readRoles: ["Hidden.Read"] } } };
+  const hiddenTable = { columns: [hidden] } as GeneratedCrudTable;
+  const refusal = (guess: string) => {
+    try {
+      prepareProtectedFieldWrites(hiddenTable, { roles: ["Edit"] }, new Map([[hidden, [guess]]]), "update", { payload: ["stored"] });
+    } catch (error) {
+      return (error as Error).message;
+    }
+    return "accepted";
+  };
+  expect(refusal("stored")).toBe(refusal("guess"));
+});

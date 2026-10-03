@@ -8,6 +8,8 @@ import { Kysely, PostgresAdapter, PostgresIntrospector, PostgresQueryCompiler,
   type CompiledQuery, type DatabaseConnection, type QueryResult } from "kysely";
 import type { DB } from "../generated/db/types.js";
 import type { RuntimeModule } from "../modules/contract.js";
+import type { RuntimeResolvedOperationWork } from "@openshapeforge/plugin-runtime";
+import { configuredDurableWorkerBroker } from "../operations/durable-worker.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
 import { createControlRuntime } from "../control/runtime.js";
 import {
@@ -21,7 +23,7 @@ import { encryptSecret, keyringFromEnv } from "../platform/secrets.js";
 import {
   __resetSessionResolverForTests, __setIdentityLinkForTests, resolveSessionContext,
 } from "./identity.js";
-import { __setTenantForOrganizationForTests } from "./tenant-resolution.js";
+import { __setTenantForOrganizationForTests, lookupTenantForOrganization } from "./tenant-resolution.js";
 import { stubLinkedMembershipForTests } from "./identity-link.test-support.js";
 
 const ISSUER = "https://identity.example.test/realms/host";
@@ -39,6 +41,8 @@ let server: ReturnType<typeof Bun.serve>;
 const lookups: string[][] = [];
 let exchangeToken = "";
 let exchangeCalls = 0;
+let durableCatalogCalls = 0;
+let durableExecuteCalls = 0;
 
 async function headers(overrides: Record<string, unknown> = {}): Promise<Headers> {
   const payload = {
@@ -57,9 +61,19 @@ beforeAll(async () => {
   keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
   const publicKey = { ...keys.publicKey.export({ format: "jwk" }), kid: "test-key", alg: "RS256" };
   server = Bun.serve({ port: 0, fetch: (request) => {
-    if (new URL(request.url).pathname.endsWith("/token")) {
+    const path = new URL(request.url).pathname;
+    if (path.endsWith("/token")) {
       exchangeCalls++;
       return Response.json({ access_token: exchangeToken, expires_in: 300 });
+    }
+    if (path === "/api/operations/Note.create") {
+      durableCatalogCalls++;
+      return Response.json({ id: "Note.create", intent: "Note.create",
+        effects: { data: "write", external: "none" }, reliability: { idempotency: { mode: "keyed" } } });
+    }
+    if (path === "/api/operations/Note.create/execute") {
+      durableExecuteCalls++;
+      return Response.json({ data: { id: "created" }, operations: [] });
     }
     return Response.json({ keys: [publicKey] });
   } });
@@ -74,6 +88,8 @@ beforeEach(() => {
   stubLinkedMembershipForTests();
   __resetExchangeCacheForTests();
   exchangeCalls = 0;
+  durableCatalogCalls = 0;
+  durableExecuteCalls = 0;
   lookups.length = 0;
   __setTenantForOrganizationForTests(async (realm, organization) => {
     lookups.push([realm, organization]);
@@ -289,8 +305,10 @@ function serviceRegistry(realm = "host", organizationId: string | null = "org-a"
   const connection: DatabaseConnection = {
     async executeQuery<R>(query: CompiledQuery): Promise<QueryResult<R>> {
       queries.push(query);
-      const rows = credentialRows?.(query) ?? (query.sql.includes("from platform.tenants")
-        ? [{ keycloak_realm: realm, keycloak_organization_id: organizationId }] : []);
+      const rows = credentialRows?.(query) ?? (query.sql.includes("app.tenant_for_scoped_service")
+        ? [{ tenant_id: realm === query.parameters[1] && organizationId &&
+            await lookupTenantForOrganization(undefined, realm, organizationId) === query.parameters[0]
+          ? query.parameters[0] : null }] : []);
       return { rows: rows as R[] };
     },
     async *streamQuery<R>(): AsyncIterableIterator<QueryResult<R>> { throw new Error("Unexpected stream"); },
@@ -324,11 +342,56 @@ describe("explicit service credentials in host mode", () => {
     expect(session.relation).toBeNull();
     expect(lookups).toEqual([["host", "org-a"]]);
     expect(queries.some((q) => q.sql.includes("set_config('app.tenant_id'") && q.parameters.includes(TENANT_A))).toBe(true);
-    expect(queries.some((q) => q.sql.includes("from platform.tenants") && q.parameters.includes(TENANT_A))).toBe(true);
+    expect(queries.some((q) => q.sql.includes("app.tenant_for_scoped_service") && q.parameters.includes(TENANT_A))).toBe(true);
     expect(queries.some((q) =>
       q.sql.includes("set_config('app.bypass_rls', 'false', true)")
     )).toBe(true);
     await db.destroy();
+  });
+
+  function durableBroker(db: Kysely<DB>) {
+    let work: RuntimeResolvedOperationWork = {
+      tenantId: TENANT_A, serviceIdentityId: clientId,
+      operation: { id: "Note.create", input: { value: "requested" }, idempotencyKey: "stable-key" },
+    };
+    return configuredDurableWorkerBroker(
+      db,
+      async () => work,
+      async (_reference, operationContractFingerprint) => { work = { ...work, operationContractFingerprint }; },
+      { ...process.env, OPENSHAPEFORGE_OPERATION_API_URL: server.url.href,
+        OPENSHAPEFORGE_SERVICE_IDENTITY_TOKEN_URL: new URL("/token", server.url).href },
+    );
+  }
+
+  test("durable workers verify host service credentials with their scoped registry database", async () => {
+    const { db, queries } = serviceRegistry();
+    exchangeToken = (await headers(serviceClaims)).get("authorization")!.slice("Bearer ".length);
+    try {
+      const broker = durableBroker(db);
+      const request = await broker.authorize({ workId: "command-1", attempt: 1, workerId: "worker-1" });
+      expect(request.authority).toEqual({ mode: "serviceIdentity", serviceIdentityId: clientId });
+      expect(await broker.execute(request)).toEqual({ data: { id: "created" }, operations: [] });
+      expect(exchangeCalls).toBe(2);
+      expect(durableCatalogCalls).toBe(2);
+      expect(durableExecuteCalls).toBe(1);
+      expect(queries.some((q) => q.sql.includes("app.tenant_for_scoped_service") && q.parameters.includes(TENANT_A))).toBe(true);
+      expect(queries.some((q) => q.sql.includes("set_config('app.bypass_rls', 'false', true)"))).toBe(true);
+    } finally { await db.destroy(); }
+  });
+
+  test.each([
+    ["another realm", "other", "org-a"],
+    ["an unprovisioned organization", "host", null],
+    ["another tenant's organization", "host", "org-b"],
+  ])("durable workers reject %s before catalog discovery or dispatch", async (_label, realm, organizationId) => {
+    const { db } = serviceRegistry(realm!, organizationId);
+    exchangeToken = (await headers(serviceClaims)).get("authorization")!.slice("Bearer ".length);
+    try {
+      await expect(durableBroker(db).authorize({ workId: "command-1", attempt: 1, workerId: "worker-1" }))
+        .rejects.toHaveProperty("code", "SERVICE_IDENTITY_MISMATCH");
+      expect(durableCatalogCalls).toBe(0);
+      expect(durableExecuteCalls).toBe(0);
+    } finally { await db.destroy(); }
   });
 
   test("shared runtime routes fall back from control to tenant authentication for a same-issuer token", async () => {

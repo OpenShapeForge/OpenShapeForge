@@ -67,7 +67,7 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
   });
 
   await sql`
-    -- These two SECURITY DEFINER functions are deliberately point lookups.
+    -- These SECURITY DEFINER functions are deliberately point lookups.
     -- Their non-login owner can SELECT only the named registry columns and is
     -- admitted by role-specific read policies. No statement-local bypass GUC
     -- is raised: a STABLE policy helper that observes such a temporary value
@@ -99,6 +99,26 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
        limit 1
     $fn$;
 
+    -- A verified service credential already fixes the tenant. The worker has
+    -- no direct access to platform.tenants; disclose only whether its scoped
+    -- tenant has the matching realm and an organization bound back to it.
+    create or replace function app.tenant_for_scoped_service(
+      tenant uuid,
+      realm text
+    ) returns uuid
+    language sql stable security definer
+    set search_path = pg_catalog
+    as $fn$
+      select t.id
+        from platform.tenants t
+       where t.id = $1
+         and t.id = app.current_tenant()
+         and t.keycloak_realm = $2
+         and t.keycloak_organization_id is not null
+         and t.keycloak_organization_id <> ''
+         and app.tenant_for_keycloak_organization($2, t.keycloak_organization_id) = t.id
+    $fn$;
+
     -- Older reruns may have the original text-returning helper underneath
     -- these policies. Remove its dependants before changing the return type.
     drop policy if exists identity_relations_insertable on platform.identity_relations;
@@ -124,12 +144,16 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
     grant create on schema app to ${sql.id(IDENTITY_RESOLVER_ROLE)};
     alter function app.tenant_for_keycloak_organization(text, text)
       owner to ${sql.id(IDENTITY_RESOLVER_ROLE)};
+    alter function app.tenant_for_scoped_service(uuid, text)
+      owner to ${sql.id(IDENTITY_RESOLVER_ROLE)};
     alter function app.identity_subject(uuid)
       owner to ${sql.id(IDENTITY_RESOLVER_ROLE)};
     revoke create on schema app from ${sql.id(IDENTITY_RESOLVER_ROLE)};
     revoke all on function app.tenant_for_keycloak_organization(text, text) from public;
+    revoke all on function app.tenant_for_scoped_service(uuid, text) from public;
     revoke all on function app.identity_subject(uuid) from public;
     grant execute on function app.tenant_for_keycloak_organization(text, text) to ${sql.id(APP_ROLE)};
+    grant execute on function app.tenant_for_scoped_service(uuid, text) to ${sql.id(APP_ROLE)};
     grant execute on function app.identity_subject(uuid) to ${sql.id(APP_ROLE)};
 
     alter table platform.identities enable row level security;

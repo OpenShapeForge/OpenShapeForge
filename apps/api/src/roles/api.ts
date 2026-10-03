@@ -177,6 +177,7 @@ export function createApiApp(options: {
   };
   const operationContracts = options.operationContracts ?? listOperationContracts();
   const limits = readApiLimits();
+  const trustProxy = limits.trustProxy;
 
   // Default level stays "info"; LOG_LEVEL=debug surfaces the drift "ok" line.
   // trustProxy lets Fastify derive the real client IP from X-Forwarded-For (the
@@ -202,8 +203,11 @@ export function createApiApp(options: {
       },
       ...(options.logStream ? { stream: options.logStream } : {}),
     },
-    // Fastify 5.12 refuses numeric-only proxy trust; preserve that fail-closed behavior.
-    trustProxy: typeof limits.trustProxy === "number" ? false : limits.trustProxy,
+    // Express the configured hop count through Fastify's supported trust function.
+    // The socket is hop zero; addresses beyond that count stay untrusted.
+    trustProxy: typeof trustProxy === "number"
+      ? (_address, hop) => hop < trustProxy
+      : trustProxy,
     requestTimeout: limits.requestTimeoutMs,
     // Browser handoff tokens (`/api/entity-configuration/<token>`,
     // mcp/handoff-store.ts) are `<tenant>.<handoff>.<secret>` — 117

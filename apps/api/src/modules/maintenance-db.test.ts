@@ -535,28 +535,31 @@ test("privileged app credentials and mutated contribution registration cannot br
   await dispatch();
 });
 
-test("a job owner drains handled failed runs without replacing a successful reconciliation result", async () => {
+test("a job owner preserves explicitly acknowledged reconciliation and the failed audit", async () => {
   const result = await runRegisteredSeedJob(
     owner,
     privileged.db,
     seed.name,
     "recovery-job",
     async (runner) => {
+      const interrupted = runner(request, async () => {
+        throw new Error("expected interrupted run");
+      });
       try {
-        await runner(request, async () => {
-          throw new Error("expected interrupted run");
-        });
+        await interrupted;
         throw new Error("Expected interrupted run rejection");
       } catch (error) {
         expect((error as Error).message).toBe("expected interrupted run");
       }
-      return runner(request, async (context) => {
+      const result = await runner(request, async (context) => {
         const result = await context.operations.execute("Relation.get", {
           id: relationId,
         });
         expect(result).toHaveProperty("data");
         return "recovered";
       });
+      runner.acknowledgeFailure!(interrupted);
+      return result;
     },
   );
   expect(result).toBe("recovered");
@@ -650,7 +653,7 @@ test("nested store acquisition refuses instead of deadlocking a pool of one", as
   };
   await dispatch();
 });
-test("discarded failing headless jobs fail their owner while handled recovery remains supported", async () => {
+test("discarded failing headless jobs fail their owner", async () => {
   await expect(
     runRegisteredSeedJob(
       owner,
@@ -709,14 +712,15 @@ test("borrowed initialized owner avoids duplicate init and never closes caller m
   ).rejects.toThrow("initialized module");
 });
 
-test("migration owner refuses a discarded failed maintenance seed instead of reporting success", async () => {
+for (const inspection of ["discarded", "allSettled"] as const) test(`migration owner refuses a failed maintenance seed after ${inspection}`, async () => {
   const failedSeed = {
     ...seed,
-    name: "discarded-migration-seed",
+    name: `${inspection}-migration-seed`,
     apply: async (_db: unknown, context?: { runSeed?: RunMaintenanceSeed }) => {
-      void context!.runSeed!(request, async () => {
+      const job = context!.runSeed!(request, async () => {
         throw new Error("discarded migration failure");
       });
+      if (inspection === "allSettled") await Promise.allSettled([job]);
       return { present: true, skipped: false, rows: 0 };
     },
   };

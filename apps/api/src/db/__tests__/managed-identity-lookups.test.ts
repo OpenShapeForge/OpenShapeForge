@@ -13,6 +13,7 @@ const url = new URL(adminUrl);
 url.pathname = `/${name}`;
 const db = new SQL(url.toString(), { max: 1 });
 const id = "00000000-0000-4000-8000-000000000001";
+const otherId = "00000000-0000-4000-8000-000000000002";
 const resolverRole = databaseRole("identityResolver").name;
 
 beforeAll(async () => {
@@ -28,6 +29,7 @@ beforeAll(async () => {
     create table platform.tenants(id uuid, keycloak_realm text, keycloak_organization_id text);
     create table platform.identities(id uuid, subject text);
     insert into platform.tenants values ('${id}', 'test', 'org');
+    insert into platform.tenants values ('${otherId}', 'test', 'other-org');
     insert into platform.identities values ('${id}', 'subject');
     alter table platform.tenants enable row level security;
     alter table platform.tenants force row level security;
@@ -76,6 +78,7 @@ for (const value of ["", "false"]) {
       expect((await tx`select app.tenant_for_keycloak_organization('test','org') as value`)[0].value).toBe(id);
       await tx`select set_config('app.tenant_id', ${id}, true)`;
       expect((await tx`select app.tenant_for_scoped_service(${id}::uuid, 'test') as value`)[0].value).toBe(id);
+      expect((await tx`select app.tenant_for_scoped_service(${otherId}::uuid, 'test') as value`)[0].value).toBeNull();
       expect((await tx`select app.tenant_for_scoped_service(${id}::uuid, 'other') as value`)[0].value).toBeNull();
       expect((await tx`select app.tenant_for_scoped_service(null, 'test') as value`)[0].value).toBeNull();
       await tx`select set_config('app.tenant_id', '', true)`;

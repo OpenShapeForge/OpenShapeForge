@@ -118,6 +118,11 @@ test("missing confirmation and wrong actual database/role refuse before provider
       protocol,
     ),
   ).rejects.toThrow("boundary");
+  await expect(
+    runManagedTenantMaintenance(request, {
+      ...config, keycloak: { ...config.keycloak, tenantRealm: "foreign" },
+    }, runtime.db, protocol),
+  ).rejects.toThrow("host realm boundary");
   expect(requests).toEqual([]);
 });
 test("wrong service principal refuses before audited tenant reads or writes", async () => {
@@ -172,6 +177,13 @@ test("fresh tenant and existing binding replay use actual service provenance and
         "https://identity.example.test/realms/example#actual-service-principal",
     ),
   ).toBe(true);
+  requests = [];
+  const renamed = await runManagedTenantMaintenance(
+    { ...request, name: "Renamed Example" }, config, runtime.db, protocol,
+  );
+  expect(renamed).toHaveProperty("tenant.name", "Renamed Example");
+  expect(renamed).toHaveProperty("tenant.keycloakOrganizationId", organizationId);
+  expect(requests.filter((value) => value.endsWith("/openshapeforge/organizations"))).toHaveLength(1);
 });
 test("provider replacement refuses before tenant, ERP or starter-group mutation", async () => {
   const before =

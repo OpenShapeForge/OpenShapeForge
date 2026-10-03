@@ -99,11 +99,16 @@ Required environment: `OPENSHAPEFORGE_MIGRATE_DATABASE_URL`,
 `KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API`,
 `OPENSHAPEFORGE_PUBLIC_ORIGIN` and `OPENSHAPEFORGE_MCP_CLIENTS`.
 Additional resource origins use `OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS`.
+The explicit MCP client list must equal the API's effective client list, including
+its defaults when the API variable is absent. The CLI requires an explicit list
+so a managed job cannot silently provision a different resource audience.
 `OPENSHAPEFORGE_CONTROL_KEYCLOAK_CONNECT_URL` reuses the existing HTTPS ingress
 route with the public TLS server name and certificate validation. Host source
 configuration, including `OPENSHAPEFORGE_ORGANIZATION_CONTEXT`, remains in force.
 Actual database/current role/session role are checked before provider access;
 the host remains responsible for its deployment-specific network and staging gate.
+CLI failures report fixed maintenance/control error codes only. Provider bodies,
+credentials and exception messages are suppressed, including during shutdown.
 
 Managed replay always preserves an existing organization binding. For an already
 bound tenant, the SPI response is checked before registry/name/starter-group
@@ -125,9 +130,13 @@ another transaction from the pinned connection inside its transaction fails
 immediately. The facade cannot sandbox arbitrary raw SQL from trusted seed code;
 start `runSeed` outside a separately owned raw migration transaction.
 
-An owner drains already started work. A discarded failing job fails its enclosing
-migration/CLI owner; an explicitly awaited/caught refusal can be reconciled by the
-trusted callback. Borrowed initialized modules/platform are reused without a
+An owner drains already started work. A failed registered run fails its enclosing
+migration/CLI owner, including failures inspected through `catch` or `allSettled`.
+After a successful explicit reconciliation, a headless owner can call
+`runSeed.acknowledgeFailure(failedJob)` for its own completed failed promise.
+Foreign, pending and retained-after-callback acknowledgments are refused. The
+failed run remains in the audit; attaching a promise handler never counts as
+acknowledgment. Borrowed initialized modules/platform are reused without a
 second `init` or a caller-owned `close`; headless CLI modules initialize once.
 Registered seed roles are the union of the stable operation contracts, including
 required transitive business reads. These are trusted seed authority, not browser

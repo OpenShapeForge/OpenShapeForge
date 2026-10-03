@@ -26,7 +26,7 @@ import {
   PLATFORM_OPERATOR_ROLE,
   systemSessionForOperator,
 } from "../control/authorization.js";
-import { maintenanceJob, drainMaintenanceJobs } from "./maintenance-jobs.js";
+import { maintenanceJob, drainMaintenanceJobs, acknowledgeMaintenanceFailure } from "./maintenance-jobs.js";
 import { isControlSession } from "../control/control-session.js";
 import type { SystemSessionInput } from "../db/session.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
@@ -520,10 +520,7 @@ export function liveMaintenanceRunner(
           storeDb: database.db,
           appDb: app.db,
           platform,
-          system: {
-            ...systemSessionForOperator(administrator, "maintenance"),
-            reason: "maintenance",
-          },
+          system: systemSessionForOperator(administrator, "maintenance"),
           check,
           operator: {
             subject: administrator.subject,
@@ -677,6 +674,12 @@ async function withJobOwner<T>(
       children.push(job);
       return job.promise;
     };
+    Object.defineProperty(runner, "acknowledgeFailure", { value: (job: Promise<unknown>) => {
+      check();
+      if (!accepting) throw new Error("Maintenance job callback has finished.");
+      acknowledgeMaintenanceFailure(children, job);
+    } });
+    Object.freeze(runner);
     try {
       const result = await work(runner);
       accepting = false;

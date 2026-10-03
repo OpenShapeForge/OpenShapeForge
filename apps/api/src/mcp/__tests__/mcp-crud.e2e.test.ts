@@ -134,19 +134,24 @@ describe("generated MCP server", () => {
     const create = advertisedFor("create", "Relation")!;
     const remove = advertisedFor("delete")!;
     const update = advertisedFor("update")!;
+    const successSchema = (tool: { outputSchema: Record<string, unknown> }) => {
+      expect(tool.outputSchema.type).toBe("object");
+      expect(Array.isArray(tool.outputSchema.anyOf)).toBe(true);
+      return (tool.outputSchema.anyOf as Record<string, unknown>[])[0]!;
+    };
     for (const tool of [get, list, create]) {
       expect(tool.outputSchema.type).toBe("object");
-      expect(Array.isArray(tool.outputSchema.oneOf)).toBe(true);
-      const definitions = tool.outputSchema.$defs as Record<string, unknown>;
+      expect(Array.isArray(successSchema(tool).oneOf)).toBe(true);
+      const definitions = successSchema(tool).$defs as Record<string, unknown>;
       expect(definitions.OperationOffer).toBeDefined();
       expect(definitions.OperationError).toBeDefined();
     }
-    const getSuccess = (get.outputSchema.oneOf as Record<string, unknown>[])[0]!;
+    const getSuccess = (successSchema(get).oneOf as Record<string, unknown>[])[0]!;
     const getProperties = getSuccess.properties as Record<string, Record<string, unknown>>;
     expect(getSuccess.required).toEqual(["data", "operations"]);
     expect(getProperties.data?.type).toBe("object");
     expect(getProperties.operations?.type).toBe("array");
-    const listSuccess = (list.outputSchema.oneOf as Record<string, unknown>[])[0]!;
+    const listSuccess = (successSchema(list).oneOf as Record<string, unknown>[])[0]!;
     expect(listSuccess).toMatchObject({
       properties: {
         data: {
@@ -156,7 +161,7 @@ describe("generated MCP server", () => {
     });
     // A canonical delete answers with the deletion envelope: `data.deleted`
     // is the constant true (a missing row is an error, never `deleted: false`).
-    const removeSuccess = (remove.outputSchema.oneOf as Record<string, unknown>[])[0]!;
+    const removeSuccess = (successSchema(remove).oneOf as Record<string, unknown>[])[0]!;
     expect(removeSuccess.required).toEqual(["data", "operations"]);
     expect(removeSuccess.properties).toMatchObject({
       data: { required: ["deleted"], properties: { deleted: { type: "boolean", const: true } } },

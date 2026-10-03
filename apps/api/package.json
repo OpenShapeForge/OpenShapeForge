@@ -51,6 +51,7 @@
     "@openshapeforge/connector-twinfield": "workspace:*",
     "@types/bun": "^1.3.5",
     "jose": "^6.2.1",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "@modelcontextprotocol/sdk": "1.30.0"
   }
 }

@@ -2,6 +2,7 @@
 /**
  * The tool list of one session. Split out of session-surface.ts, verbatim.
  */
+import { toolWithFailureOutputSchema } from "./tool-output-schema.js";
 import {
   connectHelperTool,
   dryRunHelperTool,
@@ -219,7 +220,7 @@ export function createToolListing(scope: ServerScope) {
   };
 
   server.setRequestHandler('tools/list', async () => ({
-    tools: (await listedTools()).map((entry) => entry.tool),
+    tools: (await listedTools()).map((entry) => toolWithFailureOutputSchema(entry.tool)),
   }));
 
   return {

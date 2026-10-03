@@ -1031,6 +1031,40 @@ describe("first-class plugin operations", () => {
     }
   });
 
+  test("reserves the core Operation, event, lease and artifact routes", () => {
+    for (const reserved of ["artifacts", "events", "operation-leases", "operations"]) {
+      expect(() => collectPluginOperations([{ name: reserved, operations: [{
+        ...operation,
+        key: `${reserved}.quote.publish`,
+        transports: {
+          ...operation.transports,
+          rest: { ...operation.transports.rest, path: `/api/${reserved}/quotes/:quoteId/publish` },
+        },
+      }] }], context)).toThrow(new RegExp(`reserved API namespace "${reserved}"`));
+    }
+
+    const emptyManifest: PlatformSchemaManifest = { version: 1, tables: [] };
+    for (const [method, path, owner] of [
+      ["GET", "/api/events", "core entity change stream"],
+      ["GET", "/api/operations", "core Operation runtime"],
+      ["GET", "/api/operations/:quoteId", "core Operation runtime"],
+      ["POST", "/api/operations/source-sync.upsert/execute", "core Operation runtime"],
+      ["POST", "/api/operation-leases", "core edit leases"],
+      ["POST", "/api/operation-leases/renew", "core edit leases"],
+      ["POST", "/api/operation-leases/release", "core edit leases"],
+    ] as const) {
+      const shadowing: CompiledPluginOperation = {
+        ...operation,
+        plugin: "demo",
+        id: operation.key,
+        intent: "invoke",
+        transports: { ...operation.transports, rest: { ...operation.transports.rest, method, path } },
+      };
+      expect(() => auditOperationSurfaceCollisions([shadowing], emptyManifest, [], 60))
+        .toThrow(new RegExp(`${owner}.*plugin operation`));
+    }
+  });
+
   test("allows a canonical operation at its exact plugin namespace root", () => {
     const rootOperation: PluginOperationContract = {
       ...operation,

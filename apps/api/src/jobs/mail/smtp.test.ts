@@ -108,6 +108,14 @@ describe("smtp provider", () => {
     expect(deferred.phase).toBe("before-data");
   });
 
+  test("a failure names the step and the reply code, never the recipient", async () => {
+    const port = await fakeSmtp({ replies: { RCPT: "550 5.1.1 <someone@example.test>: Recipient address rejected\r\n" } });
+    const rejected = await failure(port);
+    expect(rejected.message).toBe("RCPT TO (recipient 1 of 1): 550 5.1.1 <[address]>: Recipient address rejected");
+    const late = await fakeSmtp({ replies: { DATA: "554 someone@example.test refused\r\n" } });
+    expect((await failure(late)).message).not.toContain("someone@example.test");
+  });
+
   test("silence after the message body is after-data — the one outcome nobody may retry", async () => {
     const hang = await fakeSmtp({ afterData: "hang" });
     const timedOut = await failure(hang);

@@ -173,9 +173,17 @@ async function open(config: SmtpConfig): Promise<SmtpConnection> {
   return new SmtpConnection(socket, config.timeoutMs);
 }
 
+/**
+ * Server text often echoes the envelope ("<a@b.test>: Recipient address
+ * rejected"), and error text ends up in the job's lastError and the logs.
+ */
+function withoutAddresses(text: string): string {
+  return text.split(/([\s<>()[\]"',;:]+)/).map((part) => (part.includes("@") ? "[address]" : part)).join("");
+}
+
 function expect(reply: Reply, accepted: number[], what: string): void {
   if (accepted.includes(reply.code)) return;
-  const text = `${what}: ${reply.code} ${reply.lines.join(" ")}`.trim();
+  const text = withoutAddresses(`${what}: ${reply.code} ${reply.lines.join(" ")}`.trim());
   throw new MailDeliveryError(reply.code >= 500 ? "rejected" : "before-data", text, { code: reply.code >= 500 ? "MAIL_REJECTED" : "MAIL_UNAVAILABLE" });
 }
 
@@ -206,8 +214,8 @@ export function createSmtpMailProvider(config: SmtpConfig, options: { messageId?
           expect(await connection.command(`AUTH PLAIN ${credentials}`), [235], "AUTH");
         }
         expect(await connection.command(`MAIL FROM:<${from}>`), [250], "MAIL FROM");
-        for (const recipient of message.to) {
-          expect(await connection.command(`RCPT TO:<${recipient}>`), [250, 251], `RCPT TO ${recipient}`);
+        for (const [index, recipient] of message.to.entries()) {
+          expect(await connection.command(`RCPT TO:<${recipient}>`), [250, 251], `RCPT TO (recipient ${index + 1} of ${message.to.length})`);
         }
         expect(await connection.command("DATA"), [354], "DATA");
         // From here on the message is leaving. A failure before the reply is
@@ -216,7 +224,7 @@ export function createSmtpMailProvider(config: SmtpConfig, options: { messageId?
         connection.write(`${rendered}\r\n.\r\n`);
         const accepted = await connection.read();
         if (accepted.code !== 250) {
-          const text = `Message not accepted: ${accepted.code} ${accepted.lines.join(" ")}`.trim();
+          const text = withoutAddresses(`Message not accepted: ${accepted.code} ${accepted.lines.join(" ")}`.trim());
           throw new MailDeliveryError(accepted.code >= 500 ? "rejected" : "before-data", text, { code: accepted.code >= 500 ? "MAIL_REJECTED" : "MAIL_UNAVAILABLE" });
         }
         phase = "before-data";
@@ -228,7 +236,7 @@ export function createSmtpMailProvider(config: SmtpConfig, options: { messageId?
         return { providerMessageId: id };
       } catch (error) {
         if (error instanceof MailDeliveryError) throw error;
-        const detail = error instanceof Error ? error.message : String(error);
+        const detail = withoutAddresses(error instanceof Error ? error.message : String(error));
         throw new MailDeliveryError(
           phase,
           phase === "after-data"

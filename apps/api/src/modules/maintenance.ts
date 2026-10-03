@@ -112,6 +112,11 @@ function contributionCopy(
     );
   const value = matches[0]!;
   if (
+    value.storeConnection !== undefined &&
+    value.storeConnection !== "application"
+  )
+    throw new Error("Invalid maintenance store connection.");
+  if (
     !UUID.test(value.actorId) ||
     !value.name ||
     new Set(value.operations).size !== value.operations.length
@@ -262,14 +267,18 @@ async function lifecycle<T>(
         transaction((port) => port.query<Row>(text, params)),
     });
   };
-  const base = connection(owner.storeDb);
+  const storeDb =
+    contribution.storeConnection === "application"
+      ? owner.appDb
+      : owner.storeDb;
+  const base = connection(storeDb);
   const store = Object.freeze({
     ...base,
     pinned: <R>(callback: (port: MaintenanceConnection) => Promise<R>) => {
       if (storeFrame.getStore() === token)
         throw new Error("Nested maintenance pinned acquisition is forbidden.");
       return tracked(() =>
-        owner.storeDb.connection().execute(async (db) => {
+        storeDb.connection().execute(async (db) => {
           let open = true;
           const children: Promise<unknown>[] = [];
           const basePinned = connection(db);

@@ -16,6 +16,7 @@ import {
   type DatabaseRuntime,
 } from "../db/connection.js";
 import { runMigrationChain } from "../db/migration-chain.js";
+import { withDbSession } from "../db/session.js";
 import {
   bindOperationHandlers,
   invokeOperation,
@@ -721,14 +722,130 @@ test("migration owner refuses a discarded failed maintenance seed instead of rep
   };
   const module: RuntimeModule = { ...owner, seeds: [failedSeed] };
   await expect(
-    privileged.db
-      .connection()
-      .execute((db) =>
-        runMigrationChain(db, {
-          moduleSeeds: [failedSeed],
-          maintenanceModules: [module],
-          appliedBy: "discarded-migration",
-        }),
-      ),
+    privileged.db.connection().execute((db) =>
+      runMigrationChain(db, {
+        moduleSeeds: [failedSeed],
+        maintenanceModules: [module],
+        appliedBy: "discarded-migration",
+      }),
+    ),
   ).rejects.toThrow("discarded migration failure");
+});
+
+test("a constrained migrator cannot use app-only identity policies via a bypass GUC", async () => {
+  const role = `maintenance_migrator_${randomUUID().replaceAll("-", "")}`;
+  await server.unsafe(
+    `create role "${role}" login password 'fixture-only' nosuperuser nobypassrls noinherit`,
+  );
+  const migrateUrl = new URL(url());
+  migrateUrl.username = role;
+  migrateUrl.password = "fixture-only";
+  const constrained = createDatabaseRuntime({
+    databaseUrl: migrateUrl.toString(),
+  });
+  try {
+    await sql`grant usage on schema app,erp,platform to ${sql.id(role)}`.execute(
+      privileged.db,
+    );
+    await sql`grant execute on all functions in schema app to ${sql.id(role)}`.execute(
+      privileged.db,
+    );
+    await sql`grant all privileges on all tables in schema erp,platform to ${sql.id(role)}`.execute(
+      privileged.db,
+    );
+    const grant = await sql<{
+      super: boolean;
+      bypass: boolean;
+      app: boolean;
+    }>`select rolsuper as super,rolbypassrls as bypass,pg_has_role(current_user,'openshapeforge_app','member') as app from pg_roles where rolname=current_user`.execute(
+      constrained.db,
+    );
+    expect(grant.rows[0]).toEqual({ super: false, bypass: false, app: false });
+    await expect(
+      runRegisteredSeedJob(
+        owner,
+        constrained.db,
+        seed.name,
+        "constrained-identity-proof",
+        (runner) =>
+          runner(request, (context) =>
+            context.store.query(
+              "insert into platform.identities(id,issuer,subject,display_name) values($1::uuid,$2,$3,$4)",
+              [
+                randomUUID(),
+                "https://issuer.example/realms/example",
+                randomUUID(),
+                "Fixture",
+              ],
+            ),
+          ),
+      ),
+    ).rejects.toThrow("row-level security");
+    const identityId = randomUUID(),
+      subject = randomUUID();
+    const applicationOwner: RuntimeModule = {
+      ...owner,
+      maintenance: [
+        { ...contribution, operations: [], storeConnection: "application" },
+      ],
+    };
+    await runRegisteredSeedJob(
+      applicationOwner,
+      constrained.db,
+      seed.name,
+      "app-identity-proof",
+      (runner) =>
+        runner(request, async (context) => {
+          expect(context.provenance.tenantId).toBe(tenantId);
+          await context.store.transaction(async (query) => {
+            await query.query(
+              "insert into platform.identities(id,issuer,subject,display_name) values($1::uuid,$2,$3,$4)",
+              [
+                identityId,
+                "https://issuer.example/realms/example",
+                subject,
+                "Application fixture",
+              ],
+            );
+            await query.query(
+              "insert into platform.identity_relations(identity_id,tenant_id,relation_id,status,linked_at,linked_by,roles) values($1::uuid,$2::uuid,$3::uuid,'linked',now(),'fixture',array[]::text[])",
+              [identityId, tenantId, relationId],
+            );
+            expect(
+              await query.query(
+                "select identity_id::text from platform.identity_relations where identity_id=$1::uuid",
+                [identityId],
+              ),
+            ).toEqual([{ identity_id: identityId }]);
+          });
+        }),
+    );
+    const foreign = await withDbSession(
+      app.db,
+      {
+        tenantId: foreignTenantId,
+        userId: actorId,
+        roles: [],
+        groups: [],
+        scope: "tenant",
+      },
+      (db) =>
+        sql`select identity_id from platform.identity_relations where identity_id=${identityId}::uuid`.execute(
+          db,
+        ),
+    );
+    expect(foreign.rows).toEqual([]);
+    expect(
+      (await audit()).rows.some(
+        (row) =>
+          row.actor_subject === "maintenance-job:app-identity-proof" &&
+          row.succeeded &&
+          row.tenant_id === tenantId,
+      ),
+    ).toBe(true);
+  } finally {
+    await constrained.close();
+    await sql`drop owned by ${sql.id(role)}`.execute(privileged.db);
+    await server.unsafe(`drop role "${role}"`);
+  }
 });

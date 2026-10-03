@@ -26,6 +26,8 @@ export type RunMaintenanceSeed = <T>(request: MaintenanceRequest, work: (context
 export type RuntimeMaintenanceContribution = {
   name: string;
   actorId: string;
+  /** Trusted registered SQL owner; default is the migration connection. */
+  storeConnection?: "application";
   /** Full stable direct/read/prepare allowlist, including all retry paths. */
   operations: readonly string[];
   actingRelation?: { sourceAuthority: string };

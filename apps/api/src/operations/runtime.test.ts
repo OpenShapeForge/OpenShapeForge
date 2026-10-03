@@ -1764,8 +1764,24 @@ test("MCP projects and dispatches live runtime provider Operations canonically",
       description: "Find the tickets visible to this person.",
       inputSchema: definition.input.schema,
       outputSchema: expect.objectContaining({
-        required: ["data", "operations"],
-        properties: expect.objectContaining({ data: definition.output.schema }),
+        type: "object",
+        anyOf: [
+          expect.objectContaining({
+            required: ["data", "operations"],
+            additionalProperties: false,
+            properties: expect.objectContaining({ data: definition.output.schema }),
+          }),
+          expect.objectContaining({
+            required: ["error"],
+            additionalProperties: false,
+            properties: expect.objectContaining({
+              error: expect.objectContaining({
+                required: ["code", "message", "retryable"],
+                additionalProperties: false,
+              }),
+            }),
+          }),
+        ],
       }),
       annotations: expect.objectContaining({
         readOnlyHint: true,

@@ -46,6 +46,7 @@
  * well, for the same reason protected-resource-metadata.ts mirrors the
  * tenant issuer's.
  */
+import { toolWithFailureOutputSchema } from "./tool-output-schema.js";
 import { randomUUID } from "node:crypto";
 import { FastifyStreamableHTTPServerTransport } from "./legacy-http.js";
 import { Server } from "@modelcontextprotocol/server";
@@ -341,7 +342,7 @@ function buildPlatformServer(input: {
   const presentation: ControlPresentation = { client: input.client, access };
 
   server.setRequestHandler('tools/list', async () => ({
-    tools: tools().map(({ tool }) => tool),
+    tools: tools().map(({ tool }) => toolWithFailureOutputSchema(tool)),
   }));
   server.setRequestHandler('resources/list', async () => ({
     resources: [PLATFORM_SESSION_RESOURCE],

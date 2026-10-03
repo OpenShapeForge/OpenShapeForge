@@ -11,7 +11,7 @@ import {
   renderArtifactUploadPage,
 } from "./artifact-upload.js";
 import { HttpError } from "../rest/http-error.js";
-import { ARTIFACT_UPLOAD_LIMIT_BYTES, limitUploadBody } from "../artifacts/upload-limit.js";
+import { ARTIFACT_UPLOAD_LIMIT_BYTES, assertUploadFileName, limitUploadBody } from "../artifacts/upload-input.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { callbackOrigin, elicitedKeyring } from "./handoff-config.js";
 import { type McpRouteContext } from "./route-context.js";
@@ -67,9 +67,7 @@ export async function registerArtifactUploadRoutes(
         } catch {
           throw new HttpError(400, "BAD_USER_INPUT", "The file name is not valid UTF-8.");
         }
-        if (!fileName || fileName.length > 255 || /[\r\n\0/\\]/.test(fileName)) {
-          throw new HttpError(400, "BAD_USER_INPUT", "The file name is invalid.");
-        }
+        assertUploadFileName(fileName);
         const body = request.body as AsyncIterable<Uint8Array> | undefined;
         if (!body || typeof body[Symbol.asyncIterator] !== "function") {
           throw new HttpError(400, "BAD_USER_INPUT", "A file body is required.");

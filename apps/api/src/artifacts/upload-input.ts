@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
+ * Input checks shared by both upload routes (`/api/artifacts` and the MCP
+ * upload handoff).
+ *
  * The upload routes hand the raw request stream to the storage provider, and
  * Fastify applies a route's `bodyLimit` only to bodies it parses itself — never
  * to a content-type parser that passes the payload through. So the limit is
@@ -31,4 +34,17 @@ export function limitUploadBody(
       }
     },
   };
+}
+
+/**
+ * A stored file name is shown to every reader of the owning record, so it may
+ * not carry line breaks, path separators, control characters or bidi
+ * overrides — `invoice\u202Efdp.exe` would display as `invoiceexe.pdf`.
+ */
+const UNSAFE_FILE_NAME = /[\x00-\x1f\x7f-\x9f/\\\u202a-\u202e\u2066-\u2069]/;
+
+export function assertUploadFileName(name: string): void {
+  if (!name || name.length > 255 || UNSAFE_FILE_NAME.test(name)) {
+    throw new HttpError(400, "BAD_USER_INPUT", "The file name is invalid.");
+  }
 }

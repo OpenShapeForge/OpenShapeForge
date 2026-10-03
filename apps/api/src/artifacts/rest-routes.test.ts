@@ -5,7 +5,7 @@ import Fastify from "fastify";
 import { __resetSessionResolverForTests } from "../auth/identity.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { registerArtifactRestRoutes } from "./rest-routes.js";
-import { limitUploadBody } from "./upload-limit.js";
+import { assertUploadFileName, limitUploadBody } from "./upload-input.js";
 
 const SECRET = "artifact-route-test-secret";
 const ARTIFACT_ID = "1658ad0b-e44b-4ef3-86ca-953dc6783885";
@@ -109,5 +109,13 @@ describe("artifact REST adapter", () => {
     expect(await drain(limitUploadBody(chunks(4, 4), "8", 8))).toBe(8);
     expect(() => limitUploadBody(chunks(1), "9", 8)).toThrow("exceeds the upload limit");
     await expect(drain(limitUploadBody(chunks(4, 4, 1), undefined, 8))).rejects.toMatchObject({ status: 413, code: "ARTIFACT_TOO_LARGE" });
+  });
+
+  test("refuses file names that would display differently than they are", () => {
+    expect(() => assertUploadFileName("bewijs.pdf")).not.toThrow();
+    expect(() => assertUploadFileName("Offerte 2026 – définitief (v2).pdf")).not.toThrow();
+    for (const name of ["", "a/b.pdf", "a\\b.pdf", "a\nb.pdf", "a\tb.pdf", "invoice\u202Efdp.exe", "a\u2066b.pdf", "a\u0085b.pdf", "x".repeat(256)]) {
+      expect(() => assertUploadFileName(name)).toThrow("The file name is invalid.");
+    }
   });
 });

@@ -7,7 +7,7 @@ import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
-import { ARTIFACT_UPLOAD_LIMIT_BYTES, limitUploadBody } from "./upload-limit.js";
+import { ARTIFACT_UPLOAD_LIMIT_BYTES, assertUploadFileName, limitUploadBody } from "./upload-input.js";
 
 export const ARTIFACT_STAGE_PATH = "/api/artifacts";
 export const ARTIFACT_CONTENTS_PATH = "/api/artifacts/:artifactId/contents";
@@ -27,9 +27,7 @@ function fileName(request: FastifyRequest): string {
   } catch {
     throw new HttpError(400, "BAD_USER_INPUT", "The file name is not valid UTF-8.");
   }
-  if (!decoded || decoded.length > 255 || /[\r\n\0/\\]/.test(decoded)) {
-    throw new HttpError(400, "BAD_USER_INPUT", "The file name is invalid.");
-  }
+  assertUploadFileName(decoded);
   return decoded;
 }
 

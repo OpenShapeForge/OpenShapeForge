@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
+import { serializeRow as serializeMcpRow } from "../../mcp/catalog-rows.js";
 import { serializeGeneratedRestRow } from "../../rest/serialize-generated-row.js";
 import { projectRows } from "./catalog.js";
 import {
@@ -153,4 +154,14 @@ test("prints a bigint or a number a handler produced as the same decimal text", 
   expect(normalizeEntityStorageRow(bigintTable, { ...row, artifact_version: null })).toMatchObject({
     artifact_version: null,
   });
+});
+
+test("MCP preserves decimal text and computed fields through the canonical projection", () => {
+ const moneyTable={...table,columns:[...table.columns,
+  {name:'amount',sourceField:'amount',type:'numeric',required:true,primaryKey:false,generated:null},
+  {name:'sequence',sourceField:'sequence',type:'bigint',required:false,primaryKey:false,generated:null},
+ ]} satisfies GeneratedCrudTable;
+ const stored={...row,amount:245.67,sequence:9007199254740993n};
+ expect(serializeMcpRow(moneyTable,stored)).toEqual(serializeEntityRow(moneyTable,stored));
+ expect(serializeMcpRow(moneyTable,stored)).toMatchObject({amount:'245.67',sequence:'9007199254740993',labels:['New']});
 });

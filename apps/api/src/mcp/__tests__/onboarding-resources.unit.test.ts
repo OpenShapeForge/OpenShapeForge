@@ -20,6 +20,7 @@ import {
   withOnboarding,
   describeOnboarding,
   ONBOARDING_STEP_KEYS,
+  ONBOARDING_INSTRUCTION,
   type OnboardingEnvironment,
   type OnboardingRecord,
 } from "../onboarding.js";
@@ -241,4 +242,11 @@ describe("reading one onboarding step", () => {
       await readOnboardingStepResource("osf://onboarding/step/", environment()),
     ).toBeUndefined();
   });
+});
+
+it("incomplete onboarding remains optional guidance in initialize and whoami", async () => {
+  const info = withOnboarding({summary: "Signed in."}, await describeOnboarding(environment()));
+  expect(info.onboarding.status).not.toBe("Completed");
+  expect(info.summary).toContain("App and tool use do not require completing this checklist.");
+  expect(ONBOARDING_INSTRUCTION).toContain("not a prerequisite for using the app or its offered tools");
 });

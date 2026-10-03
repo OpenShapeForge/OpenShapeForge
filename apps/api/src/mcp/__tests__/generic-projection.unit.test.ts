@@ -176,3 +176,18 @@ describe("dedicated entity tools in the session's language", () => {
     expect(nl.annotations?.title).toBe("Relaties tonen");
   });
 });
+
+// Finance uses the bounded generic surface, retaining canonical role selection.
+it("Finance exposes budget writes and read-only reference discovery through generic CRUD", () => {
+  const finance=session("Finance.All.ReadWrite", "Finance.All.Read");
+  for(const entity of ["Budget", "BudgetLine"]){
+    const result=describeGenericEntity(entity, undefined, finance, tables as never, english) as any;
+    expect(Object.keys(result.operations).sort()).toEqual(["create", "delete", "get", "list", "update"]);
+  }
+  for(const entity of ["FiscalYear", "FiscalPeriod", "LedgerAccount", "CostDimension"]){
+    const result=describeGenericEntity(entity, undefined, finance, tables as never, english) as any;
+    expect(Object.keys(result.operations).sort()).toEqual(["get", "list"]);
+  }
+  const denied=crudToolsForSession(session("Nobody.Role"), tables as never, english);
+  expect(denied.filter(t=>t.name.startsWith("osf_")).some(t=>JSON.stringify(t.inputSchema).includes("BudgetLine"))).toBe(false);
+});

@@ -130,6 +130,46 @@ describe("smtp provider", () => {
     expect(refused.phase).toBe("before-data");
   });
 
+  test("a relay that stalls in a handshake or floods a reply fails the delivery instead of holding the worker", async () => {
+    const stalling = async (onConnection: (socket: Socket) => void) => {
+      const server = createServer(onConnection);
+      servers.push(server);
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      return (server.address() as { port: number }).port;
+    };
+    const send = (port: number, secure = false) => {
+      const started = Date.now();
+      return createSmtpMailProvider({ host: "127.0.0.1", port, secure, from: "sender@example.test", timeoutMs: 200, rejectUnauthorized: true })
+        .send(message)
+        .then(() => { throw new Error("expected the delivery to fail"); }, (error: MailDeliveryError) => ({ error, elapsed: Date.now() - started }));
+    };
+    // smtps:// that accepts TCP and never starts TLS.
+    const silent = await send(await stalling(() => {}), true);
+    expect(silent.error.phase).toBe("before-data");
+    expect(silent.error.message).toContain("SMTP TLS handshake timed out");
+    expect(silent.elapsed).toBeLessThan(2_000);
+    // STARTTLS answered with 220, then nothing.
+    const upgraded = await send(await stalling((socket) => {
+      socket.write("220 fake ESMTP\r\n");
+      socket.on("data", (chunk) => {
+        const line = chunk.toString("utf8");
+        if (line.startsWith("EHLO")) socket.write("250-fake\r\n250 STARTTLS\r\n");
+        else if (line.startsWith("STARTTLS")) socket.write("220 go ahead\r\n");
+      });
+    }));
+    expect(upgraded.error.phase).toBe("before-data");
+    expect(upgraded.error.message).toContain("SMTP TLS handshake timed out");
+    expect(upgraded.elapsed).toBeLessThan(2_000);
+    // A reply line that never ends: 100 KiB without a CRLF.
+    const flooded = await send(await stalling((socket) => {
+      socket.on("error", () => {});
+      socket.write(`220 ${"x".repeat(100 * 1024)}`);
+    }));
+    expect(flooded.error.phase).toBe("before-data");
+    expect(flooded.error.message).toContain("exceeds 64 KiB");
+    expect(flooded.elapsed).toBeLessThan(2_000);
+  }, 10_000);
+
   test("the URL carries scheme, port and credentials; the sender is separate", () => {
     expect(readSmtpConfig({})).toBeNull();
     expect(() => readSmtpConfig({ OPENSHAPEFORGE_SMTP_URL: "smtp://localhost:1025" })).toThrow(/OPENSHAPEFORGE_MAIL_FROM/);

@@ -65,6 +65,33 @@ export function readSmtpConfig(env: NodeJS.ProcessEnv = process.env): SmtpConfig
 
 type Reply = { code: number; lines: string[] };
 
+/** RFC 5321 caps a reply line at 512 octets; anything near this is not a reply. */
+const MAX_BUFFERED_REPLY = 64 * 1024;
+
+/**
+ * Settles once `start`'s socket reports ready. The idle timeout of an open
+ * connection does not cover a connect or a TLS handshake, so a peer that
+ * stalls there is cut off here instead of holding the job forever.
+ */
+function handshake<T extends Socket | TLSSocket>(timeoutMs: number, what: string, start: (ready: () => void) => T): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const settle = (error: Error | null) => {
+      clearTimeout(timer);
+      socket.off("error", onError);
+      socket.off("close", onClose);
+      if (!error) return resolve(socket);
+      socket.destroy();
+      reject(error);
+    };
+    const onError = (error: Error) => settle(error);
+    const onClose = () => settle(new Error(`${what} failed: the connection closed.`));
+    const timer = setTimeout(() => settle(new Error(`${what} timed out.`)), timeoutMs);
+    const socket = start(() => settle(null));
+    socket.on("error", onError);
+    socket.on("close", onClose);
+  });
+}
+
 /** One connection's line reader: replies arrive as `250-…` continuation lines ending in `250 …`. */
 class SmtpConnection {
   #socket: Socket | TLSSocket;
@@ -96,6 +123,10 @@ class SmtpConnection {
 
   #onData(chunk: string) {
     this.#buffer += chunk;
+    if (this.#buffer.length > MAX_BUFFERED_REPLY) {
+      this.#fail(new Error("SMTP reply exceeds 64 KiB."));
+      return;
+    }
     // Replies stay buffered until someone reads: the greeting arrives before
     // the first read() is issued.
     if (!this.#waiting) return;
@@ -145,10 +176,13 @@ class SmtpConnection {
     const plain = this.#socket;
     plain.removeAllListeners();
     plain.setTimeout(0);
-    this.#socket = await new Promise<TLSSocket>((resolve, reject) => {
-      const tls = connectTls({ socket: plain, servername: host, rejectUnauthorized }, () => resolve(tls));
-      tls.once("error", reject);
-    });
+    try {
+      this.#socket = await handshake(this.timeoutMs, "SMTP TLS handshake", (ready) =>
+        connectTls({ socket: plain, servername: host, rejectUnauthorized }, ready));
+    } catch (error) {
+      plain.destroy();
+      throw error;
+    }
     this.#buffer = "";
     this.#attach();
   }
@@ -160,16 +194,10 @@ class SmtpConnection {
 }
 
 async function open(config: SmtpConfig): Promise<SmtpConnection> {
-  const socket = await new Promise<Socket | TLSSocket>((resolve, reject) => {
-    const onError = (error: Error) => reject(error);
-    if (config.secure) {
-      const tls = connectTls({ host: config.host, port: config.port, servername: config.host, rejectUnauthorized: config.rejectUnauthorized }, () => resolve(tls));
-      tls.once("error", onError);
-    } else {
-      const tcp = connectTcp({ host: config.host, port: config.port }, () => resolve(tcp));
-      tcp.once("error", onError);
-    }
-  });
+  const socket = config.secure
+    ? await handshake(config.timeoutMs, "SMTP TLS handshake", (ready) =>
+      connectTls({ host: config.host, port: config.port, servername: config.host, rejectUnauthorized: config.rejectUnauthorized }, ready))
+    : await handshake(config.timeoutMs, "SMTP connect", (ready) => connectTcp({ host: config.host, port: config.port }, ready));
   return new SmtpConnection(socket, config.timeoutMs);
 }
 

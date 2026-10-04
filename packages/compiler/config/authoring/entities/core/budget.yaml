@@ -198,6 +198,8 @@ operations:
 interfaces:
   rest: {}
   graphql: {}
+  mcp:
+    tools: generic
   web:
     views:
       collection:

@@ -133,11 +133,17 @@ authorization server. Two pieces, and neither works alone:
 - Every `401` from `/api/mcp` carries
   `WWW-Authenticate: Bearer resource_metadata="…"` pointing at that document.
 
-The resource identifier is derived from the request (honouring
-`x-forwarded-proto`, so a TLS ingress does not yield an `http://` identifier)
-rather than configured separately: it has to match both what the client sends
-as `resource` and what the token carries as audience, and a mismatch between
-those is the confused-deputy case the parameter exists to prevent.
+The resource identifier is `OPENSHAPEFORGE_PUBLIC_ORIGIN` plus the resource
+path when that variable is set (in host-organization mode, the configured host
+resource). Only when no public origin is configured is the origin derived from
+the request — its `Host` header, honouring `x-forwarded-proto` so a TLS ingress
+does not yield an `http://` identifier. The identifier has to match both what
+the client sends as `resource` and what the token carries as audience, and a
+mismatch between those is the confused-deputy case the parameter exists to
+prevent. Set `OPENSHAPEFORGE_PUBLIC_ORIGIN` in production: the audience check
+below only pins a token to this deployment's origin when the origin is
+configured rather than taken from the request. `assertProductionEnv` does not
+require it.
 
 No `scope` is advertised in the challenge. This deployment authorizes by ROLE,
 resolved per entity from the compiled manifest, not by OAuth scope — naming a
@@ -182,7 +188,9 @@ resource_metadata="…"`. The audience is not authority: Keycloak mints the
 per-organization audience for anyone who requests its scope; membership is
 what the identity provider actually asserts, the audience is what stops a token
 minted for another resource (another Organization, another origin) from being
-replayed here. Only a bearer JWT is accepted on these paths; API keys and
+replayed here. The origin half of that holds only with
+`OPENSHAPEFORGE_PUBLIC_ORIGIN` set (see above); without it the origin compared
+against comes from the request. Only a bearer JWT is accepted on these paths; API keys and
 trusted-context headers name a tenant, not a membership, and are refused.
 
 Each resource has its own metadata document,
@@ -565,16 +573,26 @@ to their own organization.
 **How a link comes about** (`apps/api/src/auth/identity-link.ts`):
 
 1. **Just in time.** On a person's first bearer session in a tenant:
-   - no Relation in the tenant carries the token's e-mail → a Relation of type
-     `person` is created through the generated CRUD path (plus a NaturalPerson
-     when the token gives first and last name, and an `email` ContactDetail),
-     and linked with `linked_by = 'jit'`;
-   - exactly one Relation carries the e-mail → nothing is linked silently. The
-     row is recorded as `pending_confirmation` with that Relation as
+   - no Relation in the tenant carries the token's e-mail → the session is
+     admitted only if an organization administrator invited that address
+     (a pending row in `platform.employee_invitations`). Then a Relation of
+     type `person` is created through the generated CRUD path (plus a
+     NaturalPerson when the token gives first and last name, and an `email`
+     ContactDetail), linked with `linked_by = 'jit'` and given the invited
+     organization roles, and the invitation is claimed, in one transaction.
+     Without an invitation nothing is created and the request is refused with
+     403 `NOT_INVITED`;
+   - exactly one Relation carries the e-mail → no invitation is needed and
+     nothing is linked silently. The session is admitted, and the row is
+     recorded as `pending_confirmation` with that Relation as
      `candidate_relation_id`;
-   - several carry it, or the token has no e-mail → `pending_confirmation`
-     without a candidate; an administrator decides.
-   No RelationRole is assigned: the platform knows the person signed in, not
+   - several carry it → the session is admitted with `pending_confirmation`
+     and no candidate; an administrator decides;
+   - the token has no e-mail → there is nothing to match or invite, so the
+     request is refused like an uninvited one; the empty pending row is kept
+     so an administrator can find the identity and link it.
+   The e-mail is matched as the token's `email` claim carries it. No
+   RelationRole is assigned: the platform knows the person signed in, not
    whether they are staff, a supplier or a customer.
 2. **`confirm_my_link`** — shown to the person while they have a pending
    candidate. No arguments; it links their own identity to that one candidate.

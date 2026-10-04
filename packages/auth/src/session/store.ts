@@ -48,7 +48,10 @@ export type StoredSession<Extra extends object = {}> = StoredSessionBase & Extra
 
 export type SessionStore<Extra extends object = {}> = {
   getSession(sessionId: string): Promise<StoredSession<Extra> | null>;
+  /** Initial creation for a new opaque id; existing sessions use updateSession. */
   setSession(sessionId: string, data: StoredSession<Extra>): Promise<void>;
+  /** Atomically refuses a session removed by logout or expiry. */
+  updateSession(sessionId: string, data: StoredSession<Extra>): Promise<boolean>;
   deleteSession(sessionId: string): Promise<void>;
   acquireRefreshLock(sessionId: string): Promise<string | null>;
   releaseRefreshLock(sessionId: string, ownerToken: string): Promise<void>;
@@ -66,6 +69,13 @@ const SESSION_CACHE_TTL_MS = 1_000;
 /** Default TTL when refreshExpiresAt is unknown (30 minutes). */
 const DEFAULT_SESSION_TTL_S = 1800;
 export const REFRESH_LOCK_TTL_MS = 10_000;
+
+function sessionTtl(data: StoredSessionBase): number {
+  const nowS = Math.floor(Date.now() / 1000);
+  return data.refreshExpiresAt
+    ? Math.max(data.refreshExpiresAt - nowS, 60)
+    : DEFAULT_SESSION_TTL_S;
+}
 
 function shouldRetryRedisOperation(error: unknown): boolean {
   return error instanceof Error && /connection is closed/i.test(error.message);
@@ -175,12 +185,19 @@ export function createSessionStore<Extra extends object = {}>(
      */
     async setSession(sessionId, data) {
       const key = `${sessionPrefix}${sessionId}`;
-      const nowS = Math.floor(Date.now() / 1000);
-      const ttl = data.refreshExpiresAt
-        ? Math.max(data.refreshExpiresAt - nowS, 60)
-        : DEFAULT_SESSION_TTL_S;
-      await withRedis((redis) => redis.set(key, JSON.stringify(data), "EX", ttl));
+      await withRedis((redis) => redis.set(key, JSON.stringify(data), "EX", sessionTtl(data)));
       writeSessionCache(sessionId, data);
+    },
+
+    async updateSession(sessionId, data) {
+      const key = `${sessionPrefix}${sessionId}`;
+      const result = await withRedis((redis) =>
+        redis.set(key, JSON.stringify(data), "EX", sessionTtl(data), "XX"),
+      );
+      // A successful SET can be acknowledged after logout's DEL. Never let
+      // that late reply repopulate the local cache with a deleted session.
+      sessionCache.delete(sessionId);
+      return result === "OK";
     },
 
     /** Null when missing or expired. */

@@ -194,7 +194,7 @@ function interpolateTemplate(
   template: string,
   data: Record<string, unknown>,
 ): string {
-  return template.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_match, path: string) => {
+  return template.replace(/\{\{([^}]+)\}\}/g, (_match, path: string) => {
     const value = getValueAtPath(data, parseRendererPath(path.trim()));
     if (value == null) return "";
     return String(value);

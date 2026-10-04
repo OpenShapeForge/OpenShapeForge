@@ -8,6 +8,7 @@ import type {
   CompiledStaticEntityOperation,
   JsonSchema,
   PluginBaseContext,
+  PluginOperationAuth,
   PluginOperationContract,
   PluginOperationError,
 } from "./plugins.js";
@@ -105,11 +106,13 @@ const SECURITY_SCHEME = /^[A-Za-z0-9._-]+$/;
 const REST_PATH = /^\/api\/[a-z][a-z0-9-]*(?:\/(?::[_A-Za-z][_0-9A-Za-z]*|[a-z0-9][a-z0-9._-]*))*$/;
 const RESERVED_API_NAMESPACES = new Set([
   "api-keys",
+  "artifacts",
   "connectors",
   "control",
   "documents",
   "entity-configuration",
   "entity-oauth",
+  "events",
   "graphql",
   "health",
   "jobs",
@@ -117,6 +120,8 @@ const RESERVED_API_NAMESPACES = new Set([
   "mcp",
   "metrics",
   "oauth",
+  "operation-leases",
+  "operations",
   "ready",
   "rest",
 ]);
@@ -176,6 +181,13 @@ const CORE_API_ROUTES: readonly RestRoute[] = [
   { method: "GET", path: "/api/rest/docs/oauth2-redirect.js", owner: "core REST OAuth callback" },
   { method: "POST", path: "/api/artifacts", owner: "core artifact transport" },
   { method: "GET", path: "/api/artifacts/:artifactId/contents", owner: "core artifact transport" },
+  { method: "GET", path: "/api/events", owner: "core entity change stream" },
+  { method: "GET", path: "/api/operations", owner: "core Operation runtime" },
+  { method: "GET", path: "/api/operations/:id", owner: "core Operation runtime" },
+  { method: "POST", path: "/api/operations/:id/execute", owner: "core Operation runtime" },
+  { method: "POST", path: "/api/operation-leases", owner: "core edit leases" },
+  { method: "POST", path: "/api/operation-leases/renew", owner: "core edit leases" },
+  { method: "POST", path: "/api/operation-leases/release", owner: "core edit leases" },
   { method: "GET", path: "/api/rest/v1/connectors", owner: "core connector catalog" },
   { method: "GET", path: "/api/rest/v1/connectors/:slug", owner: "core connector catalog" },
   { method: "PUT", path: "/api/rest/v1/connectors/:slug/installations/:instanceKey", owner: "core connector configuration" },
@@ -374,6 +386,18 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
     throw new Error(
       `${where} recordPermission requires a record target with inputField.`,
     );
+  }
+  if (operation.auth.mode === "session") {
+    const restricted = operation.auth.roles !== undefined || operation.auth.roleGroups !== undefined;
+    if (operation.auth.anyAuthenticatedSession !== undefined &&
+        (operation.auth.anyAuthenticatedSession !== true || restricted)) {
+      throw new Error(`${where} auth.anyAuthenticatedSession must be true and cannot be combined with roles or roleGroups.`);
+    }
+    if (!restricted && operation.auth.anyAuthenticatedSession !== true) {
+      throw new Error(
+        `${where} session auth must declare roles or roleGroups, or admit every authenticated session with anyAuthenticatedSession: true.`,
+      );
+    }
   }
   if (operation.auth.mode === "session" && operation.auth.roleGroups !== undefined) {
     if (!Array.isArray(operation.auth.roleGroups) || operation.auth.roleGroups.length === 0 ||
@@ -616,6 +640,13 @@ export function collectPluginOperations(
   return collectOperationContracts(plugins, context, false);
 }
 
+/** The runtime reads an omitted role list as the opt-in's rule, so only the compiler needs the opt-in. */
+function compiledAuth(auth: PluginOperationAuth): PluginOperationAuth {
+  if (auth.mode !== "session" || auth.anyAuthenticatedSession === undefined) return auth;
+  const { anyAuthenticatedSession: _optIn, ...compiled } = auth;
+  return compiled;
+}
+
 /** Authored canonical identity is separate from the bound implementation owner. */
 function collectOperationContracts(
   plugins: readonly CompilerPlugin[],
@@ -680,6 +711,7 @@ function collectOperationContracts(
       if (typescriptKey) typescript.add(typescriptKey);
       const compiled: CompiledPluginOperation = {
         ...operation,
+        auth: compiledAuth(operation.auth),
         plugin: plugin.name,
         id: operation.key,
         intent: "invoke",

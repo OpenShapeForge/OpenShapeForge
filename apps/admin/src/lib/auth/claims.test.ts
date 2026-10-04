@@ -17,6 +17,7 @@ describe("operator refresh invariant", () => {
   const store: SessionStore = {
     async getSession() { return null; },
     async setSession() {},
+    async updateSession() { return true; },
     async deleteSession() {},
     async acquireRefreshLock() { return "lock"; },
     async releaseRefreshLock() {},

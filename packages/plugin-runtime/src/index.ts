@@ -45,7 +45,8 @@ export type PluginSessionCredential =
 /**
  * One record a grant reaches beside its subject, with the intents the
  * issuer delegated. Core verified at issue time that the issuer held each
- * intent on the record, so a grant never reaches further than its issuer.
+ * intent on the record, so a delegated record never reaches further than its
+ * issuer. The subject is not verified that way (docs/capability-grants.md).
  */
 export type RuntimeCapabilityGrantRecordAccess = {
   entity: string;
@@ -849,7 +850,11 @@ export type RuntimeModule = RuntimeModuleContract<
   RuntimeOperationProvider
 >;
 
-/** Creates an isolated module using its compiler-authored, nonsecret configuration. */
+/**
+ * Creates a module instance from its compiler-authored, nonsecret configuration.
+ * The instance owns its state; it still runs in-process with the host's
+ * privileges (docs/plugins.md, "Compiled runtime configuration").
+ */
 export type RuntimeModuleFactory = (configuration: unknown) => RuntimeModule;
 
 export type { MaintenanceQuery, MaintenanceConnection, MaintenanceStore, MaintenanceContext, MaintenanceRequest, RunMaintenanceSeed, RuntimeMaintenanceContribution } from "./maintenance.js";

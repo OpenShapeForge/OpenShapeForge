@@ -120,11 +120,16 @@ earlier layers produced. For each file in each layer:
    slug** from an earlier layer. The patch targets by slug (file stem), not
    by path, so an overlay may place the patch in any `entities/` subfolder.
 
-Generated CRUD exposure is the deliberate exception to ordinary last-writer
-wins merging: `crud.operations` is monotonic. A later `entityPatch` may disable
-an operation but cannot re-enable one disabled by an earlier layer. This lets a
-host set a maximum exposure policy that an installed package/plugin cannot
-widen.
+Generated CRUD exposure is a partial exception to ordinary last-writer wins
+merging. For an Operation an earlier layer **declared**, a later `entityPatch`
+may narrow it but not widen it, and may disable its projection on an interface
+(`interfaces.*.operations`) but not re-enable one an earlier layer disabled.
+An Operation an earlier layer did **not** declare is not protected: a later
+layer — including an installed package's or plugin's authoring layer, which
+is applied after the configured layers — may add it, `update` or `delete` on a
+read-only entity included, and the generated surfaces then expose it. So a
+host can cap what its own declared Operations do, but leaving an Operation out
+does not stop a later layer from adding it; layers are trusted configuration.
    Patching a slug no earlier layer defines is an error. Later layers may
    patch the same entity again — patches stack.
 2. **`kind: appShellPatch`** — strategic-merged into `menu.yaml` from an

@@ -25,8 +25,7 @@ operations:
                 relationGroupId: { type: string, x-osf-i18n: { title: { en: Group, nl: Groep } }, format: uuid }
                 roleKey:
                   type: string
-                  x-osf-i18n: { title: { en: Role, nl: Rol }, enum: { org_employee: { en: Employee, nl: Medewerker }, financien: { en: Finance, nl: Financiën }, verkoper: { en: Seller, nl: Verkoper }, goedkeurder: { en: Approver, nl: Goedkeurder }, org_admin: { en: Administrator, nl: Beheerder } } }
-                  enum: [ org_employee, financien, verkoper, goedkeurder, org_admin ]
+                  x-osf-i18n: { title: { en: Role, nl: Rol } }
                 roleLabel: { type: string, x-osf-i18n: { title: { en: Role, nl: Rol } } }
             x-osf-i18n: { title: { en: Role assignments, nl: Roltoekenningen } }
     auth: { mode: session, roles: [ Organization.Access.Manage ] }
@@ -55,8 +54,7 @@ operations:
           relationGroupId: { type: string, x-osf-i18n: { title: { en: Group, nl: Groep } }, format: uuid }
           roleKey:
             type: string
-            x-osf-i18n: { title: { en: Role, nl: Rol }, enum: { org_employee: { en: Employee, nl: Medewerker }, financien: { en: Finance, nl: Financiën }, verkoper: { en: Seller, nl: Verkoper }, goedkeurder: { en: Approver, nl: Goedkeurder }, org_admin: { en: Administrator, nl: Beheerder } } }
-            enum: [ org_employee, financien, verkoper, goedkeurder, org_admin ]
+            x-osf-i18n: { title: { en: Role, nl: Rol } }
           roleLabel: { type: string, x-osf-i18n: { title: { en: Role, nl: Rol } } }
     auth: { mode: session, roles: [ Organization.Access.Manage ] }
     tenancy: { mode: required }
@@ -84,8 +82,7 @@ operations:
           relationGroupId: { type: string, x-osf-i18n: { title: { en: Group, nl: Groep } }, format: uuid }
           roleKey:
             type: string
-            x-osf-i18n: { title: { en: Role, nl: Rol }, enum: { org_employee: { en: Employee, nl: Medewerker }, financien: { en: Finance, nl: Financiën }, verkoper: { en: Seller, nl: Verkoper }, goedkeurder: { en: Approver, nl: Goedkeurder }, org_admin: { en: Administrator, nl: Beheerder } } }
-            enum: [ org_employee, financien, verkoper, goedkeurder, org_admin ]
+            x-osf-i18n: { title: { en: Role, nl: Rol } }
           roleLabel: { type: string, x-osf-i18n: { title: { en: Role, nl: Rol } } }
     auth: { mode: session, roles: [ Organization.Access.Manage ] }
     tenancy: { mode: required }

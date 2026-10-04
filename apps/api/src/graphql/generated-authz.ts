@@ -69,8 +69,9 @@ function fieldNameForColumn(column: Column): string {
 function classifiedColumnForFilterField(
   columns: readonly Column[],
   field: string,
+  exactFilterFields: boolean,
 ): Column | undefined {
-  const filterField = field.endsWith("In") ? field.slice(0, -2) : field;
+  const filterField = !exactFilterFields && field.endsWith("In") ? field.slice(0, -2) : field;
   return columns.find((column) => fieldNameForColumn(column) === filterField);
 }
 
@@ -115,7 +116,8 @@ export function assertOperationAllowed(
  * Prevent a reader who cannot see classified values from using them as an
  * oracle through list filters or ordering. Unknown fields are intentionally
  * ignored here so the existing generated CRUD validation can continue to
- * report BAD_USER_INPUT for them.
+ * report BAD_USER_INPUT for them. `exactFilterFields` is for a sub-filter whose
+ * keys name fields directly, where a trailing `In` is not the membership alias.
  */
 export function assertClassifiedQueryFieldsAllowed(
   columns: readonly Column[],
@@ -124,6 +126,7 @@ export function assertClassifiedQueryFieldsAllowed(
   typeName: string,
   filter?: Record<string, unknown> | null,
   sort?: QuerySort,
+  exactFilterFields = false,
 ): void {
   // Every list request runs this; entities without a classified column (the
   // common case) must not pay for the role intersection.
@@ -133,7 +136,7 @@ export function assertClassifiedQueryFieldsAllowed(
   const requestedFields = [
     ...Object.keys(filter ?? {}).map((field) => ({
       field,
-      column: classifiedColumnForFilterField(columns, field),
+      column: classifiedColumnForFilterField(columns, field, exactFilterFields),
     })),
     ...(sort?.field
       ? [{ field: sort.field, column: classifiedColumnForSortField(columns, sort.field) }]

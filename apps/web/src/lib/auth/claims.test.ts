@@ -52,6 +52,7 @@ describe("tenant refresh invariant", () => {
   const store: SessionStore<TenantSessionFields> = {
     async getSession() { return null; },
     async setSession() {},
+    async updateSession() { return true; },
     async deleteSession() {},
     async acquireRefreshLock() { return "lock"; },
     async releaseRefreshLock() {},

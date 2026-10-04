@@ -1,21 +1,31 @@
 // SPDX-License-Identifier: BUSL-1.1
-import type { ModuleOperationHandler } from "../modules/contract.js";
+import type { ModuleOperationErrorResult, ModuleOperationHandler } from "../modules/contract.js";
 import { inviteEmployee, type EmployeeInvitationRole } from "../auth/employee-invitations.js";
+import { KeycloakAdminError } from "../control/keycloak-organization-admin.js";
 import { HttpError } from "../rest/http-error.js";
+
+function refusal(status: number, code: string, message: string): ModuleOperationErrorResult {
+  return { ok: false, status, code, body: { error: { code, message, retryable: false } } };
+}
 
 export const inviteAccount: ModuleOperationHandler = async (input, context) => {
   const session = context.session;
-  if (!session?.tenantId || !session.userId) return { ok: false, status: 401, code: "UNAUTHENTICATED", body: { error: "Sign in first." } };
-  if (typeof input.relationId !== "string" || !input.relationId) return { ok: false, status: 400, code: "VALIDATION", body: { error: "A relation is required." } };
+  if (!session?.tenantId || !session.userId) return refusal(401, "UNAUTHENTICATED", "Sign in first.");
+  if (typeof input.relationId !== "string" || !input.relationId) return refusal(400, "VALIDATION", "A relation is required.");
   const members = context.control?.clients?.identityMembers;
-  if (!members || !context.db) return { ok: false, status: 503, code: "OPERATION_UNAVAILABLE", body: { error: "Account invitations are not configured." } };
+  if (!members || !context.db) return refusal(503, "OPERATION_UNAVAILABLE", "Account invitations are not configured.");
   try {
     const invitation = await inviteEmployee(context.db, { ...session, tenantId: session.tenantId, userId: session.userId }, members, {
       relationId: input.relationId as string, email: input.email as string, role: input.role as EmployeeInvitationRole,
     });
     return { value: { id: invitation.id, email: invitation.email, status: invitation.status, delivery: invitation.delivery } };
   } catch (error) {
+    // The provider's own error text names its admin URL and client; only the declared 503 leaves here.
+    if (error instanceof KeycloakAdminError || (error instanceof HttpError && error.code.startsWith("KEYCLOAK_ADMIN_")))
+      return refusal(503, "OPERATION_UNAVAILABLE", "The identity provider could not complete this invitation. Check its status before retrying.");
+    if (error instanceof HttpError && error.code === "TENANT_NOT_PROVISIONED")
+      return refusal(503, "OPERATION_UNAVAILABLE", error.message);
     if (!(error instanceof HttpError)) throw error;
-    return { ok: false, status: error.status, code: error.code, body: { error: error.message } };
+    return refusal(error.status, error.code, error.message);
   }
 };

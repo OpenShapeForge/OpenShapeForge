@@ -16,6 +16,7 @@
  * SETTINGS separately from client and user administration, which is why this
  * needs its own client rather than reusing that one.
  */
+import { REQUEST_TIMEOUT_MS } from "../../control/keycloak-service-account.js";
 
 export type KeycloakAdminConfig = {
   /** Base URL, e.g. http://localhost:8181 */
@@ -102,6 +103,7 @@ export class KeycloakAdmin {
           client_id: this.config.clientId,
           client_secret: this.config.clientSecret,
         }).toString(),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       },
     );
     if (!response.ok) {
@@ -134,6 +136,7 @@ export class KeycloakAdmin {
         ...(body === undefined ? {} : { "content-type": "application/json" }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   }
 

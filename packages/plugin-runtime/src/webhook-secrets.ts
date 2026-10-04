@@ -21,6 +21,9 @@ export type RuntimeWebhookSecretServices<Session> = {
    * authority. AAD binds the ciphertext to tenant+credential; wrong inputs fail
    * closed. Protocol: hex HMAC-SHA256(timestamp + "." + eventId + "." + rawBody),
    * timestamp in Unix seconds, at most 300 seconds from the host clock.
+   * Verification keeps no record of accepted deliveries, so a signed delivery
+   * verifies again until its timestamp leaves the window: the plugin must dedupe
+   * accepted credential id, event id and signature for at least that window.
    */
   verify(input: RuntimeWebhookSignatureInput): Promise<boolean>;
   /** Only core mints a live session from encrypted issuer provenance, with no issuer roles. */

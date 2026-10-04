@@ -187,6 +187,11 @@ export async function loadOrderedBindingsByOwner(
   if (ownerIds.length === 0) return grouped;
 
   const seen = new Set<string>();
+  // One owner's broken chain (too many rows, a duplicate or invalid order)
+  // lists as unresolved for that owner alone; it never fails the listing of
+  // every other derived tool in the same audience. Executing that owner
+  // still refuses (loadOrderedBindings).
+  const broken = new Set<string>();
   let cursor: string | null = null;
   for (;;) {
     const page = asPage(
@@ -204,17 +209,25 @@ export async function loadOrderedBindingsByOwner(
         seen.add(id);
       }
       const ownerId = row[parentRef];
-      if (typeof ownerId !== "string" || !grouped.has(ownerId)) continue;
+      if (typeof ownerId !== "string" || !grouped.has(ownerId) || broken.has(ownerId)) continue;
       const bucket = grouped.get(ownerId)!;
       bucket.push(row);
-      overflowIfBeyond(bucket.length);
+      if (bucket.length > MAX_BINDINGS_PER_OWNER) broken.add(ownerId);
     }
     if (!page.nextCursor || page.rows.length === 0) break;
     if (page.nextCursor === cursor) throw new BindingOverflowError();
     cursor = page.nextCursor;
   }
   for (const [id, rows] of grouped) {
-    grouped.set(id, rows.length === 0 ? [] : orderedBindingRecords(rows));
+    if (rows.length === 0 || broken.has(id)) {
+      grouped.set(id, []);
+      continue;
+    }
+    try {
+      grouped.set(id, orderedBindingRecords(rows));
+    } catch {
+      grouped.set(id, []);
+    }
   }
   return grouped;
 }

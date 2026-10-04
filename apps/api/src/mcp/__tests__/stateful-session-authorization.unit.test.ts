@@ -250,6 +250,17 @@ describe("sameStatefulMcpAuthorization", () => {
     expect(stateful.roles).toEqual(["General.All.Read", "org_employee"]);
   });
 
+  it("gives a plugin's session capability the request's roles, not those of initialize", async () => {
+    const established = authorization({ roles: ["Organization.All.ReadWrite", "org_admin"], scope: "tenant" }) as TrustedSessionContext;
+    const capability = createModuleSessionCapability(createStatefulMcpSessionContext(established));
+    const demoted = authorization({ roles: ["General.All.Read"], scope: "self" }) as TrustedSessionContext;
+    await withFreshRelationGroupMemberships(demoted, async () => {
+      expect(capability.roles).toEqual(["General.All.Read"]);
+      expect(capability.scope).toBe("self");
+    });
+    expect(Object.isFrozen(capability.roles)).toBe(true);
+  });
+
   it("still refuses identity, claim, and credential changes", () => {
     const original = authorization();
     expect(

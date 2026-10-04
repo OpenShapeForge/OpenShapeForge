@@ -290,7 +290,7 @@ export function createTokenRefresh<Extra extends object>(
           // Another pod is still refreshing. Its result, good or bad, lands in
           // Redis; the next request reads it. Stamping an error on this cookie
           // now would sign the browser out of a session that may be fine.
-          return updated ?? stored;
+          return updated ?? { ...stored, error: "RefreshTokenError" };
         }
       }
 
@@ -305,7 +305,9 @@ export function createTokenRefresh<Extra extends object>(
         if (current.error) return current;
         if (hasUsableAccessWindow(current)) return current;
         const refreshed = await doRefreshAccessToken(current);
-        await store.setSession(sessionId, refreshed);
+        if (!await store.updateSession(sessionId, refreshed)) {
+          return { ...current, error: "RefreshTokenError" };
+        }
         return refreshed;
       } finally {
         if (lockOwnerToken) {

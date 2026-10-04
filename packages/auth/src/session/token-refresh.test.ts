@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { afterEach, describe, expect, test } from "bun:test";
 import { createTokenRefresh, type TokenRefreshOptions } from "./token-refresh.js";
+import { createLogoutHandler } from "./logout.js";
 import type { SessionStore, StoredSession } from "./store.js";
 
 type Fields = { tenantId?: string | undefined };
@@ -30,6 +31,11 @@ function fakeStore(initial: Record<string, StoredSession<Fields>> = {}): Session
     locks,
     async getSession(id) { return records.get(id) ?? null; },
     async setSession(id, data) { records.set(id, data); },
+    async updateSession(id, data) {
+      if (!records.has(id)) return false;
+      records.set(id, data);
+      return true;
+    },
     async deleteSession(id) { records.delete(id); },
     async acquireRefreshLock(id) {
       if (locks.has(id)) return null;
@@ -241,5 +247,56 @@ describe("refreshSessionInRedis", () => {
 
     expect(a).toBe(b);
     expect(calls).toHaveLength(1);
+  });
+
+  test("a refresh finishing after logout cannot restore the deleted session", async () => {
+    const store = fakeStore({ s1: stored });
+    const started = Promise.withResolvers<void>();
+    const response = Promise.withResolvers<Response>();
+    globalThis.fetch = (async () => {
+      started.resolve();
+      return response.promise;
+    }) as unknown as typeof fetch;
+    const pending = refresher(store).refreshSessionInRedis("s1", stored);
+    await started.promise;
+    let signedOut = false;
+    const logout = createLogoutHandler({
+      logTag: "test",
+      keycloak: { logoutUrl: "https://identity.example.test/logout", clientId: "gateway" },
+      auth: async () => ({ sessionId: "s1", expires: "2099-01-01", sub: "user-1", accessToken: "", idToken: "", roles: [] }),
+      deleteSession: store.deleteSession,
+      signOut: async () => { signedOut = true; },
+    });
+    expect((await logout()).status).toBe(303);
+    expect(signedOut).toBe(true);
+    expect(store.records.has("s1")).toBe(false);
+    response.resolve(Response.json({
+      access_token: jwt({ sub: "user-1", tid: "tenant-a", exp: nowS() + 300, realm_access: { roles: ["r"] } }),
+      expires_in: 300,
+    }));
+    const result = await pending;
+    expect(result.error).toBe("RefreshTokenError");
+    expect(store.records.has("s1")).toBe(false);
+    expect(store.locks.size).toBe(0);
+  });
+
+  test("a session deleted while another pod holds the lock fails closed", async () => {
+    const store = fakeStore({ s1: stored });
+    store.locks.set("s1", "other-pod");
+    const locked = Promise.withResolvers<void>();
+    const originalAcquire = store.acquireRefreshLock;
+    store.acquireRefreshLock = async (id) => {
+      const result = await originalAcquire(id);
+      locked.resolve();
+      return result;
+    };
+    const calls = keycloakResponses({ status: 500 });
+    const pending = refresher(store).refreshSessionInRedis("s1", stored);
+    await locked.promise;
+    await store.deleteSession("s1");
+    expect((await pending).error).toBe("RefreshTokenError");
+    expect(calls).toHaveLength(0);
+    expect(store.records.has("s1")).toBe(false);
+    expect(store.locks.get("s1")).toBe("other-pod");
   });
 });

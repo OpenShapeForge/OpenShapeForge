@@ -16,7 +16,8 @@ From one entity YAML file you get:
   pagination, relationship traversal),
 - an MCP server whose tool schemas carry the authored validation, enumerations,
   and labels, so agents get the constraints up front,
-- an append-only entity-event journal on every mutation,
+- an entity-event journal that every generated CRUD mutation appends to
+  (append-only by convention; the database does not refuse updates or deletes),
 - automatically derived e2e tests (with HTML reports) and k6 load tests.
 
 Extensibility comes in three forms: Kustomize-style **authoring layers**

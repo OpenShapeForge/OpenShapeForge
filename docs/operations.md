@@ -1,9 +1,12 @@
 # GraphQL operations and observability
 
 The API exposes two GraphQL transport profiles. In production, `/api/graphql`
-accepts arbitrary operations only after verified integration authentication,
-authorization, tenant isolation, rate limits, and GraphQL Armor. The generated
-web app uses `/api/graphql/persisted`: its build-generated manifest maps the
+accepts arbitrary operations from any verified credential that resolves to a
+tenant and a user — an integration's credential, but equally a signed-in
+person's bearer token — and then applies authorization, tenant isolation, rate
+limits, and GraphQL Armor. The persisted profile is therefore not a boundary
+for people: it is what the generated web app uses, not the only way a person's
+token can reach GraphQL. The generated web app uses `/api/graphql/persisted`: its build-generated manifest maps the
 SHA-256 of each canonical operation to the query. That endpoint rejects raw,
 unknown, or stale operations. A deliberate integration-only web call may opt
 back into the integration profile in `executeGraphqlRequest`. During a rolling
@@ -62,8 +65,11 @@ choice visible in their values rather than hiding it in the shared package.
   tenant, user, variables, headers, and arbitrary operation-name labels are
   intentionally absent.
 
-Readiness and metrics use the ordinary request-rate boundary; only constant-time
-liveness is exempt.
+Liveness (`/api/health`) and readiness (`/api/ready`) are exempt from the
+request-rate limit, so a probe is never throttled. Readiness touches the
+database, and what bounds it is a one-second result cache with a single check in
+flight at a time. Metrics uses the ordinary request-rate boundary and also
+requires the signed internal context above.
 
 Unexpected GraphQL exceptions are masked for callers and centrally reduced to
 a category, allowlisted error type, and optional allowlisted operational code.

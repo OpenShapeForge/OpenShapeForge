@@ -1,12 +1,14 @@
 # Capability grants
 
 A **capability grant** is a hashed, expiring, recipient-bound token that lets
-someone *without an account* invoke a fixed set of Operations on exactly one
-record: a customer who receives a link, opens a document and accepts or signs
+someone *without an account* invoke a fixed set of Operations on one subject
+record, plus any records the issuer explicitly delegates (at most sixteen; see
+below): a customer who receives a link, opens a document and accepts or signs
 it; a contact who answers a request. The plugin that owns the record decides
 which Operations a recipient gets; core owns the token, its resolution, the
-attempt limits and the audit trail. Nothing a plugin does with a grant can
-widen it.
+attempt limits and the audit trail. Once issued, nothing a plugin does with a
+grant can widen it; what it reaches is decided at issue time, including the
+subject, which core does not check against the issuer (see below).
 
 The pieces, in the order a request meets them:
 
@@ -65,8 +67,10 @@ returned exactly once, by `platform.grants.issue`, and is never stored: the
 row keeps `token_hash`, the SHA-256 of the secret half. The id locates the
 row by primary key, so an attacker cannot make the database compare against
 every hash, and the secret is compared in constant time (`timingSafeEqual`).
-An unknown id costs the same comparison against a decoy hash as a wrong
-secret does.
+An unknown id still performs a comparison against a decoy hash, so the
+comparison itself reveals nothing; the outcome does differ, because only a
+known id counts failed attempts and can lock (below). Treat the grant id as
+public.
 
 The token is presented as **`Authorization: Grant <token>`**. A header rather
 than a query parameter, for the same reason bearer tokens are ("bearer
@@ -117,7 +121,10 @@ Operations it lists, and a capability Operation accepts exactly a grant
 session (a bearer session presented to one is `401 GRANT_INVALID`). When the
 Operation declares a record target with an `inputField`, core sets that
 field to the grant's subject id before validation; a different value in the
-request is `403 GRANT_SCOPE`.
+request is `403 GRANT_SCOPE`. A handler's nested `platform.operations.execute`
+gets no such completion: there the field must already hold the subject id,
+and an Operation whose target entity is not the grant's subject entity is
+`403 GRANT_SCOPE` on every path.
 
 ### What a grant session may reach
 
@@ -135,8 +142,12 @@ records: [
 ```
 
 Issuing verifies every delegated intent against the issuer's own access
-through the same oracle, so a grant never reaches a record its issuer could
-not; the delegation is journaled with the grant and shown in its summary.
+through the same oracle, so a delegated record never reaches past its
+issuer; the delegation is journaled with the grant and shown in its summary.
+The **subject** is not checked that way: core only validates its shape (an
+entity name and a UUID) and a grant session then reaches it for `get` and
+`update`. Issue a grant only for a subject the issuing session may itself
+act on, and never take the subject id from client input unchecked.
 `delete` is never delegated. This is what lets a recipient open the PDF they
 are asked to sign and lets the completing handler append the signed copy to
 the record's Document (`appendDocumentVersion` from
@@ -165,7 +176,9 @@ edit leases have ([plugins.md](plugins.md#canonical-operations)).
 
 `CAPABILITY_GRANT_ATTEMPT_POLICY`: five wrong secrets inside a fifteen-minute
 window lock the grant for fifteen minutes. The window starts at the first
-failure and restarts when it has elapsed; a correct secret clears it. The
+failure and restarts when it has elapsed; a correct secret clears it, except
+while the grant is locked, when the secret is not compared at all. Because the
+grant id is not secret, anyone who knows it can keep a grant locked. The
 policy is global; per-grant policies are deliberately absent until a
 consumer needs one.
 
@@ -180,7 +193,7 @@ const { id, token, expiresAt } = await platform.grants.issue(session, {
   subject: { entity: "Envelope", id: envelopeId },
   recipient: { kind: "email", address },
   expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000),
-  maxUses: 1,                              // null or omitted: reusable until expiry
+  maxUses: 2,                              // every call counts: one read, one sign; null or omitted: reusable until expiry
   supersede: "same-subject-and-recipient", // optional
 });
 ```
@@ -229,6 +242,11 @@ grant), `capability_grant_locked` (attempts, `locked_until`) and
 `capability_grant_revoked` (reason, and `supersededBy` when a newer grant
 caused it). A wrong secret that does not reach the lock is not journaled.
 
+The journal is append-only by convention, not by the database: its policy
+isolates tenants but allows every command, so the trail is only as reliable as
+the code that runs as the application role (see
+[api.md](api.md#the-entity-event-journal)).
+
 ## Housekeeping
 
 Expired, consumed and revoked rows are inert — resolution refuses them — but
@@ -236,4 +254,4 @@ a table nobody deletes from grows without bound. `purgeCapabilityGrants(db,
 session, { retainDays })` removes rows whose expiry or revocation is older
 than the window (default thirty days); the audit trail stays in the journal.
 There is no scheduler in the API that calls it; see
-[retention.md](retention.md#runtime-enforcement-not-implemented-follow-up).
+[retention.md](retention.md#runtime-enforcement).

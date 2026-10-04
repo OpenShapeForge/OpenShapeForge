@@ -103,6 +103,10 @@ function prepareItems(value: unknown[], before: unknown, policy: FieldValuePolic
   const used = new Set<number>();
   const key = policy.itemKey;
   const identities = new Set<string>();
+  // A caller who cannot read an item is refused at the collection path: an
+  // item path would reveal which position its guess matched.
+  const itemReadable = readable && granted(item.readRoles, context.session) &&
+    (!item.classification || context.classified);
   if (key && previous.some(entry => !object(entry) || typeof entry[key] !== "string")) {
     throw operationFailure({ code: "INTERNAL_SERVER_ERROR", message: `Stored collection "${path}" lacks generated item identities.` });
   }
@@ -129,7 +133,8 @@ function prepareItems(value: unknown[], before: unknown, policy: FieldValuePolic
     if (!key && old !== undefined && readable && granted(item.readRoles, context.session) &&
       (!item.classification || context.classified) && isDeepStrictEqual(entry, old)) return old;
     const next = prepareValue(entry, old, item,
-      { ...context, readable, operation: old === undefined ? "create" : "update" }, `${path}[${index}]`);
+      { ...context, readable, operation: old === undefined ? "create" : "update" },
+      itemReadable || !context.caller ? `${path}[${index}]` : path);
     return key && object(next) ? { ...next, [key]: identity ?? randomUUID() } : next;
   });
   if (previous.some((entry, index) => !used.has(index) && protectedValue(entry, item, context) !== undefined)) {

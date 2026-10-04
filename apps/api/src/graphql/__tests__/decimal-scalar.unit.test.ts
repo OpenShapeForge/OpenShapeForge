@@ -20,3 +20,10 @@ describe("the Decimal scalar's input", () => {
     expect(() => parseDecimalValue(true)).toThrow(/finite number/);
   });
 });
+
+test("normalizes a long fraction in linear time", () => {
+  const started = performance.now();
+  expect(() => parseDecimalValue(`0.${"0".repeat(200_000)}1`)).toThrow("cannot be carried exactly");
+  expect(parseDecimalValue(`12.50${"0".repeat(10_000)}`)).toBe(12.5);
+  expect(performance.now() - started).toBeLessThan(250);
+});

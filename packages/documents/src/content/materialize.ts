@@ -128,7 +128,9 @@ export async function materializeTemplateContent(
 
   async function interpolate(value: JsonValue, parameters: JsonObject, markdown = false): Promise<JsonValue> {
     if (typeof value === "string") {
-      const matches = [...value.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)];
+      // One unbounded run per `{{`, trimmed by variable(): surrounding `\s*`
+      // around a lazy group backtracks cubically on an unclosed `{{`.
+      const matches = [...value.matchAll(/\{\{([^{}]+)\}\}/g)];
       if (matches.length === 1 && matches[0]![0] === value) {
         const whole = await variable(matches[0]![1]!, parameters);
         return markdown && typeof whole === "string" ? markdownText(whole) : whole;

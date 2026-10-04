@@ -104,7 +104,7 @@ Engine semantics (`src/graphql/generated-crud.ts`):
 
 `src/rest/generated-rest-routes.ts` is the REST counterpart of the GraphQL
 schema builder. Entities opt in per entity with an `interfaces.rest` block in their YAML
-(see [authoring.md](authoring.md#rest-generated-rest-exposure)); the compiler
+(see [authoring.md](authoring.md#interfacesrest--generated-rest-exposure)); the compiler
 bridges it to `source.rest` in the manifest, and every such table gets routes
 under `/api/rest/v1/<basePath>`:
 
@@ -787,8 +787,10 @@ visibility.
 **4. Capability grants** — `Authorization: Grant <grantId>.<secret>`, accepted
 only by Operations declared with `auth.mode: capability`. Not a session
 resolver path: the operations runtime resolves the token into a grant
-session with a tenant, no user and no roles, so a grant reaches exactly the
-Operations it lists on exactly one record, and nothing else on this surface.
+session with a tenant, no user and no roles, so a grant reaches only the
+Operations it lists, on its subject record and on the records it delegates (at
+most sixteen, each for the intents written on the grant), and nothing else on
+this surface.
 See [capability-grants.md](capability-grants.md).
 
 ## The entity-event journal
@@ -830,7 +832,11 @@ notification presentation are outside this transport.
 There is **no general API query**
 over the journal; `listEntityEvents` exists in code and is used by the e2e
 suite reading Postgres directly through the same RLS session layer. The
-journal is append-only by design (`test:perf` runs accumulate rows).
+journal is append-only by convention: no core path deletes events
+(`test:perf` runs accumulate rows), and the only core update assigns the
+delivery cursor. The database does not enforce it — the tenant-isolation
+policy on `platform.entity_events` covers all commands, so code running as the
+application role can update or delete its own tenant's events.
 
 ## Environment configuration
 
@@ -981,10 +987,14 @@ generate` before first compose up. `--import-realm` imports every file in the
 import directory, and the compose file mounts one bind per realm.
 
 `keycloak/openshapeforge-realm.json` (realm `openshapeforge`) is the **tenant**
-realm. The repository's test-only authoring layer adds neutral identities
+realm. The development-identity authoring layer
+(`test/fixtures/authoring/development-identities`) adds neutral identities
 (password `test`) with a `tid` tenant attribute: `tenant-a-admin`,
 `tenant-a-user`, `tenant-a-no-access` (tenant `11111111-…`) and
-`tenant-b-user` (tenant `33333333-…`). The interactive client is
+`tenant-b-user` (tenant `33333333-…`). The root `authoring.config.yaml` mounts
+that layer, so these users are in every generated tenant realm, not only the
+local one: a production realm keeps them with passwords read from the
+environment instead of `test`. The interactive client is
 `openshapeforge-gateway` (secret `dev-secret`) — the e2e suite uses it for the
 password-grant bearer test.
 

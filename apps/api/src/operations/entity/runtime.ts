@@ -44,6 +44,7 @@ import type {
   EntityOperationResult,
   GeneratedCrudExposureOperation,
   GeneratedCrudTable,
+  ListPageInput,
 } from "./types.js";
 import { fieldNameForColumn } from "./columns.js";
 import {
@@ -806,6 +807,24 @@ function projectedOfferIntents(
   return candidates.filter((intent) => projected.has(intent));
 }
 
+/**
+ * The page a caller may ask for, and nothing else: an execute body is not
+ * schema-checked for list, and spreading it whole would let a caller supply
+ * the runtime-only `fixedWhere` (an unguarded predicate on any column) or a
+ * different `table`.
+ */
+function listPageInput(input: EntityOperationInput | undefined): ListPageInput {
+  if (!input) return {};
+  const { limit, cursor, filter, sort, includeTotalCount } = input;
+  return {
+    ...(limit !== undefined ? { limit } : {}),
+    ...(cursor !== undefined ? { cursor } : {}),
+    ...(filter !== undefined ? { filter } : {}),
+    ...(sort !== undefined ? { sort } : {}),
+    ...(includeTotalCount !== undefined ? { includeTotalCount } : {}),
+  };
+}
+
 /** Interface-neutral dispatcher used by REST, MCP and future transports. */
 export async function executeEntityOperation(
   db: OpenShapeForgeDatabase,
@@ -873,8 +892,8 @@ export async function executeEntityOperation(
     switch (request.operation.intent) {
       case "list": {
         const connection = await listGeneratedEntities(db, session, {
+          ...listPageInput(request.input),
           table: table.name,
-          ...request.input,
         });
         const targets = connection.rows.map((row) => offerTarget(row, table));
         const unavailableByTarget = await businessAndLeaseUnavailability(

@@ -11,7 +11,7 @@ import {
   generatedCrudError,
   assertClassifiedQueryAllowed,
 } from "./catalog.js";
-import { fieldColumnMap, fieldNameForColumn } from "./columns.js";
+import { fieldColumnMap, fieldNameForColumn, primaryKeyEquals } from "./columns.js";
 import { listGeneratedEntitiesForTable } from "./queries.js";
 import type {
   CountedEntityConnection,
@@ -73,7 +73,7 @@ export async function listGeneratedEntityRelation(
   const parent = input.parentTable;
   const target = input.targetTable;
   if (!parent.primaryKey || !target.primaryKey) throw generatedCrudError("Relationship requires primary keys.", "INTERNAL_SERVER_ERROR");
-  const parentPredicate = sql`${sql.id("relation_parent", parent.primaryKey)}::text = ${String(parentId)}
+  const parentPredicate = sql`${primaryKeyEquals(parent, String(parentId), "relation_parent")}
     ${parent.tenantScoped ? sql`and relation_parent.tenant_id = ${session.tenantId}` : sql``}`;
   let where;
   let orderBy;
@@ -95,7 +95,7 @@ export async function listGeneratedEntityRelation(
     const columnTable = belongsTo ? parent : target;
     const column = columnTable.columns.find((column) => column.name === relationship.foreignKey);
     if (!column) throw generatedCrudError("Relationship foreign-key metadata is invalid.", "INTERNAL_SERVER_ERROR");
-    assertClassifiedQueryAllowed(columnTable, session, { filter: { [fieldNameForColumn(column)]: parentId } });
+    assertClassifiedQueryAllowed(columnTable, session, { filter: { [fieldNameForColumn(column)]: parentId } }, true);
     if (isElicitedOutputColumn(columnTable, column)) throw generatedCrudError("Secure input cannot be traversed as a relationship.", "FORBIDDEN");
     const join = belongsTo
       ? sql`${sql.id("relation_parent", column.name)} = ${sql.id("row_source", target.primaryKey)}`

@@ -5,6 +5,7 @@ import { withDbSession, type DbSessionInput } from "../db/session.js";
 import type { DB } from "../generated/db/types.js";
 import { jsonbLiteral } from "../db/sql-helpers.js";
 import { getGeneratedCrudTables, requireEntityOperation } from "../operations/entity/catalog.js";
+import { primaryKeyEquals } from "../operations/entity/columns.js";
 import type { GeneratedCrudTable } from "../operations/entity/types.js";
 import { mapEntityEvent, type EntityEventRecord } from "./entity-events.js";
 
@@ -59,7 +60,7 @@ async function projectChange(trx: Transaction<DB>, session: DbSessionInput, even
     // Current RLS, including owner and record ACL policies, is authoritative.
     const visible = await sql<{ id: string }>`select ${sql.id(table.primaryKey)}::text as id
       from ${sql.id(table.schema, table.table)}
-      where ${sql.id(table.primaryKey)}::text = ${event.aggregateId}
+      where ${primaryKeyEquals(table, event.aggregateId)}
         and tenant_id = ${session.tenantId} limit 1`.execute(trx);
     if (!visible.rows.length) return;
   }

@@ -37,11 +37,29 @@ contract. It changes the editable suggested credential label so multiple
 passkeys are distinguishable by realm, client platform and local registration
 time.
 
+## Keycloak 26.7.3 WebAuthn registration script
+
+- Project: Keycloak (https://www.keycloak.org/)
+- Source: `themes/src/main/resources/theme/base/login/resources/js/webauthnRegister.js`
+- License: **Apache-2.0** — full text below.
+- Role: base for the modified OpenShapeForge child-theme module at
+  `theme/openshapeforge/login/resources/js/webauthnRegisterAutoLabel.js`,
+  which the template above imports.
+
+The modified module keeps Keycloak's WebAuthn registration flow and form
+fields. It removes the browser prompt that asked for a credential label and
+stores the label the template suggests instead.
+
+Both modified files are copied into the Keycloak image with the theme. They
+carry `SPDX-License-Identifier: BUSL-1.1 AND Apache-2.0`: the Keycloak-derived
+portions remain under Apache-2.0, the OpenShapeForge modifications are under
+BUSL-1.1.
+
 ## License texts
 
 ### Apache License 2.0
 
-Applies to `apple-identity-provider` and the Keycloak template above. Reproduced here so this file is
+Applies to `apple-identity-provider` and the two Keycloak theme files above. Reproduced here so this file is
 self-contained: the root notices file is generated from the JavaScript
 dependency tree and its contents change with that tree.
 

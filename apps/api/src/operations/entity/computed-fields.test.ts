@@ -77,3 +77,17 @@ describe("computed label rules", () => {
     expect(result.items.map(({ label }) => label)).toEqual(["Contactpersoon"]);
   });
 });
+
+test("an unclosed description placeholder is left as text in linear time", () => {
+  const unclosed = `{{${" ".repeat(1_998)}x`;
+  const started = performance.now();
+  const result = evaluateLabelRules(relationTable, [{ ...rules[1]!, description_template: unclosed }], {
+    display_name: "Robin de Vries",
+    relation_type: "person",
+  });
+  expect(performance.now() - started).toBeLessThan(250);
+  expect(result.items[0]!.description).toBe(unclosed);
+  expect(evaluateLabelRules(relationTable, [{ ...rules[1]!, description_template: "Hi {{ displayName \n}}" }], {
+    display_name: "Robin", relation_type: "person",
+  }).items[0]!.description).toBe("Hi Robin");
+});

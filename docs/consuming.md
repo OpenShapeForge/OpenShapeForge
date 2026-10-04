@@ -36,11 +36,14 @@ then install by name (Bun and npm both read `.npmrc`):
 bun add @openshapeforge/compiler
 ```
 
-Alternatively, every workflow run — including pull requests touching the
-compiler or either public runtime contract package — uploads all three tarballs
-as one run artifact named `openshapeforge-compiler-npm-<sha>` (90-day
-retention). Download it from the run's Artifacts section (or `gh run
-download`) and install the dependency tarballs together:
+Alternatively, every run of that workflow uploads the compiler and its two
+runtime contract packages as one run artifact named
+`openshapeforge-compiler-npm-<sha>` (90-day retention). Runs also happen for
+pull requests, including pull requests from forks, so an artifact is built from
+whatever code that pull request contains, before anyone has reviewed it. Install
+a run artifact only from a `push` run on `main` (or `hans/dev` for the dev
+channel), never from a pull-request run. Download it from the run's Artifacts
+section (or `gh run download`) and install the dependency tarballs together:
 
 ```sh
 npm install \
@@ -49,9 +52,12 @@ npm install \
   ./openshapeforge-compiler-0.2.0.tgz
 ```
 
-Either way the content is proven before it ships: CI installs the tarball into
-a scratch project and regenerates this repository's committed artifacts from
-the packaged bin, byte-for-byte.
+For those three packages, CI checks the content before it ships: it installs
+the tarballs into a scratch project and regenerates this repository's
+committed artifacts from the packaged bin, byte-for-byte. The other published
+packages (`@openshapeforge/documents`, `plugin-runtime`, `versioning` and
+`workflow-layout`) get only a pack dry run in that workflow; no install or
+smoke test runs against their tarballs.
 
 ## Setup
 
@@ -190,13 +196,16 @@ repo bundling this package needs to do the same.
   entity is absent is not lowered (recorded in
   `relationshipStatus.skippedReferences`). Cross-module FKs between entities
   are registered by the compiler itself.
-- **Retention is advisory metadata; there is no enforcement runtime.** The
-  compiler emits a `retention` block (clock, rules, legal hold, review gates,
-  crypto-delete key, erasure cascades) into the DB manifest, but nothing reads
-  it: no scheduler deletes/anonymizes data past its window, no legal hold is
-  honored, and there is no cross-entity data-subject erasure primitive. See
-  [retention.md](retention.md); building the enforcement job and the erasure
-  primitive are tracked as follow-up issues.
+- **Retention is enforced only at hard delete; there is no scheduled
+  executor.** The compiler emits a `retention` block (clock, rules, legal hold,
+  review gates, crypto-delete key, erasure cascades) into the DB manifest. The
+  reference API's generic hard delete reads it and refuses deletion inside a
+  configured `minimum` period or while the record's active-hold column is
+  true. Nothing else acts on it: no scheduler deletes/anonymizes data past its
+  window, and there is no cross-entity data-subject erasure primitive. A host
+  that does not use the reference API runtime gets none of this enforcement.
+  See [retention.md](retention.md#runtime-enforcement); building the executor
+  and the erasure primitive are tracked as follow-up issues.
 - **A host that does not use the reference API migrator must consume the
   plugin migration registry itself.** Apply every entry, in registry order,
   after the generated tables exist, on every run — each in its own

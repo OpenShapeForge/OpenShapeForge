@@ -5,6 +5,7 @@ import type { DB } from "../../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { generatedCrudError } from "./catalog.js";
+import { primaryKeyEquals } from "./columns.js";
 import { notAuthorizedRefusal } from "./authorization-refusal-text.js";
 import { operationFailure } from "@openshapeforge/operations";
 import type { GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
@@ -206,7 +207,7 @@ export async function assertRecordPermissionInTransaction(
       ${config.empty === "public"}
     ) as allowed
     from ${sql.id(table.schema, table.table)} as row_source
-    where ${sql.id("row_source", table.primaryKey)}::text = ${id}
+    where ${primaryKeyEquals(table, id, "row_source")}
       ${tenantWhere}
     limit 1
   `.execute(trx);

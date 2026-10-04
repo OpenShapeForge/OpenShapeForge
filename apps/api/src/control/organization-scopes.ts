@@ -513,6 +513,9 @@ export async function ensureOrganizationScope(
   settings: OrganizationScopeSettings,
 ): Promise<OrganizationScopeState> {
   // Host mode has one Git-owned resource; tenant provisioning cannot mutate it.
+  // Existing organization resources are maintained by the host's authored
+  // realm and deployment reconciliation, not by this provisioning operation.
+  // New host organizations use the shared resource (organization-context.md).
   if (usesHostOrganizationContext()) return {
     scope: "organization", audiences: [hostMcpResource()], actions: [], registrationPolicyPresent: false,
   };

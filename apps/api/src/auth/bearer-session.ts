@@ -112,7 +112,10 @@ export async function resolveVerifiedBearerSession(
         !(typeof claims.aud === "string" ? [claims.aud] : claims.aud ?? [])
           .includes(options.requiredAudience)) return EMPTY_SESSION;
     const groups = identity.groups ?? [];
-    const hostMode = hostOrganizationContext();
+    // A bound resource already selects an organization through its exact
+    // audience, membership and registry mapping. The shared host surface
+    // needs a single selected membership because it has no such path binding.
+    const hostMode = hostOrganizationContext() && !options.organization;
     const configuredService = hostMode
       ? configuredOrganizationServiceAccount(claims, identity.tenantId)
       : undefined;

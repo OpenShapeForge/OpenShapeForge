@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
 import { deriveEntityOsfTypes, deriveProviderOsfTypes, normalizeEntityFields, withBaseTypes } from "./entity-fields.js";
 import { resolveStorageColumns } from "./compiler/storage.js";
 import { resolveRelationships } from "./compiler/relationships.js";
 import { resolveModelFields } from "./compiler/model.js";
 import type { CoreEntity, Field, OperationCatalogDefinition } from "./types.js";
-import { assertNoRelationshipsBlock, type LoadedArtifacts } from "./loader.js";
+import { assertNoRelationshipsBlock, loadOsfTypeCatalogSources, type LoadedArtifacts } from "./loader.js";
 
 const entity = (name: string, fields: Field[]): CoreEntity => ({
   schemaVersion: 3, kind: "coreEntity", module: "core", entity: name, title: name, fields,
@@ -17,6 +18,34 @@ const catalog = () => deriveEntityOsfTypes([page, block], {
 });
 
 describe("one relational field contract", () => {
+  test("the shipped catalog composes Conversation with its canonical identity alias", () => {
+    const shipped = Object.assign({}, ...loadOsfTypeCatalogSources(
+      resolve(import.meta.dir, "../../config/authoring"),
+    ).map(source => source.types));
+    const conversation = {
+      ...entity("Conversation", [{ key: "id", osfType: "conversationId" }]),
+      operations: { list: { implementation: { type: "entity", action: "list" } } },
+    } as unknown as CoreEntity;
+    const derived = deriveEntityOsfTypes([conversation], shipped);
+    expect(shipped).not.toHaveProperty("conversationId");
+    expect(derived.conversationId).toMatchObject({
+      kind: "entityId", entity: "Conversation", baseType: "string", validation: { format: "uuid" },
+      optionSource: { type: "entity", source: "Conversation", valueField: "id" },
+      render: { input: "EntityReferenceSelect", display: "EntityReferenceDisplay" },
+    });
+    expect(derived.conversationId!.lookup).toBeUndefined();
+    expect(JSON.stringify(derived.conversationId)).not.toContain("remoteUrl");
+    const normalized = normalizeEntityFields(conversation, derived);
+    expect(normalized.fields[0]).toMatchObject({ key: "id", baseType: "string", validation: { format: "uuid" } });
+    expect(resolveRelationships({ coreEntity: normalized, profiles: [] } as unknown as LoadedArtifacts)).toEqual([]);
+    const message = normalizeEntityFields(entity("Message", [
+      { key: "conversation", osfType: "Conversation", required: true },
+    ]), derived);
+    expect(resolveStorageColumns(message.fields, [])).toMatchObject([{ field: "conversation", type: "uuid" }]);
+    expect(resolveRelationships({ coreEntity: message, profiles: [] } as unknown as LoadedArtifacts))
+      .toMatchObject([{ key: "conversation", target: "Conversation", foreignKey: "conversation_id" }]);
+  });
+
   test("semantic image refinement retains the Document UUID relation and ordered transforms", () => {
     const document = entity("Document", []);
     const image = { label: { en: "Image" }, baseType: "string" as const, entity: "Document", validation: { maxLength: 36 } };

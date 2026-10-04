@@ -255,18 +255,6 @@ types:
       display: TextDisplay
       input: Input
 
-  conversationId:
-    label: { en: Conversation ID, nl: Conversatie-ID }
-    baseType: string
-    icon: MessageSquare
-    lookup:
-      provider: messaging.conversations
-      remoteUrl: /api/runtime/lookups?osfType=conversationId
-      searchParam: search
-    render:
-      display: TextDisplay
-      input: Input
-
   identityAssuranceLevel:
     label: { en: Identity assurance level, nl: Identificatieniveau }
     pluralLabel: { en: Identity assurance levels, nl: Identificatieniveaus }

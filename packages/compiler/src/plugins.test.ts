@@ -136,7 +136,9 @@ describe("compiler plugins", () => {
     for (const artifact of all) {
       for (const match of artifact.contents.matchAll(/"?remoteUrl"?\s*:\s*"([^"]*)"/g)) remoteUrls.add(match[1]!);
     }
-    expect(remoteUrls.size).toBeGreaterThan(0);
+    // The retired Conversation lookup must not return; actual pickers are
+    // proved below through the canonical identity aliases and list Operations.
+    expect(remoteUrls.has("/api/runtime/lookups?osfType=conversationId")).toBe(false);
     expect([...remoteUrls].filter((url) => !url.startsWith("/api/"))).toEqual([]);
     // The designer's core-entity-options route never existed; nothing may point at it, authored or generated.
     expect(all.filter((artifact) => artifact.contents.includes("core-entity-options")).map((artifact) => artifact.path)).toEqual([]);

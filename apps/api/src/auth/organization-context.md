@@ -61,9 +61,22 @@ verification. In host mode only, this exact resource audience replaces the
 static authorized-party allowlist so dynamically registered OAuth clients can
 authenticate; a nonempty verified `azp` is still required. The generic API and
 API-key exchange paths retain the static allowlist. Signature, issuer and
-configured API audience remain mandatory verifier checks for both paths when
-configured. Supplying `requiredAudience` makes that endpoint bearer-only, also
+configured API audience remain mandatory verifier checks for the generic and
+shared resource paths when configured. Supplying `requiredAudience` makes that endpoint bearer-only, also
 outside host mode. Resource-origin configuration belongs to the transport/host.
+
+An organization-bound MCP resource is also available in host mode when the
+host's authored realm and deployment reconciliation maintain that resource's
+`mcp-resource:<alias>` scope and registration policy. Its exact resource audience,
+verified nonempty `azp`, organization membership and tenant registry mapping
+replace the generic API audience and static client allowlist. The path selects
+one membership from a token that may contain several; a conflicting `tid` is
+still refused. The shared host resource keeps its single-membership requirement.
+
+Host-mode tenant provisioning does not create per-organization resource scopes;
+new host organizations use the shared `/api/mcp` resource. Existing organization
+resources remain the host deployment's responsibility. Publishing their metadata
+does not create a scope, register a client or grant access.
 
 Explicit deployment service identities may use a `tid`-only token. The verified
 client and service-account username must match the configured credential. Its

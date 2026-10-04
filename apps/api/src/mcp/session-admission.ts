@@ -42,9 +42,6 @@ export function createMcpSessionAdmission(
     resource: string;
   }> {
     const routed = (request.params as { alias?: unknown } | undefined)?.alias;
-    if (usesHostOrganizationContext() && routed !== undefined) {
-      throw new HttpError(404, "NOT_FOUND", "Unknown MCP resource.");
-    }
     // The parametric route also matches a reserved first segment and a
     // malformed alias; the one path parser decides, not the route table.
     const alias = routed === undefined ? undefined : organizationAliasFromPath(request.url);
@@ -81,7 +78,7 @@ export function createMcpSessionAdmission(
       resolved = await resolveSessionContext(headersFromFastify(mcpHeaders), {
         db: options.db,
         ...(binding ? { organization: binding } : {}),
-        ...(usesHostOrganizationContext() ? { requiredAudience: hostMcpResource() } : {}),
+        ...(usesHostOrganizationContext() && !binding ? { requiredAudience: hostMcpResource() } : {}),
       });
     } catch (error) {
       if (error instanceof OrganizationBindingError) {

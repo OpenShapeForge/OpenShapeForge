@@ -85,4 +85,27 @@ describe("generated authorization fixture metadata", () => {
       effectiveClientRoles: ["Application.Editor", "Data.All.ReadWrite"],
     });
   });
+
+  test("refuses one role name with different composites in two namespaces", () => {
+    expect(() => buildRuntimeAuthMetadata({
+      clientRoleComposites: {
+        "application-api": { Editor: { composites: { "resource-api": ["Data.All.Read"] } } },
+        "billing-api": { Editor: { composites: { "resource-api": ["Data.All.ReadWrite"] } } },
+      },
+    })).toThrow(/Role "Editor" is declared by client "application-api" and client "billing-api"/);
+    expect(() => buildRuntimeAuthMetadata({
+      realmRoles: { Editor: { composites: { "resource-api": ["Data.All.Read"] } } },
+      clientRoleComposites: {
+        "billing-api": { Editor: { composites: { "resource-api": ["Data.All.ReadWrite"] } } },
+      },
+    })).toThrow(/Role "Editor" is declared by the realm and client "billing-api"/);
+
+    const identical = buildRuntimeAuthMetadata({
+      realmRoles: { Editor: { composites: { "resource-api": ["Data.All.Read"] } } },
+      clientRoleComposites: {
+        "billing-api": { Editor: { composites: { "other-api": ["Data.All.Read"] } } },
+      },
+    });
+    expect(identical.realmRoleComposites).toEqual({ Editor: ["Data.All.Read"] });
+  });
 });

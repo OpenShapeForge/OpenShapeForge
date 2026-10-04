@@ -169,8 +169,8 @@ export async function acceptPendingInvitation(
 /** The refusal, worded so the person knows what has to happen next. */
 export function notInvited(session: SessionInput, claims: IdentityClaims): NotInvitedError {
   console.warn(
-    `[auth] Refused ${claims.email ?? claims.subject} (${claims.issuer}) in tenant ` +
-      `${session.tenantId}: nobody in this organization carries that e-mail and no ` +
+    `[auth] Refused subject ${claims.subject} (${claims.issuer}) in tenant ` +
+      `${session.tenantId}: nobody in this organization carries its e-mail and no ` +
       "invitation is pending.",
   );
   return new NotInvitedError(

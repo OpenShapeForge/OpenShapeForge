@@ -107,16 +107,30 @@ export function buildRuntimeAuthMetadata(
   authConfig: RuntimeAuthorizationConfig,
 ): Pick<RuntimeMetadataData, "realmRoleComposites" | "personas"> {
   const realmRoleComposites: Record<string, string[]> = {};
+  // The web runtime keys composites by role name alone, so a name two
+  // namespaces declare differently has no single correct expansion.
+  const declaredBy = new Map<string, string>();
+  const declareComposites = (owner: string, roleName: string, composites: string[]) => {
+    const name = normalizeKeycloakRoleName(roleName);
+    const roles = normalizeRoleList(composites);
+    const previous = declaredBy.get(name);
+    if (previous !== undefined && previous !== owner &&
+        JSON.stringify(realmRoleComposites[name]) !== JSON.stringify(roles)) {
+      throw new Error(
+        `Role "${name}" is declared by ${previous} and ${owner} with different composites; ` +
+          "the web runtime role metadata cannot tell them apart.",
+      );
+    }
+    declaredBy.set(name, owner);
+    realmRoleComposites[name] = roles;
+  };
   for (const [roleName, role] of Object.entries(authConfig.realmRoles ?? {})) {
-    const roles = Object.values(role.composites ?? {}).flat();
-    realmRoleComposites[normalizeKeycloakRoleName(roleName)] = normalizeRoleList(roles);
+    declareComposites("the realm", roleName, Object.values(role.composites ?? {}).flat());
   }
 
-  for (const definitions of Object.values(authConfig.clientRoleComposites ?? {})) {
+  for (const [clientId, definitions] of Object.entries(authConfig.clientRoleComposites ?? {})) {
     for (const [roleName, role] of Object.entries(definitions)) {
-      realmRoleComposites[normalizeKeycloakRoleName(roleName)] = normalizeRoleList(
-        Object.values(role.composites).flat(),
-      );
+      declareComposites(`client "${clientId}"`, roleName, Object.values(role.composites).flat());
     }
   }
 

@@ -210,10 +210,16 @@ export type PluginOperationAuth =
     }
   | {
       mode: "session";
-      /** Omitted means any authenticated session; [] deliberately denies all. */
+      /** [] deliberately denies all. */
       roles?: string[];
       /** Every group requires at least one matching role; groups are combined with AND. */
       roleGroups?: string[][];
+      /**
+       * Admits every authenticated tenant session. Required when neither
+       * `roles` nor `roleGroups` is declared, so an omitted role list never
+       * fails open by accident; the compiled contract does not carry it.
+       */
+      anyAuthenticatedSession?: true;
       scopes?: string[];
       /** Current target-record permission checked in addition to roles. */
       recordPermission?: import("./authoring/types/common.js").RecordPermissionAction;

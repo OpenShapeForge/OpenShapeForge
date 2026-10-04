@@ -244,16 +244,27 @@ export function createModuleSessionCapability(
 ): TrustedSessionContext {
   const capability = {
     ...session,
-    roles: Object.freeze([...session.roles]),
     groups: Object.freeze([...session.groups]),
     ...(session.oauthScopes
       ? { oauthScopes: Object.freeze([...session.oauthScopes]) }
       : {}),
   };
-  // A stateful MCP server lives across HTTP requests. Its bearer roles and
-  // login binding are pinned, while domain memberships are deliberately
-  // refreshed from storage for every request. A getter keeps the plugin-facing
-  // capability immutable while reading the latest core-owned membership set.
+  // A stateful MCP server lives across HTTP requests. Its login binding is
+  // pinned, while roles, scope and domain memberships are the current
+  // request's (mcp/stateful-session-authorization.ts): a copy taken here would
+  // keep a revoked role alive for as long as the client stays connected.
+  // Getters keep the plugin-facing capability immutable while reading the
+  // latest core-owned values.
+  Object.defineProperty(capability, "roles", {
+    enumerable: true,
+    configurable: false,
+    get: () => Object.freeze([...session.roles]),
+  });
+  Object.defineProperty(capability, "scope", {
+    enumerable: true,
+    configurable: false,
+    get: () => session.scope,
+  });
   Object.defineProperty(capability, "relationGroupIds", {
     enumerable: true,
     configurable: false,

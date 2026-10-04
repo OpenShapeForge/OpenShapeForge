@@ -181,6 +181,17 @@ jobs:
           E2E_WEB_URL: http://localhost:3000
         run: bun run test:browser
 
+      - name: Retain browser authentication evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: web-e2e-evidence
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Collect traces and server logs from a failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

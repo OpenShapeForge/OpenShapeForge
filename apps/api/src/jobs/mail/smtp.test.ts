@@ -108,6 +108,14 @@ describe("smtp provider", () => {
     expect(deferred.phase).toBe("before-data");
   });
 
+  test("a failure names the step and the reply code, never the recipient", async () => {
+    const port = await fakeSmtp({ replies: { RCPT: "550 5.1.1 <someone@example.test>: Recipient address rejected\r\n" } });
+    const rejected = await failure(port);
+    expect(rejected.message).toBe("RCPT TO (recipient 1 of 1): 550 5.1.1 <[address]>: Recipient address rejected");
+    const late = await fakeSmtp({ replies: { DATA: "554 someone@example.test refused\r\n" } });
+    expect((await failure(late)).message).not.toContain("someone@example.test");
+  });
+
   test("silence after the message body is after-data — the one outcome nobody may retry", async () => {
     const hang = await fakeSmtp({ afterData: "hang" });
     const timedOut = await failure(hang);
@@ -121,6 +129,46 @@ describe("smtp provider", () => {
     const refused = await failure(tempfail);
     expect(refused.phase).toBe("before-data");
   });
+
+  test("a relay that stalls in a handshake or floods a reply fails the delivery instead of holding the worker", async () => {
+    const stalling = async (onConnection: (socket: Socket) => void) => {
+      const server = createServer(onConnection);
+      servers.push(server);
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      return (server.address() as { port: number }).port;
+    };
+    const send = (port: number, secure = false) => {
+      const started = Date.now();
+      return createSmtpMailProvider({ host: "127.0.0.1", port, secure, from: "sender@example.test", timeoutMs: 200, rejectUnauthorized: true })
+        .send(message)
+        .then(() => { throw new Error("expected the delivery to fail"); }, (error: MailDeliveryError) => ({ error, elapsed: Date.now() - started }));
+    };
+    // smtps:// that accepts TCP and never starts TLS.
+    const silent = await send(await stalling(() => {}), true);
+    expect(silent.error.phase).toBe("before-data");
+    expect(silent.error.message).toContain("SMTP TLS handshake timed out");
+    expect(silent.elapsed).toBeLessThan(2_000);
+    // STARTTLS answered with 220, then nothing.
+    const upgraded = await send(await stalling((socket) => {
+      socket.write("220 fake ESMTP\r\n");
+      socket.on("data", (chunk) => {
+        const line = chunk.toString("utf8");
+        if (line.startsWith("EHLO")) socket.write("250-fake\r\n250 STARTTLS\r\n");
+        else if (line.startsWith("STARTTLS")) socket.write("220 go ahead\r\n");
+      });
+    }));
+    expect(upgraded.error.phase).toBe("before-data");
+    expect(upgraded.error.message).toContain("SMTP TLS handshake timed out");
+    expect(upgraded.elapsed).toBeLessThan(2_000);
+    // A reply line that never ends: 100 KiB without a CRLF.
+    const flooded = await send(await stalling((socket) => {
+      socket.on("error", () => {});
+      socket.write(`220 ${"x".repeat(100 * 1024)}`);
+    }));
+    expect(flooded.error.phase).toBe("before-data");
+    expect(flooded.error.message).toContain("exceeds 64 KiB");
+    expect(flooded.elapsed).toBeLessThan(2_000);
+  }, 10_000);
 
   test("the URL carries scheme, port and credentials; the sender is separate", () => {
     expect(readSmtpConfig({})).toBeNull();

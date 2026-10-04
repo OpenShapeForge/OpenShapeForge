@@ -60,6 +60,7 @@ operations:
           highestSourceVersion: { type: [string, "null"] }
     auth:
       mode: session
+      anyAuthenticatedSession: true
     tenancy:
       mode: required
     effects:
@@ -118,7 +119,7 @@ operations:
         required: [batches]
         properties:
           batches: { type: array, items: { type: object } }
-    auth: { mode: session }
+    auth: { mode: session, anyAuthenticatedSession: true }
     tenancy: { mode: required }
     effects: { data: write, external: none }
     reliability:
@@ -168,6 +169,7 @@ operations:
           sourceVersion: { type: [string, "null"] }
     auth:
       mode: session
+      anyAuthenticatedSession: true
     tenancy:
       mode: required
     effects:
@@ -226,6 +228,7 @@ operations:
           removed: { type: integer, minimum: 0 }
     auth:
       mode: session
+      anyAuthenticatedSession: true
     tenancy:
       mode: required
     effects:

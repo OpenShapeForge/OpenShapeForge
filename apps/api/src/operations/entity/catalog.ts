@@ -211,12 +211,13 @@ export function projectGeneratedEntityRow(
 export function assertElicitedQueryAllowed(
   table: GeneratedCrudTable,
   input: Pick<ListPageInput, "filter" | "sort">,
+  exactFilterFields = false,
 ): void {
   const column = elicitedOutputColumn(table);
   if (!column) return;
   const field = fieldNameForColumn(column);
   const filtered = Object.keys(input.filter ?? {}).some(
-    (candidate) => candidate === field || candidate === `${field}In`,
+    (candidate) => candidate === field || (!exactFilterFields && candidate === `${field}In`),
   );
   if (filtered || input.sort?.field === field) {
     throw generatedCrudError(
@@ -234,6 +235,7 @@ export function assertClassifiedQueryAllowed(
     filter?: Record<string, unknown> | null;
     sort?: { field?: string | null; direction?: string | null } | null;
   },
+  exactFilterFields = false,
 ): void {
   assertClassifiedQueryFieldsAllowed(
     table.columns,
@@ -242,6 +244,7 @@ export function assertClassifiedQueryAllowed(
     entityLabel(table),
     input.filter,
     input.sort,
+    exactFilterFields,
   );
 }
 

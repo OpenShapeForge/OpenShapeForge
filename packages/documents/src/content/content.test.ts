@@ -388,6 +388,15 @@ describe("template variants and local/global variables", () => {
     await rejectsCode(f.run(), "MISSING_VARIABLE");
   });
 
+  test("refuses an unclosed variable in linear time", async () => {
+    const f = fixture([text("open", `{{${" ".repeat(19_000)}x`)]);
+    const started = performance.now();
+    await rejectsCode(f.run(), "INVALID_VALUE");
+    expect(performance.now() - started).toBeLessThan(1_000);
+    f.versions.root = version("root", [text("spaced", "{{  local.name \n}}")]);
+    expect((await materializeTemplateContent({ ...f.request, parameters: { name: "Acme" } }, f.registry, f.resolvers)).blocks[0]!.values.body).toBe("Acme");
+  });
+
   test("a variable filled into a Markdown field is escaped text, other fields keep the raw value", async () => {
     const f = fixture([text("md", "**Client:** {{local.name}}"), text("whole", "{{local.name}}"), text("plain", "Plain {{local.name}}")]);
     f.registry.TextSection = { ...f.registry.TextSection!, fields: { body: { osfType: "markdown", baseType: "string", required: true } } };

@@ -338,7 +338,12 @@ function canonicalDecimal(value: string): string {
   const [sign, digits] = value.startsWith("-") ? ["-", value.slice(1)] : ["", value];
   const [integer, fraction = ""] = digits.split(".");
   const trimmedInteger = integer!.replace(/^0+(?=\d)/, "");
-  const trimmedFraction = fraction.replace(/0+$/, "");
+  // A backwards scan, not /0+$/: the regex retries every zero run from each
+  // of its positions, quadratic on "0.000…01", and this runs on variables
+  // before any resolver or authorization.
+  let end = fraction.length;
+  while (end > 0 && fraction.charCodeAt(end - 1) === 48) end -= 1;
+  const trimmedFraction = fraction.slice(0, end);
   const text = trimmedFraction ? `${trimmedInteger}.${trimmedFraction}` : trimmedInteger;
   return text === "0" ? "0" : `${sign}${text}`;
 }

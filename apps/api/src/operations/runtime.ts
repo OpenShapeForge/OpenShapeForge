@@ -707,13 +707,16 @@ export function requireOperationAuthorization(
     return;
   }
   // A capability Operation takes the grant session core resolved from the
-  // presented token and nothing else; the grant's own Operation list is the
-  // whole authorization, there are no roles to consult.
+  // presented token and nothing else; the grant's own Operation list and its
+  // subject entity are the whole authorization, there are no roles to consult.
   if (operation.auth.mode === "capability") {
     if (!session || session.credential !== "grant" || !session.grant || !session.tenantId) {
       throw capabilityGrantRefusal("GRANT_INVALID");
     }
     if (!session.grant.operations.includes(operation.key)) throw capabilityGrantRefusal("GRANT_SCOPE");
+    if (operation.target && operation.target.entityName !== session.grant.subject.entity) {
+      throw capabilityGrantRefusal("GRANT_SCOPE");
+    }
     return;
   }
   if (operation.auth.mode !== "session") return;
@@ -956,8 +959,11 @@ async function invokeGuardedCustomOperation(
       () => invokeHandler(customHandlerInput(operation, input)),
     );
   }
+  // Lease and challenge consumption are keyed on the record version; without
+  // one they would silently not run.
   if (!operation.target || operation.target.scope !== "record" ||
-    !operation.target.inputField || !context.session || !context.db || !context.platform) {
+    !operation.target.inputField || !context.session || !context.db || !context.platform ||
+    ((operation.concurrency?.editLease || confirmation.mode === "challenge") && !operation.concurrency?.version)) {
     throw operationFailure({
       code: "INTERNAL_SERVER_ERROR",
       message: "The protected Operation contract is incomplete.",
@@ -1236,6 +1242,7 @@ export async function invokeOperation(
   const ownedTarget = captureOwnedTarget(bound.operation, input);
   const run = async (activeContext: Parameters<ModuleOperationHandler>[1]) => {
     requireOperationAuthorization(bound.operation, activeContext.session);
+    assertGrantSubjectTarget(bound.operation, activeContext.session, input);
     const validation = validatorsFor(bound.operation);
     // The compiler augments a custom Operation's canonical schema with the
     // platform-owned mutation controls. Validate that complete request before
@@ -1476,7 +1483,10 @@ export async function invokeOperation(
     context.platform,
     context.session,
     (session) => {
-      const runSeed = bound.maintenanceOwner ? liveMaintenanceRunner(bound.maintenanceOwner, context.platform, session) : undefined;
+      // Only the module's Control handlers receive live maintenance
+      // (docs/maintenance.md), whatever session another of its Operations runs under.
+      const runSeed = bound.maintenanceOwner && bound.operation.auth.mode === "control"
+        ? liveMaintenanceRunner(bound.maintenanceOwner, context.platform, session) : undefined;
       return run({
       ...context,
       ...(session ? { session } : {}),
@@ -1741,6 +1751,20 @@ function bindGrantSubject(
   if (!field) return input;
   if (field in input && input[field] !== session.grant.subject.id) throw capabilityGrantRefusal("GRANT_SCOPE");
   return { ...input, [field]: session.grant.subject.id };
+}
+
+/**
+ * The binding above completes REST input; this holds on every path into a
+ * capability Operation, a handler's nested execute included.
+ */
+function assertGrantSubjectTarget(
+  operation: OperationContract,
+  session: TrustedSessionContext | undefined,
+  input: Record<string, unknown>,
+): void {
+  if (operation.auth.mode !== "capability") return;
+  const field = operation.target?.inputField;
+  if (field && input[field] !== session?.grant?.subject.id) throw capabilityGrantRefusal("GRANT_SCOPE");
 }
 
 export function registerOperationRestRoutes(

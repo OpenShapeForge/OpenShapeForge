@@ -192,7 +192,8 @@ export type IssueCapabilityGrantOptions = {
   /**
    * Proves the issuer holds one intent on one record; throws otherwise. Every
    * delegated record is checked through it before the row is written, so a
-   * grant can never reach a record its issuer could not.
+   * delegated record never reaches past its issuer. The subject is not
+   * checked here; see requireGrantedRecord in modules/record-access.ts.
    */
   assertIssuerAccess?: (record: { entityName: string; id: string; intent: "get" | "update" }) => Promise<void>;
   now?: Date;

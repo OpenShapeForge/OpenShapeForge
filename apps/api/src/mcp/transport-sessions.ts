@@ -245,10 +245,22 @@ export function createTransportSessions(input: {
       await server.connect(
         transport,
       );
-      await withFreshRelationGroupMemberships(
-        session,
-        () => transport.handleNodeRequest(request.raw, reply.raw, request.body),
-      );
+      try {
+        await withFreshRelationGroupMemberships(
+          session,
+          () => transport.handleNodeRequest(request.raw, reply.raw, request.body),
+        );
+      } finally {
+        // The SDK can refuse an initialize before a session exists (an
+        // unacceptable Accept or Content-Type, a batched second initialize).
+        // Nothing would ever release that server: it is in no session map
+        // and the idle sweep never sees it.
+        if (transport.sessionId === undefined) {
+          options.modulePlatform?.unregisterServer(server);
+          void transport.close();
+          void server.close();
+        }
+      }
       return;
     }
 

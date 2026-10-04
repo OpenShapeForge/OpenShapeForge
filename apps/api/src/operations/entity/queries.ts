@@ -160,7 +160,9 @@ function buildFilterConditions(
       const related = getGeneratedCrudTables().find((candidate) => candidate.source?.graphql?.typeName === relationship.target);
       if (!related) throw generatedCrudError(`Relationship filter ${key} has no generated target.`, "INTERNAL_SERVER_ERROR");
       requireEntityOperation(related, "list", session);
-      assertClassifiedQueryAllowed(related, session, { filter: any as Record<string, unknown> });
+      // Sub-filter keys name related fields exactly (see the lookup below).
+      assertClassifiedQueryAllowed(related, session, { filter: any as Record<string, unknown> }, true);
+      assertElicitedQueryAllowed(related, { filter: any as Record<string, unknown> }, true);
       const relatedFields = fieldColumnMap(related);
       const relatedConditions = [];
       for (const [relatedKey, relatedValue] of Object.entries(any as Record<string, unknown>)) {

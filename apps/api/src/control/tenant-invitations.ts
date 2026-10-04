@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { sql } from "kysely";
+import { sql, type RawBuilder } from "kysely";
 import { isEmployeeInvitationRole, normalisedEmail, recordEmployeeInvitation, toInvitation } from "../auth/employee-invitations.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withSystemSession } from "../db/session.js";
@@ -24,6 +24,22 @@ const AUDIT_ACTION: Readonly<Record<InvitationAction, string>> = {
   create: "control.create-tenant-invitation",
   revoke: "control.revoke-tenant-invitation",
   resend: "control.resend-tenant-invitation",
+};
+
+/**
+ * Reads take no lock. Create and resend serialise operator actions on the
+ * tenant without the `for key share` conflict that `for update` has, so the
+ * tenant's foreign-key inserts (sign-ins, receipts, jobs) do not wait for the
+ * Keycloak calls made under it. Revoke keeps `for update`: its pending-row
+ * update matches by e-mail and relies on a tenant-side invitation insert for
+ * that address landing only after it commits.
+ */
+const TENANT_LOCK: Readonly<Record<InvitationAction, RawBuilder<unknown>>> = {
+  list: sql``,
+  get: sql``,
+  create: sql` for no key update`,
+  revoke: sql` for update`,
+  resend: sql` for no key update`,
 };
 
 function invitationTimestamp(value: number | null): string | null {
@@ -70,8 +86,7 @@ export async function manageTenantInvitations(
         }>`
           select id, status, keycloak_realm, keycloak_organization_id
           from platform.tenants
-          where slug = ${input.slug}
-          for update
+          where slug = ${input.slug}${TENANT_LOCK[action]}
         `.execute(trx)).rows[0];
         if (!tenant || tenant.keycloak_realm !== clients.tenantRealm) {
           throw new FirstAdministratorError(

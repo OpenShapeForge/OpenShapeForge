@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Run in its own process: OPENSHAPEFORGE_ORGANIZATION_CONTEXT=host bun test ./apps/api/src/auth/host-organization-session.test.ts
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import Fastify from "fastify";
@@ -25,6 +25,7 @@ import {
 } from "./identity.js";
 import { __setTenantForOrganizationForTests, lookupTenantForOrganization } from "./tenant-resolution.js";
 import { stubLinkedMembershipForTests } from "./identity-link.test-support.js";
+import { notInvited } from "./identity-link-admission.js";
 
 const ISSUER = "https://identity.example.test/realms/host";
 const RESOURCE = "https://api.example.test/api/mcp";
@@ -294,6 +295,22 @@ describe("host organization binding through real bearer verification and resolve
     expect((await resolveSessionContext(new Headers({ authorization: `Bearer ${mintApiKey().token}` }), {
       requiredAudience: RESOURCE,
     })).credential).toBe("none");
+  });
+
+  test("a refused sign-in names the address to the person, never to the log", async () => {
+    const address = "uninvited.private@example.test";
+    __setIdentityLinkForTests(async (session, claims) => { throw notInvited(session as never, claims); });
+    const logged: string[] = [];
+    const warn = spyOn(console, "warn").mockImplementation((...args: unknown[]) => { logged.push(args.map(String).join(" ")); });
+    try {
+      await expect(resolveSessionContext(await headers({ email: address }))).rejects.toMatchObject({
+        code: "NOT_INVITED", message: expect.stringContaining(address),
+      });
+    } finally {
+      warn.mockRestore();
+    }
+    expect(logged.some((line) => line.includes(`Refused subject ${USER}`))).toBe(true);
+    expect(logged.filter((line) => line.includes(address))).toEqual([]);
   });
 });
 

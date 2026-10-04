@@ -6,7 +6,8 @@
  * else lives in the record stored here. Each app constructs its own store with
  * its own key prefix, so a control-plane session and a tenant-app session can
  * never collide on a key and flushing one app's sessions cannot take out the
- * other's. The client options, cluster/TLS handling and read-through cache are
+ * other's. Each session read checks Redis so logout also takes effect in
+ * other server instances. The client options and cluster/TLS handling are
  * the same for every app on purpose: they all run against the same Redis, and
  * a divergence in timeouts or cluster handling would only ever be discovered
  * as an operational surprise in whichever app got it wrong.
@@ -65,7 +66,6 @@ export type SessionStoreOptions = {
   logTag: string;
 };
 
-const SESSION_CACHE_TTL_MS = 1_000;
 /** Default TTL when refreshExpiresAt is unknown (30 minutes). */
 const DEFAULT_SESSION_TTL_S = 1800;
 export const REFRESH_LOCK_TTL_MS = 10_000;
@@ -136,10 +136,6 @@ export function createSessionStore<Extra extends object = {}>(
 
   // Lazy singleton — the connection is created on first use.
   let client: RedisClient | null = null;
-  const sessionCache = new Map<
-    string,
-    { value: StoredSession<Extra> | null; expiresAt: number }
-  >();
 
   function getRedis(): RedisClient {
     client ??= connect(options.logTag);
@@ -164,20 +160,6 @@ export function createSessionStore<Extra extends object = {}>(
     }
   }
 
-  function readSessionCache(sessionId: string): StoredSession<Extra> | null | undefined {
-    const cached = sessionCache.get(sessionId);
-    if (!cached) return undefined;
-    if (cached.expiresAt <= Date.now()) {
-      sessionCache.delete(sessionId);
-      return undefined;
-    }
-    return cached.value;
-  }
-
-  function writeSessionCache(sessionId: string, value: StoredSession<Extra> | null): void {
-    sessionCache.set(sessionId, { value, expiresAt: Date.now() + SESSION_CACHE_TTL_MS });
-  }
-
   return {
     /**
      * TTL is derived from refreshExpiresAt, with a minimum of 60s and a
@@ -186,7 +168,6 @@ export function createSessionStore<Extra extends object = {}>(
     async setSession(sessionId, data) {
       const key = `${sessionPrefix}${sessionId}`;
       await withRedis((redis) => redis.set(key, JSON.stringify(data), "EX", sessionTtl(data)));
-      writeSessionCache(sessionId, data);
     },
 
     async updateSession(sessionId, data) {
@@ -194,29 +175,17 @@ export function createSessionStore<Extra extends object = {}>(
       const result = await withRedis((redis) =>
         redis.set(key, JSON.stringify(data), "EX", sessionTtl(data), "XX"),
       );
-      // A successful SET can be acknowledged after logout's DEL. Never let
-      // that late reply repopulate the local cache with a deleted session.
-      sessionCache.delete(sessionId);
       return result === "OK";
     },
 
     /** Null when missing or expired. */
     async getSession(sessionId) {
-      const cached = readSessionCache(sessionId);
-      if (cached !== undefined) return cached;
-
       const key = `${sessionPrefix}${sessionId}`;
       const raw = await withRedis((redis) => redis.get(key));
-      if (!raw) {
-        writeSessionCache(sessionId, null);
-        return null;
-      }
+      if (!raw) return null;
       try {
-        const parsed = JSON.parse(raw) as StoredSession<Extra>;
-        writeSessionCache(sessionId, parsed);
-        return parsed;
+        return JSON.parse(raw) as StoredSession<Extra>;
       } catch {
-        sessionCache.delete(sessionId);
         return null;
       }
     },
@@ -225,13 +194,11 @@ export function createSessionStore<Extra extends object = {}>(
     async deleteSession(sessionId) {
       const key = `${sessionPrefix}${sessionId}`;
       await withRedis((redis) => redis.del(key));
-      sessionCache.delete(sessionId);
     },
 
     /**
      * An owner token when the lock was acquired, null when another process
-     * holds it. Holding the lock means the next read must see what the
-     * previous holder wrote, so the local cache entry is dropped with it.
+     * holds it. Each session read observes the previous holder's Redis write.
      */
     async acquireRefreshLock(sessionId) {
       const key = `${refreshLockPrefix}${sessionId}`;
@@ -240,7 +207,6 @@ export function createSessionStore<Extra extends object = {}>(
         redis.set(key, ownerToken, "PX", REFRESH_LOCK_TTL_MS, "NX"),
       );
       if (result !== "OK") return null;
-      sessionCache.delete(sessionId);
       return ownerToken;
     },
 
@@ -258,7 +224,6 @@ export function createSessionStore<Extra extends object = {}>(
 
     resetForTests() {
       resetRedisClient();
-      sessionCache.clear();
     },
   };
 }

@@ -73,13 +73,14 @@ function harness() {
     admit: () => true, initialFields: () => ({}), sessionFields: () => ({}),
     refreshInvariant: () => undefined, refreshedFields: () => ({}),
   });
+  const callbacks = config.callbacks!;
   let signedOut = false;
   const logout = createLogoutHandler({
     logTag: "test", keycloak: { logoutUrl: "https://identity.example.test/logout", clientId: "app" },
     auth: async () => ({ sessionId: "s1", expires: "2099-01-01", sub: "person", accessToken: "", idToken: "", roles: [] }),
     deleteSession: store.deleteSession, signOut: async () => { signedOut = true; },
   });
-  const hydrate = () => config.callbacks!.session!({
+  const hydrate = () => callbacks.session!({
     session: { user: {}, expires: "2099-01-01", sub: "", accessToken: "", idToken: "", roles: [] }, token: { sessionId: "s1" },
   } as unknown as Parameters<NonNullable<NonNullable<NextAuthConfig["callbacks"]>["session"]>>[0]) as Promise<Session>;
   return { store, logout, hydrate, signedOut: () => signedOut };
@@ -100,7 +101,7 @@ test("profile hydration read before logout cannot restore the session or project
   expect(await h.store.getSession("s1")).toBeNull();
 });
 
-test("a write applied before logout but acknowledged afterward cannot restore the local cache", async () => {
+test("a write applied before logout but acknowledged afterward cannot restore session authority", async () => {
   const h = harness(); records.set(sessionKey, JSON.stringify(stored()));
   writeGate = Promise.withResolvers<void>(); writeStarted = Promise.withResolvers<void>();
   const release = writeGate;
@@ -110,6 +111,18 @@ test("a write applied before logout but acknowledged afterward cannot restore th
   release.resolve(); await pending;
   expect(records.has(sessionKey)).toBe(false);
   expect(await h.store.getSession("s1")).toBeNull();
+});
+
+test("logout in another store instance immediately invalidates a cached authenticated session", async () => {
+  const proxy = harness();
+  const route = harness();
+  await proxy.store.setSession("s1", { ...stored(), name: "Hydrated Person" });
+  expect((await proxy.hydrate()).accessToken.length > 0).toBe(true);
+  expect((await route.logout()).status).toBe(303);
+  expect(records.has(sessionKey)).toBe(false);
+  const session = await proxy.hydrate();
+  expect(session.error).toBe("RefreshTokenError");
+  expect(Boolean(session.accessToken)).toBe(false);
 });
 
 test("initial sign-in creation remains separate from ordinary existing-session updates", async () => {
@@ -131,7 +144,7 @@ test("initial sign-in creation remains separate from ordinary existing-session u
   expect(commands.at(-1)?.args[2]).toBe("XX");
 });
 
-test("conditional update refuses a removed sid without caching it and keeps the normal TTL policy", async () => {
+test("conditional update refuses a removed sid and keeps the normal TTL policy", async () => {
   const h = harness();
   expect(await h.store.updateSession("s1", stored())).toBe(false);
   expect(await h.store.getSession("s1")).toBeNull();

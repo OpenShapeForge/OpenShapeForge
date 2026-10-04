@@ -48,8 +48,17 @@ test("signs in, ends its app and Keycloak sessions, then requires a fresh login"
   try {
     const response = await replay.get("/", { maxRedirects: 0 });
     const location = response.headers().location;
+    let redirectPath: string | null = null;
+    if (location) {
+      try { redirectPath = new URL(location, WEB_URL).pathname; }
+      catch { redirectPath = "<invalid>"; }
+    }
+    await testInfo.attach("logout-cookie-replay", {
+      body: JSON.stringify({ status: response.status(), redirectPath }),
+      contentType: "application/json",
+    });
     const refused = [302, 303, 307, 308].includes(response.status()) && Boolean(location)
-      && new URL(location!, WEB_URL).pathname === "/login";
+      && redirectPath === "/login";
     expect(refused, "the pre-logout cookie must no longer authorize the protected route").toBe(true);
     const sessionResponse = await replay.get("/api/auth/session");
     const oldSession: unknown = await sessionResponse.json();

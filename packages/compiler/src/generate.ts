@@ -63,6 +63,30 @@ export const DATABASE_ROLES: readonly DatabaseRoleContract[] = [
     purpose: "Definer of the two identity-registry point lookups; owns nothing else." },
 ];
 
+export type DatabaseRoleNames = Readonly<Record<DatabaseRoleContract["key"], string>>;
+
+/** Snapshot trusted build input; database roles are never request/authoring context. */
+export function resolveDatabaseRoleNames(input?: DatabaseRoleNames): DatabaseRoleNames {
+  const keys = DATABASE_ROLES.map((role) => role.key);
+  const candidate = input === undefined
+    ? Object.fromEntries(DATABASE_ROLES.map((role) => [role.key, role.name]))
+    : input;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate) ||
+      Reflect.ownKeys(candidate).length !== keys.length ||
+      Reflect.ownKeys(candidate).some((key) =>
+        typeof key !== "string" || !keys.includes(key as DatabaseRoleContract["key"]))) {
+    throw new Error("databaseRoleNames requires exactly app, worker, blueprintReader and identityResolver.");
+  }
+  const values = keys.map((key) => [key, candidate[key]] as const);
+  if (values.some(([, value]) => typeof value !== "string" ||
+      !/^[a-z_][a-z0-9_]{0,62}$/.test(value) || value === "postgres" ||
+      value === "public" || value.startsWith("pg_")) ||
+      new Set(values.map(([, value]) => value)).size !== keys.length) {
+    throw new Error("databaseRoleNames requires four distinct non-reserved SQL identifiers.");
+  }
+  return Object.freeze(Object.fromEntries(values)) as DatabaseRoleNames;
+}
+
 export type GenerateArtifactsOptions = {
   source?: string;
   openApi?: OpenApiSpecOptions;
@@ -73,6 +97,8 @@ export type GenerateArtifactsOptions = {
    * resolveColumnWriters.
    */
   operations?: readonly CompiledStaticOperation[];
+  /** Trusted deployment build input; never authoring or request context. */
+  databaseRoleNames?: DatabaseRoleNames;
 };
 
 function sqlGeneratedHeader(source: string): string {
@@ -233,7 +259,7 @@ function groupFunctionForExpand(expand: GroupExpand): string {
  * `contributePlatformTables` hooks never pass through it — and the workflow
  * queue tables, the reason this field exists at all, arrive that way.
  */
-function renderWorkerAccessDisjunct(table: TableDefinition): string {
+function renderWorkerAccessDisjunct(table: TableDefinition, workerDatabaseRole: string): string {
   const workerRole = table.workerAccess;
   if (workerRole === undefined) {
     return "";
@@ -251,7 +277,7 @@ function renderWorkerAccessDisjunct(table: TableDefinition): string {
     );
   }
   return (
-    ` OR (current_user = ${quoteSqlString(WORKER_DATABASE_ROLE)}` +
+    ` OR (current_user = ${quoteSqlString(workerDatabaseRole)}` +
     ` AND app.current_worker_role() = ${quoteSqlString(workerRole)})`
   );
 }
@@ -492,12 +518,12 @@ function renderIndexSql(
   return index.where ? `${head} WHERE ${index.where};` : `${head};`;
 }
 
-function renderTableSql(table: TableDefinition): string {
+function renderTableSql(table: TableDefinition, workerDatabaseRole: string): string {
   // Resolved before the tenantScoped branch below so a workerAccess on a global
   // table is REJECTED rather than silently dropped — the table emits no policy
   // at all there, and a declaration that quietly does nothing reads like a
   // grant that was made.
-  const workerAccess = renderWorkerAccessDisjunct(table);
+  const workerAccess = renderWorkerAccessDisjunct(table, workerDatabaseRole);
   // Emits nothing; validated here so a malformed declaration fails the build
   // rather than quietly costing the worker a grant at migrate time.
   validateWorkerDml(table);
@@ -774,6 +800,7 @@ function renderManifestJson(
   manifest: PlatformSchemaManifest,
   source: string,
   operations?: readonly CompiledStaticOperation[],
+  databaseRoles: readonly DatabaseRoleContract[] = DATABASE_ROLES,
 ): string {
   for (const table of manifest.tables) {
     for (const column of table.columns) {
@@ -781,8 +808,9 @@ function renderManifestJson(
         (name, writtenBy) => { resolveColumnWriters(table, { name, writtenBy }, operations); });
     }
   }
+  const defaultNames = databaseRoles.every((role, index) => role.name === DATABASE_ROLES[index]!.name);
   const checksum = createHash("sha256")
-    .update(JSON.stringify(manifest))
+    .update(JSON.stringify(defaultNames ? manifest : { manifest, databaseRoles }))
     .digest("hex");
   const tables = manifest.tables.map((table) => ({
     name: `${table.schema}.${table.name}`,
@@ -897,11 +925,11 @@ function renderManifestJson(
       // The login role the emitted `workerAccess` policies compare
       // `current_user` against. Read by the migrate chain so the role that is
       // provisioned and the role the policies name can never drift apart.
-      workerDatabaseRole: WORKER_DATABASE_ROLE,
+      workerDatabaseRole: databaseRoles.find((role) => role.key === "worker")!.name,
       // The complete role contract: what must exist before the chain runs.
       // Provisioning is a host step (apps/api/src/db/provision-roles.ts);
       // the chain only verifies.
-      databaseRoles: DATABASE_ROLES,
+      databaseRoles,
       capabilities: {
         generatedEntities,
       },
@@ -926,13 +954,16 @@ export function generateArtifacts(
   manifest: PlatformSchemaManifest,
   options: GenerateArtifactsOptions = {},
 ): GeneratedArtifact[] {
+  const names = resolveDatabaseRoleNames(options.databaseRoleNames);
+  const databaseRoles = Object.freeze(DATABASE_ROLES.map((role) =>
+    Object.freeze({ ...role, name: names[role.key] })));
   assertTenantBoundReferences(manifest);
   const source = options.source ?? defaultSource;
   const sql = `${sqlGeneratedHeader(source)}
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-${manifest.tables.map(renderTableSql).join("\n\n")}
+${manifest.tables.map((table) => renderTableSql(table, names.worker)).join("\n\n")}
 
 -- OpenShapeForge generated foreign keys: keep after table creation for cyclic catalog relationships.
 ${renderForeignKeySql(manifest)}
@@ -949,7 +980,7 @@ ${renderForeignKeySql(manifest)}
     },
     {
       path: "apps/api/src/generated/db/manifest.json",
-      contents: renderManifestJson(manifest, source, options.operations),
+      contents: renderManifestJson(manifest, source, options.operations, databaseRoles),
     },
     {
       path: "apps/api/src/generated/rest/openapi.json",

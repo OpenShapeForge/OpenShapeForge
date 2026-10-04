@@ -50,11 +50,19 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
     }
 
     static boolean localPeer(String peer, String trustedPeers) {
-        if (peer == null || !peer.matches("[0-9a-fA-F:.]+") || (!peer.contains(".") && !peer.contains(":"))) return false;
+        if (peer == null) return false;
+        if (peer.contains(":")) {
+            if (!peer.matches("[0-9a-fA-F:.]+")) return false;
+        } else {
+            if (!peer.matches("[0-9]{1,3}(\\.[0-9]{1,3}){3}")) return false;
+            if (Arrays.stream(peer.split("\\.")).anyMatch(part -> Integer.parseInt(part) > 255)) return false;
+        }
         try {
             var address = InetAddress.getByName(peer);
             if (address.isLoopbackAddress()) return true;
-            if (trustedPeers == null) return false;
+            byte[] bytes = address.getAddress();
+            boolean uniqueLocalV6 = bytes.length == 16 && (bytes[0] & 0xfe) == 0xfc;
+            if (trustedPeers == null || !(address.isSiteLocalAddress() || address.isLinkLocalAddress() || uniqueLocalV6)) return false;
             // Exact literal peers only; no DNS, subnet or wildcard trust.
             return Arrays.stream(trustedPeers.split(",")).map(String::trim).anyMatch(peer::equals);
         } catch (java.net.UnknownHostException e) { return false; }
@@ -87,7 +95,9 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
                 .setAttribute("localLanguage", context.getSession().getContext().resolveLocale(context.getUser()).toLanguageTag())
                 ;
             if (error != null) form.setError(error);
-            context.challenge(form.createForm("local-accounts.ftl"));
+            var response = form.createForm("local-accounts.ftl");
+            if (error != null) context.failureChallenge(AuthenticationFlowError.ACCESS_DENIED, response);
+            else context.challenge(response);
         } catch (java.io.IOException e) {
             context.failure(AuthenticationFlowError.INTERNAL_ERROR);
         }

@@ -12,3 +12,10 @@ Docker launcher may explicitly trust its concrete Docker gateway IPs via
 and disabled `KC_PROXY_HEADERS`. Never trust forwarded peer addresses, DNS names,
 subnets or arbitrary LAN peers. URI checks are secondary; hostname configuration
 is not caller identity. Hosts own the account-picker translations.
+
+Hosts must provide `osfLocalAccountTitle` and `osfLocalAccountUnavailable` message
+keys. Place `localAccounts` in an HTML-escaped data attribute, never interpolate
+its JSON/user names into executable script. The child theme is required when
+explicitly enabling this module; a missing theme fails instead of authenticating
+or silently changing login methods. Rejected selections use Keycloak's failure
+challenge so native failure events remain available.

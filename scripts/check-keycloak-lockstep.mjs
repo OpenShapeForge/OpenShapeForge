@@ -36,6 +36,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertKeycloakVersionsAgree,
+  assertProductionExcludesLocalProvider,
   keycloakVersionsFromSources,
 } from "./keycloak-version-lockstep.mjs";
 
@@ -54,16 +55,15 @@ const [pom, dockerfile, chart, compatSource, localPom] = await Promise.all([
   readFile(join(REPO_ROOT, LOCAL_POM_PATH), "utf8"),
 ]);
 const compat = JSON.parse(compatSource);
-const versions = keycloakVersionsFromSources({ pom, dockerfile, chart });
-const localVersion = localPom.match(/<keycloak\.version>([^<]+)<\/keycloak\.version>/)?.[1]?.trim();
+const versions = keycloakVersionsFromSources({ pom, localPom, dockerfile, chart });
 
 const { compileVersion, runtimeVersion } = versions;
 
 const failures = [];
-if (localVersion !== versions.compileVersion) failures.push(`${LOCAL_POM_PATH}: local provider compiles against ${localVersion ?? "missing version"}, parent SPI against ${versions.compileVersion ?? "missing version"}. Update both Maven declarations together.`);
 
 try {
   assertKeycloakVersionsAgree(versions);
+  assertProductionExcludesLocalProvider({ pom, dockerfile });
 } catch (error) {
   failures.push(error instanceof Error ? error.message : String(error));
 }

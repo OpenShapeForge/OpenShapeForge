@@ -30,7 +30,11 @@ public class LocalAccountAuthenticatorTest {
         assertFalse(LocalAccountAuthenticator.localPeer("localhost", "localhost"));
         assertFalse(LocalAccountAuthenticator.localPeer(null, null));
         assertFalse(LocalAccountAuthenticator.localPeer("192.0.2.1", "192.0.2.0/24,*"));
-        assertTrue(LocalAccountAuthenticator.localPeer("192.0.2.1", "192.0.2.1"));
+        assertFalse(LocalAccountAuthenticator.localPeer("192.0.2.1", "192.0.2.1"));
+        assertFalse(LocalAccountAuthenticator.localPeer("facade.de", "facade.de"));
+        assertFalse(LocalAccountAuthenticator.localPeer("999.0.0.1", null));
+        assertTrue(LocalAccountAuthenticator.localPeer("172.17.0.1", "172.17.0.1"));
+        assertTrue(LocalAccountAuthenticator.localPeer("fd00::1", "fd00::1"));
         assertFalse(LocalAccountAuthenticator.eligible(true, null, null));
     }
 

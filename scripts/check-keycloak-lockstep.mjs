@@ -43,6 +43,7 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const POM_PATH = "packages/keycloak-spi/pom.xml";
 const DOCKERFILE_PATH = "packages/keycloak-spi/Dockerfile";
 const CHART_PATH = "deploy/helm/openshapeforge-api/charts/keycloak/Chart.yaml";
+const LOCAL_POM_PATH = "packages/keycloak-spi/local-development/pom.xml";
 const COMPAT_PATH = "packages/keycloak-spi/provider-compatibility.json";
 
 const [pom, dockerfile, chart, compatSource, localPom] = await Promise.all([
@@ -50,15 +51,16 @@ const [pom, dockerfile, chart, compatSource, localPom] = await Promise.all([
   readFile(join(REPO_ROOT, DOCKERFILE_PATH), "utf8"),
   readFile(join(REPO_ROOT, CHART_PATH), "utf8"),
   readFile(join(REPO_ROOT, COMPAT_PATH), "utf8"),
-  readFile(join(REPO_ROOT, "packages/keycloak-spi/local-development/pom.xml"), "utf8"),
+  readFile(join(REPO_ROOT, LOCAL_POM_PATH), "utf8"),
 ]);
 const compat = JSON.parse(compatSource);
 const versions = keycloakVersionsFromSources({ pom, dockerfile, chart });
 const localVersion = localPom.match(/<keycloak\.version>([^<]+)<\/keycloak\.version>/)?.[1]?.trim();
-if (localVersion !== versions.compileVersion) throw new Error("Local Keycloak provider version differs from the parent SPI; update both Maven declarations together.");
+
 const { compileVersion, runtimeVersion } = versions;
 
 const failures = [];
+if (localVersion !== versions.compileVersion) failures.push(`${LOCAL_POM_PATH}: local provider compiles against ${localVersion ?? "missing version"}, parent SPI against ${versions.compileVersion ?? "missing version"}. Update both Maven declarations together.`);
 
 try {
   assertKeycloakVersionsAgree(versions);

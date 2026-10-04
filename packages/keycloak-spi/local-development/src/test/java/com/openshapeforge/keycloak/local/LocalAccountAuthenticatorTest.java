@@ -17,10 +17,21 @@ public class LocalAccountAuthenticatorTest {
     }
 
     @Test public void disabledAndServiceAccountsCannotAuthenticate() {
-        assertTrue(LocalAccountAuthenticator.eligible(true, null));
-        assertFalse(LocalAccountAuthenticator.eligible(false, null));
-        assertFalse(LocalAccountAuthenticator.eligible(true, "service-client"));
-        assertFalse(LocalAccountAuthenticator.eligible(false, "service-client"));
+        assertTrue(LocalAccountAuthenticator.eligible(true, null, "account"));
+        assertFalse(LocalAccountAuthenticator.eligible(false, null, "account"));
+        assertFalse(LocalAccountAuthenticator.eligible(true, "service-client", "account"));
+        assertFalse(LocalAccountAuthenticator.eligible(false, "service-client", "account"));
+    }
+
+    @Test public void remotePeersFailClosedUnlessTheLocalLauncherExplicitlyTrustsTheGateway() {
+        assertTrue(LocalAccountAuthenticator.localPeer("127.0.0.1", null));
+        assertTrue(LocalAccountAuthenticator.localPeer("::1", null));
+        assertFalse(LocalAccountAuthenticator.localPeer("192.0.2.1", null));
+        assertFalse(LocalAccountAuthenticator.localPeer("localhost", "localhost"));
+        assertFalse(LocalAccountAuthenticator.localPeer(null, null));
+        assertFalse(LocalAccountAuthenticator.localPeer("192.0.2.1", "192.0.2.0/24,*"));
+        assertTrue(LocalAccountAuthenticator.localPeer("192.0.2.1", "192.0.2.1"));
+        assertFalse(LocalAccountAuthenticator.eligible(true, null, null));
     }
 
     @Test public void whitespaceAndCaseAreNormalizedWithoutWideningOrigins() {

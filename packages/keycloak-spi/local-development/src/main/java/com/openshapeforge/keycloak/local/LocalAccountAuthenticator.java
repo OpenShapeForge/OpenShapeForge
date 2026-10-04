@@ -2,6 +2,7 @@
 package com.openshapeforge.keycloak.local;
 
 import java.net.URI;
+import java.net.InetAddress;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -36,6 +37,8 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
     }
 
     private boolean allowed(AuthenticationFlowContext context) {
+        if (!localPeer(context.getSession().getContext().getConnection().getRemoteAddr(),
+            System.getenv("OSF_LOCAL_LOGIN_TRUSTED_PEERS"))) return false;
         return allowed(System.getenv("OSF_LOCAL_LOGIN_ENABLED"), System.getenv("OSF_LOCAL_LOGIN_REALMS"),
             context.getRealm().getName(), context.getUriInfo().getBaseUri().toString(),
             context.getUriInfo().getRequestUri().toString(), context.getAuthenticationSession().getRedirectUri());
@@ -46,8 +49,23 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
             && localUri(base) && localUri(request) && localUri(redirect);
     }
 
-    static boolean eligible(boolean enabled, String serviceAccountClientLink) {
-        return enabled && serviceAccountClientLink == null;
+    static boolean localPeer(String peer, String trustedPeers) {
+        if (peer == null || !peer.matches("[0-9a-fA-F:.]+") || (!peer.contains(".") && !peer.contains(":"))) return false;
+        try {
+            var address = InetAddress.getByName(peer);
+            if (address.isLoopbackAddress()) return true;
+            if (trustedPeers == null) return false;
+            // Exact literal peers only; no DNS, subnet or wildcard trust.
+            return Arrays.stream(trustedPeers.split(",")).map(String::trim).anyMatch(peer::equals);
+        } catch (java.net.UnknownHostException e) { return false; }
+    }
+
+    static boolean listed(String serviceAccountClientLink, String username) {
+        return serviceAccountClientLink == null && username != null;
+    }
+
+    static boolean eligible(boolean enabled, String serviceAccountClientLink, String username) {
+        return enabled && listed(serviceAccountClientLink, username);
     }
 
     @Override public void authenticate(AuthenticationFlowContext context) {
@@ -57,7 +75,7 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
 
     private void challenge(AuthenticationFlowContext context, String error) {
         try (var stream = context.getSession().users().searchForUserStream(context.getRealm(), Map.of(), null, null)) {
-            var accounts = stream.filter(user -> user.getServiceAccountClientLink() == null && user.getUsername() != null)
+            var accounts = stream.filter(user -> listed(user.getServiceAccountClientLink(), user.getUsername()))
                 .sorted(Comparator.comparing(UserModel::getUsername))
                 .map(user -> Map.of("value", user.getId(), "label", user.getUsername(),
                     "description", String.join(" ",
@@ -65,9 +83,8 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
                         user.getLastName() == null ? "" : user.getLastName()).trim(),
                     "disabled", !user.isEnabled()))
                 .toList();
-            boolean dutch = dutch(context);
             var form = context.form().setAttribute("localAccounts", JsonSerialization.writeValueAsString(accounts))
-                .setAttribute("localLanguage", dutch ? "nl" : "en")
+                .setAttribute("localLanguage", context.getSession().getContext().resolveLocale(context.getUser()).toLanguageTag())
                 ;
             if (error != null) form.setError(error);
             context.challenge(form.createForm("local-accounts.ftl"));
@@ -76,17 +93,13 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
         }
     }
 
-    private boolean dutch(AuthenticationFlowContext context) {
-        return "nl".equals(context.getSession().getContext().resolveLocale(context.getUser()).getLanguage());
-    }
-
     @Override public void action(AuthenticationFlowContext context) {
         if (!allowed(context)) { context.failure(AuthenticationFlowError.ACCESS_DENIED); return; }
         var data = context.getHttpRequest().getDecodedFormParameters();
         if ("normal".equals(data.getFirst("mode"))) { context.attempted(); return; }
         String id = data.getFirst("account");
         UserModel user = id == null ? null : context.getSession().users().getUserById(context.getRealm(), id);
-        if (user == null || !eligible(user.isEnabled(), user.getServiceAccountClientLink())) {
+        if (user == null || !eligible(user.isEnabled(), user.getServiceAccountClientLink(), user.getUsername())) {
             challenge(context, "osfLocalAccountUnavailable"); return;
         }
         context.setUser(user);

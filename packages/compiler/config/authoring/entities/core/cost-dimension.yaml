@@ -170,6 +170,14 @@ operations:
 interfaces:
   rest: {}
   graphql: {}
+  mcp:
+    tools: generic
+    operations:
+      list: {}
+      get: {}
+      create: false
+      update: false
+      delete: false
   web:
     views:
       collection:

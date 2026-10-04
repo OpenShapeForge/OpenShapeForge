@@ -164,7 +164,7 @@ describe("one availability rule for listing, describe and call", () => {
         expect(text).toMatch(
           name === "relation_delete"
             ? /^NOT_FOUND/
-            : /^BAD_USER_INPUT: "Address" is not one of the entities "osf_delete" can address in this session: Quote, QuoteLine\./,
+            : /^BAD_USER_INPUT: "Address" is not one of the entities "osf_delete" can address in this session: Budget, BudgetLine, Quote, QuoteLine\./,
         );
         expect(text).not.toContain("RELATION_COLLECTION_MUTATION_UNSUPPORTED");
       });
@@ -182,20 +182,25 @@ describe("one availability rule for listing, describe and call", () => {
       const result = await client.callTool({ name: "osf_create", arguments: { entity: "Quote", quoteNumber: "Q-1" } });
       expect(result.isError).toBe(true);
       expect(String((result.content as { text?: string }[])[0]?.text)).toMatch(
-        /^BAD_USER_INPUT: "Quote" is not one of the entities "osf_create" can address in this session: QuoteLine\./,
+        /^BAD_USER_INPUT: "Quote" is not one of the entities "osf_create" can address in this session: Budget, BudgetLine, QuoteLine\./,
       );
     });
     // The line's owner key is required and managed by the owner: the child's
     // generic create cannot set it, so osf_create no longer offers QuoteLine.
-    await withServer(FINANCE, tablesWithRequiredOwnerKey(), async (client) => {
+    const emptyCreates = tablesWithRequiredOwnerKey();
+    for (const [key, table] of emptyCreates) {
+      if (["Budget", "BudgetLine"].includes(table.source?.authoringEntityName ?? "")) {
+        emptyCreates.set(key, { ...table, source: { ...table.source!, crud: { ...table.source!.crud!, operations: { ...table.source!.crud!.operations, create: false } } } });
+      }
+    }
+    await withServer(FINANCE, emptyCreates, async (client) => {
       const { tools } = await client.listTools();
-      // Quote's create is withheld as above too, so osf_create has no entity
-      // left for this session and is not listed at all.
-      expect(entityEnum(tools, "osf_create") ?? []).not.toContain("QuoteLine");
+      // Withhold all remaining generic creates to retain the empty-enum proof.
+      expect(entityEnum(tools, "osf_create")).toBeUndefined();
       expect(entityEnum(tools, "osf_list")).toContain("QuoteLine");
       const result = await client.callTool({ name: "osf_create", arguments: { entity: "QuoteLine", lineNumber: 1 } });
       expect(result.isError).toBe(true);
-      expect(String((result.content as { text?: string }[])[0]?.text)).toMatch(/^NOT_FOUND/);
+      expect(String((result.content as { text?: string }[])[0]?.text)).toBe('NOT_FOUND: Unknown tool "osf_create".');
     });
     // On the unchanged manifest both creates are offered.
     await withServer(FINANCE, new Map(getGeneratedCrudTables().map((table) => [table.name, table])), async (client) => {

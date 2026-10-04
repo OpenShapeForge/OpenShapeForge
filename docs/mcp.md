@@ -620,12 +620,12 @@ tokens, and RelationRoles — the administrator assigns those.
 
 ## First use: onboarding
 
-The first time a person connects, the assistant has to set them up and has to
-know when that is done. Both are server-side facts, not remembered prose:
+Onboarding is optional guidance. It never blocks app use or an offered
+Operation; the runtime still enforces the ordinary authorization and validation
+contract. Checklist progress is a server-side fact, not remembered prose:
 
-- the server's `initialize` instructions end with one sentence — *Call
-  `whoami` first. If its `onboarding.status` is not Completed, follow
-  `onboarding_guide`.* — which is what every client shows the model;
+- the server's `initialize` instructions ask the model to call `whoami` first,
+  explain that onboarding is optional, and offer `onboarding_guide` on request;
 - `whoami` carries an `onboarding` object: a **computed checklist**, also
   available on its own as the `onboarding_status` tool;
 - `complete_onboarding` records completion durably, once, per (identity,
@@ -647,7 +647,7 @@ delimited hunks).
     { "key": "preferences",              "title": "Working preferences",                     "status": "todo",           "howTo": "Ask the person, in one batched question, about working hours, priorities and house style, then save the answer with set_my_preferences (omit `tool` to apply it to all tools). They may skip this: complete_onboarding { skip: true }." },
     { "key": "guide",                    "title": "Role guide read",                         "status": "not_applicable", "howTo": "No role guide applies to this person's roles." }
   ],
-  "summary": "Onboarding is in progress: 1 of 4 steps done (to do: organization_connections, connections, preferences). Follow onboarding_guide."
+  "summary": "Onboarding is in progress: 1 of 4 steps done (to do: organization_connections, connections, preferences). Onboarding is optional; use onboarding_guide if the person asks for help."
 }
 ```
 

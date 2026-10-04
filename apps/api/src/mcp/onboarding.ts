@@ -97,10 +97,10 @@ export function onboardingStepKeyFromUri(uri: string): OnboardingStepKey | null 
 
 /** Appended to the server's `initialize` instructions: the one sentence every client shows the model. */
 export const ONBOARDING_INSTRUCTION =
-  " Call `whoami` first. Its `onboarding` field is an index: which steps are done and which" +
-  " are not, never how to do them. If `onboarding.status` is not Completed, follow" +
-  " `onboarding_guide`; for one step, read the resource `osf://onboarding/step/<key>`" +
-  " (or call `onboarding_status`, which returns every step with its how-to).";
+  " Call `whoami` first. Its `onboarding` field is an index, not a how-to." +
+  " Onboarding is optional guidance, not a prerequisite for using the app or its offered tools." +
+  " On request, follow `onboarding_guide`; for one step read `osf://onboarding/step/<key>`;" +
+  " without resources call `onboarding_status`.";
 
 // ---------------------------------------------------------------------------
 // Shapes
@@ -508,7 +508,7 @@ export function computeOnboarding(
     sentences.push(
       applicable.length === done.length
         ? "Every step is done; call complete_onboarding to record it."
-        : "Follow onboarding_guide.",
+        : "Onboarding is optional; use onboarding_guide if the person asks for help.",
     );
   }
   return {
@@ -1128,7 +1128,7 @@ export function withOnboarding<T extends { summary: string }>(
       ? "Onboarding is completed."
       : onboarding.status === "Not applicable"
         ? null
-        : `Onboarding is ${onboarding.status.toLowerCase()}; follow onboarding_guide.`;
+        : `Onboarding is ${onboarding.status.toLowerCase()}; optional guidance is available via onboarding_guide. App and tool use do not require completing this checklist.`;
   return {
     ...info,
     onboarding: onboardingIndex(onboarding),

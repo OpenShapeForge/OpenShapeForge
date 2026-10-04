@@ -5,6 +5,7 @@
  * mutation controls a call carries beside its values. Split out of catalog.ts.
  */
 
+import { serializeEntityRow } from "../operations/entity/serialize-result.js";
 import { createHash } from "node:crypto";
 import { compareCodeUnits } from "@openshapeforge/operations";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
@@ -56,12 +57,7 @@ export function fieldNameForColumn(column: GeneratedTable["columns"][number]) {
 }
 
 export function serializeRow(table: GeneratedTable, row: Record<string, unknown>) {
-  return Object.fromEntries(
-    table.columns.map((column) => [
-      fieldNameForColumn(column),
-      row[column.name],
-    ]),
-  );
+  return serializeEntityRow(table, row);
 }
 
 /**

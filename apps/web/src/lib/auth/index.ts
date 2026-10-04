@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import {
   createKeycloakSettings,
+  createLogoutHandler,
   createSessionAuth,
   createSessionStore,
   validateProductionEnv,
@@ -64,4 +65,11 @@ const session = createSessionAuth<TenantSessionFields>({
 export const { auth, handlers, signIn, signOut } = session;
 export const { deleteSession } = store;
 export const keycloakLogoutUrl = keycloak.logoutUrl;
+export const logout = createLogoutHandler({
+  logTag: "auth",
+  auth: session.auth,
+  signOut: session.signOut,
+  deleteSession: store.deleteSession,
+  keycloak,
+});
 export type { Session } from "next-auth";

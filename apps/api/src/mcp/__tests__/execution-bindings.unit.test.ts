@@ -190,18 +190,29 @@ describe("loadOrderedBindingsByOwner", () => {
     expect(relation.get("svc-2")).toHaveLength(perOwner);
   });
 
-  it("caps each owner independently and refuses overflow", async () => {
+  it("caps each owner independently: an overflowing owner lists unresolved, the others intact", async () => {
     const rows = [
       ...bindingRows("svc-1", MAX_BINDINGS_PER_OWNER + 1),
       ...bindingRows("svc-2", 2),
     ];
-    await expect(
-      loadOrderedBindingsByOwner(
-        relationExecution,
-        [{ id: "svc-1" }, { id: "svc-2" }],
-        pagingReader(rows),
-      ),
-    ).rejects.toBeInstanceOf(BindingOverflowError);
+    const relation = await loadOrderedBindingsByOwner(
+      relationExecution,
+      [{ id: "svc-1" }, { id: "svc-2" }],
+      pagingReader(rows),
+    );
+    expect(relation.get("svc-1")).toEqual([]);
+    expect(relation.get("svc-2")).toHaveLength(2);
+  });
+
+  it("lists an owner with a duplicate order as unresolved without failing the others", async () => {
+    const duplicate = bindingRows("svc-1", 2).map((row) => ({ ...row, order: 1 }));
+    const relation = await loadOrderedBindingsByOwner(
+      relationExecution,
+      [{ id: "svc-1" }, { id: "svc-2" }],
+      pagingReader([...duplicate, ...bindingRows("svc-2", 2)]),
+    );
+    expect(relation.get("svc-1")).toEqual([]);
+    expect(relation.get("svc-2")).toHaveLength(2);
   });
 });
 

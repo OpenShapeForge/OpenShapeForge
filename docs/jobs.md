@@ -120,7 +120,10 @@ const runtimeModule: RuntimeModule = {
 ```
 
 A handler returns one of `done`, `retry`, `failed` or `outcome_unknown`
-(`RuntimeJobOutcome`). Returning nothing is `done`; throwing is `retry`; an
+(`RuntimeJobOutcome`). Returning nothing is `done`; throwing is
+`outcome_unknown`, because the worker cannot tell whether the handler's
+external effect already happened (a handler that knows repetition is safe
+returns `retry` explicitly); an
 outcome that is not one of those, or a `retry`, `failed` or `outcome_unknown`
 without an `error` to record, is a handler bug and settles that job `failed`
 with `INVALID_OUTCOME` — never the batch.
@@ -146,7 +149,8 @@ to anyone else, however long the run takes. When the handler returns, the
 outcome is settled in the same transaction, so the handler's writes and the
 job's state commit together — there is no window in which the work is done
 and the row still says `running`. Only a handler that **throws** is settled
-apart, as a `retry`, after its transaction rolled back. A crash between
+apart, as `outcome_unknown`, after its transaction rolled back (a throw before
+the handler started — opening the session, say — is settled as `retry`). A crash between
 commit and nothing — the process dying mid-run — leaves a `running` row
 whose lease expires and is reclaimed, and the handler runs again: a handler
 with an external effect must be idempotent on its own terms, or end
@@ -238,7 +242,13 @@ and projected to REST, MCP and GraphQL:
 resets the attempt budget, `done` closes the job as delivered when the effect
 was confirmed elsewhere. Anything else answers `409 CONFLICT`. The views omit
 the payload and actor: a payload may carry personal data, and the operator's
-question is what happened, not what was sent.
+question is what happened, not what was sent. They are not free of personal
+data, though: `lastError` carries the handler's error text as it was thrown,
+and a mail delivery that the SMTP server refuses names the recipient address
+there. The worker also logs that error text when a job does not end `done`,
+and `failed`, `dead` and `outcome_unknown` rows are not swept (see
+[Retention](#retention)). Treat `Platform.Jobs.Manage` and the worker log as
+access to recipient addresses.
 
 ## Retention
 

@@ -302,7 +302,9 @@ handler. A read-only entity simply has no `create`, `update` or `delete`
 Operation; an internal entity has none at all. That set is the upper
 bound for GraphQL, REST and MCP; each
 `interfaces.*` block may exclude an Operation (`operations: { delete: false }`)
-but cannot add one.
+but cannot add one. That bound is per compiled entity, not per layer: a later
+authoring layer's `entityPatch` may add an Operation the entity's own file left
+out ([layers.md](layers.md)).
 
 The stock generated entity pages are emitted only when all five intents are
 implemented, because those pages assume the complete list/detail/edit

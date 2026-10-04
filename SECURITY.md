@@ -47,24 +47,42 @@ Out of scope:
 - the **local development stack** (`docker-compose.local.yml`) and its
   intentional dev-only credentials — `admin/admin`, `dev-secret`,
   `openshapeforge-local-dev-context-secret`, the `openshapeforge/openshapeforge` Postgres
-  user, the synthetic `tenant-*-*` test users, `POSTGRES_HOST_AUTH_METHOD=trust`,
-  `sslRequired: none`. These are documented dev values (see `AGENTS.md`) and
-  must never be used in production. A report that they are "insecure" in the
-  dev stack is not a vulnerability; a report that a **production deployment
+  user, the password `test` of the synthetic `tenant-*-*` users,
+  `POSTGRES_HOST_AUTH_METHOD=trust`, `sslRequired: none`. These are documented
+  dev values (see [docs/api.md](docs/api.md) and [docs/testing.md](docs/testing.md))
+  and must never be used in production. A report that they are "insecure" in
+  the dev stack is not a vulnerability; a report that a **production deployment
   guide or default** ships them **is**.
+
+  The `tenant-*-*` users themselves are not dev-only. The development-identity
+  authoring layer is mounted by the root `authoring.config.yaml`, so the users
+  and their roles are part of every generated tenant realm, including the one
+  `.github/workflows/deploy.yml` deploys to production (with passwords read
+  from the environment instead of `test`). Issues with those users in a
+  deployed realm are in scope.
 - vulnerabilities in third-party dependencies — report those upstream (see
   `THIRD-PARTY-NOTICES.md`); we will bump once a fix is released.
 
 ## Deploying securely
 
-If you deploy OpenShapeForge, the production posture the code expects (enforced at
-startup by `assertProductionEnv` when `NODE_ENV=production`):
+If you deploy OpenShapeForge, this is the production posture the code expects.
+Only part of it is enforced. With `NODE_ENV=production`, `assertProductionEnv`
+refuses to start the API when the **authentication** configuration is unsafe:
+bearer verification is configured without an audience, the
+`OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` is unset, still the dev default, too
+short or too uniform, or no complete authentication method is configured.
+Everything else in the list is the operator's responsibility; the API does not
+check it at startup.
 
 - connect the API as a **non-superuser, non-BYPASSRLS** Postgres role so
   `FORCE ROW LEVEL SECURITY` is actually enforced (`DATABASE_URL`); run
-  migrations with a separate privileged role (`OPENSHAPEFORGE_MIGRATE_DATABASE_URL`),
+  migrations with a separate privileged role (`OPENSHAPEFORGE_MIGRATE_DATABASE_URL`).
+  *Not checked at API startup:* the API starts and serves on a superuser or
+  BYPASSRLS connection. `bun run db:migrate` verifies the provisioned role
+  contract, not the role a running API connects as,
 - set a real bearer issuer/JWKS **and audience**
-  (`OPENSHAPEFORGE_API_VERIFY_BEARER_*`),
-- set a strong, non-default `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET`,
-- terminate TLS and require it at the identity provider,
-- never expose the local-dev compose ports or credentials.
+  (`OPENSHAPEFORGE_API_VERIFY_BEARER_*`) — *the audience is enforced once a
+  JWKS URI or issuer is set*,
+- set a strong, non-default `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` — *enforced*,
+- terminate TLS and require it at the identity provider — *not checked*,
+- never expose the local-dev compose ports or credentials — *not checked*.

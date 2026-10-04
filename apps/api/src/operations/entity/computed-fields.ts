@@ -43,7 +43,7 @@ function expressionPayload(table: GeneratedCrudTable, row: GeneratedEntityRow) {
 
 function interpolate(template: string | null, payload: GeneratedEntityRow) {
   if (!template) return null;
-  return template.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_match, path: string) => {
+  return template.replace(/\{\{([^}]+)\}\}/g, (_match, path: string) => {
     let value: unknown = payload;
     for (const part of path.trim().split(".")) {
       value = value && typeof value === "object"

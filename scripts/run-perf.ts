@@ -11,17 +11,23 @@
  * exit code, so threshold breaches fail the run while still producing the
  * report.
  */
-import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { performanceVerdict, type PerfMetric, type PerfSummary } from "./perf-results.js";
 
 const repoRoot = resolve(import.meta.dir, "..");
 const reportDir = join(repoRoot, ".perf-report");
 const summaryPath = join(reportDir, "summary.json");
 const htmlPath = join(reportDir, "index.html");
 const apiUrl = process.env.API_URL ?? "http://127.0.0.1:3001";
+const catalogPath = join(reportDir, "fixture-catalog.json");
 
 mkdirSync(reportDir, { recursive: true });
+
+if (!process.env.PERF_TENANT_ID || !process.env.PERF_USER_ID) {
+  console.error("PERF_TENANT_ID and PERF_USER_ID must name the isolated benchmark's seeded, linked identity.");
+  process.exit(1);
+}
 
 if (!Bun.which("k6")) {
   console.error("k6 is not installed — `brew install k6` (https://k6.io) and retry.");
@@ -46,10 +52,21 @@ const env = {
   API_URL: apiUrl,
   OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET:
     process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ?? "openshapeforge-local-dev-context-secret",
-  // Fresh tenant per run: RLS-isolated from dev data; lifecycle iterations
-  // clean their own rows, only entity_events journal rows accumulate.
-  PERF_TENANT_ID: process.env.PERF_TENANT_ID ?? randomUUID(),
-  PERF_USER_ID: process.env.PERF_USER_ID ?? randomUUID(),
+  E2E_API_URL: apiUrl,
+  PERF_CATALOG_PATH: catalogPath,
+};
+
+const preparation = Bun.spawnSync(["bun", "test", "apps/api/perf/prepare-fixtures.test.ts"],
+  { cwd: repoRoot, env, stdout: "pipe", stderr: "pipe" });
+writeFileSync(join(reportDir, "preflight.log"), `${preparation.stdout.toString()}\n${preparation.stderr.toString()}`);
+if (preparation.exitCode !== 0) {
+  console.error(`Canonical fixture preflight failed; k6 was not started. See ${reportDir}/preflight.log`);
+  process.exit(preparation.exitCode ?? 1);
+}
+const catalog = JSON.parse(readFileSync(catalogPath, "utf8")) as {
+  entities: Array<{ slug: string }>; exclusions: Array<{ entity: string; reason: string }>;
+  preflightOperationCount: number;
+  referencePolicyEvidence: Array<{ entity: string; successfulOperations: string[]; refusalCode: string; measuredOperationCount: number }>;
 };
 
 const run = Bun.spawnSync(
@@ -68,14 +85,10 @@ const consoleOutput = `${run.stdout.toString()}\n${run.stderr.toString()}`.trim(
 // Render
 // ---------------------------------------------------------------------------
 
-type TrendStats = Record<string, number> & { thresholds?: Record<string, boolean> };
-type Summary = {
-  metrics: Record<string, TrendStats>;
-};
-
-let summary: Summary | null = null;
+type TrendStats = PerfMetric;
+let summary: PerfSummary | null = null;
 try {
-  summary = JSON.parse(readFileSync(summaryPath, "utf8")) as Summary;
+  summary = JSON.parse(readFileSync(summaryPath, "utf8")) as PerfSummary;
 } catch {
   // k6 crashed before writing a summary — the report still shows the output.
 }
@@ -90,7 +103,8 @@ type Row = {
   thresholdOk: boolean | null;
 };
 const rows: Row[] = [];
-let thresholdFailures = 0;
+const verdict = performanceVerdict(summary, catalog.entities.map(entry => entry.slug), run.exitCode ?? 1);
+const thresholdFailures = verdict.thresholdBreaches.length;
 
 for (const [name, stats] of Object.entries(summary?.metrics ?? {})) {
   const match = /^http_req_duration\{entity:([^,}]+),op:([^}]+)\}$/.exec(name);
@@ -98,16 +112,15 @@ for (const [name, stats] of Object.entries(summary?.metrics ?? {})) {
   // k6 --summary-export marks breached thresholds with `true`.
   const thresholdEntries = Object.values(stats.thresholds ?? {});
   const thresholdOk = thresholdEntries.length > 0 ? thresholdEntries.every((breached) => !breached) : null;
-  if (thresholdOk === false) thresholdFailures += 1;
   rows.push({ entity: match[1]!, op: match[2]!, stats, thresholdOk });
 }
 rows.sort((a, b) => a.entity.localeCompare(b.entity) || a.op.localeCompare(b.op));
 
-const format = (value: number | undefined) =>
-  value === undefined ? "—" : `${value.toFixed(1)} ms`;
+const format = (value: unknown) =>
+  typeof value !== "number" ? "—" : `${value.toFixed(1)} ms`;
 
-const entityCount = new Set(rows.map((row) => row.entity)).size;
-const failedRun = run.exitCode !== 0;
+const entityCount = catalog.entities.length;
+const failedRun = !verdict.passed;
 const httpReqs = summary?.metrics["http_reqs"]?.count ?? 0;
 const failedRate = summary?.metrics["http_req_failed"]?.value ?? 0;
 const checksMetric = summary?.metrics["checks"];
@@ -168,6 +181,12 @@ const html = `<!doctype html>
 vus: ${process.env.PERF_VUS ?? 5}/entity · duration: ${process.env.PERF_DURATION ?? "15s"} ·
 p95 budget: ${process.env.PERF_P95_MS ?? 800} ms ·
 scenarios derived from apps/api/src/generated/db/manifest.json</p>
+<p class="meta">${catalog.preflightOperationCount} real preflight operations · dependency fixtures prepared before timing ·
+missing operation coverage: ${verdict.missingCoverage.length} · incomplete lifecycles: ${verdict.missingLifecycles.length} ·
+anonymous/trusted rate budgets: ${escapeHtml(process.env.API_RATE_LIMIT_MAX ?? "API default")}/${escapeHtml(process.env.API_RATE_LIMIT_MAX_TRUSTED ?? "API default")}</p>
+<p class="meta">Explicit exceptions: ${catalog.exclusions.map(item => `${escapeHtml(item.entity)} (${escapeHtml(item.reason)})`).join(", ") || "none"}</p>
+<p class="meta">Untimed reference-policy evidence: ${catalog.referencePolicyEvidence.map(item =>
+  `${escapeHtml(item.entity)}: ${item.successfulOperations.length} successful operations, delete ${escapeHtml(item.refusalCode)}, ${item.measuredOperationCount} latency metrics`).join("; ")}</p>
 <table>
   <tr><th></th><th>entity</th><th>op</th><th>avg</th><th>med</th><th>p95</th><th>p99</th><th>max</th></tr>
   ${tableRows}
@@ -186,4 +205,5 @@ console.log(
     `${thresholdFailures} threshold breaches`,
 );
 console.log(`report: ${htmlPath}`);
-process.exit(run.exitCode ?? 1);
+writeFileSync(join(reportDir, "verdict.json"), JSON.stringify(verdict, null, 2) + "\n");
+process.exit(run.exitCode || (verdict.passed ? 0 : 1));

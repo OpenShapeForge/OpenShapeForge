@@ -211,7 +211,10 @@ export function createSessionAuth<Extra extends object>(
           hydratedStored.preferredUsername !== stored.preferredUsername ||
           hydratedStored.email !== stored.email
         ) {
-          await store.setSession(sessionId, hydratedStored);
+          if (!await store.updateSession(sessionId, hydratedStored)) {
+            session.error = "RefreshTokenError";
+            return session;
+          }
           stored = hydratedStored;
         }
 

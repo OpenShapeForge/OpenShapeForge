@@ -32,4 +32,6 @@ export { ACCESS_TOKEN_REFRESH_BUFFER_S, createTokenRefresh } from "./token-refre
 export type { RefreshedClaims, TokenRefresh, TokenRefreshOptions } from "./token-refresh.js";
 
 export { createSessionAuth } from "./next-auth.js";
+export { createLogoutHandler } from "./logout.js";
+export type { LogoutHandlerOptions } from "./logout.js";
 export type { SessionAuth, SessionAuthOptions, SignInClaims } from "./next-auth.js";

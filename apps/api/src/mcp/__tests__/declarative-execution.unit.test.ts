@@ -1910,6 +1910,26 @@ describe("executeBindingStep", () => {
     expect(outputs).toEqual({ records: { id: "one", title: "Title one" } });
   });
 
+  it("gives every fanned-out request its own idempotency key", async () => {
+    const keys: Array<string | null> = [];
+    await executeBindingStep({
+      binding,
+      operationRow: { ...operationRow, operation: { method: "POST", pathTemplate: "/records/{providerId}" } },
+      providerRow,
+      connectionValues: {},
+      serviceInputs: { recordIds: ["a", "b", "c"] },
+      secretScope: "unused",
+      idempotencyKey: "step-key",
+      fetchImpl: (async (_input, init) => {
+        keys.push(new Headers(init?.headers).get("idempotency-key"));
+        return Response.json({ id: "x" });
+      }) as typeof fetch,
+    });
+    expect(keys).toHaveLength(3);
+    expect(keys.every((key) => typeof key === "string" && key !== "step-key")).toBe(true);
+    expect(new Set(keys).size).toBe(3);
+  });
+
   it("fans a query out over an earlier collection and preserves its order", async () => {
     const calls: string[] = [];
     const outputs = await executeBindingStep({

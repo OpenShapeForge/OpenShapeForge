@@ -40,7 +40,14 @@ function providerId(value: string, label: string): string {
   return value;
 }
 
-async function withTenant<T>(deps: Dependencies, operation: string, slug: string, target: string | undefined,
+/**
+ * A write serialises operator actions on the tenant with `for no key update`:
+ * it conflicts with itself and with `for update`, but not with the
+ * `for key share` that every tenant-scoped foreign-key insert takes on this
+ * row, so sign-ins, receipts and jobs of the tenant do not wait for the
+ * Keycloak calls made under it. A read takes no lock.
+ */
+async function withTenant<T>(deps: Dependencies, operation: string, slug: string, target: string | undefined, access: "read" | "write",
   work: (tenant: TenantIdentity, trx: Transaction<DB>, afterCommit: (hook: () => void) => void) => Promise<T>): Promise<T> {
   if (!/^[a-z][a-z0-9-]*$/.test(slug)) throw new ControlInputError("slug must be a tenant slug.");
   const reason = `${operation} tenant="${slug}"${target ? ` ${target}` : ""}`;
@@ -48,7 +55,7 @@ async function withTenant<T>(deps: Dependencies, operation: string, slug: string
   const result = await withSystemSession(deps.db, systemSessionForAdministrator(deps.administrator, reason), async (trx) => {
     const tenant = (await sql<TenantIdentity>`
       select id::text as id, slug, status, keycloak_organization_id
-        from platform.tenants where slug = ${slug} for update
+        from platform.tenants where slug = ${slug}${access === "write" ? sql` for no key update` : sql``}
     `.execute(trx)).rows[0];
     if (!tenant) throw new ControlInputError("The tenant does not exist.");
     if (!tenant.keycloak_organization_id) throw new ControlInputError("The tenant has no linked Keycloak organization.");
@@ -124,28 +131,46 @@ async function memberWithSummary(deps: Dependencies, trx: Transaction<DB>, tenan
   };
 }
 
+/** Per-member Keycloak reads in flight at once while listing a tenant. */
+const MEMBER_READ_CONCURRENCY = 8;
+
+/** `items.map(work)` in order, with at most `limit` calls of `work` pending; stops starting new ones after a failure. */
+async function mapBounded<T, R>(items: readonly T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  let failed = false;
+  const worker = async () => {
+    while (!failed && next < items.length) {
+      const index = next++;
+      try { results[index] = await work(items[index]!); } catch (error) { failed = true; throw error; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 /** Listing only: an ambiguous member id shows no roles or link rather than one issuer's. */
 const unique = (rows: MembershipRow[] | undefined) => (rows?.length === 1 ? rows[0] : undefined);
 
 export async function listTenantMembers(deps: Dependencies, slug: string) {
-  return withTenant(deps, "control.list-tenant-members", slug, undefined, async (tenant, trx) => {
+  return withTenant(deps, "control.list-tenant-members", slug, undefined, "read", async (tenant, trx) => {
     const memberships = await membershipsBySubject(trx, tenant.id);
     return {
       tenantSlug: slug,
-      members: await Promise.all((await deps.members.listMembers(tenant.keycloak_organization_id!))
-        .map(async (member) => {
+      members: await mapBounded(await deps.members.listMembers(tenant.keycloak_organization_id!), MEMBER_READ_CONCURRENCY,
+        async (member) => {
           const credentials = await deps.members.listCredentials(member.memberId);
           return { tenantSlug: slug, ...member, ...linkSummary(unique(memberships.get(member.memberId))),
             credentialCount: credentials.length,
             credentialTypes: [...new Set(credentials.map((credential) => credential.type))].sort() };
-        })),
+        }),
     };
   });
 }
 
 export async function getTenantMember(deps: Dependencies, slug: string, memberId: string) {
   providerId(memberId, "memberId");
-  return withTenant(deps, "control.get-tenant-member", slug, `member="${memberId}"`, async (tenant, trx) => ({
+  return withTenant(deps, "control.get-tenant-member", slug, `member="${memberId}"`, "read", async (tenant, trx) => ({
     tenantSlug: slug,
     ...(await memberWithSummary(deps, trx, tenant, memberId)),
   }));
@@ -153,7 +178,7 @@ export async function getTenantMember(deps: Dependencies, slug: string, memberId
 
 export async function listTenantCredentials(deps: Dependencies, slug: string, memberId: string) {
   providerId(memberId, "memberId");
-  return withTenant(deps, "control.list-tenant-credentials", slug, `member="${memberId}"`, async (tenant, trx) => {
+  return withTenant(deps, "control.list-tenant-credentials", slug, `member="${memberId}"`, "read", async (tenant, trx) => {
     await memberWithSummary(deps, trx, tenant, memberId);
     return { tenantSlug: slug, memberId, credentials: (await deps.members.listCredentials(memberId))
       .map((credential) => ({ tenantSlug: slug, memberId, ...credential })) };
@@ -163,7 +188,7 @@ export async function listTenantCredentials(deps: Dependencies, slug: string, me
 export async function getTenantCredential(deps: Dependencies, slug: string, memberId: string, credentialId: string) {
   providerId(memberId, "memberId");
   providerId(credentialId, "credentialId");
-  return withTenant(deps, "control.get-tenant-credential", slug, `member="${memberId}" credential="${credentialId}"`, async (tenant, trx) => {
+  return withTenant(deps, "control.get-tenant-credential", slug, `member="${memberId}" credential="${credentialId}"`, "read", async (tenant, trx) => {
     await memberWithSummary(deps, trx, tenant, memberId);
     const credential = (await deps.members.listCredentials(memberId)).find((item) => item.credentialId === credentialId);
     if (!credential) throw new ControlInputError("The credential does not exist for this member.");
@@ -187,7 +212,7 @@ function roles(input: unknown): EmployeeInvitationRole[] {
  */
 export async function changeTenantMemberRoles(deps: Dependencies, slug: string, memberId: string, input: unknown, mode: "assign" | "remove") {
   providerId(memberId, "memberId");
-  return withTenant(deps, `control.${mode}-tenant-member-roles`, slug, `member="${memberId}"`, async (tenant, trx, afterCommit) => {
+  return withTenant(deps, `control.${mode}-tenant-member-roles`, slug, `member="${memberId}"`, "write", async (tenant, trx, afterCommit) => {
     await memberWithSummary(deps, trx, tenant, memberId);
     const selected = roles(input);
     const membership = await membershipOf(trx, tenant.id, memberId);
@@ -235,7 +260,7 @@ function memberLinkPending(membership: MembershipRow): ControlOperationError {
 export async function confirmTenantMemberLink(deps: Dependencies, slug: string, memberId: string) {
   providerId(memberId, "memberId");
   const operation = "control.confirm-tenant-member-link";
-  return withTenant(deps, operation, slug, `member="${memberId}"`, async (tenant, trx, afterCommit) => {
+  return withTenant(deps, operation, slug, `member="${memberId}"`, "write", async (tenant, trx, afterCommit) => {
     await memberWithSummary(deps, trx, tenant, memberId);
     const membership = await membershipOf(trx, tenant.id, memberId);
     if (!membership || membership.status !== "pending_confirmation" || !membership.candidate_relation_name) {
@@ -265,7 +290,7 @@ export async function confirmTenantMemberLink(deps: Dependencies, slug: string, 
  */
 export async function removeTenantMembership(deps: Dependencies, slug: string, memberId: string) {
   providerId(memberId, "memberId");
-  return withTenant(deps, "control.remove-tenant-membership", slug, `member="${memberId}"`, async (tenant, trx, afterCommit) => {
+  return withTenant(deps, "control.remove-tenant-membership", slug, `member="${memberId}"`, "write", async (tenant, trx, afterCommit) => {
     const membership = await membershipOf(trx, tenant.id, memberId);
     if (membership) {
       await sql`
@@ -281,7 +306,7 @@ export async function removeTenantMembership(deps: Dependencies, slug: string, m
 
 export async function requestPasskeyRecovery(deps: Dependencies, slug: string, memberId: string) {
   providerId(memberId, "memberId");
-  return withTenant(deps, "control.request-passkey-recovery", slug, `member="${memberId}"`, async (tenant, trx) => {
+  return withTenant(deps, "control.request-passkey-recovery", slug, `member="${memberId}"`, "write", async (tenant, trx) => {
     const member = await memberWithSummary(deps, trx, tenant, memberId);
     if (!member.enabled || !member.email) throw new ControlInputError("Passkey recovery requires an enabled member with an email address.");
     await deps.members.sendPasskeyRecovery(memberId);
@@ -292,7 +317,7 @@ export async function requestPasskeyRecovery(deps: Dependencies, slug: string, m
 export async function revokeTenantCredential(deps: Dependencies, slug: string, memberId: string, credentialId: string, recoveryConfirmed: boolean) {
   providerId(memberId, "memberId");
   providerId(credentialId, "credentialId");
-  return withTenant(deps, "control.revoke-tenant-credential", slug, `member="${memberId}" credential="${credentialId}"`, async (tenant, trx) => {
+  return withTenant(deps, "control.revoke-tenant-credential", slug, `member="${memberId}" credential="${credentialId}"`, "write", async (tenant, trx) => {
     await memberWithSummary(deps, trx, tenant, memberId);
     const credentials = await deps.members.listCredentials(memberId);
     if (!credentials.some((credential) => credential.credentialId === credentialId)) throw new ControlInputError("The credential does not exist for this member.");

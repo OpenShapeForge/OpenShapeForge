@@ -22,15 +22,21 @@ function quoteIdent(value: string): string {
 }
 
 /**
- * The expression with every quoted span (single, double or dollar quoted)
- * blanked, so the structural checks below see only the SQL that PostgreSQL
- * will parse as SQL. A `--` inside an option value or a pattern literal is
- * text, not a comment.
+ * The expression with every quoted span (single or double quoted) blanked, so
+ * the structural checks below see only the SQL that PostgreSQL will parse as
+ * SQL. A `--` inside an option value or a pattern literal is text, not a
+ * comment. Escape strings and `$` are refused rather than modelled: in
+ * `E'\''` the backslash keeps the string open past a quote this scan would
+ * close, and PostgreSQL reads `$` as an identifier character or as a
+ * dollar-quote opener depending on what precedes it.
  */
 function outsideQuotes(expression: string, label: string): string {
   let bare = "";
   for (let index = 0; index < expression.length; index += 1) {
     const character = expression[index]!;
+    if (character === "'" && (expression[index - 1] === "E" || expression[index - 1] === "e")) {
+      throw new Error(`${label} must not contain an escape string (E'...'). Use a standard string literal.`);
+    }
     if (character === "'" || character === '"') {
       const quote = character;
       while (++index < expression.length) {
@@ -42,18 +48,9 @@ function outsideQuotes(expression: string, label: string): string {
       continue;
     }
     if (character === "$") {
-      const delimiter = expression
-        .slice(index)
-        .match(/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/)?.[0];
-      if (delimiter) {
-        const closing = expression.indexOf(delimiter, index + delimiter.length);
-        if (closing === -1) {
-          throw new Error(`${label} has an unterminated dollar-quoted string.`);
-        }
-        index = closing + delimiter.length - 1;
-        bare += " ";
-        continue;
-      }
+      throw new Error(
+        `${label} must not contain "$" outside a quoted string. Use schemaMigrations for free-form SQL.`,
+      );
     }
     bare += character;
   }

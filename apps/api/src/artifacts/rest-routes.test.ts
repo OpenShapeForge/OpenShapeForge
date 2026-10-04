@@ -5,6 +5,7 @@ import Fastify from "fastify";
 import { __resetSessionResolverForTests } from "../auth/identity.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { registerArtifactRestRoutes } from "./rest-routes.js";
+import { ARTIFACT_UPLOAD_LIMIT_BYTES, assertUploadFileName, limitUploadBody } from "./upload-input.js";
 
 const SECRET = "artifact-route-test-secret";
 const ARTIFACT_ID = "1658ad0b-e44b-4ef3-86ca-953dc6783885";
@@ -73,7 +74,29 @@ describe("artifact REST adapter", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toBe("download");
     expect(response.headers["content-disposition"]).toContain('filename="rapport.pdf"');
+    expect(response.headers["x-content-type-options"]).toBe("nosniff");
+    expect(response.headers["cache-control"]).toBe("private, no-store");
     expect(owner).toEqual({ artifactId: ARTIFACT_ID, owner: { entity: "Document", id: DOCUMENT_ID } });
+    await app.close();
+  });
+
+  test("refuses a body over the upload limit before storage is called", async () => {
+    const app = Fastify();
+    let called = false;
+    registerArtifactRestRoutes(app, {
+      artifacts: {
+        async stage() { called = true; throw new Error("must not run"); },
+        async bind() { throw new Error("unused"); },
+        async read() { throw new Error("unused"); },
+      },
+    });
+    const response = await app.inject({
+      method: "POST", url: "/api/artifacts", headers: authorizationHeaders(),
+      payload: Buffer.alloc(ARTIFACT_UPLOAD_LIMIT_BYTES + 1),
+    });
+    expect(response.statusCode).toBe(413);
+    expect(response.json().error.code).toBe("ARTIFACT_TOO_LARGE");
+    expect(called).toBeFalse();
     await app.close();
   });
 
@@ -92,5 +115,29 @@ describe("artifact REST adapter", () => {
     expect(response.json().error.code).toBe("UNAUTHENTICATED");
     expect(called).toBeFalse();
     await app.close();
+  });
+
+  test("enforces the upload limit the route declares", async () => {
+    async function* chunks(...sizes: number[]) {
+      for (const size of sizes) yield new Uint8Array(size);
+    }
+    async function drain(source: AsyncIterable<Uint8Array>): Promise<number> {
+      let total = 0;
+      for await (const chunk of source) total += chunk.byteLength;
+      return total;
+    }
+    expect(await drain(limitUploadBody(chunks(4, 4), "8", 8))).toBe(8);
+    expect(() => limitUploadBody(chunks(1), "9", 8)).toThrow("exceeds the upload limit");
+    await expect(drain(limitUploadBody(chunks(4, 4, 1), undefined, 8))).rejects.toMatchObject({ status: 413, code: "ARTIFACT_TOO_LARGE" });
+  });
+
+  test("refuses file names that would display differently than they are", () => {
+    expect(() => assertUploadFileName("bewijs.pdf")).not.toThrow();
+    expect(() => assertUploadFileName("Offerte 2026 – définitief (v2).pdf")).not.toThrow();
+    expect(() => assertUploadFileName("a\tb.pdf")).not.toThrow();
+    for (const name of ["", "a/b.pdf", "a\\b.pdf", "a\nb.pdf", "a\u001bb.pdf", "invoice\u202Efdp.exe", "a\u2066b.pdf", "a\u200Fb.pdf",
+      "a\u061Cb.pdf", "a\u2028b.pdf", "a\u0085b.pdf", "x".repeat(256)]) {
+      expect(() => assertUploadFileName(name)).toThrow("The file name is invalid.");
+    }
   });
 });

@@ -96,7 +96,9 @@ function requireCanonicalRoles(
  * The subject record is reachable for `get` and `update` (the capability
  * Operation exists to act on it), and every other record only with an intent
  * its issuer delegated — verified against the issuer's own access when the
- * grant was issued, so this never widens past what that session could do.
+ * grant was issued. The subject itself is not checked against the issuer at
+ * issue time: the issuing plugin is responsible for naming only a subject
+ * its session may act on.
  */
 function requireGrantedRecord(
   session: TrustedSessionContext,
@@ -184,9 +186,10 @@ export class RecordAccessRuntime {
         }
 
         const authorize = async (trx: Transaction<DB>): Promise<void> => {
-          // A grant's record permissions were the issuer's, proven at issue
-          // time; the grant id itself owns no record. Only the tenant fence
-          // is re-checked here, so a record deleted since is still refused.
+          // A grant session carries no record permissions: its delegated
+          // records were checked against the issuer at issue time, its
+          // subject was not (requireGrantedRecord). Only the tenant fence is
+          // re-checked here, so a record deleted since is still refused.
           const permissions = session.credential === "grant" ? [] : (operation.authorization.recordPermissions ?? []);
           if (permissions.length === 0) {
             await assertVisibleRecord(trx, session, table, input.id);

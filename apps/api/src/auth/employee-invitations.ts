@@ -322,7 +322,7 @@ export async function inviteEmployee(
   } catch (error) {
     console.warn("[employee-invitation] " + JSON.stringify({
       outcome: "keycloak_failed", tenantId: session.tenantId, organizationId,
-      actor, email, role: input.role,
+      actor, role: input.role,
       code: error instanceof KeycloakAdminError ? error.code : "UNKNOWN",
       status: error instanceof KeycloakAdminError ? error.status : null,
     }));
@@ -334,7 +334,7 @@ export async function inviteEmployee(
   );
   console.info("[employee-invitation] " + JSON.stringify({
     outcome: "admission_recorded", tenantId: session.tenantId, organizationId,
-    invitationId: invitation.id, actor, email, role: input.role, delivery,
+    invitationId: invitation.id, actor, role: input.role, delivery,
   }));
   return { ...invitation, delivery };
 }
@@ -538,7 +538,7 @@ export async function revokeInvitation(
   });
 
   console.info(
-    `[auth] ${actor} revoked the invitation for ${email} in tenant ${session.tenantId}; ` +
+    `[auth] ${actor} revoked invitation ${row.id} in tenant ${session.tenantId}; ` +
       `Keycloak invitation ${keycloakInvitationDeleted ? "deleted (the link is dead)" : "was already gone"}.`,
   );
   return { ...row, keycloakInvitationDeleted };

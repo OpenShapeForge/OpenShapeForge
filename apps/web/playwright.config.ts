@@ -15,13 +15,15 @@ export default defineConfig({
   workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
-  reporter: process.env.CI ? [["github"], ["list"]] : [["list"]],
+  reporter: process.env.CI
+    ? [["github"], ["list"], ["html", { open: "never" }]]
+    : [["list"], ["html", { open: "never" }]],
   outputDir: "./test-results",
   use: {
     ...devices["Desktop Chrome"],
     baseURL: WEB_URL,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
-    video: "off",
+    video: "on",
   },
 });

@@ -1,5 +1,8 @@
-// SPDX-License-Identifier: BUSL-1.1
-// Derived from Keycloak 26.7.3 (Apache-2.0). Only label confirmation is removed.
+// SPDX-License-Identifier: BUSL-1.1 AND Apache-2.0
+// Derived from Keycloak 26.7.3's base login theme module
+// themes/src/main/resources/theme/base/login/resources/js/webauthnRegister.js
+// (Apache-2.0; see packages/keycloak-spi/THIRD-PARTY-NOTICES.md). Modified: the label
+// prompt is removed and the template's suggested label is used as-is.
 import { base64url } from "rfc4648";
 
 export async function registerByWebAuthn(input) {

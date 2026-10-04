@@ -214,8 +214,9 @@ export async function resolveCredentialSession(
         // would authenticate them into a tenant nobody admitted them to, which
         // is the hole this closes, and a bare 401 would tell them nothing they
         // could act on. Let it through as the 403 it is — the message names
-        // the way in.
-        console.warn(`[auth] ${error.message}`);
+        // the way in. The message names the person's address, so it is not
+        // logged; notInvited() already logged the refusal by subject.
+        console.warn("[auth] Bearer session refused (403): not admitted to this organization.");
         throw error;
       }
       if (error instanceof SessionAuthenticationUnavailableError) {

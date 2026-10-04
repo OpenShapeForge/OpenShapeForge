@@ -1,11 +1,12 @@
+// SPDX-License-Identifier: BUSL-1.1
 package com.openshapeforge.keycloak.local;
 
 import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class LocalAccountAuthenticatorTest {
-    private static final String AUTH = "https://auth.hubble.localhost/realms/openshapeforge";
-    private static final String CALLBACK = "https://hubble.localhost/signin-callback";
+    private static final String AUTH = "https://auth.app.localhost/realms/development";
+    private static final String CALLBACK = "https://app.localhost/signin-callback";
 
     @Test public void onlyLoopbackHttpOriginsAreAccepted() {
         for (String uri : new String[] { AUTH, CALLBACK, "http://127.0.0.1:8181", "http://[::1]:8181", "http://localhost" })
@@ -15,14 +16,27 @@ public class LocalAccountAuthenticatorTest {
         assertFalse(LocalAccountAuthenticator.localUri(null));
     }
 
+    @Test public void disabledAndServiceAccountsCannotAuthenticate() {
+        assertTrue(LocalAccountAuthenticator.eligible(true, null));
+        assertFalse(LocalAccountAuthenticator.eligible(false, null));
+        assertFalse(LocalAccountAuthenticator.eligible(true, "service-client"));
+        assertFalse(LocalAccountAuthenticator.eligible(false, "service-client"));
+    }
+
+    @Test public void whitespaceAndCaseAreNormalizedWithoutWideningOrigins() {
+        assertTrue(LocalAccountAuthenticator.allowed("true", "other, development", "development", AUTH, AUTH, CALLBACK));
+        assertTrue(LocalAccountAuthenticator.localUri("HTTPS://AUTH.APP.LOCALHOST/"));
+        assertFalse(LocalAccountAuthenticator.localUri("HTTPS://APP.LOCALHOST.EXAMPLE/"));
+    }
+
     @Test public void optInAndRealmAndBothRequestOriginsAndCallbackAreRequired() {
-        assertTrue(LocalAccountAuthenticator.allowed("true", "openshapeforge", "openshapeforge", AUTH, AUTH, CALLBACK));
-        assertFalse(LocalAccountAuthenticator.allowed(null, "openshapeforge", "openshapeforge", AUTH, AUTH, CALLBACK));
-        assertFalse(LocalAccountAuthenticator.allowed("false", "openshapeforge", "openshapeforge", AUTH, AUTH, CALLBACK));
-        assertFalse(LocalAccountAuthenticator.allowed("true", null, "openshapeforge", AUTH, AUTH, CALLBACK));
-        assertFalse(LocalAccountAuthenticator.allowed("true", "openshapeforge", "master", AUTH, AUTH, CALLBACK));
-        assertFalse(LocalAccountAuthenticator.allowed("true", "openshapeforge", "openshapeforge", "https://remote.example", AUTH, CALLBACK));
-        assertFalse(LocalAccountAuthenticator.allowed("true", "openshapeforge", "openshapeforge", AUTH, "https://remote.example", CALLBACK));
-        assertFalse(LocalAccountAuthenticator.allowed("true", "openshapeforge", "openshapeforge", AUTH, AUTH, "https://remote.example/callback"));
+        assertTrue(LocalAccountAuthenticator.allowed("true", "development", "development", AUTH, AUTH, CALLBACK));
+        assertFalse(LocalAccountAuthenticator.allowed(null, "development", "development", AUTH, AUTH, CALLBACK));
+        assertFalse(LocalAccountAuthenticator.allowed("false", "development", "development", AUTH, AUTH, CALLBACK));
+        assertFalse(LocalAccountAuthenticator.allowed("true", null, "development", AUTH, AUTH, CALLBACK));
+        assertFalse(LocalAccountAuthenticator.allowed("true", "development", "master", AUTH, AUTH, CALLBACK));
+        assertFalse(LocalAccountAuthenticator.allowed("true", "development", "development", "https://remote.example", AUTH, CALLBACK));
+        assertFalse(LocalAccountAuthenticator.allowed("true", "development", "development", AUTH, "https://remote.example", CALLBACK));
+        assertFalse(LocalAccountAuthenticator.allowed("true", "development", "development", AUTH, AUTH, "https://remote.example/callback"));
     }
 }

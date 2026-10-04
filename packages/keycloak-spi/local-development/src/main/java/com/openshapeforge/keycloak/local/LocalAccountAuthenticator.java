@@ -4,6 +4,8 @@ package com.openshapeforge.keycloak.local;
 import java.net.URI;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.Set;
 import org.keycloak.Config;
@@ -26,8 +28,8 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
     static boolean localUri(String value) {
         try {
             URI uri = URI.create(value);
-            String host = uri.getHost();
-            return uri.getRawUserInfo() == null && Set.of("http", "https").contains(uri.getScheme()) && host != null
+            String host = uri.getHost() == null ? null : uri.getHost().toLowerCase(Locale.ROOT);
+            return uri.getRawUserInfo() == null && Set.of("http", "https").contains(uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT)) && host != null
                 && (Set.of("localhost", "127.0.0.1", "[::1]", "::1").contains(host)
                     || host.endsWith(".localhost"));
         } catch (RuntimeException e) { return false; }
@@ -40,8 +42,12 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
     }
 
     static boolean allowed(String enabled, String realms, String realm, String base, String request, String redirect) {
-        return "true".equals(enabled) && realms != null && List.of(realms.split(",")).contains(realm)
+        return "true".equals(enabled) && realms != null && Arrays.stream(realms.split(",")).map(String::trim).anyMatch(realm::equals)
             && localUri(base) && localUri(request) && localUri(redirect);
+    }
+
+    static boolean eligible(boolean enabled, String serviceAccountClientLink) {
+        return enabled && serviceAccountClientLink == null;
     }
 
     @Override public void authenticate(AuthenticationFlowContext context) {
@@ -51,7 +57,7 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
 
     private void challenge(AuthenticationFlowContext context, String error) {
         try (var stream = context.getSession().users().searchForUserStream(context.getRealm(), Map.of(), null, null)) {
-            var accounts = stream.filter(user -> user.getServiceAccountClientLink() == null)
+            var accounts = stream.filter(user -> user.getServiceAccountClientLink() == null && user.getUsername() != null)
                 .sorted(Comparator.comparing(UserModel::getUsername))
                 .map(user -> Map.of("value", user.getId(), "label", user.getUsername(),
                     "description", String.join(" ",
@@ -62,7 +68,7 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
             boolean dutch = dutch(context);
             var form = context.form().setAttribute("localAccounts", JsonSerialization.writeValueAsString(accounts))
                 .setAttribute("localLanguage", dutch ? "nl" : "en")
-                .setAttribute("localTitle", dutch ? "Lokaal developmentaccount" : "Local development account");
+                ;
             if (error != null) form.setError(error);
             context.challenge(form.createForm("local-accounts.ftl"));
         } catch (java.io.IOException e) {
@@ -71,8 +77,7 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
     }
 
     private boolean dutch(AuthenticationFlowContext context) {
-        var languages = context.getHttpRequest().getHttpHeaders().getAcceptableLanguages();
-        return !languages.isEmpty() && "nl".equals(languages.get(0).getLanguage());
+        return "nl".equals(context.getSession().getContext().resolveLocale(context.getUser()).getLanguage());
     }
 
     @Override public void action(AuthenticationFlowContext context) {
@@ -81,9 +86,8 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
         if ("normal".equals(data.getFirst("mode"))) { context.attempted(); return; }
         String id = data.getFirst("account");
         UserModel user = id == null ? null : context.getSession().users().getUserById(context.getRealm(), id);
-        if (user == null || !user.isEnabled() || user.getServiceAccountClientLink() != null) {
-            challenge(context, dutch(context) ? "Dit account is niet beschikbaar voor aanmelden."
-                : "This account is not available for sign-in."); return;
+        if (user == null || !eligible(user.isEnabled(), user.getServiceAccountClientLink())) {
+            challenge(context, "osfLocalAccountUnavailable"); return;
         }
         context.setUser(user);
         context.getEvent().detail("auth_method", ID);

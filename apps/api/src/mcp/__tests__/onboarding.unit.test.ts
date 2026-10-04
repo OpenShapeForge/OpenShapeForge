@@ -184,7 +184,7 @@ describe("computeOnboarding", () => {
     const inProgress = computeOnboarding(facts());
     expect(inProgress.status).toBe("In progress");
     expect(inProgress.summary).toContain("1 of 2 steps done");
-    expect(inProgress.summary).toContain("Follow onboarding_guide.");
+    expect(inProgress.summary).toContain("Onboarding is optional; use onboarding_guide if the person asks for help.");
 
     const allDone = computeOnboarding(facts({ preferences: { offered: true, count: 1 } }));
     expect(allDone.status).toBe("In progress");
@@ -275,7 +275,7 @@ describe("guide text and instructions", () => {
     const info = { name: "Hans", summary: "You are Hans." };
     const inProgress = withOnboarding(info, computeOnboarding(facts()));
     expect(inProgress.onboarding.status).toBe("In progress");
-    expect(inProgress.summary).toBe("You are Hans. Onboarding is in progress; follow onboarding_guide.");
+    expect(inProgress.summary).toBe("You are Hans. Onboarding is in progress; optional guidance is available via onboarding_guide. App and tool use do not require completing this checklist.");
     const none = withOnboarding(info, computeOnboarding(facts({ relation: null, record: null })));
     expect(none.summary).toBe("You are Hans.");
   });

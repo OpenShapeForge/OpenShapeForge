@@ -20,6 +20,7 @@ import {
   pluginCreateInput,
   schemaSample,
   tables,
+  tablesByName,
 } from "../../../graphql/__tests__/e2e/entity-factory.js";
 import {
   isEntityBackedCreate,
@@ -300,7 +301,7 @@ export async function createMcpRow(
   // that intentionally has no MCP mutation projection of its own. Seed that
   // dependency through the shared database fixture instead of inventing a
   // tool the catalog does not advertise.
-  if (!table.source?.mcp) {
+  if (!table.source?.mcp?.operations.create) {
     return createRow(table, identity, overrides, depth);
   }
   const created = await callTool(
@@ -371,9 +372,7 @@ export async function createForeignKeyTarget(
   identity: Identity,
   depth = 1,
 ): Promise<string> {
-  const mcpTarget = mcpCreateTables.find(
-    (candidate) => candidate.name === target && candidate.source?.mcp?.operations.create,
-  );
-  if (!mcpTarget) throw new Error(`MCP FK target ${target} has no create operation`);
+  const mcpTarget = tablesByName.get(target);
+  if (!mcpTarget) throw new Error(`MCP FK target ${target} has no table`);
   return createRow(mcpTarget, identity, {}, depth);
 }

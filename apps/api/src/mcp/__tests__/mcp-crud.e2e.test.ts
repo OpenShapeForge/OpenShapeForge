@@ -526,6 +526,22 @@ describe("generated MCP server", () => {
       args: Record<string, unknown> = {},
     ) => callTool(identity, toolNameFor(table, operation), argsFor(table, args));
 
+    // Read-only MCP entities still have database fixtures; never invent their
+    // absent mutation tools merely to set up a read/tenant-isolation proof.
+    if (!table.source!.mcp!.operations.create) {
+      test(`${prefix}: reads its fixture without exposing it to another tenant`, async () => {
+        const id = await createMcpRow(table, tenantA);
+        const fetched = await call(tenantA, "get", { id });
+        expectCanonicalToolOutput(table, "get", fetched.body);
+        expect(toolPayload(fetched.body).id).toBe(id);
+        const listed = await call(tenantA, "list", { first: 5 });
+        expectCanonicalToolOutput(table, "list", listed.body);
+        expect(toolError(listed.body)).toBeUndefined();
+        expect(toolError((await call(tenantB, "get", { id })).body)).toMatch(/NOT_FOUND/);
+      });
+      continue;
+    }
+
     test(`${prefix}: create, get, list, update, delete round-trip`, async () => {
       const args = await createArgs(table, tenantA);
       const created = await call(tenantA, "create", args);

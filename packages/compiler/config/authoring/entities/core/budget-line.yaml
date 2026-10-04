@@ -256,6 +256,10 @@ interfaces:
                     - lineNumber
                     - description
                     - amount
+                    - budgetId
+                    - ledgerAccountId
+                    - fiscalPeriodId
+                    - costDimensionId
         modes:
           create:
             title:
@@ -269,6 +273,7 @@ interfaces:
                   - lineNumber
                   - description
                   - amount
+                  - budgetId
                   - ledgerAccountId
                   - fiscalPeriodId
                   - costDimensionId

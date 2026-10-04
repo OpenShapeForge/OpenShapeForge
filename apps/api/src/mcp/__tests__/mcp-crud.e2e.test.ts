@@ -539,6 +539,15 @@ describe("generated MCP server", () => {
         expect(toolError(listed.body)).toBeUndefined();
         expect(toolError((await call(tenantB, "get", { id })).body)).toMatch(/NOT_FOUND/);
       });
+      test(`${prefix}: rejects unknown read filters and advertises relationship keys`, async () => {
+        const invalid = await call(tenantA, "list", { filter: { definitelyNotAField: "x" } });
+        expect(toolError(invalid.body)).toMatch(/BAD_USER_INPUT/);
+        const { body } = await rpc(tenantA, "tools/list");
+        const schema = await advertisedSchema(tenantA, body.result.tools, table, "list");
+        for (const column of table.columns.filter(column => foreignKeyTargets(table).has(column.name))) {
+          expect(schema.properties.filter.properties[fieldName(column)]).toMatchObject({ type: "string", format: "uuid" });
+        }
+      });
       continue;
     }
 

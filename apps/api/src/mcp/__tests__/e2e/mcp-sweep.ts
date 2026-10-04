@@ -20,7 +20,7 @@ import {
   pluginCreateInput,
   schemaSample,
   tables,
-  tablesByName,
+  eligibleTablesByName,
 } from "../../../graphql/__tests__/e2e/entity-factory.js";
 import {
   isEntityBackedCreate,
@@ -372,7 +372,7 @@ export async function createForeignKeyTarget(
   identity: Identity,
   depth = 1,
 ): Promise<string> {
-  const mcpTarget = tablesByName.get(target);
-  if (!mcpTarget) throw new Error(`MCP FK target ${target} has no table`);
+  const mcpTarget = eligibleTablesByName.get(target);
+  if (!mcpTarget) throw new Error(`MCP FK target ${target} has no eligible fixture table`);
   return createRow(mcpTarget, identity, {}, depth);
 }

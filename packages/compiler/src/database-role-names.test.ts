@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parse, stringify } from "yaml";
 import {
   DATABASE_ROLES, generateArtifacts, resolveDatabaseRoleNames,
   type DatabaseRoleNames,
@@ -40,15 +41,35 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 async function hostRoot() {
   const root = await mkdtemp(join(tmpdir(), "osf-role-names-"));
   roots.push(root);
-  await mkdir(join(root, "packages/compiler"), { recursive: true });
-  await cp(join(import.meta.dir, "../config"), join(root, "packages/compiler/config"), { recursive: true });
+  await mkdir(join(root, "packages/compiler/config"), { recursive: true });
+  await writeFile(join(root, "packages/compiler/config/platform-schema.yaml"), "version: 1\ntables: []\n");
+  const authoring = join(root, "role-fixture");
+  await mkdir(join(authoring, "entities"), { recursive: true });
+  await cp(join(import.meta.dir, "../config/authoring/entities/_base.yaml"), join(authoring, "entities/_base.yaml"));
+  // The same real three-entity identity fixture used by index.test.ts: this
+  // tests option assembly/write plumbing, not four repeats of the whole corpus.
+  const identityFields: Record<string, string[]> = {
+    relation: ["displayName", "relationType", "status", "businessContext"],
+    "natural-person": ["relationId", "firstName", "lastName"],
+    "contact-detail": ["relationId", "type", "value", "isPrimary", "status"],
+  };
+  for (const [slug, fields] of Object.entries(identityFields)) {
+    const source = parse(await readFile(join(import.meta.dir, `../config/authoring/entities/core/${slug}.yaml`), "utf8"));
+    const entity = Object.fromEntries(["schemaVersion", "kind", "module", "entity", "title", "description", "language", "authorization", "operations", "interfaces"]
+      .map(key => [key, source[key]]));
+    entity.interfaces = { ...source.interfaces, web: { operations: source.interfaces.web.operations } };
+    entity.fields = source.fields.filter((field: { key: string }) => fields.includes(field.key));
+    await writeFile(join(authoring, `entities/${slug}.yaml`), stringify(entity));
+  }
+  await cp(join(import.meta.dir, "../config/authoring/authorization.yaml"), join(authoring, "authorization.yaml"));
+  await cp(join(import.meta.dir, "../config/authoring/catalogs"), join(authoring, "catalogs"), { recursive: true });
   for (const name of ["documents", "core-versioning"]) {
     await mkdir(join(root, name));
     await writeFile(join(root, name, "index.ts"), `export default { name: "${name}" };\n`);
     await writeFile(join(root, name, "runtime.ts"), `export default { name: "${name}", operationHandlers: {} };\n`);
   }
   await writeFile(join(root, "authoring.config.yaml"),
-    "layers:\n  - packages/compiler/config/authoring\nplugins:\n  - ./documents/index.ts\n  - ./core-versioning/index.ts\n");
+    "layers:\n  - role-fixture\nplugins:\n  - ./documents/index.ts\n  - ./core-versioning/index.ts\n");
   return root;
 }
 

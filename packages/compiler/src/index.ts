@@ -36,7 +36,12 @@ import {
   generateCoreReferentiedataArtifacts,
   type CoreReferentiedataSnapshot,
 } from "./core-referentiedata-artifacts.js";
-import { generateArtifacts } from "./generate.js";
+import {
+  generateArtifacts,
+  resolveDatabaseRoleNames,
+  type GenerateArtifactsOptions,
+} from "./generate.js";
+export type { DatabaseRoleNames } from "./generate.js";
 import { renderConnectorCatalog } from "./generate-connectors.js";
 import { connectorMcpTools } from "@openshapeforge/operations";
 import { renderGraphqlDocumentationCatalog } from "./generate-graphql.js";
@@ -344,13 +349,18 @@ function assertReferentieGroepsResolve(
   }
 }
 
+export type CollectAllArtifactsOptions = Pick<GenerateArtifactsOptions, "databaseRoleNames">;
+
 /**
  * Collects every artifact the compiler would write, without touching disk.
  * The single entry point shared by `runCompiler` and the check scripts.
  */
 export async function collectAllArtifacts(
   repoRoot: string = defaultRepoRoot,
+  options: CollectAllArtifactsOptions = {},
 ): Promise<ArtifactCollection> {
+  // Capture/validate before the first async compile/plugin boundary.
+  const databaseRoleNames = resolveDatabaseRoleNames(options.databaseRoleNames);
   const authoringConfig = loadAuthoringConfig(repoRoot);
   const { manifest, entities, connectors, plugins, pluginEntries, referentiedataCatalog, referentiedata } =
     await loadActivePlatformCompile(repoRoot);
@@ -453,6 +463,7 @@ export async function collectAllArtifacts(
   const keycloakArtifacts = generateAuthoringKeycloakArtifacts(authoringDir);
   const groups: ArtifactCollection["groups"] = {
     db: generateArtifacts(manifest, {
+      databaseRoleNames,
       source: activeManifestSource,
       // Resolves the operation keys authored in `writtenBy` into routes, and
       // fails the build on a key no operation answers to.
@@ -664,14 +675,14 @@ export async function collectAllArtifacts(
   };
 }
 
-export type RunCompilerOptions = {
+export type RunCompilerOptions = CollectAllArtifactsOptions & {
   /** Host repo root; defaults to this package's own monorepo root. */
   repoRoot?: string;
 };
 
 export async function runCompiler(options: RunCompilerOptions = {}) {
   const repoRoot = options.repoRoot ?? defaultRepoRoot;
-  const { all } = await collectAllArtifacts(repoRoot);
+  const { all } = await collectAllArtifacts(repoRoot, options);
 
   for (const artifact of all) {
     const target = join(repoRoot, artifact.path);

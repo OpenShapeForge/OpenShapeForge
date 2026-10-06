@@ -37,3 +37,17 @@ Run policy tests with `mvn -f pom.xml test`. Build the pinned Dockerfile, publis
 an immutable image, then adopt its digest through the consuming deployment.
 The automatic-label script is derived from Keycloak 26.7.3's Apache-2.0 script;
 keep native credential serialization and error handling synchronized on upgrades.
+
+For the same opt-in origin, successful native passkey enrollment can replace a
+previous different user's SSO session in this browser. The provider logs out
+only the session matching the current root authentication session; it never
+lists or removes another device's sessions. An enabled enrolled user, exactly
+one enabled organization, and its bounded return URL are required. Failed or
+cancelled enrollment and unconfigured realms keep stock behavior.
+
+The replacement finishes native required actions and action-token invalidation
+without creating a different user's session under the old session ID. The child
+theme follows the bounded `account_changed=1` return. Consuming applications must
+remove their saved OIDC user on this marker and start normal OIDC/PKCE login;
+the newly registered passkey authenticates the new account. The marker carries
+no identity, token, role or permission. This does not bypass admission checks.

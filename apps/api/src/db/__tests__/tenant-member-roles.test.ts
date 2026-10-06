@@ -1,4 +1,3 @@
-import { IDENTITY_LINK_ADMIN_ROLE, NEEDS_ROLE_ASSIGNMENT_ROLES } from "../../auth/organization-roles.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * The platform operator's member-role administration writes the tenant's
@@ -10,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql, type Kysely } from "kysely";
 import type { DB } from "../../generated/db/types.js";
+import { IDENTITY_LINK_ADMIN_ROLE, NEEDS_ROLE_ASSIGNMENT_ROLES } from "../../auth/organization-roles.js";
 import { __resetIdentityLinkForTests, confirmPendingLink, resolveIdentityLink } from "../../auth/identity-link.js";
 import type { KeycloakTenantMemberAdminClient } from "../../control/keycloak-organization-members.js";
 import type { PlatformAdministrator } from "../../control/platform-admin.js";
@@ -106,15 +106,17 @@ describe("tenant member roles from the control plane", () => {
         const claims = { issuer: ISSUER, subject, email: "nora@example.com", givenName: "Nora", familyName: "Tester" };
         const deps = { db: appDb, administrator, members: membersClient(subject, "nora@example.com") };
 
-        // Not signed in yet: nothing to write to.
-        await expect(
-          changeTenantMemberRoles(deps, "acme", subject, ["org_admin"], "assign"),
-        ).rejects.toMatchObject({
-          status: 409,
-          code: "MEMBER_NOT_SIGNED_IN",
-          detail: "MEMBER_NOT_SIGNED_IN",
-          message: expect.stringContaining("has not signed in"),
-        });
+        // Explicit role assignment records admission for a registered provider
+        // account, without inventing an identity link or a provider-wide role.
+        expect(await changeTenantMemberRoles(deps, "acme", subject, ["org_admin"], "assign"))
+          .toMatchObject({ action: "awaiting_sign_in", roles: [] });
+        const intent = (await sql<{role: string; status: string}>`
+          select role, status from platform.employee_invitations where tenant_id = ${TENANT} and email = 'nora@example.com'
+        `.execute(adminDb)).rows;
+        expect(intent).toEqual([{role: "org_admin", status: "pending"}]);
+        expect((await sql`select * from platform.identity_relations where tenant_id = ${TENANT}`.execute(adminDb)).rows).toHaveLength(0);
+        expect((await sql`select * from platform.employee_invitations where tenant_id = ${OTHER_TENANT}`.execute(adminDb)).rows).toHaveLength(0);
+        await sql`delete from platform.employee_invitations where tenant_id = ${TENANT}`.execute(adminDb);
 
         // Invited as an employee in acme and in other, signed in to both.
         for (const tenant of [TENANT, OTHER_TENANT]) {
@@ -229,7 +231,7 @@ describe("tenant member roles from the control plane", () => {
         const assigned = await changeTenantMemberRoles(deps, "acme", subject, ["org_admin"], "assign");
         expect(assigned).toMatchObject({
           action: "assigned",
-          roles: [...NEEDS_ROLE_ASSIGNMENT_ROLES, IDENTITY_LINK_ADMIN_ROLE, "org_admin", "org_employee"].sort(),
+          roles: [...new Set([...NEEDS_ROLE_ASSIGNMENT_ROLES, IDENTITY_LINK_ADMIN_ROLE, "org_admin", "org_employee"])].sort(),
         });
         const listed = await listTenantMembers(deps, "acme");
         expect(listed.members[0]).toMatchObject({ memberId: subject, roles: assigned.roles, linkStatus: "linked" });

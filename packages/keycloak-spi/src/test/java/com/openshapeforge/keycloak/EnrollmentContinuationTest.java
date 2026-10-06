@@ -97,4 +97,67 @@ public class EnrollmentContinuationTest {
         assertTrue(EnrollmentContinuation.allowedTarget("http://127.0.0.1:3932","http://127.0.0.1:3932/acme"));
         assertFalse(EnrollmentContinuation.allowedTarget("http://127.0.0.1:3932","http://127.0.0.1:3933/acme"));
     }
+    @Test public void failedRegistrationCannotReplaceBrowserSession() {
+        for (var status : RequiredActionContext.Status.values()) if (status != RequiredActionContext.Status.SUCCESS) {
+            var f = new Fixture(); f.status = status;
+            assertNull(EnrollmentContinuation.browserSessionToReplace(f.context()));
+        }
+        var disabled = new Fixture(); disabled.enabled = false;
+        assertNull(EnrollmentContinuation.browserSessionToReplace(disabled.context()));
+    }
+
+    static final class SessionFixture {
+        String origin = ORIGIN, target = ORIGIN + "/acme", previousUser = "old", newUser = "new";
+        int organizations = 1;
+        String clientId = "account";
+        final UserSessionModel previous = mock(UserSessionModel.class, m -> m.equals("getUser")
+            ? mock(UserModel.class, u -> u.equals("getId") ? previousUser : null) : null);
+        RequiredActionContext context() {
+            var account = mock(ClientModel.class, m -> m.equals("getAttribute") ? origin : null);
+            var realm = mock(RealmModel.class, m -> m.equals("getClientByClientId") ? account : null);
+            var root = mock(org.keycloak.sessions.RootAuthenticationSessionModel.class, m -> m.equals("getId") ? "browser-session" : null);
+            var client = mock(ClientModel.class, m -> m.equals("getClientId") ? clientId : null);
+            var auth = mock(AuthenticationSessionModel.class, m -> switch(m) {
+                case "getParentSession" -> root; case "getClient" -> client; default -> null;
+            });
+            var user = mock(UserModel.class, m -> switch(m) {
+                case "isEnabled" -> true; case "getId" -> newUser; default -> null;
+            });
+            var org = mock(OrganizationModel.class, m -> switch(m) {
+                case "isEnabled" -> true; case "getRedirectUrl" -> target; default -> null;
+            });
+            var provider = mock(OrganizationProvider.class, m -> m.equals("getByMember") ? Stream.generate(() -> org).limit(organizations) : null);
+            var sessions = (UserSessionProvider) Proxy.newProxyInstance(UserSessionProvider.class.getClassLoader(),
+                new Class<?>[]{UserSessionProvider.class}, (p,m,a) -> {
+                    if (!m.getName().equals("getUserSession")) throw new AssertionError("Must never enumerate other device sessions");
+                    assertSame(realm, a[0]); assertEquals("browser-session", a[1]); return previous;
+                });
+            var session = mock(KeycloakSession.class, m -> switch(m) {
+                case "getProvider" -> provider; case "sessions" -> sessions; default -> null;
+            });
+            return mock(RequiredActionContext.class, m -> switch(m) {
+                case "getStatus" -> RequiredActionContext.Status.SUCCESS; case "getUser" -> user;
+                case "getSession" -> session; case "getRealm" -> realm; case "getAuthenticationSession" -> auth; default -> null;
+            });
+        }
+    }
+    @Test public void selectsOnlyThisBrowsersDifferentUserSession() {
+        var f = new SessionFixture();
+        assertSame(f.previous, EnrollmentContinuation.browserSessionToReplace(f.context()));
+        f.previousUser = f.newUser;
+        assertNull(EnrollmentContinuation.browserSessionToReplace(f.context()));
+    }
+    @Test public void unconfiguredUnsafeAndAmbiguousEnrollmentsCannotLogoutAnotherAccount() {
+        var otherClient = new SessionFixture(); otherClient.clientId = "another-client";
+        assertNull(EnrollmentContinuation.browserSessionToReplace(otherClient.context()));
+        for (String origin : new String[]{null, "", "https://evil.example.test"}) {
+            var f = new SessionFixture(); f.origin = origin;
+            assertNull(EnrollmentContinuation.browserSessionToReplace(f.context()));
+        }
+        for (int count : new int[]{0,2}) {
+            var f = new SessionFixture(); f.organizations = count;
+            assertNull(EnrollmentContinuation.browserSessionToReplace(f.context()));
+        }
+    }
+
 }

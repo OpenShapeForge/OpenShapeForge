@@ -103,9 +103,12 @@ describe("tenant member administration", () => {
     await removeTenantMembership({ db: remove.db, administrator, members: membersClient().client }, "acme", "m0");
     expect(remove.tenantLock()).toBe("for no key update");
 
+    // Unlinked members now record admission. This fake returns no invitation insert row,
+    // so the shared writer reports its conflict after acquiring the tenant lock.
     const roles = recordingDatabase();
     await expect(changeTenantMemberRoles({ db: roles.db, administrator, members: membersClient().client },
-      "acme", "m0", ["org_employee"], "assign")).rejects.toMatchObject({ code: "MEMBER_NOT_SIGNED_IN" });
+      "acme", "m0", ["org_employee"], "assign")).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(roles.queries.some(sql => /insert into platform\.employee_invitations/.test(sql))).toBe(true);
     expect(roles.tenantLock()).toBe("for no key update");
   });
 

@@ -13,6 +13,7 @@
 import { sql, type Transaction } from "kysely";
 import {
   employeeInvitationRoleGrants,
+  recordEmployeeInvitation,
   isEmployeeInvitationRole,
   type EmployeeInvitationRole,
 } from "../auth/employee-invitations.js";
@@ -26,6 +27,7 @@ import type { KeycloakTenantMemberAdminClient } from "./keycloak-organization-me
 import { systemSessionForAdministrator, type PlatformAdministrator } from "./platform-admin.js";
 import { ControlInputError } from "./organization-naming.js";
 import { ControlOperationError } from "./errors.js";
+import { invitationOutcome } from "./invitation-outcome.js";
 
 type Dependencies = {
   db: OpenShapeForgeDatabase;
@@ -213,18 +215,21 @@ function roles(input: unknown): EmployeeInvitationRole[] {
 export async function changeTenantMemberRoles(deps: Dependencies, slug: string, memberId: string, input: unknown, mode: "assign" | "remove") {
   providerId(memberId, "memberId");
   return withTenant(deps, `control.${mode}-tenant-member-roles`, slug, `member="${memberId}"`, "write", async (tenant, trx, afterCommit) => {
-    await memberWithSummary(deps, trx, tenant, memberId);
+    const member = await memberWithSummary(deps, trx, tenant, memberId);
     const selected = roles(input);
     const membership = await membershipOf(trx, tenant.id, memberId);
     if (!membership) {
-      throw new ControlOperationError(
-        409,
-        "MEMBER_NOT_SIGNED_IN",
-        "MEMBER_NOT_SIGNED_IN",
-        "This person has an account but has not signed in to this tenant yet, so there is no membership to change. " +
-          "Call create_tenant_invitation with their e-mail and role: it sends no e-mail to an existing account and returns " +
-          "the sign-in URL; the role is applied when they sign in there.",
-      );
+      if (mode === "remove") throw new ControlOperationError(409, "MEMBER_NOT_SIGNED_IN", "MEMBER_NOT_SIGNED_IN", "No membership to remove roles from; revoke any pending admission instead.");
+      if (tenant.status !== "active" || !member.enabled || !member.email) {
+        throw new ControlInputError("Assigning admission requires an active tenant and an enabled member with an email address.");
+      }
+      // A provider account is not an application membership. Record explicit
+      // admission rather than inventing a link or taking over an email match.
+      if (selected.length !== 1) throw new ControlInputError("Select one admission role for an unlinked member.");
+      const invitation = await recordEmployeeInvitation(trx, tenant.id,
+        `${deps.administrator.issuer}#${deps.administrator.subject}`,
+        { email: member.email, role: selected[0]!, firstName: member.firstName ?? undefined, lastName: member.lastName ?? undefined });
+      return { tenantSlug: slug, memberId, roles: [], action: "awaiting_sign_in", invitationId: invitation.id, ...invitationOutcome(slug, "no_email_existing_account") };
     }
     const grants = new Set(selected.flatMap((role) => employeeInvitationRoleGrants(role)));
     const current = new Set(membership.roles ?? []);

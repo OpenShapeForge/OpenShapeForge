@@ -18,6 +18,7 @@ public final class EnrollmentRegisterFactory extends WebAuthnPasswordlessRegiste
             @Override public void processAction(RequiredActionContext context) {
                 super.processAction(context);
                 EnrollmentContinuation.resume(context);
+                EnrollmentContinuation.replaceBrowserSession(context);
             }
         };
     }

@@ -78,6 +78,8 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
       id uuid primary key default gen_random_uuid(), slug text unique not null, status text not null,
       keycloak_realm text, keycloak_organization_id text
     )`.execute(owner.db);
+    await sql`create table platform.identities (id uuid primary key default gen_random_uuid(), email text);
+      create table platform.identity_relations (identity_id uuid references platform.identities, tenant_id uuid, status text);`.execute(owner.db);
     await applyAppHelpersMigration(owner.db);
     // Both tables come from the manifest; the invitations migration file owns
     // only the checks, the pending-address index and the policy.
@@ -98,7 +100,7 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
   });
   afterAll(async () => { await runtime?.close(); await owner?.close(); });
   beforeEach(async () => {
-    await sql`truncate platform.employee_invitations, platform.tenants, platform.system_bypass_audit;
+    await sql`truncate platform.identity_relations, platform.identities, platform.employee_invitations, platform.tenants, platform.system_bypass_audit;
       insert into platform.tenants (slug, status, keycloak_realm, keycloak_organization_id)
       values ('acme', 'active', 'tenant', 'org-acme'), ('other', 'active', 'tenant', 'org-other')`.execute(owner.db);
     sends = []; pending = new Set(); admins = []; members = []; smtp = true; deliveryFails = false; conflictMessage = null;
@@ -229,6 +231,11 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     expect(await create()).toMatchObject({ email: 'member@example.com', role: 'org_admin', delivery: 'no_email_existing_account' });
     expect(sends).toHaveLength(0);
     await sql`update platform.employee_invitations set status='accepted', accepted_at=now()`.execute(owner.db);
+    expect(await create()).toMatchObject({ status: 'pending', delivery: 'no_email_existing_account', role: 'org_admin' });
+    await sql`insert into platform.identities (email) values ('member@example.com');
+      insert into platform.identity_relations (identity_id, tenant_id, status)
+      select i.id,t.id,'linked' from platform.identities i, platform.tenants t where t.slug='acme';
+      update platform.employee_invitations set status='accepted', accepted_at=now() where status='pending';`.execute(owner.db);
     expect(await create()).toMatchObject({ status: 'accepted', delivery: 'already_accepted' });
     members = [];
     expect(await create()).toMatchObject({ status: 'pending', delivery: 'email_sent' });

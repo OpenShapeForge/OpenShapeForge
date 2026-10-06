@@ -173,7 +173,15 @@ export async function manageTenantInvitations(
           // for a member, and the local intent is what their sign-in consumes.
           const member = await clients.members.hasMemberByEmail(organization.id, email);
           const accepted = rows.find((row) => row.status === "accepted" && row.email.toLowerCase() === email);
-          if (member && accepted) {
+          // Historical acceptance is not current admission. A missing/pending
+          // membership needs a new intent; linked members use role administration.
+          const linked = member && accepted ? (await sql`
+            select ir.identity_id from platform.identity_relations ir
+            join platform.identities i on i.id = ir.identity_id
+            where ir.tenant_id = ${tenant.id} and ir.status = 'linked'
+              and lower(i.email) = lower(${email})
+          `.execute(trx)).rows.length > 0 : false;
+          if (member && accepted && linked) {
             return { tenantSlug: input.slug, invitationId: accepted.id, ...toInvitation(accepted), ...invitationOutcome(input.slug, "already_accepted") };
           }
           const delivery = member

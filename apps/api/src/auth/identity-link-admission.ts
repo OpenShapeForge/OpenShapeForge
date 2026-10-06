@@ -105,7 +105,7 @@ export async function admitInvitedPerson(
       // The row may already exist, empty and pending: a session that could
       // not be admitted by an e-mail (an API key's, a token without one)
       // recorded it. The invitation claims that row rather than losing to it.
-      await linkEmptyPendingRow(trx, { identityId, tenantId: session.tenantId, relationId, linkedBy: "jit", roles, allowCandidate: Boolean(target.rows[0]?.relation_id) })
+      await linkEmptyPendingRow(trx, { identityId, tenantId: session.tenantId, relationId, linkedBy: "jit", roles, allowCandidate: true })
         ? await readLinkRow(trx, identityId, session.tenantId)
         : null
     );
@@ -118,9 +118,10 @@ export async function admitInvitedPerson(
     }
     // Lost a race with another replica: keep its link; this transaction's
     // Relation and claim roll back with the refusal below.
-    const row = inserted ?? (await readLinkRow(trx, identityId, session.tenantId));
-    if (target.rows[0]?.relation_id && row?.relation_id !== relationId) throw notInvited(session, claims);
-    return row ? toState(row, claims) : null;
+    if (!inserted) throw new SessionAuthenticationUnavailableError(
+      "The membership changed while accepting the invitation; sign in again.",
+    );
+    return toState(inserted, claims);
   });
   if (!linked) {
     throw new SessionAuthenticationUnavailableError(

@@ -16,7 +16,7 @@ const template = readFileSync(
 
 describe("OpenShapeForge Keycloak login theme", () => {
   test("inherits the pinned v2 theme and is copied into the immutable image", () => {
-    expect(properties.trim()).toBe("parent=keycloak.v2");
+    expect(properties.trim().split("\n")).toEqual(["parent=keycloak.v2", "scripts=js/accountChanged.js"]);
     expect(dockerfile).toContain(
       "COPY theme/openshapeforge /opt/keycloak/themes/openshapeforge",
     );
@@ -46,4 +46,24 @@ describe("OpenShapeForge Keycloak login theme", () => {
     expect(template).toContain("residentKey : ${residentKey?c}");
     expect(template).toContain('initLabelPrompt : ${msg("webauthn-registration-init-label-prompt")?c}');
   });
+});
+
+test("account completion redirects only a native info link carrying the replacement marker", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const script = readFileSync(new URL("../packages/keycloak-spi/theme/openshapeforge/login/resources/js/accountChanged.js", import.meta.url), "utf8");
+  for (const [href, redirect] of [
+    ["https://app.example.test/acme?account_changed=1", true],
+    ["http://127.0.0.1:3701/acme?account_changed=1", true],
+    ["https://app.example.test/acme", false],
+    ["http://external.example/acme?account_changed=1", false],
+    [null, false],
+  ] as const) {
+    const navigations: string[] = [];
+    runInNewContext(script, { URL,
+      document: { querySelector: (selector: string) => { expect(selector).toBe("#kc-info-message a[href]"); return href ? { href } : null; } },
+      window: { addEventListener: (event: string, callback: () => void) => { expect(event).toBe("DOMContentLoaded"); callback(); },
+        location: { replace: (url: string) => navigations.push(url) } },
+    });
+    expect(navigations).toEqual(redirect ? [href!] : []);
+  }
 });

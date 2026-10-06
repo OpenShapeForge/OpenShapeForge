@@ -162,6 +162,14 @@ function entity(
 }
 
 describe("web manifest projection", () => {
+  test("read labels use the authored reference catalog without replacing canonical codes", () => {
+    const contact = entity("ContactMoment", "contact", [field("channel", { options: { type: "referentiedata", referentieGroep: "COMMUNICATIONCHANNEL" } })], coreView());
+    const manifest = buildWebManifest([contact], {}, { catalogs: [], operations: [] }, { COMMUNICATIONCHANNEL: [{ value: "phone", label: { en: "Phone", nl: "Telefoon" } }] });
+    expect(manifest.entities.ContactMoment!.fields.channel!.options).toEqual([{ value: "phone", label: { en: "Phone", nl: "Telefoon" } }]);
+    expect(manifest.entities.ContactMoment!.fields.channel!.optionSource).toEqual({ type: "referentiedata", group: "COMMUNICATIONCHANNEL" });
+    expect(buildWebManifest([contact]).entities.ContactMoment!.fields.channel!.options).toBeUndefined();
+  });
+
   test("preserves entityValue and allowed definitions on fields and collection relationships", () => {
     const definition = entity("Snippet", "snippet", [field("text")], coreView());
     definition.contract.entity.valueDefinition = true;
@@ -179,6 +187,59 @@ describe("web manifest projection", () => {
     expect(output.entities.Snippet).toBeUndefined();
     expect(output.entityValueDefinitions.Snippet).toMatchObject({ entityName: "Snippet", fields: [{ id: "Snippet.text", key: "text", supports: { read: true, create: true, update: true } }] });
     expect(renderWebManifest(buildWebManifest([page, placement, definition]))).toBe(renderWebManifest(buildWebManifest([definition, placement, page])));
+  });
+
+  test("contact context projects canonical sources for relations and employees without destination tabs", () => {
+    for (const name of ["Relation", "Employee"]) {
+      const owner = entity(name, "owner", [field("displayName"), field("preferred")], coreView(), [{ key: "contacts", kind: "hasMany", target: "Contact", foreignKey: "owner_id" }, { key: "people", kind: "hasMany", target: "Person", foreignKey: "owner_id" }]);
+      owner.contract.interfaces!.web!.recordContext = { fields: [], contacts: { relationship: "contacts", channelField: "type", valueField: "value", preferredChannelField: "preferred", language: { relationship: "people", field: "language" } } };
+      const contacts = entity("Contact", "contact", [field("type"), field("value")], coreView());
+      const person = entity("Person", "person", [field("language")], coreView());
+      const build = () => buildWebManifest([owner, contacts, person]);
+      expect(build().entities[name]!.views.record!.layout.context.contacts).toEqual({ relationshipId: "contacts", channelField: "type", valueField: "value", preferredChannelField: "preferred", language: { relationshipId: "people", field: "language" } });
+      owner.contract.interfaces!.web!.recordContext.contacts!.valueField = "missing";
+      expect(build).toThrow("contact context");
+      owner.contract.interfaces!.web!.recordContext.contacts!.valueField = "value";
+      person.contract.model.fields[0]!.baseType = "number";
+      expect(build).toThrow("single string field");
+    }
+  });
+
+  test("timeline placements use canonical date and reference fields for contacts and case events", () => {
+    for (const name of ["ContactMoment", "CaseStatusEvent"]) {
+      const view = coreView();
+      view.detail!.groups.items = [{ id: "activity", label: text("Activity"), fields: [], relationship: { render: { component: "relationshipTab" }, name: "events", overrides: { presentation: { kind: "timeline", iconField: "channel", icons: { phone: "phone" }, titleField: "subject", timestampField: "occurredAt", descriptionField: "channel", relatedField: "caseId" } } } }];
+      const owner = entity("Owner", "owner", [field("displayName")], view, [{ key: "events", kind: "hasMany", target: name, foreignKey: "owner_id" }]);
+      const target = entity(name, "event", [field("subject"), field("channel"), field("occurredAt", { baseType: "datetime" }), field("caseId", { osfType: "Case", relationship: { kind: "belongsTo", target: "Case", fieldKey: "caseId", foreignKey: "case_id" } })], coreView(), [{ key: "case", fieldKey: "caseId", kind: "belongsTo", target: "Case", foreignKey: "case_id" }]);
+      const caseEntity = entity("Case", "case", [field("displayName")], coreView());
+      const build = () => buildWebManifest([owner, target, caseEntity]);
+      expect(build().entities.Owner!.relationships.events!.collection!.presentation).toMatchObject({ kind: "timeline", timestampField: "occurredAt", relatedField: "caseId" });
+      target.contract.model.fields.find(f => f.key === "occurredAt")!.baseType = "string";
+      expect(build).toThrow("date");
+      target.contract.model.fields.find(f => f.key === "occurredAt")!.baseType = "datetime";
+      view.detail!.groups.items[0]!.relationship!.overrides!.presentation!.titleField = "missing";
+      expect(build).toThrow("missing");
+    }
+  });
+
+  test("association placements project canonical target rows without replacing the link collection", () => {
+    for (const [ownerName, targetName] of [["Relation", "Income"], ["Project", "Member"]]) {
+      const view = coreView();
+      view.detail!.groups.items = [{ id: "linked", label: text("Linked"), fields: [], relationship: { render: { component: "relationshipTab" }, name: "links", through: "targetId", overrides: { columns: ["displayName"] } } }];
+      const owner = entity(ownerName!, "owner", [field("displayName")], view, [{ key: "links", kind: "hasMany", target: "Link", foreignKey: "owner_id" }]);
+      owner.contract.interfaces!.web!.recordWorkspaceTabs = false;
+      const link = entity("Link", "link", [field("ownerId"), field("targetId")], coreView(), [{ key: "targetId", fieldKey: "targetId", kind: "belongsTo", target: targetName!, foreignKey: "target_id" }]);
+      link.contract.storage.columns.push({ field: "ownerId", column: "owner_id", type: "uuid", nullable: false, storageClass: "core" });
+      const destination = entity(targetName!, "destination", [field("displayName")], coreView(), [{ key: "links", kind: "hasMany", target: "Link", foreignKey: "target_id" }]);
+      const projected = buildWebManifest([owner, link, destination]).entities[ownerName!]!;
+      expect(projected.relationships.links!.targetEntityId).toBe("Link");
+      expect(projected.relationships.links__targetId).toMatchObject({ targetEntityId: targetName, association: { relationship: "links", parentField: "ownerId" }, operations: { list: { id: `${targetName}.list` } } });
+      expect(projected.relationships.links__targetId!.operations.create).toBeUndefined();
+      expect(projected.views.record!.layout.tabs[0]!.relationshipId).toBe("links__targetId");
+      expect(projected.views.record!.layout.workspaceTabs).toBe(false);
+      view.detail!.groups.items[0]!.relationship!.through = "unknown";
+      expect(() => buildWebManifest([owner, link, destination])).toThrow("canonical association reference");
+    }
   });
 
   test("schema-3 uses authored relation field keys and exposes via traversals read-only", () => {

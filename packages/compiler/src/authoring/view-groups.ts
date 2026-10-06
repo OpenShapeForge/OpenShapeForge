@@ -16,6 +16,8 @@ type GroupContainer = {
 };
 
 export interface ResolvedViewGroup {
+  /** Supplemental data remains addressable through context and editable in forms. */
+  showInReadNavigation?: boolean;
   id: string;
   title?: LocalizedText;
   label?: LocalizedText;
@@ -147,6 +149,7 @@ function resolveGroupDefinition(
     title: group.title,
     label: group.label,
     icon: group.icon,
+    ...(group.showInReadNavigation !== undefined ? { showInReadNavigation: group.showInReadNavigation } : {}),
     render: group.render,
     fields: group.fields,
     relationships: group.relationships,

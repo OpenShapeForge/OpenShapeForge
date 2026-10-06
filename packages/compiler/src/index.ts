@@ -390,6 +390,7 @@ export async function collectAllArtifacts(
   const productWebPresent = existsSync(join(repoRoot, "apps/product-web"));
   assertReferentieGroepsResolve(entities, referentiedata);
   const pluginMigrationRegistry = collectPluginMigrationRegistry(manifest, plugins, {
+    databaseRoleNames,
     repoRoot,
     authoringDir,
     webPresent,
@@ -445,6 +446,7 @@ export async function collectAllArtifacts(
     referentiedata,
   });
   const context = {
+    databaseRoleNames,
     repoRoot,
     authoringDir,
     webPresent,

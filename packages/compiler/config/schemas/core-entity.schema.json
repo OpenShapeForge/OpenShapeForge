@@ -1316,12 +1316,14 @@
               "additionalProperties": false,
               "required": ["tabs"],
               "properties": {
-                "preset": { "enum": ["main", "inbox-main-context"], "x-osf-i18n": { "title": { "en": "Page layout", "nl": "Pagina-indeling" }, "enum": { "main": { "en": "Main", "nl": "Hoofdinhoud" }, "inbox-main-context": { "en": "List, main and context", "nl": "Lijst, hoofdinhoud en context" } } } },
+                "preset": { "enum": ["main", "main-context", "inbox-main-context"], "x-osf-i18n": { "title": { "en": "Page layout", "nl": "Pagina-indeling" }, "enum": { "main": { "en": "Main", "nl": "Hoofdinhoud" }, "main-context": { "en": "Main and context", "nl": "Hoofdinhoud en context" }, "inbox-main-context": { "en": "List, main and context", "nl": "Lijst, hoofdinhoud en context" } } } },
+                "workspaceTabs": { "type": "boolean", "description": "Whether to show surrounding workspace tabs; omission inherits the normal shell. Internal record task tabs are unaffected." },
                 "context": {
                   "type": "object",
                   "additionalProperties": false,
                   "required": ["fields"],
                   "properties": {
+                    "contacts": {"type": "object", "additionalProperties": false, "required": ["relationship", "channelField", "valueField"], "properties": {"channels": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["key", "types"], "properties": {"key": {"$ref": "#/$defs/fieldKey"}, "types": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "label": {"$ref": "#/$defs/localizedText"}, "when": {"type": "object", "minProperties": 1, "propertyNames": {"pattern": "^[a-zA-Z][a-zA-Z0-9]*$"}, "additionalProperties": {"type": ["string", "boolean"]}}}}}, "relationship": {"$ref": "#/$defs/fieldKey"}, "channelField": {"$ref": "#/$defs/fieldKey"}, "valueField": {"$ref": "#/$defs/fieldKey"}, "preferredChannelField": {"$ref": "#/$defs/fieldKey"}, "language": {"type": "object", "additionalProperties": false, "required": ["relationship", "field"], "properties": {"relationship": {"$ref": "#/$defs/fieldKey"}, "field": {"$ref": "#/$defs/fieldKey"}}}}},
                     "fields": {
                       "type": "array",
                       "uniqueItems": true,
@@ -1401,6 +1403,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "showInReadNavigation": { "type": "boolean", "description": "Show this supplementary tab in ordinary read navigation; edit forms and contextual selection retain it." },
         "id": {
           "type": "string",
           "minLength": 1,
@@ -1455,11 +1458,25 @@
       "required": ["name"],
       "properties": {
         "name": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "relationship" },
+        "through": { "$ref": "#/$defs/fieldKey" },
         "view": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
         "overrides": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "presentation": {
+              "type": "object", "additionalProperties": false,
+              "required": ["kind", "titleField", "timestampField"],
+              "properties": {
+                "kind": { "const": "timeline" },
+                "titleField": { "$ref": "#/$defs/fieldKey" },
+                "timestampField": { "$ref": "#/$defs/fieldKey" },
+                "iconField": { "$ref": "#/$defs/fieldKey" },
+                "icons": { "type": "object", "additionalProperties": { "type": "string", "enum": ["phone", "email", "whatsapp", "chat", "check", "clock"] } },
+                "descriptionField": { "$ref": "#/$defs/fieldKey" },
+                "relatedField": { "$ref": "#/$defs/fieldKey" }
+              }
+            },
             "columns": {
               "type": "array",
               "minItems": 1,

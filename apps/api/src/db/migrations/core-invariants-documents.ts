@@ -360,5 +360,7 @@ export async function applyDocumentCommands(db: OpenShapeForgeDatabase): Promise
     grant execute on function document_internal.create_with_first_version(jsonb, jsonb) to ${sql.ref(APP_ROLE)};
     grant execute on function document_internal.append_version(uuid, jsonb) to ${sql.ref(APP_ROLE)};
   `.execute(db);
-  await sql.raw(readFileSync(new URL("./tenant-avatar-access.sql", import.meta.url), "utf8")).execute(db);
+  const avatarSql = readFileSync(new URL("./tenant-avatar-access.sql", import.meta.url), "utf8")
+    .replace(/\bTO openshapeforge_app\b/gi, `TO "${APP_ROLE.replaceAll('"', '""')}"`);
+  await sql.raw(avatarSql).execute(db);
 }

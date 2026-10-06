@@ -40,6 +40,8 @@ export type PluginBaseContext = {
   repoRoot: string;
   authoringDir: string;
   webPresent: boolean;
+  /** Resolved host database roles for plugin-owned SQL grants. */
+  databaseRoleNames?: { app: string; worker: string; blueprintReader: string; identityResolver: string };
 };
 
 /** A static plugin-backed Operation after compiler ownership is attached. */

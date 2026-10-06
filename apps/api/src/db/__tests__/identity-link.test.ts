@@ -15,6 +15,7 @@ import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
 import { withDbSession } from "../session.js";
 import { updateGeneratedEntity } from "../../operations/entity/mutations.js";
+import { admitInvitedPerson } from "../../auth/identity-link-admission.js";
 import { personSessionRoles } from "../../auth/person-roles.js";
 import { IDENTITY_LINK_ADMIN_ROLE, NEEDS_ROLE_ASSIGNMENT_ROLES } from "../../auth/organization-roles.js";
 import {
@@ -555,6 +556,40 @@ describe("identity ↔ Relation link", () => {
     TEST_TIMEOUT,
   );
 
+  test("a competing explicit link rolls admission back without consuming the invitation", async () => {
+    await withScratchDb(async (appDb, adminDb) => {
+      await seedTenants(adminDb);
+      const who = person("competing-link");
+      const winner = await invitedSignIn(appDb, adminDb, who, tenantA);
+      await invite(adminDb, tenantA, who.claims.email!, "org_admin");
+      const invitation = (await sql<{id: string}>`select id from platform.employee_invitations
+        where tenant_id=${tenantA} and email=${who.claims.email!} and status='pending'`.execute(adminDb)).rows[0]!;
+      await expect(admitInvitedPerson(appDb, sessionFor(who, tenantA), who.claims,
+        winner.state!.identityId, {id: invitation.id, role: "org_admin"})).rejects.toMatchObject({code: "AUTHENTICATION_UNAVAILABLE"});
+      expect((await sql`select id from erp.relations where tenant_id=${tenantA}`.execute(adminDb)).rows).toHaveLength(1);
+      expect((await sql`select status from platform.employee_invitations where id=${invitation.id}`.execute(adminDb)).rows[0]).toMatchObject({status: "pending"});
+      expect((await signIn(appDb, who, tenantA)).state!.relationId).toBe(winner.state!.relationId);
+    });
+  }, TEST_TIMEOUT);
+
+  test("an explicit invitation admits a candidate without taking over the email-matched party", async () => {
+    await withScratchDb(async (appDb, adminDb) => {
+      await seedTenants(adminDb);
+      const hans = person("invited-candidate");
+      const candidate = await existingRelation(adminDb, tenantA, "Existing party", hans.claims.email!);
+      expect((await signIn(appDb, hans, tenantA)).state!.candidateRelationId).toBe(candidate);
+      await invite(adminDb, tenantA, hans.claims.email!, "org_admin");
+      const admitted = await signIn(appDb, hans, tenantA);
+      expect(admitted.state).toMatchObject({ status: "linked", candidateRelationId: null });
+      expect(admitted.state!.relationId).not.toBe(candidate);
+      expect(admitted.state!.roles).toContain("org_admin");
+      expect(await invitationRows(adminDb, tenantA)).toMatchObject([{ status: "accepted" }]);
+      expect((await signIn(appDb, hans, tenantA)).state!.relationId).toBe(admitted.state!.relationId);
+      expect((await sql`select id from erp.relations where id=${candidate}`.execute(adminDb)).rows).toHaveLength(1);
+      await expect(signIn(appDb, hans, tenantB)).rejects.toMatchObject({ code: "NOT_INVITED" });
+    });
+  }, TEST_TIMEOUT);
+
   test(
     "an existing Relation with the e-mail is not linked silently; the person confirms it",
     async () => {
@@ -620,7 +655,7 @@ describe("identity ↔ Relation link", () => {
         const dave = person("dave");
         await existingRelation(adminDb, tenantA, "Dave One", "dave@example.com");
         await existingRelation(adminDb, tenantA, "Dave Two", "dave@example.com");
-        const daves = await invitedSignIn(appDb, adminDb, dave, tenantA);
+        const daves = await signIn(appDb, dave, tenantA);
         expect(daves.state).toMatchObject({
           status: "pending_confirmation",
           candidateRelationId: null,
@@ -644,7 +679,7 @@ describe("identity ↔ Relation link", () => {
         const employee = person("frank", ["Relations.All.ReadWrite"]);
         const erinsRelation = await existingRelation(adminDb, tenantA, "Erin Tester", "erin@example.com");
         const adminSignIn = await invitedSignIn(appDb, adminDb, admin, tenantA);
-        const erinSignIn = await invitedSignIn(appDb, adminDb, erin, tenantA);
+        const erinSignIn = await signIn(appDb, erin, tenantA);
         expect(erinSignIn.state!.status).toBe("pending_confirmation");
         const employeeSignIn = await invitedSignIn(appDb, adminDb, employee, tenantA);
 

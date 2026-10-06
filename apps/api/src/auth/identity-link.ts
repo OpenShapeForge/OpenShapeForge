@@ -325,7 +325,10 @@ async function ensureIdentityLink(
   // so `link_identity` can find the identity. It settles nothing — phase 2
   // asks the invitation question for it exactly as for no row at all.
   const targeted = claims.email ? await withDbSession(db, session, trx => findPendingInvitation(trx, session.tenantId, claims.email!)) : null;
-  if (targeted?.relationId && found.state?.status !== "linked") {
+  // An explicit invitation admits this identity even when an email match
+  // left a candidate. Admission creates its own party unless the administrator
+  // selected a target; matching email alone never selects an existing party.
+  if (targeted && found.state?.status !== "linked") {
     return admitInvitedPerson(db, session, claims, found.identityId, targeted);
   }
   const emptyPending = found.state !== null &&

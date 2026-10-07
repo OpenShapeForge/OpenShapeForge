@@ -35,7 +35,9 @@ updates:
 
   # Keycloak SPI (Java)
   - package-ecosystem: "maven"
-    directory: "/packages/keycloak-spi"
+    directories:
+      - "/packages/keycloak-spi"
+      - "/packages/keycloak-spi/local-development"
     schedule:
       interval: "weekly"
       day: "monday"

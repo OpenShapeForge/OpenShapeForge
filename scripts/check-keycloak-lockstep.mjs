@@ -36,6 +36,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertKeycloakVersionsAgree,
+  assertProductionExcludesLocalProvider,
   keycloakVersionsFromSources,
 } from "./keycloak-version-lockstep.mjs";
 
@@ -43,22 +44,26 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const POM_PATH = "packages/keycloak-spi/pom.xml";
 const DOCKERFILE_PATH = "packages/keycloak-spi/Dockerfile";
 const CHART_PATH = "deploy/helm/openshapeforge-api/charts/keycloak/Chart.yaml";
+const LOCAL_POM_PATH = "packages/keycloak-spi/local-development/pom.xml";
 const COMPAT_PATH = "packages/keycloak-spi/provider-compatibility.json";
 
-const [pom, dockerfile, chart, compatSource] = await Promise.all([
+const [pom, dockerfile, chart, compatSource, localPom] = await Promise.all([
   readFile(join(REPO_ROOT, POM_PATH), "utf8"),
   readFile(join(REPO_ROOT, DOCKERFILE_PATH), "utf8"),
   readFile(join(REPO_ROOT, CHART_PATH), "utf8"),
   readFile(join(REPO_ROOT, COMPAT_PATH), "utf8"),
+  readFile(join(REPO_ROOT, LOCAL_POM_PATH), "utf8"),
 ]);
 const compat = JSON.parse(compatSource);
-const versions = keycloakVersionsFromSources({ pom, dockerfile, chart });
+const versions = keycloakVersionsFromSources({ pom, localPom, dockerfile, chart });
+
 const { compileVersion, runtimeVersion } = versions;
 
 const failures = [];
 
 try {
   assertKeycloakVersionsAgree(versions);
+  assertProductionExcludesLocalProvider({ pom, dockerfile });
 } catch (error) {
   failures.push(error instanceof Error ? error.message : String(error));
 }

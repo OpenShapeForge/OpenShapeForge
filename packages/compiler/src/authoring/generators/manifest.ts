@@ -61,6 +61,8 @@ export type EntityManifestEntryData = {
   typeName: string;
   realtimeResourceType: string;
   listQueryName: string;
+  /** Operation-backed sources read through list/get Operations and have no generated writes. */
+  readOnly: boolean;
   domains: string[];
   routes: Record<string, LocalizedText | string>;
   hasListConfigs: boolean;

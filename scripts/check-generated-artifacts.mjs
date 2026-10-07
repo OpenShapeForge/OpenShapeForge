@@ -17,11 +17,12 @@ const repoRoot = process.cwd();
 const webPresent = existsSync(join(repoRoot, "apps/web"));
 // Entities with invariant-rich or aggregate-owned writes withhold part of
 // generic CRUD. The stock full-CRUD web UI is intentionally not generated for
-// these entities (isGeneratedCrudUiEnabled requires every operation to be
+// these entities (isGeneratedEntityUiEnabled requires every operation to be
 // true). Schema-3 entities with an explicit complete CRUD and Web contract do
 // retain their generated pages; partial contracts use the Web manifest only.
-// Account now uses canonical account Operations rather than generated CRUD.
-const expectedGeneratedCrudEntityCount = 115;
+// Operation-backed sources (Account) get the same generated read pages through
+// their canonical list/get Operations.
+const expectedGeneratedCrudEntityCount = 116;
 
 /**
  * The realms this repository authors, by name.

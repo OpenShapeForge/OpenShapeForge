@@ -29,9 +29,10 @@ export type EntityManifestEntry = {
   actions: {
     list: (...args: any[]) => Promise<any>;
     get: (id: string, options?: any) => Promise<any>;
-    create: (input: Record<string, unknown>) => Promise<any>;
-    update: (input: Record<string, unknown>) => Promise<any>;
-    delete: (id: string) => Promise<any>;
+    /** Absent for an Operation-backed source, which has no generated writes. */
+    create?: (input: Record<string, unknown>) => Promise<any>;
+    update?: (input: Record<string, unknown>) => Promise<any>;
+    delete?: (id: string) => Promise<any>;
   };
 };
 

@@ -756,6 +756,20 @@ function lowerCamel(value: string): string {
 }
 
 /**
+ * The GraphQL field an entity plugin Operation projects to, or undefined when
+ * its entity interface does not project it. Generated web pages read
+ * Operation-backed entities through the same field the API registers.
+ */
+export function entityPluginOperationGraphqlField(
+  authored: Pick<NonNullable<CompiledEntityInfo["contract"]["pluginOperations"]>[number], "entityName" | "key" | "interfaces">,
+): string | undefined {
+  const projection = authored.interfaces.graphql;
+  if (projection === undefined || projection === false) return undefined;
+  return projection.field ??
+    `${lowerCamel(authored.entityName)}${authored.key[0]!.toUpperCase()}${authored.key.slice(1)}`;
+}
+
+/**
  * Lower strict-v2 YAML plugin Operations to the established canonical static
  * registry. YAML owns every contract field; the runtime module supplies only
  * the named handler implementation.
@@ -847,10 +861,7 @@ export function collectAuthoredEntityPluginOperations(
                 enabled: true,
                 kind: graphqlProjection.kind ??
                   (definition.effects.data === "read" ? "query" : "mutation"),
-                field: graphqlProjection.field ??
-                  `${lowerCamel(authored.entityName)}${
-                    authored.key[0]!.toUpperCase()
-                  }${authored.key.slice(1)}`,
+                field: entityPluginOperationGraphqlField(authored)!,
               },
           typescript: {
             enabled: true,

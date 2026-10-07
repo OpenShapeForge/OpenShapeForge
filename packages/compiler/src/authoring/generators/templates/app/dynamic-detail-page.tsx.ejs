@@ -23,7 +23,6 @@ import {
 } from "@/features/realtime/lib/entity-resource-keys";
 import { Renderer } from "@/features/renderer/components/renderer";
 import { EntityLabelsServer } from "@/features/labels/components/EntityLabelsServer";
-import { executeGraphqlRequest } from "@/lib/server/graphql-client";
 import { resolveEntity, type EntityManifestEntry } from "@/compiler/entity-manifest";
 import { getCachedSession } from "@/lib/cached-session";
 import { resolveEntitySlugForRoute } from "@/lib/server/route-authz";
@@ -93,14 +92,10 @@ async function DetailContent({
   let entity: Record<string, unknown> | null = null;
 
   try {
-    const data = await executeGraphqlRequest<Record<string, unknown>>({
-      query: baseQuery,
-      // queriesByGroup is emitted into the persisted manifest from the same
-      // in-memory page config bundle during this compiler run.
-      profile: "persisted",
-      variables: { id },
-    });
-    entity = (data?.[config.queryName] ?? null) as Record<string, unknown> | null;
+    // The entity's own read action binds the id and unwraps the record for
+    // generated CRUD and Operation-backed sources alike. queriesByGroup is
+    // emitted into the persisted manifest from the same page config bundle.
+    entity = (await entry.actions.get(id, { query: baseQuery })) as Record<string, unknown> | null;
   } catch (error) {
     loadError = resolveEntityLoadErrorMessage(error, lang);
   }

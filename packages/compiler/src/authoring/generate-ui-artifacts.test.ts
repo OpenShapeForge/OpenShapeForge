@@ -2,19 +2,21 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildRuntimeAuthMetadata,
-  isGeneratedCrudUiEnabled,
   resolveGeneratedCrudRoutes,
 } from "./generate-ui-artifacts.js";
+import { isGeneratedEntityUiEnabled } from "./generators/entity-read-transport.js";
+
+type Contract = Parameters<typeof isGeneratedEntityUiEnabled>[0];
 
 function contract(
   operations: Record<"list" | "get" | "create" | "update" | "delete", boolean>,
 ) {
-  return { crud: { operations } } as Parameters<typeof isGeneratedCrudUiEnabled>[0];
+  return { crud: { operations } } as Contract;
 }
 
-describe("generated CRUD UI eligibility", () => {
+describe("generated entity UI eligibility", () => {
   test("keeps the historical full CRUD pages", () => {
-    expect(isGeneratedCrudUiEnabled(contract({
+    expect(isGeneratedEntityUiEnabled(contract({
       list: true,
       get: true,
       create: true,
@@ -24,13 +26,24 @@ describe("generated CRUD UI eligibility", () => {
   });
 
   test("does not emit stock pages for a partial API policy", () => {
-    expect(isGeneratedCrudUiEnabled(contract({
+    expect(isGeneratedEntityUiEnabled(contract({
       list: true,
       get: true,
       create: false,
       update: false,
       delete: false,
     }))).toBe(false);
+  });
+
+  test("renders an Operation-backed source that projects its list Operation to the web", () => {
+    const none = { list: false, get: false, create: false, update: false, delete: false };
+    const source = (web: Record<string, boolean>) => ({
+      ...contract(none),
+      source: { kind: "operations" },
+      interfaces: { web: { operations: web } },
+    }) as Contract;
+    expect(isGeneratedEntityUiEnabled(source({ list: true, get: true }))).toBe(true);
+    expect(isGeneratedEntityUiEnabled(source({}))).toBe(false);
   });
 });
 

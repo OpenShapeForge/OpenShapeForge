@@ -10,6 +10,7 @@ import {
 import { compile } from "./compiler/index.js";
 import { generateDynamicRoutes, generateLayout, generateViewPages } from "./generators/app.js";
 import { buildRuntimeMetadataEntry } from "./generators/pages.js";
+import { isGeneratedEntityUiEnabled } from "./generators/entity-read-transport.js";
 import type { EntityPageConfigBundle } from "./generators/app.js";
 import { normalizeKeycloakRoleName } from "./generators/keycloak.js";
 import type { EntityManifestEntryData } from "./generators/app.js";
@@ -209,13 +210,6 @@ function toKebabCase(value: string) {
     .toLowerCase();
 }
 
-export function isGeneratedCrudUiEnabled(contract: CompiledAuthoringEntity["contract"]) {
-  // The stock generated pages assume the complete list/detail/edit surface.
-  // Partial CRUD policies are valid for APIs and workflows, but require a
-  // purpose-built UI rather than pages that reference omitted operations.
-  return Object.values(contract.crud.operations).every(Boolean);
-}
-
 export function resolveGeneratedCrudRoutes(
   legacyRoutes: ViewDefinition["routes"] | undefined,
   compiledRoutes: ViewDefinition["routes"] | undefined,
@@ -223,7 +217,7 @@ export function resolveGeneratedCrudRoutes(
   return legacyRoutes ?? compiledRoutes;
 }
 
-function isGeneratedCrudUiEnabledForEntityName(
+function isGeneratedEntityUiEnabledForEntityName(
   entityName: string | undefined,
   contractByName: Map<string, CompiledAuthoringEntity["contract"]>,
 ) {
@@ -231,10 +225,10 @@ function isGeneratedCrudUiEnabledForEntityName(
     return true;
   }
   const contract = contractByName.get(entityName) ?? contractByName.get(toKebabCase(entityName));
-  return contract ? isGeneratedCrudUiEnabled(contract) : true;
+  return contract ? isGeneratedEntityUiEnabled(contract) : true;
 }
 
-function isGeneratedCrudUiEnabledForViewName(
+function isGeneratedEntityUiEnabledForViewName(
   viewName: string | undefined,
   viewDefinitions: Map<string, ViewDefinition>,
   contractByName: Map<string, CompiledAuthoringEntity["contract"]>,
@@ -246,7 +240,7 @@ function isGeneratedCrudUiEnabledForViewName(
   if (!viewDefinition) {
     return true;
   }
-  return isGeneratedCrudUiEnabledForEntityName(viewDefinition.entity, contractByName);
+  return isGeneratedEntityUiEnabledForEntityName(viewDefinition.entity, contractByName);
 }
 
 function filterAppShellNavItems(
@@ -267,8 +261,8 @@ function filterAppShellNavItems(
     const entity = typeof item.entity === "string" ? item.entity : undefined;
     const view = typeof item.view === "string" ? item.view : undefined;
     if (
-      !isGeneratedCrudUiEnabledForEntityName(entity, contractByName) ||
-      !isGeneratedCrudUiEnabledForViewName(view, viewDefinitions, contractByName)
+      !isGeneratedEntityUiEnabledForEntityName(entity, contractByName) ||
+      !isGeneratedEntityUiEnabledForViewName(view, viewDefinitions, contractByName)
     ) {
       return [];
     }
@@ -292,7 +286,7 @@ function buildNavRoutes(
 ): Map<string, ViewDefinition["routes"]["list"]> {
   const navRoutes = new Map<string, ViewDefinition["routes"]["list"]>();
   for (const entity of compiled) {
-    if (!isGeneratedCrudUiEnabled(entity.contract)) {
+    if (!isGeneratedEntityUiEnabled(entity.contract)) {
       continue;
     }
     const contextKeys = Object.keys(entity.contract.views);
@@ -306,7 +300,7 @@ function buildNavRoutes(
     if (navRoutes.has(viewName)) {
       continue;
     }
-    if (!isGeneratedCrudUiEnabledForEntityName(viewDefinition.entity, contractByName)) {
+    if (!isGeneratedEntityUiEnabledForEntityName(viewDefinition.entity, contractByName)) {
       continue;
     }
     if (viewDefinition.routes?.list) {
@@ -444,7 +438,7 @@ export async function generateAuthoringUiArtifacts(
         `View ${viewName}.view.yaml references entity "${viewDefinition.entity}" but no compiled contract exists.`,
       );
     }
-    if (!isGeneratedCrudUiEnabled(contract)) {
+    if (!isGeneratedEntityUiEnabled(contract)) {
       continue;
     }
 
@@ -470,7 +464,7 @@ export async function generateAuthoringUiArtifacts(
     if (viewDefinitions.has(entity.name)) {
       continue;
     }
-    if (!isGeneratedCrudUiEnabled(entity.contract)) {
+    if (!isGeneratedEntityUiEnabled(entity.contract)) {
       continue;
     }
     if (!entity.routes) {

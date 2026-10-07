@@ -116,3 +116,7 @@ a database uniqueness constraint or live Keycloak revocation check. API tests
 use real signed tokens, a local JWKS/token endpoint, and fake registry rows;
 they do not prove deployed provisioning, database RLS, login prompts or client
 refresh behavior. Deployment activation and live acceptance remain host work.
+
+Canonical REST Operation projections including edit leases, and their event feed used by an MCP App can explicitly bind to their existing MCP resource with `x-openshapeforge-mcp-resource`. In host mode, only the configured public origin and canonical shared or organization MCP paths are accepted. The header carries no identity: the credential must still prove the exact resource audience, issuer, signature, subject and admitted organization membership. Shared resources also retain the configured API audience; organization resources retain their registry binding. Only those projections explicitly enable this policy with `mcpAppResource`; ordinary API requests, API-key provisioning/exchange, connector OAuth and GraphQL keep the static client allowlist. Control projections accept only the configured `/admin/mcp` binding and still require verified platform authority.
+
+Binary artifact routes are outside this JSON projection and retain their ordinary browser-client policy.

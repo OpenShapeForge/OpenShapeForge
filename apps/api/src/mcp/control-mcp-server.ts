@@ -1,3 +1,4 @@
+import { PLATFORM_ADMIN_MCP_PATH } from "./organization-resource.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * The platform administrator MCP — `/api/control/mcp`.
@@ -104,7 +105,7 @@ export const CONTROL_MCP_ROUTE_PATH = "/api/control/mcp";
  * metadata document, in the `WWW-Authenticate` challenge and in `aud`, so it is
  * the one that has to be short.
  */
-export const CONTROL_MCP_PATH = "/admin/mcp";
+export const CONTROL_MCP_PATH = PLATFORM_ADMIN_MCP_PATH;
 
 /** The control resource's own metadata document (RFC 9728 path-suffixed form). */
 export const CONTROL_MCP_METADATA_PATH = `${PROTECTED_RESOURCE_METADATA_PATH}${CONTROL_MCP_PATH}`;

@@ -32,6 +32,7 @@
  * token minted for another resource — another organization, another origin —
  * from being replayed here.
  */
+import { HttpError } from "../rest/http-error.js";
 import type { AuthIdentity } from "@openshapeforge/auth";
 import {
   organizationResourceScopes,
@@ -55,16 +56,14 @@ export type OrganizationResourceBinding = {
   resource: string;
 };
 
-export class OrganizationBindingError extends Error {
-  readonly code = "ORGANIZATION_RESOURCE_FORBIDDEN" as const;
-  readonly status = 403 as const;
+export class OrganizationBindingError extends HttpError {
   /** Scopes the client should request to obtain a token for this resource. */
   readonly scopes: string[];
   /** Why, for the log only — never sent to the caller. */
   readonly reason: string;
 
   constructor(binding: OrganizationResourceBinding, reason: string) {
-    super(organizationBindingRefusalMessage(binding));
+    super(403, "ORGANIZATION_RESOURCE_FORBIDDEN", organizationBindingRefusalMessage(binding));
     this.name = "OrganizationBindingError";
     this.reason = reason;
     this.scopes = organizationResourceScopes(binding.alias);

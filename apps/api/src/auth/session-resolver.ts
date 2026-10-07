@@ -5,6 +5,7 @@
  * through to another. `identity.ts` composes this with the acting Relation
  * and the organization address check into `resolveSessionContext`.
  */
+import { mcpResourceHeader } from "./mcp-resource-header.js";
 import { BearerVerifierUnavailableError } from "@openshapeforge/auth";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { __resetBearerVerifiersForTests, getApiKeyKeyring, getBearerVerifier } from "./bearer-verifier.js";
@@ -35,6 +36,8 @@ import {
 export { EMPTY_SESSION, hostOrganizationContext, resolveScope } from "./session-scope.js";
 
 export type ResolveSessionOptions = {
+  /** Only canonical REST projections and their event feed accept MCP App resource binding. */
+  mcpAppResource?: boolean;
   /**
    * Required for API keys and organization-to-tenant registry resolution.
    * Host organization mode refuses sessions without registry proof.
@@ -135,6 +138,13 @@ export async function resolveCredentialSession(
   headers: Headers,
   options: ResolveSessionOptions = {},
 ): Promise<TrustedSessionContext> {
+  if (options.mcpAppResource && !options.organization && options.requiredAudience === undefined) {
+    try { options = { ...options, ...mcpResourceHeader(headers, "tenant") }; }
+    catch (error) {
+      if (error instanceof SessionAuthenticationUnavailableError) throw error;
+      return EMPTY_SESSION;
+    }
+  }
   const authorization = headers.get("authorization");
 
   if (authorization && BEARER_AUTHORIZATION.test(authorization)) {

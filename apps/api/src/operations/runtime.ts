@@ -1711,7 +1711,7 @@ async function resolveControlRestSession(
     );
   }
   try {
-    return await resolveControlSession(headersFromFastify(request.headers), control.config.config);
+    return await resolveControlSession(headersFromFastify(request.headers), control.config.config, { mcpAppResource: true });
   } catch (error) {
     throw controlSessionHttpError(error);
   }
@@ -1785,7 +1785,7 @@ export function registerOperationRestRoutes(
           ? await resolveControlRestSession(request, context)
           : entry.operation.auth.mode === "capability"
           ? await resolveCapabilityRestSession(request, context, entry.operation)
-          : await resolveSessionContext(headersFromFastify(request.headers), { db: context.db });
+          : await resolveSessionContext(headersFromFastify(request.headers), { db: context.db, mcpAppResource: true });
       } catch (error) {
         return sendOperationRestFailure(reply, entry.operation, error, true);
       }
@@ -1847,7 +1847,7 @@ export function registerRuntimeOperationRestRoutes(
     let controlSession: TrustedSessionContext | undefined;
     if (control && bearerIssuerOf(headers) === control.operator.issuer) {
       try {
-        controlSession = await resolveControlSession(headers, control);
+        controlSession = await resolveControlSession(headers, control, { mcpAppResource: true });
       } catch (error) {
         // A deployment can share an issuer between control and tenant clients
         // before enabling host-organization mode. Only retry when the tenant
@@ -1864,7 +1864,7 @@ export function registerRuntimeOperationRestRoutes(
     // credential must therefore still get the ordinary tenant verifier; the
     // resulting tenant session cannot invoke control Operations because their
     // credential mode remains `control`.
-    const session = controlSession ?? await resolveSessionContext(headers, { db: runtime.db });
+    const session = controlSession ?? await resolveSessionContext(headers, { db: runtime.db, mcpAppResource: true });
     if (!session || !session.userId || session.credential === "none") {
       throw new HttpError(
         401,

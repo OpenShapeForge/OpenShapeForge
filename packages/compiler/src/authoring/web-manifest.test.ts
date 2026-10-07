@@ -1219,6 +1219,14 @@ describe("standalone Operation pages", () => {
               },
               sentAt: { type: "string", format: "date-time", "x-osf-i18n": { title: text("Sent at", "Verzonden op") } },
               canUpdate: { type: "boolean", "x-osf-i18n": { title: text("Can update") } },
+              roles: {
+                type: "array",
+                items: { type: "string", enum: ["org_admin", "org_employee"] },
+                "x-osf-i18n": {
+                  title: text("Roles", "Rollen"),
+                  enum: { org_admin: text("Administrator", "Beheerder"), org_employee: text("Employee", "Medewerker") },
+                },
+              },
             }, required: ["slug", "name", "status", "sentAt", "canUpdate"] }, "x-osf-i18n": { title: text("Tenants") } },
             totalCount: { type: "integer" },
             nextCursor: { type: ["string", "null"] },
@@ -1229,7 +1237,7 @@ describe("standalone Operation pages", () => {
         pages: {}, operations: {}, entities: {
           Tenant: {
             title: text("Tenants"), route: "/tenants", recordRoute: "/tenants/:slug",
-            idField: "slug", displayField: "name", fields: ["slug", "name", "status", "sentAt"], columns: ["name", "slug", "status", "sentAt"],
+            idField: "slug", displayField: "name", fields: ["slug", "name", "status", "sentAt", "roles"], columns: ["name", "slug", "status", "sentAt", "roles"],
             operations: {
               list: { operation: "listTenants", resultField: "tenants" },
               get: { operation: "getTenant" },
@@ -1274,6 +1282,18 @@ describe("standalone Operation pages", () => {
       { value: "EXPIRED", label: text("Expired", "Verlopen") },
     ]);
     expect(manifest.entities.Tenant?.fields.sentAt?.baseType).toBe("datetime");
+    expect(manifest.entities.Tenant?.fields.name?.cardinality).toBe("one");
+    // An array result field is a collection of its item type, as a core collection field is,
+    // not one opaque "array" value a host can only print as JSON.
+    expect(manifest.entities.Tenant?.fields.roles).toMatchObject({
+      osfType: "string",
+      baseType: "string",
+      cardinality: "many",
+      options: [
+        { value: "org_admin", label: text("Administrator", "Beheerder") },
+        { value: "org_employee", label: text("Employee", "Medewerker") },
+      ],
+    });
 
     const canonicalTenant = entity("Tenant", "tenant", [field("name")], coreView());
     const composed = buildWebManifest([canonicalTenant], {}, standalone(operationEntities));

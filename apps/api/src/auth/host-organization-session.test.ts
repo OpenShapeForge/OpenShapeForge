@@ -309,6 +309,12 @@ describe("host organization binding through real bearer verification and resolve
       const request = await headers(claims); request.set("x-openshapeforge-mcp-resource", RESOURCE);
       expect((await resolveSessionContext(request)).credential).toBe("none");
     }
+    const alpha = new URL("/alpha/mcp", RESOURCE).href;
+    const bound = await headers({ azp: "registered-client", aud: alpha, scope: "openid organization mcp-resource:alpha" });
+    bound.set("x-openshapeforge-mcp-resource", alpha);
+    expect((await resolveSessionContext(bound)).tenantId).toBe(TENANT_A);
+    bound.set("x-openshapeforge-mcp-resource", new URL("/beta/mcp", RESOURCE).href);
+    await expect(resolveSessionContext(bound)).rejects.toMatchObject({ code: "ORGANIZATION_RESOURCE_FORBIDDEN" });
     const key = new Headers({ authorization: `Bearer ${mintApiKey().token}`, "x-openshapeforge-mcp-resource": RESOURCE });
     expect((await resolveSessionContext(key)).credential).toBe("none");
     process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "off";

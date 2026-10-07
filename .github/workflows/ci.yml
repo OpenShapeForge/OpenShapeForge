@@ -171,6 +171,7 @@ jobs:
           src/auth/identity-link.test.ts
           src/auth/identity.test.ts
           src/auth/host-organization-session.test.ts
+          src/auth/mcp-resource-header.test.ts
           src/auth/ui-locale.test.ts
           src/auth/api-key/ceiling.test.ts
           src/auth/api-key/resolve.test.ts

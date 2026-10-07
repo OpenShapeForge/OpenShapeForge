@@ -8,7 +8,7 @@ const request = (path: string) => new Headers({ [MCP_RESOURCE_HEADER]: `${origin
 test("HTTP binding distinguishes tenant and control resources on the configured origin", () => {
   process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = origin; process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "host";
   expect(mcpResourceHeader(request("/api/mcp"), "tenant")).toEqual({ requiredAudience: `${origin}/api/mcp` });
-  for (const path of ["/alpha", "/alpha/mcp"]) expect(mcpResourceHeader(request(path), "tenant")).toEqual({ organization: { alias: "alpha", resource: `${origin}${path}` } });
+  for (const path of ["/alpha", "/alpha/mcp"]) expect(mcpResourceHeader(request(path), "tenant")).toEqual({ organization: { alias: "alpha", resource: `${origin}/alpha` } });
   expect(mcpResourceHeader(request("/admin/mcp"), "control")).toEqual({ resource: `${origin}/admin/mcp` });
   for (const path of ["/api/mcp", "/alpha/mcp"]) expect(() => mcpResourceHeader(request(path), "control")).toThrow();
   for (const path of ["/admin/mcp", "/alpha/api/relations", "/api/mcp?next=bad", "/api/mcp#fragment"]) expect(() => mcpResourceHeader(request(path), "tenant")).toThrow();

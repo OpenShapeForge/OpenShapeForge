@@ -36,6 +36,8 @@ import {
 export { EMPTY_SESSION, hostOrganizationContext, resolveScope } from "./session-scope.js";
 
 export type ResolveSessionOptions = {
+  /** Only canonical REST projections and their event feed accept MCP App resource binding. */
+  mcpAppResource?: boolean;
   /**
    * Required for API keys and organization-to-tenant registry resolution.
    * Host organization mode refuses sessions without registry proof.
@@ -136,9 +138,13 @@ export async function resolveCredentialSession(
   headers: Headers,
   options: ResolveSessionOptions = {},
 ): Promise<TrustedSessionContext> {
-  if (!options.organization && options.requiredAudience === undefined) {
+  if (options.mcpAppResource && !options.organization && options.requiredAudience === undefined) {
     try { options = { ...options, ...mcpResourceHeader(headers, "tenant") }; }
-    catch { return EMPTY_SESSION; }
+    catch (error) {
+      if (error instanceof SessionAuthenticationUnavailableError) throw error;
+      console.warn("[auth] Invalid MCP App resource binding.");
+      return EMPTY_SESSION;
+    }
   }
   const authorization = headers.get("authorization");
 

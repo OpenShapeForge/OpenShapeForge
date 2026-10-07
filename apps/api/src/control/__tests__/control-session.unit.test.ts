@@ -203,9 +203,9 @@ it("MCP App HTTP binding preserves platform authority and ordinary REST refusal"
       resource_access: { "realm-management": { roles: ["realm-admin"] } } };
     await expect(resolveControlSession(bearer(), hostConfig, { verifier: verifierFor(claims) })).rejects.toBeInstanceOf(ControlAuthorizationError);
     const headers = bearer(); headers.set("x-openshapeforge-mcp-resource", RESOURCE);
-    expect((await resolveControlSession(headers, hostConfig, { verifier: verifierFor(claims) })).roles).toContain(PLATFORM_OPERATOR_ROLE);
-    await expect(resolveControlSession(headers, hostConfig, { verifier: verifierFor({ ...claims, resource_access: {} }) })).rejects.toBeInstanceOf(ControlAuthorizationError);
+    expect((await resolveControlSession(headers, hostConfig, { mcpAppResource: true, verifier: verifierFor(claims) })).roles).toContain(PLATFORM_OPERATOR_ROLE);
+    await expect(resolveControlSession(headers, hostConfig, { mcpAppResource: true, verifier: verifierFor({ ...claims, resource_access: {} }) })).rejects.toBeInstanceOf(ControlAuthorizationError);
     headers.set("x-openshapeforge-mcp-resource", "https://attacker.example.test/admin/mcp");
-    await expect(resolveControlSession(headers, hostConfig, { verifier: verifierFor(claims) })).rejects.toBeInstanceOf(ControlAuthorizationError);
+    await expect(resolveControlSession(headers, hostConfig, { mcpAppResource: true, verifier: verifierFor(claims) })).rejects.toBeInstanceOf(ControlAuthorizationError);
   } finally { if (previousOrigin === undefined) delete process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN; else process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = previousOrigin; }
 });

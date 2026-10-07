@@ -25,6 +25,7 @@ import {
 } from "./identity.js";
 import { __setTenantForOrganizationForTests, lookupTenantForOrganization } from "./tenant-resolution.js";
 import { stubLinkedMembershipForTests } from "./identity-link.test-support.js";
+import { toHttpError } from "../rest/http-error.js";
 import { notInvited } from "./identity-link-admission.js";
 
 const ISSUER = "https://identity.example.test/realms/host";
@@ -300,26 +301,34 @@ describe("host organization binding through real bearer verification and resolve
     const dynamic = await headers({ azp: "registered-client" });
     expect((await resolveSessionContext(dynamic)).credential).toBe("none");
     dynamic.set("x-openshapeforge-mcp-resource", RESOURCE);
-    expect((await resolveSessionContext(dynamic)).tenantId).toBe(TENANT_A);
+    expect((await resolveSessionContext(dynamic, { mcpAppResource: true })).tenantId).toBe(TENANT_A);
     for (const resource of ["https://attacker.example.test/api/mcp", RESOURCE + "?x=1", new URL("/admin/mcp", RESOURCE).href]) {
       dynamic.set("x-openshapeforge-mcp-resource", resource);
-      expect((await resolveSessionContext(dynamic)).credential).toBe("none");
+      expect((await resolveSessionContext(dynamic, { mcpAppResource: true })).credential).toBe("none");
     }
     for (const claims of [{ azp: "dynamic", aud: "api" }, { azp: "dynamic", aud: RESOURCE }, { azp: undefined }]) {
       const request = await headers(claims); request.set("x-openshapeforge-mcp-resource", RESOURCE);
-      expect((await resolveSessionContext(request)).credential).toBe("none");
+      expect((await resolveSessionContext(request, { mcpAppResource: true })).credential).toBe("none");
     }
-    const alpha = new URL("/alpha/mcp", RESOURCE).href;
+    const alpha = new URL("/alpha", RESOURCE).href;
     const bound = await headers({ azp: "registered-client", aud: alpha, scope: "openid organization mcp-resource:alpha" });
-    bound.set("x-openshapeforge-mcp-resource", alpha);
-    expect((await resolveSessionContext(bound)).tenantId).toBe(TENANT_A);
+    bound.set("x-openshapeforge-mcp-resource", alpha + "/mcp");
+    expect((await resolveSessionContext(bound, { mcpAppResource: true })).tenantId).toBe(TENANT_A);
     bound.set("x-openshapeforge-mcp-resource", new URL("/beta/mcp", RESOURCE).href);
-    await expect(resolveSessionContext(bound)).rejects.toMatchObject({ code: "ORGANIZATION_RESOURCE_FORBIDDEN" });
+    await expect(resolveSessionContext(bound, { mcpAppResource: true })).rejects.toMatchObject({ code: "ORGANIZATION_RESOURCE_FORBIDDEN" });
+    const app = Fastify();
+    app.setErrorHandler((error, _request, reply) => { const mapped = toHttpError(error); return reply.code(mapped.status).send(mapped.body); });
+    app.get("/projection", async request => resolveSessionContext(new Headers(request.headers as Record<string, string>), { mcpAppResource: true }));
+    const refused = await app.inject({ method: "GET", url: "/projection", headers: Object.fromEntries(bound) });
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json().error.code).toBe("ORGANIZATION_RESOURCE_FORBIDDEN");
+    await app.close();
+    expect((await resolveSessionContext(dynamic)).credential).toBe("none");
     const key = new Headers({ authorization: `Bearer ${mintApiKey().token}`, "x-openshapeforge-mcp-resource": RESOURCE });
-    expect((await resolveSessionContext(key)).credential).toBe("none");
+    expect((await resolveSessionContext(key, { mcpAppResource: true })).credential).toBe("none");
     process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "off";
     dynamic.set("x-openshapeforge-mcp-resource", RESOURCE);
-    expect((await resolveSessionContext(dynamic)).credential).toBe("none");
+    expect((await resolveSessionContext(dynamic, { mcpAppResource: true })).credential).toBe("none");
   });
 
   test("required audience rejects API keys before key configuration or database access", async () => {

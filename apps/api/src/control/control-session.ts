@@ -26,6 +26,7 @@
  * `auth.roles` is the authorization decision. Client roles
  * (`resource_access`) never count, for the reason `realmRolesOf` gives.
  */
+import { SessionAuthenticationUnavailableError } from "../auth/session-unavailable.js";
 import { mcpResourceHeader } from "../auth/mcp-resource-header.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { usesHostOrganizationContext } from "../config/host-organization.js";
@@ -53,6 +54,7 @@ export type ControlSessionContext = TrustedSessionContext & {
 };
 
 export type ControlSessionOptions = ResolveOperatorOptions & {
+  mcpAppResource?: boolean;
   /**
    * The canonical URL of the resource being called, so a token bound to it
    * by `aud` is admitted on that binding. Absent means only the party
@@ -117,9 +119,9 @@ export async function resolveControlSession(
   config: ControlPlaneConfig,
   options: ControlSessionOptions = {},
 ): Promise<ControlSessionContext> {
-  if (options.resource === undefined) {
+  if (options.mcpAppResource && options.resource === undefined) {
     try { options = { ...options, ...mcpResourceHeader(headers, "control") }; }
-    catch { throw new ControlAuthorizationError("UNAUTHENTICATED", "Invalid control MCP App resource binding."); }
+    catch (error) { if (error instanceof SessionAuthenticationUnavailableError) throw error; throw new ControlAuthorizationError("UNAUTHENTICATED", "Invalid control MCP App resource binding."); }
   }
   if (usesHostOrganizationContext()) assertHostRealm(config);
   const claims = await verifyControlBearer(headers, config, options);

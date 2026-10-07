@@ -21,7 +21,7 @@ export function registerEntityChangeStream(app: FastifyInstance, options: { db?:
     const db = options.db;
     if (!db) return reply.code(503).send({ error: { code: "DATABASE_NOT_CONFIGURED" } });
     const headers = headersFromFastify(request.headers);
-    const session = await resolveSessionContext(headers, { db });
+    const session = await resolveSessionContext(headers, { db, mcpAppResource: true });
     if (!session.tenantId || !session.userId) return reply.code(401).send({ error: { code: "UNAUTHENTICATED" } });
     const key = `${session.tenantId}:${session.userId}`;
     if ((active.get(key) ?? 0) >= 5) return reply.code(429).header("retry-after", "5").send({ error: { code: "STREAM_LIMIT" } });
@@ -59,7 +59,7 @@ export function registerEntityChangeStream(app: FastifyInstance, options: { db?:
       try {
         // Rotate periodically so reauthentication/renewal cannot leave a stale stream.
         while (!abort.signal.aborted && Date.now() - started < 55_000) {
-          const current = await resolveSessionContext(headers, { db });
+          const current = await resolveSessionContext(headers, { db, mcpAppResource: true });
           if (current.tenantId !== session.tenantId || current.userId !== session.userId) break;
           const authorize: ResourceChangeAuthorizer | undefined = options.authorizeResource
             ? (_dbSession, entity, id) => options.authorizeResource!(current, entity, id)

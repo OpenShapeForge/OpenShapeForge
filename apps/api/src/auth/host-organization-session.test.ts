@@ -32,7 +32,7 @@ const RESOURCE = "https://api.example.test/api/mcp";
 const TENANT_A = "11111111-1111-4111-8111-111111111111";
 const TENANT_B = "22222222-2222-4222-8222-222222222222";
 const USER = "33333333-3333-4333-8333-333333333333";
-const ENV = ["OPENSHAPEFORGE_ORGANIZATION_CONTEXT", "OPENSHAPEFORGE_ORGANIZATION_SERVICE_IDENTITIES",
+const ENV = ["OPENSHAPEFORGE_PUBLIC_ORIGIN", "OPENSHAPEFORGE_ORGANIZATION_CONTEXT", "OPENSHAPEFORGE_ORGANIZATION_SERVICE_IDENTITIES",
   "OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER", "OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI",
   "OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE", "OPENSHAPEFORGE_API_VERIFY_BEARER_AUTHORIZED_PARTIES",
   "OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET", "OPENSHAPEFORGE_API_KEY_SECRET_KEYS"] as const;
@@ -289,6 +289,31 @@ describe("host organization binding through real bearer verification and resolve
     }
     process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "off";
     expect((await resolveSessionContext(dynamic, { requiredAudience: RESOURCE })).credential).toBe("none");
+  });
+
+  test("MCP App HTTP binding admits only the exact resource, preserving ordinary API policy", async () => {
+    process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = new URL(RESOURCE).origin;
+    process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUTHORIZED_PARTIES = "web";
+    __resetSessionResolverForTests();
+    stubLinkedMembershipForTests();
+    __setTenantForOrganizationForTests(async () => TENANT_A);
+    const dynamic = await headers({ azp: "registered-client" });
+    expect((await resolveSessionContext(dynamic)).credential).toBe("none");
+    dynamic.set("x-openshapeforge-mcp-resource", RESOURCE);
+    expect((await resolveSessionContext(dynamic)).tenantId).toBe(TENANT_A);
+    for (const resource of ["https://attacker.example.test/api/mcp", RESOURCE + "?x=1", new URL("/admin/mcp", RESOURCE).href]) {
+      dynamic.set("x-openshapeforge-mcp-resource", resource);
+      expect((await resolveSessionContext(dynamic)).credential).toBe("none");
+    }
+    for (const claims of [{ azp: "dynamic", aud: "api" }, { azp: "dynamic", aud: RESOURCE }, { azp: undefined }]) {
+      const request = await headers(claims); request.set("x-openshapeforge-mcp-resource", RESOURCE);
+      expect((await resolveSessionContext(request)).credential).toBe("none");
+    }
+    const key = new Headers({ authorization: `Bearer ${mintApiKey().token}`, "x-openshapeforge-mcp-resource": RESOURCE });
+    expect((await resolveSessionContext(key)).credential).toBe("none");
+    process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "off";
+    dynamic.set("x-openshapeforge-mcp-resource", RESOURCE);
+    expect((await resolveSessionContext(dynamic)).credential).toBe("none");
   });
 
   test("required audience rejects API keys before key configuration or database access", async () => {

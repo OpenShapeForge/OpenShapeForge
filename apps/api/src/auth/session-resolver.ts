@@ -5,6 +5,7 @@
  * through to another. `identity.ts` composes this with the acting Relation
  * and the organization address check into `resolveSessionContext`.
  */
+import { mcpResourceHeader } from "./mcp-resource-header.js";
 import { BearerVerifierUnavailableError } from "@openshapeforge/auth";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { __resetBearerVerifiersForTests, getApiKeyKeyring, getBearerVerifier } from "./bearer-verifier.js";
@@ -135,6 +136,10 @@ export async function resolveCredentialSession(
   headers: Headers,
   options: ResolveSessionOptions = {},
 ): Promise<TrustedSessionContext> {
+  if (!options.organization && options.requiredAudience === undefined) {
+    try { options = { ...options, ...mcpResourceHeader(headers, "tenant") }; }
+    catch { return EMPTY_SESSION; }
+  }
   const authorization = headers.get("authorization");
 
   if (authorization && BEARER_AUTHORIZATION.test(authorization)) {

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { toHttpError } from "./http-error.js";
 import { Readable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import type { FastifyInstance } from "fastify";
@@ -21,7 +22,9 @@ export function registerEntityChangeStream(app: FastifyInstance, options: { db?:
     const db = options.db;
     if (!db) return reply.code(503).send({ error: { code: "DATABASE_NOT_CONFIGURED" } });
     const headers = headersFromFastify(request.headers);
-    const session = await resolveSessionContext(headers, { db, mcpAppResource: true });
+    let session: TrustedSessionContext;
+    try { session = await resolveSessionContext(headers, { db, mcpAppResource: true }); }
+    catch (error) { const mapped = toHttpError(error); return reply.code(mapped.status).send(mapped.body); }
     if (!session.tenantId || !session.userId) return reply.code(401).send({ error: { code: "UNAUTHENTICATED" } });
     const key = `${session.tenantId}:${session.userId}`;
     if ((active.get(key) ?? 0) >= 5) return reply.code(429).header("retry-after", "5").send({ error: { code: "STREAM_LIMIT" } });

@@ -25,7 +25,8 @@ import {
 } from "./identity.js";
 import { __setTenantForOrganizationForTests, lookupTenantForOrganization } from "./tenant-resolution.js";
 import { stubLinkedMembershipForTests } from "./identity-link.test-support.js";
-import { toHttpError } from "../rest/http-error.js";
+import { registerEditLeaseRestRoutes } from "../rest/edit-lease-routes.js";
+import { registerEntityChangeStream } from "../rest/entity-change-stream.js";
 import { notInvited } from "./identity-link-admission.js";
 
 const ISSUER = "https://identity.example.test/realms/host";
@@ -317,12 +318,22 @@ describe("host organization binding through real bearer verification and resolve
     bound.set("x-openshapeforge-mcp-resource", new URL("/beta/mcp", RESOURCE).href);
     await expect(resolveSessionContext(bound, { mcpAppResource: true })).rejects.toMatchObject({ code: "ORGANIZATION_RESOURCE_FORBIDDEN" });
     const app = Fastify();
-    app.setErrorHandler((error, _request, reply) => { const mapped = toHttpError(error); return reply.code(mapped.status).send(mapped.body); });
-    app.get("/projection", async request => resolveSessionContext(new Headers(request.headers as Record<string, string>), { mcpAppResource: true }));
-    const refused = await app.inject({ method: "GET", url: "/projection", headers: Object.fromEntries(bound) });
+    const fixture = serviceRegistry();
+    registerEntityChangeStream(app, { db: fixture.db });
+    registerEditLeaseRestRoutes(app, { db: fixture.db });
+    const refused = await app.inject({ method: "GET", url: "/api/events", headers: Object.fromEntries(bound) });
     expect(refused.statusCode).toBe(403);
     expect(refused.json().error.code).toBe("ORGANIZATION_RESOURCE_FORBIDDEN");
+    const refusedLease = await app.inject({ method: "POST", url: "/api/operation-leases", headers: Object.fromEntries(bound), payload: { operationId: "Unknown.update", targetId: "record" } });
+    expect(refusedLease.statusCode).toBe(403);
+    expect(refusedLease.json().error.code).toBe("ORGANIZATION_RESOURCE_FORBIDDEN");
+    bound.set("x-openshapeforge-mcp-resource", alpha + "/mcp");
+    const admittedLease = await app.inject({ method: "POST", url: "/api/operation-leases", headers: Object.fromEntries(bound), payload: { operationId: "Unknown.update", targetId: "record" } });
+    expect(admittedLease.statusCode).toBe(404);
+    expect(admittedLease.json().error.code).toBe("NOT_FOUND");
     await app.close();
+    await fixture.db.destroy();
+    dynamic.set("x-openshapeforge-mcp-resource", RESOURCE);
     expect((await resolveSessionContext(dynamic)).credential).toBe("none");
     const key = new Headers({ authorization: `Bearer ${mintApiKey().token}`, "x-openshapeforge-mcp-resource": RESOURCE });
     expect((await resolveSessionContext(key, { mcpAppResource: true })).credential).toBe("none");

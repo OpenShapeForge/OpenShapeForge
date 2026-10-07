@@ -142,7 +142,6 @@ export async function resolveCredentialSession(
     try { options = { ...options, ...mcpResourceHeader(headers, "tenant") }; }
     catch (error) {
       if (error instanceof SessionAuthenticationUnavailableError) throw error;
-      console.warn("[auth] Invalid MCP App resource binding.");
       return EMPTY_SESSION;
     }
   }

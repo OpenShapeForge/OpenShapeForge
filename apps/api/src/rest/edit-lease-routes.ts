@@ -34,7 +34,7 @@ export function registerEditLeaseRestRoutes(
   }> {
     const resolved = await resolveSessionContext(
       headersFromFastify(request.headers),
-      { db: options.db },
+      { db: options.db, mcpAppResource: true },
     );
     if (!resolved.tenantId || !resolved.userId) {
       throw new HttpError(

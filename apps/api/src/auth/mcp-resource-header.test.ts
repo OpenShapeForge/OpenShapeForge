@@ -14,3 +14,12 @@ test("HTTP binding distinguishes tenant and control resources on the configured 
   for (const path of ["/admin/mcp", "/alpha/api/relations", "/api/mcp?next=bad", "/api/mcp#fragment"]) expect(() => mcpResourceHeader(request(path), "tenant")).toThrow();
   expect(() => mcpResourceHeader(new Headers({ [MCP_RESOURCE_HEADER]: "https://other.example.test/api/mcp" }), "tenant")).toThrow();
 });
+
+test("binding reports unavailable authentication when the configured origin is missing or invalid", () => {
+  process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "host";
+  for (const value of [undefined, "invalid", "https://app.example.test/path"]) {
+    if (value === undefined) delete process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+    else process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = value;
+    expect(() => mcpResourceHeader(request("/api/mcp"), "tenant")).toThrow("MCP App resource verification is unavailable");
+  }
+});

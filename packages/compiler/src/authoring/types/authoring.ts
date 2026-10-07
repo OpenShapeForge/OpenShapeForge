@@ -425,7 +425,7 @@ export interface EntityWebRecordLayout {
   workspaceTabs?: boolean;
   tabs: import("./views.js").ViewGroup[];
   /** Deliberately selected summary, independent of the full record tabs. */
-  context?: { fields: string[]; relationships?: string[]; contacts?: import("./views.js").ContactContextPresentation };
+  context?: { fields: string[]; relationships?: string[]; contacts?: import("./views.js").ContactContextPresentation; records?: import("./views.js").RelatedRecordContextPresentation[] };
 }
 
 export type EntityWebNamedViewDefinition =

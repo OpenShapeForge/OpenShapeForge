@@ -304,7 +304,7 @@ export type WebRecordView = {
   layout: {
     tabs: WebRecordTab[];
     workspaceTabs?: boolean;
-    context: { groups: WebFieldGroup[]; relationships: string[]; contacts?: WebContactContext };
+    context: { groups: WebFieldGroup[]; relationships: string[]; contacts?: WebContactContext; records?: WebRelatedRecordContext[] };
   };
   variableSources?: WebVariableSource[];
   labels: {
@@ -479,4 +479,14 @@ export type WebContactContext = {
   valueField: string;
   preferredChannelField?: string;
   language?: { relationshipId: string; field: string };
+};
+
+export type WebRelatedRecordContext = {
+  key: string; label: LocalizedText;
+  path: Array<{ entityId: string; relationshipId: string }>;
+  targetEntityId: string; displayField: string;
+  when?: Record<string, string | number | boolean | null>;
+  tone?: "default" | "subtle";
+  labelEmphasis?: boolean;
+  status?: { field: string; values: Record<string, "off" | "success" | "danger" | "warning"> };
 };

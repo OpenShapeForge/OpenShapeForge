@@ -761,7 +761,7 @@ export interface CompiledEntityContract {
       fields?: Record<string, { render: import("./common.js").FieldRender }>;
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];
-      recordContext?: { fields: string[]; relationships?: string[]; contacts?: import("./views.js").ContactContextPresentation };
+      recordContext?: { fields: string[]; relationships?: string[]; contacts?: import("./views.js").ContactContextPresentation; records?: import("./views.js").RelatedRecordContextPresentation[] };
       /** Authored layout-renderer exceptions; hosts resolve these opaque keys. */
       renderers?: {
         collection?: string;

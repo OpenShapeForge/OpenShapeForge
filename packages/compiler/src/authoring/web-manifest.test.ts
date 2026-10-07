@@ -1602,3 +1602,34 @@ describe("provider-backed relationships", () => {
     expect(() => buildWebManifest([parent], {}, standalone(catalog))).toThrow('pageSize must be between');
   });
 });
+
+
+test("context paths follow canonical relationship graphs for homes and project members", () => {
+  for (const [name, middle, target] of [["Relation", "Agreement", "Asset"], ["Project", "Membership", "Person"]]) {
+    const owner = entity(name!, "owner", [field("name")], coreView(), [{ key: "links", kind: "hasMany", target: middle!, foreignKey: "owner_id" }]);
+    const link = entity(middle!, "link", [field("targetId", { osfType: target! })], coreView(), [{ key: "targetId", fieldKey: "targetId", kind: "belongsTo", target: target!, foreignKey: "target_id" }]);
+    const end = entity(target!, "target", [field("name")], coreView());
+    owner.contract.interfaces!.web!.recordContext = { fields: [], records: [{ key: "related", path: ["links", "targetId"], displayField: "name" }] };
+    const build = () => buildWebManifest([owner, link, end]);
+    expect(build().entities[name!]!.views.record!.layout.context.records![0]).toMatchObject({ targetEntityId: target, displayField: "name", path: [{ entityId: name, relationshipId: `${name}.links` }, { entityId: middle, relationshipId: `${middle}.targetId` }] });
+    owner.contract.interfaces!.web!.recordContext.records![0]!.when = { name: "selected" };
+    expect(build().entities[name!]!.views.record!.layout.context.records![0]!.when).toEqual({ name: "selected" });
+    owner.contract.interfaces!.web!.recordContext.records![0]!.when = { name: true };
+    expect(build).toThrow("matching scalar field");
+    owner.contract.interfaces!.web!.recordContext.records![0]!.when = { missing: "value" };
+    expect(build).toThrow("matching scalar field");
+    delete owner.contract.interfaces!.web!.recordContext.records![0]!.when;
+    owner.contract.interfaces!.web!.recordContext.records![0]!.status = { field: "name", values: { selected: "success" } };
+    owner.contract.interfaces!.web!.recordContext.records![0]!.tone = "subtle";
+    owner.contract.interfaces!.web!.recordContext.records![0]!.labelEmphasis = true;
+    expect(build().entities[name!]!.views.record!.layout.context.records![0]).toMatchObject({ status: { field: "name", values: { selected: "success" } }, tone: "subtle", labelEmphasis: true });
+    owner.contract.interfaces!.web!.recordContext.records![0]!.status.field = "unknown";
+    expect(build).toThrow("context status requires a single string");
+    delete owner.contract.interfaces!.web!.recordContext.records![0]!.status;
+    owner.contract.interfaces!.web!.recordContext.records![0]!.path = ["missing"];
+    expect(build).toThrow("canonical readable relationship");
+    owner.contract.interfaces!.web!.recordContext.records![0]!.path = ["links", "targetId"];
+    owner.contract.interfaces!.web!.recordContext.records![0]!.displayField = "unknown";
+    expect(build).toThrow("single string");
+  }
+});

@@ -57,3 +57,10 @@ conflict en responsive gedrag. Compileer deterministisch en toets de gewijzigde
 ingelogde browserstroom met rapport, screenshots en video. Technische checks
 bewijzen geen visuele productacceptatie. Rapporteer wat actief werkt en wat nog
 ontbreekt; een inventaris of een gegenereerde route is geen adoptiebewijs.
+
+Een contextregel mag `records` met een pad van een tot vier bestaande
+relaties selecteren. De compiler controleert iedere stap, het leescontract en
+het tekstveld voor de naam. Een terminale `when`-selectie verwijst alleen naar
+bestaande scalaire velden; dit is presentatie, geen toegangsbeleid. Behoud alle
+passende resultaten en meld onvolledige/paginagegevens. Een statuskleur volgt
+een expliciete mapping van het bestaande statusveld; onbekend blijft neutraal.

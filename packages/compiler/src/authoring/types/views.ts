@@ -332,3 +332,16 @@ export interface ContactContextPresentation {
   preferredChannelField?: string;
   language?: { relationship: string; field: string };
 }
+
+/** Read-only context follows existing canonical relationships, never inferred identities. */
+export interface RelatedRecordContextPresentation {
+  key: string;
+  label?: LocalizedText;
+  path: string[];
+  displayField?: string;
+  /** Presentation selection on the terminal record; never an authorization rule. */
+  when?: Record<string, string | number | boolean | null>;
+  tone?: "default" | "subtle";
+  labelEmphasis?: boolean;
+  status?: { field: string; values: Record<string, "off" | "success" | "danger" | "warning"> };
+}

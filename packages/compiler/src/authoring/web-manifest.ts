@@ -904,6 +904,36 @@ function projectEntity(
       throw new Error(`${entityName}: collection context relationship ${key} requires a matching detail tab.`);
     }
   }
+  const contextRecordKeys = new Set<string>();
+  const contextRecords = authoredContext?.records?.map(definition => {
+    if (contextRecordKeys.has(definition.key)) throw new Error(`${entityName}: duplicate context record ${definition.key}.`);
+    contextRecordKeys.add(definition.key);
+    if (!definition.path.length || definition.path.length > 4) throw new Error(`${entityName}: context record path requires one to four relationships.`);
+    let owner = source;
+    const path = definition.path.map(key => {
+      const relation = owner.contract.model.relationships.find(item => item.key === key);
+      const target = relation && all.get(relation.target);
+      if (!relation || !target || !target.operations[relation.kind === "hasMany" ? "list" : "get"]) throw new Error(`${entityName}: context record path ${key} requires a canonical readable relationship.`);
+      const step = { entityId: owner.contract.entity.name, relationshipId: `${owner.contract.entity.name}.${key}` };
+      owner = target;
+      return step;
+    });
+    const displayField = definition.displayField ?? owner.collection.displayField;
+    const display = owner.contract.model.fields.find(field => field.key === displayField);
+    if (!display || display.baseType !== "string" || display.cardinality === "collection") throw new Error(`${entityName}: context record display field ${displayField} must be a single string.`);
+    for (const [key, value] of Object.entries(definition.when ?? {})) {
+      const field = owner.contract.model.fields.find(field => field.key === key);
+      if (!field || field.cardinality === "collection" || !["string", "number", "boolean"].includes(field.baseType)
+        || (value !== null && typeof value !== field.baseType)) throw new Error(`${entityName}: context condition ${key} requires a matching scalar field.`);
+    }
+    if (definition.status) {
+      const statusField = owner.contract.model.fields.find(field => field.key === definition.status!.field);
+      if (!statusField || statusField.baseType !== "string" || statusField.cardinality === "collection") throw new Error(`${entityName}: context status requires a single string field.`);
+    }
+    return { key: definition.key, label: localized(definition.label, definition.key), path, targetEntityId: owner.contract.entity.name, displayField,
+      ...(definition.when ? { when: definition.when } : {}), ...(definition.tone ? { tone: definition.tone } : {}),
+      ...(definition.labelEmphasis !== undefined ? { labelEmphasis: definition.labelEmphasis } : {}), ...(definition.status ? { status: definition.status } : {}) };
+  });
   const contacts = authoredContext?.contacts;
   if (contacts) {
     const assertContactField = (relationshipKey: string, fieldKey: string) => {
@@ -992,6 +1022,7 @@ function projectEntity(
       tabs: recordTabs,
       ...(contract.interfaces?.web?.recordWorkspaceTabs !== undefined ? { workspaceTabs: contract.interfaces.web.recordWorkspaceTabs } : {}),
       context: {
+        ...(contextRecords?.length ? { records: contextRecords } : {}),
         ...(contacts ? { contacts: {
           relationshipId: contacts.relationship, channelField: contacts.channelField, valueField: contacts.valueField,
           ...(contacts.channels ? { channels: contacts.channels.map(channel => ({ key: channel.key, types: channel.types, ...(channel.label ? { label: localized(channel.label, channel.key) } : {}), ...(channel.when ? { when: channel.when } : {}) })) } : {}),

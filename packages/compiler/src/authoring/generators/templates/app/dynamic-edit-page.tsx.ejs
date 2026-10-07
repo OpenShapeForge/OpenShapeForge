@@ -57,7 +57,7 @@ async function EditContent({
   id: string;
   lang: string;
   getAction: EntityManifestEntry["actions"]["get"];
-  updateAction: EntityManifestEntry["actions"]["update"];
+  updateAction: NonNullable<EntityManifestEntry["actions"]["update"]>;
   domains: string[];
   authzSlug: string | null;
 }) {
@@ -113,7 +113,7 @@ async function EditContent({
 export default async function Page({ params }: PageProps) {
   const { entity: slug, id } = await params;
   const entry = await resolveEntity(slug);
-  if (!entry?.editFormConfigBases) notFound();
+  if (!entry?.editFormConfigBases || !entry.actions.update) notFound();
 
   const activeType = await getActiveContext();
   const lang = await getActiveLang();

@@ -42,6 +42,10 @@ import type {
   RuntimeWaitConditionFieldData,
 } from "./manifest.js";
 import { normalizeKeycloakRoleName } from "./keycloak.js";
+import {
+  operationSourceQueries,
+  operationSourceReadTransport,
+} from "./entity-read-transport.js";
 
 export type EntityPageConfigBundle = {
   entitySlug: string;
@@ -398,12 +402,20 @@ export function generateViewPages(
     [...usedDetailRelationshipPaths],
   );
 
-  // Server action for this entity
+  // Server action for this entity. An Operation-backed source reads through
+  // its list/get Operations instead of generated CRUD.
   const entityLower = contract.entity.name.toLowerCase();
-  files.set(`actions/generated/${entityLower}.ts`, renderTemplate("app/actions.ts.ejs", {
-    contract,
-    detailRelationshipSelectionSet,
-  }));
+  const source = operationSourceReadTransport(contract);
+  files.set(`actions/generated/${entityLower}.ts`, source
+    ? renderTemplate("app/source-actions.ts.ejs", {
+      contract,
+      source,
+      queries: operationSourceQueries(contract, source),
+    })
+    : renderTemplate("app/actions.ts.ejs", {
+      contract,
+      detailRelationshipSelectionSet,
+    }));
 
   const contexts = Object.keys(contract.views);
   const routes = view.routes;
@@ -431,6 +443,7 @@ export function generateViewPages(
     typeName: gql.typeName,
     realtimeResourceType: gql.queries.single.name,
     listQueryName: gql.queries.list.name,
+    readOnly: Boolean(source),
     domains: contract.entity.domains,
     routes,
     hasListConfigs: Object.keys(listConfigs).length > 0,
@@ -1018,10 +1031,10 @@ function buildDetailConfigFromPresentation(
 
   return {
     queriesByGroup,
-    queryName: contract.graphql.queries.single.name,
+    queryName: operationSourceReadTransport(contract)?.getField ?? contract.graphql.queries.single.name,
     realtimeResourceType: contract.graphql.queries.single.name,
     defaultGroupId,
-    deleteMutationName: contract.graphql.mutations.delete.name,
+    deleteMutationName: contract.source ? undefined : contract.graphql.mutations.delete.name,
     render: detail.render?.component,
     header: {
       titleTemplate: detail.header.title,
@@ -1383,9 +1396,9 @@ function buildListConfigFromPresentation(
   );
   const detailRoute = routes.detail ?? `${getCanonicalRoute(routes.list).replace(/\/$/, "")}/:id`;
 
-  return {
+  const config: GeneratedListConfig = {
     query: buildListQuery(contract, selection),
-    queryName: contract.graphql.queries.list.name,
+    queryName: operationSourceReadTransport(contract)?.listField ?? contract.graphql.queries.list.name,
     realtimeResourceType: contract.graphql.queries.single.name,
     title: list.title ?? { en: "List", nl: "Lijst" },
     subtitle: list.subtitle,
@@ -1427,9 +1440,33 @@ function buildListConfigFromPresentation(
     actionDefinitions: view?.actionDefinitions,
     rowActions: list.rowActions,
     routes,
-    deleteMutationName: contract.graphql.mutations.delete.name,
+    deleteMutationName: contract.source ? undefined : contract.graphql.mutations.delete.name,
     rowLink: list.rowLink ?? detailRoute,
   };
+  assertOperationSourceListConfig(contract, config);
+  return config;
+}
+
+/**
+ * An Operation-backed source accepts only the query capabilities its list
+ * Operation declares: free-text and text filters on its filter fields and a
+ * sort on its sort fields. Reject a list presentation that would send more.
+ */
+function assertOperationSourceListConfig(contract: CompiledEntityContract, config: GeneratedListConfig): void {
+  const source = operationSourceReadTransport(contract);
+  if (!source) return;
+  const entity = contract.entity.name;
+  if (!source.filterFields.includes(config.filterField)) {
+    throw new Error(`${entity}: list search field "${config.filterField}" is not a source query filter field (${source.filterFields.join(", ")}).`);
+  }
+  for (const filter of config.filters ?? []) {
+    if ((filter.type ?? "select") !== "text" || !source.filterFields.includes(filter.key)) {
+      throw new Error(`${entity}: list filter "${filter.key}" must be a text filter on a source query filter field.`);
+    }
+  }
+  if (config.defaultSort && !source.sortFields.includes(config.defaultSort.key)) {
+    throw new Error(`${entity}: list default sort "${config.defaultSort.key}" is not a source query sort field (${source.sortFields.join(", ")}).`);
+  }
 }
 
 function buildListConfig(
@@ -2208,10 +2245,16 @@ function collectListSelectionPaths(
 }
 
 function buildDetailQuery(contract: CompiledEntityContract, selection: string): string {
+  // An Operation-backed source returns its whole projected record; it has no
+  // per-field GraphQL selection.
+  const source = operationSourceReadTransport(contract);
+  if (source) return operationSourceQueries(contract, source).get;
   return `query Get${contract.graphql.typeName}($id: ID!) { ${contract.graphql.queries.single.name}(id: $id) { data { ${selection} } error { code message retryable } } }`;
 }
 
 function buildListQuery(contract: CompiledEntityContract, selection: string): string {
+  const source = operationSourceReadTransport(contract);
+  if (source) return operationSourceQueries(contract, source).list;
   return `query List${contract.graphql.typeName}($filter: ${contract.graphql.typeName}Filter, $sort: ${contract.graphql.typeName}Sort, $first: Int, $after: String) { ${contract.graphql.queries.list.name}(filter: $filter, sort: $sort, first: $first, after: $after) { data { items { data { ${selection} } } nextCursor totalCount } error { code message retryable } } }`;
 }
 

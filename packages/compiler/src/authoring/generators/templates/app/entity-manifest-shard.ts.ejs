@@ -7,9 +7,11 @@
 import {
   get<%= entry.typeName %>,
   <%= listFnName %>,
+<% if (!entry.readOnly) { -%>
   create<%= entry.typeName %>,
   update<%= entry.typeName %>,
   delete<%= entry.typeName %>,
+<% } -%>
 } from "@/actions/generated/<%= e %>";
 import type { EntityManifestEntry } from "../entity-manifest";
 
@@ -32,9 +34,11 @@ const entry: EntityManifestEntry = {
   actions: {
     list: <%= listFnName %>,
     get: get<%= entry.typeName %>,
+<% if (!entry.readOnly) { -%>
     create: create<%= entry.typeName %>,
     update: update<%= entry.typeName %>,
     delete: delete<%= entry.typeName %>,
+<% } -%>
   },
 };
 

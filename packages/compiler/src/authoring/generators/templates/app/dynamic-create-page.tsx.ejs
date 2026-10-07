@@ -22,7 +22,7 @@ type PageProps = { params: Promise<{ entity: string }> };
 export default async function Page({ params }: PageProps) {
   const { entity: slug } = await params;
   const entry = await resolveEntity(slug);
-  if (!entry?.createFormConfigBases) notFound();
+  if (!entry?.createFormConfigBases || !entry.actions.create) notFound();
 
   const activeType = await getActiveContext();
   const lang = await getActiveLang();

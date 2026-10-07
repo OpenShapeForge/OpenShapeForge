@@ -18,12 +18,14 @@ import { executeGraphqlRequest } from "@/lib/server/graphql-client";
 export const getActiveLabelRules = cache(async (entityType: string) => {
   const data = await executeGraphqlRequest<{
     labelRules?: {
-      edges?: Array<{ node?: Record<string, unknown> | null }>;
+      data?: { items?: Array<{ data?: Record<string, unknown> | null }> } | null;
+      error?: { code?: string; message?: string } | null;
     };
   }>({
     query: `query ActiveLabelRules($filter: LabelRuleFilter, $sort: LabelRuleSort, $first: Int) {
       labelRules(filter: $filter, sort: $sort, first: $first) {
-        edges { node { id label variant expression descriptionTemplate priority } }
+        data { items { data { id label variant expression descriptionTemplate priority } } }
+        error { code message retryable }
       }
     }`,
     variables: {
@@ -33,7 +35,11 @@ export const getActiveLabelRules = cache(async (entityType: string) => {
     },
   });
 
-  return (data?.labelRules?.edges ?? [])
-    .map((edge) => edge.node)
+  const result = data?.labelRules;
+  if (result?.error) {
+    throw new Error(`${result.error.code ?? "OPERATION_FAILED"}: ${result.error.message ?? "Operation failed."}`);
+  }
+  return (result?.data?.items ?? [])
+    .map((item) => item.data)
     .filter(Boolean);
 });

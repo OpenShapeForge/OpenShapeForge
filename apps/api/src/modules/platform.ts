@@ -889,6 +889,14 @@ export class ModulePlatformRuntime {
         },
       };
     }
+    // A keyed Operation declares its canonical input field. All transports may
+    // supply that field; an explicit transport key still takes precedence and
+    // the provider rejects a conflicting input value before admitting effects.
+    const idempotency = match.definition.reliability.idempotency;
+    if (idempotency.mode === "keyed" && !request.idempotencyKey && idempotency.inputField) {
+      const inputKey = request.input?.[idempotency.inputField];
+      if (typeof inputKey === "string" && inputKey.trim()) request = { ...request, idempotencyKey: inputKey };
+    }
     const contractFailure = contractPreconditionFailure(match.definition, request);
     if (contractFailure) return contractFailure;
     const stack = this.#operationCallStack.getStore() ?? [];

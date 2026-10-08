@@ -1138,8 +1138,10 @@ test("the canonical catalog exposes a custom delivery key and keyed replay prese
       expect(definition?.reliability.idempotency).toEqual({ mode: "keyed", inputField: "deliveryKey" });
       const request = { operation: { id: operation.key, intent: "invoke" },
         input: { message: "Approval requested", deliveryKey: "logical-delivery" }, idempotencyKey: "logical-delivery" };
-      const first = await platform.services.operations.execute(active, request);
+      const { idempotencyKey: _transportKey, ...inputOnly } = request;
+      const first = await platform.services.operations.execute(active, inputOnly);
       expect(first).toEqual({ data: { call: 1 }, operations: [] });
+      expect(await platform.services.operations.execute(active, inputOnly)).toEqual(first);
       expect(await platform.services.operations.execute(active, request)).toEqual(first);
       expect(seen).toEqual([request.input]);
       expect(await platform.services.operations.execute(active, { ...request, idempotencyKey: "different-visit-key" }))

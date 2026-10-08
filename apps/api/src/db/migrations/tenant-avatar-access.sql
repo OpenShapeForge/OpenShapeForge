@@ -18,16 +18,16 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$
   )
 $$;
 REVOKE ALL ON FUNCTION document_internal.is_tenant_avatar(uuid) FROM public;
-GRANT EXECUTE ON FUNCTION document_internal.is_tenant_avatar(uuid) TO openshapeforge_app;
+GRANT EXECUTE ON FUNCTION document_internal.is_tenant_avatar(uuid) TO __OSF_APP_ROLE__;
 
 DROP POLICY IF EXISTS documents_tenant_avatar_read ON erp.documents;
-CREATE POLICY documents_tenant_avatar_read ON erp.documents AS RESTRICTIVE FOR SELECT TO openshapeforge_app USING (
+CREATE POLICY documents_tenant_avatar_read ON erp.documents AS RESTRICTIVE FOR SELECT TO __OSF_APP_ROLE__ USING (
   NOT ('Organization.Access.Manage' = ANY(string_to_array(coalesce(current_setting('app.roles',true),''),',')))
   OR string_to_array(coalesce(current_setting('app.roles',true),''),',') && ARRAY['CaseFile.All.Read','CaseFile.All.ReadWrite']
   OR document_internal.is_tenant_avatar(id)
 );
 DROP POLICY IF EXISTS document_versions_tenant_avatar_read ON erp.document_versions;
-CREATE POLICY document_versions_tenant_avatar_read ON erp.document_versions AS RESTRICTIVE FOR SELECT TO openshapeforge_app USING (
+CREATE POLICY document_versions_tenant_avatar_read ON erp.document_versions AS RESTRICTIVE FOR SELECT TO __OSF_APP_ROLE__ USING (
   NOT ('Organization.Access.Manage' = ANY(string_to_array(coalesce(current_setting('app.roles',true),''),',')))
   OR string_to_array(coalesce(current_setting('app.roles',true),''),',') && ARRAY['CaseFile.All.Read','CaseFile.All.ReadWrite']
   OR document_internal.is_tenant_avatar(document_id)
@@ -44,7 +44,7 @@ DO $guard$
 BEGIN
   IF to_regclass('erp.document_renditions') IS NOT NULL THEN
 DROP POLICY IF EXISTS document_renditions_tenant_avatar_read ON erp.document_renditions;
-CREATE POLICY document_renditions_tenant_avatar_read ON erp.document_renditions AS RESTRICTIVE FOR SELECT TO openshapeforge_app USING (
+CREATE POLICY document_renditions_tenant_avatar_read ON erp.document_renditions AS RESTRICTIVE FOR SELECT TO __OSF_APP_ROLE__ USING (
   NOT ('Organization.Access.Manage' = ANY(string_to_array(coalesce(current_setting('app.roles',true),''),',')))
   OR string_to_array(coalesce(current_setting('app.roles',true),''),',') && ARRAY['CaseFile.All.Read','CaseFile.All.ReadWrite']
   OR EXISTS (SELECT 1 FROM erp.document_versions v WHERE v.id = source_document_version_id AND v.tenant_id = app.current_tenant() AND document_internal.is_tenant_avatar(v.document_id))

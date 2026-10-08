@@ -111,6 +111,9 @@ jobs:
       # and the version arithmetic for this commit is printed in the log. The
       # literal ${NODE_AUTH_TOKEN} is expanded by npm itself from the step-level
       # env at request time — the token never lands on disk.
+      - name: Test immutable package comparison
+        run: bun test scripts/package-tarball-equivalence.test.ts
+
       - name: Dry-run the publish plan
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

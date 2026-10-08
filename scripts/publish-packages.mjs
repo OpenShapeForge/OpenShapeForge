@@ -28,6 +28,7 @@
  * Authentication comes from ~/.npmrc: `npm view` needs a read token on this
  * registry as much as `npm publish` needs a write token.
  */
+import { packageTarballsHaveSameContents } from "./package-tarball-equivalence.mjs";
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -139,6 +140,13 @@ function publishedIntegrity(name, version) {
   throw new Error(`npm view ${name}@${version} failed:\n${result.stderr}`);
 }
 
+/** npm/zlib versions can compress the exact same tar archive differently. */
+function samePublishedContents(name, version, candidatePath) {
+  const destination = mkdtempSync(path.join(tmpdir(), "published-package-"));
+  const [packed] = JSON.parse(npm(["pack", `${name}@${version}`, "--ignore-scripts", "--json", "--pack-destination", destination, `--registry=${REGISTRY}`]).stdout);
+  return packageTarballsHaveSameContents(readFileSync(candidatePath), readFileSync(path.join(destination, packed.filename)));
+}
+
 /** Copies LICENSE (and the compiler's README) into the package; returns the paths it created. */
 function stageDistributionFiles(entry) {
   const copies = [[path.join(repoRoot, "LICENSE"), path.join(entry.dir, "LICENSE")]];
@@ -180,7 +188,7 @@ function main() {
       const published = publishedIntegrity(name, version);
       if (published === null) {
         plan.push({ name, version, tarball: path.join(packDestination, packed.filename) });
-      } else if (options.channel === "main" && published.integrity !== packed.integrity) {
+      } else if (options.channel === "main" && published.integrity !== packed.integrity && !samePublishedContents(name, version, path.join(packDestination, packed.filename))) {
         throw new Error(`${name}@${version} already exists with different contents; bump its version before publishing.`);
       } else {
         console.log(`${name}@${version} is already published; nothing to do.`);

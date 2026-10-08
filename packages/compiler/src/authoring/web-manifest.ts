@@ -1308,15 +1308,24 @@ function projectStandalone(
           enum?: Record<string, CompiledLocalizedText>;
         } | undefined;
         const title = i18n?.title;
-        const target = referenceTarget(schema, targets);
-        const rawType = Array.isArray(schema.type) ? schema.type.find((value) => value !== "null") : schema.type;
-        const baseType = schema.format === "date-time"
+        // An array result field is a collection of its items, projected the way
+        // a core entity's collection field is: the item type with cardinality many.
+        const typeOf = (candidate: Record<string, unknown>) =>
+          Array.isArray(candidate.type) ? candidate.type.find((value) => value !== "null") : candidate.type;
+        const items = typeOf(schema) === "array" && schema.items && typeof schema.items === "object" && !Array.isArray(schema.items)
+          ? schema.items as Record<string, unknown>
+          : undefined;
+        const value = items ?? schema;
+        // Only a single reference is a belongsTo (see relationships below).
+        const target = items ? undefined : referenceTarget(schema, targets);
+        const rawType = typeOf(value);
+        const baseType = value.format === "date-time"
           ? "datetime"
-          : schema.format === "date"
+          : value.format === "date"
             ? "date"
             : typeof rawType === "string" ? rawType : "string";
-        const enumValues = Array.isArray(schema.enum)
-          ? schema.enum.filter((value): value is string => typeof value === "string")
+        const enumValues = Array.isArray(value.enum)
+          ? value.enum.filter((candidate): candidate is string => typeof candidate === "string")
           : Object.keys(i18n?.enum ?? {});
         return [key, {
           id: `${entityName}.${key}`,
@@ -1332,7 +1341,7 @@ function projectStandalone(
             })),
           } : {}),
           ...(target ? { relationship: { targetEntityId: target.contract.entity.name } } : {}),
-          cardinality: "one" as const,
+          cardinality: items ? "many" as const : "one" as const,
           required: false,
           supports: { read: true, create: false, update: false },
         }];

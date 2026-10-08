@@ -119,6 +119,8 @@ export interface CompiledField {
   render: CompiledRender;
   unit?: string;
   defaultValue?: unknown;
+  /** Creation-only string interpolation; explicit caller values win. */
+  defaultTemplate?: string;
   validation?: FieldValidation;
   visibility?: VisibilityConfig;
   computed?: ComputedField;

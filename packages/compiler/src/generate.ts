@@ -853,6 +853,7 @@ function renderManifestJson(
       ...(column.writtenBy === undefined
         ? {}
         : { writtenBy: resolveColumnWriters(table, column, operations) }),
+      ...(column.defaultTemplate === undefined ? {} : { defaultTemplate: column.defaultTemplate }),
       ...(column.deriveOnCreate === undefined
         ? {}
         : { deriveOnCreate: column.deriveOnCreate }),
@@ -910,7 +911,8 @@ function renderManifestJson(
         // Already resolved on the rendered table above; republished here so the
         // runtime's generated-entity view carries the same one fact.
         ...(column.writtenBy === undefined ? {} : { writtenBy: column.writtenBy }),
-        ...(column.deriveOnCreate === undefined
+        ...(column.defaultTemplate === undefined ? {} : { defaultTemplate: column.defaultTemplate }),
+      ...(column.deriveOnCreate === undefined
           ? {}
           : { deriveOnCreate: column.deriveOnCreate }),
       })),

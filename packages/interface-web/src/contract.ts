@@ -172,6 +172,7 @@ export type WebFieldProjection = {
   maxLength?: number;
   /** Authored literal create default; never replaces an existing record value. */
   defaultValue?: unknown;
+  defaultTemplate?: string;
   /** Nested canonical field metadata for read presentation; not a second schema. */
   children?: WebFieldProjection[];
   item?: WebFieldProjection;

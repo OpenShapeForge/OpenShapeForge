@@ -1,3 +1,4 @@
+import { applyDefaultTemplates } from "./default-template.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
@@ -247,7 +248,8 @@ async function insertGeneratedRowInTransaction(
   values: ReturnType<typeof normalizeWritableValues>,
   entityValues: EntityValueIOContext = {},
 ): Promise<GeneratedEntityRow> {
-  const identified = prepareProtectedFieldWrites(table, session, values, "create", undefined, false);
+  const defaulted = await applyDefaultTemplates(trx, session, table, values, entityValues.tables);
+  const identified = prepareProtectedFieldWrites(table, session, defaulted, "create", undefined, false);
   const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, identified, "create", undefined, entityValues);
   await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
   await assertPublishableRelatedMutationInTransaction(trx, session, table, {

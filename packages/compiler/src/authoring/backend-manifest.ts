@@ -1,3 +1,4 @@
+import { validateDefaultTemplates } from "./compiler/default-template.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { join, relative } from "node:path";
 import { compile } from "./compiler/index.js";
@@ -1388,6 +1389,7 @@ export function compileAuthoringBackendManifest(
           : {}),
       };
       if (field) assertDefaultSatisfiesContract(field);
+      if (field?.defaultTemplate !== undefined) column.defaultTemplate = field.defaultTemplate;
       const defaultValue = defaultSql(field, column);
       if (defaultValue !== undefined) {
         column.default = defaultValue;
@@ -1606,6 +1608,7 @@ export function compileAuthoringBackendManifest(
   const entityValues = compileFieldRelationStorage(physicalCandidates, tables, relationshipRegister, candidates);
   bindVersioningStorage(physicalCandidates, tables);
   bindOwnerAxes(physicalCandidates, tables);
+  validateDefaultTemplates(tables);
 
   return {
     version: 1,

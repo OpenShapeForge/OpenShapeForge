@@ -508,6 +508,7 @@ function projectField(
     ...(field.entityValue ? { entityValue: { ...field.entityValue } } : {}),
     ...(field.allowedDefinitions ? { allowedDefinitions: [...field.allowedDefinitions].sort() } : {}),
     ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
+    ...(field.defaultTemplate !== undefined ? { defaultTemplate: field.defaultTemplate } : {}),
     ...(field.options?.items?.length ? { options: field.options.items.map(({ value, label }) => ({ value, label: localized(label, value) })) } : {}),
     ...(optionSource ? { optionSource } : {}),
     ...(field.children ? { children: field.children.map((child) => projectField(child, `${parent}.${field.key}`, nestedSupports, editNested, presentations)) } : {}),

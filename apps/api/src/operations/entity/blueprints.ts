@@ -103,6 +103,10 @@ export async function createFromBlueprint(db: OpenShapeForgeDatabase, session: D
     const source = (await readPublished(db, session, table, blueprintId))[0];
     if (!source) throw generatedCrudError("Blueprint is unavailable.", "NOT_FOUND");
     const merged = { ...allowedValues(table, source.values_json), ...values };
+    for (const column of table.columns) {
+      const field = column.sourceField;
+      if (column.defaultTemplate && field && !Object.hasOwn(values, field)) delete merged[field];
+    }
     validate(merged);
     const resolvedBindings: BlueprintBindings = structuredClone(bindings);
     const referenceKeys = source.values_json.$referenceKeys as ReferenceKey[] | undefined;

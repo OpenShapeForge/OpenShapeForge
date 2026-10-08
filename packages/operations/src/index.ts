@@ -113,3 +113,4 @@ export type { ScalarJsonSchema, ScalarProjection, ScalarType } from "./scalar-pr
 export { DECIMAL_PATTERN, decimalText, INTEGER_TEXT_PATTERN, isScalarType, SCALAR_PROJECTION, SCALAR_TYPES, scalarJsonSchema } from "./scalar-projection.js";
 export type { EntityRuntimeError, EntityRuntimeErrorSituation } from "./entity-runtime-errors.js";
 export { ENTITY_RUNTIME_ERRORS, ENTITY_RUNTIME_ERROR_STATUS } from "./entity-runtime-errors.js";
+export { defaultTemplatePaths, renderDefaultTemplate } from './default-template.js';

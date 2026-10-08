@@ -39,6 +39,7 @@ export type GeneratedCrudColumn = {
     rest: string;
     mcp?: string;
   }[];
+  defaultTemplate?: string;
   deriveOnCreate?: {
     sourceField: string;
     sourceColumn: string;

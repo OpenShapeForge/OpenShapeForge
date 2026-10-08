@@ -387,7 +387,7 @@ export function entityValuesSchema(
       field.key !== secureInputTarget && field.key !== options.excludeField && persisted.has(field.key)
     );
   const compiledValues = withEntityRelationshipKeys(
-    compiledObjectSchema(fields, referentiedata, {
+    compiledObjectSchema(operation === "create" ? fields.map(field => field.defaultTemplate === undefined ? field : {...field, required: false}) : fields, referentiedata, {
       ...(operation === "create"
         ? { requireRequired: true, defaultsAreMaterialized: true }
         : { requireRequired: false, includeDefault: false }),
@@ -399,6 +399,7 @@ export function entityValuesSchema(
   const { schema: values, definitions } = splitBundledDefinitions(compiledValues);
   const properties = values.properties as Record<string, JsonObject>;
   for (const field of fields) {
+    if (operation === "create" && field.defaultTemplate && properties[field.key]) properties[field.key]!["x-osf-default-template"] = field.defaultTemplate;
     const policy = compileFieldValuePolicy(field);
     if (policy && (policy.children || policy.item) && properties[field.key]) {
       properties[field.key] = operation === "update"

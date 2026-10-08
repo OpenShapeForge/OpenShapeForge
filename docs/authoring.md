@@ -689,3 +689,7 @@ version and the entity's version/edit-lease controls. It replaces only the decla
 fields, keeping the customer record's identity, relationships and other fields.
 This initial contract supports scalar configuration records, not workflow graphs
 or other aggregates. Existing plugin-backed mutations cannot silently opt in.
+
+### Creation defaults from field templates
+
+A persisted string field may declare `defaultTemplate: "Budget {{fiscalYear.code}}"`. This creation-only default interpolates submitted scalar fields (`{{name}}`) or one belongs-to relationship (`{{fiscalYear.code}}`, where the reference field is `fiscalYearId`). Explicit caller values take precedence, including when copying a Blueprint. Missing or unreadable sources reject creation; references use the same tenant, read authorization and field projection as ordinary reads. No expressions, collections, chaining or executable code are accepted. Updates never recompute the value. Use `defaultValue` for literals; it cannot coexist with `defaultTemplate`.

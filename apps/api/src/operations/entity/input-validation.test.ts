@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import { getGeneratedCrudTables } from "./catalog.js";
-import { assertEntityValuesValid } from "./input-validation.js";
+import { assertBlueprintControlsValid, assertEntityValuesValid } from "./input-validation.js";
 import { entityOperationContract, executeEntityOperation } from "./runtime.js";
 
 const task = getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === "Task")!;
@@ -85,4 +85,14 @@ describe("entity write contract validation", () => {
       }),
     });
   });
+});
+
+test("Blueprint controls reject malformed bindings before database access", () => {
+  const operation = entityOperationContract("RelationGroup.create");
+  expect(violationsOf(() => assertBlueprintControlsValid(create, { blueprintId: "template" }))?.code).toBe("VALIDATION");
+  for (const bindings of [null, [], { Period: null }, { Period: [] }, { Period: { source: "invalid" } }, Object.fromEntries(Array.from({ length: 21 }, (_, i) => [String(i), {}]))]) {
+    expect(violationsOf(() => assertBlueprintControlsValid(operation, { blueprintId: "template", blueprintBindings: bindings }))?.code).toBe("VALIDATION");
+  }
+  expect(violationsOf(() => assertBlueprintControlsValid(operation, { blueprintBindings: {} }))?.code).toBe("VALIDATION");
+  expect(() => assertBlueprintControlsValid(operation, { blueprintId: "template", blueprintBindings: { Period: { source: "11111111-1111-4111-8111-111111111111" } }, values: { description: null } })).not.toThrow();
 });

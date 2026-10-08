@@ -107,7 +107,7 @@ export async function createFromBlueprint(db: OpenShapeForgeDatabase, session: D
     const resolvedBindings: BlueprintBindings = structuredClone(bindings);
     const referenceKeys = source.values_json.$referenceKeys as ReferenceKey[] | undefined;
     for (const reference of referenceKeys ?? []) {
-      if (resolvedBindings[reference.entity]?.[reference.sourceId]) continue;
+      const explicitBinding = resolvedBindings[reference.entity]?.[reference.sourceId];
       const rule = policy(table).bindings?.find(rule => rule.entity === reference.entity);
       if (!rule) continue;
       const filter: Record<string,unknown> = {};
@@ -122,7 +122,9 @@ export async function createFromBlueprint(db: OpenShapeForgeDatabase, session: D
       const destination = graphTable(reference.entity);
       const matches = await listGeneratedEntities(db, session, { table: destination.name, filter, limit: 2 });
       if (matches.rows.length !== 1 || matches.nextCursor) throw generatedCrudError("Blueprint reference has no unique destination. Check its context before copying.", "BAD_USER_INPUT");
-      (resolvedBindings[reference.entity] ??= {})[reference.sourceId] = String(matches.rows[0]![destination.primaryKey!]);
+      const destinationId = String(matches.rows[0]![destination.primaryKey!]);
+      if (explicitBinding && explicitBinding !== destinationId) throw generatedCrudError("Blueprint binding does not match its destination context.", "BAD_USER_INPUT");
+      (resolvedBindings[reference.entity] ??= {})[reference.sourceId] = destinationId;
     }
     const row = await createGeneratedEntity(db, session, { table: table.name, values: merged, ...(trusted ? { trusted } : {}) });
     const snapshot = source.values_json.$graph as BlueprintGraphRecord[] | undefined;

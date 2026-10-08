@@ -1223,7 +1223,18 @@
               },
               "x-osf-i18n": { "title": { "en": "Actions", "nl": "Acties" } }
             },
-            "emptyState": {"type": "object", "additionalProperties": false, "required": ["title"], "properties": {"title": {"$ref": "#/$defs/localizedText"}, "description": {"$ref": "#/$defs/localizedText"}, "illustration": {"const": "empty-collection"}, "primaryAction": {"const": "create"}}},
+            "emptyState": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["title"],
+              "x-osf-i18n": { "title": { "en": "Empty state", "nl": "Lege toestand" } },
+              "properties": {
+                "title": { "$ref": "#/$defs/localizedText" },
+                "description": { "$ref": "#/$defs/localizedText" },
+                "illustration": { "const": "empty-collection", "x-osf-i18n": { "title": { "en": "Illustration", "nl": "Illustratie" } } },
+                "primaryAction": { "const": "create", "x-osf-i18n": { "title": { "en": "Primary action", "nl": "Primaire actie" } } }
+              }
+            },
             "columns": {
               "type": "array",
               "minItems": 1,

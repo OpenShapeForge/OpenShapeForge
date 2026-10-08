@@ -544,6 +544,7 @@ export function entityOperationJsonSchemas(
         ["values"],
       );
       if (blueprint) {
+        inputSchema.dependentRequired = { blueprintBindings: ["blueprintId"] };
         inputSchema.allOf = [{
           if: { not: { required: ["blueprintId"] } },
           then: { properties: { values: { required: requiredValues } } },

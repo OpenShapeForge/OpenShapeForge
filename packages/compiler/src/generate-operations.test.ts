@@ -173,7 +173,9 @@ describe("first-class plugin operations", () => {
         }],
       },
     }];
+    authored[0]!.contract.pluginOperations[0]!.definition.guidance = { assistant: 'Use the stable source references.' };
     const [compiled] = collectAuthoredEntityPluginOperations(authored as never, context);
+    expect(compiled!.description).toContain('Use the stable source references.');
     const logicalDocument = structuredClone(authored);
     logicalDocument[0]!.contract.pluginOperations[0]!.id = "documents.create";
     logicalDocument[0]!.contract.pluginOperations[0]!.definition.id = "documents.create";

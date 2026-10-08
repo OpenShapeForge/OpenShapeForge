@@ -200,6 +200,7 @@ export type WebCollectionView = {
     actions?: WebCustomOperationRef[];
   };
   title: LocalizedText;
+  emptyState?: { title: LocalizedText; description?: LocalizedText; illustration?: "empty-collection"; primaryAction?: "create" };
   searchPlaceholder: LocalizedText;
   displayField: string;
   columns: Array<{ fieldId: string; key: string; label: LocalizedText }>;

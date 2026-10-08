@@ -442,6 +442,7 @@ export interface EntityWebViewDefinition {
     renderer?: string;
     route: string | LocalizedText;
     title?: LocalizedText;
+    emptyState?: { title: LocalizedText; description?: LocalizedText; illustration?: "empty-collection"; primaryAction?: "create" };
     /** Ordered collection-scoped plugin Operations shown by Web consumers. */
     actions?: string[];
     columns: { key: string; label?: LocalizedText; sortable?: boolean }[];

@@ -386,6 +386,7 @@ function collectionFor(
       list?.search.placeholder ?? { en: "Search...", nl: "Zoeken..." },
       "Search...",
     ),
+    ...(contract.interfaces?.web?.collectionEmptyState ? { emptyState: contract.interfaces.web.collectionEmptyState } : {}),
     displayField: contract.entity.filterField ?? columnKeys[0]!,
     columns: columnKeys.map((key) => ({
       fieldId: `${entityName}.${key}`,

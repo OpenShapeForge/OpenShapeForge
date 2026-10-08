@@ -756,6 +756,7 @@ export interface CompiledEntityContract {
       fields?: Record<string, { render: import("./common.js").FieldRender }>;
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];
+      collectionEmptyState?: { title: LocalizedText; description?: LocalizedText; illustration?: "empty-collection"; primaryAction?: "create" };
       recordContext?: { fields: string[]; relationships?: string[] };
       /** Authored layout-renderer exceptions; hosts resolve these opaque keys. */
       renderers?: {

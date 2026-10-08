@@ -203,7 +203,7 @@
     },
     "packages/documents": {
       "name": "@openshapeforge/documents",
-      "version": "0.2.4",
+      "version": "0.2.5",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
         "@openshapeforge/versioning": "workspace:*",

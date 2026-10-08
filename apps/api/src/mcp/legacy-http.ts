@@ -27,7 +27,9 @@ export class FastifyStreamableHTTPServerTransport extends WebStandardStreamableH
         const disconnected = () => { void reader.cancel().catch(() => {}); };
         const cleanup = () => webRequest.signal.removeEventListener("abort", disconnected);
         const body = new ReadableStream<Uint8Array>({
-          start() {
+          start(controller) {
+            // Flush HTTP headers even when the notification stream is silent.
+            controller.enqueue(new TextEncoder().encode(": connected\n\n"));
             webRequest.signal.addEventListener("abort", disconnected, { once: true });
             if (webRequest.signal.aborted) disconnected();
           },

@@ -1,0 +1,9 @@
+version: 1
+# Library: publishes the npm packages listed in .mcd/repo.yaml#provides, not a
+# deployable image. The repo also builds and self-deploys an API and a
+# Keycloak image (see .github/workflows/docker-api.yml, docker-keycloak.yml,
+# deploy.yml) for OpenShapeForge's own hosted instance, outside this project.
+artifacts: []
+checks:
+  lint: bun run typecheck:compiler
+  test: bun run test:compiler

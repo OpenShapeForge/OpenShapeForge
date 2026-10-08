@@ -11,3 +11,14 @@ test('Budget and document names share the validated default vocabulary',()=>{
  budget.columns[0]!.defaultTemplate='{{fiscalYear.missing}}';expect(()=>validateDefaultTemplates([budget,year])).toThrow();
  budget.columns[0]!.defaultTemplate='{{name}}';expect(()=>validateDefaultTemplates([budget,year])).toThrow();
 });
+
+test('creation templates do not change physical schema fingerprints', async()=>{
+ const {generateArtifacts}=await import('../../generate.js');
+ const fixture={version:1,tables:[{schema:'demo',name:'documents',columns:[{name:'id',type:'uuid',primaryKey:true,required:true,default:'gen_random_uuid()'},{name:'name',sourceField:'name',type:'text',required:true}]}]};
+ const before=generateArtifacts(fixture as never);
+ Object.assign(fixture.tables[0]!.columns[1]!, {defaultTemplate:'Document {{id}}'});
+ const after=generateArtifacts(fixture as never);
+ const checksum=(artifacts:typeof before)=>JSON.parse(artifacts.find(a=>a.path.endsWith('manifest.json'))!.contents).checksum;
+ expect(checksum(after)).toBe(checksum(before));
+ expect(after.find(a=>a.path.endsWith('schema.sql'))!.contents).toBe(before.find(a=>a.path.endsWith('schema.sql'))!.contents);
+});

@@ -809,8 +809,13 @@ function renderManifestJson(
     }
   }
   const defaultNames = databaseRoles.every((role, index) => role.name === DATABASE_ROLES[index]!.name);
+  // Creation interpolation is runtime metadata, not a database definition.
+  // Keep the storage fingerprint stable when only this policy changes.
+  const schemaManifest = {...manifest, tables:manifest.tables.map(table => ({...table,
+    columns:table.columns.map(({defaultTemplate: _runtimeDefault, ...column}) => column),
+  }))};
   const checksum = createHash("sha256")
-    .update(JSON.stringify(defaultNames ? manifest : { manifest, databaseRoles }))
+    .update(JSON.stringify(defaultNames ? schemaManifest : { manifest:schemaManifest, databaseRoles }))
     .digest("hex");
   const tables = manifest.tables.map((table) => ({
     name: `${table.schema}.${table.name}`,

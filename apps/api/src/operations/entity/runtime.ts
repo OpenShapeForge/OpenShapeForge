@@ -974,7 +974,7 @@ export async function executeEntityOperation(
               (merged) => assertEntityValuesValid(operation, table, merged, { partial: false }),
               operation.stamps?.length
                 ? { operation: operation.id, values: trustedOperationStampValues(operation, session) }
-                : undefined)
+                : undefined, request.input?.blueprintBindings)
           : await createGeneratedEntity(db, session, {
               table: table.name,
               values,

@@ -657,6 +657,9 @@ export interface CompiledAuthorization {
 }
 
 export interface CompiledBlueprint {
+  bindings?: import("./authoring.js").BlueprintBinding[];
+  mode?: "copy";
+  include?: import("./authoring.js").BlueprintInclude[];
   fields: string[];
   labelField: string;
   operations: { list: string; status: string; reset: string; publish: string };

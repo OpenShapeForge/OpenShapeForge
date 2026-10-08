@@ -1547,5 +1547,5 @@ test('collection empty state projects into the generic web contract without inve
  definition.contract.interfaces={web:{operations:{list:true,get:true,create:true}}};
  definition.contract.interfaces!.web!.collectionEmptyState={title:text('No records'),description:text('Create a record.'),illustration:'empty-collection',primaryAction:'create'};
  const result=buildWebManifest([definition]);
- expect(result.entities.Example!.views.collection.emptyState).toEqual(definition.contract.interfaces!.web!.collectionEmptyState);
+ expect(result.entities.Example!.views.collection.emptyState).toEqual({title:{en:"No records",nl:"No records"},description:{en:"Create a record.",nl:"Create a record."},illustration:"empty-collection",primaryAction:"create"});
 });

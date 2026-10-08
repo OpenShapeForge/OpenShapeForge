@@ -386,7 +386,7 @@ function collectionFor(
       list?.search.placeholder ?? { en: "Search...", nl: "Zoeken..." },
       "Search...",
     ),
-    ...(contract.interfaces?.web?.collectionEmptyState ? { emptyState: contract.interfaces.web.collectionEmptyState } : {}),
+    ...(contract.interfaces?.web?.collectionEmptyState ? { emptyState: { ...(contract.interfaces.web.collectionEmptyState.illustration ? {illustration:contract.interfaces.web.collectionEmptyState.illustration} : {}), ...(contract.interfaces.web.collectionEmptyState.primaryAction ? {primaryAction:contract.interfaces.web.collectionEmptyState.primaryAction} : {}), title: localized(contract.interfaces.web.collectionEmptyState.title, "No records"), ...(contract.interfaces.web.collectionEmptyState.description ? { description: localized(contract.interfaces.web.collectionEmptyState.description, "") } : {}) } } : {}),
     displayField: contract.entity.filterField ?? columnKeys[0]!,
     columns: columnKeys.map((key) => ({
       fieldId: `${entityName}.${key}`,

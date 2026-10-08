@@ -1264,6 +1264,46 @@ export function compileAuthoringBackendManifest(
     candidates.map((candidate) => [candidate.contract.entity.name, candidate]),
   );
 
+  for (const owner of physicalCandidates) {
+    const visit = (parent: typeof owner, includes: import("./types.js").BlueprintInclude[], depth = 0): void => {
+      if (depth > 8) throw new Error("Blueprint nesting exceeds eight levels.");
+      for (const include of includes) {
+        const child = byEntityName.get(include.entity);
+        if (!child) throw new Error(`Blueprint child ${include.entity} is not in the compiled catalog.`);
+        const via = child.contract.model.fields.find(field => field.key === include.via);
+        if (via?.osfType !== parent.contract.entity.name || !via.relationship) throw new Error(`Blueprint child ${include.entity}.${include.via} must reference ${parent.contract.entity.name}.`);
+        const keys = [...include.fields, include.via, ...(include.references ?? [])];
+        if (new Set(keys).size !== keys.length) throw new Error("Blueprint fields and references must be distinct.");
+        for (const key of include.fields) {
+          const field = child.contract.model.fields.find(field => field.key === key);
+          const column = child.contract.storage.columns.find(column => column.field === key);
+          if (!field || !column || field.relationship || field.readOnly || field.immutable || field.computed || field.localized || field.cardinality !== "single" || field.baseType === "object" || column.type === "uuid" || field.authorization || field.permissions || field.writtenBy?.length || (field.classification && field.classification.sensitivity !== "public") || /^(id|tenantId|externalId|ownerId|permissions|recordPermissions|createdAt|updatedAt|deletedAt)$|password|secret|token|credential/i.test(key)) throw new Error(`Unsafe blueprint child scalar ${include.entity}.${key}.`);
+        }
+        for (const key of include.references ?? []) {
+          const field = child.contract.model.fields.find(field => field.key === key);
+          if (!field?.relationship || field.readOnly || field.immutable || field.writtenBy?.length || field.authorization || field.permissions) throw new Error(`Invalid blueprint child reference ${include.entity}.${key}.`);
+        }
+        visit(child, include.include ?? [], depth + 1);
+      }
+    };
+    for (const rule of owner.contract.blueprint?.bindings ?? []) {
+      const target=byEntityName.get(rule.entity);
+      if (!target) throw new Error(`Blueprint binding entity ${rule.entity} is unavailable.`);
+      for (const field of rule.match) {
+        const value=target.contract.model.fields.find(value=>value.key===field);
+        if (!value || value.relationship || value.localized || value.computed || value.authorization || value.permissions || value.classification || value.cardinality!=="single" || value.baseType==="object" || /^(id|tenantId|externalId|ownerId|permissions|recordPermissions)$|password|secret|token|credential/i.test(field)) throw new Error(`Unsafe blueprint matching field ${rule.entity}.${field}.`);
+      }
+      for (const [field,context] of Object.entries(rule.scope)) {
+        const targetField=target.contract.model.fields.find(value=>value.key===field);
+        const contextField=owner.contract.model.fields.find(value=>value.key===context);
+        if (!targetField?.relationship || !contextField?.relationship || targetField.osfType!==contextField.osfType) throw new Error("Blueprint binding scope must share an explicit entity relationship with the root context.");
+      }
+    }
+    if (owner.contract.blueprint?.include) {
+      if (owner.contract.blueprint.mode !== "copy") throw new Error("Connected blueprints require mode: copy.");
+      visit(owner, owner.contract.blueprint.include);
+    }
+  }
   const tables: TableDefinition[] = physicalCandidates.map((candidate) => {
     const schema = schemaByModule[candidate.contract.entity.module] ?? snakeCase(candidate.contract.entity.module);
     const name = candidate.contract.storage.table;

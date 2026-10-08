@@ -1,3 +1,4 @@
+import { blueprintBindingsSchema } from "./blueprint-create-schema.js";
 // SPDX-License-Identifier: BUSL-1.1
 /** Concrete JSON Schemas for the canonical entity Operation executor. */
 import type {
@@ -539,7 +540,7 @@ export function entityOperationJsonSchemas(
       const requiredValues = Array.isArray(values.required) ? values.required as string[] : [];
       const copyValues = blueprint ? { ...values, required: requiredValues.filter((key) => !blueprint.fields.includes(key)) } : values;
       const inputSchema = controlled(
-        { values: copyValues, ...(blueprint ? { blueprintId: { type: "string", minLength: 1 } } : {}) },
+        { values: copyValues, ...(blueprint ? { blueprintId: { type: "string", minLength: 1 }, blueprintBindings: blueprintBindingsSchema } : {}) },
         ["values"],
       );
       if (blueprint) {

@@ -7,7 +7,7 @@ import { getGeneratedCrudTables, requireEntityOperation, projectGeneratedEntityR
 import { recordPermissionsAllowRow } from './record-permissions.js';
 import type { GeneratedCrudColumn, GeneratedCrudTable, GeneratedEntityRow } from './types.js';
 /** Materialize omitted fields in the same tenant transaction as the canonical create. */
-export async function applyDefaultTemplates(trx: Transaction<DB>, session: DbSessionInput, table: GeneratedCrudTable, input: Map<GeneratedCrudColumn, unknown>, tables = getGeneratedCrudTables()) {
+export async function applyDefaultTemplates(trx: Transaction<DB>, session: DbSessionInput, table: GeneratedCrudTable, input: Map<GeneratedCrudColumn, unknown>, tables: readonly GeneratedCrudTable[] = getGeneratedCrudTables()) {
   const values = new Map(input);
   const related = new Map<string, GeneratedEntityRow>();
   const refuse = (): never => { throw operationFailure({code:'VALIDATION', message:'A default source is unavailable or unreadable.', retryable:false}); };

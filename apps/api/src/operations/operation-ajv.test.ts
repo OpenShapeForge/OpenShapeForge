@@ -2,6 +2,16 @@
 import { describe, expect, test } from "bun:test";
 import { createOperationAjv } from "./operation-ajv.js";
 
+test("default template annotations compile without applying validation defaults", () => {
+  const ajv = createOperationAjv();
+  const validate = ajv.compile({type: "object", properties: {name: {type: "string", "x-osf-default-template": "{{fiscalYear.code}}"}}, additionalProperties: false});
+  const input = {};
+  expect(validate(input)).toBe(true);
+  expect(input).toEqual({});
+  expect(validate({name: 2028})).toBe(false);
+  expect(() => ajv.compile({type: "string", "x-osf-default-template": {field: "code"}})).toThrow();
+});
+
 describe("the x-osf-choice annotation", () => {
   test("is accepted in its string and object forms and refused when malformed", () => {
     const ajv = createOperationAjv();

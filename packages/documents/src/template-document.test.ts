@@ -23,13 +23,13 @@ snapshot.compositionHash = createHash("sha256").update(`osf-template-content-v1\
 function fixture() {
   const events: string[] = [];
   const requests: { operation: { id: string }; input: Record<string, unknown>; idempotencyKey?: string }[] = [];
-  const controls = { sourceDenied: false, destinationDenied: false, storageDenied: false, writeFails: false, corruptStage: false, corruptBinding: false, hideCreate: false, invalidMetadata: false };
+  const controls = { sourceDenied: false, destinationDenied: false, storageDenied: false, writeFails: false, corruptStage: false, corruptBinding: false, hideCreate: false, invalidMetadata: false, wireNumbers: false, invalidWireNumber: undefined as unknown };
   const liveSnapshot = structuredClone(snapshot);
   let active = false;
   let staged: Uint8Array | undefined;
   let committed = false;
   let descriptor = { artifactId: ids.artifact, version: 1, fileName: "", mediaType: "application/json", sha256: "", byteSize: 0 };
-  const stored = () => ({ id: ids.version, documentId: ids.document, artifactId: ids.artifact, artifactVersion: 2, mimeType: "application/json", checksum: controls.corruptBinding ? "c".repeat(64) : descriptor.sha256, byteSize: descriptor.byteSize, fileName: descriptor.fileName });
+  const stored = () => ({ id: ids.version, documentId: ids.document, artifactId: ids.artifact, artifactVersion: controls.invalidWireNumber ?? (controls.wireNumbers ? "2" : 2), mimeType: "application/json", checksum: controls.corruptBinding ? "c".repeat(64) : descriptor.sha256, byteSize: controls.wireNumbers ? String(descriptor.byteSize) : descriptor.byteSize, fileName: descriptor.fileName });
   const createOps = ["Document", "DocumentVersion"].map((entityName) => ({ id: `${entityName}.create`, entityName, intent: "create", input: { kind: "json-schema", schema: { type: "object" } }, effects: { data: "write", external: "none" } }));
   const get = { id: "DocumentVersion.get", entityName: "DocumentVersion", intent: "get", effects: { data: "read", external: "none" } };
   const getDocument = { id: "Document.get", entityName: "Document", intent: "get", effects: { data: "read", external: "none" } };
@@ -174,5 +174,24 @@ test("lifecycle failures and mismatched persisted bindings propagate out of the 
     const f = fixture(); f.controls[control] = true;
     await expect(createDocumentFromTemplate(input, f.context)).rejects.toMatchObject({ operationError: { code: control === "writeFails" ? "ALREADY_EXISTS" : "HANDLER_CONTRACT_VIOLATION" } });
     expect(f.events).toContain("rollback"); expect(f.events).not.toContain("commit"); expect(f.committed()).toBe(false);
+  }
+});
+
+
+test("accepts exact canonical bigint wire text for new and existing documents", async () => {
+  const { document: _document, ...rest } = input;
+  for (const request of [input, { ...rest, documentId: ids.document }]) {
+    const f = fixture(); f.controls.wireNumbers = true;
+    const result = await createDocumentFromTemplate(request, f.context);
+    expect(result).toMatchObject({ status: 201, value: { artifactVersion: 2, byteSize: f.bytes()!.byteLength } });
+    expect(f.committed()).toBe(true);
+  }
+});
+
+test("refuses unsafe or noncanonical artifact counters without committing", async () => {
+  for (const value of ["9007199254740993", "2.0", "2e0", " 2", "02", "-2", "", true, 2.5]) {
+    const f = fixture(); f.controls.invalidWireNumber = value;
+    await expect(createDocumentFromTemplate(input, f.context)).rejects.toMatchObject({ operationError: { code: "HANDLER_CONTRACT_VIOLATION" } });
+    expect(f.committed()).toBe(false);
   }
 });

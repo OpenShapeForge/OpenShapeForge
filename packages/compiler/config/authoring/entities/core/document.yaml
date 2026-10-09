@@ -44,14 +44,21 @@ authorization:
     read:
       - CaseFile.All.Read
       - CaseFile.All.ReadWrite
+      # Documents are not only case file content: knowledge articles and other
+      # generic documents are governed by the organization roles alone.
+      - Organization.All.Read
+      - Organization.All.ReadWrite
       # Core RLS admits this role only through the tenant-owned avatar.
       - Organization.Access.Manage
     create:
       - CaseFile.All.ReadWrite
+      - Organization.All.ReadWrite
     update:
       - CaseFile.All.ReadWrite
+      - Organization.All.ReadWrite
     delete:
       - CaseFile.All.ReadWrite
+      - Organization.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public
@@ -569,7 +576,7 @@ operations:
       - { status: 403, code: FORBIDDEN, description: The document or its template version is not accessible. }
       - { status: 404, code: NOT_FOUND, description: The document does not exist. }
       - { status: 409, code: INVALID_STATE, description: The document has no linked template version. }
-    auth: { mode: session, roles: [CaseFile.All.Read, CaseFile.All.ReadWrite] }
+    auth: { mode: session, roles: [CaseFile.All.Read, CaseFile.All.ReadWrite, Organization.All.Read, Organization.All.ReadWrite] }
     tenancy: { mode: required }
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }

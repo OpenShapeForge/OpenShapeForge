@@ -7,7 +7,7 @@
 
 import { connectionFieldsOf } from "./connection-guidance.js";
 import { ENTITY_CONFIGURATION_PATH, callbackOrigin, configurationWebUrl } from "./handoff-config.js";
-import { type ToolResult } from "./tool-results.js";
+import { ok, type ToolResult } from "./tool-results.js";
 export function configurationAppResult(
   payload: unknown,
   token: string,
@@ -15,7 +15,7 @@ export function configurationAppResult(
 ): ToolResult {
   const configurationUrl = `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/${token}`;
   return {
-    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+    ...ok(payload),
     _meta: {
       configurationUrl,
       displayName,

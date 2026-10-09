@@ -17,9 +17,12 @@ app.ontoolresult = (result) => {
     | { configurationUrl?: unknown; displayName?: unknown }
     | undefined;
   if (typeof meta?.configurationUrl !== "string") {
-    message.textContent = "No secure configuration form was supplied.";
+    // The searchable executor also carries ordinary reads and writes. They
+    // neither supply a form nor revoke an earlier private handoff.
+    if (!formUrl) document.body.hidden = true;
     return;
   }
+  document.body.hidden = false;
   formUrl = meta.configurationUrl;
   title.textContent =
     typeof meta.displayName === "string"

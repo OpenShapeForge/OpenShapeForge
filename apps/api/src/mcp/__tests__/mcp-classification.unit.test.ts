@@ -155,6 +155,8 @@ describe("MCP App capability negotiation", () => {
       expect(first?.type).toBe("text");
       expect(first?.type === "text" ? first.text : "").not.toContain("private-token");
       expect(JSON.stringify(result._meta)).toContain("private-token");
+      expect(result.structuredContent).toEqual({ status: "awaiting_person" });
+      expect(JSON.stringify(result.structuredContent)).not.toContain("private-token");
       expect(result._meta).toEqual({
         configurationUrl:
           "https://api.example.test/api/entity-configuration/private-token",

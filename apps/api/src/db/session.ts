@@ -332,6 +332,8 @@ export type SystemSessionInput = {
    * Keycloak. Audit rows record this.
    */
   actorSubject: string;
+  /** Optional internal UUID actor for SQL policies; audit keeps actorSubject. */
+  databaseActorId?: string;
   /**
    * Roles the actor presents. Must include SYSTEM_BYPASS_ROLE or
    * withSystemSession throws BEFORE any SQL runs.
@@ -385,6 +387,8 @@ export async function withSystemSession<TDatabase, TResult>(
   if (!input.reason || input.reason.trim().length === 0) {
     throw new Error("withSystemSession requires a non-empty reason for audit logging.");
   }
+  if (input.databaseActorId !== undefined)
+    assertUuid(input.databaseActorId, "databaseActorId");
 
   // A per-invocation audit id. Keying start/end on this uuid (the table PK)
   // instead of (actor_subject, started_at) keeps two concurrent same-actor
@@ -402,7 +406,7 @@ export async function withSystemSession<TDatabase, TResult>(
         assertUuid(input.tenantId, "tenantId");
         await sql`select set_config('app.tenant_id', ${input.tenantId}, true)`.execute(trx);
       }
-      await sql`select set_config('app.user_id', ${input.actorSubject}, true)`.execute(trx);
+      await sql`select set_config('app.user_id', ${input.databaseActorId ?? input.actorSubject}, true)`.execute(trx);
       await sql`select set_config('app.roles', ${input.roles.join(",")}, true)`.execute(trx);
       await sql`select set_config('app.bypass_rls', 'true', true)`.execute(trx);
 

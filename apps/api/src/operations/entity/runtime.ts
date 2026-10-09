@@ -56,7 +56,7 @@ import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "../
 import { requireOperationPrerequisites } from "../prerequisite-receipts.js";
 import { executeEntityPlugin } from "./plugin-executor.js";
 import { entityBusinessUnavailability } from "./availability.js";
-import { assertEntityValuesValid, assertOperationInputValid, type EntityValuesValidation } from "./input-validation.js";
+import { assertBlueprintControlsValid, assertEntityValuesValid, assertOperationInputValid, type EntityValuesValidation } from "./input-validation.js";
 import {
   assertNoCallerElicitedOutput,
   assertNoForeignOperationWrittenValues,
@@ -959,6 +959,9 @@ export async function executeEntityOperation(
       case "create": {
         const blueprintId = typeof request.input?.blueprintId === "string" ? request.input.blueprintId : undefined;
         const values = blueprintId === undefined ? requireValues(request.input) : request.input?.values ?? {};
+        if (request.input && (Object.hasOwn(request.input, "blueprintId") || Object.hasOwn(request.input, "blueprintBindings"))) {
+          assertBlueprintControlsValid(operation, request.input);
+        }
         // The payload first: an invalid create must answer VALIDATION, never
         // a prerequisite or CONFIRMATION_REQUIRED it would only fail after. A
         // blueprint create completes the caller's overlay from the blueprint
@@ -974,7 +977,7 @@ export async function executeEntityOperation(
               (merged) => assertEntityValuesValid(operation, table, merged, { partial: false }),
               operation.stamps?.length
                 ? { operation: operation.id, values: trustedOperationStampValues(operation, session) }
-                : undefined)
+                : undefined, request.input?.blueprintBindings)
           : await createGeneratedEntity(db, session, {
               table: table.name,
               values,

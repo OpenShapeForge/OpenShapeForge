@@ -27,3 +27,8 @@ test("blueprint Operations preserve edit controls and separate publication right
   expect(publish.auth).toEqual({ mode: "session", roles: ["platform-operator"], recordPermission: "edit" });
   expect(publish.inputSchema.required).toEqual(["id", "expectedVersion", "leaseToken"]);
 });
+
+test('Independent copies expose publication and provenance, without reset',()=>{
+ const fixture={slug:'template',contract:{entity:{id:'core.Template',name:'Template',title:'Template'},blueprint:{mode:'copy',fields:['name'],labelField:'name',operations:{list:'bp.list',status:'bp.status',reset:'bp.reset',publish:'bp.publish'}},authorization:{roles:{create:['Create'],update:['Edit']}},entityOperations:{}}} as unknown as CompiledEntityInfo;
+ expect(collectBlueprintOperations([fixture]).map(operation=>operation.handler)).toEqual(['Template.list','Template.status','Template.publish']);
+});

@@ -200,6 +200,7 @@ export type WebCollectionView = {
     actions?: WebCustomOperationRef[];
   };
   title: LocalizedText;
+  emptyState?: { title: LocalizedText; description?: LocalizedText; illustration?: "empty-collection"; primaryAction?: "create" };
   searchPlaceholder: LocalizedText;
   displayField: string;
   columns: Array<{ fieldId: string; key: string; label: LocalizedText }>;
@@ -336,7 +337,7 @@ export type WebStatusTransitions = {
 };
 
 export type WebEntityInterface = {
-  blueprint?: { fields: string[]; labelField: string; operations: { list: string; status: string; reset: string; publish: string } };
+  blueprint?: { mode?: "copy"; fields: string[]; labelField: string; operations: { list: string; status: string; reset: string; publish: string } };
   /** Status state machines declared on this entity's fields. */
   transitions?: WebStatusTransitions[];
   /** Canonical record label used outside a particular view, including selectors. */

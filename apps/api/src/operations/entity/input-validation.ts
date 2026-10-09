@@ -202,3 +202,29 @@ export function assertOperationInputValid(
     retryable: false,
   });
 }
+
+const blueprintControlContracts = new WeakMap<EntityOperationContract, EntityOperationContract>();
+const BLUEPRINT_CONTROL_KEYS = ["blueprintId", "blueprintBindings"];
+/** Validate compiler-owned Blueprint controls without changing nullable entity values. */
+export function assertBlueprintControlsValid(
+  operation: EntityOperationContract,
+  input: Readonly<Record<string, unknown>>,
+): void {
+  let controls = blueprintControlContracts.get(operation);
+  if (!controls) {
+    const properties = (operation.inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {};
+    controls = {
+      ...operation,
+      inputSchema: {
+        type: "object",
+        properties: Object.fromEntries(BLUEPRINT_CONTROL_KEYS
+          .filter(key => properties[key]).map(key => [key, properties[key]])),
+        additionalProperties: false,
+        ...(properties.blueprintBindings ? { dependentRequired: { blueprintBindings: ["blueprintId"] } } : {}),
+      },
+    };
+    blueprintControlContracts.set(operation, controls);
+  }
+  assertOperationInputValid(controls, Object.fromEntries(BLUEPRINT_CONTROL_KEYS
+    .filter(key => Object.hasOwn(input, key)).map(key => [key, input[key]])));
+}

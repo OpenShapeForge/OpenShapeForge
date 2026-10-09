@@ -181,12 +181,12 @@
     },
     "packages/compiler": {
       "name": "@openshapeforge/compiler",
-      "version": "0.2.7",
+      "version": "0.2.8",
       "bin": {
         "openshapeforge-compiler": "./src/index.ts",
       },
       "dependencies": {
-        "@openshapeforge/interface-web": "^0.2.2",
+        "@openshapeforge/interface-web": "^0.2.3",
         "@openshapeforge/operations": "^0.2.3",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
@@ -220,7 +220,7 @@
     },
     "packages/interface-web": {
       "name": "@openshapeforge/interface-web",
-      "version": "0.2.2",
+      "version": "0.2.3",
       "dependencies": {
         "@openshapeforge/operations": "^0.2.2",
       },

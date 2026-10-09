@@ -137,6 +137,7 @@ export function sessionMayInvoke(identity: Identity, entity: string, operation: 
 /** Transport controls a create or update schema advertises next to the authored fields. */
 export const MUTATION_CONTROLS = new Set([
   "blueprintId",
+  "blueprintBindings",
   "expectedVersion",
   "leaseToken",
   "confirmed",

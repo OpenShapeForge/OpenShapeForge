@@ -793,7 +793,7 @@ export function collectAuthoredEntityPluginOperations(
       const operation: PluginOperationContract = {
         key: authored.id,
         title: authoredText(definition.name),
-        description: authoredText(definition.description),
+        description: [authoredText(definition.description), authoredText(definition.guidance?.assistant ?? '')].filter(Boolean).join(' '),
         handler: implementation.type === "collection" ? "collectionMutation" : implementation.handler,
         target: {
           entityId: authored.entityId,
@@ -1058,7 +1058,7 @@ export function collectAuthoredModulePluginOperations(
       return {
         key: canonicalId,
         title: authoredText(definition.name),
-        description: authoredText(definition.description),
+        description: [authoredText(definition.description), authoredText(definition.guidance?.assistant ?? '')].filter(Boolean).join(' '),
         handler: definition.implementation.handler,
         inputSchema: withOperationControls(definition.input!.schema, definition),
         outputSchema: definition.output!.schema,

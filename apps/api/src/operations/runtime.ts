@@ -490,7 +490,8 @@ export function runtimeStaticOperationRegistrations(
         const input = { ...(request.input ?? {}) };
         if (entry.operation.idempotency.mode === "idempotency-key") {
           const field = entry.operation.idempotency.inputField!;
-          if (!request.idempotencyKey) {
+          const key = request.idempotencyKey ?? (typeof input[field] === "string" ? input[field] as string : undefined);
+          if (!key?.trim()) {
             return {
               error: {
                 code: "IDEMPOTENCY_KEY_REQUIRED",
@@ -499,7 +500,7 @@ export function runtimeStaticOperationRegistrations(
               },
             };
           }
-          if (field in input && input[field] !== request.idempotencyKey) {
+          if (field in input && input[field] !== key) {
             return {
               error: {
                 code: "BAD_USER_INPUT",
@@ -508,7 +509,7 @@ export function runtimeStaticOperationRegistrations(
               },
             };
           }
-          input[field] = request.idempotencyKey;
+          input[field] = key;
         }
         try {
           const result = await invokeOperation(entry, input, {

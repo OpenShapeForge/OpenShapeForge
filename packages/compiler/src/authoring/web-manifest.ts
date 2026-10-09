@@ -386,6 +386,7 @@ function collectionFor(
       list?.search.placeholder ?? { en: "Search...", nl: "Zoeken..." },
       "Search...",
     ),
+    ...(contract.interfaces?.web?.collectionEmptyState ? { emptyState: { ...(contract.interfaces.web.collectionEmptyState.illustration ? {illustration:contract.interfaces.web.collectionEmptyState.illustration} : {}), ...(contract.interfaces.web.collectionEmptyState.primaryAction ? {primaryAction:contract.interfaces.web.collectionEmptyState.primaryAction} : {}), title: localized(contract.interfaces.web.collectionEmptyState.title, "No records"), ...(contract.interfaces.web.collectionEmptyState.description ? { description: localized(contract.interfaces.web.collectionEmptyState.description, "") } : {}) } } : {}),
     displayField: contract.entity.filterField ?? columnKeys[0]!,
     columns: columnKeys.map((key) => ({
       fieldId: `${entityName}.${key}`,
@@ -507,6 +508,7 @@ function projectField(
     ...(field.entityValue ? { entityValue: { ...field.entityValue } } : {}),
     ...(field.allowedDefinitions ? { allowedDefinitions: [...field.allowedDefinitions].sort() } : {}),
     ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
+    ...(field.defaultTemplate !== undefined ? { defaultTemplate: field.defaultTemplate } : {}),
     ...(field.options?.items?.length ? { options: field.options.items.map(({ value, label }) => ({ value, label: localized(label, value) })) } : {}),
     ...(optionSource ? { optionSource } : {}),
     ...(field.children ? { children: field.children.map((child) => projectField(child, `${parent}.${field.key}`, nestedSupports, editNested, presentations)) } : {}),

@@ -473,6 +473,7 @@
         "currency": { "type": "string" },
         "value": {},
         "defaultValue": {},
+        "defaultTemplate": { "type": "string", "minLength": 1, "maxLength": 2000 },
         "validation": { "$ref": "#/$defs/validation" },
         "relationship": { "$ref": "#/$defs/relationship" },
         "provider": {

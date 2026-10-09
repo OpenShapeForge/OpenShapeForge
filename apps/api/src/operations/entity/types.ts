@@ -39,6 +39,7 @@ export type GeneratedCrudColumn = {
     rest: string;
     mcp?: string;
   }[];
+  defaultTemplate?: string;
   deriveOnCreate?: {
     sourceField: string;
     sourceColumn: string;
@@ -272,6 +273,7 @@ export type EntityOperationInput = ListPageInput & {
   [key: string]: unknown;
   id?: string;
   blueprintId?: string;
+  blueprintBindings?: Record<string, Record<string, string>>;
   values?: Record<string, unknown>;
   expectedVersion?: string;
   leaseToken?: string;

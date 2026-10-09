@@ -12,7 +12,7 @@ export function collectBlueprintOperations(entities: readonly Pick<CompiledEntit
     const version = titled({ type: "integer", minimum: 1 }, "Blueprint version", "Blueprintversie");
     const blueprintId = titled({ type: "string" }, "Blueprint", "Blueprint");
     const expectedVersion = titled({ type: "string", format: "date-time" }, "Expected record version", "Verwachte recordversie");
-    const source = { type: "object", additionalProperties: false, required: ["blueprintId", "label", "version"], properties: { blueprintId, label: titled({ type: "string" }, "Label", "Label"), version } };
+    const source = { type: "object", additionalProperties: false, required: ["blueprintId", "label", "version"], properties: { description: titled({ type: "string" }, "Description", "Beschrijving"), preview: titled({ type: "array", maxItems: 20, items: { type: "string" } }, "Preview", "Voorbeeld"), blueprintId, label: titled({ type: "string" }, "Label", "Label"), version } };
     const inputs = {
       list: { properties: { search: titled({ type: "string", maxLength: 200 }, "Search", "Zoeken"), limit: titled({ type: "integer", minimum: 1, maximum: 100 }, "Limit", "Limiet"), cursor: titled({ type: "string" }, "Cursor", "Cursor") }, required: [] },
       status: { properties: { id }, required: ["id"] },
@@ -25,7 +25,7 @@ export function collectBlueprintOperations(entities: readonly Pick<CompiledEntit
       reset: { type: "object", additionalProperties: true },
       publish: { type: "object", additionalProperties: false, required: ["blueprintId", "version"], properties: { blueprintId, version } },
     };
-    return (['list', 'status', 'reset', 'publish'] as const).map((action): CompiledPluginOperation => {
+    return (['list', 'status', 'reset', 'publish'] as const).filter(action => blueprint.mode !== 'copy' || action !== 'reset').map((action): CompiledPluginOperation => {
       const roles = action === "publish" ? ["platform-operator"] : action === "list" ? [...new Set([...(contract.authorization?.roles.create ?? []), ...(contract.authorization?.roles.update ?? [])])] : contract.authorization?.roles.update ?? [];
       const concurrency = action === "reset" || action === "publish" ? { ...contract.entityOperations.update?.concurrency, version: contract.entityOperations.update?.concurrency?.version ?? { mode: "required" as const, field: "updatedAt" } } : undefined;
       const input = inputs[action];

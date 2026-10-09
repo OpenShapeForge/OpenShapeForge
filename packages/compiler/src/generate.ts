@@ -809,8 +809,13 @@ function renderManifestJson(
     }
   }
   const defaultNames = databaseRoles.every((role, index) => role.name === DATABASE_ROLES[index]!.name);
+  // Creation interpolation is runtime metadata, not a database definition.
+  // Keep the storage fingerprint stable when only this policy changes.
+  const schemaManifest = {...manifest, tables:manifest.tables.map(table => ({...table,
+    columns:table.columns.map(({defaultTemplate: _runtimeDefault, ...column}) => column),
+  }))};
   const checksum = createHash("sha256")
-    .update(JSON.stringify(defaultNames ? manifest : { manifest, databaseRoles }))
+    .update(JSON.stringify(defaultNames ? schemaManifest : { manifest:schemaManifest, databaseRoles }))
     .digest("hex");
   const tables = manifest.tables.map((table) => ({
     name: `${table.schema}.${table.name}`,
@@ -853,6 +858,7 @@ function renderManifestJson(
       ...(column.writtenBy === undefined
         ? {}
         : { writtenBy: resolveColumnWriters(table, column, operations) }),
+      ...(column.defaultTemplate === undefined ? {} : { defaultTemplate: column.defaultTemplate }),
       ...(column.deriveOnCreate === undefined
         ? {}
         : { deriveOnCreate: column.deriveOnCreate }),
@@ -910,7 +916,8 @@ function renderManifestJson(
         // Already resolved on the rendered table above; republished here so the
         // runtime's generated-entity view carries the same one fact.
         ...(column.writtenBy === undefined ? {} : { writtenBy: column.writtenBy }),
-        ...(column.deriveOnCreate === undefined
+        ...(column.defaultTemplate === undefined ? {} : { defaultTemplate: column.defaultTemplate }),
+      ...(column.deriveOnCreate === undefined
           ? {}
           : { deriveOnCreate: column.deriveOnCreate }),
       })),

@@ -73,6 +73,7 @@ export function resolveModelFields(
     // New properties
     if (field.unit) compiled.unit = field.unit;
     if (field.defaultValue !== undefined) compiled.defaultValue = field.defaultValue;
+    if (field.defaultTemplate !== undefined) compiled.defaultTemplate = field.defaultTemplate;
     if (field.variables) compiled.variables = field.variables;
     if (field.sortable) compiled.sortable = field.sortable;
     if (field.entityValue) compiled.entityValue = { ...field.entityValue };

@@ -1,6 +1,6 @@
 {
   "name": "@openshapeforge/operations",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Transport-independent operation results and availability offers for OpenShapeForge.",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"

@@ -29,6 +29,14 @@ function uuid(value: unknown, name: string): string {
   return value;
 }
 
+/** Canonical entity bigint fields cross the Operation boundary as decimal text.
+ * Only exact, nonnegative safe integers fit this artifact service contract. */
+function artifactInteger(value: unknown): number | undefined {
+  if (typeof value !== "number" && (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value))) return undefined;
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : undefined;
+}
+
 /** Persist the exact logical content through the existing immutable version/artifact lifecycle. */
 export const createDocumentFromTemplate: ModuleOperationHandler = async (input, context) => {
   const { platform, session } = contextServices(context);
@@ -88,9 +96,11 @@ export const createDocumentFromTemplate: ModuleOperationHandler = async (input, 
     const documentId = existingDocumentId ?? uuid(created.id, "created document id");
     const documentVersionId = uuid(existingDocumentId ? created.id : created.currentVersionId, "created document version id");
     const stored = await execute(getVersion, { id: documentVersionId });
-    if (stored.id !== documentVersionId || stored.documentId !== documentId || stored.artifactId !== artifact.artifactId || !Number.isSafeInteger(stored.artifactVersion) || (stored.artifactVersion as number) < artifact.version || stored.checksum !== checksum || stored.mimeType !== "application/json" || stored.byteSize !== bytes.byteLength || stored.fileName !== artifact.fileName) fail("HANDLER_CONTRACT_VIOLATION", "The created DocumentVersion did not bind the materialized artifact.");
+    const artifactVersion = artifactInteger(stored.artifactVersion);
+    const byteSize = artifactInteger(stored.byteSize);
+    if (stored.id !== documentVersionId || stored.documentId !== documentId || stored.artifactId !== artifact.artifactId || artifactVersion === undefined || artifactVersion < artifact.version || stored.checksum !== checksum || stored.mimeType !== "application/json" || byteSize !== bytes.byteLength || stored.fileName !== artifact.fileName) fail("HANDLER_CONTRACT_VIOLATION", "The created DocumentVersion did not bind the materialized artifact.");
     return {
-      documentId, documentVersionId, artifactId: artifact.artifactId, artifactVersion: stored.artifactVersion as number,
+      documentId, documentVersionId, artifactId: artifact.artifactId, artifactVersion: artifactVersion!,
       fileName: artifact.fileName, mediaType: "application/json", checksum, byteSize: bytes.byteLength, compositionHash: snapshot.compositionHash,
     } satisfies TemplateDocumentResult;
   });

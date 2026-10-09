@@ -171,6 +171,29 @@ describe("MCP App capability negotiation", () => {
     }
   });
 
+  it("projects private configuration fields from their OSF types for host renderers", () => {
+    const previous = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+    process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = "https://api.example.test";
+    try {
+      const result = configurationAppResult({ status: "awaiting_person" }, "synthetic-token", "Provider", [
+        { key: "region", osfType: "string", required: true, options: { items: [{ value: "eu" }, { value: "us" }] } },
+        { key: "secret", osfType: "string", classification: { sensitivity: "confidential" } },
+        { key: "retries", osfType: "integer" },
+        { key: "enabled", osfType: "boolean" },
+      ]);
+      const configuration = result._meta?.configuration as { fields: { key: string; secret: boolean; schema: unknown }[] };
+      expect(configuration.fields.find(f => f.key === "region")?.schema).toMatchObject({ type: "string", enum: ["eu", "us"] });
+      expect(configuration.fields.find(f => f.key === "secret")?.secret).toBe(true);
+      expect(configuration.fields.find(f => f.key === "retries")?.schema).toMatchObject({ type: "integer" });
+      expect(configuration.fields.find(f => f.key === "enabled")?.schema).toMatchObject({ type: "boolean" });
+      expect(JSON.stringify(result.content)).not.toContain("synthetic-token");
+      expect(JSON.stringify(result.structuredContent)).not.toContain("configuration");
+    } finally {
+      if (previous === undefined) delete process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+      else process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = previous;
+    }
+  });
+
   it("keeps both model-visible fallback paths adopter-neutral", () => {
     expect(configurationFallbackLead("declined", "app")).toBe(
       "The secure form could not be completed in this client. " +

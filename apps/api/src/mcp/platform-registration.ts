@@ -51,7 +51,7 @@ export function registerSessionWithPlatform(
     tables,
   } = scope;
   const {
-    listedTools,
+    availableTools,
   } = surface;
   modulePlatform?.registerServer({
     server,
@@ -81,7 +81,7 @@ export function registerSessionWithPlatform(
               ? { allowed: true }
               : { allowed: false, code: "NOT_FOUND" };
           }
-          const current = (await listedTools()).find(
+          const current = (await availableTools()).find(
             (entry) =>
               entry.source !== "module" && entry.tool.name === subject.name,
           );
@@ -242,7 +242,7 @@ export function registerSessionWithPlatform(
       signal,
     ) => {
       signal?.throwIfAborted();
-      const tool = (await listedTools()).find(
+      const tool = (await availableTools()).find(
         (entry) => entry.tool.name === toolName,
       );
       if (!tool || tool.source !== "derived") {

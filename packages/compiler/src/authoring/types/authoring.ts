@@ -442,6 +442,7 @@ export interface EntityWebViewDefinition {
     renderer?: string;
     route: string | LocalizedText;
     title?: LocalizedText;
+    emptyState?: { title: LocalizedText; description?: LocalizedText; illustration?: "empty-collection"; primaryAction?: "create" };
     /** Ordered collection-scoped plugin Operations shown by Web consumers. */
     actions?: string[];
     columns: { key: string; label?: LocalizedText; sortable?: boolean }[];
@@ -544,7 +545,7 @@ export interface CoreEntity {
   /** Canonical read Operations resolve records; this entity owns no SQL table. */
   source?: { kind: "operations"; query?: { filterFields: string[]; sortFields: string[] } };
   /** Explicit safe scalar content copied from a published blueprint. */
-  blueprint?: { fields: string[] };
+  blueprint?: { fields: string[]; mode?: "copy"; include?: BlueprintInclude[]; bindings?: BlueprintBinding[] };
   /** Named cross-tenant worker; enforced together with the dedicated DB role. */
   workerAccess?: string;
   schemaVersion: number;
@@ -1019,3 +1020,8 @@ export interface TransformCatalog {
   kind: "transformCatalog";
   transforms: Record<string, TransformDefinition>;
 }
+
+/** Explicit owned content included in a one-time blueprint copy. */
+export interface BlueprintInclude { entity: string; via: string; fields: string[]; references?: string[]; include?: BlueprintInclude[] }
+
+export interface BlueprintBinding { entity: string; scope: Record<string,string>; match: string[] }

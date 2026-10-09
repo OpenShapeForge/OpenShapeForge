@@ -313,6 +313,7 @@ export type ColumnDefinition = {
    * the API materializes it and uses the named unique-index columns as its
    * race-safe ON CONFLICT target.
    */
+  defaultTemplate?: string;
   deriveOnCreate?: {
     sourceField: string;
     sourceColumn: string;

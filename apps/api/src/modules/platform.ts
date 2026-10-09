@@ -24,6 +24,7 @@ import {
   tableForEntityOperation,
 } from "../operations/entity/index.js";
 import { serializeEntityResult } from "../operations/entity/serialize-result.js";
+import { pluginEntityTransportInput } from "../operations/entity/transport-input.js";
 import type {
   McpInvocationContext,
   ModuleAuthorizationDecision,
@@ -801,9 +802,22 @@ export class ModulePlatformRuntime {
       }
       const contractFailure = contractPreconditionFailure(entityOperation, request);
       if (contractFailure) return contractFailure;
+      // An explicit transport key binds the declared input field exactly as
+      // the REST header does; a conflicting input value is refused.
+      let input = request.input;
+      if (request.idempotencyKey !== undefined &&
+        entityOperation.reliability.idempotency.mode === "keyed") {
+        try {
+          input = pluginEntityTransportInput(entityOperation, input ?? {}, undefined, request.idempotencyKey);
+        } catch (error) {
+          const operationError = operationErrorOf(error);
+          if (operationError) return { error: operationError };
+          throw error;
+        }
+      }
       const result = await executeEntityOperation(this.#db, session, {
         operation: { id: entityOperation.id, intent: entityOperation.intent },
-        ...(request.input ? { input: request.input as never } : {}),
+        ...(input ? { input: input as never } : {}),
       });
       return serializeEntityResult(tableForEntityOperation(entityOperation), result);
     }
@@ -888,6 +902,14 @@ export class ModulePlatformRuntime {
           retryable: false,
         },
       };
+    }
+    // A keyed Operation declares its canonical input field. All transports may
+    // supply that field; an explicit transport key still takes precedence and
+    // the provider rejects a conflicting input value before admitting effects.
+    const idempotency = match.definition.reliability.idempotency;
+    if (idempotency.mode === "keyed" && !request.idempotencyKey && idempotency.inputField) {
+      const inputKey = request.input?.[idempotency.inputField];
+      if (typeof inputKey === "string" && inputKey.trim()) request = { ...request, idempotencyKey: inputKey };
     }
     const contractFailure = contractPreconditionFailure(match.definition, request);
     if (contractFailure) return contractFailure;

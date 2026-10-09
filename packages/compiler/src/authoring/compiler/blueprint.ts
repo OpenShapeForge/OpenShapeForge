@@ -42,6 +42,9 @@ export function buildBlueprint(
   const id = `osf-blueprints.${entity.entity}`;
   return {
     fields: [...keys], labelField,
+    ...(entity.blueprint.bindings ? { bindings: entity.blueprint.bindings } : {}),
+    ...(entity.blueprint.mode ? { mode: entity.blueprint.mode } : {}),
+    ...(entity.blueprint.include ? { include: entity.blueprint.include } : {}),
     operations: { list: `${id}.list`, status: `${id}.status`, reset: `${id}.reset`, publish: `${id}.publish` },
   };
 }

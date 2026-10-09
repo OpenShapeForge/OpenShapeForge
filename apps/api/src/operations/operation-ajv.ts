@@ -27,6 +27,7 @@ export function createOperationAjv(coerceTypes = false): OperationAjv {
   // nor authorize a value, but strict ajv must recognize each keyword.
   instance.addKeyword({ keyword: "x-osf-sourceField", schemaType: "string", valid: true });
   instance.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });
+  instance.addKeyword({ keyword: "x-osf-default-template", schemaType: "string", valid: true });
   // The authoring editor's choice marker (which catalog a string is chosen from); presentation metadata as well.
   instance.addKeyword(operationChoiceKeyword);
   instance.addKeyword(operationReferenceKeyword);

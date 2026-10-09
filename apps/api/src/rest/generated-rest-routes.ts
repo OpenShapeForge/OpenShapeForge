@@ -64,6 +64,7 @@ const RESERVED_LIST_PARAMS = new Set([
 
 const MUTATION_CONTROL_FIELDS = new Set([
   "blueprintId",
+  "blueprintBindings",
   "expectedVersion",
   "leaseToken",
   "confirmed",
@@ -73,6 +74,7 @@ const MUTATION_CONTROL_FIELDS = new Set([
 
 type MutationControlField =
   | "blueprintId"
+  | "blueprintBindings"
   | "expectedVersion"
   | "leaseToken"
   | "confirmed"
@@ -81,13 +83,13 @@ type MutationControlField =
 
 function expectedMutationControlType(
   field: MutationControlField,
-): "string" | "boolean" {
-  return field === "confirmed" ? "boolean" : "string";
+): "string" | "boolean" | "object" {
+  return field === "blueprintBindings" ? "object" : field === "confirmed" ? "boolean" : "string";
 }
 
 function splitMutationBody(body: unknown): {
   valuesBody: unknown;
-  controls: Record<string, string | boolean>;
+  controls: Record<string, string | boolean | Record<string, Record<string, string>>>;
 } {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     return { valuesBody: body, controls: {} };
@@ -97,19 +99,20 @@ function splitMutationBody(body: unknown): {
     if (!MUTATION_CONTROL_FIELDS.has(key)) continue;
     const field = key as MutationControlField;
     const expectedType = expectedMutationControlType(field);
-    if (typeof value !== expectedType) {
+    if (typeof value !== expectedType || (field === "blueprintBindings" && (value === null || Array.isArray(value)))) {
       if (field === "blueprintId") throw new HttpError(400, "BAD_USER_INPUT", "blueprintId must be a string.");
-      throw invalidMutationControlTypeFailure(field, expectedType);
+      if (field === "blueprintBindings") throw new HttpError(400, "BAD_USER_INPUT", "blueprintBindings must be an object.");
+      throw invalidMutationControlTypeFailure(field as Exclude<MutationControlField, "blueprintBindings" | "blueprintId">, expectedType as "string" | "boolean");
     }
   }
   const controls = Object.fromEntries(
     entries.filter(
       ([key, value]) =>
         MUTATION_CONTROL_FIELDS.has(key) &&
-        (typeof value === "string" ||
+        ((key === "blueprintBindings" && typeof value === "object") || typeof value === "string" ||
           (key === "confirmed" && typeof value === "boolean")),
     ),
-  ) as Record<string, string | boolean>;
+  ) as Record<string, string | boolean | Record<string, Record<string, string>>>;
   const valuesBody = Object.fromEntries(
     entries.filter(([key]) => !MUTATION_CONTROL_FIELDS.has(key)),
   );

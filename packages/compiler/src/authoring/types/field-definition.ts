@@ -319,6 +319,8 @@ export interface FieldDefinition {
   currency?: string;
   value?: unknown;
   defaultValue?: unknown;
+  /** Creation-only string interpolation; explicit caller values win. */
+  defaultTemplate?: string;
   validation?: FieldDefinitionValidation;
   relationship?: FieldDefinitionRelationship;
   /** Authored only on a field whose osfType names a provider-backed entity. */

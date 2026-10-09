@@ -119,6 +119,8 @@ export interface CompiledField {
   render: CompiledRender;
   unit?: string;
   defaultValue?: unknown;
+  /** Creation-only string interpolation; explicit caller values win. */
+  defaultTemplate?: string;
   validation?: FieldValidation;
   visibility?: VisibilityConfig;
   computed?: ComputedField;
@@ -657,6 +659,9 @@ export interface CompiledAuthorization {
 }
 
 export interface CompiledBlueprint {
+  bindings?: import("./authoring.js").BlueprintBinding[];
+  mode?: "copy";
+  include?: import("./authoring.js").BlueprintInclude[];
   fields: string[];
   labelField: string;
   operations: { list: string; status: string; reset: string; publish: string };
@@ -756,6 +761,7 @@ export interface CompiledEntityContract {
       fields?: Record<string, { render: import("./common.js").FieldRender }>;
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];
+      collectionEmptyState?: { title: LocalizedText; description?: LocalizedText; illustration?: "empty-collection"; primaryAction?: "create" };
       recordContext?: { fields: string[]; relationships?: string[] };
       /** Authored layout-renderer exceptions; hosts resolve these opaque keys. */
       renderers?: {

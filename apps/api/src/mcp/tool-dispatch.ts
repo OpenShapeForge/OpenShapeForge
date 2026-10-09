@@ -27,6 +27,7 @@ import type { CapturedDerivedExecution } from "./catalog.js";
 import type { DerivedToolsCatalogEntry } from "./derived-tools.js";
 import type { ServerScope } from "./server-scope.js";
 import type { ListedTool, SessionSurface } from "./session-surface.js";
+import { retainConfigurationAppResult } from "./configuration-app-state.js";
 import { staticToolCall } from "./dispatch-static-tools.js";
 import { connectToolCall } from "./dispatch-connect-tool.js";
 import { dryRunToolCall } from "./dispatch-dry-run-tool.js";
@@ -109,7 +110,7 @@ export async function directToolCall(
   };
   for (const section of SECTIONS) {
     const outcome = await section(scoped);
-    if (outcome !== undefined) return outcome;
+    if (outcome !== undefined) return retainConfigurationAppResult(outcome, call.session, call.db);
   }
   // The entity section answers every name it is reached with.
   throw new Error(`Tool "${call.name}" was not dispatched.`);

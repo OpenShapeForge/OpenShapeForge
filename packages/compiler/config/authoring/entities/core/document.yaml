@@ -349,6 +349,14 @@ fields:
     relationship:
       ownership: reference
 operations:
+  insertVariant:
+    name: { en: Add content, nl: Inhoud toevoegen }
+    description: Add one channel and language to this document through its owned content collection.
+    implementation: { type: collection, action: insert, field: variants }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
   list:
     name: { en: List documents, nl: Documenten tonen }
     description: Returns the visible document collection.

@@ -51,6 +51,7 @@ type Definition = {
   roles: readonly string[];
   target?: { entityName: string; inputField?: string };
   concurrency?: { version?: { field: string }; editLease?: unknown };
+  idempotency?: { mode: string; inputField?: string };
 };
 type Catalog = {
   operations: (Omit<Definition, "id" | "roles"> & {
@@ -167,6 +168,7 @@ async function lifecycle<T>(
   const invocationId = randomUUID();
   const system = {
     ...owner.system,
+    databaseActorId: contribution.actorId,
     reason: `${owner.system.reason}: ${contribution.name} ${tenantSlug}: ${reason}`,
   };
   const tenantId = await withSystemSession(
@@ -416,9 +418,14 @@ async function lifecycle<T>(
                 definition.concurrency.version.field
               ];
             }
+            const idempotencyField = definition.idempotency?.mode === "idempotency-key"
+              ? definition.idempotency.inputField
+              : undefined;
+            const idempotencyKey = idempotencyField ? input[idempotencyField] : undefined;
             const result = await owner.platform.operations.execute(verified, {
               operation: { id, intent: definition.intent },
               input,
+              ...(typeof idempotencyKey === "string" ? { idempotencyKey } : {}),
             });
             if ("error" in result) failed = true;
             return result;
@@ -613,6 +620,7 @@ async function withJobOwner<T>(
         `Maintenance runtime modules could not initialise: ${initialised.failures.map((failure) => `${failure.name}: ${failure.reason}: ${failure.message}`).join("; ")}`,
       );
     if (runtimePlatform) {
+      runtimePlatform.registerArtifactStorage(executionModules);
       runtimePlatform.registerOperationProviders(executionModules);
       runtimePlatform.registerHostOperationExecutor(
         createRuntimeHostOperationExecutor({

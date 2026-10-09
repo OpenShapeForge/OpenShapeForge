@@ -155,6 +155,7 @@ const audit = () =>
     privileged.db,
   );
 
+
 beforeAll(async () => {
   server = new SQL(adminUrl);
   await server.unsafe(`create database "${name}"`);
@@ -852,4 +853,32 @@ test("a constrained migrator cannot use app-only identity policies via a bypass 
     await sql`drop owned by ${sql.id(role)}`.execute(privileged.db);
     await server.unsafe(`drop role "${role}"`);
   }
+});
+
+test("maintenance forwards the declared Operation idempotency input without bypassing missing-key refusal", async () => {
+  contribution.operations.push("TemplateVersion.createDocument");
+  try {
+    for (const includeKey of [false, true]) {
+      let resultCode: string | undefined;
+      work = async (runner) => runner!(request, async context => {
+        const result = await context.operations.execute("TemplateVersion.createDocument", {
+          templateVersionId: randomUUID(), documentId: randomUUID(), channel: "document", locale: "nl", parameters: {}, version: { versionLabel: "1.0", status: "published" },
+          ...(includeKey ? { idempotencyKey: `fixture:${randomUUID()}` } : {}),
+        });
+        resultCode = "error" in result ? result.error.code : undefined;
+      });
+      await expect(dispatch()).rejects.toThrow("Maintenance canonical Operation was refused.");
+      // An absent/unowned template remains protected by the canonical record guard.
+      expect(resultCode).toBe(includeKey ? "FORBIDDEN" : "IDEMPOTENCY_KEY_REQUIRED");
+    }
+  } finally { contribution.operations.pop(); }
+});
+
+test("a seed job keeps its textual audit subject separate from the UUID store actor", async () => {
+  await runRegisteredSeedJob(owner, privileged.db, seed.name, "uuid-store-proof", runner =>
+    runner(request, async context => {
+      expect(await context.store.query("select app.current_user_id()::text as actor_id"))
+        .toEqual([{ actor_id: actorId }]);
+    }));
+  expect((await audit()).rows.some(row => row.actor_subject === "maintenance-job:uuid-store-proof" && row.succeeded && row.tenant_id === tenantId)).toBe(true);
 });

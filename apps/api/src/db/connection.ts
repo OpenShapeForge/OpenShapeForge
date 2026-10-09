@@ -72,11 +72,21 @@ export function readAdminDatabaseUrl(env: NodeJS.ProcessEnv = process.env): stri
   return env.OPENSHAPEFORGE_ADMIN_DATABASE_URL?.trim() || readMigrateDatabaseUrl(env);
 }
 
+/** Each process must fit its pool within the database's shared connection budget. */
+export function readDatabasePoolMaxConnections(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.OPENSHAPEFORGE_DATABASE_POOL_MAX_CONNECTIONS?.trim();
+  if (!raw) return 10;
+  if (!/^[1-9]\d*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    throw new Error("OPENSHAPEFORGE_DATABASE_POOL_MAX_CONNECTIONS must be a positive safe integer.");
+  }
+  return Number(raw);
+}
+
 export function createDatabaseRuntime(
   options: DatabaseRuntimeOptions = {},
 ): DatabaseRuntime {
   const postgres = new SQL(options.databaseUrl ?? readDatabaseUrl(), {
-    max: options.maxConnections ?? 10,
+    max: options.maxConnections ?? readDatabasePoolMaxConnections(),
   });
 
   const db = new Kysely<DB>({

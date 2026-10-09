@@ -142,7 +142,7 @@ export function createSessionSurface(scope: ServerScope) {
   };
   server.setRequestHandler('resources/list', listedResources);
   registerAgentSkillHandlers(server, skillsForSession);
-  const { runtimeProviderToolsForSession, listedTools } = createToolListing(scope);
+  const { runtimeProviderToolsForSession, availableTools, listedTools } = createToolListing(scope);
   // ---- first-use onboarding (mcp/onboarding.ts): the checklist reads the
   // same per-session projections tools/list uses, and rides on whoami. ----
   const onboarding = onboardingEnvironment({
@@ -244,6 +244,7 @@ export function createSessionSurface(scope: ServerScope) {
     updateNotices,
     sessionInfo,
     runtimeProviderToolsForSession,
+    availableTools,
     listedTools,
   };
 }

@@ -25,13 +25,14 @@ import { connectorToolsForSession } from "../connectors/mcp-tools.js";
 import type { McpToolCallSource } from "../modules/contract.js";
 import { assertUniqueToolNames, decorateMcpTools, moduleTools } from "../modules/mcp-hooks.js";
 import { SESSION_INFO_TOOL, SESSION_INFO_TOOL_NAME } from "./session-info.js";
+import { searchableSessionOperations, searchableCoveredToolNames } from "./searchable-session-operations.js";
 import { searchableOperationTools } from "./operation-search.js";
 import { type ProjectedRuntimeOperationTool, catalog, catalogDerivedTools } from "./catalog.js";
 import { projectRuntimeOperationTool } from "./catalog-rows.js";
 import { derivedToolsForSession } from "./derived-session-tools.js";
 import { operationMayInvoke, projectCatalogOperationTool } from "./entity-tool-invocation.js";
 import { crudToolsForSession } from "./generic-tool-projection.js";
-import { publicOriginIsHttps, supportsMcpApp } from "./handoff-config.js";
+import { ENTITY_CONFIGURATION_APP_URI, publicOriginIsHttps, supportsMcpApp } from "./handoff-config.js";
 import type { ServerScope } from "./server-scope.js";
 import type { ListedTool } from "./session-surface.js";
 /**
@@ -94,7 +95,7 @@ export function createToolListing(scope: ServerScope) {
         : {}),
     };
   });
-  const listedTools = async (): Promise<ListedTool[]> => {
+  const availableTools = async (): Promise<ListedTool[]> => {
     const runtimeOperationTools = await runtimeProviderToolsForSession();
     const coreTools = [
       SESSION_INFO_TOOL, // session-info (whoami / osf://session): every authenticated session
@@ -165,7 +166,7 @@ export function createToolListing(scope: ServerScope) {
                 operations.has(tool.key) && operationMayInvoke(tool, session),
             )
             .map(projectCatalogOperationTool)
-        : modulePlatform && searchableStaticOperationIds.size > 0
+        : modulePlatform
         ? searchableOperationTools(searchableOperationToolNames)
         : []),
     ] as Tool[];
@@ -219,12 +220,33 @@ export function createToolListing(scope: ServerScope) {
     return decorated as ListedTool[];
   };
 
+  const listedTools = async (): Promise<ListedTool[]> => {
+    const available = await availableTools();
+    if (operationToolProjection.mode !== "searchable" || !modulePlatform) return available;
+    const { definitions } = await searchableSessionOperations(scope);
+    const covered = searchableCoveredToolNames(scope, definitions);
+    const ids = new Set(definitions.map((definition) => definition.id));
+    for (const entry of available) {
+      if (entry.runtimeOperation && ids.has(entry.runtimeOperation.id)) covered.add(entry.tool.name);
+    }
+    // Exact schemas now ride on search results, including dedicated entities.
+    covered.add(GENERIC_DESCRIBE_TOOL_NAME);
+    return available.filter((entry) => !covered.has(entry.tool.name)).map((entry) =>
+      entry.tool.name === searchableOperationToolNames.execute &&
+      definitions.some((definition) => definition.interaction?.secureInput) &&
+      supportsMcpApp(server) && publicOriginIsHttps()
+        ? { ...entry, tool: { ...entry.tool, _meta: { ...entry.tool._meta, ui: { resourceUri: ENTITY_CONFIGURATION_APP_URI } } } }
+        : entry,
+    );
+  };
+
   server.setRequestHandler('tools/list', async () => ({
     tools: (await listedTools()).map((entry) => toolWithFailureOutputSchema(entry.tool)),
   }));
 
   return {
     runtimeProviderToolsForSession,
+    availableTools,
     listedTools,
   };
 }

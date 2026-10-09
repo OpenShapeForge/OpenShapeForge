@@ -132,7 +132,7 @@ function createServerScopePrologue(input: {
       client: sessionClientOf(session),
       skills: skillsForSession().map(({ entry }) => ({ uri: entry.uri, description: entry.frontmatter.description })),
     }) + (operationToolProjection.mode === "searchable"
-      ? ` Use ${searchableOperationToolNames.search} to discover entity CRUD, integration management and published services. Follow nextCursor to continue. A compact tools/list is not the full capability catalog. Execute the returned Operation id and exact input schema with ${searchableOperationToolNames.execute}. Run required prerequisites through the same executor. Private configuration may pause; its resumeWith Operation is the read to poll through the executor.`
+      ? ` Use ${searchableOperationToolNames.search} to discover entity CRUD, integration management and published services. Follow nextCursor to continue. A compact tools/list is not the full capability catalog. Execute the returned Operation id and exact input schema with ${searchableOperationToolNames.execute}. Run required prerequisites through the same executor. When a guide names a tool absent from tools/list, find its canonical Operation instead: for example, osf_create with entity Connection means Connection.create, and osf_list with entity Adapter means Adapter.list. Private configuration may pause; its resumeWith Operation is the read to poll through the executor.`
       : ""),
   });
   const hasArtifactStorage = runtimeModules.some((module) => module.artifactStorage !== undefined);

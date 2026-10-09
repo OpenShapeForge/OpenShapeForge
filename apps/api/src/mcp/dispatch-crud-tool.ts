@@ -242,6 +242,8 @@ export async function crudToolCall(
             },
             minted.token,
             String(sourceRow.name ?? entity?.entity ?? "this record"),
+            definitions,
+            messagePrefix,
           );
         }
 

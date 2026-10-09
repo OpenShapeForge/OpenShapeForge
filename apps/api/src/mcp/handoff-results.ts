@@ -7,18 +7,26 @@
 
 import { connectionFieldsOf } from "./connection-guidance.js";
 import { ENTITY_CONFIGURATION_PATH, callbackOrigin, configurationWebUrl } from "./handoff-config.js";
-import { type ToolResult } from "./tool-results.js";
+import { ok, type ToolResult } from "./tool-results.js";
+import { elicitationSchemaFromDefinitions, isSecretDefinition } from "./elicitation.js";
 export function configurationAppResult(
   payload: unknown,
   token: string,
   displayName: string,
+  definitions?: unknown,
+  messagePrefix?: string,
 ): ToolResult {
   const configurationUrl = `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/${token}`;
+  const { schema, elicitable } = elicitationSchemaFromDefinitions(definitions);
   return {
-    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+    ...ok(payload),
     _meta: {
       configurationUrl,
       displayName,
+      ...(definitions !== undefined ? { configuration: {
+        fields: elicitable.map(field => ({ ...field, schema: schema.properties[String(field.key)], secret: isSecretDefinition(field) })),
+        ...(messagePrefix ? { messagePrefix } : {}),
+      } } : {}),
     },
   };
 }

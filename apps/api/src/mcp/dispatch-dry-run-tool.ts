@@ -6,14 +6,13 @@
 
 /** The dry-run helper of a derived tool: compose the provider requests without sending them. */
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import { listGeneratedEntitiesForTable } from "../operations/entity/index.js";
+import { withDbSession } from "../db/session.js";
 import { deriveToolName, derivedHelperAvailable, derivedToolsFromRows } from "./derived-tools.js";
 import { bindingSelected, composeBindingRequest } from "./declarative-execution.js";
 import { loadOrderedBindings } from "./execution-bindings.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import { catalog, catalogDerivedTools, entityForTable } from "./catalog.js";
 import { connectionScopeOf, serializeRow } from "./catalog-rows.js";
-import { DERIVED_TOOLS_ROW_LIMIT } from "./derived-session-tools.js";
 import { requireArguments } from "./entity-tool-guards.js";
 import {
   normalizeConnectionValueRows,
@@ -70,14 +69,22 @@ export async function dryRunToolCall(
       const table = tables.get(dryRunEntry.table);
       if (!table)
         throw new HttpError(404, "NOT_FOUND", `Unknown tool "${toolArg}".`);
-      const rows = (
-        await listGeneratedEntitiesForTable(db, session, table, {
-          limit: DERIVED_TOOLS_ROW_LIMIT,
-        })
-      ).rows.map((row) => serializeRow(table, row));
-      const { visibleWhen: _gate, ...ungated } = dryRunEntry;
-      // Accept the defining row's key as well as the derived tool name.
       const wantedName = deriveToolName(toolArg) ?? toolArg;
+      // Resolve the requested definition directly. A bounded first page can
+      // omit a perfectly valid draft when an organization has many services.
+      const rows = await withDbSession(db, session, (trx) =>
+        ctx.snapshotDefinitionsByToolName(trx, dryRunEntry, wantedName));
+      if (rows.length !== 1) throw new HttpError(404, "NOT_FOUND", `No unambiguous definition provides the tool "${toolArg}".`);
+      // Preview authority comes from the administrator helper and tenant-scoped
+      // definition read. Employee visibility must not prevent an administrator
+      // from testing a draft, a restricted service or an internal step.
+      const {
+        visibleWhen: _gate,
+        internalOnlyField: _internal,
+        visibleToRolesField: _audience,
+        ...ungated
+      } = dryRunEntry;
+      // Accept the defining row's key as well as the derived tool name.
       const target = derivedToolsFromRows(
         ungated,
         rows,

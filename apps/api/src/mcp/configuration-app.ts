@@ -50,7 +50,7 @@ export async function renderConfigurationApp(): Promise<string> {
   return (
     `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">` +
     `<title>Secure configuration</title>` +
-    `<body style="${PAGE_STYLE}"><h2 id="configuration-title" style="font-size:1.2rem">Secure configuration</h2>` +
+    `<body hidden style="${PAGE_STYLE}"><h2 id="configuration-title" style="font-size:1.2rem">Secure configuration</h2>` +
     `<p id="configuration-message">Preparing the secure form…</p>` +
     `<button id="configuration-open" hidden type="button" ` +
     `style="padding:.6rem 1rem;border:1px solid #777;border-radius:6px;background:transparent">` +

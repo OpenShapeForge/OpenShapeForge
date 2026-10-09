@@ -168,6 +168,7 @@ async function lifecycle<T>(
   const invocationId = randomUUID();
   const system = {
     ...owner.system,
+    databaseActorId: contribution.actorId,
     reason: `${owner.system.reason}: ${contribution.name} ${tenantSlug}: ${reason}`,
   };
   const tenantId = await withSystemSession(

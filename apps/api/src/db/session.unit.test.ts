@@ -1,10 +1,17 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { createDbSessionContext } from "./session.js";
+import { createDbSessionContext, withSystemSession, SYSTEM_BYPASS_ROLE } from "./session.js";
 
 const tenantId = "11111111-1111-4111-8111-111111111111";
 const userId = "22222222-2222-4222-8222-222222222222";
 const relationGroupId = "33333333-3333-4333-8333-333333333333";
+
+test("a system database actor must be a UUID before any connection is used", async () => {
+  await expect(withSystemSession(undefined as never, {
+    actorSubject: "maintenance-job:fixture", databaseActorId: "not-a-uuid",
+    roles: [SYSTEM_BYPASS_ROLE], reason: "regression proof",
+  }, async () => undefined)).rejects.toThrow("databaseActorId must be a UUID");
+});
 
 describe("RelationGroup database session context", () => {
   test("keeps RelationGroups separate from platform groups and normalizes them", () => {

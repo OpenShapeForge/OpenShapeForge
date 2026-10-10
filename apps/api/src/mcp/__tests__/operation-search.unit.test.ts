@@ -70,6 +70,25 @@ describe("searchable MCP Operations", () => {
     });
   });
 
+  test("shows a supplied description without matching on it", () => {
+    const definitions = [definition("demo.alpha"), definition("demo.bravo")];
+    const descriptions = new Map([["demo.alpha", "Full tool text. Ask for missing required fields."]]);
+    const search = (query: string) => searchOperationDefinitions({
+      definitions,
+      allowedIds: new Set(["demo.alpha", "demo.bravo"]),
+      arguments: { query },
+      locale,
+      descriptions,
+    }).operations;
+    const shown = search("demo");
+    expect(shown.find((entry) => (entry.operation as { id: string }).id === "demo.alpha")?.description)
+      .toBe("Full tool text. Ask for missing required fields.");
+    expect(shown.find((entry) => (entry.operation as { id: string }).id === "demo.bravo")?.description)
+      .toBe("Description for demo.bravo");
+    // Matching stays on the canonical, every-language text.
+    expect(search("missing required")).toEqual([]);
+  });
+
   test("filters before paging and returns exact canonical schemas", () => {
     const definitions = [
       definition("demo.alpha", {

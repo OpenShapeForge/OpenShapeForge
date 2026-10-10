@@ -187,6 +187,9 @@ describe("generated MCP server", () => {
     expect(create).toBeDefined();
     expect(create.name).toBe("Create relation");
     expect(create.description).toContain("Creates one relation after validating");
+    // The CRUD tool's full description rides along: authored MCP
+    // instructions reach the model through search too.
+    expect(create.description).toContain("Ask for missing required fields");
     const displayName = create.inputSchema.properties.displayName;
     // Authored validation reaches the model as JSON Schema, not as a 400.
     expect(displayName.maxLength).toBe(200);

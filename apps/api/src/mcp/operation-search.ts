@@ -199,6 +199,8 @@ export function searchOperationDefinitions(input: {
   allowedIds: ReadonlySet<string>;
   arguments: unknown;
   locale: ResolvedLocale;
+  /** Per-id description shown instead of the canonical one (never matched on). */
+  descriptions?: ReadonlyMap<string, string>;
 }): { operations: Record<string, unknown>[]; nextCursor?: string } {
   const args = parseOperationSearchArguments(input.arguments);
   const words = queryWords(args.query);
@@ -206,7 +208,8 @@ export function searchOperationDefinitions(input: {
     .filter((definition) => input.allowedIds.has(definition.id))
     .map((definition) => {
       const name = localizedText(definition.name, input.locale) ?? definition.id;
-      const description = localizedText(definition.description, input.locale) ?? name;
+      const description = input.descriptions?.get(definition.id) ??
+        localizedText(definition.description, input.locale) ?? name;
       return { definition, name, description, haystack: searchWords(definition) };
     });
   // Every word, in any authored language, before any single word: a model

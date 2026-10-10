@@ -16,15 +16,23 @@ export async function searchableSessionOperations(scope: ServerScope) {
     ...entities.keys(),
     ...providers.map((definition) => definition.id),
   ]);
+  // The model reads the search result instead of the CRUD tool it replaces,
+  // so it gets that tool's full description: the canonical text plus the
+  // assistant guidance, the authored MCP instructions and the write notes.
+  // The canonical (all-language) description stays on the definition for
+  // matching; this is only what a result shows.
+  const descriptions = new Map<string, string>();
   return {
     allowedIds,
     entities,
+    descriptions,
     definitions: definitions.filter((definition) => allowedIds.has(definition.id)).map((definition): RuntimeOperationDefinition => {
       const entry = entities.get(definition.id);
       if (!entry) return definition;
       // Exact interface schema: preserve classified-field withholding and the
       // existing secure-input adapter rather than exposing the raw core input.
       const tool = describeTool(entry.tool, entry.entity, scope.tables.get(entry.tool.table), scope.session, scope.locale);
+      descriptions.set(definition.id, tool.description);
       const schema = tool.outputSchema;
       if (!schema) throw new Error(`CRUD Operation ${definition.id} has no output schema.`);
       const branches = [schema, ...((schema.oneOf ?? []) as Record<string, unknown>[])];

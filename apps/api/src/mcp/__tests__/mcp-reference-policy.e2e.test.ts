@@ -15,11 +15,11 @@
 import { expect } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { createRow } from "../../graphql/__tests__/e2e/entity-factory.js";
-import { isEntityBackedCreate } from "../../graphql/__tests__/e2e/operations.js";
+import { isEntityBackedCreate, operationIdFor } from "../../graphql/__tests__/e2e/operations.js";
 import { expectCreateWriteRefusal, expectWriterRefusal, operationWrittenReferences, plantReference, referenceTarget } from "../../graphql/__tests__/e2e/reference-policy.js";
 import { createdRows, describe, registerSuiteLifecycle, tenantA, tenantB, test, type Identity } from "../../graphql/__tests__/e2e/harness.js";
 import {
-  advertisedSchema, argsFor, callTool, createArgs, mcpCreateTables, rpc, toolError, toolNameFor, toolPayload, type CrudOperation, type McpTable,
+  advertisedSchema, argsFor, searchableProjection, searchedOperation, callTool, createArgs, mcpCreateTables, rpc, toolError, toolNameFor, toolPayload, type CrudOperation, type McpTable,
 } from "./e2e/mcp-sweep.js";
 
 registerSuiteLifecycle();
@@ -44,6 +44,11 @@ describe("generated MCP server: operation-written references", () => {
         expect((await advertisedSchema(tenantA, tools, table, "list")).properties.filter.properties[field]).toMatchObject({ type: "string", format: "uuid" });
         expect((await advertisedSchema(tenantA, tools, table, "update")).properties.values.properties).not.toHaveProperty(field);
         if (isEntityBackedCreate(table)) expect((await advertisedSchema(tenantA, tools, table, "create")).properties).not.toHaveProperty(field);
+        // In the searchable projection the update's writer note reaches the
+        // model on the search result, as it did on the dedicated tool.
+        if (searchableProjection) {
+          expect((await searchedOperation(tenantA, operationIdFor(table, "update"))).description).toContain(field);
+        }
 
         const refusedCreate = await call(tenantA, "create", { ...(await createArgs(table, tenantA)), [field]: randomUUID() });
         expectCreateWriteRefusal(table, { text: toolError(refusedCreate.body) }, field, writers);

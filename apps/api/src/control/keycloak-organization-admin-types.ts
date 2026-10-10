@@ -107,6 +107,7 @@ export type KeycloakAdminErrorCode =
 /** Fixed, non-identifying names for the Keycloak admin subcall that failed. */
 export type KeycloakAdminOperation =
   | "service_account_token"
+  | "invite_existing_member"
   | "get_organization"
   | "get_organization_for_update"
   | "update_organization"

@@ -74,10 +74,7 @@ import type { DB } from "../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
 import { validateInvitationTarget } from "./invitation-target.js";
 import { deliverOrganizationInvitation } from "./keycloak-invitation-delivery.js";
-import { accessNoticeMail } from "./access-notice-mail.js";
-import { enqueueJob } from "../jobs/store.js";
-import { tenantSignInUrl } from "../control/invitation-outcome.js";
-import { roleLabel } from "../mcp/session-labels.js";
+
 import { HttpError } from "../rest/http-error.js";
 import { accessPolicy, customRoleId } from '../accounts/access-policy.js';
 // From the leaf module, NOT from ./identity-link.js: this module and that one
@@ -205,8 +202,8 @@ export type EmployeeInvitation = {
 
 export type EmployeeAdmission = EmployeeInvitation & {
   delivery: "sent" | "not_required" | "already_pending";
-  /** An existing member gets an access notice instead of an invitation: queued, or no mail transport. */
-  accessNotice?: "queued";
+  /** An existing member is mailed an organization invitation instead (Keycloak invite-existing-user). */
+  accessNotice?: "sent" | "failed";
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -333,10 +330,9 @@ export async function inviteEmployee(
     if (!found.rows.length) throw new HttpError(400, 'VALIDATION', 'Choose a role from this organization.');
   }
 
-  const tenant = await withDbSession(db, session, (trx) =>
+  const { organizationId } = await withDbSession(db, session, (trx) =>
     tenantOrganization(trx, session.tenantId),
   );
-  const { organizationId } = tenant;
 
   if (input.relationId) await withDbSession(db, session, trx => validateInvitationTarget(trx, session.tenantId, input.relationId!, email));
 
@@ -357,28 +353,30 @@ export async function inviteEmployee(
     rethrowKeycloakError(error);
   }
 
-  // An existing member gets no Keycloak invitation; the access notice tells
-  // them about the new role, queued with the admission so neither exists alone.
-  const notify = delivery === "not_required";
-  const invitation = await withDbSession(db, session, async (trx) => {
-    const recorded = await recordEmployeeInvitation(trx, session.tenantId, actor, input, email);
-    if (notify) {
-      const label = input.role ? { en: roleLabel(input.role, "en"), nl: roleLabel(input.role, "nl") } : null;
-      await enqueueJob(trx, {
-        tenantId: session.tenantId, actorId: actor, kind: "mail.deliver",
-        payload: accessNoticeMail({
-          email, firstName: input.firstName, tenantName: tenant.name ?? tenant.slug ?? "Hubble", role: label,
-          signInUrl: tenant.slug ? tenantSignInUrl(tenant.slug) : null,
-        }),
-      });
+  const invitation = await withDbSession(db, session, (trx) =>
+    recordEmployeeInvitation(trx, session.tenantId, actor, input, email),
+  );
+  // Keycloak sends no invite-user mail to an existing member; its
+  // invite-existing-user mail tells them about the new access instead. A failure
+  // there leaves the admission in place and is reported, not thrown.
+  let accessNotice: EmployeeAdmission["accessNotice"];
+  if (delivery === "not_required" && keycloak.inviteExistingMember) {
+    try {
+      accessNotice = await keycloak.inviteExistingMember(organizationId, email) ? "sent" : "failed";
+    } catch (error) {
+      accessNotice = "failed";
+      console.warn("[employee-invitation] " + JSON.stringify({
+        outcome: "access_notice_failed", tenantId: session.tenantId, organizationId, invitationId: invitation.id,
+        code: error instanceof KeycloakAdminError ? error.code : "UNKNOWN",
+        status: error instanceof KeycloakAdminError ? error.status : null,
+      }));
     }
-    return recorded;
-  });
+  }
   console.info("[employee-invitation] " + JSON.stringify({
     outcome: "admission_recorded", tenantId: session.tenantId, organizationId,
-    invitationId: invitation.id, actor, role: input.role, delivery, ...(notify ? { accessNotice: "queued" } : {}),
+    invitationId: invitation.id, actor, role: input.role, delivery, ...(accessNotice ? { accessNotice } : {}),
   }));
-  return { ...invitation, delivery, ...(notify ? { accessNotice: "queued" as const } : {}) };
+  return { ...invitation, delivery, ...(accessNotice ? { accessNotice } : {}) };
 }
 
 /** Shared persistence after Keycloak confirms membership or an invitation; caller owns authorization. */
@@ -542,10 +540,9 @@ export async function revokeInvitation(
     );
   }
 
-  const tenant = await withDbSession(db, session, (trx) =>
+  const { organizationId } = await withDbSession(db, session, (trx) =>
     tenantOrganization(trx, session.tenantId),
   );
-  const { organizationId } = tenant;
 
   let keycloakInvitationDeleted = false;
   try {

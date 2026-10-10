@@ -70,6 +70,28 @@ describe("searchable MCP Operations", () => {
     });
   });
 
+  test("matches the canonical text in every language behind a replaced one", () => {
+    const shown = definition("Relation.create", { name: "Create relation", description: "Creates one relation." });
+    const search = (query: string, canonicalText?: Map<string, Pick<RuntimeOperationDefinition, "name" | "description">>) =>
+      searchOperationDefinitions({
+        definitions: [shown],
+        allowedIds: new Set([shown.id]),
+        arguments: { query },
+        locale,
+        ...(canonicalText ? { canonicalText } : {}),
+      }).operations;
+    const canonical = new Map([[shown.id, {
+      name: { en: "Create relation", nl: "Relatie aanmaken" },
+      description: { en: "Creates one relation.", nl: "Maakt één relatie aan." },
+    }]]);
+    expect(search("aanmaken")).toEqual([]);
+    const found = search("aanmaken", canonical);
+    expect(found).toHaveLength(1);
+    // What the result shows stays the replaced, session-language text.
+    expect(found[0]!.name).toBe("Create relation");
+    expect(found[0]!.description).toBe("Creates one relation.");
+  });
+
   test("filters before paging and returns exact canonical schemas", () => {
     const definitions = [
       definition("demo.alpha", {

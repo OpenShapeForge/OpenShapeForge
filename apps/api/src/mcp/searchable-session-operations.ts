@@ -16,15 +16,21 @@ export async function searchableSessionOperations(scope: ServerScope) {
     ...entities.keys(),
     ...providers.map((definition) => definition.id),
   ]);
+  // A covered CRUD Operation shows its tool's title and description in the
+  // session's language; search still matches the canonical name and
+  // description in every authored language as well (operation-search.ts).
+  const canonicalText = new Map<string, Pick<RuntimeOperationDefinition, "name" | "description">>();
   return {
     allowedIds,
     entities,
+    canonicalText,
     definitions: definitions.filter((definition) => allowedIds.has(definition.id)).map((definition): RuntimeOperationDefinition => {
       const entry = entities.get(definition.id);
       if (!entry) return definition;
       // Exact interface schema: preserve classified-field withholding and the
       // existing secure-input adapter rather than exposing the raw core input.
       const tool = describeTool(entry.tool, entry.entity, scope.tables.get(entry.tool.table), scope.session, scope.locale);
+      canonicalText.set(definition.id, { name: definition.name, description: definition.description });
       const schema = tool.outputSchema;
       if (!schema) throw new Error(`CRUD Operation ${definition.id} has no output schema.`);
       const branches = [schema, ...((schema.oneOf ?? []) as Record<string, unknown>[])];

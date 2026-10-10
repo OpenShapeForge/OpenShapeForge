@@ -70,6 +70,58 @@ describe("searchable MCP Operations", () => {
     });
   });
 
+  test("matches the canonical text in every language behind a replaced one", () => {
+    const shown = definition("Relation.create", { name: "Create relation", description: "Creates one relation." });
+    const search = (query: string, canonicalText?: Map<string, Pick<RuntimeOperationDefinition, "name" | "description">>) =>
+      searchOperationDefinitions({
+        definitions: [shown],
+        allowedIds: new Set([shown.id]),
+        arguments: { query },
+        locale,
+        ...(canonicalText ? { canonicalText } : {}),
+      }).operations;
+    const canonical = new Map([[shown.id, {
+      name: { en: "Create relation", nl: "Relatie aanmaken" },
+      description: { en: "Creates one relation.", nl: "Maakt één relatie aan." },
+    }]]);
+    expect(search("aanmaken")).toEqual([]);
+    const found = search("aanmaken", canonical);
+    expect(found).toHaveLength(1);
+    // What the result shows stays the replaced, session-language text.
+    expect(found[0]!.name).toBe("Create relation");
+    expect(found[0]!.description).toBe("Creates one relation.");
+  });
+
+  test("matches plurals to singulars without matching short common words", () => {
+    const definitions = [
+      definition("access.role.assign", { name: { en: "Assign a role" }, description: { en: "Use this to give a user one role." } }),
+      definition("notes.list", { name: { en: "List notes" }, description: { en: "Use this to read notes." } }),
+    ];
+    const ids = (query: string) => searchOperationDefinitions({
+      definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query }, locale,
+    }).operations.map((entry) => (entry.operation as { id: string }).id);
+    expect(ids("roles")).toEqual(["access.role.assign"]);
+    expect(ids("users")).toEqual(["access.role.assign"]);
+    // "use" is in both descriptions; a longer query word never shrinks to it.
+    expect(ids("useful")).toEqual([]);
+    expect(ids("x")).toEqual([]);
+  });
+
+  test("never falls back on a shared action verb alone, and pages the fallback by id", () => {
+    const definitions = ["a.create", "b.create", "c.create", "payroll.run"].map((id) =>
+      definition(id, { name: { en: id.endsWith("create") ? "Create record" : "Run payroll" }, description: { en: "Does it." } }));
+    const allowedIds = new Set(definitions.map((d) => d.id));
+    const search = (query: string, extra: Record<string, unknown> = {}) => searchOperationDefinitions({
+      definitions, allowedIds, arguments: { query, ...extra }, locale,
+    });
+    expect(search("create invoice").operations).toEqual([]);
+    expect(search("create payroll").operations.map((entry) => (entry.operation as { id: string }).id)).toEqual(["payroll.run"]);
+    const first = search("record payroll", { limit: 2 });
+    const second = search("record payroll", { limit: 2, cursor: first.nextCursor });
+    expect([...first.operations, ...second.operations].map((entry) => (entry.operation as { id: string }).id))
+      .toEqual(["a.create", "b.create", "c.create", "payroll.run"]);
+  });
+
   test("filters before paging and returns exact canonical schemas", () => {
     const definitions = [
       definition("demo.alpha", {
@@ -192,5 +244,35 @@ describe("searchable MCP Operations", () => {
       // Every page ordered by the same total order the cursor compares with.
       expect(seen).toEqual([...seen].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0)));
     }
+  });
+});
+
+describe("operation search matches the model's own words", () => {
+  const all = [
+    definition("accounts.invite-member", { name: { en: "Invite employee", nl: "Medewerker uitnodigen" }, description: { en: "Invite a person to this organization.", nl: "Nodig iemand uit voor deze organisatie." } }),
+    definition("accounts.list-roles", { name: { en: "List roles", nl: "Rollen tonen" }, description: { en: "List roles within the current organization." } }),
+    definition("Relation.create", { name: { en: "Create relation", nl: "Relatie aanmaken" } }),
+  ];
+  const ids = (query: string, locale_ = locale) =>
+    searchOperationDefinitions({ definitions: all, allowedIds: new Set(all.map((d) => d.id)), arguments: { query }, locale: locale_ })
+      .operations.map((operation) => (operation.operation as { id: string }).id);
+
+  test("every word may appear anywhere, in any authored language", () => {
+    expect(ids("invite employee")).toEqual(["accounts.invite-member"]);
+    expect(ids("medewerker uitnodigen", { ...locale, tag: "en" })).toEqual(["accounts.invite-member"]);
+    expect(ids("organization invite")).toEqual(["accounts.invite-member"]);
+  });
+
+  test("light stemming finds inflected forms", () => {
+    expect(ids("invitation")).toEqual(["accounts.invite-member"]);
+    expect(ids("uitnodiging")).toEqual(["accounts.invite-member"]);
+  });
+
+  test("without a full match, any longer word still finds candidates, in id order", () => {
+    expect(ids("invite user with finance viewer role")).toEqual(["accounts.invite-member", "accounts.list-roles"]);
+  });
+
+  test("a single unmatched word finds nothing rather than everything", () => {
+    expect(ids("payroll")).toEqual([]);
   });
 });

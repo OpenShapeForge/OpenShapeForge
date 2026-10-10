@@ -18,6 +18,7 @@
  */
 import type { CallToolResult, Tool } from "@modelcontextprotocol/server";
 import {
+  declaredEmployeeInvitationRoles,
   EMPLOYEE_INVITATION_ADMIN_ROLE,
   inviteEmployee,
   listInvitations,
@@ -30,6 +31,7 @@ import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import type { KeycloakOrganizationMembersClient } from "../control/keycloak-organization-members.js";
+import { roleLabel } from "./session-labels.js";
 
 export const INVITE_EMPLOYEE_TOOL = "invite_employee";
 export const LIST_INVITATIONS_TOOL = "list_invitations";
@@ -41,7 +43,7 @@ const INVITE_EMPLOYEE: Tool = {
   description:
     "Admit an employee or colleague into this organization with a pre-selected role. " +
     "A person not yet in the Keycloak organization receives an invitation e-mail. Someone who is " +
-    "already a member receives no redundant mail and can sign in again immediately. An " +
+    "already a member is e-mailed an organization invitation with the sign-in link instead, and can sign in again immediately. An " +
     "existing pending invitation is reused without resending it. Report the returned delivery " +
     "and nextStep exactly: status pending means the application role awaits sign-in, not that an " +
     "e-mail was sent or must be accepted. For organization administrators.",
@@ -51,9 +53,17 @@ const INVITE_EMPLOYEE: Tool = {
       email: { type: "string", description: "E-mail address to admit." },
       firstName: { type: "string", description: "Optional first name, used if an invitation e-mail is needed." },
       lastName: { type: "string", description: "Optional last name, used if an invitation e-mail is needed." },
+      relationId: {
+        type: "string",
+        format: "uuid",
+        description:
+          "Optional id of this organization's existing person Relation for them, such as one just " +
+          "created on request. Their account is linked to it at first sign-in instead of a new " +
+          "Relation being made. Omit it when no Relation was asked for.",
+      },
       role: {
         type: "string",
-        description: "A role key from this organization's AccessRole catalogue, applied on first sign-in. Read the catalogue before choosing; do not invent a key.",
+        description: "A role key, applied on first sign-in.",
         "x-osf-reference": { entity: "AccessRole", valueField: "key" },
       },
     },
@@ -111,12 +121,46 @@ export function sessionMayInviteEmployees(
   return (session.roles ?? []).includes(EMPLOYEE_INVITATION_ADMIN_ROLE);
 }
 
+/**
+ * invite_employee with the declared role keys spelled out in its `role`
+ * field. The model cannot read the AccessRole catalogue in every session, and
+ * a guessed key ("finance.viewer") is refused as a write — so the keys travel
+ * with the tool. No `enum`: an organization's custom role ids stay valid.
+ */
+export function inviteEmployeeTool(roles: readonly string[] = declaredEmployeeInvitationRoles()): Tool {
+  if (roles.length === 0) return INVITE_EMPLOYEE;
+  const choices = roles.map((role) => {
+    const en = roleLabel(role, "en");
+    const nl = roleLabel(role, "nl");
+    const words = [en, nl !== en ? nl : undefined].filter(Boolean).join(" / ");
+    return words ? `${role} (${words})` : role;
+  });
+  const schema = INVITE_EMPLOYEE.inputSchema as { properties: Record<string, Record<string, unknown>> };
+  return {
+    ...INVITE_EMPLOYEE,
+    inputSchema: {
+      ...INVITE_EMPLOYEE.inputSchema,
+      properties: {
+        ...schema.properties,
+        role: {
+          ...schema.properties.role,
+          description:
+            "The role applied on first sign-in, as one of these keys exactly as written: " +
+            `${choices.join("; ")}. Match the person's wording to a label here and name the ` +
+            "role to them by that label, not its key; a custom role id of this organization " +
+            "is also accepted. Do not invent a key.",
+        },
+      },
+    },
+  };
+}
+
 /** The employee-invitation tools this session is shown. */
 export function employeeInvitationToolsForSession(
   session: Pick<TrustedSessionContext, "roles">,
 ): Tool[] {
   return sessionMayInviteEmployees(session)
-    ? [INVITE_EMPLOYEE, LIST_INVITATIONS, REVOKE_INVITATION]
+    ? [inviteEmployeeTool(), LIST_INVITATIONS, REVOKE_INVITATION]
     : [];
 }
 
@@ -144,8 +188,16 @@ export function publicEmployeeAdmission(admission: EmployeeAdmission): Record<st
     : admission.delivery === "not_required"
     ? {
         reason: "existing_organization_member",
-        message: "This person already belongs to the Keycloak organization. No e-mail was sent. The role awaits their next sign-in.",
-        nextStep: "The person must sign out and sign in again with this account. There is no e-mail invitation to accept.",
+        message: admission.accessNotice === "sent"
+          ? "This person already has an account in this organization, so the role was admitted directly. The identity provider e-mailed them about it (an organization invitation whose link only confirms they are a member). The role applies when they sign out and sign in again."
+          : admission.accessNotice === "failed"
+          ? "This person already has an account in this organization, so the role was admitted directly, but no e-mail could be sent. The role applies at their next sign-in."
+          : "This person already belongs to the Keycloak organization. No e-mail was sent. The role awaits their next sign-in.",
+        nextStep: admission.accessNotice === "sent"
+          ? "Tell the person they received an e-mail about their access, and that they sign out and sign in again with their existing account for the role to apply."
+          : admission.accessNotice === "failed"
+          ? "The person must sign out and sign in again with this account; tell them so directly, because no e-mail reached them."
+          : "The person must sign out and sign in again with this account. There is no e-mail invitation to accept.",
       }
     : {
         reason: "existing_invitation",
@@ -274,11 +326,13 @@ export async function callEmployeeInvitationTool(
   try {
     const email = stringArgument(args, "email", true)!;
     const role = stringArgument(args, "role", true)!;
+    const relationId = stringArgument(args, "relationId", false);
     const admission = await inviteEmployee(db, scoped, keycloak, {
       email,
       firstName: stringArgument(args, "firstName", false),
       lastName: stringArgument(args, "lastName", false),
       role: role as EmployeeInvitationRole,
+      ...(relationId ? { relationId } : {}),
     });
     return succeeded(publicEmployeeAdmission(admission));
   } catch (error) {

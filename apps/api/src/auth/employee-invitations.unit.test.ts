@@ -89,4 +89,22 @@ describe("invitation log lines", () => {
     expect(logged.some((line) => line.includes(`revoked invitation ${row.id}`))).toBe(true);
     expect(logged.filter((line) => line.includes(ADDRESS))).toEqual([]);
   });
+
+  test("an existing member is mailed an organization invitation; a failed mail keeps the admission", async () => {
+    const calls: string[] = [];
+    const notifying = (fail: boolean) => ({ ...keycloak(false),
+      async inviteExistingMember(organizationId: string, email: string) { calls.push(`${organizationId} ${email}`); if (fail) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "smtp", 500); return true; },
+    }) as unknown as KeycloakOrganizationMembersClient;
+    await expect(inviteEmployee(db, session, notifying(false), { email: ADDRESS, role: "org_employee" }))
+      .resolves.toMatchObject({ delivery: "not_required", accessNotice: "sent" });
+    expect(calls).toEqual([`org-1 ${ADDRESS}`]);
+    await expect(inviteEmployee(db, session, notifying(true), { email: ADDRESS, role: "org_employee" }))
+      .resolves.toMatchObject({ delivery: "not_required", accessNotice: "failed" });
+    expect(logged.some((line) => line.includes('"access_notice_failed"'))).toBe(true);
+    const missing = { ...keycloak(false), async inviteExistingMember() { return false; } } as unknown as KeycloakOrganizationMembersClient;
+    await expect(inviteEmployee(db, session, missing, { email: ADDRESS, role: "org_employee" }))
+      .resolves.toMatchObject({ accessNotice: "failed" });
+    expect(logged.some((line) => line.includes('"MEMBER_NOT_FOUND"'))).toBe(true);
+    expect(logged.filter((line) => line.includes(ADDRESS))).toEqual([]);
+  });
 });

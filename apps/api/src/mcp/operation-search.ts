@@ -158,27 +158,89 @@ export function parseOperationExecuteArguments(value: unknown): {
   };
 }
 
+/** Words a model adds around its intent that would match nearly every operation. */
+const FILLER_WORDS = new Set([
+  "a", "an", "the", "to", "of", "in", "on", "for", "with", "and", "or", "as", "by", "this", "that", "new",
+  "de", "het", "een", "en", "of", "van", "voor", "met", "naar", "in", "op", "nieuw", "nieuwe",
+]);
+
+/** The query's distinct words, lower-cased; separators like `.`, `_` and `-` split too. */
+function queryWords(query: string | undefined): string[] {
+  return [...new Set((query ?? "").toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word && !FILLER_WORDS.has(word)))];
+}
+
+/** Everything a search may match on: id, key and every authored language of name and description, as words. */
+function searchWords(definition: RuntimeOperationDefinition): string[] {
+  const texts = (value: unknown): string[] =>
+    typeof value === "string"
+      ? [value]
+      : value && typeof value === "object" && !Array.isArray(value)
+        ? Object.values(value).filter((text): text is string => typeof text === "string")
+        : [];
+  const camelSplit = (text: string) => text.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+  return [definition.id, definition.key, ...texts(definition.name), ...texts(definition.description)]
+    .filter((text): text is string => typeof text === "string")
+    .flatMap((text) => camelSplit(text).toLowerCase().split(/[^\p{L}\p{N}]+/u))
+    .filter(Boolean);
+}
+
+/**
+ * The verbs every CRUD Operation shares. A query of only these and an
+ * unmatched subject ("create payroll") must not fall back to every create.
+ */
+const GENERIC_ACTION_WORDS = new Set([
+  "create", "add", "list", "show", "get", "read", "find", "search", "update", "edit", "change", "delete", "remove",
+  "aanmaken", "maak", "toevoegen", "voeg", "tonen", "toon", "lijst", "ophalen", "lezen", "zoek", "zoeken",
+  "wijzigen", "wijzig", "bijwerken", "verwijderen", "verwijder",
+]);
+
+/**
+ * A query word matches a text word that starts with its first five letters
+ * (all of a shorter word): "invite" finds "invitation", "uitnodigen" finds
+ * "uitnodiging", "organization" finds "organisatie", "role" finds "roles".
+ * A plural also finds its singular: a text word of at least four letters
+ * that the query word starts with matches too, so "roles" finds "role" but
+ * "users" does not find "use". A word under three letters only matches
+ * itself.
+ */
+function wordMatches(word: string, words: readonly string[]): boolean {
+  if (word.length < 3) return words.includes(word);
+  const prefix = word.slice(0, Math.min(5, word.length));
+  return words.some((candidate) =>
+    candidate.startsWith(prefix) ||
+    (candidate.length >= 4 && candidate.length < word.length && word.startsWith(candidate)));
+}
+
 export function searchOperationDefinitions(input: {
   definitions: readonly RuntimeOperationDefinition[];
   allowedIds: ReadonlySet<string>;
   arguments: unknown;
   locale: ResolvedLocale;
+  /** Canonical text also matched on, for a definition whose shown text was replaced. */
+  canonicalText?: ReadonlyMap<string, Pick<RuntimeOperationDefinition, "name" | "description">>;
 }): { operations: Record<string, unknown>[]; nextCursor?: string } {
   const args = parseOperationSearchArguments(input.arguments);
-  const query = args.query?.toLocaleLowerCase(input.locale.tag);
-  const definitions = input.definitions
+  const words = queryWords(args.query);
+  const candidates = input.definitions
     .filter((definition) => input.allowedIds.has(definition.id))
     .map((definition) => {
       const name = localizedText(definition.name, input.locale) ?? definition.id;
       const description = localizedText(definition.description, input.locale) ?? name;
-      return { definition, name, description };
-    })
-    .filter(({ definition, name, description }) => {
-      if (!query) return true;
-      return [definition.id, definition.key, name, description]
-        .filter((candidate): candidate is string => typeof candidate === "string")
-        .some((candidate) => candidate.toLocaleLowerCase(input.locale.tag).includes(query));
-    })
+      const canonical = input.canonicalText?.get(definition.id);
+      const haystack = [
+        ...searchWords(definition),
+        ...(canonical ? searchWords({ ...definition, ...canonical }) : []),
+      ];
+      return { definition, name, description, haystack };
+    });
+  // Every word, in any authored language, before any single word: a model
+  // asks in its own words ("invite employee role"), not in one exact phrase
+  // of the person's locale. Both passes keep the id order the cursor needs.
+  const every = candidates.filter(({ haystack }) => words.every((word) => wordMatches(word, haystack)));
+  const definitions = (every.length > 0 || words.length < 2
+    ? every
+    : candidates.filter(({ haystack }) =>
+        words.some((word) => word.length >= 3 && !GENERIC_ACTION_WORDS.has(word) && wordMatches(word, haystack))))
     // The sort and the cursor comparison below must be the same total order:
     // the cursor is the last id of the previous page and the next page starts
     // at the first id greater than it, so a collation-sorted list would loop

@@ -45,6 +45,11 @@ export function __setRoleLabelsForTests(value: Record<string, RoleLabel> | null)
   roleLabels = value ?? (generatedRoleLabels as Record<string, RoleLabel>);
 }
 
+/** A role's authored label in a language (English when that language has none). */
+export function roleLabel(role: string, language: PhraseLanguage = "en"): string | undefined {
+  return inLanguage(roleLabels[role]?.label, language);
+}
+
 /** A persona: a role whose authored entry carries a `label`. */
 export type PersonaLabel = {
   role: string;

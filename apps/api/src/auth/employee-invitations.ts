@@ -91,13 +91,32 @@ export { IDENTITY_LINK_ADMIN_ROLE as EMPLOYEE_INVITATION_ADMIN_ROLE };
 export const EMPLOYEE_INVITATION_ROLES = ["org_admin", "org_employee"] as const;
 export type EmployeeInvitationRole = string;
 
+function declaredRoleTable(): Record<string, unknown> | undefined {
+  const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER ?? "http://localhost/realms/openshapeforge";
+  const realm = new URL(issuer).pathname.split("/realms/")[1]?.split("/")[0] ?? "";
+  return (generatedRoleComposites as Record<string, { clients: Record<string, Record<string, unknown>> }>)[realm]?.clients[memberRoleClientId()];
+}
+
 export function isEmployeeInvitationRole(value: string): value is EmployeeInvitationRole {
   if (customRoleId(value)) return true;
   if (accessPolicy.roles.length && !accessPolicy.roles.includes(value)) return false;
-  const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER ?? "http://localhost/realms/openshapeforge";
-  const realm = new URL(issuer).pathname.split("/realms/")[1]?.split("/")[0] ?? "";
-  const table = (generatedRoleComposites as Record<string, { clients: Record<string, Record<string, unknown>> }>)[realm]?.clients[memberRoleClientId()];
+  const table = declaredRoleTable();
   return Boolean(table && Object.hasOwn(table, value));
+}
+
+/**
+ * The declared role keys an invitation may pre-select, in the access policy's
+ * authored order — the same set isEmployeeInvitationRole accepts, minus an
+ * organization's custom roles, which live in its database. Offered to the
+ * model so it never has to guess a key.
+ */
+export function declaredEmployeeInvitationRoles(): string[] {
+  const table = declaredRoleTable();
+  if (!table) return [];
+  const declared = Object.keys(table);
+  return accessPolicy.roles.length
+    ? accessPolicy.roles.filter((role) => declared.includes(role))
+    : declared;
 }
 
 /**
@@ -182,6 +201,8 @@ export type EmployeeInvitation = {
 
 export type EmployeeAdmission = EmployeeInvitation & {
   delivery: "sent" | "not_required" | "already_pending";
+  /** An existing member is mailed an organization invitation instead (Keycloak invite-existing-user). */
+  accessNotice?: "sent" | "failed";
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -295,7 +316,7 @@ export async function inviteEmployee(
     throw new HttpError(
       400,
       "VALIDATION",
-      "role must be a declared organization role.",
+      `role must be a declared organization role key or a custom role id; declared keys: ${declaredEmployeeInvitationRoles().join(", ")}.`,
     );
   }
   const actor = session.relation?.identityId ?? session.userId;
@@ -332,11 +353,33 @@ export async function inviteEmployee(
   const invitation = await withDbSession(db, session, (trx) =>
     recordEmployeeInvitation(trx, session.tenantId, actor, input, email),
   );
+  // Keycloak sends no invite-user mail to an existing member; its
+  // invite-existing-user mail tells them about the new access instead. A failure
+  // there leaves the admission in place and is reported, not thrown.
+  let accessNotice: EmployeeAdmission["accessNotice"];
+  if (delivery === "not_required" && keycloak.inviteExistingMember) {
+    try {
+      accessNotice = await keycloak.inviteExistingMember(organizationId, email) ? "sent" : "failed";
+      if (accessNotice === "failed") {
+        console.warn("[employee-invitation] " + JSON.stringify({
+          outcome: "access_notice_failed", tenantId: session.tenantId, organizationId, invitationId: invitation.id,
+          code: "MEMBER_NOT_FOUND", status: null,
+        }));
+      }
+    } catch (error) {
+      accessNotice = "failed";
+      console.warn("[employee-invitation] " + JSON.stringify({
+        outcome: "access_notice_failed", tenantId: session.tenantId, organizationId, invitationId: invitation.id,
+        code: error instanceof KeycloakAdminError ? error.code : "UNKNOWN",
+        status: error instanceof KeycloakAdminError ? error.status : null,
+      }));
+    }
+  }
   console.info("[employee-invitation] " + JSON.stringify({
     outcome: "admission_recorded", tenantId: session.tenantId, organizationId,
-    invitationId: invitation.id, actor, role: input.role, delivery,
+    invitationId: invitation.id, actor, role: input.role, delivery, ...(accessNotice ? { accessNotice } : {}),
   }));
-  return { ...invitation, delivery };
+  return { ...invitation, delivery, ...(accessNotice ? { accessNotice } : {}) };
 }
 
 /** Shared persistence after Keycloak confirms membership or an invitation; caller owns authorization. */

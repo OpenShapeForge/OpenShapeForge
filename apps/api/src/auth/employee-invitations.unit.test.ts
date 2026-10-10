@@ -46,9 +46,11 @@ describe("invitation log lines", () => {
     id: "33333333-3333-4333-8333-333333333333", email: ADDRESS, role: null, first_name: null, last_name: null,
     status: "pending", invited_by: session.userId, invited_at: new Date(0).toISOString(), revoked_at: null,
   };
+  const jobs: (readonly unknown[])[] = [];
   const connection: DatabaseConnection = {
     async executeQuery<R>(query: CompiledQuery): Promise<QueryResult<R>> {
-      if (query.sql.includes("from platform.tenants")) return { rows: [{ keycloak_organization_id: "org-1", keycloak_realm: "realm" }] as R[] };
+      if (query.sql.includes("from platform.tenants")) return { rows: [{ keycloak_organization_id: "org-1", keycloak_realm: "realm", slug: "acme", name: "Acme" }] as R[] };
+      if (query.sql.includes("\"platform\".\"jobs\"")) { jobs.push(query.parameters); return { rows: [{ id: "job-1", status: "pending" }] as R[] }; }
       if (query.sql.includes("platform.employee_invitations")) return { rows: [row] as R[] };
       return { rows: [] };
     },
@@ -87,6 +89,20 @@ describe("invitation log lines", () => {
     expect(logged.some((line) => line.includes('"admission_recorded"') && line.includes(row.id))).toBe(true);
     expect(logged.some((line) => line.includes('"keycloak_failed"'))).toBe(true);
     expect(logged.some((line) => line.includes(`revoked invitation ${row.id}`))).toBe(true);
+    expect(logged.filter((line) => line.includes(ADDRESS))).toEqual([]);
+  });
+
+  test("an existing member is mailed an organization invitation; a failed mail keeps the admission", async () => {
+    const calls: string[] = [];
+    const notifying = (fail: boolean) => ({ ...keycloak(false),
+      async inviteExistingMember(organizationId: string, email: string) { calls.push(`${organizationId} ${email}`); if (fail) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "smtp", 500); return true; },
+    }) as unknown as KeycloakOrganizationMembersClient;
+    await expect(inviteEmployee(db, session, notifying(false), { email: ADDRESS, role: "org_employee" }))
+      .resolves.toMatchObject({ delivery: "not_required", accessNotice: "sent" });
+    expect(calls).toEqual([`org-1 ${ADDRESS}`]);
+    await expect(inviteEmployee(db, session, notifying(true), { email: ADDRESS, role: "org_employee" }))
+      .resolves.toMatchObject({ delivery: "not_required", accessNotice: "failed" });
+    expect(logged.some((line) => line.includes('"access_notice_failed"'))).toBe(true);
     expect(logged.filter((line) => line.includes(ADDRESS))).toEqual([]);
   });
 });

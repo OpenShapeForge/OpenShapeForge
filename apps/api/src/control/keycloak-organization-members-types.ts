@@ -116,6 +116,13 @@ export type KeycloakOrganizationMembersClient = {
    * message here repeats that rather than inventing a different explanation).
    */
   inviteUser(organizationId: string, input: InviteOrganizationMemberInput): Promise<void>;
+  /**
+   * Mail an organization invitation to an address that already belongs to the
+   * organization (Keycloak `invite-existing-user`), so a person given a new role
+   * hears about it through the realm's own mail. Resolves false when no member
+   * has this address.
+   */
+  inviteExistingMember?(organizationId: string, email: string): Promise<boolean>;
   /** Re-send the same pending invitation without accepting new recipient or role input. */
   resendInvitation?(organizationId: string, invitationId: string): Promise<void>;
   /**

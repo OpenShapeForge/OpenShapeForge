@@ -52,7 +52,7 @@ describe("employeeInvitationToolsForSession", () => {
       roles: [EMPLOYEE_INVITATION_ADMIN_ROLE],
     }).find((tool) => tool.name === INVITE_EMPLOYEE_TOOL)!;
     expect(invite.title).toBe("Admit an employee");
-    expect(invite.description).toContain("receives no redundant mail");
+    expect(invite.description).toContain("is e-mailed an organization invitation with the sign-in link");
     expect(invite.description).toContain("reused without resending");
     expect(invite.description).toContain("status pending means the application role awaits sign-in");
   });
@@ -82,6 +82,11 @@ describe("employeeInvitationToolsForSession", () => {
       message: "This person already belongs to the Keycloak organization. No e-mail was sent. The role awaits their next sign-in.",
       nextStep: "The person must sign out and sign in again with this account. There is no e-mail invitation to accept.",
     });
+    expect(publicEmployeeAdmission({ ...invitation, delivery: "not_required", accessNotice: "sent" })).toMatchObject({
+      reason: "existing_organization_member",
+      nextStep: "Tell the person to open the e-mail and sign in with their existing account; the role applies then.",
+    });
+    expect(String(publicEmployeeAdmission({ ...invitation, delivery: "not_required", accessNotice: "failed" }).message)).toContain("no e-mail could be sent");
     expect(publicEmployeeAdmission({ ...invitation, delivery: "already_pending" })).toMatchObject({
       delivery: "already_pending",
       reason: "existing_invitation",

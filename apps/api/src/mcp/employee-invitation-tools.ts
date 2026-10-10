@@ -41,7 +41,7 @@ const INVITE_EMPLOYEE: Tool = {
   description:
     "Admit an employee or colleague into this organization with a pre-selected role. " +
     "A person not yet in the Keycloak organization receives an invitation e-mail. Someone who is " +
-    "already a member receives no redundant mail and can sign in again immediately. An " +
+    "already a member is e-mailed an organization invitation with the sign-in link instead, and can sign in again immediately. An " +
     "existing pending invitation is reused without resending it. Report the returned delivery " +
     "and nextStep exactly: status pending means the application role awaits sign-in, not that an " +
     "e-mail was sent or must be accepted. For organization administrators.",
@@ -144,8 +144,16 @@ export function publicEmployeeAdmission(admission: EmployeeAdmission): Record<st
     : admission.delivery === "not_required"
     ? {
         reason: "existing_organization_member",
-        message: "This person already belongs to the Keycloak organization. No e-mail was sent. The role awaits their next sign-in.",
-        nextStep: "The person must sign out and sign in again with this account. There is no e-mail invitation to accept.",
+        message: admission.accessNotice === "sent"
+          ? "This person already has an account in this organization, so the role was admitted directly. The identity provider e-mailed them an organization invitation with the sign-in link. The role applies at their next sign-in."
+          : admission.accessNotice === "failed"
+          ? "This person already has an account in this organization, so the role was admitted directly, but no e-mail could be sent. The role applies at their next sign-in."
+          : "This person already belongs to the Keycloak organization. No e-mail was sent. The role awaits their next sign-in.",
+        nextStep: admission.accessNotice === "sent"
+          ? "Tell the person to open the e-mail and sign in with their existing account; the role applies then."
+          : admission.accessNotice === "failed"
+          ? "The person must sign out and sign in again with this account; tell them so directly, because no e-mail reached them."
+          : "The person must sign out and sign in again with this account. There is no e-mail invitation to accept.",
       }
     : {
         reason: "existing_invitation",

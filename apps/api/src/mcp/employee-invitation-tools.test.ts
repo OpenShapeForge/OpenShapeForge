@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   employeeInvitationToolsForSession,
   INVITE_EMPLOYEE_TOOL,
+  inviteEmployeeTool,
   LIST_INVITATIONS_TOOL,
   REVOKE_INVITATION_TOOL,
   publicEmployeeAdmission,
@@ -93,5 +94,20 @@ describe("employeeInvitationToolsForSession", () => {
       nextStep: "Keycloak retained the existing invitation; this operation did not resend it. " +
         "Revoke and admit again if a fresh message is required.",
     });
+  });
+});
+
+describe("inviteEmployeeTool", () => {
+  test("spells out the declared role keys with their labels, without an enum", () => {
+    const tool = inviteEmployeeTool(["finance_viewer", "org_employee"]);
+    const role = (tool.inputSchema as unknown as { properties: { role: { description: string; enum?: unknown } } }).properties.role;
+    expect(role.description).toContain("finance_viewer;");
+    expect(role.description).toContain("org_employee (");
+    expect(role.description).toContain("Do not invent a key");
+    expect(role.enum).toBeUndefined();
+  });
+  test("keeps the plain field when no roles are declared", () => {
+    const role = (inviteEmployeeTool([]).inputSchema as unknown as { properties: { role: { description: string } } }).properties.role;
+    expect(role.description).toBe("A role key, applied on first sign-in.");
   });
 });

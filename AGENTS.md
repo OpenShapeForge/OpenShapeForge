@@ -137,3 +137,71 @@ and the applicable required checks, without separate approval from Hans.
 Coordinate package and host dependencies with their owners. This permission
 applies within the agreed task scope; local-only work stays local and product
 acceptance remains with Hans. Follow protected branches and environment boundaries.
+
+## Magical Coding Device
+
+This repository is onboarded to the MCD project `osf` as a library: it
+publishes `@openshapeforge/compiler` and the runtime-contract packages that a
+host repo depends on (see `.mcd/repo.yaml`, `docs/consuming.md`). `osf-packages`
+is the project's primary repo. MCD agents working here must not touch
+`.github/**` (workflow changes go through a human) and must not push to `main`
+or `develop` directly.
+
+## Existing pipelines
+
+- **`.github/workflows/ci.yml`** ("CI") — triggers on every pull request and
+  on push to `main`/`develop`. Jobs: `gates` (install, `bun run generate`,
+  typecheck all workspaces, build `apps/web` and `apps/admin`, unit tests for
+  the compiler/foundation packages/admin/observability/web/connectors/
+  workflow-layout, `check:generated`, `check:authoring-local`,
+  `check:authoring-schemas`, `check:notices`, `check:required-checks`),
+  `keycloak-spi` (Maven build + tests of the Keycloak SPI and login theme),
+  `helm` (`helm lint`/`helm template` of `deploy/helm/openshapeforge-api`),
+  `db-tests` (migration/drift and connector database tests against a real
+  Postgres), `scan` (Trivy filesystem/secret scan). No deploy, no registry
+  writes.
+- **`.github/workflows/api-e2e.yml`** ("API e2e") — pull_request, push,
+  workflow_dispatch. Runs the GraphQL/REST e2e suite against the local
+  compose stack (Postgres + Keycloak). Uses the local
+  `KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API` dev secret and the
+  job's `GH_TOKEN`.
+- **`.github/workflows/web-e2e.yml`** ("Web browser e2e") — pull_request,
+  push, workflow_dispatch. Playwright e2e for `apps/web` against local dev
+  secrets (`AUTH_SECRET`, `AUTH_KEYCLOAK_SECRET`,
+  `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET`, all local-dev-only values).
+- **`.github/workflows/docker-api.yml`** ("API image") — pull_request, push,
+  workflow_dispatch. Builds `apps/api`'s Docker image; publishes to `ghcr.io`
+  using the job's `GITHUB_TOKEN` only on qualifying push refs (forks/PRs get
+  a read-only token and never push).
+- **`.github/workflows/docker-keycloak.yml`** ("Keycloak image") — same
+  trigger/publish shape as `docker-api.yml`, for the Keycloak image, `ghcr.io`,
+  `GITHUB_TOKEN`.
+- **`.github/workflows/package-compiler.yml`** ("Package compiler") — push to
+  `main`/`hans/dev`, pull_request (path-filtered to `packages/**`,
+  `bun.lock`, `docs/consuming.md`, this workflow), workflow_dispatch. `pack`
+  job builds installable tarballs for the compiler + its two public runtime
+  contract packages and proves them by reinstalling and regenerating this
+  repo's own artifacts; uploads a run artifact. `publish` job publishes every
+  non-private workspace package to the **GitHub Packages npm registry**
+  (`npm.pkg.github.com`) — `latest` on `main` version bumps, `<version>-dev.<sha>`
+  on `hans/dev`. Secret: `GITHUB_TOKEN`.
+- **`.github/workflows/deploy.yml`** ("Deploy") — workflow_dispatch only,
+  GitHub environment `dev`. Helm-upgrades the API + migrate Job + optional
+  Keycloak subchart onto OpenShapeForge's own Scaleway Kapsule cluster
+  (`api.openshapeforge.eu`). Pulls images from `ghcr.io` with the job's
+  `GITHUB_TOKEN` (or secret `GHCR_PULL_TOKEN` if set). Secrets:
+  `SCW_ACCESS_KEY`, `SCW_SECRET_KEY`, `SCW_DEFAULT_PROJECT_ID`,
+  `SCW_DEFAULT_ORGANIZATION_ID`, `SCW_CLUSTER_ID`. Application credentials
+  (DB URLs, Keycloak client secrets, admin passwords) are pulled at run time
+  from Scaleway Secret Manager, provisioned by Terraform in a separate
+  `OpenShapeForge-Base` repo — not stored as GitHub secrets. This deploy
+  targets OpenShapeForge's own hosted environment, independent of this
+  project's `preview`/`staging`/`production` targets.
+- **`.github/workflows/e2e-cluster.yml`** ("E2E against cluster") —
+  workflow_dispatch only, GitHub environment `dev`. Runs the e2e suite
+  against the deployed cluster from `deploy.yml`. Same five Scaleway
+  secrets, plus a Keycloak client secret fetched from Scaleway Secret
+  Manager at run time.
+- **`.github/workflows/backend-agent.yml`** ("Backend agent") — triggers on
+  an issue being labeled `backend-agent-work`; currently a placeholder step,
+  no build/test/deploy.

@@ -1713,6 +1713,12 @@ test("context paths follow canonical relationship graphs for homes and project m
     expect(build).toThrow("matching scalar field");
     owner.contract.interfaces!.web!.recordContext.records![0]!.when = { missing: "value" };
     expect(build).toThrow("matching scalar field");
+    end.contract.model.fields.push(field("priority", { osfType: "integer", baseType: "integer" }), field("startsOn", { osfType: "date", baseType: "date" }));
+    owner.contract.interfaces!.web!.recordContext.records![0]!.when = { priority: 1, startsOn: "2026-10-10" };
+    expect(build().entities[name!]!.views.record!.layout.context.records![0]!.when).toEqual({ priority: 1, startsOn: "2026-10-10" });
+    owner.contract.interfaces!.web!.recordContext.records![0]!.when = { priority: 1.5 };
+    expect(build).toThrow("matching scalar field");
+    end.contract.model.fields.splice(-2);
     delete owner.contract.interfaces!.web!.recordContext.records![0]!.when;
     owner.contract.interfaces!.web!.recordContext.records![0]!.status = { field: "name", values: { selected: "success" } };
     owner.contract.interfaces!.web!.recordContext.records![0]!.tone = "subtle";

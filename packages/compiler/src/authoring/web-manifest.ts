@@ -980,8 +980,9 @@ function projectEntity(
     if (!display || display.baseType !== "string" || display.cardinality === "collection") throw new Error(`${entityName}: context record display field ${displayField} must be a single string.`);
     for (const [key, value] of Object.entries(definition.when ?? {})) {
       const field = owner.contract.model.fields.find(field => field.key === key);
-      if (!field || field.cardinality === "collection" || !["string", "number", "boolean"].includes(field.baseType)
-        || (value !== null && typeof value !== field.baseType)) throw new Error(`${entityName}: context condition ${key} requires a matching scalar field.`);
+      const valueType = field && contextConditionValueTypes[field.baseType];
+      if (!field || field.cardinality === "collection" || !valueType
+        || (value !== null && (typeof value !== valueType || (field.baseType === "integer" && !Number.isInteger(value))))) throw new Error(`${entityName}: context condition ${key} requires a matching scalar field.`);
     }
     if (definition.status) {
       const statusField = owner.contract.model.fields.find(field => field.key === definition.status!.field);
@@ -1613,6 +1614,11 @@ function projectStandalone(
 }
 
 /** Project resolved entity contracts into the versioned browser interface contract. */
+/** JSON value type of a context condition, by field base type; dates compare as their ISO strings. */
+const contextConditionValueTypes: Record<string, "string" | "number" | "boolean" | undefined> = {
+  string: "string", date: "string", datetime: "string", integer: "number", number: "number", boolean: "boolean",
+};
+
 export function buildWebManifest(
   entities: readonly Pick<CompiledEntityInfo, "slug" | "contract">[],
   options: WebManifestOptions = {},

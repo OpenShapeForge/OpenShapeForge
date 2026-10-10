@@ -11,8 +11,10 @@ import {
   audienceAndPresentationInstruction,
   vocabularySentence,
   buildServerInstructions,
+  EFFICIENCY_GUIDANCE,
   INSTRUCTIONS,
   languageInstruction,
+  PEOPLE_AND_ACCESS_GUIDANCE,
 } from "../server-instructions.js";
 import { UPDATE_INSTRUCTION } from "../update-notices.js";
 
@@ -134,5 +136,21 @@ describe("languageInstruction", () => {
     expect(languageInstruction(resolveLocale({ user: null, realmDefault: "en" }))).toContain(
       "reads English (en), from this deployment's default",
     );
+  });
+});
+
+describe("working efficiently, and people and access", () => {
+  const base = { opening: null, hasConnectors: false, oauthCallbackUrl: null, locale: nl, client };
+  it("always tells the model to plan, not guess, and when to stop searching", () => {
+    const text = buildServerInstructions(base);
+    expect(text).toContain(EFFICIENCY_GUIDANCE);
+    expect(text).toContain("Never guess an identifier, role key or allowed value");
+    expect(text).toContain("stop and tell the person");
+    expect(text).not.toContain("People and access");
+  });
+  it("explains that access is one invite_employee call only to a session offered it", () => {
+    const text = buildServerInstructions({ ...base, peopleAndAccess: true });
+    expect(text).toContain(PEOPLE_AND_ACCESS_GUIDANCE);
+    expect(text.indexOf(EFFICIENCY_GUIDANCE)).toBeLessThan(text.indexOf(PEOPLE_AND_ACCESS_GUIDANCE));
   });
 });

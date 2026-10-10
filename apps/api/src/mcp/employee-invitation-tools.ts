@@ -18,6 +18,7 @@
  */
 import type { CallToolResult, Tool } from "@modelcontextprotocol/server";
 import {
+  declaredEmployeeInvitationRoles,
   EMPLOYEE_INVITATION_ADMIN_ROLE,
   inviteEmployee,
   listInvitations,
@@ -30,6 +31,7 @@ import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import type { KeycloakOrganizationMembersClient } from "../control/keycloak-organization-members.js";
+import { roleLabel } from "./session-labels.js";
 
 export const INVITE_EMPLOYEE_TOOL = "invite_employee";
 export const LIST_INVITATIONS_TOOL = "list_invitations";
@@ -53,7 +55,7 @@ const INVITE_EMPLOYEE: Tool = {
       lastName: { type: "string", description: "Optional last name, used if an invitation e-mail is needed." },
       role: {
         type: "string",
-        description: "A role key from this organization's AccessRole catalogue, applied on first sign-in. Read the catalogue before choosing; do not invent a key.",
+        description: "A role key, applied on first sign-in.",
         "x-osf-reference": { entity: "AccessRole", valueField: "key" },
       },
     },
@@ -111,12 +113,45 @@ export function sessionMayInviteEmployees(
   return (session.roles ?? []).includes(EMPLOYEE_INVITATION_ADMIN_ROLE);
 }
 
+/**
+ * invite_employee with the declared role keys spelled out in its `role`
+ * field. The model cannot read the AccessRole catalogue in every session, and
+ * a guessed key ("finance.viewer") is refused as a write — so the keys travel
+ * with the tool. No `enum`: an organization's custom role ids stay valid.
+ */
+export function inviteEmployeeTool(roles: readonly string[] = declaredEmployeeInvitationRoles()): Tool {
+  if (roles.length === 0) return INVITE_EMPLOYEE;
+  const choices = roles.map((role) => {
+    const en = roleLabel(role, "en");
+    const nl = roleLabel(role, "nl");
+    const words = [en, nl !== en ? nl : undefined].filter(Boolean).join(" / ");
+    return words ? `${role} (${words})` : role;
+  });
+  const schema = INVITE_EMPLOYEE.inputSchema as { properties: Record<string, Record<string, unknown>> };
+  return {
+    ...INVITE_EMPLOYEE,
+    inputSchema: {
+      ...INVITE_EMPLOYEE.inputSchema,
+      properties: {
+        ...schema.properties,
+        role: {
+          ...schema.properties.role,
+          description:
+            "The role applied on first sign-in, as one of these keys exactly as written: " +
+            `${choices.join("; ")}. Match the person's wording to a label here; a custom role ` +
+            "id of this organization is also accepted. Do not invent a key.",
+        },
+      },
+    },
+  };
+}
+
 /** The employee-invitation tools this session is shown. */
 export function employeeInvitationToolsForSession(
   session: Pick<TrustedSessionContext, "roles">,
 ): Tool[] {
   return sessionMayInviteEmployees(session)
-    ? [INVITE_EMPLOYEE, LIST_INVITATIONS, REVOKE_INVITATION]
+    ? [inviteEmployeeTool(), LIST_INVITATIONS, REVOKE_INVITATION]
     : [];
 }
 

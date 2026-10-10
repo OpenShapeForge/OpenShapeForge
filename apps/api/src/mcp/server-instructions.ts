@@ -98,9 +98,10 @@ export const PEOPLE_AND_ACCESS_GUIDANCE =
   "call: invite_employee with their e-mail address and a role key from that " +
   "tool's own role list. It pre-selects the role for their first sign-in and " +
   "sends an invitation e-mail only when one is needed. A Relation is a " +
-  "contact record and grants no access: create it only when the person also " +
-  "asks for a contact record. Account role tools change an existing account " +
-  "and do not apply to someone who has only been invited.";
+  "separate contact record that grants no access by itself: when the person " +
+  "also asks for one, create it as well, never in place of the invitation. " +
+  "Account role tools change an existing account and do not apply to someone " +
+  "who has only been invited.";
 
 /**
  * The short reminder every generated `create`/`update` tool carries in its

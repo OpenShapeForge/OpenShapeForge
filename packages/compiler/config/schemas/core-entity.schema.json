@@ -1381,12 +1381,409 @@
               "additionalProperties": false,
               "required": ["tabs"],
               "properties": {
-                "preset": { "enum": ["main", "inbox-main-context"], "x-osf-i18n": { "title": { "en": "Page layout", "nl": "Pagina-indeling" }, "enum": { "main": { "en": "Main", "nl": "Hoofdinhoud" }, "inbox-main-context": { "en": "List, main and context", "nl": "Lijst, hoofdinhoud en context" } } } },
+                "preset": { "enum": ["main", "main-context", "inbox-main-context"], "x-osf-i18n": { "title": { "en": "Page layout", "nl": "Pagina-indeling" }, "enum": { "main": { "en": "Main", "nl": "Hoofdinhoud" }, "main-context": { "en": "Main and context", "nl": "Hoofdinhoud en context" }, "inbox-main-context": { "en": "List, main and context", "nl": "Lijst, hoofdinhoud en context" } } } },
+                "workspaceTabs": {
+                  "type": "boolean",
+                  "description": "Whether to show surrounding workspace tabs; omission inherits the normal shell. Internal record task tabs are unaffected.",
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Workspace tabs",
+                      "nl": "Werkruimtetabbladen"
+                    }
+                  }
+                },
                 "context": {
                   "type": "object",
                   "additionalProperties": false,
                   "required": ["fields"],
                   "properties": {
+                    "records": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "key",
+                          "path"
+                        ],
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "pattern": "^[a-z][A-Za-z0-9]*$",
+                            "x-osf-i18n": {
+                              "title": {
+                                "en": "Identifier",
+                                "nl": "Identificatie"
+                              }
+                            }
+                          },
+                          "label": {
+                            "$ref": "#/$defs/localizedText"
+                          },
+                          "path": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 4,
+                            "items": {
+                              "$ref": "#/$defs/fieldKey",
+                              "x-osf-choice": "relationship",
+                              "x-osf-i18n": {
+                                "title": {
+                                  "en": "Relationship",
+                                  "nl": "Relatie"
+                                }
+                              }
+                            },
+                            "x-osf-i18n": {
+                              "title": {
+                                "en": "Relationship path",
+                                "nl": "Relatiepad"
+                              }
+                            }
+                          },
+                          "displayField": {
+                            "$ref": "#/$defs/fieldKey",
+                            "x-osf-choice": "field",
+                            "x-osf-i18n": {
+                              "title": {
+                                "en": "Display field",
+                                "nl": "Weergaveveld"
+                              }
+                            }
+                          },
+                          "tone": {
+                            "enum": [
+                              "default",
+                              "subtle"
+                            ],
+                            "x-osf-i18n": {
+                              "title": {
+                                "en": "Emphasis",
+                                "nl": "Nadruk"
+                              },
+                              "enum": {
+                                "default": {
+                                  "en": "Default",
+                                  "nl": "Standaard"
+                                },
+                                "subtle": {
+                                  "en": "Subtle",
+                                  "nl": "Subtiel"
+                                }
+                              }
+                            }
+                          },
+                          "labelEmphasis": {
+                            "type": "boolean",
+                            "x-osf-i18n": {
+                              "title": {
+                                "en": "Emphasize label",
+                                "nl": "Label benadrukken"
+                              }
+                            }
+                          },
+                          "status": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "field",
+                              "values"
+                            ],
+                            "properties": {
+                              "field": {
+                                "$ref": "#/$defs/fieldKey",
+                                "x-osf-choice": "field",
+                                "x-osf-i18n": {
+                                  "title": {
+                                    "en": "Field",
+                                    "nl": "Veld"
+                                  }
+                                }
+                              },
+                              "values": {
+                                "type": "object",
+                                "minProperties": 1,
+                                "additionalProperties": {
+                                  "enum": [
+                                    "off",
+                                    "success",
+                                    "danger",
+                                    "warning"
+                                  ],
+                                  "x-osf-i18n": {
+                                    "title": {
+                                      "en": "Status color",
+                                      "nl": "Statuskleur"
+                                    },
+                                    "enum": {
+                                      "off": {
+                                        "en": "None",
+                                        "nl": "Geen"
+                                      },
+                                      "success": {
+                                        "en": "Success",
+                                        "nl": "Succes"
+                                      },
+                                      "danger": {
+                                        "en": "Danger",
+                                        "nl": "Gevaar"
+                                      },
+                                      "warning": {
+                                        "en": "Warning",
+                                        "nl": "Waarschuwing"
+                                      }
+                                    }
+                                  }
+                                },
+                                "x-osf-i18n": {
+                                  "title": {
+                                    "en": "Status colors",
+                                    "nl": "Statuskleuren"
+                                  }
+                                }
+                              }
+                            },
+                            "x-osf-i18n": {
+                              "title": {
+                                "en": "Status indicator",
+                                "nl": "Statusindicator"
+                              }
+                            }
+                          },
+                          "when": {
+                            "type": "object",
+                            "minProperties": 1,
+                            "propertyNames": {
+                              "$ref": "#/$defs/fieldKey",
+                              "x-osf-choice": "field",
+                              "x-osf-i18n": {
+                                "title": {
+                                  "en": "Field",
+                                  "nl": "Veld"
+                                }
+                              }
+                            },
+                            "additionalProperties": {
+                              "type": [
+                                "string",
+                                "number",
+                                "boolean",
+                                "null"
+                              ],
+                              "x-osf-i18n": {
+                                "title": {
+                                  "en": "Condition value",
+                                  "nl": "Voorwaardewaarde"
+                                }
+                              }
+                            },
+                            "x-osf-i18n": {
+                              "title": {
+                                "en": "Visibility conditions",
+                                "nl": "Zichtbaarheidsvoorwaarden"
+                              }
+                            }
+                          }
+                        },
+                        "x-osf-i18n": {
+                          "title": {
+                            "en": "Related record",
+                            "nl": "Gerelateerd record"
+                          }
+                        }
+                      },
+                      "x-osf-i18n": {
+                        "title": {
+                          "en": "Related records",
+                          "nl": "Gerelateerde records"
+                        }
+                      }
+                    },
+                    "contacts": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "relationship",
+                        "channelField",
+                        "valueField"
+                      ],
+                      "properties": {
+                        "channels": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "key",
+                              "types"
+                            ],
+                            "properties": {
+                              "key": {
+                                "type": "string",
+                                "pattern": "^[a-z][A-Za-z0-9]*$",
+                                "x-osf-i18n": {
+                                  "title": {
+                                    "en": "Identifier",
+                                    "nl": "Identificatie"
+                                  }
+                                }
+                              },
+                              "types": {
+                                "type": "array",
+                                "minItems": 1,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "x-osf-i18n": {
+                                    "title": {
+                                      "en": "Channel type",
+                                      "nl": "Kanaaltype"
+                                    }
+                                  }
+                                },
+                                "x-osf-i18n": {
+                                  "title": {
+                                    "en": "Channel types",
+                                    "nl": "Kanaaltypen"
+                                  }
+                                }
+                              },
+                              "label": {
+                                "$ref": "#/$defs/localizedText"
+                              },
+                              "when": {
+                                "type": "object",
+                                "minProperties": 1,
+                                "propertyNames": {
+                                  "pattern": "^[a-zA-Z][a-zA-Z0-9]*$",
+                                  "x-osf-choice": "field",
+                                  "x-osf-i18n": {
+                                    "title": {
+                                      "en": "Field",
+                                      "nl": "Veld"
+                                    }
+                                  }
+                                },
+                                "additionalProperties": {
+                                  "type": [
+                                    "string",
+                                    "boolean"
+                                  ],
+                                  "x-osf-i18n": {
+                                    "title": {
+                                      "en": "Condition value",
+                                      "nl": "Voorwaardewaarde"
+                                    }
+                                  }
+                                },
+                                "x-osf-i18n": {
+                                  "title": {
+                                    "en": "Visibility conditions",
+                                    "nl": "Zichtbaarheidsvoorwaarden"
+                                  }
+                                }
+                              }
+                            },
+                            "x-osf-i18n": {
+                              "title": {
+                                "en": "Contact channel",
+                                "nl": "Contactkanaal"
+                              }
+                            }
+                          },
+                          "x-osf-i18n": {
+                            "title": {
+                              "en": "Contact channels",
+                              "nl": "Contactkanalen"
+                            }
+                          }
+                        },
+                        "relationship": {
+                          "$ref": "#/$defs/fieldKey",
+                          "x-osf-choice": "relationship",
+                          "x-osf-i18n": {
+                            "title": {
+                              "en": "Relationship",
+                              "nl": "Relatie"
+                            }
+                          }
+                        },
+                        "channelField": {
+                          "$ref": "#/$defs/fieldKey",
+                          "x-osf-choice": "field",
+                          "x-osf-i18n": {
+                            "title": {
+                              "en": "Channel field",
+                              "nl": "Kanaalveld"
+                            }
+                          }
+                        },
+                        "valueField": {
+                          "$ref": "#/$defs/fieldKey",
+                          "x-osf-choice": "field",
+                          "x-osf-i18n": {
+                            "title": {
+                              "en": "Value field",
+                              "nl": "Waardeveld"
+                            }
+                          }
+                        },
+                        "preferredChannelField": {
+                          "$ref": "#/$defs/fieldKey",
+                          "x-osf-choice": "field",
+                          "x-osf-i18n": {
+                            "title": {
+                              "en": "Preferred channel field",
+                              "nl": "Voorkeurskanaalveld"
+                            }
+                          }
+                        },
+                        "language": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "relationship",
+                            "field"
+                          ],
+                          "properties": {
+                            "relationship": {
+                              "$ref": "#/$defs/fieldKey",
+                              "x-osf-choice": "relationship",
+                              "x-osf-i18n": {
+                                "title": {
+                                  "en": "Relationship",
+                                  "nl": "Relatie"
+                                }
+                              }
+                            },
+                            "field": {
+                              "$ref": "#/$defs/fieldKey",
+                              "x-osf-choice": "field",
+                              "x-osf-i18n": {
+                                "title": {
+                                  "en": "Field",
+                                  "nl": "Veld"
+                                }
+                              }
+                            }
+                          },
+                          "x-osf-i18n": {
+                            "title": {
+                              "en": "Language",
+                              "nl": "Taal"
+                            }
+                          }
+                        }
+                      },
+                      "x-osf-i18n": {
+                        "title": {
+                          "en": "Contact information",
+                          "nl": "Contactgegevens"
+                        }
+                      }
+                    },
                     "fields": {
                       "type": "array",
                       "uniqueItems": true,
@@ -1466,10 +1863,31 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "showInReadNavigation": {
+          "type": "boolean",
+          "description": "Show this supplementary tab in ordinary read navigation; edit forms and contextual selection retain it.",
+          "x-osf-i18n": {
+            "title": {
+              "en": "Show in read navigation",
+              "nl": "Tonen in leesnavigatie"
+            }
+          }
+        },
         "id": {
           "type": "string",
           "minLength": 1,
           "x-osf-i18n": { "title": { "en": "Id", "nl": "Id" } }
+        },
+        "icon": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Icon key shown with the group; the host resolves it.",
+          "x-osf-i18n": { "title": { "en": "Icon", "nl": "Icoon" } }
+        },
+        "visibleWhen": {
+          "$ref": "#/$defs/field/properties/visibility",
+          "description": "Show the group only while these conditions hold for the record being edited.",
+          "x-osf-i18n": { "title": { "en": "Visible when", "nl": "Zichtbaar wanneer" } }
         },
         "title": {
           "$ref": "#/$defs/localizedText",
@@ -1520,11 +1938,43 @@
       "required": ["name"],
       "properties": {
         "name": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "relationship" },
+        "through": {
+          "$ref": "#/$defs/fieldKey",
+          "x-osf-choice": "relationship"
+        },
         "view": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
         "overrides": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "presentation": {
+              "type": "object", "additionalProperties": false,
+              "required": ["kind", "titleField", "timestampField"],
+              "properties": {
+                "kind": { "const": "timeline" },
+                "titleField": {
+                  "$ref": "#/$defs/fieldKey",
+                  "x-osf-choice": "field"
+                },
+                "timestampField": {
+                  "$ref": "#/$defs/fieldKey",
+                  "x-osf-choice": "field"
+                },
+                "iconField": {
+                  "$ref": "#/$defs/fieldKey",
+                  "x-osf-choice": "field"
+                },
+                "icons": { "type": "object", "additionalProperties": { "type": "string", "enum": ["phone", "email", "whatsapp", "chat", "check", "clock"] } },
+                "descriptionField": {
+                  "$ref": "#/$defs/fieldKey",
+                  "x-osf-choice": "field"
+                },
+                "relatedField": {
+                  "$ref": "#/$defs/fieldKey",
+                  "x-osf-choice": "field"
+                }
+              }
+            },
             "columns": {
               "type": "array",
               "minItems": 1,
@@ -1941,18 +2391,23 @@
         "visibility": {
           "type": "object",
           "required": ["conditions"],
+          "x-osf-i18n": { "title": { "en": "Visibility", "nl": "Zichtbaarheid" } },
           "properties": {
             "conditions": {
               "type": "array",
+              "x-osf-i18n": { "title": { "en": "Conditions", "nl": "Voorwaarden" } },
               "items": {
                 "type": "object",
                 "required": ["field", "operator"],
+                "x-osf-i18n": { "title": { "en": "Condition", "nl": "Voorwaarde" } },
                 "properties": {
                   "field": {
-                    "type": "string"
+                    "type": "string",
+                    "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
                   },
                   "operator": {
                     "type": "string",
+                    "x-osf-i18n": { "title": { "en": "Operator", "nl": "Operator" } },
                     "enum": [
                       "eq",
                       "neq",
@@ -1966,13 +2421,16 @@
                       "isNotEmpty"
                     ]
                   },
-                  "value": {}
+                  "value": {
+                    "x-osf-i18n": { "title": { "en": "Value", "nl": "Waarde" } }
+                  }
                 }
               }
             },
             "logic": {
               "type": "string",
-              "enum": ["and", "or"]
+              "enum": ["and", "or"],
+              "x-osf-i18n": { "title": { "en": "Logic", "nl": "Logica" } }
             }
           }
         },
@@ -2014,6 +2472,8 @@
         "options": {
           "type": "object",
           "required": ["type"],
+          "if": { "properties": { "type": { "not": { "const": "static" } } }, "required": ["type"] },
+          "then": { "properties": { "presentation": false } },
           "properties": {
             "type": {
               "type": "string",
@@ -2030,9 +2490,19 @@
                   },
                   "label": {
                     "$ref": "#/$defs/localizedText"
+                  },
+                  "icon": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]*$",
+                    "description": "Icon key; the host resolves it and renders nothing for an unknown key."
                   }
                 }
               }
+            },
+            "presentation": {
+              "type": "string",
+              "enum": ["tiles"],
+              "description": "Render static options as icon tiles instead of a select. Only for type static."
             },
             "referentieGroep": {
               "type": "string"

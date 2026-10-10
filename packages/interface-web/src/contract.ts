@@ -117,6 +117,14 @@ export type WebFieldSuggestions = {
 export type WebFieldOption = {
   value: string;
   label: LocalizedText;
+  /** Icon key, e.g. for a choice tile. The host resolves it; an unknown key renders no icon. */
+  icon?: string;
+};
+
+/** Same condition shape as field visibility; `logic` defaults to `and`. */
+export type WebVisibilityCondition = {
+  conditions: Array<{ field: string; operator: "eq" | "neq" | "in" | "notIn" | "gt" | "lt" | "gte" | "lte" | "isEmpty" | "isNotEmpty"; value?: unknown }>;
+  logic?: "and" | "or";
 };
 
 export type WebEqualityConstraint = { eq: string | number | boolean };
@@ -139,6 +147,10 @@ export type WebFieldProjection = {
   /** Canonical protection metadata; the server remains the enforcement boundary. */
   fieldPolicy?: FieldValuePolicy;
   /** Explicit Web-only exception; defaults still come from the semantic registry. */
+  /**
+   * Renderer hint, e.g. `ChoiceTiles` for static options authored with `presentation: tiles`.
+   * A host without that renderer uses its default input for the field.
+   */
   presentation?: { component: string; props?: Record<string, unknown> };
   id: string;
   key: string;
@@ -161,10 +173,7 @@ export type WebFieldProjection = {
   };
   variables?: "none" | "whole" | "template" | "both";
   suggestions?: WebFieldSuggestions;
-  visibility?: {
-    conditions: Array<{ field: string; operator: "eq" | "neq" | "in" | "notIn" | "gt" | "lt" | "gte" | "lte" | "isEmpty" | "isNotEmpty"; value?: unknown }>;
-    logic?: "and" | "or";
-  };
+  visibility?: WebVisibilityCondition;
   options?: WebFieldOption[];
   optionSource?: WebFieldOptionSource;
   cardinality: "one" | "many";
@@ -184,11 +193,26 @@ export type WebFieldGroup = {
   id: string;
   title: LocalizedText;
   fields: string[];
+  /** Icon key shown with the group; the host resolves it. */
+  icon?: string;
+  /** The group applies only while these conditions hold for the draft being edited. */
+  visibleWhen?: WebVisibilityCondition;
   /** Per-field presentation-renderer overrides authored on a FieldRef; keyed by field key, sparse. */
   fieldOverrides?: Record<string, { render: { component: WebRendererKey } }>;
 };
 
+export type WebTimelinePresentation = {
+  kind: "timeline";
+  iconField?: string;
+  icons?: Record<string, "phone" | "email" | "whatsapp" | "chat" | "check" | "clock">;
+  titleField: string;
+  timestampField: string;
+  descriptionField?: string;
+  relatedField?: string;
+};
+
 export type WebCollectionView = {
+  presentation?: WebTimelinePresentation;
   id: string;
   kind: "collection";
   renderer: WebRendererKey;
@@ -229,6 +253,8 @@ export type WebRelationshipProjection = {
   positionColumn?: string;
   via?: string;
   through?: { field: string; column: string; target: string };
+  /** Canonical target list is scoped by its inverse association, not by target IDs in the browser. */
+  association?: { entityId: string; relationship: string; parentField: string };
   mutationSupport?: "unsupported" | "atomic";
   allowedDefinitions?: string[];
   constraints?: WebRelationshipConstraints;
@@ -257,9 +283,13 @@ export type WebRelationshipProjection = {
 };
 
 export type WebRecordTab = {
+  /** Supplemental data remains addressable through context and editable in forms. */
+  showInReadNavigation?: boolean;
   id: string;
   label: LocalizedText;
   groups: WebFieldGroup[];
+  /** The tab applies only while these conditions hold for the record shown; its groups carry it too. */
+  visibleWhen?: WebVisibilityCondition;
   relationshipId?: string;
   /** Named view owned by the relationship target selected by this placement. */
   targetView?: string;
@@ -269,7 +299,7 @@ export type WebRecordView = {
   id: string;
   kind: "record";
   renderer: WebRendererKey;
-  preset: "main" | "inbox-main-context";
+  preset: "main" | "main-context" | "inbox-main-context";
   modes: WebViewMode[];
   routes: {
     read?: string;
@@ -290,7 +320,8 @@ export type WebRecordView = {
   badges?: string[];
   layout: {
     tabs: WebRecordTab[];
-    context: { groups: WebFieldGroup[]; relationships: string[] };
+    workspaceTabs?: boolean;
+    context: { groups: WebFieldGroup[]; relationships: string[]; contacts?: WebContactContext; records?: WebRelatedRecordContext[] };
   };
   variableSources?: WebVariableSource[];
   labels: {
@@ -455,4 +486,24 @@ export type WebManifestOptions = {
   context?: string;
   /** Route language may differ from the default content language. */
   routeLocale?: "en" | "nl";
+};
+
+
+export type WebContactContext = {
+  channels?: Array<{ key: string; types: string[]; label?: LocalizedText; when?: Record<string, string | boolean> }>;
+  relationshipId: string;
+  channelField: string;
+  valueField: string;
+  preferredChannelField?: string;
+  language?: { relationshipId: string; field: string };
+};
+
+export type WebRelatedRecordContext = {
+  key: string; label: LocalizedText;
+  path: Array<{ entityId: string; relationshipId: string }>;
+  targetEntityId: string; displayField: string;
+  when?: Record<string, string | number | boolean | null>;
+  tone?: "default" | "subtle";
+  labelEmphasis?: boolean;
+  status?: { field: string; values: Record<string, "off" | "success" | "danger" | "warning"> };
 };

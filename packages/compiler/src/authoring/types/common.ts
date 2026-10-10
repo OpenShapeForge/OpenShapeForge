@@ -164,11 +164,15 @@ export interface ComputedField {
 export interface FieldOptionStatic {
   value: string;
   label: LocalizedText;
+  /** Icon key shown with the option, e.g. on a tile; the host resolves it. */
+  icon?: string;
 }
 
 export interface FieldOptions {
   type: "static" | "referentiedata" | "remote" | "dynamic" | "entity";
   items?: FieldOptionStatic[];
+  /** `tiles` renders static options as icon tiles instead of a select. */
+  presentation?: "tiles";
   source?: string;
   referentieGroep?: string;
   remoteUrl?: string;

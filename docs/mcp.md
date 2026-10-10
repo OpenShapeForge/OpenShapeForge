@@ -293,10 +293,7 @@ When the deployment selects the **searchable Operation projection**, the fixed
 `osf_search_operations` / `osf_execute_operation` pair also covers authorized
 entity CRUD and runtime provider Operations. Search returns the exact MCP input
 schema, including field withholding and concurrency controls, plus canonical
-interaction and prerequisite metadata. A covered CRUD Operation's result shows
-the description its dedicated tool would carry: assistant guidance, authored
-MCP instructions and the operation-written field note included. Matching stays
-on the canonical description in every authored language. Pagination uses `nextCursor`. Covered
+interaction and prerequisite metadata. Pagination uses `nextCursor`. Covered
 CRUD, authored operation and provider tools no longer consume individual slots
 in `tools/list`; tools without a canonical replacement remain advertised.
 The dedicated projection continues to offer its authored tool names.

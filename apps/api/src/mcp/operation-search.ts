@@ -199,8 +199,8 @@ export function searchOperationDefinitions(input: {
   allowedIds: ReadonlySet<string>;
   arguments: unknown;
   locale: ResolvedLocale;
-  /** Per-id description shown instead of the canonical one (never matched on). */
-  descriptions?: ReadonlyMap<string, string>;
+  /** Canonical text also matched on, for a definition whose shown text was replaced. */
+  canonicalText?: ReadonlyMap<string, Pick<RuntimeOperationDefinition, "name" | "description">>;
 }): { operations: Record<string, unknown>[]; nextCursor?: string } {
   const args = parseOperationSearchArguments(input.arguments);
   const words = queryWords(args.query);
@@ -208,9 +208,13 @@ export function searchOperationDefinitions(input: {
     .filter((definition) => input.allowedIds.has(definition.id))
     .map((definition) => {
       const name = localizedText(definition.name, input.locale) ?? definition.id;
-      const description = input.descriptions?.get(definition.id) ??
-        localizedText(definition.description, input.locale) ?? name;
-      return { definition, name, description, haystack: searchWords(definition) };
+      const description = localizedText(definition.description, input.locale) ?? name;
+      const canonical = input.canonicalText?.get(definition.id);
+      const haystack = [
+        ...searchWords(definition),
+        ...(canonical ? searchWords({ ...definition, ...canonical }) : []),
+      ];
+      return { definition, name, description, haystack };
     });
   // Every word, in any authored language, before any single word: a model
   // asks in its own words ("invite employee role"), not in one exact phrase

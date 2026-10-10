@@ -38,7 +38,8 @@ FROM quay.io/keycloak/keycloak:26.7.3@sha256:29be7252db0a106f1cd2ac17b9a56ff2668
 COPY --from=builder /build/target/openshapeforge-keycloak-spi.jar /opt/keycloak/providers/
 COPY --from=builder /build/providers/apple-identity-provider-*.jar /opt/keycloak/providers/
 # The child login theme inherits Keycloak v2 and changes only the passkey
-# registration label. Keeping it in this immutable image makes a realm's
+# registration label and skips password-field validation on passwordless forms.
+# Keeping it in this immutable image makes a realm's
 # loginTheme pin reproducible without a writable theme volume.
 COPY theme/openshapeforge /opt/keycloak/themes/openshapeforge
 RUN /opt/keycloak/bin/kc.sh build --db=postgres --health-enabled=true

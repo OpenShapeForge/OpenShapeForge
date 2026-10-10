@@ -36,10 +36,14 @@ authorization:
       - CaseFile.All.Read
       - CaseFile.All.ReadWrite
       - DocumentTypes.All.Delete
+      - Organization.All.Read
+      - Organization.All.ReadWrite
     create:
       - CaseFile.All.ReadWrite
+      - Organization.All.ReadWrite
     update:
       - CaseFile.All.ReadWrite
+      - Organization.All.ReadWrite
     delete:
       - DocumentTypes.All.Delete
   rowAccess:

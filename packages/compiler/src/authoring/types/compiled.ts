@@ -413,10 +413,13 @@ export interface CompiledTimelineConfig {
 }
 
 export interface CompiledViewGroup {
+  /** Supplemental data remains addressable through context and editable in forms. */
+  showInReadNavigation?: boolean;
   id: string;
   title?: LocalizedText;
   label?: LocalizedText;
   icon?: string;
+  visibleWhen?: VisibilityConfig;
   render?: CompiledViewRender;
   fields?: (string | CompiledFieldEntry)[];
   relationships?: CompiledRelationshipUsage[];
@@ -563,6 +566,8 @@ export type CompiledNamedPresentation =
   | CompiledWorkspaceView;
 
 export interface CompiledRelationshipUsage {
+  /** Present target records through a reference on the association entity. */
+  through?: string;
   render: CompiledViewRender;
   name: string;
   via?: string;
@@ -757,12 +762,13 @@ export interface CompiledEntityContract {
   interfaces?: {
     web?: {
       namedViews?: Record<string, CompiledEntityWebNamedViewDefinition>;
-      recordPreset?: "main" | "inbox-main-context";
+      recordPreset?: "main" | "main-context" | "inbox-main-context";
+      recordWorkspaceTabs?: boolean;
       fields?: Record<string, { render: import("./common.js").FieldRender }>;
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];
       collectionEmptyState?: { title: LocalizedText; description?: LocalizedText; illustration?: "empty-collection"; primaryAction?: "create" };
-      recordContext?: { fields: string[]; relationships?: string[] };
+      recordContext?: { fields: string[]; relationships?: string[]; contacts?: import("./views.js").ContactContextPresentation; records?: import("./views.js").RelatedRecordContextPresentation[] };
       /** Authored layout-renderer exceptions; hosts resolve these opaque keys. */
       renderers?: {
         collection?: string;

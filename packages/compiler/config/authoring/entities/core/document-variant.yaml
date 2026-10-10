@@ -12,10 +12,11 @@ domains: [documents]
 authorization:
   roles:
     # Same roles as Document: a variant is part of its document, not of the template.
-    read: [CaseFile.All.Read, CaseFile.All.ReadWrite]
-    create: [CaseFile.All.ReadWrite]
-    update: [CaseFile.All.ReadWrite]
-    delete: [CaseFile.All.ReadWrite]
+    read: [CaseFile.All.Read, CaseFile.All.ReadWrite, Organization.All.Read, Organization.All.ReadWrite]
+    create: [CaseFile.All.ReadWrite, Organization.All.ReadWrite]
+    # The block Operations below derive their roles from this update list.
+    update: [CaseFile.All.ReadWrite, Organization.All.ReadWrite]
+    delete: [CaseFile.All.ReadWrite, Organization.All.ReadWrite]
 displayTemplate: "{{channel}} · {{locale}}"
 indexes:
   - { name: document_variants_tenant_document_channel_locale_uidx, fields: [tenantId, document, channel, locale], unique: true }

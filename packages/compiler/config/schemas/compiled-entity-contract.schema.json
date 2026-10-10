@@ -387,6 +387,7 @@
         "title": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
         "label": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
         "icon": { "type": "string" },
+        "visibleWhen": { "$ref": "core-entity.schema.json#/$defs/field/properties/visibility" },
         "render": { "$ref": "#/$defs/compiledViewRender" },
         "fields": {
           "type": "array",

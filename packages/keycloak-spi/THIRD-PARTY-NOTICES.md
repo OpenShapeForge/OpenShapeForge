@@ -26,6 +26,13 @@ not vendored into this repository and not modified.
 
 ## Keycloak 26.7.3 passwordless WebAuthn registration template
 
+The child theme also derives `register.ftl` from Keycloak 26.7.3's
+`themes/src/main/resources/theme/keycloak.v2/login/register.ftl` (Apache-2.0).
+It preserves the native profile/registration form and guards password-policy
+validation with the same `passwordRequired` condition that renders the inputs.
+Passwordless enrollment therefore does not attach a listener to a missing
+password input. The derived file carries the same dual SPDX attribution.
+
 - Project: Keycloak (https://www.keycloak.org/)
 - Source: `themes/src/main/resources/theme/keycloak.v2/login/webauthn-register.ftl`
 - License: **Apache-2.0** — full text below.

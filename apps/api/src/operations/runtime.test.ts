@@ -1861,41 +1861,22 @@ test("MCP projects and dispatches live runtime provider Operations canonically",
     await server.connect(serverTransport);
     await client.connect(clientTransport);
     const listed = await client.listTools();
-    expect(listed.tools).toContainEqual(expect.objectContaining({
-      name: "find_tickets",
-      title: "Find tickets",
-      description: "Find the tickets visible to this person.",
-      inputSchema: definition.input.schema,
-      outputSchema: expect.objectContaining({
-        type: "object",
-        anyOf: [
-          expect.objectContaining({
-            required: ["data", "operations"],
-            additionalProperties: false,
-            properties: expect.objectContaining({ data: definition.output.schema }),
-          }),
-          expect.objectContaining({
-            required: ["error"],
-            additionalProperties: false,
-            properties: expect.objectContaining({
-              error: expect.objectContaining({
-                required: ["code", "message", "retryable"],
-                additionalProperties: false,
-              }),
-            }),
-          }),
-        ],
-      }),
-      annotations: expect.objectContaining({
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-      }),
-    }));
-
+    expect(listed.tools.map((tool) => tool.name)).toContain("osf_search_operations");
+    expect(listed.tools.map((tool) => tool.name)).toContain("osf_execute_operation");
+    expect(listed.tools.map((tool) => tool.name)).not.toContain("find_tickets");
+    const searched = await client.callTool({
+      name: "osf_search_operations", arguments: { query: definition.id, limit: 20 },
+    });
+    expect(searched.isError).not.toBe(true);
+    expect(searched.structuredContent).toMatchObject({ operations: [{
+      operation: { id: definition.id, intent: definition.intent },
+      name: definition.name, description: definition.description,
+      inputSchema: definition.input.schema, outputSchema: definition.output.schema,
+      effects: definition.effects, reliability: definition.reliability,
+    }] });
     const result = await client.callTool({
-      name: "find_tickets",
-      arguments: { query: "open" },
+      name: "osf_execute_operation",
+      arguments: { operationId: definition.id, input: { query: "open" } },
     });
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toEqual({

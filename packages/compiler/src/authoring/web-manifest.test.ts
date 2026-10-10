@@ -162,6 +162,14 @@ function entity(
 }
 
 describe("web manifest projection", () => {
+  test("read labels use the authored reference catalog without replacing canonical codes", () => {
+    const contact = entity("ContactMoment", "contact", [field("channel", { options: { type: "referentiedata", referentieGroep: "COMMUNICATIONCHANNEL" } })], coreView());
+    const manifest = buildWebManifest([contact], {}, { catalogs: [], operations: [] }, { COMMUNICATIONCHANNEL: [{ value: "phone", label: { en: "Phone", nl: "Telefoon" } }] });
+    expect(manifest.entities.ContactMoment!.fields.channel!.options).toEqual([{ value: "phone", label: { en: "Phone", nl: "Telefoon" } }]);
+    expect(manifest.entities.ContactMoment!.fields.channel!.optionSource).toEqual({ type: "referentiedata", group: "COMMUNICATIONCHANNEL" });
+    expect(buildWebManifest([contact]).entities.ContactMoment!.fields.channel!.options).toBeUndefined();
+  });
+
   test("preserves entityValue and allowed definitions on fields and collection relationships", () => {
     const definition = entity("Snippet", "snippet", [field("text")], coreView());
     definition.contract.entity.valueDefinition = true;
@@ -179,6 +187,59 @@ describe("web manifest projection", () => {
     expect(output.entities.Snippet).toBeUndefined();
     expect(output.entityValueDefinitions.Snippet).toMatchObject({ entityName: "Snippet", fields: [{ id: "Snippet.text", key: "text", supports: { read: true, create: true, update: true } }] });
     expect(renderWebManifest(buildWebManifest([page, placement, definition]))).toBe(renderWebManifest(buildWebManifest([definition, placement, page])));
+  });
+
+  test("contact context projects canonical sources for relations and employees without destination tabs", () => {
+    for (const name of ["Relation", "Employee"]) {
+      const owner = entity(name, "owner", [field("displayName"), field("preferred")], coreView(), [{ key: "contacts", kind: "hasMany", target: "Contact", foreignKey: "owner_id" }, { key: "people", kind: "hasMany", target: "Person", foreignKey: "owner_id" }]);
+      owner.contract.interfaces!.web!.recordContext = { fields: [], contacts: { relationship: "contacts", channelField: "type", valueField: "value", preferredChannelField: "preferred", language: { relationship: "people", field: "language" } } };
+      const contacts = entity("Contact", "contact", [field("type"), field("value")], coreView());
+      const person = entity("Person", "person", [field("language")], coreView());
+      const build = () => buildWebManifest([owner, contacts, person]);
+      expect(build().entities[name]!.views.record!.layout.context.contacts).toEqual({ relationshipId: "contacts", channelField: "type", valueField: "value", preferredChannelField: "preferred", language: { relationshipId: "people", field: "language" } });
+      owner.contract.interfaces!.web!.recordContext.contacts!.valueField = "missing";
+      expect(build).toThrow("contact context");
+      owner.contract.interfaces!.web!.recordContext.contacts!.valueField = "value";
+      person.contract.model.fields[0]!.baseType = "number";
+      expect(build).toThrow("single string field");
+    }
+  });
+
+  test("timeline placements use canonical date and reference fields for contacts and case events", () => {
+    for (const name of ["ContactMoment", "CaseStatusEvent"]) {
+      const view = coreView();
+      view.detail!.groups.items = [{ id: "activity", label: text("Activity"), fields: [], relationship: { render: { component: "relationshipTab" }, name: "events", overrides: { presentation: { kind: "timeline", iconField: "channel", icons: { phone: "phone" }, titleField: "subject", timestampField: "occurredAt", descriptionField: "channel", relatedField: "caseId" } } } }];
+      const owner = entity("Owner", "owner", [field("displayName")], view, [{ key: "events", kind: "hasMany", target: name, foreignKey: "owner_id" }]);
+      const target = entity(name, "event", [field("subject"), field("channel"), field("occurredAt", { baseType: "datetime" }), field("caseId", { osfType: "Case", relationship: { kind: "belongsTo", target: "Case", fieldKey: "caseId", foreignKey: "case_id" } })], coreView(), [{ key: "case", fieldKey: "caseId", kind: "belongsTo", target: "Case", foreignKey: "case_id" }]);
+      const caseEntity = entity("Case", "case", [field("displayName")], coreView());
+      const build = () => buildWebManifest([owner, target, caseEntity]);
+      expect(build().entities.Owner!.relationships.events!.collection!.presentation).toMatchObject({ kind: "timeline", timestampField: "occurredAt", relatedField: "caseId" });
+      target.contract.model.fields.find(f => f.key === "occurredAt")!.baseType = "string";
+      expect(build).toThrow("date");
+      target.contract.model.fields.find(f => f.key === "occurredAt")!.baseType = "datetime";
+      view.detail!.groups.items[0]!.relationship!.overrides!.presentation!.titleField = "missing";
+      expect(build).toThrow("missing");
+    }
+  });
+
+  test("association placements project canonical target rows without replacing the link collection", () => {
+    for (const [ownerName, targetName] of [["Relation", "Income"], ["Project", "Member"]]) {
+      const view = coreView();
+      view.detail!.groups.items = [{ id: "linked", label: text("Linked"), fields: [], relationship: { render: { component: "relationshipTab" }, name: "links", through: "targetId", overrides: { columns: ["displayName"] } } }];
+      const owner = entity(ownerName!, "owner", [field("displayName")], view, [{ key: "links", kind: "hasMany", target: "Link", foreignKey: "owner_id" }]);
+      owner.contract.interfaces!.web!.recordWorkspaceTabs = false;
+      const link = entity("Link", "link", [field("ownerId"), field("targetId")], coreView(), [{ key: "targetId", fieldKey: "targetId", kind: "belongsTo", target: targetName!, foreignKey: "target_id" }]);
+      link.contract.storage.columns.push({ field: "ownerId", column: "owner_id", type: "uuid", nullable: false, storageClass: "core" });
+      const destination = entity(targetName!, "destination", [field("displayName")], coreView(), [{ key: "links", kind: "hasMany", target: "Link", foreignKey: "target_id" }]);
+      const projected = buildWebManifest([owner, link, destination]).entities[ownerName!]!;
+      expect(projected.relationships.links!.targetEntityId).toBe("Link");
+      expect(projected.relationships.links__targetId).toMatchObject({ targetEntityId: targetName, association: { relationship: "links", parentField: "ownerId" }, operations: { list: { id: `${targetName}.list` } } });
+      expect(projected.relationships.links__targetId!.operations.create).toBeUndefined();
+      expect(projected.views.record!.layout.tabs[0]!.relationshipId).toBe("links__targetId");
+      expect(projected.views.record!.layout.workspaceTabs).toBe(false);
+      view.detail!.groups.items[0]!.relationship!.through = "unknown";
+      expect(() => buildWebManifest([owner, link, destination])).toThrow("canonical association reference");
+    }
   });
 
   test("schema-3 uses authored relation field keys and exposes via traversals read-only", () => {
@@ -375,6 +436,94 @@ describe("web manifest projection", () => {
     expect(() => assertEntityAuthoring(artifacts.coreEntity, "block.yaml")).toThrow(/unknown field missing/);
     views.named.detailed = { ...views.named.detailed, fields: ["values"] } as never;
     expect(() => validator.validate(raw, "block.yaml")).toThrow();
+  });
+
+  test("static options carry icons as tiles and form groups carry an icon and a visibility condition", () => {
+    const artifacts = loadEntity(authoringDir, "address");
+    const raw = parse(readFileSync(join(authoringDir, "entities/core/address.yaml"), "utf8"));
+    const mode = {
+      type: "static", presentation: "tiles",
+      items: [
+        { value: "home", label: text("Home", "Woon"), icon: "house" },
+        { value: "postal", label: text("Postal", "Post"), icon: "envelope-simple" },
+      ],
+    };
+    const typeField = raw.fields.find((candidate: { key: string }) => candidate.key === "type");
+    typeField.options = mode;
+    const groups = [
+      { id: "kind", title: text("Kind", "Soort"), icon: "tag", fields: ["type"] },
+      { id: "street", title: text("Street", "Straat"), icon: "map-pin",
+        visibleWhen: { conditions: [{ field: "type", operator: "eq", value: "home" }] }, fields: ["street"] },
+      { id: "outer", title: text("Outer"), visibleWhen: { conditions: [{ field: "type", operator: "neq", value: "postal" }] },
+        groups: [{ id: "inner", title: text("Inner"), visibleWhen: { conditions: [{ field: "city", operator: "isNotEmpty" }] }, fields: ["city"] }] },
+    ];
+    raw.interfaces.web.views.record.modes.create.groups = groups;
+    const validator = createAuthoringValidator();
+    expect(() => validator.validate(raw, "address.yaml")).not.toThrow();
+    const authored = artifacts.coreEntity;
+    authored.fields.find((candidate) => candidate.key === "type")!.options = mode as never;
+    authored.interfaces!.web!.views!.record!.modes!.create!.groups = groups as never;
+    const address = () => buildWebManifest([{ slug: "address", contract: compile(artifacts) }]).entities.Address!;
+    const result = address();
+    expect(result.fields.type).toMatchObject({
+      presentation: { component: "ChoiceTiles" },
+      options: [
+        { value: "home", label: text("Home", "Woon"), icon: "house" },
+        { value: "postal", label: text("Postal", "Post"), icon: "envelope-simple" },
+      ],
+    });
+    const created = result.views.record!.formGroups!.create ?? [];
+    expect(created.find((group) => group.id === "kind")).toMatchObject({ icon: "tag", fields: ["type"] });
+    expect(created.find((group) => group.id === "street")).toMatchObject({
+      icon: "map-pin", visibleWhen: { conditions: [{ field: "type", operator: "eq", value: "home" }] },
+    });
+    // A flattened child keeps its parent's condition: both must hold.
+    expect(created.find((group) => group.id === "inner")).toMatchObject({ visibleWhen: { conditions: [
+      { field: "type", operator: "neq", value: "postal" }, { field: "city", operator: "isNotEmpty" },
+    ] } });
+    groups[1]!.visibleWhen!.conditions[0]!.field = "missing";
+    expect(address).toThrow(/form group "street" visibleWhen field "missing" is not a readable field of Address/);
+    raw.interfaces.web.views.record.modes.create.groups = [{ ...groups[0], icon: "Not An Icon" }];
+    expect(() => validator.validate(raw, "address.yaml")).toThrow();
+    typeField.options = { ...mode, items: [{ value: "home", label: text("Home"), icon: "House" }] };
+    raw.interfaces.web.views.record.modes.create.groups = [groups[0]];
+    expect(() => validator.validate(raw, "address.yaml")).toThrow();
+  });
+
+  test("detail tabs carry their condition; nested conditions and tile options are checked", () => {
+    const artifacts = loadEntity(authoringDir, "address");
+    const record = artifacts.coreEntity.interfaces!.web!.views!.record!;
+    const tab = record.layout!.tabs![0]! as { visibleWhen?: unknown; groups?: unknown[] };
+    const address = () => buildWebManifest([{ slug: "address", contract: compile(artifacts) }]).entities.Address!;
+    const present = { conditions: [{ field: "type", operator: "isNotEmpty" }] };
+    tab.visibleWhen = present;
+    const projected = address().views.record!.layout.tabs[0]!;
+    // The tab itself carries the condition, so a tab without field groups keeps it too.
+    expect(projected.visibleWhen).toEqual(present as never);
+    for (const group of projected.groups) expect(group.visibleWhen?.conditions).toContainEqual(present.conditions[0] as never);
+    tab.visibleWhen = { conditions: [{ field: "missing", operator: "isEmpty" }] };
+    expect(address).toThrow(/detail tab "overview" visibleWhen field "missing" is not a readable field of Address/);
+
+    // A single condition reads the same under or-logic; several cannot be flattened into a child.
+    tab.groups = [{ id: "nested", title: text("Nested"), visibleWhen: { conditions: [{ field: "city", operator: "isNotEmpty" }] }, fields: ["city"] }];
+    tab.visibleWhen = { logic: "or", conditions: [{ field: "type", operator: "eq", value: "home" }] };
+    expect(address().views.record!.layout.tabs[0]!.groups.find((group) => group.id === "nested")!.visibleWhen!.conditions).toHaveLength(2);
+    tab.visibleWhen = { logic: "or", conditions: [{ field: "type", operator: "eq", value: "home" }, { field: "type", operator: "eq", value: "postal" }] };
+    expect(address).toThrow(/Detail group "nested" combines its visibleWhen with a parent group's; nested conditions must use "and"/);
+    delete tab.visibleWhen;
+
+    // A form group projects fields only, so a condition on a relationship-only group is refused.
+    record.modes!.create!.groups = [{ id: "relation", title: text("Relation"), relationship: "relationId", visibleWhen: present }] as never;
+    expect(address).toThrow(/Form group "relation" has a visibleWhen but no fields to show or hide/);
+    record.modes!.create!.groups = [];
+
+    // Tiles are a presentation of static options only.
+    const typeField = artifacts.coreEntity.fields.find((candidate) => candidate.key === "type")!;
+    typeField.options = { ...typeField.options!, presentation: "tiles" } as never;
+    expect(address).toThrow(/options.presentation "tiles" requires static options/);
+    const raw = parse(readFileSync(join(authoringDir, "entities/core/address.yaml"), "utf8"));
+    raw.fields.find((candidate: { key: string }) => candidate.key === "type").options.presentation = "tiles";
+    expect(() => createAuthoringValidator().validate(raw, "address.yaml")).toThrow(/options: must NOT be valid|must match "then" schema/);
   });
 
   test("named record relationship views are validated and projected independently", () => {
@@ -1548,4 +1697,40 @@ test('collection empty state projects into the generic web contract without inve
  definition.contract.interfaces!.web!.collectionEmptyState={title:text('No records'),description:text('Create a record.'),illustration:'empty-collection',primaryAction:'create'};
  const result=buildWebManifest([definition]);
  expect(result.entities.Example!.views.collection.emptyState).toEqual({title:{en:"No records",nl:"No records"},description:{en:"Create a record.",nl:"Create a record."},illustration:"empty-collection",primaryAction:"create"});
+});
+
+test("context paths follow canonical relationship graphs for homes and project members", () => {
+  for (const [name, middle, target] of [["Relation", "Agreement", "Asset"], ["Project", "Membership", "Person"]]) {
+    const owner = entity(name!, "owner", [field("name")], coreView(), [{ key: "links", kind: "hasMany", target: middle!, foreignKey: "owner_id" }]);
+    const link = entity(middle!, "link", [field("targetId", { osfType: target! })], coreView(), [{ key: "targetId", fieldKey: "targetId", kind: "belongsTo", target: target!, foreignKey: "target_id" }]);
+    const end = entity(target!, "target", [field("name")], coreView());
+    owner.contract.interfaces!.web!.recordContext = { fields: [], records: [{ key: "related", path: ["links", "targetId"], displayField: "name" }] };
+    const build = () => buildWebManifest([owner, link, end]);
+    expect(build().entities[name!]!.views.record!.layout.context.records![0]).toMatchObject({ targetEntityId: target, displayField: "name", path: [{ entityId: name, relationshipId: `${name}.links` }, { entityId: middle, relationshipId: `${middle}.targetId` }] });
+    owner.contract.interfaces!.web!.recordContext.records![0]!.when = { name: "selected" };
+    expect(build().entities[name!]!.views.record!.layout.context.records![0]!.when).toEqual({ name: "selected" });
+    owner.contract.interfaces!.web!.recordContext.records![0]!.when = { name: true };
+    expect(build).toThrow("matching scalar field");
+    owner.contract.interfaces!.web!.recordContext.records![0]!.when = { missing: "value" };
+    expect(build).toThrow("matching scalar field");
+    end.contract.model.fields.push(field("priority", { osfType: "integer", baseType: "integer" }), field("startsOn", { osfType: "date", baseType: "date" }));
+    owner.contract.interfaces!.web!.recordContext.records![0]!.when = { priority: 1, startsOn: "2026-10-10" };
+    expect(build().entities[name!]!.views.record!.layout.context.records![0]!.when).toEqual({ priority: 1, startsOn: "2026-10-10" });
+    owner.contract.interfaces!.web!.recordContext.records![0]!.when = { priority: 1.5 };
+    expect(build).toThrow("matching scalar field");
+    end.contract.model.fields.splice(-2);
+    delete owner.contract.interfaces!.web!.recordContext.records![0]!.when;
+    owner.contract.interfaces!.web!.recordContext.records![0]!.status = { field: "name", values: { selected: "success" } };
+    owner.contract.interfaces!.web!.recordContext.records![0]!.tone = "subtle";
+    owner.contract.interfaces!.web!.recordContext.records![0]!.labelEmphasis = true;
+    expect(build().entities[name!]!.views.record!.layout.context.records![0]).toMatchObject({ status: { field: "name", values: { selected: "success" } }, tone: "subtle", labelEmphasis: true });
+    owner.contract.interfaces!.web!.recordContext.records![0]!.status.field = "unknown";
+    expect(build).toThrow("context status requires a single string");
+    delete owner.contract.interfaces!.web!.recordContext.records![0]!.status;
+    owner.contract.interfaces!.web!.recordContext.records![0]!.path = ["missing"];
+    expect(build).toThrow("canonical readable relationship");
+    owner.contract.interfaces!.web!.recordContext.records![0]!.path = ["links", "targetId"];
+    owner.contract.interfaces!.web!.recordContext.records![0]!.displayField = "unknown";
+    expect(build).toThrow("single string");
+  }
 });

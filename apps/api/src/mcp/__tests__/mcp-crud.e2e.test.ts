@@ -48,6 +48,7 @@ import {
   test,
 } from "../../graphql/__tests__/e2e/harness.js";
 import { __entityMutationControlsForTests } from "../generated-mcp-server.js";
+import { tablesByName as runtimeTablesByName } from "../catalog.js";
 import { crudToolCanSucceed } from "../session-projection.js";
 import {
   acquireLease,
@@ -119,24 +120,36 @@ describe("generated MCP server", () => {
     const searched = new Map(
       (await allSearchedOperations(tenantA)).map((entry) => [entry.operation.id, entry]),
     );
+    // The runtime's full table map: the collection policy reads every table.
+    const runtimeTables = runtimeTablesByName();
     const authorized = [
       ...new Set(
         catalog.tools
           // A tool the session holds no role for is withheld, and so is one
           // that cannot succeed through MCP at all (crudToolCanSucceed).
           .filter((tool) => sessionMayInvoke(tenantA, tool.entity, tool.operation as CrudOperation))
-          .filter((tool) => crudToolCanSucceed(tool as Parameters<typeof crudToolCanSucceed>[0], tablesByName))
+          .filter((tool) => crudToolCanSucceed(tool as Parameters<typeof crudToolCanSucceed>[0], runtimeTables))
           .map((tool) => `${tool.entity}.${tool.operation}`),
       ),
     ];
     expect(authorized.length).toBeGreaterThan(0);
     expect(authorized.filter((id) => !searched.has(id))).toEqual([]);
+    // And nothing beyond it: a withheld CRUD Operation is not searchable either.
+    const compiledIds = new Set(catalog.tools.map((tool) => `${tool.entity}.${tool.operation}`));
+    expect([...searched.keys()].filter((id) => compiledIds.has(id) && !authorized.includes(id))).toEqual([]);
 
     const get = searched.get("Relation.get")!;
     expect(get.outputSchema.type).toBe("object");
     const list = searched.get("Relation.list")!;
     expect(list.outputSchema).toMatchObject({ required: ["items", "totalCount", "nextCursor"] });
     expect(searched.get("Relation.update")!.reliability.idempotency.mode).toBe("none");
+    // A canonical delete answers `data.deleted` as the constant true (a
+    // missing row is an error, never `deleted: false`).
+    const deleteId = authorized.find((id) => id.endsWith(".delete"))!;
+    expect(searched.get(deleteId)!.outputSchema).toMatchObject({
+      required: ["deleted"],
+      properties: { deleted: { type: "boolean", const: true } },
+    });
   });
 
   test("binds, authorizes and dispatches a canonical operation tool", async () => {

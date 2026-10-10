@@ -97,9 +97,10 @@ export const PEOPLE_AND_ACCESS_GUIDANCE =
   " People and access — giving someone access to this organization is ONE " +
   "call: invite_employee with their e-mail address and a role key from that " +
   "tool's own role list. It pre-selects the role for their first sign-in and " +
-  "sends an invitation e-mail only when one is needed. A Relation is a " +
-  "separate contact record that grants no access by itself: when the person " +
-  "also asks for one, create it as well, never in place of the invitation. " +
+  "sends an invitation e-mail only when one is needed. Do every part the " +
+  "person asked for: when the request also names a relation or contact " +
+  "record, create that Relation first and then invite — it is a separate " +
+  "record that grants no access by itself, so never one in place of the other. " +
   "Account role tools change an existing account and do not apply to someone " +
   "who has only been invited.";
 

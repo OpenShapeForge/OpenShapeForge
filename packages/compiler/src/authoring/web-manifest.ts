@@ -43,6 +43,7 @@ import type {
   WebEntityInterface,
   WebFieldGroup,
   WebFieldProjection,
+  WebVisibilityCondition,
   WebManifestOptions,
   WebManifestV1,
   WebOperationIntent,
@@ -289,11 +290,19 @@ function groupPresentation(group: CompiledViewGroup): Pick<WebFieldGroup, "icon"
   };
 }
 
-/** A group may only depend on fields the entity actually has. */
-function assertGroupVisibility(entityName: string, groups: readonly WebFieldGroup[], fieldKeys: ReadonlySet<string>): void {
-  for (const group of groups) for (const condition of group.visibleWhen?.conditions ?? []) {
-    if (!fieldKeys.has(condition.field)) {
-      throw new Error(`${entityName} form group "${group.id}" visibleWhen field "${condition.field}" is not a field of ${entityName}.`);
+/**
+ * A condition is evaluated by the host on the record it shows, so it may only use fields the
+ * Web interface can read.
+ */
+function assertVisibilityFields(
+  entityName: string,
+  scope: string,
+  owners: readonly { id: string; visibleWhen?: WebVisibilityCondition }[],
+  fields: Readonly<Record<string, WebFieldProjection>>,
+): void {
+  for (const owner of owners) for (const condition of owner.visibleWhen?.conditions ?? []) {
+    if (!fields[condition.field]?.supports.read) {
+      throw new Error(`${entityName} ${scope} "${owner.id}" visibleWhen field "${condition.field}" is not a readable field of ${entityName}.`);
     }
   }
 }
@@ -302,11 +311,13 @@ function assertGroupVisibility(entityName: string, groups: readonly WebFieldGrou
  * Nested groups are flattened, so a child carries its parent's condition too: both must hold.
  * Or-logic cannot be combined into one flat condition and is refused where it would be needed.
  */
-function withParentVisibility(group: CompiledViewGroup, parent: CompiledViewGroup["visibleWhen"]): CompiledViewGroup {
+function withParentVisibility(group: CompiledViewGroup, parent: CompiledViewGroup["visibleWhen"], scope = "Form group"): CompiledViewGroup {
   if (!parent) return group;
   if (!group.visibleWhen) return { ...group, visibleWhen: parent };
-  if (group.visibleWhen.logic === "or" || parent.logic === "or") {
-    throw new Error(`Form group "${group.id}" combines its visibleWhen with a parent group's; nested conditions must use "and".`);
+  // A single condition reads the same under either logic.
+  const disjunctive = (condition: NonNullable<CompiledViewGroup["visibleWhen"]>) => condition.logic === "or" && condition.conditions.length > 1;
+  if (disjunctive(group.visibleWhen) || disjunctive(parent)) {
+    throw new Error(`${scope} "${group.id}" combines its visibleWhen with a parent group's; nested conditions must use "and".`);
   }
   return { ...group, visibleWhen: { conditions: [...parent.conditions, ...group.visibleWhen.conditions] } };
 }
@@ -315,15 +326,20 @@ function projectGroups(
   groups: readonly CompiledViewGroup[] | undefined,
   excluded: ReadonlySet<string> = new Set(),
   parentVisibility?: CompiledViewGroup["visibleWhen"],
+  scope = "Form group",
 ): WebFieldGroup[] {
   return (groups ?? []).flatMap((authored) => {
-    const group = withParentVisibility(authored, parentVisibility);
+    const group = withParentVisibility(authored, parentVisibility, scope);
     const keys = fieldKeys(group, excluded);
+    // A form group projects fields only; a condition on a relationship-only group could not be honoured.
+    if (authored.visibleWhen && authored.relationship && keys.length === 0 && !group.groups?.length) {
+      throw new Error(`${scope} "${group.id}" has a visibleWhen but no fields to show or hide; place the condition on a group with fields.`);
+    }
     const overrides = fieldOverrides(group, excluded);
     const projected = keys.length > 0
       ? [{ id: group.id, title: localized(group.title ?? group.label, group.id), fields: keys, ...groupPresentation(group), ...(overrides ? { fieldOverrides: overrides } : {}) }]
       : [];
-    return [...projected, ...projectGroups(group.groups, excluded, group.visibleWhen)];
+    return [...projected, ...projectGroups(group.groups, excluded, group.visibleWhen, scope)];
   });
 }
 
@@ -334,7 +350,7 @@ function projectTabGroups(tab: CompiledViewGroup): WebFieldGroup[] {
     ...(ownFields.length > 0
       ? [{ id: tab.id, title: localized(tab.title ?? tab.label, tab.id), fields: ownFields, ...groupPresentation(tab), ...(overrides ? { fieldOverrides: overrides } : {}) }]
       : []),
-    ...projectGroups(tab.groups, new Set(), tab.visibleWhen),
+    ...projectGroups(tab.groups, new Set(), tab.visibleWhen, "Detail group"),
   ];
 }
 
@@ -515,6 +531,9 @@ function projectField(
 ): WebFieldProjection {
   const nestedSupports = editNested ? supports : { read: true, create: false, update: false };
   const presentation = presentations[`${parent}.${field.key}`.split(".").slice(1).join(".")]?.render;
+  if (field.options?.presentation && field.options.type !== "static") {
+    throw new Error(`${parent}.${field.key}: options.presentation "${field.options.presentation}" requires static options.`);
+  }
   const optionSource = fieldOptionSource(field);
   const fieldPolicy = compileFieldValuePolicy(field);
   return {
@@ -525,7 +544,7 @@ function projectField(
     cardinality: field.cardinality === "collection" ? "many" : "one",
     required: field.required,
     ...(fieldPolicy ? { fieldPolicy } : {}),
-    ...(presentation ? { presentation } : field.options?.type === "static" && field.options.presentation === "tiles" ? { presentation: { component: "ChoiceTiles" } } : {}),
+    ...(presentation ? { presentation } : field.options?.presentation === "tiles" ? { presentation: { component: "ChoiceTiles" } } : {}),
     ...projectedTextLength(field),
     ...(field.relationship?.target ? { relationship: {
       targetEntityId: field.relationship.target,
@@ -804,8 +823,6 @@ function projectEntity(
   const createGroups = createUnsupported ? [] : formGroups(createVariant, undefined, serverOwnedFields);
   const authoredCreateGroups = formGroups(createVariant, undefined, serverOwnedFields);
   const updateGroups = formGroups(updateVariant, createVariant, serverOwnedFields);
-  const modelFieldKeys = new Set(contract.model.fields.map(({ key }) => key));
-  for (const groups of [authoredCreateGroups, updateGroups]) assertGroupVisibility(entityName, groups, modelFieldKeys);
   const createFields = createWritableFieldKeys(source, all);
   const updateFields = new Set(updateGroups.flatMap(({ fields }) => fields));
   // A provider-backed reference is only a relationship: it has no value of its
@@ -822,6 +839,7 @@ function projectEntity(
   // Every single entity reference is an authored field, so its writability and
   // presentation are projected above; relationships add no implicit fields.
   const fields = Object.fromEntries(explicitFields);
+  for (const groups of [authoredCreateGroups, updateGroups]) assertVisibilityFields(entityName, "form group", groups, fields);
 
   let relationships = Object.fromEntries(contract.model.relationships.flatMap((relationship) => {
     if (relationship.provider) return projectProviderRelationship(entityName, relationship, providers, fields);
@@ -922,13 +940,15 @@ function projectEntity(
       id: tab.id,
       ...(tab.showInReadNavigation !== undefined ? { showInReadNavigation: tab.showInReadNavigation } : {}),
       label: localized(tab.label ?? tab.title, tab.id),
+      ...(tab.visibleWhen ? { visibleWhen: structuredClone(tab.visibleWhen) } : {}),
       groups: projectTabGroups(tab),
       ...(relationshipId ? { relationshipId } : {}),
       ...(requestedView ? { targetView: requestedView } : {}),
     }];
   };
   const tabs: WebRecordTab[] = (view?.detail?.groups.items ?? []).flatMap(projectRecordTab);
-  assertGroupVisibility(entityName, tabs.flatMap(({ groups }) => groups), new Set(contract.model.fields.map(({ key }) => key)));
+  assertVisibilityFields(entityName, "detail tab", tabs, fields);
+  assertVisibilityFields(entityName, "detail group", tabs.flatMap(({ groups }) => groups), fields);
   const authoredContext = contract.interfaces?.web?.recordContext;
   for (const key of authoredContext?.fields ?? []) {
     if (!fields[key]?.supports.read) throw new Error(`${entityName}: context field ${key} is not readable.`);

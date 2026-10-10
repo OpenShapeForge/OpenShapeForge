@@ -39,7 +39,7 @@
   "devDependencies": {
     "@openshapeforge/documents": "workspace:*",
     "@openshapeforge/versioning": "workspace:*",
-    "@types/bun": "^1.3.5"
+    "@types/bun": "^1.4.2"
   },
   "scripts": {
     "generate": "bun run --cwd packages/compiler generate",

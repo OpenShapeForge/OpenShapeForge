@@ -27,7 +27,7 @@
     "@openshapeforge/operations": "^0.2.2"
   },
   "devDependencies": {
-    "@types/bun": "^1.3.5",
+    "@types/bun": "^1.4.2",
     "typescript": "^5.9.0"
   }
 }

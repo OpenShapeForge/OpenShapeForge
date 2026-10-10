@@ -138,8 +138,9 @@ export function inviteEmployeeTool(roles: readonly string[] = declaredEmployeeIn
           ...schema.properties.role,
           description:
             "The role applied on first sign-in, as one of these keys exactly as written: " +
-            `${choices.join("; ")}. Match the person's wording to a label here; a custom role ` +
-            "id of this organization is also accepted. Do not invent a key.",
+            `${choices.join("; ")}. Match the person's wording to a label here and name the ` +
+            "role to them by that label, not its key; a custom role id of this organization " +
+            "is also accepted. Do not invent a key.",
         },
       },
     },

@@ -53,6 +53,14 @@ const INVITE_EMPLOYEE: Tool = {
       email: { type: "string", description: "E-mail address to admit." },
       firstName: { type: "string", description: "Optional first name, used if an invitation e-mail is needed." },
       lastName: { type: "string", description: "Optional last name, used if an invitation e-mail is needed." },
+      relationId: {
+        type: "string",
+        format: "uuid",
+        description:
+          "Optional id of this organization's existing person Relation for them, such as one just " +
+          "created on request. Their account is linked to it at first sign-in instead of a new " +
+          "Relation being made. Omit it when no Relation was asked for.",
+      },
       role: {
         type: "string",
         description: "A role key, applied on first sign-in.",
@@ -318,11 +326,13 @@ export async function callEmployeeInvitationTool(
   try {
     const email = stringArgument(args, "email", true)!;
     const role = stringArgument(args, "role", true)!;
+    const relationId = stringArgument(args, "relationId", false);
     const admission = await inviteEmployee(db, scoped, keycloak, {
       email,
       firstName: stringArgument(args, "firstName", false),
       lastName: stringArgument(args, "lastName", false),
       role: role as EmployeeInvitationRole,
+      ...(relationId ? { relationId } : {}),
     });
     return succeeded(publicEmployeeAdmission(admission));
   } catch (error) {

@@ -71,6 +71,19 @@ describe("complete searchable MCP session", () => {
       expect(JSON.stringify(result.structuredContent)).toMatch(/VALIDATION|BAD_USER_INPUT/);
     });
   });
+  test("a CRUD Operation is found by its canonical name in another language", async () => {
+    const create = getEntityOperationContracts().find((candidate) => candidate.id === "Relation.create")!;
+    expect(JSON.stringify(create.name)).toContain("aanmaken");
+    await fixture(0, ["Relations.All.ReadWrite"], async (client) => {
+      const ids: string[] = []; let cursor: string | undefined;
+      do {
+        const page = data(await client.callTool({ name: "osf_search_operations", arguments: { query: "aanmaken", limit: 20, ...(cursor ? { cursor } : {}) } }));
+        ids.push(...page.operations.map((candidate) => candidate.operation.id)); cursor = page.nextCursor;
+      } while (cursor);
+      expect(ids).toContain("Relation.create");
+    });
+  });
+
   test("ordinary sessions cannot discover or invoke administrator CRUD", async () => {
     const operation = getEntityOperationContracts().find((candidate) => candidate.intent === "create" && catalog.tools.some((tool) => tool.operationId === candidate.id))!;
     await fixture(0, [], async (client) => {

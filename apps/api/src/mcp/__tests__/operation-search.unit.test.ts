@@ -92,6 +92,36 @@ describe("searchable MCP Operations", () => {
     expect(found[0]!.description).toBe("Creates one relation.");
   });
 
+  test("matches plurals to singulars without matching short common words", () => {
+    const definitions = [
+      definition("access.role.assign", { name: { en: "Assign a role" }, description: { en: "Use this to give a user one role." } }),
+      definition("notes.list", { name: { en: "List notes" }, description: { en: "Use this to read notes." } }),
+    ];
+    const ids = (query: string) => searchOperationDefinitions({
+      definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query }, locale,
+    }).operations.map((entry) => (entry.operation as { id: string }).id);
+    expect(ids("roles")).toEqual(["access.role.assign"]);
+    expect(ids("users")).toEqual(["access.role.assign"]);
+    // "use" is in both descriptions; a longer query word never shrinks to it.
+    expect(ids("useful")).toEqual([]);
+    expect(ids("x")).toEqual([]);
+  });
+
+  test("never falls back on a shared action verb alone, and pages the fallback by id", () => {
+    const definitions = ["a.create", "b.create", "c.create", "payroll.run"].map((id) =>
+      definition(id, { name: { en: id.endsWith("create") ? "Create record" : "Run payroll" }, description: { en: "Does it." } }));
+    const allowedIds = new Set(definitions.map((d) => d.id));
+    const search = (query: string, extra: Record<string, unknown> = {}) => searchOperationDefinitions({
+      definitions, allowedIds, arguments: { query, ...extra }, locale,
+    });
+    expect(search("create invoice").operations).toEqual([]);
+    expect(search("create payroll").operations.map((entry) => (entry.operation as { id: string }).id)).toEqual(["payroll.run"]);
+    const first = search("record payroll", { limit: 2 });
+    const second = search("record payroll", { limit: 2, cursor: first.nextCursor });
+    expect([...first.operations, ...second.operations].map((entry) => (entry.operation as { id: string }).id))
+      .toEqual(["a.create", "b.create", "c.create", "payroll.run"]);
+  });
+
   test("filters before paging and returns exact canonical schemas", () => {
     const definitions = [
       definition("demo.alpha", {

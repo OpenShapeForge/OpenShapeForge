@@ -185,13 +185,30 @@ function searchWords(definition: RuntimeOperationDefinition): string[] {
 }
 
 /**
- * A query word matches a text word sharing its first five letters (all of a
- * shorter word): "invite" finds "invitation", "uitnodigen" finds
+ * The verbs every CRUD Operation shares. A query of only these and an
+ * unmatched subject ("create payroll") must not fall back to every create.
+ */
+const GENERIC_ACTION_WORDS = new Set([
+  "create", "add", "list", "show", "get", "read", "find", "search", "update", "edit", "change", "delete", "remove",
+  "aanmaken", "maak", "toevoegen", "voeg", "tonen", "toon", "lijst", "ophalen", "lezen", "zoek", "zoeken",
+  "wijzigen", "wijzig", "bijwerken", "verwijderen", "verwijder",
+]);
+
+/**
+ * A query word matches a text word that starts with its first five letters
+ * (all of a shorter word): "invite" finds "invitation", "uitnodigen" finds
  * "uitnodiging", "organization" finds "organisatie", "role" finds "roles".
+ * A plural also finds its singular: a text word of at least four letters
+ * that the query word starts with matches too, so "roles" finds "role" but
+ * "users" does not find "use". A word under three letters only matches
+ * itself.
  */
 function wordMatches(word: string, words: readonly string[]): boolean {
+  if (word.length < 3) return words.includes(word);
   const prefix = word.slice(0, Math.min(5, word.length));
-  return words.some((candidate) => candidate.startsWith(prefix));
+  return words.some((candidate) =>
+    candidate.startsWith(prefix) ||
+    (candidate.length >= 4 && candidate.length < word.length && word.startsWith(candidate)));
 }
 
 export function searchOperationDefinitions(input: {
@@ -222,7 +239,8 @@ export function searchOperationDefinitions(input: {
   const every = candidates.filter(({ haystack }) => words.every((word) => wordMatches(word, haystack)));
   const definitions = (every.length > 0 || words.length < 2
     ? every
-    : candidates.filter(({ haystack }) => words.some((word) => word.length >= 3 && wordMatches(word, haystack))))
+    : candidates.filter(({ haystack }) =>
+        words.some((word) => word.length >= 3 && !GENERIC_ACTION_WORDS.has(word) && wordMatches(word, haystack))))
     // The sort and the cursor comparison below must be the same total order:
     // the cursor is the last id of the previous page and the next page starts
     // at the first id greater than it, so a collation-sorted list would loop

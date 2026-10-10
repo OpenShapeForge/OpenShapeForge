@@ -18,7 +18,7 @@ export const inviteAccount: ModuleOperationHandler = async (input, context) => {
     const invitation = await inviteEmployee(context.db, { ...session, tenantId: session.tenantId, userId: session.userId }, members, {
       relationId: input.relationId as string, email: input.email as string, role: input.role as EmployeeInvitationRole,
     });
-    return { value: { id: invitation.id, email: invitation.email, status: invitation.status, delivery: invitation.delivery } };
+    return { value: { id: invitation.id, email: invitation.email, status: invitation.status, delivery: invitation.delivery, ...(invitation.accessNotice ? { accessNotice: invitation.accessNotice } : {}) } };
   } catch (error) {
     // The provider's own error text names its admin URL and client; only the declared 503 leaves here.
     if (error instanceof KeycloakAdminError || (error instanceof HttpError && error.code.startsWith("KEYCLOAK_ADMIN_")))

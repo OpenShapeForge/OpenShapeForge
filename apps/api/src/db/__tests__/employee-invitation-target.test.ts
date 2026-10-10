@@ -8,6 +8,7 @@ import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
 import { inviteEmployee } from "../../auth/employee-invitations.js";
+import { callEmployeeInvitationTool, INVITE_EMPLOYEE_TOOL } from "../../mcp/employee-invitation-tools.js";
 import { __resetIdentityLinkForTests, resolveIdentityLink } from "../../auth/identity-link.js";
 import type { KeycloakOrganizationMembersClient } from "../../control/keycloak-organization-members.js";
 
@@ -118,4 +119,24 @@ test("an existing linked account cannot be invited onto a different relation", (
   const after = await resolveIdentityLink(app, login, claims);
   expect(after?.relationId).toBe(original);
   expect(after?.roles).toEqual(state?.roles);
+}), 120_000);
+
+test("invite_employee links the invitation to the Relation the assistant just created", () => scratch(async (app, db) => {
+  const own = await tenant(db), other = await tenant(db);
+  const created = await relation(db, own);
+  const foreign = await relation(db, other);
+  const kc = keycloak();
+  const admin = { ...session(own, true), credential: "trusted-context" as const };
+  const refused = await callEmployeeInvitationTool(INVITE_EMPLOYEE_TOOL, {
+    email: "foreign@example.test", role: "org_employee", relationId: foreign,
+  }, app as never, admin, kc.client);
+  expect(refused?.isError).toBe(true);
+  expect(kc.calls).toEqual([]);
+  const admitted = await callEmployeeInvitationTool(INVITE_EMPLOYEE_TOOL, {
+    email: "linked@example.test", role: "org_employee", relationId: created,
+  }, app as never, admin, kc.client);
+  expect(admitted?.isError).toBeFalsy();
+  const rows = (await sql<{ relation_id: string | null }>`select relation_id from platform.employee_invitations
+    where lower(email) = 'linked@example.test'`.execute(db)).rows;
+  expect(rows).toEqual([{ relation_id: created }]);
 }), 120_000);

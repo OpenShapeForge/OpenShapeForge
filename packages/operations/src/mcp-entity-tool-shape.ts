@@ -23,6 +23,15 @@ export const DATA_ACQUISITION_TOOL_FOOTER =
   "than asking field-by-field. See this server's instructions for the full " +
   "order.";
 
+const DATA_ACQUISITION_TOOL_FOOTER_BY_LANGUAGE: Readonly<Record<string, string>> = {
+  en: DATA_ACQUISITION_TOOL_FOOTER,
+  nl:
+    " Invullen: leid waarden af uit bestaande records, standaardwaarden en " +
+    "door de server uitgegeven velden voordat je iets vraagt; stel één volledig " +
+    "concept voor in plaats van veld voor veld te vragen. De volledige volgorde " +
+    "staat in de instructies van deze server.",
+};
+
 type LocalizedText = string | Readonly<Record<string, string>> | undefined;
 
 function inLanguage(value: LocalizedText, language: string): string | undefined {
@@ -34,27 +43,22 @@ function inLanguage(value: LocalizedText, language: string): string | undefined 
 
 /**
  * The title and description of an entity CRUD tool in one language. The
- * compiler collapses the canonical operation's `{ en, nl, … }` name and
- * description into English and appends its own advice; the canonical
- * operation still carries every language, so the localized sentence
- * replaces the English one the compiled description was composed from and
- * the advice is kept. Without a canonical operation, or when the compiled
- * text was not composed that way, the compiled text stands.
+ * compiler composes the description in every language its authored parts
+ * carry (`descriptionI18n`); a language it has none for has nothing authored
+ * beyond English and gets the compiled text. The title is the canonical
+ * operation's name in that language.
  */
 export function localizedEntityToolText(
-  compiled: { title?: string | undefined; description: string },
-  canonical: { name?: LocalizedText; description?: LocalizedText } | undefined,
+  compiled: { title?: string | undefined; description: string; descriptionI18n?: Readonly<Record<string, string>> | undefined },
+  canonical: { name?: LocalizedText } | undefined,
   language: string | undefined,
-): { title: string | undefined; description: string } {
-  if (!language || !canonical) return { title: compiled.title, description: compiled.description };
-  const english = inLanguage(canonical.description, "en");
-  const localized = inLanguage(canonical.description, language);
+): { title: string | undefined; description: string; descriptionLanguage: string } {
+  const composed = language === undefined ? undefined : compiled.descriptionI18n?.[language];
   return {
-    title: inLanguage(canonical.name, language) ?? compiled.title,
-    description:
-      english && localized && compiled.description.startsWith(english)
-        ? `${localized}${compiled.description.slice(english.length)}`
-        : compiled.description,
+    title: (language && canonical && inLanguage(canonical.name, language)) || compiled.title,
+    description: composed ?? compiled.description,
+    // The compiled description is English: what the write footer must match.
+    descriptionLanguage: composed !== undefined ? language! : "en",
   };
 }
 
@@ -64,6 +68,8 @@ export type EntityToolAdvertisement = {
   operation: "list" | "get" | "create" | "update" | "delete";
   title: string | undefined;
   description: string;
+  /** The language `description` is in, which the write footer follows (default: `language`). */
+  descriptionLanguage?: string;
   inputSchema: Record<string, unknown>;
   outputSchema?: Record<string, unknown> | undefined;
   annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean };
@@ -105,7 +111,9 @@ export function advertisedEntityTool(tool: EntityToolAdvertisement, language = "
   return {
     name: tool.name,
     ...(tool.title !== undefined ? { title: tool.title } : {}),
-    description: write ? `${tool.description}${DATA_ACQUISITION_TOOL_FOOTER}` : tool.description,
+    description: write
+      ? `${tool.description}${DATA_ACQUISITION_TOOL_FOOTER_BY_LANGUAGE[tool.descriptionLanguage ?? language] ?? DATA_ACQUISITION_TOOL_FOOTER}`
+      : tool.description,
     inputSchema: schemaInLanguage(tool.inputSchema, language) as Record<string, unknown>,
     ...(tool.outputSchema
       ? { outputSchema: schemaInLanguage(tool.outputSchema, language) as Record<string, unknown> }

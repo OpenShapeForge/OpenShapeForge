@@ -11,6 +11,7 @@ import {
   DATA_ACQUISITION_TOOL_FOOTER,
   advertisedEntityTool,
   advertisedToolBytes,
+  localizedEntityToolText,
   schemaInLanguage,
 } from "@openshapeforge/operations";
 import {
@@ -21,6 +22,7 @@ import {
   MAX_DEDICATED_TOOLS,
   operationMcpServer,
   type McpCatalogInput,
+  type McpToolDefinition,
 } from "./generate-mcp.js";
 import type { CompiledPluginOperation } from "./generate-operations.js";
 
@@ -914,6 +916,69 @@ describe("buildMcpCatalog", () => {
       for (const tool of [create, update]) {
         expect(tool.description).toContain("reviewedAt (example.finding.review)");
       }
+    });
+
+    it("composes the description in every authored language, and the write reminder follows it", () => {
+      const catalog = buildMcpCatalog(
+        [
+          input(
+            contract({
+              fields: [
+                field({ key: "name" }),
+                field({ key: "reviewedAt", writtenBy: ["example.finding.review"] }),
+              ],
+              mcp: {
+                toolPrefix: "widget",
+                tools: "dedicated",
+                operations: { list: true, get: true, create: true, update: true, delete: true },
+                operationInstructions: {
+                  create: { en: "Ask for the name first.", nl: "Vraag eerst de naam." },
+                },
+              },
+            }),
+          ),
+        ],
+        "test",
+      );
+      const tool = (operation: string) => catalog.tools.find((entry) => entry.operation === operation)!;
+      const create = tool("create");
+      // English once: the operation-written note is not repeated.
+      expect(create.description.split("Not settable here").length).toBe(2);
+      expect(create.description).toContain("Ask for the name first.");
+      // Dutch: the authored instruction and the note in Dutch, a part with no
+      // Dutch text (the canonical sentence) filled from English.
+      const dutch = create.descriptionI18n!.nl!;
+      expect(dutch).toContain("Vraag eerst de naam.");
+      expect(dutch).toContain("Hier niet in te stellen");
+      expect(dutch).toContain("reviewedAt (example.finding.review)");
+      expect(dutch).not.toContain("Ask for the name first.");
+      expect(dutch).not.toContain("Not settable here");
+      // Nothing authored in Dutch for list: only the compiled English exists.
+      expect(tool("list").descriptionI18n).toBeUndefined();
+
+      const listed = (entry: McpToolDefinition, language: string) => {
+        const text = localizedEntityToolText(entry, undefined, language);
+        return advertisedEntityTool({
+          name: entry.name,
+          operation: entry.operation,
+          title: text.title,
+          description: text.description,
+          descriptionLanguage: text.descriptionLanguage,
+          inputSchema: entry.inputSchema,
+          annotations: entry.annotations,
+          linksConfigurationApp: false,
+        }, language).description;
+      };
+      expect(listed(create, "nl")).toStartWith(dutch);
+      expect(listed(create, "nl")).toContain(" Invullen:");
+      // An English description keeps the English reminder in a Dutch session.
+      expect(listed(tool("update"), "nl")).toContain(DATA_ACQUISITION_TOOL_FOOTER);
+    });
+
+    it("carries the authored entity description in every language", () => {
+      const catalog = buildMcpCatalog([input(contract())], "test");
+      expect(catalog.entities[0]!.description).toBe("A widget.");
+      expect(catalog.entities[0]!.descriptions).toEqual({ en: "A widget." });
     });
 
     it("leaves an entity with no immutable field identical across create and update", () => {

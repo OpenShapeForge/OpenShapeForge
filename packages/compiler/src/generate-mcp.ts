@@ -295,6 +295,13 @@ export type McpToolDefinition = {
   table: string;
   title?: string;
   description: string;
+  /**
+   * The description composed in every other language the authored parts
+   * carry (canonical text, assistant guidance, MCP instructions and the
+   * operation-written note), English filling a part a language lacks.
+   * Absent when nothing is authored beyond English.
+   */
+  descriptionI18n?: Record<string, string>;
   inputSchema: JsonObject;
   /** Canonical success/error envelope returned by the tool. */
   outputSchema: JsonObject;
@@ -358,18 +365,40 @@ function entityDescription(contract: CompiledEntityContract): string {
  * One sentence listing the fields this entity keeps out of create/update and
  * the operations that do write them, or "" when the entity has none.
  */
-function operationWrittenNote(fields: CompiledField[]): string {
+function operationWrittenNote(fields: CompiledField[], language = "en"): string {
   const written = fields.filter(
     (field) => field.writtenBy !== undefined && field.writtenBy.length > 0,
   );
   if (written.length === 0) return "";
   const parts = written.map(
     (field) => `${field.key} (${field.writtenBy!.join(", ")})`,
-  );
-  return (
-    ` Not settable here — these record that a process took place and are written ` +
-    `only by the operation named: ${parts.join("; ")}. Sending one anyway is refused.`
-  );
+  ).join("; ");
+  return language === "nl"
+    ? ` Hier niet in te stellen — deze leggen vast dat een proces heeft plaatsgevonden en ` +
+      `worden alleen geschreven door de genoemde operatie: ${parts}. Een meegestuurde waarde wordt geweigerd.`
+    : ` Not settable here — these record that a process took place and are written ` +
+      `only by the operation named: ${parts}. Sending one anyway is refused.`;
+}
+
+type AuthoredText = string | { readonly en?: string; readonly nl?: string; readonly fr?: string } | undefined;
+
+/** The authored text in one language, English (then any) when that language has none. */
+function textIn(value: AuthoredText, language: string): string | undefined {
+  if (typeof value === "string") return value.trim() || undefined;
+  if (!value) return undefined;
+  return (value as Record<string, string | undefined>)[language]?.trim() || localizedText(value);
+}
+
+/** The non-English languages any of these authored texts is written in. */
+function otherLanguages(values: readonly AuthoredText[]): string[] {
+  const languages = new Set<string>();
+  for (const value of values) {
+    if (!value || typeof value === "string") continue;
+    for (const [language, text] of Object.entries(value)) {
+      if (language !== "en" && text?.trim()) languages.add(language);
+    }
+  }
+  return [...languages].sort();
 }
 
 function buildToolsForEntity(
@@ -398,7 +427,6 @@ function buildToolsForEntity(
   // incomplete and tries anyway; a model that reads "reviewedAt is written by
   // example.finding.review" calls that instead. The sentence is worth more
   // than the refusal it prevents.
-  const writerNote = operationWrittenNote(fields);
   const sortable = entitySortableFieldKeys(contract, mcp.elicitOnCreate?.into);
   const filterField = contract.entity.filterField;
   const tools: McpToolDefinition[] = [];
@@ -456,17 +484,29 @@ function buildToolsForEntity(
   const described = (
     operation: McpToolDefinition["operation"],
     fallback: string,
-  ) => {
+  ): Pick<McpToolDefinition, "description" | "descriptionI18n"> => {
     const canonical = contract.entityOperations[operation];
-    const parts = [
-      localizedText(canonical?.description) ?? fallback,
-      localizedText(canonical?.guidance?.assistant),
-      localizedText(mcp.operationInstructions?.[operation]),
-    ].filter((part): part is string => Boolean(part));
-    const description = parts.join(" ");
-    return operation === "create" || operation === "update"
-      ? `${description}${writerNote}`
-      : description;
+    const authored: AuthoredText[] = [
+      canonical?.description,
+      canonical?.guidance?.assistant,
+      mcp.operationInstructions?.[operation],
+    ];
+    const compose = (language: string) => {
+      const [canonicalText, guidance, instructions] = authored.map((value) => textIn(value, language));
+      const description = [canonicalText ?? fallback, guidance, instructions]
+        .filter((part): part is string => Boolean(part))
+        .join(" ");
+      return operation === "create" || operation === "update"
+        ? `${description}${operationWrittenNote(fields, language)}`
+        : description;
+    };
+    const languages = otherLanguages(authored);
+    return {
+      description: compose("en"),
+      ...(languages.length > 0
+        ? { descriptionI18n: Object.fromEntries(languages.map((language) => [language, compose(language)])) }
+        : {}),
+    };
   };
   const titled = (
     operation: McpToolDefinition["operation"],
@@ -499,7 +539,7 @@ function buildToolsForEntity(
       entity: contract.entity.name,
       table,
       title: titled("list", `List ${label}`),
-      description: described(
+      ...described(
         "list",
         `${description} Returns a page of records. Text filters match on substring; ` +
           `other types match exactly.` +
@@ -552,7 +592,7 @@ function buildToolsForEntity(
       entity: contract.entity.name,
       table,
       title: titled("get", `Get ${label}`),
-      description: described(
+      ...described(
         "get",
         `${description} Fetches a single record by id.`,
       ),
@@ -580,9 +620,9 @@ function buildToolsForEntity(
       entity: contract.entity.name,
       table,
       title: titled("create", `Create ${label}`),
-      description: described(
+      ...described(
         "create",
-        `${description} Creates a new record.${writerNote}`,
+        `${description} Creates a new record.`,
       ),
       inputSchema: withEntityOperationControls(inputSchema, contract.entityOperations.create),
       outputSchema: outputSchema("create"),
@@ -603,10 +643,9 @@ function buildToolsForEntity(
       entity: contract.entity.name,
       table,
       title: titled("update", `Update ${label}`),
-      description: described(
+      ...described(
         "update",
-        `${description} Partially updates a record; omitted fields are left unchanged.` +
-          writerNote,
+        `${description} Partially updates a record; omitted fields are left unchanged.`,
       ),
       inputSchema: withEntityOperationControls(
         canonicalUpdate?.input.kind === "json-schema"
@@ -641,7 +680,7 @@ function buildToolsForEntity(
       entity: contract.entity.name,
       table,
       title: titled("delete", `Delete ${label}`),
-      description: described(
+      ...described(
         "delete",
         `${description} Permanently deletes a record by id.`,
       ),
@@ -671,6 +710,8 @@ export type McpEntityCatalogEntry = {
    */
   labels?: Record<string, string>;
   description: string;
+  /** The authored `{ en, nl, … }` description, carried through like `labels`. */
+  descriptions?: Record<string, string>;
   domains: string[];
   displayTemplate?: string;
   filterField?: string;
@@ -986,6 +1027,9 @@ function listedLanguages(
     }
   }
   for (const tool of input.tools) {
+    // A description may be authored in a language only guidance or
+    // instructions carry, which no schema or canonical text names.
+    for (const language of Object.keys(tool.descriptionI18n ?? {})) languages.add(language);
     collect(tool.inputSchema);
     collect(tool.outputSchema);
   }
@@ -1025,6 +1069,7 @@ export function advertisedToolSizes(input: StaticListingInput): AdvertisedToolSi
           operation: tool.operation,
           title: text.title,
           description: text.description,
+          descriptionLanguage: text.descriptionLanguage,
           inputSchema: tool.inputSchema,
           outputSchema: tool.outputSchema,
           annotations: tool.annotations,
@@ -1259,6 +1304,11 @@ export function buildMcpCatalog(
         ? { labels: { ...(contract.entity.labels as Record<string, string>) } }
         : {}),
       description: entityDescription(contract),
+      ...(contract.entity.description &&
+      typeof contract.entity.description === "object" &&
+      Object.keys(contract.entity.description).length > 0
+        ? { descriptions: { ...(contract.entity.description as Record<string, string>) } }
+        : {}),
       domains: [...contract.entity.domains],
       ...(contract.entity.displayTemplate
         ? { displayTemplate: contract.entity.displayTemplate }

@@ -8,10 +8,11 @@ import {
   publicEmployeeAdmission,
   sessionMayInviteEmployees,
 } from "./employee-invitation-tools.js";
+import { EMPLOYEE_INVITATION_ADMIN_ROLE } from "../auth/employee-invitations.js";
 
 describe("sessionMayInviteEmployees", () => {
-  test("requires Organization.Access.Manage, same as link_identity", () => {
-    expect(sessionMayInviteEmployees({ roles: ["Organization.Access.Manage"] })).toBe(true);
+  test("requires the contract's administrator role, same as link_identity", () => {
+    expect(sessionMayInviteEmployees({ roles: [EMPLOYEE_INVITATION_ADMIN_ROLE] })).toBe(true);
     expect(sessionMayInviteEmployees({ roles: ["org_employee"] })).toBe(false);
     expect(sessionMayInviteEmployees({ roles: [] })).toBe(false);
     expect(sessionMayInviteEmployees({ roles: [] })).toBe(false);
@@ -21,7 +22,7 @@ describe("sessionMayInviteEmployees", () => {
 describe("employeeInvitationToolsForSession", () => {
   test("an administrator is shown all three tools", () => {
     const names = employeeInvitationToolsForSession({
-      roles: ["Organization.Access.Manage"],
+      roles: [EMPLOYEE_INVITATION_ADMIN_ROLE],
     }).map((tool) => tool.name);
     expect(names.sort()).toEqual(
       [INVITE_EMPLOYEE_TOOL, LIST_INVITATIONS_TOOL, REVOKE_INVITATION_TOOL].sort(),
@@ -35,7 +36,7 @@ describe("employeeInvitationToolsForSession", () => {
 
   test("invite_employee requires a role from the shared organization catalogue", () => {
     const invite = employeeInvitationToolsForSession({
-      roles: ["Organization.Access.Manage"],
+      roles: [EMPLOYEE_INVITATION_ADMIN_ROLE],
     }).find((tool) => tool.name === INVITE_EMPLOYEE_TOOL)!;
     const schema = invite.inputSchema as unknown as {
       required: string[];
@@ -48,12 +49,12 @@ describe("employeeInvitationToolsForSession", () => {
 
   test("invite_employee describes admission and conditional delivery truthfully", () => {
     const invite = employeeInvitationToolsForSession({
-      roles: ["Organization.Access.Manage"],
+      roles: [EMPLOYEE_INVITATION_ADMIN_ROLE],
     }).find((tool) => tool.name === INVITE_EMPLOYEE_TOOL)!;
     expect(invite.title).toBe("Admit an employee");
     expect(invite.description).toContain("receives no redundant mail");
     expect(invite.description).toContain("reused without resending");
-    expect(invite.description).toContain("status pending means the Hubble role awaits sign-in");
+    expect(invite.description).toContain("status pending means the application role awaits sign-in");
   });
 
   test("invite_employee reports each delivery outcome explicitly", () => {

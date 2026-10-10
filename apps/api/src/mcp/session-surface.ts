@@ -30,6 +30,7 @@ import {
 import { resourcesForSession } from "./session-projection.js";
 import { derivedToolsForSession } from "./derived-session-tools.js";
 import { entitiesForSession, entityResourceUri } from "./entity-resources.js";
+import { entityDescription, entityTitle } from "./entity-tool-projection.js";
 import {
   ENTITY_CONFIGURATION_APP_URI,
   ENTITY_OAUTH_CALLBACK_PATH,
@@ -99,8 +100,8 @@ export function createSessionSurface(scope: ServerScope) {
         ...entries.map(({ entity }) => ({
           uri: entityResourceUri(entity),
           name: `entity-${entity.slug}`,
-          title: `${entity.title} schema`,
-          description: entity.description,
+          title: `${entityTitle(entity, locale) ?? entity.title} schema`,
+          description: entityDescription(entity, locale),
           mimeType: JSON_MIME_TYPE,
         })),
         ...authoredResources.map((resource) => ({

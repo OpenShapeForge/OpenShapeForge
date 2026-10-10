@@ -22,6 +22,7 @@ import {
   catalog,
 } from "./catalog.js";
 import { toolsForSession } from "./session-projection.js";
+import { entityDescription } from "./entity-tool-projection.js";
 export const RESOURCE_READ_LIMIT = 200;
 
 export type SessionEntity = {
@@ -94,7 +95,7 @@ export function describeEntityResource(
     slug: entity.slug,
     title: localizedText(entity.labels, locale) ?? entity.title,
     language: locale?.tag,
-    description: entity.description,
+    description: entityDescription(entity, locale),
     domains: entity.domains,
     ...(entity.displayTemplate && templateVisible
       ? { displayTemplate: entity.displayTemplate }
@@ -158,7 +159,7 @@ export function describeCatalogResource(
       entity: entity.entity,
       slug: entity.slug,
       title: localizedText(entity.labels, locale) ?? entity.title,
-      description: entity.description,
+      description: entityDescription(entity, locale),
       domains: entity.domains,
       resourceUri: entityResourceUri(entity),
       operations: tools.map((tool) => tool.name),

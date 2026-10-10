@@ -28,23 +28,27 @@ export function entityTitle(
   return (locale && localizedText(entity.labels, locale)) || entity.title;
 }
 
+/** The entity's authored description in the session's language, when it has one. */
+export function entityDescription(
+  entity: CatalogEntity,
+  locale: ResolvedLocale | undefined,
+): string {
+  return (locale && localizedText(entity.descriptions, locale)) || entity.description;
+}
+
 export let canonicalOperationsById: Map<string, EntityOperationContract> | undefined;
 
 /**
- * The title and description of an entity CRUD tool in the session's language.
- *
- * The compiler collapses the canonical operation's `{ en, nl, … }` name and
- * description into English at build time and appends its own advice ("use get
- * for one known id", the edit-lease reminder). The canonical operation still
- * carries every language, so the localized sentence replaces the English one
- * it was composed from and the advice is kept; a text the catalogue did not
- * compose that way is described as compiled.
+ * The title and description of an entity CRUD tool in the session's language:
+ * the description the compiler composed for that language (canonical text,
+ * assistant guidance, MCP instructions and the operation-written note), the
+ * title from the canonical operation's name.
  */
 export function localizedToolText(
   tool: CatalogTool,
   locale: ResolvedLocale | undefined,
-): { title: string | undefined; description: string } {
-  if (!locale) return { title: tool.title, description: tool.description };
+): { title: string | undefined; description: string; descriptionLanguage: string } {
+  if (!locale) return { title: tool.title, description: tool.description, descriptionLanguage: "en" };
   canonicalOperationsById ??= new Map(
     getEntityOperationContracts().map((operation) => [operation.id, operation]),
   );
@@ -72,6 +76,7 @@ export function describeTool(
     operation: tool.operation,
     title: text.title,
     description: text.description,
+    descriptionLanguage: text.descriptionLanguage,
     inputSchema: withholdClassified(
       table && (tool.operation === "create" || tool.operation === "update")
         ? withoutCollectionInputs(tool.inputSchema as Record<string, unknown>, collectionManagedFields(table, getGeneratedCrudTables()))

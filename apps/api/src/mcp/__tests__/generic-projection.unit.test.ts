@@ -14,6 +14,8 @@ import {
   __describeGenericEntriesForTests as describeGenericEntries,
   __toolsForSessionForTests as toolsForSession,
 } from "../generated-mcp-server.js";
+import { describeCatalogResource, entitiesForSession } from "../entity-resources.js";
+import { entityDescription } from "../entity-tool-projection.js";
 
 const catalog = rawCatalog as unknown as {
   tools: {
@@ -23,7 +25,7 @@ const catalog = rawCatalog as unknown as {
     inputSchema: Record<string, unknown>;
     errors: { status: number; code: string; description: string }[];
   }[];
-  entities: { entity: string; tools?: string; labels?: Record<string, string> }[];
+  entities: { entity: string; tools?: string; labels?: Record<string, string>; descriptions?: Record<string, string> }[];
 };
 
 const tables = new Map(getGeneratedCrudTables().map((table) => [table.name, table]));
@@ -158,22 +160,47 @@ describe("the generic osf_* listing", () => {
     const described = describeGenericEntity("Address", "list", session(RELATIONS), tables as never, dutch) as any;
     expect(described.title).toBe(address.labels.nl);
   });
+
+  it("describes entities in the session's language, the authored English otherwise", () => {
+    const entity = { entity: "Widget", description: "A widget.", descriptions: { en: "A widget.", nl: "Een widget." } } as never;
+    expect(entityDescription(entity, dutch)).toBe("Een widget.");
+    expect(entityDescription(entity, english)).toBe("A widget.");
+    expect(entityDescription({ entity: "Plain", description: "Plain." } as never, dutch)).toBe("Plain.");
+    // The schema index reads Relation, which authors Dutch, through the same rule.
+    const index = describeCatalogResource(entitiesForSession(session(RELATIONS), tables as never), dutch);
+    const relation = index.entities.find((entry) => entry.entity === "Relation")!;
+    const authored = catalog.entities.find((entry) => entry.entity === "Relation")!.descriptions!;
+    expect(relation.description).toBe(authored.nl!);
+  });
 });
 
 describe("dedicated entity tools in the session's language", () => {
   const relation = catalog.tools.find((tool) => tool.name === "relation_list");
-  it.skipIf(!relation)("uses the canonical operation's localized name and keeps the compiled advice", () => {
+  it.skipIf(!relation)("uses the canonical operation's localized name and the whole description in that language", () => {
     const en = crudToolsForSession(session(RELATIONS), tables as never, english)
       .find((tool) => tool.name === "relation_list")!;
     const nl = crudToolsForSession(session(RELATIONS), tables as never, dutch)
       .find((tool) => tool.name === "relation_list")!;
     expect(en.title).toBe("List relations");
     expect(nl.title).toBe("Relaties tonen");
-    expect(nl.description).toStartWith("Geeft een gefilterde en gesorteerde pagina met relaties terug.");
-    // The compiled advice after the canonical sentence is the same in both.
-    const advice = (text: string | undefined) => text!.slice(text!.indexOf("."));
-    expect(advice(nl.description)).toBe(advice(en.description));
+    expect(en.description).toBe(
+      "Returns a filtered and sorted page of relations. Use this operation to find relations; use get for one known id.",
+    );
+    // Assistant guidance follows the canonical sentence into Dutch.
+    expect(nl.description).toBe(
+      "Geeft een gefilterde en gesorteerde pagina met relaties terug. " +
+        "Gebruik deze operatie om relaties te zoeken; gebruik get voor één bekend id.",
+    );
     expect(nl.annotations?.title).toBe("Relaties tonen");
+  });
+
+  it.skipIf(!relation)("composes authored instructions and the write reminder in the session's language", () => {
+    const nl = crudToolsForSession(session(RELATIONS), tables as never, dutch)
+      .find((tool) => tool.name === "relation_create")!;
+    expect(nl.description).toContain("Vraag ontbrekende verplichte velden uit voordat je deze tool aanroept.");
+    expect(nl.description).toContain(" Invullen: leid waarden af uit bestaande records");
+    expect(nl.description).not.toContain("Ask for missing required fields");
+    expect(nl.description).not.toContain("Filling this in");
   });
 });
 

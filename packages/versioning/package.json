@@ -1,6 +1,6 @@
 {
   "name": "@openshapeforge/versioning",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Generic immutable published-snapshot versioning for OpenShapeForge entities.",
   "license": "BUSL-1.1",
   "repository": {

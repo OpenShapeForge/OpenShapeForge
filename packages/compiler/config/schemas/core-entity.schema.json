@@ -15,12 +15,40 @@
   ],
   "properties": {
     "source": {
-      "type": "object", "additionalProperties": false,
-      "required": ["kind"], "properties": { "kind": { "const": "operations" },
-        "query": { "type": "object", "additionalProperties": false, "required": ["filterFields", "sortFields"], "properties": {
-          "filterFields": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
-          "sortFields": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
-        } }
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "operations"
+        },
+        "query": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "filterFields",
+            "sortFields"
+          ],
+          "properties": {
+            "filterFields": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            },
+            "sortFields": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
       }
     },
     "blueprint": {
@@ -43,14 +71,38 @@
           "const": "copy"
         },
         "bindings": {
-          "type": "array", "maxItems": 20,
+          "type": "array",
+          "maxItems": 20,
           "items": {
-            "type": "object", "additionalProperties": false,
-            "required": ["entity", "scope", "match"],
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "entity",
+              "scope",
+              "match"
+            ],
             "properties": {
-              "entity": { "type": "string", "minLength": 1 },
-              "scope": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "string", "minLength": 1 } },
-              "match": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+              "entity": {
+                "type": "string",
+                "minLength": 1
+              },
+              "scope": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "match": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
             }
           }
         },
@@ -68,7 +120,9 @@
       "pattern": "^[a-z][a-z0-9._-]*$",
       "description": "Named worker allowed across tenants for this entity, only through the dedicated worker database identity."
     },
-    "baseEntity": { "type": "boolean" },
+    "baseEntity": {
+      "type": "boolean"
+    },
     "schemaVersion": {
       "type": "integer",
       "const": 3,
@@ -102,7 +156,10 @@
     },
     "language": {
       "type": "string",
-      "enum": ["en", "nl"]
+      "enum": [
+        "en",
+        "nl"
+      ]
     },
     "labels": {
       "$ref": "#/$defs/localizedText"
@@ -135,7 +192,7 @@
     },
     "indexes": {
       "type": "array",
-      "description": "Storage-level indexes, compiled into TableDefinition.indexes and emitted as CREATE [UNIQUE] INDEX IF NOT EXISTS. Declare one only when it backs a runtime contract the engine relies on — e.g. the tenant-scoped uniqueness an idempotent `ON CONFLICT (...) DO NOTHING` insert needs.",
+      "description": "Storage-level indexes, compiled into TableDefinition.indexes and emitted as CREATE [UNIQUE] INDEX IF NOT EXISTS. Declare one only when it backs a runtime contract the engine relies on \u2014 e.g. the tenant-scoped uniqueness an idempotent `ON CONFLICT (...) DO NOTHING` insert needs.",
       "items": {
         "$ref": "#/$defs/entityIndex"
       }
@@ -143,16 +200,31 @@
     "versioning": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["strategy", "versionEntity", "versionsField"],
+      "required": [
+        "strategy",
+        "versionEntity",
+        "versionsField"
+      ],
       "properties": {
-        "strategy": { "type": "string", "const": "publishedSnapshot" },
-        "versionEntity": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" },
-        "versionsField": { "$ref": "#/$defs/fieldKey" },
+        "strategy": {
+          "type": "string",
+          "const": "publishedSnapshot"
+        },
+        "versionEntity": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]*$"
+        },
+        "versionsField": {
+          "$ref": "#/$defs/fieldKey"
+        },
         "snapshot": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "ownedRelationships": { "type": "string", "const": "recursive" }
+            "ownedRelationships": {
+              "type": "string",
+              "const": "recursive"
+            }
           }
         }
       }
@@ -160,9 +232,14 @@
     "hardDelete": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["requireNeverPublished"],
+      "required": [
+        "requireNeverPublished"
+      ],
       "properties": {
-        "requireNeverPublished": { "type": "boolean", "const": true }
+        "requireNeverPublished": {
+          "type": "boolean",
+          "const": true
+        }
       }
     },
     "fields": {
@@ -178,29 +255,41 @@
       "type": "object",
       "description": "Entity-level RBAC authorization. Defines roles required for CRUD operations. Used by the compiler to generate GraphQL auth guards and Keycloak role definitions.",
       "additionalProperties": false,
-      "required": ["roles"],
+      "required": [
+        "roles"
+      ],
       "properties": {
         "roles": {
           "type": "object",
-          "required": ["read"],
+          "required": [
+            "read"
+          ],
           "additionalProperties": false,
           "properties": {
             "read": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "minItems": 1
             },
             "create": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "update": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             },
             "delete": {
               "type": "array",
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             }
           }
         },
@@ -208,22 +297,42 @@
           "type": "object",
           "description": "Owner-axis read policy for an entity owned through more than one reference (one table, several owners). Each listed reference lends its owner entity's `authorization.roles.read` to the rows it owns, and the compiler emits a RESTRICTIVE select policy so a session holding none of an owner's read roles never sees that owner's rows, whatever the entity's own read roles say. `command` names a transaction-local setting and the values a server-side command marks its transaction with to read every owner's rows (a template publisher re-seeding the documents that track the template).",
           "additionalProperties": false,
-          "required": ["fields"],
+          "required": [
+            "fields"
+          ],
           "properties": {
             "fields": {
               "type": "array",
               "description": "Owning reference fields of this entity (each `relationship.inverse.ownership: owned`). The target entity's read roles gate the rows that reference carries.",
-              "items": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][A-Za-z0-9]*$"
+              },
               "minItems": 2,
               "uniqueItems": true
             },
             "command": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["setting", "values"],
+              "required": [
+                "setting",
+                "values"
+              ],
               "properties": {
-                "setting": { "type": "string", "pattern": "^app\\.[a-z_]+$", "description": "Transaction-local setting the command sets (set_config(..., true))." },
-                "values": { "type": "array", "items": { "type": "string", "pattern": "^[a-z_]+$" }, "minItems": 1, "uniqueItems": true }
+                "setting": {
+                  "type": "string",
+                  "pattern": "^app\\.[a-z_]+$",
+                  "description": "Transaction-local setting the command sets (set_config(..., true))."
+                },
+                "values": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z_]+$"
+                  },
+                  "minItems": 1,
+                  "uniqueItems": true
+                }
               }
             }
           }
@@ -232,7 +341,9 @@
           "type": "object",
           "description": "Row-level access filtering. When enabled, the compiler emits a Postgres RLS policy (`FORCE ROW LEVEL SECURITY`) alongside the tenant predicate. Add an `owner` axis to make each row visible only to the user recorded in its owner column, and/or a `group` axis to make each row visible only within the org-unit hierarchy recorded in its group column; without any axis the policy is plain tenant scoping. Owner and group axes are independently combinable (both emit OR-branches). The platform-admin bypass (app.bypass_rls()) and tenant scope (app.has_scope('tenant')) always short-circuit the policy.",
           "additionalProperties": false,
-          "required": ["enabled"],
+          "required": [
+            "enabled"
+          ],
           "properties": {
             "enabled": {
               "type": "boolean",
@@ -240,32 +351,43 @@
             },
             "empty": {
               "type": "string",
-              "enum": ["public", "restricted"],
+              "enum": [
+                "public",
+                "restricted"
+              ],
               "default": "public",
-              "description": "Behavior when a row's group/owner column IS NULL: 'public' = the NULL-column row is visible tenant-wide (OR-NULL branch emitted); 'restricted' = NULL-column rows are hidden. Defaults to 'public'. Forced to 'restricted' when 'owner' is set. 'restricted' requires an owner or group axis — otherwise there is no confidentiality column to be NULL and the compiler fails closed."
+              "description": "Behavior when a row's group/owner column IS NULL: 'public' = the NULL-column row is visible tenant-wide (OR-NULL branch emitted); 'restricted' = NULL-column rows are hidden. Defaults to 'public'. Forced to 'restricted' when 'owner' is set. 'restricted' requires an owner or group axis \u2014 otherwise there is no confidentiality column to be NULL and the compiler fails closed."
             },
             "owner": {
               "type": "object",
               "description": "Owner-predicated axis. When set, the generated policy adds `\"<column>\" = <session>()`. Use for per-person data (preferences, personal connections, drafts) where each person only sees rows they own. The column must be a uuid field or belongsTo foreignKey on this entity.",
               "additionalProperties": false,
-              "required": ["column", "session"],
+              "required": [
+                "column",
+                "session"
+              ],
               "properties": {
                 "column": {
                   "type": "string",
-                  "description": "Persisted uuid column (or belongsTo foreignKey) on this entity that holds the owner's id — the login's user id or the acting Relation's id, matching `session`. Must reference a uuid-typed field or relationship foreignKey."
+                  "description": "Persisted uuid column (or belongsTo foreignKey) on this entity that holds the owner's id \u2014 the login's user id or the acting Relation's id, matching `session`. Must reference a uuid-typed field or relationship foreignKey."
                 },
                 "session": {
                   "type": "string",
-                  "enum": ["app.current_user_id", "app.current_relation_id"],
-                  "description": "Session identity the owner column is compared against: 'app.current_user_id' (the login) or 'app.current_relation_id' (the Relation the person acts as — the owner of a person-owned record whose column references the acting party)."
+                  "enum": [
+                    "app.current_user_id",
+                    "app.current_relation_id"
+                  ],
+                  "description": "Session identity the owner column is compared against: 'app.current_user_id' (the login) or 'app.current_relation_id' (the Relation the person acts as \u2014 the owner of a person-owned record whose column references the acting party)."
                 }
               }
             },
             "group": {
               "type": "object",
-              "description": "Group-predicated mode. The generated RLS policy adds `\"<column>\" = ANY(<groups-fn>())` where the function is selected by `expand` (descendants→app.current_groups(), exact→app.current_groups_exact(), ancestors→app.current_groups_ancestors()). Use for org-unit / team confidentiality. The column must be a uuid field or belongsTo foreignKey holding the row's owning org-unit id.",
+              "description": "Group-predicated mode. The generated RLS policy adds `\"<column>\" = ANY(<groups-fn>())` where the function is selected by `expand` (descendants\u2192app.current_groups(), exact\u2192app.current_groups_exact(), ancestors\u2192app.current_groups_ancestors()). Use for org-unit / team confidentiality. The column must be a uuid field or belongsTo foreignKey holding the row's owning org-unit id.",
               "additionalProperties": false,
-              "required": ["column"],
+              "required": [
+                "column"
+              ],
               "properties": {
                 "column": {
                   "type": "string",
@@ -273,7 +395,11 @@
                 },
                 "expand": {
                   "type": "string",
-                  "enum": ["descendants", "ancestors", "exact"],
+                  "enum": [
+                    "descendants",
+                    "ancestors",
+                    "exact"
+                  ],
                   "default": "descendants",
                   "description": "How the user's directly-bound org units expand against the closure at session setup: descendants=see rows of child units, ancestors=see parents', exact=only direct units. Resolved into the per-mode GUC set before the query; the policy compares to the already-expanded set."
                 }
@@ -283,21 +409,34 @@
               "type": "object",
               "description": "Action-specific record authorization stored in one persisted JSON object. The object has fixed view/edit/delete members containing users/groups/roles arrays. RBAC remains mandatory; this ACL only narrows it.",
               "additionalProperties": false,
-              "required": ["field", "empty", "createRequires"],
+              "required": [
+                "field",
+                "empty",
+                "createRequires"
+              ],
               "properties": {
                 "field": {
                   "$ref": "#/$defs/fieldKey",
                   "description": "Authored key of a required, persisted, single object field holding the record ACL."
                 },
                 "empty": {
-                  "enum": ["public", "restricted"],
+                  "enum": [
+                    "public",
+                    "restricted"
+                  ],
                   "description": "Meaning of a valid subject set whose users/groups/roles arrays are all empty. Malformed ACL data always fails closed."
                 },
                 "createRequires": {
                   "type": "array",
                   "minItems": 1,
                   "uniqueItems": true,
-                  "items": { "enum": ["view", "edit", "delete"] },
+                  "items": {
+                    "enum": [
+                      "view",
+                      "edit",
+                      "delete"
+                    ]
+                  },
                   "description": "Record permissions the creator must hold in the submitted ACL before insert."
                 }
               }
@@ -308,8 +447,12 @@
     },
     "operations": {
       "type": "object",
-      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
-      "additionalProperties": { "$ref": "#/$defs/entityOperationV2" }
+      "propertyNames": {
+        "pattern": "^[a-z][A-Za-z0-9]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/entityOperationV2"
+      }
     },
     "interfaces": {
       "$ref": "#/$defs/entityInterfacesV2"
@@ -322,7 +465,9 @@
           "items": {
             "properties": {
               "relationship": {
-                "properties": { "displayField": false }
+                "properties": {
+                  "displayField": false
+                }
               }
             }
           }
@@ -330,7 +475,10 @@
       }
     },
     {
-      "required": ["operations", "interfaces"]
+      "required": [
+        "operations",
+        "interfaces"
+      ]
     }
   ],
   "$defs": {
@@ -378,31 +526,53 @@
     },
     "localizedOrString": {
       "oneOf": [
-        { "type": "string", "minLength": 1 },
-        { "$ref": "#/$defs/localizedText" }
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "$ref": "#/$defs/localizedText"
+        }
       ]
     },
     "entityOperationV2": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "description", "implementation", "effects", "reliability", "confirmation"],
+      "required": [
+        "name",
+        "description",
+        "implementation",
+        "effects",
+        "reliability",
+        "confirmation"
+      ],
       "properties": {
         "id": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
         },
-        "name": { "$ref": "#/$defs/localizedOrString" },
-        "description": { "$ref": "#/$defs/localizedOrString" },
+        "name": {
+          "$ref": "#/$defs/localizedOrString"
+        },
+        "description": {
+          "$ref": "#/$defs/localizedOrString"
+        },
         "guidance": {
           "type": "object",
           "additionalProperties": false,
-          "properties": { "assistant": { "$ref": "#/$defs/localizedOrString" } }
+          "properties": {
+            "assistant": {
+              "$ref": "#/$defs/localizedOrString"
+            }
+          }
         },
         "prerequisites": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/operationPrerequisiteV2" }
+          "items": {
+            "$ref": "#/$defs/operationPrerequisiteV2"
+          }
         },
         "stamps": {
           "type": "array",
@@ -410,11 +580,21 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["field", "source"],
+            "required": [
+              "field",
+              "source"
+            ],
             "properties": {
-              "field": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field" },
+              "field": {
+                "$ref": "#/$defs/fieldKey",
+                "x-osf-choice": "field"
+              },
               "source": {
-                "enum": ["now", "actorRelation", "actorUserId"],
+                "enum": [
+                  "now",
+                  "actorRelation",
+                  "actorUserId"
+                ],
                 "description": "Trusted server source. actorRelation requires the session's confirmed tenant Relation; actorUserId records the explicit session identity and never substitutes a Relation."
               }
             }
@@ -423,29 +603,64 @@
         "implementation": {
           "oneOf": [
             {
-              "type": "object", "additionalProperties": false,
-              "required": ["type", "action", "field"],
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "action",
+                "field"
+              ],
               "properties": {
-                "type": { "const": "collection" },
-                "action": { "enum": ["insert", "move", "update", "remove"] },
-                "field": { "$ref": "#/$defs/fieldKey" }
+                "type": {
+                  "const": "collection"
+                },
+                "action": {
+                  "enum": [
+                    "insert",
+                    "move",
+                    "update",
+                    "remove"
+                  ]
+                },
+                "field": {
+                  "$ref": "#/$defs/fieldKey"
+                }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["type", "action"],
+              "required": [
+                "type",
+                "action"
+              ],
               "properties": {
-                "type": { "const": "entity" },
-                "action": { "enum": ["list", "get", "create", "update", "delete"] }
+                "type": {
+                  "const": "entity"
+                },
+                "action": {
+                  "enum": [
+                    "list",
+                    "get",
+                    "create",
+                    "update",
+                    "delete"
+                  ]
+                }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["type", "plugin", "handler"],
+              "required": [
+                "type",
+                "plugin",
+                "handler"
+              ],
               "properties": {
-                "type": { "const": "plugin" },
+                "type": {
+                  "const": "plugin"
+                },
                 "plugin": {
                   "type": "string",
                   "pattern": "^[a-z][a-z0-9-]*$"
@@ -454,86 +669,193 @@
                   "type": "string",
                   "pattern": "^[_A-Za-z][_0-9A-Za-z]*$"
                 },
-                "action": { "enum": ["list", "get", "create", "update", "delete"] }
+                "action": {
+                  "enum": [
+                    "list",
+                    "get",
+                    "create",
+                    "update",
+                    "delete"
+                  ]
+                }
               }
             }
           ]
         },
-        "target": { "$ref": "#/$defs/operationTargetV2" },
+        "target": {
+          "$ref": "#/$defs/operationTargetV2"
+        },
         "input": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["schema"],
-          "properties": { "schema": { "type": "object" } }
+          "required": [
+            "schema"
+          ],
+          "properties": {
+            "schema": {
+              "type": "object"
+            }
+          }
         },
         "output": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["schema"],
-          "properties": { "schema": { "type": "object" } }
+          "required": [
+            "schema"
+          ],
+          "properties": {
+            "schema": {
+              "type": "object"
+            }
+          }
         },
         "errors": {
           "type": "array",
-          "items": { "$ref": "#/$defs/operationErrorV2" }
+          "items": {
+            "$ref": "#/$defs/operationErrorV2"
+          }
         },
-        "auth": { "$ref": "#/$defs/operationAuthV2" },
-        "tenancy": { "$ref": "#/$defs/operationTenancyV2" },
+        "auth": {
+          "$ref": "#/$defs/operationAuthV2"
+        },
+        "tenancy": {
+          "$ref": "#/$defs/operationTenancyV2"
+        },
         "effects": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["data", "external"],
+          "required": [
+            "data",
+            "external"
+          ],
           "properties": {
-            "data": { "enum": ["read", "write", "delete"] },
-            "external": { "enum": ["none", "read", "write"] }
+            "data": {
+              "enum": [
+                "read",
+                "write",
+                "delete"
+              ]
+            },
+            "external": {
+              "enum": [
+                "none",
+                "read",
+                "write"
+              ]
+            }
           }
         },
         "reliability": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["idempotency"],
+          "required": [
+            "idempotency"
+          ],
           "properties": {
             "idempotency": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["mode"],
+              "required": [
+                "mode"
+              ],
               "properties": {
-                "mode": { "enum": ["natural", "keyed", "none"] },
-                "inputField": { "$ref": "#/$defs/fieldKey" },
-                "header": { "type": "string", "minLength": 1 }
+                "mode": {
+                  "enum": [
+                    "natural",
+                    "keyed",
+                    "none"
+                  ]
+                },
+                "inputField": {
+                  "$ref": "#/$defs/fieldKey"
+                },
+                "header": {
+                  "type": "string",
+                  "minLength": 1
+                }
               }
             }
           }
         },
-        "concurrency": { "$ref": "#/$defs/operationConcurrencyV2" },
-        "confirmation": { "$ref": "#/$defs/operationConfirmationV2" },
-        "interaction": { "$ref": "#/$defs/operationInteractionV2" }
+        "concurrency": {
+          "$ref": "#/$defs/operationConcurrencyV2"
+        },
+        "confirmation": {
+          "$ref": "#/$defs/operationConfirmationV2"
+        },
+        "interaction": {
+          "$ref": "#/$defs/operationInteractionV2"
+        }
       },
       "allOf": [
         {
           "if": {
             "properties": {
               "implementation": {
-                "properties": { "type": { "enum": ["entity", "collection"] } },
-                "required": ["type"]
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "entity",
+                      "collection"
+                    ]
+                  }
+                },
+                "required": [
+                  "type"
+                ]
               }
             },
-            "required": ["implementation"]
+            "required": [
+              "implementation"
+            ]
           },
           "then": {
             "not": {
               "anyOf": [
-                { "required": ["id"] },
-                { "required": ["target"] },
-                { "required": ["input"] },
-                { "required": ["output"] },
-                { "required": ["errors"] },
-                { "required": ["auth"] },
-                { "required": ["tenancy"] }
+                {
+                  "required": [
+                    "id"
+                  ]
+                },
+                {
+                  "required": [
+                    "target"
+                  ]
+                },
+                {
+                  "required": [
+                    "input"
+                  ]
+                },
+                {
+                  "required": [
+                    "output"
+                  ]
+                },
+                {
+                  "required": [
+                    "errors"
+                  ]
+                },
+                {
+                  "required": [
+                    "auth"
+                  ]
+                },
+                {
+                  "required": [
+                    "tenancy"
+                  ]
+                }
               ]
             }
           },
           "else": {
-            "required": ["input", "output", "errors"]
+            "required": [
+              "input",
+              "output",
+              "errors"
+            ]
           }
         },
         {
@@ -541,19 +863,42 @@
             "properties": {
               "implementation": {
                 "properties": {
-                  "type": { "const": "plugin" },
-                  "action": { "enum": ["list", "get", "create", "update", "delete"] }
+                  "type": {
+                    "const": "plugin"
+                  },
+                  "action": {
+                    "enum": [
+                      "list",
+                      "get",
+                      "create",
+                      "update",
+                      "delete"
+                    ]
+                  }
                 },
-                "required": ["type", "action"]
+                "required": [
+                  "type",
+                  "action"
+                ]
               }
             },
-            "required": ["implementation"]
+            "required": [
+              "implementation"
+            ]
           },
           "then": {
             "not": {
               "anyOf": [
-                { "required": ["auth"] },
-                { "required": ["tenancy"] }
+                {
+                  "required": [
+                    "auth"
+                  ]
+                },
+                {
+                  "required": [
+                    "tenancy"
+                  ]
+                }
               ]
             }
           },
@@ -561,25 +906,52 @@
             "if": {
               "properties": {
                 "implementation": {
-                  "properties": { "type": { "const": "plugin" } },
-                  "required": ["type"]
+                  "properties": {
+                    "type": {
+                      "const": "plugin"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
                 }
               },
-              "required": ["implementation"]
+              "required": [
+                "implementation"
+              ]
             },
-            "then": { "required": ["auth", "tenancy"] }
+            "then": {
+              "required": [
+                "auth",
+                "tenancy"
+              ]
+            }
           }
         },
         {
-          "if": { "required": ["prerequisites"] },
+          "if": {
+            "required": [
+              "prerequisites"
+            ]
+          },
           "then": {
             "properties": {
               "implementation": {
                 "type": "object",
-                "required": ["type", "action"],
+                "required": [
+                  "type",
+                  "action"
+                ],
                 "properties": {
-                  "type": { "enum": ["entity", "plugin"] },
-                  "action": { "const": "create" }
+                  "type": {
+                    "enum": [
+                      "entity",
+                      "plugin"
+                    ]
+                  },
+                  "action": {
+                    "const": "create"
+                  }
                 }
               }
             }
@@ -590,7 +962,10 @@
     "operationPrerequisiteV2": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["operation", "receipt"],
+      "required": [
+        "operation",
+        "receipt"
+      ],
       "properties": {
         "operation": {
           "type": "string",
@@ -599,8 +974,14 @@
         "receipt": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["binding"],
-          "properties": { "binding": { "const": "loginSession" } }
+          "required": [
+            "binding"
+          ],
+          "properties": {
+            "binding": {
+              "const": "loginSession"
+            }
+          }
         }
       }
     },
@@ -609,20 +990,38 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["scope"],
-          "properties": { "scope": { "const": "collection" } }
+          "required": [
+            "scope"
+          ],
+          "properties": {
+            "scope": {
+              "const": "collection"
+            }
+          }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["scope", "inputField"],
+          "required": [
+            "scope",
+            "inputField"
+          ],
           "properties": {
-            "scope": { "const": "record" },
-            "inputField": { "$ref": "#/$defs/fieldKey" },
+            "scope": {
+              "const": "record"
+            },
+            "inputField": {
+              "$ref": "#/$defs/fieldKey"
+            },
             "inputBindings": {
-              "type": "object", "minProperties": 1,
-              "propertyNames": { "$ref": "#/$defs/fieldKey" },
-              "additionalProperties": { "$ref": "#/$defs/fieldKey" }
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": {
+                "$ref": "#/$defs/fieldKey"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/fieldKey"
+              }
             }
           }
         }
@@ -631,18 +1030,37 @@
     "operationErrorV2": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "code", "description"],
+      "required": [
+        "status",
+        "code",
+        "description"
+      ],
       "properties": {
-        "status": { "type": "integer", "minimum": 400, "maximum": 599 },
-        "code": { "type": "string", "minLength": 1 },
-        "description": { "type": "string", "minLength": 1 },
-        "schema": { "type": "object" },
+        "status": {
+          "type": "integer",
+          "minimum": 400,
+          "maximum": 599
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "schema": {
+          "type": "object"
+        },
         "rest": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "body": {},
-            "contentType": { "type": "string", "minLength": 1 }
+            "contentType": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         }
       }
@@ -652,29 +1070,70 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mode", "scheme", "description", "securityScheme"],
+          "required": [
+            "mode",
+            "scheme",
+            "description",
+            "securityScheme"
+          ],
           "properties": {
-            "mode": { "const": "custom" },
-            "scheme": { "type": "string", "pattern": "^[a-zA-Z0-9._-]+$" },
-            "description": { "type": "string", "minLength": 1 },
+            "mode": {
+              "const": "custom"
+            },
+            "scheme": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9._-]+$"
+            },
+            "description": {
+              "type": "string",
+              "minLength": 1
+            },
             "securityScheme": {
               "oneOf": [
                 {
-                  "type": "object", "additionalProperties": false,
-                  "required": ["type", "in", "name"],
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "in",
+                    "name"
+                  ],
                   "properties": {
-                    "type": { "const": "apiKey" },
-                    "in": { "enum": ["header", "query", "cookie"] },
-                    "name": { "type": "string", "minLength": 1 }
+                    "type": {
+                      "const": "apiKey"
+                    },
+                    "in": {
+                      "enum": [
+                        "header",
+                        "query",
+                        "cookie"
+                      ]
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    }
                   }
                 },
                 {
-                  "type": "object", "additionalProperties": false,
-                  "required": ["type", "scheme"],
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "scheme"
+                  ],
                   "properties": {
-                    "type": { "const": "http" },
-                    "scheme": { "type": "string", "minLength": 1 },
-                    "bearerFormat": { "type": "string", "minLength": 1 }
+                    "type": {
+                      "const": "http"
+                    },
+                    "scheme": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "bearerFormat": {
+                      "type": "string",
+                      "minLength": 1
+                    }
                   }
                 }
               ]
@@ -684,42 +1143,69 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mode"],
-          "properties": { "mode": { "const": "public" } }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["mode"],
-          "description": "A capability grant: core resolves a hashed, expiring, recipient-bound token into a grant session that names the covered Operations and the one record. REST only; tenancy must be required.",
-          "properties": { "mode": { "const": "capability" } }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["mode", "roles"],
-          "description": "A control-realm operator: the bearer is verified against the platform's control realm (not a tenant realm) and must hold one of the listed realm roles. No tenant context exists; tenancy must be none.",
+          "required": [
+            "mode"
+          ],
           "properties": {
-            "mode": { "const": "control" },
-            "roles": {
-              "type": "array",
-              "minItems": 1,
-              "uniqueItems": true,
-              "items": { "type": "string", "minLength": 1 }
+            "mode": {
+              "const": "public"
             }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mode"],
+          "required": [
+            "mode"
+          ],
+          "description": "A capability grant: core resolves a hashed, expiring, recipient-bound token into a grant session that names the covered Operations and the one record. REST only; tenancy must be required.",
           "properties": {
-            "mode": { "const": "session" },
+            "mode": {
+              "const": "capability"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "roles"
+          ],
+          "description": "A control-realm operator: the bearer is verified against the platform's control realm (not a tenant realm) and must hold one of the listed realm roles. No tenant context exists; tenancy must be none.",
+          "properties": {
+            "mode": {
+              "const": "control"
+            },
+            "roles": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "const": "session"
+            },
             "roles": {
               "description": "Optional operation-role allow-list. An explicit empty list denies every role. Without roles or roleGroups the Operation must declare anyAuthenticatedSession: true.",
               "type": "array",
               "uniqueItems": true,
-              "items": { "type": "string", "minLength": 1 }
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
             },
             "roleGroups": {
               "description": "Conjunctive role gates. The session must hold at least one role from every non-empty group.",
@@ -729,16 +1215,26 @@
                 "type": "array",
                 "minItems": 1,
                 "uniqueItems": true,
-                "items": { "type": "string", "minLength": 1 }
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
               }
             },
             "scopes": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "type": "string", "minLength": 1 }
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
             },
             "recordPermission": {
-              "enum": ["view", "edit", "delete"],
+              "enum": [
+                "view",
+                "edit",
+                "delete"
+              ],
               "description": "Required permission on the current record target, in addition to roles and scopes."
             },
             "anyAuthenticatedSession": {
@@ -752,23 +1248,54 @@
     "operationTenancyV2": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode"],
+      "required": [
+        "mode"
+      ],
       "properties": {
-        "mode": { "enum": ["required", "derived", "none"] },
-        "description": { "type": "string", "minLength": 1 }
+        "mode": {
+          "enum": [
+            "required",
+            "derived",
+            "none"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "operationInteractionV2": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "sourceField", "sourceEntity", "definitionsField", "into"],
+      "required": [
+        "type",
+        "sourceField",
+        "sourceEntity",
+        "definitionsField",
+        "into"
+      ],
       "properties": {
-        "type": { "const": "secureInput" },
-        "sourceField": { "$ref": "#/$defs/fieldKey" },
-        "sourceEntity": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" },
-        "definitionsField": { "$ref": "#/$defs/fieldKey" },
-        "into": { "$ref": "#/$defs/fieldKey" },
-        "message": { "type": "string", "minLength": 1 }
+        "type": {
+          "const": "secureInput"
+        },
+        "sourceField": {
+          "$ref": "#/$defs/fieldKey"
+        },
+        "sourceEntity": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]*$"
+        },
+        "definitionsField": {
+          "$ref": "#/$defs/fieldKey"
+        },
+        "into": {
+          "$ref": "#/$defs/fieldKey"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "operationConcurrencyV2": {
@@ -779,18 +1306,30 @@
         "version": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mode", "field"],
+          "required": [
+            "mode",
+            "field"
+          ],
           "properties": {
-            "mode": { "const": "required" },
-            "field": { "const": "updatedAt" }
+            "mode": {
+              "const": "required"
+            },
+            "field": {
+              "const": "updatedAt"
+            }
           }
         },
         "editLease": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mode", "expiresAfterInactivity"],
+          "required": [
+            "mode",
+            "expiresAfterInactivity"
+          ],
           "properties": {
-            "mode": { "const": "required" },
+            "mode": {
+              "const": "required"
+            },
             "expiresAfterInactivity": {
               "type": "string",
               "pattern": "^P(?=[0-9]|T[0-9])(?:[0-9]+(?:\\.[0-9]+)?Y)?(?:[0-9]+(?:\\.[0-9]+)?M)?(?:[0-9]+(?:\\.[0-9]+)?W)?(?:[0-9]+(?:\\.[0-9]+)?D)?(?:T(?=[0-9])(?:[0-9]+(?:\\.[0-9]+)?H)?(?:[0-9]+(?:\\.[0-9]+)?M)?(?:[0-9]+(?:\\.[0-9]+)?S)?)?$"
@@ -804,37 +1343,77 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mode"],
-          "properties": { "mode": { "const": "none" } }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["mode"],
-          "properties": { "mode": { "const": "acknowledgement" } }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["mode", "challenge"],
+          "required": [
+            "mode"
+          ],
           "properties": {
-            "mode": { "const": "challenge" },
+            "mode": {
+              "const": "none"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "const": "acknowledgement"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "challenge"
+          ],
+          "properties": {
+            "mode": {
+              "const": "challenge"
+            },
             "challenge": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["kind", "field", "issuedBy", "bindTo", "expiresAfter", "singleUse"],
+              "required": [
+                "kind",
+                "field",
+                "issuedBy",
+                "bindTo",
+                "expiresAfter",
+                "singleUse"
+              ],
               "properties": {
-                "kind": { "const": "type-current-field" },
-                "field": { "$ref": "#/$defs/fieldKey" },
-                "issuedBy": { "const": "server" },
+                "kind": {
+                  "const": "type-current-field"
+                },
+                "field": {
+                  "$ref": "#/$defs/fieldKey"
+                },
+                "issuedBy": {
+                  "const": "server"
+                },
                 "bindTo": {
                   "type": "array",
                   "prefixItems": [
-                    { "const": "subject" },
-                    { "const": "tenant" },
-                    { "const": "operation" },
-                    { "const": "target.id" },
-                    { "const": "target.version" }
+                    {
+                      "const": "subject"
+                    },
+                    {
+                      "const": "tenant"
+                    },
+                    {
+                      "const": "operation"
+                    },
+                    {
+                      "const": "target.id"
+                    },
+                    {
+                      "const": "target.version"
+                    }
                   ],
                   "items": false,
                   "minItems": 5,
@@ -844,7 +1423,9 @@
                   "type": "string",
                   "pattern": "^P(?=[0-9]|T[0-9])(?:[0-9]+(?:\\.[0-9]+)?Y)?(?:[0-9]+(?:\\.[0-9]+)?M)?(?:[0-9]+(?:\\.[0-9]+)?W)?(?:[0-9]+(?:\\.[0-9]+)?D)?(?:T(?=[0-9])(?:[0-9]+(?:\\.[0-9]+)?H)?(?:[0-9]+(?:\\.[0-9]+)?M)?(?:[0-9]+(?:\\.[0-9]+)?S)?)?$"
                 },
-                "singleUse": { "const": true }
+                "singleUse": {
+                  "const": true
+                }
               }
             }
           }
@@ -854,14 +1435,28 @@
     "interfaceOperationV2": {
       "type": "object",
       "additionalProperties": false,
-      "properties": { "instructions": { "$ref": "#/$defs/localizedOrString" } }
+      "properties": {
+        "instructions": {
+          "$ref": "#/$defs/localizedOrString"
+        }
+      }
     },
     "restInterfaceOperationV2": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "instructions": { "$ref": "#/$defs/localizedOrString" },
-        "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+        "instructions": {
+          "$ref": "#/$defs/localizedOrString"
+        },
+        "method": {
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE"
+          ]
+        },
         "path": {
           "type": "string",
           "pattern": "^/api/[a-z][a-z0-9-]*(?:/(?::[_A-Za-z][_0-9A-Za-z]*|[a-z0-9][a-z0-9._-]*))*$"
@@ -869,11 +1464,26 @@
         "response": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind"],
+          "required": [
+            "kind"
+          ],
           "properties": {
-            "status": { "type": "integer", "minimum": 200, "maximum": 399 },
-            "kind": { "enum": ["json", "binary", "stream"] },
-            "contentType": { "type": "string", "minLength": 1 }
+            "status": {
+              "type": "integer",
+              "minimum": 200,
+              "maximum": 399
+            },
+            "kind": {
+              "enum": [
+                "json",
+                "binary",
+                "stream"
+              ]
+            },
+            "contentType": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         }
       }
@@ -882,7 +1492,9 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "instructions": { "$ref": "#/$defs/localizedOrString" },
+        "instructions": {
+          "$ref": "#/$defs/localizedOrString"
+        },
         "name": {
           "type": "string",
           "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,127}$"
@@ -893,8 +1505,15 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "instructions": { "$ref": "#/$defs/localizedOrString" },
-        "kind": { "enum": ["query", "mutation"] },
+        "instructions": {
+          "$ref": "#/$defs/localizedOrString"
+        },
+        "kind": {
+          "enum": [
+            "query",
+            "mutation"
+          ]
+        },
         "field": {
           "type": "string",
           "pattern": "^[_A-Za-z][_0-9A-Za-z]*$"
@@ -903,25 +1522,38 @@
     },
     "interfaceOperationsV2": {
       "type": "object",
-      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "propertyNames": {
+        "pattern": "^[a-z][A-Za-z0-9]*$"
+      },
       "additionalProperties": {
         "oneOf": [
-          { "const": false },
-          { "$ref": "#/$defs/interfaceOperationV2" }
+          {
+            "const": false
+          },
+          {
+            "$ref": "#/$defs/interfaceOperationV2"
+          }
         ]
       }
     },
     "webInterfaceOperationsV2": {
       "type": "object",
-      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$", "x-osf-choice": "operation" },
+      "propertyNames": {
+        "pattern": "^[a-z][A-Za-z0-9]*$",
+        "x-osf-choice": "operation"
+      },
       "additionalProperties": {
         "oneOf": [
-          { "const": false },
+          {
+            "const": false
+          },
           {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "instructions": { "$ref": "#/$defs/localizedOrString" },
+              "instructions": {
+                "$ref": "#/$defs/localizedOrString"
+              },
               "resultRenderer": {
                 "type": "string",
                 "pattern": "^[a-z][A-Za-z0-9.-]*$",
@@ -934,31 +1566,49 @@
     },
     "restInterfaceOperationsV2": {
       "type": "object",
-      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "propertyNames": {
+        "pattern": "^[a-z][A-Za-z0-9]*$"
+      },
       "additionalProperties": {
         "oneOf": [
-          { "const": false },
-          { "$ref": "#/$defs/restInterfaceOperationV2" }
+          {
+            "const": false
+          },
+          {
+            "$ref": "#/$defs/restInterfaceOperationV2"
+          }
         ]
       }
     },
     "mcpInterfaceOperationsV2": {
       "type": "object",
-      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "propertyNames": {
+        "pattern": "^[a-z][A-Za-z0-9]*$"
+      },
       "additionalProperties": {
         "oneOf": [
-          { "const": false },
-          { "$ref": "#/$defs/mcpInterfaceOperationV2" }
+          {
+            "const": false
+          },
+          {
+            "$ref": "#/$defs/mcpInterfaceOperationV2"
+          }
         ]
       }
     },
     "graphqlInterfaceOperationsV2": {
       "type": "object",
-      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "propertyNames": {
+        "pattern": "^[a-z][A-Za-z0-9]*$"
+      },
       "additionalProperties": {
         "oneOf": [
-          { "const": false },
-          { "$ref": "#/$defs/graphqlInterfaceOperationV2" }
+          {
+            "const": false
+          },
+          {
+            "$ref": "#/$defs/graphqlInterfaceOperationV2"
+          }
         ]
       }
     },
@@ -970,32 +1620,59 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "basePath": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-            "operations": { "$ref": "#/$defs/restInterfaceOperationsV2" }
+            "basePath": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]*$"
+            },
+            "operations": {
+              "$ref": "#/$defs/restInterfaceOperationsV2"
+            }
           }
         },
         "graphql": {
           "type": "object",
           "additionalProperties": false,
-          "properties": { "operations": { "$ref": "#/$defs/graphqlInterfaceOperationsV2" } }
+          "properties": {
+            "operations": {
+              "$ref": "#/$defs/graphqlInterfaceOperationsV2"
+            }
+          }
         },
         "mcp": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "tools": {
-              "enum": ["dedicated", "generic"],
+              "enum": [
+                "dedicated",
+                "generic"
+              ],
               "default": "dedicated",
               "description": "Technical MCP tool projection. Dedicated emits one tool per projected operation; generic routes through the five shared osf_* CRUD tools."
             },
-            "operations": { "$ref": "#/$defs/mcpInterfaceOperationsV2" },
-            "resource": { "$ref": "#/$defs/mcpResourceV2" }
+            "operations": {
+              "$ref": "#/$defs/mcpInterfaceOperationsV2"
+            },
+            "resource": {
+              "$ref": "#/$defs/mcpResourceV2"
+            }
           }
         },
         "web": {
           "type": "object",
           "additionalProperties": false,
-          "anyOf": [{ "required": ["views"] }, { "required": ["fields"] }],
+          "anyOf": [
+            {
+              "required": [
+                "views"
+              ]
+            },
+            {
+              "required": [
+                "fields"
+              ]
+            }
+          ],
           "properties": {
             "fields": {
               "type": "object",
@@ -1006,42 +1683,82 @@
               "additionalProperties": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["render"],
+                "required": [
+                  "render"
+                ],
                 "properties": {
                   "render": {
                     "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/render",
-                    "x-osf-i18n": { "title": { "en": "Render", "nl": "Weergave" } }
+                    "x-osf-i18n": {
+                      "title": {
+                        "en": "Render",
+                        "nl": "Weergave"
+                      }
+                    }
                   }
                 },
-                "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
+                "x-osf-i18n": {
+                  "title": {
+                    "en": "Field",
+                    "nl": "Veld"
+                  }
+                }
               },
-              "x-osf-i18n": { "title": { "en": "Field components", "nl": "Veldcomponenten" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Field components",
+                  "nl": "Veldcomponenten"
+                }
+              }
             },
             "operations": {
               "$ref": "#/$defs/webInterfaceOperationsV2",
-              "x-osf-i18n": { "title": { "en": "Operations", "nl": "Operaties" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Operations",
+                  "nl": "Operaties"
+                }
+              }
             },
             "views": {
               "$ref": "#/$defs/webViewsV2",
-              "x-osf-i18n": { "title": { "en": "Views", "nl": "Weergaven" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Views",
+                  "nl": "Weergaven"
+                }
+              }
             }
           },
-          "x-osf-i18n": { "title": { "en": "Web", "nl": "Web" } }
+          "x-osf-i18n": {
+            "title": {
+              "en": "Web",
+              "nl": "Web"
+            }
+          }
         }
       }
     },
     "mcpResourceV2": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["uri"],
+      "required": [
+        "uri"
+      ],
       "properties": {
         "uri": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9+.-]*://[A-Za-z0-9][A-Za-z0-9/_-]*[A-Za-z0-9]$"
         },
-        "name": { "type": "string" },
-        "description": { "type": "string" },
-        "templateDescription": { "type": "string" }
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "templateDescription": {
+          "type": "string"
+        }
       }
     },
     "webMatrixView": {
@@ -1137,80 +1854,237 @@
       }
     },
     "webNamedViewV2": {
-      "x-osf-i18n": { "title": { "en": "View", "nl": "Weergave" } },
+      "x-osf-i18n": {
+        "title": {
+          "en": "View",
+          "nl": "Weergave"
+        }
+      },
       "oneOf": [
-        { "$ref": "#/$defs/webMatrixView" },
+        {
+          "$ref": "#/$defs/webMatrixView"
+        },
         {
           "type": "object",
-          "x-osf-i18n": { "title": { "en": "Record view", "nl": "Recordweergave" } },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Record view",
+              "nl": "Recordweergave"
+            }
+          },
           "additionalProperties": false,
-          "required": ["kind"],
+          "required": [
+            "kind"
+          ],
           "oneOf": [
-            { "required": ["fields"], "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } } },
-            { "required": ["layout"], "x-osf-i18n": { "title": { "en": "Layout", "nl": "Indeling" } } }
+            {
+              "required": [
+                "fields"
+              ],
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Fields",
+                  "nl": "Velden"
+                }
+              }
+            },
+            {
+              "required": [
+                "layout"
+              ],
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Layout",
+                  "nl": "Indeling"
+                }
+              }
+            }
           ],
           "properties": {
-            "kind": { "const": "record", "x-osf-i18n": { "title": { "en": "Kind", "nl": "Soort" } } },
+            "kind": {
+              "const": "record",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Kind",
+                  "nl": "Soort"
+                }
+              }
+            },
             "fields": {
               "type": "array",
               "minItems": 1,
               "uniqueItems": true,
-              "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } },
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Fields",
+                  "nl": "Velden"
+                }
+              },
               "items": {
                 "$ref": "#/$defs/fieldKey",
                 "x-osf-choice": "field",
-                "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
+                "x-osf-i18n": {
+                  "title": {
+                    "en": "Field",
+                    "nl": "Veld"
+                  }
+                }
               }
             },
-            "title": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Title", "nl": "Titel" } } },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Title",
+                  "nl": "Titel"
+                }
+              }
+            },
             "layout": {
               "$ref": "#/$defs/webViewsV2/properties/record/properties/layout",
-              "x-osf-i18n": { "title": { "en": "Layout", "nl": "Indeling" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Layout",
+                  "nl": "Indeling"
+                }
+              }
             }
           }
         },
         {
           "type": "object",
-          "x-osf-i18n": { "title": { "en": "Collection view", "nl": "Collectieweergave" } },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Collection view",
+              "nl": "Collectieweergave"
+            }
+          },
           "additionalProperties": false,
-          "required": ["kind", "collectionLayout"],
+          "required": [
+            "kind",
+            "collectionLayout"
+          ],
           "properties": {
-            "kind": { "const": "collection", "x-osf-i18n": { "title": { "en": "Kind", "nl": "Soort" } } },
-            "collectionLayout": { "enum": ["table", "tabs", "stack"], "x-osf-i18n": { "title": { "en": "Collection layout", "nl": "Collectie-indeling" }, "enum": { "table": { "en": "Table", "nl": "Tabel" }, "tabs": { "en": "Tabs", "nl": "Tabbladen" }, "stack": { "en": "Stack", "nl": "Onder elkaar" } } } },
-            "itemView": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$", "x-osf-i18n": { "title": { "en": "Item view", "nl": "Itemweergave" } } },
-            "tabLabel": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Tab label field", "nl": "Tabbladlabelveld" } } }
+            "kind": {
+              "const": "collection",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Kind",
+                  "nl": "Soort"
+                }
+              }
+            },
+            "collectionLayout": {
+              "enum": [
+                "table",
+                "tabs",
+                "stack"
+              ],
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Collection layout",
+                  "nl": "Collectie-indeling"
+                },
+                "enum": {
+                  "table": {
+                    "en": "Table",
+                    "nl": "Tabel"
+                  },
+                  "tabs": {
+                    "en": "Tabs",
+                    "nl": "Tabbladen"
+                  },
+                  "stack": {
+                    "en": "Stack",
+                    "nl": "Onder elkaar"
+                  }
+                }
+              }
+            },
+            "itemView": {
+              "type": "string",
+              "pattern": "^[a-z][A-Za-z0-9]*$",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Item view",
+                  "nl": "Itemweergave"
+                }
+              }
+            },
+            "tabLabel": {
+              "$ref": "#/$defs/fieldKey",
+              "x-osf-choice": "field",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Tab label field",
+                  "nl": "Tabbladlabelveld"
+                }
+              }
+            }
           }
         }
       ]
     },
     "webViewsV2": {
       "type": "object",
-      "additionalProperties": { "$ref": "#/$defs/webNamedViewV2" },
-      "required": ["collection"],
+      "additionalProperties": {
+        "$ref": "#/$defs/webNamedViewV2"
+      },
+      "required": [
+        "collection"
+      ],
       "properties": {
         "named": {
           "type": "object",
-          "x-osf-i18n": { "title": { "en": "Named views", "nl": "Benoemde weergaven" } },
-          "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
-          "additionalProperties": { "$ref": "#/$defs/webNamedViewV2" }
+          "x-osf-i18n": {
+            "title": {
+              "en": "Named views",
+              "nl": "Benoemde weergaven"
+            }
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][A-Za-z0-9]*$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/webNamedViewV2"
+          }
         },
         "collection": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["route", "columns"],
+          "required": [
+            "route",
+            "columns"
+          ],
           "properties": {
             "renderer": {
               "$ref": "#/$defs/webRendererKeyV2",
-              "x-osf-i18n": { "title": { "en": "Renderer", "nl": "Renderer" } },
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Renderer",
+                  "nl": "Renderer"
+                }
+              },
               "x-osf-choice": "renderer"
             },
             "route": {
               "$ref": "#/$defs/localizedOrString",
-              "x-osf-i18n": { "title": { "en": "Route", "nl": "Route" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Route",
+                  "nl": "Route"
+                }
+              }
             },
             "title": {
               "$ref": "#/$defs/localizedText",
-              "x-osf-i18n": { "title": { "en": "Title", "nl": "Titel" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Title",
+                  "nl": "Titel"
+                }
+              }
             },
             "actions": {
               "type": "array",
@@ -1218,72 +2092,188 @@
               "items": {
                 "type": "string",
                 "pattern": "^[a-z][A-Za-z0-9]*$",
-                "x-osf-i18n": { "title": { "en": "Action", "nl": "Actie" } },
-                "x-osf-choice": { "kind": "operation", "scope": "collection" }
+                "x-osf-i18n": {
+                  "title": {
+                    "en": "Action",
+                    "nl": "Actie"
+                  }
+                },
+                "x-osf-choice": {
+                  "kind": "operation",
+                  "scope": "collection"
+                }
               },
-              "x-osf-i18n": { "title": { "en": "Actions", "nl": "Acties" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Actions",
+                  "nl": "Acties"
+                }
+              }
             },
-            "emptyState": {"type": "object", "additionalProperties": false, "required": ["title"], "properties": {"title": {"$ref": "#/$defs/localizedText"}, "description": {"$ref": "#/$defs/localizedText"}, "illustration": {"const": "empty-collection", "x-osf-i18n": { "title": { "en": "Illustration", "nl": "Illustratie" } }}, "primaryAction": {"const": "create", "x-osf-i18n": { "title": { "en": "Primary action", "nl": "Primaire actie" } }}}, "x-osf-i18n": { "title": { "en": "Empty state", "nl": "Lege toestand" } }},
+            "emptyState": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "title"
+              ],
+              "properties": {
+                "title": {
+                  "$ref": "#/$defs/localizedText"
+                },
+                "description": {
+                  "$ref": "#/$defs/localizedText"
+                },
+                "illustration": {
+                  "const": "empty-collection",
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Illustration",
+                      "nl": "Illustratie"
+                    }
+                  }
+                },
+                "primaryAction": {
+                  "const": "create",
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Primary action",
+                      "nl": "Primaire actie"
+                    }
+                  }
+                }
+              },
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Empty state",
+                  "nl": "Lege toestand"
+                }
+              }
+            },
             "columns": {
               "type": "array",
               "minItems": 1,
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["key"],
+                "required": [
+                  "key"
+                ],
                 "properties": {
                   "key": {
                     "$ref": "#/$defs/fieldKey",
-                    "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } },
+                    "x-osf-i18n": {
+                      "title": {
+                        "en": "Field",
+                        "nl": "Veld"
+                      }
+                    },
                     "x-osf-choice": "field"
                   },
                   "label": {
                     "$ref": "#/$defs/localizedText",
-                    "x-osf-i18n": { "title": { "en": "Label", "nl": "Label" } }
+                    "x-osf-i18n": {
+                      "title": {
+                        "en": "Label",
+                        "nl": "Label"
+                      }
+                    }
                   },
                   "sortable": {
                     "type": "boolean",
-                    "x-osf-i18n": { "title": { "en": "Sortable", "nl": "Sorteerbaar" } }
+                    "x-osf-i18n": {
+                      "title": {
+                        "en": "Sortable",
+                        "nl": "Sorteerbaar"
+                      }
+                    }
                   }
                 },
-                "x-osf-i18n": { "title": { "en": "Column", "nl": "Kolom" } }
+                "x-osf-i18n": {
+                  "title": {
+                    "en": "Column",
+                    "nl": "Kolom"
+                  }
+                }
               },
-              "x-osf-i18n": { "title": { "en": "Columns", "nl": "Kolommen" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Columns",
+                  "nl": "Kolommen"
+                }
+              }
             },
             "defaultSort": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["key", "direction"],
+              "required": [
+                "key",
+                "direction"
+              ],
               "properties": {
                 "key": {
                   "$ref": "#/$defs/fieldKey",
-                  "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } },
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Field",
+                      "nl": "Veld"
+                    }
+                  },
                   "x-osf-choice": "sortableField"
                 },
                 "direction": {
-                  "enum": ["asc", "desc"],
+                  "enum": [
+                    "asc",
+                    "desc"
+                  ],
                   "x-osf-i18n": {
-                    "title": { "en": "Direction", "nl": "Richting" },
+                    "title": {
+                      "en": "Direction",
+                      "nl": "Richting"
+                    },
                     "enum": {
-                      "asc": { "en": "Ascending", "nl": "Oplopend" },
-                      "desc": { "en": "Descending", "nl": "Aflopend" }
+                      "asc": {
+                        "en": "Ascending",
+                        "nl": "Oplopend"
+                      },
+                      "desc": {
+                        "en": "Descending",
+                        "nl": "Aflopend"
+                      }
                     }
                   }
                 }
               },
-              "x-osf-i18n": { "title": { "en": "Default sort", "nl": "Standaardsortering" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Default sort",
+                  "nl": "Standaardsortering"
+                }
+              }
             }
           },
-          "x-osf-i18n": { "title": { "en": "List", "nl": "Lijst" } }
+          "x-osf-i18n": {
+            "title": {
+              "en": "List",
+              "nl": "Lijst"
+            }
+          }
         },
         "record": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["title", "layout"],
+          "required": [
+            "title",
+            "layout"
+          ],
           "properties": {
             "renderer": {
               "$ref": "#/$defs/webRendererKeyV2",
-              "x-osf-i18n": { "title": { "en": "Renderer", "nl": "Renderer" } },
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Renderer",
+                  "nl": "Renderer"
+                }
+              },
               "x-osf-choice": "renderer"
             },
             "routes": {
@@ -1292,20 +2282,38 @@
               "properties": {
                 "read": {
                   "$ref": "#/$defs/localizedOrString",
-                  "x-osf-i18n": { "title": { "en": "Read", "nl": "Lezen" } }
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Read",
+                      "nl": "Lezen"
+                    }
+                  }
                 },
                 "create": {
                   "$ref": "#/$defs/localizedOrString",
-                  "x-osf-i18n": { "title": { "en": "Create", "nl": "Aanmaken" } }
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Create",
+                      "nl": "Aanmaken"
+                    }
+                  }
                 }
               },
-              "x-osf-i18n": { "title": { "en": "Routes", "nl": "Routes" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Routes",
+                  "nl": "Routes"
+                }
+              }
             },
             "title": {
               "type": "string",
               "minLength": 1,
               "x-osf-i18n": {
-                "title": { "en": "Title", "nl": "Titel" },
+                "title": {
+                  "en": "Title",
+                  "nl": "Titel"
+                },
                 "description": {
                   "en": "A template over the record's fields, such as {{displayName}}.",
                   "nl": "Een sjabloon over de velden van het record, zoals {{displayName}}."
@@ -1315,36 +2323,73 @@
             "subtitle": {
               "type": "string",
               "minLength": 1,
-              "x-osf-i18n": { "title": { "en": "Subtitle", "nl": "Ondertitel" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Subtitle",
+                  "nl": "Ondertitel"
+                }
+              }
             },
             "badges": {
               "type": "array",
               "uniqueItems": true,
               "items": {
                 "$ref": "#/$defs/fieldKey",
-                "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } },
+                "x-osf-i18n": {
+                  "title": {
+                    "en": "Field",
+                    "nl": "Veld"
+                  }
+                },
                 "x-osf-choice": "field"
               },
-              "x-osf-i18n": { "title": { "en": "Badges", "nl": "Badges" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Badges",
+                  "nl": "Badges"
+                }
+              }
             },
             "variableSources": {
               "type": "array",
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["key", "resolver"],
+                "required": [
+                  "key",
+                  "resolver"
+                ],
                 "properties": {
                   "key": {
                     "$ref": "#/$defs/fieldKey",
-                    "x-osf-i18n": { "title": { "en": "Key", "nl": "Sleutel" } }
+                    "x-osf-i18n": {
+                      "title": {
+                        "en": "Key",
+                        "nl": "Sleutel"
+                      }
+                    }
                   },
                   "resolver": {
-                    "enum": ["chips", "entityFields", "templateParameters", "workflowGraphVariables"],
+                    "enum": [
+                      "chips",
+                      "entityFields",
+                      "templateParameters",
+                      "workflowGraphVariables"
+                    ],
                     "x-osf-i18n": {
-                      "title": { "en": "Resolver", "nl": "Resolver" },
+                      "title": {
+                        "en": "Resolver",
+                        "nl": "Resolver"
+                      },
                       "enum": {
-                        "chips": { "en": "Chips", "nl": "Chips" },
-                        "entityFields": { "en": "Entity fields", "nl": "Entiteitsvelden" },
+                        "chips": {
+                          "en": "Chips",
+                          "nl": "Chips"
+                        },
+                        "entityFields": {
+                          "en": "Entity fields",
+                          "nl": "Entiteitsvelden"
+                        },
                         "templateParameters": {
                           "en": "Template parameters",
                           "nl": "Sjabloonparameters"
@@ -1358,12 +2403,27 @@
                   },
                   "params": {
                     "type": "object",
-                    "x-osf-i18n": { "title": { "en": "Parameters", "nl": "Parameters" } }
+                    "x-osf-i18n": {
+                      "title": {
+                        "en": "Parameters",
+                        "nl": "Parameters"
+                      }
+                    }
                   }
                 },
-                "x-osf-i18n": { "title": { "en": "Variable source", "nl": "Variabelebron" } }
+                "x-osf-i18n": {
+                  "title": {
+                    "en": "Variable source",
+                    "nl": "Variabelebron"
+                  }
+                }
               },
-              "x-osf-i18n": { "title": { "en": "Variable sources", "nl": "Variabelebronnen" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Variable sources",
+                  "nl": "Variabelebronnen"
+                }
+              }
             },
             "actions": {
               "type": "array",
@@ -1371,55 +2431,529 @@
               "items": {
                 "type": "string",
                 "pattern": "^[a-z][A-Za-z0-9]*$",
-                "x-osf-i18n": { "title": { "en": "Action", "nl": "Actie" } },
-                "x-osf-choice": { "kind": "operation", "scope": "record" }
+                "x-osf-i18n": {
+                  "title": {
+                    "en": "Action",
+                    "nl": "Actie"
+                  }
+                },
+                "x-osf-choice": {
+                  "kind": "operation",
+                  "scope": "record"
+                }
               },
-              "x-osf-i18n": { "title": { "en": "Actions", "nl": "Acties" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Actions",
+                  "nl": "Acties"
+                }
+              }
             },
             "layout": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["tabs"],
+              "required": [
+                "tabs"
+              ],
               "properties": {
-                "preset": { "enum": ["main", "main-context", "inbox-main-context"], "x-osf-i18n": { "title": { "en": "Page layout", "nl": "Pagina-indeling" }, "enum": { "main": { "en": "Main", "nl": "Hoofdinhoud" }, "main-context": { "en": "Main and context", "nl": "Hoofdinhoud en context" }, "inbox-main-context": { "en": "List, main and context", "nl": "Lijst, hoofdinhoud en context" } } } },
-                "workspaceTabs": { "type": "boolean", "description": "Whether to show surrounding workspace tabs; omission inherits the normal shell. Internal record task tabs are unaffected." },
+                "preset": {
+                  "enum": [
+                    "main",
+                    "main-context",
+                    "inbox-main-context"
+                  ],
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Page layout",
+                      "nl": "Pagina-indeling"
+                    },
+                    "enum": {
+                      "main": {
+                        "en": "Main",
+                        "nl": "Hoofdinhoud"
+                      },
+                      "main-context": {
+                        "en": "Main and context",
+                        "nl": "Hoofdinhoud en context"
+                      },
+                      "inbox-main-context": {
+                        "en": "List, main and context",
+                        "nl": "Lijst, hoofdinhoud en context"
+                      }
+                    }
+                  }
+                },
+                "workspaceTabs": {
+                  "type": "boolean",
+                  "description": "Whether to show surrounding workspace tabs; omission inherits the normal shell. Internal record task tabs are unaffected.",
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Workspace tabs",
+                      "nl": "Werkruimtetabbladen"
+                    }
+                  }
+                },
                 "context": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["fields"],
+                  "required": [
+                    "fields"
+                  ],
                   "properties": {
-                    "records": {"type":"array","items":{"type":"object","additionalProperties":false,"required":["key","path"],"properties":{"key":{"$ref":"#/$defs/fieldKey"},"label":{"$ref":"#/$defs/localizedText"},"path":{"type":"array","minItems":1,"maxItems":4,"items":{"$ref":"#/$defs/fieldKey"}},"displayField":{"$ref":"#/$defs/fieldKey"},"tone":{"enum":["default","subtle"]},"labelEmphasis":{"type":"boolean"},"status":{"type":"object","additionalProperties":false,"required":["field","values"],"properties":{"field":{"$ref":"#/$defs/fieldKey"},"values":{"type":"object","minProperties":1,"additionalProperties":{"enum":["off","success","danger","warning"]}}}},"when":{"type":"object","minProperties":1,"propertyNames":{"$ref":"#/$defs/fieldKey"},"additionalProperties":{"type":["string","number","boolean","null"]}}}}},
-                    "contacts": {"type": "object", "additionalProperties": false, "required": ["relationship", "channelField", "valueField"], "properties": {"channels": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["key", "types"], "properties": {"key": {"$ref": "#/$defs/fieldKey"}, "types": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}, "label": {"$ref": "#/$defs/localizedText"}, "when": {"type": "object", "minProperties": 1, "propertyNames": {"pattern": "^[a-zA-Z][a-zA-Z0-9]*$"}, "additionalProperties": {"type": ["string", "boolean"]}}}}}, "relationship": {"$ref": "#/$defs/fieldKey"}, "channelField": {"$ref": "#/$defs/fieldKey"}, "valueField": {"$ref": "#/$defs/fieldKey"}, "preferredChannelField": {"$ref": "#/$defs/fieldKey"}, "language": {"type": "object", "additionalProperties": false, "required": ["relationship", "field"], "properties": {"relationship": {"$ref": "#/$defs/fieldKey"}, "field": {"$ref": "#/$defs/fieldKey"}}}}},
+                    "records": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "key",
+                          "path"
+                        ],
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "pattern": "^[a-z][A-Za-z0-9]*$",
+                            "x-osf-i18n": {
+                              "title": {
+                                "en": "Identifier",
+                                "nl": "Identificatie"
+                              }
+                            }
+                          },
+                          "label": {
+                            "$ref": "#/$defs/localizedText"
+                          },
+                          "path": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 4,
+                            "items": {
+                              "$ref": "#/$defs/fieldKey",
+                              "x-osf-choice": "relationship",
+                              "x-osf-i18n": {
+                                "title": {
+                                  "en": "Relationship",
+                                  "nl": "Relatie"
+                                }
+                              }
+                            },
+                            "x-osf-i18n": {
+                              "title": {
+                                "en": "Relationship path",
+                                "nl": "Relatiepad"
+                              }
+                            }
+                          },
+                          "displayField": {
+                            "$ref": "#/$defs/fieldKey",
+                            "x-osf-choice": "field",
+                            "x-osf-i18n": {
+                              "title": {
+                                "en": "Display field",
+                                "nl": "Weergaveveld"
+                              }
+                            }
+                          },
+                          "tone": {
+                            "enum": [
+                              "default",
+                              "subtle"
+                            ],
+                            "x-osf-i18n": {
+                              "title": {
+                                "en": "Emphasis",
+                                "nl": "Nadruk"
+                              },
+                              "enum": {
+                                "default": {
+                                  "en": "Default",
+                                  "nl": "Standaard"
+                                },
+                                "subtle": {
+                                  "en": "Subtle",
+                                  "nl": "Subtiel"
+                                }
+                              }
+                            }
+                          },
+                          "labelEmphasis": {
+                            "type": "boolean",
+                            "x-osf-i18n": {
+                              "title": {
+                                "en": "Emphasize label",
+                                "nl": "Label benadrukken"
+                              }
+                            }
+                          },
+                          "status": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "field",
+                              "values"
+                            ],
+                            "properties": {
+                              "field": {
+                                "$ref": "#/$defs/fieldKey",
+                                "x-osf-choice": "field",
+                                "x-osf-i18n": {
+                                  "title": {
+                                    "en": "Field",
+                                    "nl": "Veld"
+                                  }
+                                }
+                              },
+                              "values": {
+                                "type": "object",
+                                "minProperties": 1,
+                                "additionalProperties": {
+                                  "enum": [
+                                    "off",
+                                    "success",
+                                    "danger",
+                                    "warning"
+                                  ],
+                                  "x-osf-i18n": {
+                                    "title": {
+                                      "en": "Status color",
+                                      "nl": "Statuskleur"
+                                    },
+                                    "enum": {
+                                      "off": {
+                                        "en": "None",
+                                        "nl": "Geen"
+                                      },
+                                      "success": {
+                                        "en": "Success",
+                                        "nl": "Succes"
+                                      },
+                                      "danger": {
+                                        "en": "Danger",
+                                        "nl": "Gevaar"
+                                      },
+                                      "warning": {
+                                        "en": "Warning",
+                                        "nl": "Waarschuwing"
+                                      }
+                                    }
+                                  }
+                                },
+                                "x-osf-i18n": {
+                                  "title": {
+                                    "en": "Status colors",
+                                    "nl": "Statuskleuren"
+                                  }
+                                }
+                              }
+                            },
+                            "x-osf-i18n": {
+                              "title": {
+                                "en": "Status indicator",
+                                "nl": "Statusindicator"
+                              }
+                            }
+                          },
+                          "when": {
+                            "type": "object",
+                            "minProperties": 1,
+                            "propertyNames": {
+                              "$ref": "#/$defs/fieldKey",
+                              "x-osf-choice": "field",
+                              "x-osf-i18n": {
+                                "title": {
+                                  "en": "Field",
+                                  "nl": "Veld"
+                                }
+                              }
+                            },
+                            "additionalProperties": {
+                              "type": [
+                                "string",
+                                "number",
+                                "boolean",
+                                "null"
+                              ],
+                              "x-osf-i18n": {
+                                "title": {
+                                  "en": "Condition value",
+                                  "nl": "Voorwaardewaarde"
+                                }
+                              }
+                            },
+                            "x-osf-i18n": {
+                              "title": {
+                                "en": "Visibility conditions",
+                                "nl": "Zichtbaarheidsvoorwaarden"
+                              }
+                            }
+                          }
+                        },
+                        "x-osf-i18n": {
+                          "title": {
+                            "en": "Related record",
+                            "nl": "Gerelateerd record"
+                          }
+                        }
+                      },
+                      "x-osf-i18n": {
+                        "title": {
+                          "en": "Related records",
+                          "nl": "Gerelateerde records"
+                        }
+                      }
+                    },
+                    "contacts": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "relationship",
+                        "channelField",
+                        "valueField"
+                      ],
+                      "properties": {
+                        "channels": {
+                          "type": "array",
+                          "minItems": 1,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "key",
+                              "types"
+                            ],
+                            "properties": {
+                              "key": {
+                                "type": "string",
+                                "pattern": "^[a-z][A-Za-z0-9]*$",
+                                "x-osf-i18n": {
+                                  "title": {
+                                    "en": "Identifier",
+                                    "nl": "Identificatie"
+                                  }
+                                }
+                              },
+                              "types": {
+                                "type": "array",
+                                "minItems": 1,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "x-osf-i18n": {
+                                    "title": {
+                                      "en": "Channel type",
+                                      "nl": "Kanaaltype"
+                                    }
+                                  }
+                                },
+                                "x-osf-i18n": {
+                                  "title": {
+                                    "en": "Channel types",
+                                    "nl": "Kanaaltypen"
+                                  }
+                                }
+                              },
+                              "label": {
+                                "$ref": "#/$defs/localizedText"
+                              },
+                              "when": {
+                                "type": "object",
+                                "minProperties": 1,
+                                "propertyNames": {
+                                  "pattern": "^[a-zA-Z][a-zA-Z0-9]*$",
+                                  "x-osf-choice": "field",
+                                  "x-osf-i18n": {
+                                    "title": {
+                                      "en": "Field",
+                                      "nl": "Veld"
+                                    }
+                                  }
+                                },
+                                "additionalProperties": {
+                                  "type": [
+                                    "string",
+                                    "boolean"
+                                  ],
+                                  "x-osf-i18n": {
+                                    "title": {
+                                      "en": "Condition value",
+                                      "nl": "Voorwaardewaarde"
+                                    }
+                                  }
+                                },
+                                "x-osf-i18n": {
+                                  "title": {
+                                    "en": "Visibility conditions",
+                                    "nl": "Zichtbaarheidsvoorwaarden"
+                                  }
+                                }
+                              }
+                            },
+                            "x-osf-i18n": {
+                              "title": {
+                                "en": "Contact channel",
+                                "nl": "Contactkanaal"
+                              }
+                            }
+                          },
+                          "x-osf-i18n": {
+                            "title": {
+                              "en": "Contact channels",
+                              "nl": "Contactkanalen"
+                            }
+                          }
+                        },
+                        "relationship": {
+                          "$ref": "#/$defs/fieldKey",
+                          "x-osf-choice": "relationship",
+                          "x-osf-i18n": {
+                            "title": {
+                              "en": "Relationship",
+                              "nl": "Relatie"
+                            }
+                          }
+                        },
+                        "channelField": {
+                          "$ref": "#/$defs/fieldKey",
+                          "x-osf-choice": "field",
+                          "x-osf-i18n": {
+                            "title": {
+                              "en": "Channel field",
+                              "nl": "Kanaalveld"
+                            }
+                          }
+                        },
+                        "valueField": {
+                          "$ref": "#/$defs/fieldKey",
+                          "x-osf-choice": "field",
+                          "x-osf-i18n": {
+                            "title": {
+                              "en": "Value field",
+                              "nl": "Waardeveld"
+                            }
+                          }
+                        },
+                        "preferredChannelField": {
+                          "$ref": "#/$defs/fieldKey",
+                          "x-osf-choice": "field",
+                          "x-osf-i18n": {
+                            "title": {
+                              "en": "Preferred channel field",
+                              "nl": "Voorkeurskanaalveld"
+                            }
+                          }
+                        },
+                        "language": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "relationship",
+                            "field"
+                          ],
+                          "properties": {
+                            "relationship": {
+                              "$ref": "#/$defs/fieldKey",
+                              "x-osf-choice": "relationship",
+                              "x-osf-i18n": {
+                                "title": {
+                                  "en": "Relationship",
+                                  "nl": "Relatie"
+                                }
+                              }
+                            },
+                            "field": {
+                              "$ref": "#/$defs/fieldKey",
+                              "x-osf-choice": "field",
+                              "x-osf-i18n": {
+                                "title": {
+                                  "en": "Field",
+                                  "nl": "Veld"
+                                }
+                              }
+                            }
+                          },
+                          "x-osf-i18n": {
+                            "title": {
+                              "en": "Language",
+                              "nl": "Taal"
+                            }
+                          }
+                        }
+                      },
+                      "x-osf-i18n": {
+                        "title": {
+                          "en": "Contact information",
+                          "nl": "Contactgegevens"
+                        }
+                      }
+                    },
                     "fields": {
                       "type": "array",
                       "uniqueItems": true,
                       "items": {
                         "$ref": "#/$defs/fieldKey",
-                        "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } },
+                        "x-osf-i18n": {
+                          "title": {
+                            "en": "Field",
+                            "nl": "Veld"
+                          }
+                        },
                         "x-osf-choice": "field"
                       },
-                      "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } }
+                      "x-osf-i18n": {
+                        "title": {
+                          "en": "Fields",
+                          "nl": "Velden"
+                        }
+                      }
                     },
                     "relationships": {
                       "type": "array",
                       "uniqueItems": true,
                       "items": {
                         "$ref": "#/$defs/fieldKey",
-                        "x-osf-i18n": { "title": { "en": "Relationship", "nl": "Relatie" } },
+                        "x-osf-i18n": {
+                          "title": {
+                            "en": "Relationship",
+                            "nl": "Relatie"
+                          }
+                        },
                         "x-osf-choice": "relationship"
                       },
-                      "x-osf-i18n": { "title": { "en": "Relationships", "nl": "Relaties" } }
+                      "x-osf-i18n": {
+                        "title": {
+                          "en": "Relationships",
+                          "nl": "Relaties"
+                        }
+                      }
                     }
                   },
-                  "x-osf-i18n": { "title": { "en": "Context column", "nl": "Contextkolom" } }
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Context column",
+                      "nl": "Contextkolom"
+                    }
+                  }
                 },
                 "tabs": {
                   "type": "array",
-                  "items": { "$ref": "#/$defs/webViewGroupV2" },
-                  "x-osf-i18n": { "title": { "en": "Tabs", "nl": "Tabbladen" } }
+                  "items": {
+                    "$ref": "#/$defs/webViewGroupV2"
+                  },
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Tabs",
+                      "nl": "Tabbladen"
+                    }
+                  }
                 }
               },
-              "x-osf-i18n": { "title": { "en": "Layout", "nl": "Indeling" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Layout",
+                  "nl": "Indeling"
+                }
+              }
             },
             "modes": {
               "type": "object",
@@ -1427,20 +2961,45 @@
               "properties": {
                 "create": {
                   "$ref": "#/$defs/webWriteModeV2",
-                  "x-osf-i18n": { "title": { "en": "Create form", "nl": "Aanmaakformulier" } }
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Create form",
+                      "nl": "Aanmaakformulier"
+                    }
+                  }
                 },
                 "update": {
                   "$ref": "#/$defs/webWriteModeV2",
-                  "x-osf-i18n": { "title": { "en": "Update form", "nl": "Wijzigformulier" } }
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Update form",
+                      "nl": "Wijzigformulier"
+                    }
+                  }
                 }
               },
-              "x-osf-i18n": { "title": { "en": "Forms", "nl": "Formulieren" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Forms",
+                  "nl": "Formulieren"
+                }
+              }
             }
           },
-          "x-osf-i18n": { "title": { "en": "Record", "nl": "Record" } }
+          "x-osf-i18n": {
+            "title": {
+              "en": "Record",
+              "nl": "Record"
+            }
+          }
         }
       },
-      "x-osf-i18n": { "title": { "en": "Views", "nl": "Weergaven" } }
+      "x-osf-i18n": {
+        "title": {
+          "en": "Views",
+          "nl": "Weergaven"
+        }
+      }
     },
     "webRendererKeyV2": {
       "type": "string",
@@ -1451,107 +3010,252 @@
     "webWriteModeV2": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["title"],
+      "required": [
+        "title"
+      ],
       "properties": {
         "title": {
           "$ref": "#/$defs/localizedText",
-          "x-osf-i18n": { "title": { "en": "Title", "nl": "Titel" } }
+          "x-osf-i18n": {
+            "title": {
+              "en": "Title",
+              "nl": "Titel"
+            }
+          }
         },
         "groups": {
           "type": "array",
-          "items": { "$ref": "#/$defs/webViewGroupV2" },
-          "x-osf-i18n": { "title": { "en": "Groups", "nl": "Groepen" } }
+          "items": {
+            "$ref": "#/$defs/webViewGroupV2"
+          },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Groups",
+              "nl": "Groepen"
+            }
+          }
         }
       },
-      "x-osf-i18n": { "title": { "en": "Form", "nl": "Formulier" } }
+      "x-osf-i18n": {
+        "title": {
+          "en": "Form",
+          "nl": "Formulier"
+        }
+      }
     },
     "webViewGroupV2": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "showInReadNavigation": { "type": "boolean", "description": "Show this supplementary tab in ordinary read navigation; edit forms and contextual selection retain it." },
+        "showInReadNavigation": {
+          "type": "boolean",
+          "description": "Show this supplementary tab in ordinary read navigation; edit forms and contextual selection retain it.",
+          "x-osf-i18n": {
+            "title": {
+              "en": "Show in read navigation",
+              "nl": "Tonen in leesnavigatie"
+            }
+          }
+        },
         "id": {
           "type": "string",
           "minLength": 1,
-          "x-osf-i18n": { "title": { "en": "Id", "nl": "Id" } }
+          "x-osf-i18n": {
+            "title": {
+              "en": "Id",
+              "nl": "Id"
+            }
+          }
         },
         "icon": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9-]*$",
           "description": "Battery icon key shown with the group; the host resolves it.",
-          "x-osf-i18n": { "title": { "en": "Icon", "nl": "Icoon" } }
+          "x-osf-i18n": {
+            "title": {
+              "en": "Icon",
+              "nl": "Icoon"
+            }
+          }
         },
         "visibleWhen": {
           "$ref": "#/$defs/field/properties/visibility",
           "description": "Show the group only while these conditions hold for the record being edited.",
-          "x-osf-i18n": { "title": { "en": "Visible when", "nl": "Zichtbaar wanneer" } }
+          "x-osf-i18n": {
+            "title": {
+              "en": "Visible when",
+              "nl": "Zichtbaar wanneer"
+            }
+          }
         },
         "title": {
           "$ref": "#/$defs/localizedText",
-          "x-osf-i18n": { "title": { "en": "Title", "nl": "Titel" } }
+          "x-osf-i18n": {
+            "title": {
+              "en": "Title",
+              "nl": "Titel"
+            }
+          }
         },
         "label": {
           "$ref": "#/$defs/localizedText",
-          "x-osf-i18n": { "title": { "en": "Label", "nl": "Label" } }
+          "x-osf-i18n": {
+            "title": {
+              "en": "Label",
+              "nl": "Label"
+            }
+          }
         },
         "fields": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/webFieldEntryV2" },
-          "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } }
+          "items": {
+            "$ref": "#/$defs/webFieldEntryV2"
+          },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Fields",
+              "nl": "Velden"
+            }
+          }
         },
         "relationship": {
           "oneOf": [
             {
               "$ref": "#/$defs/fieldKey",
               "x-osf-choice": "relationship",
-              "x-osf-i18n": { "title": { "en": "Relationship", "nl": "Relatie" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Relationship",
+                  "nl": "Relatie"
+                }
+              }
             },
             {
               "$ref": "#/$defs/webRelationshipUsageV2",
               "x-osf-choice": "relationship",
-              "x-osf-i18n": { "title": { "en": "Relationship with overrides", "nl": "Relatie met aanpassingen" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Relationship with overrides",
+                  "nl": "Relatie met aanpassingen"
+                }
+              }
             }
           ],
-          "x-osf-i18n": { "title": { "en": "Relationship", "nl": "Relatie" } },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Relationship",
+              "nl": "Relatie"
+            }
+          },
           "x-osf-choice": "relationship"
         },
         "groups": {
           "type": "array",
-          "items": { "$ref": "#/$defs/webViewGroupV2" },
-          "x-osf-i18n": { "title": { "en": "Groups", "nl": "Groepen" } }
+          "items": {
+            "$ref": "#/$defs/webViewGroupV2"
+          },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Groups",
+              "nl": "Groepen"
+            }
+          }
         }
       },
       "anyOf": [
-        { "required": ["fields"] },
-        { "required": ["relationship"] },
-        { "required": ["groups"] }
+        {
+          "required": [
+            "fields"
+          ]
+        },
+        {
+          "required": [
+            "relationship"
+          ]
+        },
+        {
+          "required": [
+            "groups"
+          ]
+        }
       ],
-      "x-osf-i18n": { "title": { "en": "Group", "nl": "Groep" } }
+      "x-osf-i18n": {
+        "title": {
+          "en": "Group",
+          "nl": "Groep"
+        }
+      }
     },
     "webRelationshipUsageV2": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "properties": {
-        "name": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "relationship" },
-        "through": { "$ref": "#/$defs/fieldKey" },
-        "view": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+        "name": {
+          "$ref": "#/$defs/fieldKey",
+          "x-osf-choice": "relationship"
+        },
+        "through": {
+          "$ref": "#/$defs/fieldKey",
+          "x-osf-choice": "relationship"
+        },
+        "view": {
+          "type": "string",
+          "pattern": "^[a-z][A-Za-z0-9]*$"
+        },
         "overrides": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "presentation": {
-              "type": "object", "additionalProperties": false,
-              "required": ["kind", "titleField", "timestampField"],
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "titleField",
+                "timestampField"
+              ],
               "properties": {
-                "kind": { "const": "timeline" },
-                "titleField": { "$ref": "#/$defs/fieldKey" },
-                "timestampField": { "$ref": "#/$defs/fieldKey" },
-                "iconField": { "$ref": "#/$defs/fieldKey" },
-                "icons": { "type": "object", "additionalProperties": { "type": "string", "enum": ["phone", "email", "whatsapp", "chat", "check", "clock"] } },
-                "descriptionField": { "$ref": "#/$defs/fieldKey" },
-                "relatedField": { "$ref": "#/$defs/fieldKey" }
+                "kind": {
+                  "const": "timeline"
+                },
+                "titleField": {
+                  "$ref": "#/$defs/fieldKey",
+                  "x-osf-choice": "field"
+                },
+                "timestampField": {
+                  "$ref": "#/$defs/fieldKey",
+                  "x-osf-choice": "field"
+                },
+                "iconField": {
+                  "$ref": "#/$defs/fieldKey",
+                  "x-osf-choice": "field"
+                },
+                "icons": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string",
+                    "enum": [
+                      "phone",
+                      "email",
+                      "whatsapp",
+                      "chat",
+                      "check",
+                      "clock"
+                    ]
+                  }
+                },
+                "descriptionField": {
+                  "$ref": "#/$defs/fieldKey",
+                  "x-osf-choice": "field"
+                },
+                "relatedField": {
+                  "$ref": "#/$defs/fieldKey",
+                  "x-osf-choice": "field"
+                }
               }
             },
             "columns": {
@@ -1560,14 +3264,24 @@
               "uniqueItems": true,
               "items": {
                 "oneOf": [
-                  { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field" },
+                  {
+                    "$ref": "#/$defs/fieldKey",
+                    "x-osf-choice": "field"
+                  },
                   {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["key"],
+                    "required": [
+                      "key"
+                    ],
                     "properties": {
-                      "key": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field" },
-                      "label": { "$ref": "#/$defs/localizedText" }
+                      "key": {
+                        "$ref": "#/$defs/fieldKey",
+                        "x-osf-choice": "field"
+                      },
+                      "label": {
+                        "$ref": "#/$defs/localizedText"
+                      }
                     }
                   }
                 ]
@@ -1576,30 +3290,64 @@
             "filters": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field" }
+              "items": {
+                "$ref": "#/$defs/fieldKey",
+                "x-osf-choice": "field"
+              }
             },
             "sortFields": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "sortableField" }
+              "items": {
+                "$ref": "#/$defs/fieldKey",
+                "x-osf-choice": "sortableField"
+              }
             },
-            "pageSize": { "type": "integer", "minimum": 1 },
+            "pageSize": {
+              "type": "integer",
+              "minimum": 1
+            },
             "sort": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["key", "direction"],
+              "required": [
+                "key",
+                "direction"
+              ],
               "properties": {
-                "key": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "sortableField" },
-                "direction": { "type": "string", "enum": ["asc", "desc"] }
+                "key": {
+                  "$ref": "#/$defs/fieldKey",
+                  "x-osf-choice": "sortableField"
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "asc",
+                    "desc"
+                  ]
+                }
               }
             },
             "actions": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "type": "string", "enum": ["create", "insert", "move", "update", "remove"] }
+              "items": {
+                "type": "string",
+                "enum": [
+                  "create",
+                  "insert",
+                  "move",
+                  "update",
+                  "remove"
+                ]
+              }
             },
-            "title": { "$ref": "#/$defs/localizedText" },
-            "emptyState": { "$ref": "#/$defs/localizedText" }
+            "title": {
+              "$ref": "#/$defs/localizedText"
+            },
+            "emptyState": {
+              "$ref": "#/$defs/localizedText"
+            }
           }
         }
       }
@@ -1608,24 +3356,39 @@
       "oneOf": [
         {
           "$ref": "#/$defs/fieldKey",
-          "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Field",
+              "nl": "Veld"
+            }
+          },
           "x-osf-choice": "field"
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["key"],
+          "required": [
+            "key"
+          ],
           "properties": {
             "key": {
               "$ref": "#/$defs/fieldKey",
-              "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } },
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Field",
+                  "nl": "Veld"
+                }
+              },
               "x-osf-choice": "field"
             },
             "render": {
               "type": "string",
               "minLength": 1,
               "x-osf-i18n": {
-                "title": { "en": "Component", "nl": "Component" },
+                "title": {
+                  "en": "Component",
+                  "nl": "Component"
+                },
                 "description": {
                   "en": "The component that draws this field here, instead of the field's default.",
                   "nl": "Het component dat dit veld hier tekent, in plaats van de standaard van het veld."
@@ -1634,9 +3397,14 @@
               "x-osf-choice": "component"
             },
             "fieldDisplayMode": {
-              "enum": ["hidden"],
+              "enum": [
+                "hidden"
+              ],
               "x-osf-i18n": {
-                "title": { "en": "Display", "nl": "Tonen" },
+                "title": {
+                  "en": "Display",
+                  "nl": "Tonen"
+                },
                 "enum": {
                   "hidden": {
                     "en": "Hidden (loaded, not shown)",
@@ -1646,16 +3414,30 @@
               }
             }
           },
-          "x-osf-i18n": { "title": { "en": "Field entry", "nl": "Veldregel" } }
+          "x-osf-i18n": {
+            "title": {
+              "en": "Field entry",
+              "nl": "Veldregel"
+            }
+          }
         }
       ],
-      "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
+      "x-osf-i18n": {
+        "title": {
+          "en": "Field",
+          "nl": "Veld"
+        }
+      }
     },
     "localizedText": {
       "type": "object",
       "minProperties": 1,
       "propertyNames": {
-        "enum": ["en", "nl", "fr"]
+        "enum": [
+          "en",
+          "nl",
+          "fr"
+        ]
       },
       "additionalProperties": {
         "type": "string"
@@ -1668,7 +3450,10 @@
     "entityIndex": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "fields"],
+      "required": [
+        "name",
+        "fields"
+      ],
       "properties": {
         "name": {
           "type": "string",
@@ -1690,23 +3475,50 @@
         "where": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["field"],
-          "oneOf": [{ "required": ["equals"] }, { "required": ["present"] }],
+          "required": [
+            "field"
+          ],
+          "oneOf": [
+            {
+              "required": [
+                "equals"
+              ]
+            },
+            {
+              "required": [
+                "present"
+              ]
+            }
+          ],
           "description": "Makes the index partial: only rows whose field equals the value (`{ field: isDefault, equals: true }`) or holds one at all (`{ field: invoiceNumber, present: true }`) take part, so a unique index enforces at most one such row per key.",
           "properties": {
-            "field": { "$ref": "#/$defs/fieldKey" },
-            "equals": { "type": ["boolean", "string", "number"] },
-            "present": { "type": "boolean" }
+            "field": {
+              "$ref": "#/$defs/fieldKey"
+            },
+            "equals": {
+              "type": [
+                "boolean",
+                "string",
+                "number"
+              ]
+            },
+            "present": {
+              "type": "boolean"
+            }
           }
         }
       }
     },
     "validationRule": {
       "type": "object",
-      "required": ["value"],
+      "required": [
+        "value"
+      ],
       "properties": {
         "value": {},
-        "message": { "$ref": "#/$defs/localizedText" }
+        "message": {
+          "$ref": "#/$defs/localizedText"
+        }
       }
     },
     "retentionPolicy": {
@@ -1718,18 +3530,29 @@
         },
         "mode": {
           "type": "string",
-          "enum": ["inline", "policyRef", "fieldOverride"]
+          "enum": [
+            "inline",
+            "policyRef",
+            "fieldOverride"
+          ]
         },
         "policy": {
           "type": "string"
         },
         "scope": {
           "type": "string",
-          "enum": ["record", "field"]
+          "enum": [
+            "record",
+            "field"
+          ]
         },
         "inherit": {
           "type": "string",
-          "enum": ["entity", "dossier", "none"]
+          "enum": [
+            "entity",
+            "dossier",
+            "none"
+          ]
         },
         "jurisdiction": {
           "type": "string"
@@ -1756,14 +3579,22 @@
         },
         "duration": {
           "oneOf": [
-            { "type": "string" },
+            {
+              "type": "string"
+            },
             {
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "minimum": { "type": "string" },
-                "maximum": { "type": "string" },
-                "default": { "type": "string" }
+                "minimum": {
+                  "type": "string"
+                },
+                "maximum": {
+                  "type": "string"
+                },
+                "default": {
+                  "type": "string"
+                }
               }
             }
           ]
@@ -1774,7 +3605,12 @@
           "properties": {
             "strategy": {
               "type": "string",
-              "enum": ["createdAt", "updatedAt", "field", "firstNonNull"]
+              "enum": [
+                "createdAt",
+                "updatedAt",
+                "field",
+                "firstNonNull"
+              ]
             },
             "field": {
               "type": "string"
@@ -1782,7 +3618,9 @@
             "fields": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "type": "string" }
+              "items": {
+                "type": "string"
+              }
             }
           }
         },
@@ -1804,13 +3642,19 @@
             },
             "review": {
               "oneOf": [
-                { "type": "boolean" },
+                {
+                  "type": "boolean"
+                },
                 {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
-                    "required": { "type": "boolean" },
-                    "queue": { "type": "string" }
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "queue": {
+                      "type": "string"
+                    }
                   }
                 }
               ]
@@ -1818,7 +3662,9 @@
             "cryptoDelete": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["keyReference"],
+              "required": [
+                "keyReference"
+              ],
               "properties": {
                 "keyReference": {
                   "type": "string",
@@ -1832,16 +3678,24 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "suspendDestruction": { "type": "boolean" },
-            "activeField": { "$ref": "#/$defs/fieldKey" }
+            "suspendDestruction": {
+              "type": "boolean"
+            },
+            "activeField": {
+              "$ref": "#/$defs/fieldKey"
+            }
           }
         },
         "tenantOverride": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "allowExtension": { "type": "boolean" },
-            "allowShortening": { "type": "boolean" }
+            "allowExtension": {
+              "type": "boolean"
+            },
+            "allowShortening": {
+              "type": "boolean"
+            }
           }
         },
         "reason": {
@@ -1852,7 +3706,10 @@
     "field": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["key", "type"],
+      "required": [
+        "key",
+        "type"
+      ],
       "properties": {
         "key": {
           "$ref": "#/$defs/fieldKey"
@@ -1920,7 +3777,13 @@
           "properties": {
             "sensitivity": {
               "type": "string",
-              "enum": ["public", "internal", "confidential", "pii", "bsn"]
+              "enum": [
+                "public",
+                "internal",
+                "confidential",
+                "pii",
+                "bsn"
+              ]
             },
             "category": {
               "type": "string"
@@ -1956,26 +3819,43 @@
             "filter": {
               "type": "object",
               "properties": {
-                "osfType": { "type": "string" },
+                "osfType": {
+                  "type": "string"
+                },
                 "valueType": {
                   "type": "string",
-                  "enum": ["string", "number", "boolean", "object", "array"]
+                  "enum": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "object",
+                    "array"
+                  ]
                 },
-                "itemOsfType": { "type": "string" },
-                "fieldType": { "type": "string" }
+                "itemOsfType": {
+                  "type": "string"
+                },
+                "fieldType": {
+                  "type": "string"
+                }
               }
             }
           }
         },
         "visibility": {
           "type": "object",
-          "required": ["conditions"],
+          "required": [
+            "conditions"
+          ],
           "properties": {
             "conditions": {
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["field", "operator"],
+                "required": [
+                  "field",
+                  "operator"
+                ],
                 "properties": {
                   "field": {
                     "type": "string"
@@ -2001,13 +3881,19 @@
             },
             "logic": {
               "type": "string",
-              "enum": ["and", "or"]
+              "enum": [
+                "and",
+                "or"
+              ]
             }
           }
         },
         "computed": {
           "type": "object",
-          "required": ["expression", "dependencies"],
+          "required": [
+            "expression",
+            "dependencies"
+          ],
           "properties": {
             "expression": {
               "type": "string"
@@ -2042,17 +3928,28 @@
         },
         "options": {
           "type": "object",
-          "required": ["type"],
+          "required": [
+            "type"
+          ],
           "properties": {
             "type": {
               "type": "string",
-              "enum": ["static", "referentiedata", "remote", "dynamic", "entity"]
+              "enum": [
+                "static",
+                "referentiedata",
+                "remote",
+                "dynamic",
+                "entity"
+              ]
             },
             "items": {
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["value", "label"],
+                "required": [
+                  "value",
+                  "label"
+                ],
                 "properties": {
                   "value": {
                     "type": "string"
@@ -2070,7 +3967,9 @@
             },
             "presentation": {
               "type": "string",
-              "enum": ["tiles"],
+              "enum": [
+                "tiles"
+              ],
               "description": "Render static options as icon tiles instead of a select."
             },
             "referentieGroep": {
@@ -2104,49 +4003,83 @@
           "properties": {
             "required": {
               "oneOf": [
-                { "type": "boolean" },
-                { "$ref": "#/$defs/validationRule" }
+                {
+                  "type": "boolean"
+                },
+                {
+                  "$ref": "#/$defs/validationRule"
+                }
               ]
             },
             "minLength": {
               "oneOf": [
-                { "type": "integer", "minimum": 0 },
-                { "$ref": "#/$defs/validationRule" }
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "$ref": "#/$defs/validationRule"
+                }
               ]
             },
             "maxLength": {
               "oneOf": [
-                { "type": "integer", "minimum": 0 },
-                { "$ref": "#/$defs/validationRule" }
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "$ref": "#/$defs/validationRule"
+                }
               ]
             },
             "min": {
               "oneOf": [
-                { "type": "number" },
-                { "$ref": "#/$defs/validationRule" }
+                {
+                  "type": "number"
+                },
+                {
+                  "$ref": "#/$defs/validationRule"
+                }
               ]
             },
             "max": {
               "oneOf": [
-                { "type": "number" },
-                { "$ref": "#/$defs/validationRule" }
+                {
+                  "type": "number"
+                },
+                {
+                  "$ref": "#/$defs/validationRule"
+                }
               ]
             },
             "pattern": {
               "oneOf": [
-                { "type": "string" },
-                { "$ref": "#/$defs/validationRule" }
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/validationRule"
+                }
               ]
             },
             "custom": {
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["name"],
+                "required": [
+                  "name"
+                ],
                 "properties": {
-                  "name": { "type": "string" },
-                  "message": { "$ref": "#/$defs/localizedText" },
-                  "params": { "type": "object" }
+                  "name": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "params": {
+                    "type": "object"
+                  }
                 }
               }
             }
@@ -2155,11 +4088,16 @@
         "reference": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "group"],
+          "required": [
+            "kind",
+            "group"
+          ],
           "properties": {
             "kind": {
               "type": "string",
-              "enum": ["referentiedata"]
+              "enum": [
+                "referentiedata"
+              ]
             },
             "group": {
               "type": "string"
@@ -2175,7 +4113,10 @@
             },
             "storageClass": {
               "type": "string",
-              "enum": ["core", "profile"]
+              "enum": [
+                "core",
+                "profile"
+              ]
             }
           }
         },
@@ -2186,7 +4127,9 @@
         "render": {
           "type": "object",
           "description": "Override the default UI component for this field. If omitted, the component catalog default for the field type is used.",
-          "required": ["component"],
+          "required": [
+            "component"
+          ],
           "properties": {
             "component": {
               "type": "string",
@@ -2220,7 +4163,9 @@
           "type": "object",
           "description": "Field-level RBAC authorization. Defines roles required to read or mutate this field.",
           "additionalProperties": false,
-          "required": ["roles"],
+          "required": [
+            "roles"
+          ],
           "properties": {
             "roles": {
               "type": "object",
@@ -2228,11 +4173,15 @@
               "properties": {
                 "read": {
                   "type": "array",
-                  "items": { "type": "string" }
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "write": {
                   "type": "array",
-                  "items": { "type": "string" }
+                  "items": {
+                    "type": "string"
+                  }
                 }
               }
             }
@@ -2245,12 +4194,26 @@
       "additionalProperties": {
         "type": "object",
         "properties": {
-          "kind": { "type": "string", "enum": ["page", "embedded"] },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "page",
+              "embedded"
+            ]
+          },
           "type": {
             "type": "string",
-            "enum": ["list", "detail", "form", "summary", "cards"]
+            "enum": [
+              "list",
+              "detail",
+              "form",
+              "summary",
+              "cards"
+            ]
           },
-          "itemAction": { "type": "object" }
+          "itemAction": {
+            "type": "object"
+          }
         },
         "additionalProperties": true
       }
@@ -2259,14 +4222,21 @@
       "description": "A compiled relationship (model.relationships of a compiled contract). Relationships are never authored at the entity level: a single reference is a field with an entity osfType and its inverse collection is derived.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["key", "kind", "target"],
+      "required": [
+        "key",
+        "kind",
+        "target"
+      ],
       "properties": {
         "key": {
           "$ref": "#/$defs/fieldKey"
         },
         "kind": {
           "type": "string",
-          "enum": ["belongsTo", "hasMany"]
+          "enum": [
+            "belongsTo",
+            "hasMany"
+          ]
         },
         "target": {
           "type": "string",
@@ -2281,7 +4251,9 @@
         "label": {
           "$ref": "#/$defs/localizedText"
         },
-        "constraints": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/relationshipConstraints" }
+        "constraints": {
+          "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/relationshipConstraints"
+        }
       }
     }
   }

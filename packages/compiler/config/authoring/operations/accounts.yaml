@@ -30,8 +30,16 @@ operations:
               title: { en: Delivery, nl: Bezorging }
               enum:
                 sent: { en: Invitation email sent. Open the link to sign in., nl: Uitnodiging per e-mail verstuurd. Open de link om aan te melden. }
-                not_required: { en: This account is already a member. No email is needed; sign in again to activate access., nl: Dit account is al lid. Er is geen e-mail nodig; meld opnieuw aan om de toegang te activeren. }
+                not_required: { en: This account is already a member; sign in again to activate access., nl: Dit account is al lid; meld opnieuw aan om de toegang te activeren. }
                 already_pending: { en: An invitation is already pending. Use the link in the earlier email., nl: Er staat al een uitnodiging open. Gebruik de link in de eerdere e-mail. }
+          accessNotice:
+            type: string
+            enum: [ sent, failed ]
+            x-osf-i18n:
+              title: { en: Access notice, nl: Toegangsbericht }
+              enum:
+                sent: { en: The member was e-mailed about the new access., nl: Het lid kreeg een e-mail over de nieuwe toegang. }
+                failed: { en: No e-mail could be sent; tell the member to sign in again., nl: Er kon geen e-mail worden verstuurd; laat het lid opnieuw aanmelden. }
     auth: { mode: session, roles: [ Organization.Access.Manage ] }
     tenancy: { mode: required }
     effects: { data: write, external: write }

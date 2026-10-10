@@ -145,12 +145,12 @@ export function publicEmployeeAdmission(admission: EmployeeAdmission): Record<st
     ? {
         reason: "existing_organization_member",
         message: admission.accessNotice === "sent"
-          ? "This person already has an account in this organization, so the role was admitted directly. The identity provider e-mailed them an organization invitation with the sign-in link. The role applies at their next sign-in."
+          ? "This person already has an account in this organization, so the role was admitted directly. The identity provider e-mailed them about it (an organization invitation whose link only confirms they are a member). The role applies when they sign out and sign in again."
           : admission.accessNotice === "failed"
           ? "This person already has an account in this organization, so the role was admitted directly, but no e-mail could be sent. The role applies at their next sign-in."
           : "This person already belongs to the Keycloak organization. No e-mail was sent. The role awaits their next sign-in.",
         nextStep: admission.accessNotice === "sent"
-          ? "Tell the person to open the e-mail and sign in with their existing account; the role applies then."
+          ? "Tell the person they received an e-mail about their access, and that they sign out and sign in again with their existing account for the role to apply."
           : admission.accessNotice === "failed"
           ? "The person must sign out and sign in again with this account; tell them so directly, because no e-mail reached them."
           : "The person must sign out and sign in again with this account. There is no e-mail invitation to accept.",

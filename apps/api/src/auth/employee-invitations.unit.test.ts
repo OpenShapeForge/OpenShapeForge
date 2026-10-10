@@ -46,9 +46,11 @@ describe("invitation log lines", () => {
     id: "33333333-3333-4333-8333-333333333333", email: ADDRESS, role: null, first_name: null, last_name: null,
     status: "pending", invited_by: session.userId, invited_at: new Date(0).toISOString(), revoked_at: null,
   };
+  const jobs: (readonly unknown[])[] = [];
   const connection: DatabaseConnection = {
     async executeQuery<R>(query: CompiledQuery): Promise<QueryResult<R>> {
-      if (query.sql.includes("from platform.tenants")) return { rows: [{ keycloak_organization_id: "org-1", keycloak_realm: "realm" }] as R[] };
+      if (query.sql.includes("from platform.tenants")) return { rows: [{ keycloak_organization_id: "org-1", keycloak_realm: "realm", slug: "acme", name: "Acme" }] as R[] };
+      if (query.sql.includes("\"platform\".\"jobs\"")) { jobs.push(query.parameters); return { rows: [{ id: "job-1", status: "pending" }] as R[] }; }
       if (query.sql.includes("platform.employee_invitations")) return { rows: [row] as R[] };
       return { rows: [] };
     },
@@ -88,5 +90,24 @@ describe("invitation log lines", () => {
     expect(logged.some((line) => line.includes('"keycloak_failed"'))).toBe(true);
     expect(logged.some((line) => line.includes(`revoked invitation ${row.id}`))).toBe(true);
     expect(logged.filter((line) => line.includes(ADDRESS))).toEqual([]);
+  });
+
+  test("an existing member is told about the new access by e-mail, queued with the admission", async () => {
+    jobs.length = 0;
+    const previous = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+    process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = "https://app.example.test";
+    try {
+      await expect(inviteEmployee(db, session, keycloak(false), { email: ADDRESS, role: "org_employee", firstName: "Ada" }))
+        .resolves.toMatchObject({ delivery: "not_required", accessNotice: "queued" });
+    } finally {
+      if (previous === undefined) delete process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN; else process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = previous;
+    }
+    expect(jobs).toHaveLength(1);
+    const values = JSON.stringify(jobs[0]);
+    expect(values).toContain("mail.deliver");
+    expect(values).toContain(ADDRESS);
+    expect(values).toContain("https://app.example.test/acme");
+    expect(values).toContain("Acme");
+    expect(logged.some((line) => line.includes('"accessNotice":"queued"'))).toBe(true);
   });
 });

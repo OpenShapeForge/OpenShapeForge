@@ -74,6 +74,10 @@ import type { DB } from "../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
 import { validateInvitationTarget } from "./invitation-target.js";
 import { deliverOrganizationInvitation } from "./keycloak-invitation-delivery.js";
+import { accessNoticeMail } from "./access-notice-mail.js";
+import { enqueueJob } from "../jobs/store.js";
+import { tenantSignInUrl } from "../control/invitation-outcome.js";
+import { roleLabel } from "../mcp/session-labels.js";
 import { HttpError } from "../rest/http-error.js";
 import { accessPolicy, customRoleId } from '../accounts/access-policy.js';
 // From the leaf module, NOT from ./identity-link.js: this module and that one
@@ -201,6 +205,8 @@ export type EmployeeInvitation = {
 
 export type EmployeeAdmission = EmployeeInvitation & {
   delivery: "sent" | "not_required" | "already_pending";
+  /** An existing member gets an access notice instead of an invitation: queued, or no mail transport. */
+  accessNotice?: "queued";
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -248,12 +254,14 @@ function rethrowKeycloakError(error: unknown): never {
 async function tenantOrganization(
   trx: Transaction<DB>,
   tenantId: string,
-): Promise<{ organizationId: string; realm: string }> {
+): Promise<{ organizationId: string; realm: string; slug?: string; name?: string }> {
   const result = await sql<{
     keycloak_organization_id: string | null;
     keycloak_realm: string | null;
+    slug?: string | null;
+    name?: string | null;
   }>`
-    select keycloak_organization_id, keycloak_realm
+    select keycloak_organization_id, keycloak_realm, slug, name
       from platform.tenants
      where id = ${tenantId}
   `.execute(trx);
@@ -265,7 +273,7 @@ async function tenantOrganization(
       "This tenant has no linked Keycloak Organization yet; it cannot admit members.",
     );
   }
-  return { organizationId: row.keycloak_organization_id, realm: row.keycloak_realm };
+  return { organizationId: row.keycloak_organization_id, realm: row.keycloak_realm, ...(row.slug ? { slug: row.slug } : {}), ...(row.name ? { name: row.name } : {}) };
 }
 
 type InvitationRow = {
@@ -325,9 +333,10 @@ export async function inviteEmployee(
     if (!found.rows.length) throw new HttpError(400, 'VALIDATION', 'Choose a role from this organization.');
   }
 
-  const { organizationId } = await withDbSession(db, session, (trx) =>
+  const tenant = await withDbSession(db, session, (trx) =>
     tenantOrganization(trx, session.tenantId),
   );
+  const { organizationId } = tenant;
 
   if (input.relationId) await withDbSession(db, session, trx => validateInvitationTarget(trx, session.tenantId, input.relationId!, email));
 
@@ -348,14 +357,28 @@ export async function inviteEmployee(
     rethrowKeycloakError(error);
   }
 
-  const invitation = await withDbSession(db, session, (trx) =>
-    recordEmployeeInvitation(trx, session.tenantId, actor, input, email),
-  );
+  // An existing member gets no Keycloak invitation; the access notice tells
+  // them about the new role, queued with the admission so neither exists alone.
+  const notify = delivery === "not_required";
+  const invitation = await withDbSession(db, session, async (trx) => {
+    const recorded = await recordEmployeeInvitation(trx, session.tenantId, actor, input, email);
+    if (notify) {
+      const label = input.role ? { en: roleLabel(input.role, "en"), nl: roleLabel(input.role, "nl") } : null;
+      await enqueueJob(trx, {
+        tenantId: session.tenantId, actorId: actor, kind: "mail.deliver",
+        payload: accessNoticeMail({
+          email, firstName: input.firstName, tenantName: tenant.name ?? tenant.slug ?? "Hubble", role: label,
+          signInUrl: tenant.slug ? tenantSignInUrl(tenant.slug) : null,
+        }),
+      });
+    }
+    return recorded;
+  });
   console.info("[employee-invitation] " + JSON.stringify({
     outcome: "admission_recorded", tenantId: session.tenantId, organizationId,
-    invitationId: invitation.id, actor, role: input.role, delivery,
+    invitationId: invitation.id, actor, role: input.role, delivery, ...(notify ? { accessNotice: "queued" } : {}),
   }));
-  return { ...invitation, delivery };
+  return { ...invitation, delivery, ...(notify ? { accessNotice: "queued" as const } : {}) };
 }
 
 /** Shared persistence after Keycloak confirms membership or an invitation; caller owns authorization. */
@@ -519,9 +542,10 @@ export async function revokeInvitation(
     );
   }
 
-  const { organizationId } = await withDbSession(db, session, (trx) =>
+  const tenant = await withDbSession(db, session, (trx) =>
     tenantOrganization(trx, session.tenantId),
   );
+  const { organizationId } = tenant;
 
   let keycloakInvitationDeleted = false;
   try {

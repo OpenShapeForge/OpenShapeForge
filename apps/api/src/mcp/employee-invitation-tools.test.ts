@@ -53,7 +53,7 @@ describe("employeeInvitationToolsForSession", () => {
       roles: [EMPLOYEE_INVITATION_ADMIN_ROLE],
     }).find((tool) => tool.name === INVITE_EMPLOYEE_TOOL)!;
     expect(invite.title).toBe("Admit an employee");
-    expect(invite.description).toContain("receives no redundant mail");
+    expect(invite.description).toContain("receives an e-mail about the new access with the sign-in link");
     expect(invite.description).toContain("reused without resending");
     expect(invite.description).toContain("status pending means the application role awaits sign-in");
   });

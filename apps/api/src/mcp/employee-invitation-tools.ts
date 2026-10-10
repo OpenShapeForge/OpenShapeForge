@@ -43,7 +43,7 @@ const INVITE_EMPLOYEE: Tool = {
   description:
     "Admit an employee or colleague into this organization with a pre-selected role. " +
     "A person not yet in the Keycloak organization receives an invitation e-mail. Someone who is " +
-    "already a member receives no redundant mail and can sign in again immediately. An " +
+    "already a member receives an e-mail about the new access with the sign-in link instead, and can sign in again immediately. An " +
     "existing pending invitation is reused without resending it. Report the returned delivery " +
     "and nextStep exactly: status pending means the application role awaits sign-in, not that an " +
     "e-mail was sent or must be accepted. For organization administrators.",
@@ -180,8 +180,12 @@ export function publicEmployeeAdmission(admission: EmployeeAdmission): Record<st
     : admission.delivery === "not_required"
     ? {
         reason: "existing_organization_member",
-        message: "This person already belongs to the Keycloak organization. No e-mail was sent. The role awaits their next sign-in.",
-        nextStep: "The person must sign out and sign in again with this account. There is no e-mail invitation to accept.",
+        message: admission.accessNotice === "queued"
+          ? "This person already has an account in this organization, so no invitation was needed. An e-mail telling them about their access, with the sign-in link, was queued. The role applies at their next sign-in."
+          : "This person already belongs to the Keycloak organization. No e-mail was sent. The role awaits their next sign-in.",
+        nextStep: admission.accessNotice === "queued"
+          ? "Tell the person they have an e-mail with the sign-in link and that they sign in with their existing account; the role applies then. There is no invitation to accept."
+          : "The person must sign out and sign in again with this account. There is no e-mail invitation to accept.",
       }
     : {
         reason: "existing_invitation",

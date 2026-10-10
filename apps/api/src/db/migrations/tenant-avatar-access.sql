@@ -23,13 +23,13 @@ GRANT EXECUTE ON FUNCTION document_internal.is_tenant_avatar(uuid) TO __OSF_APP_
 DROP POLICY IF EXISTS documents_tenant_avatar_read ON erp.documents;
 CREATE POLICY documents_tenant_avatar_read ON erp.documents AS RESTRICTIVE FOR SELECT TO __OSF_APP_ROLE__ USING (
   NOT ('Organization.Access.Manage' = ANY(string_to_array(coalesce(current_setting('app.roles',true),''),',')))
-  OR string_to_array(coalesce(current_setting('app.roles',true),''),',') && ARRAY['CaseFile.All.Read','CaseFile.All.ReadWrite']
+  OR string_to_array(coalesce(current_setting('app.roles',true),''),',') && ARRAY['CaseFile.All.Read','CaseFile.All.ReadWrite','Organization.All.Read','Organization.All.ReadWrite']
   OR document_internal.is_tenant_avatar(id)
 );
 DROP POLICY IF EXISTS document_versions_tenant_avatar_read ON erp.document_versions;
 CREATE POLICY document_versions_tenant_avatar_read ON erp.document_versions AS RESTRICTIVE FOR SELECT TO __OSF_APP_ROLE__ USING (
   NOT ('Organization.Access.Manage' = ANY(string_to_array(coalesce(current_setting('app.roles',true),''),',')))
-  OR string_to_array(coalesce(current_setting('app.roles',true),''),',') && ARRAY['CaseFile.All.Read','CaseFile.All.ReadWrite']
+  OR string_to_array(coalesce(current_setting('app.roles',true),''),',') && ARRAY['CaseFile.All.Read','CaseFile.All.ReadWrite','Organization.All.Read','Organization.All.ReadWrite']
   OR document_internal.is_tenant_avatar(document_id)
 );
 -- Derived files are append-only source/version facts, just like source versions.
@@ -46,7 +46,7 @@ BEGIN
 DROP POLICY IF EXISTS document_renditions_tenant_avatar_read ON erp.document_renditions;
 CREATE POLICY document_renditions_tenant_avatar_read ON erp.document_renditions AS RESTRICTIVE FOR SELECT TO __OSF_APP_ROLE__ USING (
   NOT ('Organization.Access.Manage' = ANY(string_to_array(coalesce(current_setting('app.roles',true),''),',')))
-  OR string_to_array(coalesce(current_setting('app.roles',true),''),',') && ARRAY['CaseFile.All.Read','CaseFile.All.ReadWrite']
+  OR string_to_array(coalesce(current_setting('app.roles',true),''),',') && ARRAY['CaseFile.All.Read','CaseFile.All.ReadWrite','Organization.All.Read','Organization.All.ReadWrite']
   OR EXISTS (SELECT 1 FROM erp.document_versions v WHERE v.id = source_document_version_id AND v.tenant_id = app.current_tenant() AND document_internal.is_tenant_avatar(v.document_id))
 );
 DROP TRIGGER IF EXISTS document_renditions_immutable ON erp.document_renditions;

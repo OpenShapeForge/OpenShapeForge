@@ -162,18 +162,31 @@ describe("the generic osf_* listing", () => {
 
 describe("dedicated entity tools in the session's language", () => {
   const relation = catalog.tools.find((tool) => tool.name === "relation_list");
-  it.skipIf(!relation)("uses the canonical operation's localized name and keeps the compiled advice", () => {
+  it.skipIf(!relation)("uses the canonical operation's localized name and the whole description in that language", () => {
     const en = crudToolsForSession(session(RELATIONS), tables as never, english)
       .find((tool) => tool.name === "relation_list")!;
     const nl = crudToolsForSession(session(RELATIONS), tables as never, dutch)
       .find((tool) => tool.name === "relation_list")!;
     expect(en.title).toBe("List relations");
     expect(nl.title).toBe("Relaties tonen");
-    expect(nl.description).toStartWith("Geeft een gefilterde en gesorteerde pagina met relaties terug.");
-    // The compiled advice after the canonical sentence is the same in both.
-    const advice = (text: string | undefined) => text!.slice(text!.indexOf("."));
-    expect(advice(nl.description)).toBe(advice(en.description));
+    expect(en.description).toBe(
+      "Returns a filtered and sorted page of relations. Use this operation to find relations; use get for one known id.",
+    );
+    // Assistant guidance follows the canonical sentence into Dutch.
+    expect(nl.description).toBe(
+      "Geeft een gefilterde en gesorteerde pagina met relaties terug. " +
+        "Gebruik deze operatie om relaties te zoeken; gebruik get voor één bekend id.",
+    );
     expect(nl.annotations?.title).toBe("Relaties tonen");
+  });
+
+  it.skipIf(!relation)("composes authored instructions and the write reminder in the session's language", () => {
+    const nl = crudToolsForSession(session(RELATIONS), tables as never, dutch)
+      .find((tool) => tool.name === "relation_create")!;
+    expect(nl.description).toContain("Vraag ontbrekende verplichte velden uit voordat je deze tool aanroept.");
+    expect(nl.description).toContain(" Invullen: leid waarden af uit bestaande records");
+    expect(nl.description).not.toContain("Ask for missing required fields");
+    expect(nl.description).not.toContain("Filling this in");
   });
 });
 

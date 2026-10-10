@@ -194,3 +194,33 @@ describe("searchable MCP Operations", () => {
     }
   });
 });
+
+describe("operation search matches the model's own words", () => {
+  const all = [
+    definition("accounts.invite-member", { name: { en: "Invite employee", nl: "Medewerker uitnodigen" }, description: { en: "Invite a person to this organization.", nl: "Nodig iemand uit voor deze organisatie." } }),
+    definition("accounts.list-roles", { name: { en: "List roles", nl: "Rollen tonen" }, description: { en: "List roles within the current organization." } }),
+    definition("Relation.create", { name: { en: "Create relation", nl: "Relatie aanmaken" } }),
+  ];
+  const ids = (query: string, locale_ = locale) =>
+    searchOperationDefinitions({ definitions: all, allowedIds: new Set(all.map((d) => d.id)), arguments: { query }, locale: locale_ })
+      .operations.map((operation) => (operation.operation as { id: string }).id);
+
+  test("every word may appear anywhere, in any authored language", () => {
+    expect(ids("invite employee")).toEqual(["accounts.invite-member"]);
+    expect(ids("medewerker uitnodigen", { ...locale, tag: "en" })).toEqual(["accounts.invite-member"]);
+    expect(ids("organization invite")).toEqual(["accounts.invite-member"]);
+  });
+
+  test("light stemming finds inflected forms", () => {
+    expect(ids("invitation")).toEqual(["accounts.invite-member"]);
+    expect(ids("uitnodiging")).toEqual(["accounts.invite-member"]);
+  });
+
+  test("without a full match, any longer word still finds candidates, in id order", () => {
+    expect(ids("invite user with finance viewer role")).toEqual(["accounts.invite-member", "accounts.list-roles"]);
+  });
+
+  test("a single unmatched word finds nothing rather than everything", () => {
+    expect(ids("payroll")).toEqual([]);
+  });
+});

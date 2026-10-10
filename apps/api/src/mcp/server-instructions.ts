@@ -10,7 +10,8 @@
  *   1. the opening sentence — who this person is (`session-opening.ts`);
  *   2. what the server is, and the OAuth redirect URL when Adapters exist;
  *   3. the guides that must be read before creating something;
- *   4. data acquisition — how to fill in a field;
+ *   4. data acquisition — how to fill in a field; working efficiently, and
+ *      people and access when the session may invite;
  *   5. first-use onboarding (`onboarding.ts`);
  *   6. audience, vocabulary and presentation, told which client it faces;
  *   7. the person's language (`locale.ts`);
@@ -67,6 +68,39 @@ export const DATA_ACQUISITION_GUIDANCE =
   "whose organization forbids them refuses the write, so never offer there. " +
   "This is about acting on what you already noticed in this conversation; " +
   "nothing records it for you.";
+
+/**
+ * Working efficiently. An embedded client runs a bounded number of model
+ * rounds per question, and every tool call is one of them: a request for
+ * three changes was observed spending its rounds on a whoami, a describe, an
+ * unreadable catalogue and a guessed role key. These are the habits that
+ * avoid that, and the point at which to stop exploring.
+ */
+export const EFFICIENCY_GUIDANCE =
+  " Working efficiently — every tool call costs the person a model round, and " +
+  "a client may stop after a fixed number of them. Plan the whole request " +
+  "before the first call and go straight to the tool whose description fits; " +
+  "read context (who the person is, a schema, a list) only when you need a " +
+  "value from it. Never guess an identifier, role key or allowed value: take " +
+  "it from a tool's own schema or from a read. When a search for an " +
+  "operation finds nothing, try once more with different words, in English " +
+  "or in the person's language; if that finds nothing either, stop and tell " +
+  "the person what this server does not offer instead of exploring further.";
+
+/**
+ * People and access, stated only to a session that is offered the
+ * invitation tools: the model otherwise reaches for the record that looks
+ * like a person (a Relation) and the tool that looks like a role grant
+ * (an Account role), neither of which admits anyone.
+ */
+export const PEOPLE_AND_ACCESS_GUIDANCE =
+  " People and access — giving someone access to this organization is ONE " +
+  "call: invite_employee with their e-mail address and a role key from that " +
+  "tool's own role list. It pre-selects the role for their first sign-in and " +
+  "sends an invitation e-mail only when one is needed. A Relation is a " +
+  "contact record and grants no access: create it only when the person also " +
+  "asks for a contact record. Account role tools change an existing account " +
+  "and do not apply to someone who has only been invited.";
 
 /**
  * The short reminder every generated `create`/`update` tool carries in its
@@ -231,6 +265,8 @@ export type ServerInstructionsInput = {
   client: McpClientInfo | null;
   /** Session-visible skills shipped by the active runtime plugins. */
   skills?: ReadonlyArray<{ uri: string; description: string }>;
+  /** Whether this session is offered invite_employee (PEOPLE_AND_ACCESS_GUIDANCE). */
+  peopleAndAccess?: boolean;
 };
 
 /**
@@ -271,6 +307,10 @@ export function buildServerInstructions(input: ServerInstructionsInput): string 
     // ---- data acquisition guidance (the constant above) ----
     DATA_ACQUISITION_GUIDANCE +
     // ---- end data acquisition guidance ----
+    // ---- working efficiently, and people and access when offered ----
+    EFFICIENCY_GUIDANCE +
+    (input.peopleAndAccess ? PEOPLE_AND_ACCESS_GUIDANCE : "") +
+    // ---- end working efficiently ----
     // ---- first-use onboarding (mcp/onboarding.ts) ----
     ONBOARDING_INSTRUCTION +
     // ---- end first-use onboarding ----

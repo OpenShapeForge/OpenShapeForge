@@ -224,6 +224,7 @@ function compileGroup(
     title: group.title,
     label: group.label,
     icon: group.icon,
+    visibleWhen: group.visibleWhen,
     render: group.render ? vr(catalog, group.render) : undefined,
     fields: group.fields ? compileFields(group.fields, catalog) : undefined,
     relationships: group.relationships?.map((relationship) => compileRelationshipUsage(relationship, catalog)!),

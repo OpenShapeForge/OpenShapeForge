@@ -377,6 +377,58 @@ describe("web manifest projection", () => {
     expect(() => validator.validate(raw, "block.yaml")).toThrow();
   });
 
+  test("static options carry icons as tiles and form groups carry an icon and a visibility condition", () => {
+    const artifacts = loadEntity(authoringDir, "address");
+    const raw = parse(readFileSync(join(authoringDir, "entities/core/address.yaml"), "utf8"));
+    const mode = {
+      type: "static", presentation: "tiles",
+      items: [
+        { value: "home", label: text("Home", "Woon"), icon: "house" },
+        { value: "postal", label: text("Postal", "Post"), icon: "envelope-simple" },
+      ],
+    };
+    const typeField = raw.fields.find((candidate: { key: string }) => candidate.key === "type");
+    typeField.options = mode;
+    const groups = [
+      { id: "kind", title: text("Kind", "Soort"), icon: "tag", fields: ["type"] },
+      { id: "street", title: text("Street", "Straat"), icon: "map-pin",
+        visibleWhen: { conditions: [{ field: "type", operator: "eq", value: "home" }] }, fields: ["street"] },
+      { id: "outer", title: text("Outer"), visibleWhen: { conditions: [{ field: "type", operator: "neq", value: "postal" }] },
+        groups: [{ id: "inner", title: text("Inner"), visibleWhen: { conditions: [{ field: "city", operator: "isNotEmpty" }] }, fields: ["city"] }] },
+    ];
+    raw.interfaces.web.views.record.modes.create.groups = groups;
+    const validator = createAuthoringValidator();
+    expect(() => validator.validate(raw, "address.yaml")).not.toThrow();
+    const authored = artifacts.coreEntity;
+    authored.fields.find((candidate) => candidate.key === "type")!.options = mode as never;
+    authored.interfaces!.web!.views!.record!.modes!.create!.groups = groups as never;
+    const address = () => buildWebManifest([{ slug: "address", contract: compile(artifacts) }]).entities.Address!;
+    const result = address();
+    expect(result.fields.type).toMatchObject({
+      presentation: { component: "ChoiceTiles" },
+      options: [
+        { value: "home", label: text("Home", "Woon"), icon: "house" },
+        { value: "postal", label: text("Postal", "Post"), icon: "envelope-simple" },
+      ],
+    });
+    const created = result.views.record!.formGroups!.create ?? [];
+    expect(created.find((group) => group.id === "kind")).toMatchObject({ icon: "tag", fields: ["type"] });
+    expect(created.find((group) => group.id === "street")).toMatchObject({
+      icon: "map-pin", visibleWhen: { conditions: [{ field: "type", operator: "eq", value: "home" }] },
+    });
+    // A flattened child keeps its parent's condition: both must hold.
+    expect(created.find((group) => group.id === "inner")).toMatchObject({ visibleWhen: { conditions: [
+      { field: "type", operator: "neq", value: "postal" }, { field: "city", operator: "isNotEmpty" },
+    ] } });
+    groups[1]!.visibleWhen!.conditions[0]!.field = "missing";
+    expect(address).toThrow(/visibleWhen field "missing" is not a field of Address/);
+    raw.interfaces.web.views.record.modes.create.groups = [{ ...groups[0], icon: "Not An Icon" }];
+    expect(() => validator.validate(raw, "address.yaml")).toThrow();
+    typeField.options = { ...mode, items: [{ value: "home", label: text("Home"), icon: "House" }] };
+    raw.interfaces.web.views.record.modes.create.groups = [groups[0]];
+    expect(() => validator.validate(raw, "address.yaml")).toThrow();
+  });
+
   test("named record relationship views are validated and projected independently", () => {
     const source = entity("Source", "source", [field("displayName"), field("contactDetails")], coreView(), [
       { key: "contactDetails", fieldKey: "contactDetails", kind: "belongsTo", target: "Target", foreignKey: "contact_details_id", ownership: "reference" },

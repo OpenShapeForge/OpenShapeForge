@@ -417,6 +417,7 @@ export interface CompiledViewGroup {
   title?: LocalizedText;
   label?: LocalizedText;
   icon?: string;
+  visibleWhen?: VisibilityConfig;
   render?: CompiledViewRender;
   fields?: (string | CompiledFieldEntry)[];
   relationships?: CompiledRelationshipUsage[];

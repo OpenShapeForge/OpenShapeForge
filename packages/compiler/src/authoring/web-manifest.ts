@@ -281,17 +281,49 @@ function fieldOverrides(
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
+/** A group's icon and its visibility condition travel to the renderer unchanged. */
+function groupPresentation(group: CompiledViewGroup): Pick<WebFieldGroup, "icon" | "visibleWhen"> {
+  return {
+    ...(group.icon ? { icon: group.icon } : {}),
+    ...(group.visibleWhen ? { visibleWhen: structuredClone(group.visibleWhen) } : {}),
+  };
+}
+
+/** A group may only depend on fields the entity actually has. */
+function assertGroupVisibility(entityName: string, groups: readonly WebFieldGroup[], fieldKeys: ReadonlySet<string>): void {
+  for (const group of groups) for (const condition of group.visibleWhen?.conditions ?? []) {
+    if (!fieldKeys.has(condition.field)) {
+      throw new Error(`${entityName} form group "${group.id}" visibleWhen field "${condition.field}" is not a field of ${entityName}.`);
+    }
+  }
+}
+
+/**
+ * Nested groups are flattened, so a child carries its parent's condition too: both must hold.
+ * Or-logic cannot be combined into one flat condition and is refused where it would be needed.
+ */
+function withParentVisibility(group: CompiledViewGroup, parent: CompiledViewGroup["visibleWhen"]): CompiledViewGroup {
+  if (!parent) return group;
+  if (!group.visibleWhen) return { ...group, visibleWhen: parent };
+  if (group.visibleWhen.logic === "or" || parent.logic === "or") {
+    throw new Error(`Form group "${group.id}" combines its visibleWhen with a parent group's; nested conditions must use "and".`);
+  }
+  return { ...group, visibleWhen: { conditions: [...parent.conditions, ...group.visibleWhen.conditions] } };
+}
+
 function projectGroups(
   groups: readonly CompiledViewGroup[] | undefined,
   excluded: ReadonlySet<string> = new Set(),
+  parentVisibility?: CompiledViewGroup["visibleWhen"],
 ): WebFieldGroup[] {
-  return (groups ?? []).flatMap((group) => {
+  return (groups ?? []).flatMap((authored) => {
+    const group = withParentVisibility(authored, parentVisibility);
     const keys = fieldKeys(group, excluded);
     const overrides = fieldOverrides(group, excluded);
     const projected = keys.length > 0
-      ? [{ id: group.id, title: localized(group.title ?? group.label, group.id), fields: keys, ...(overrides ? { fieldOverrides: overrides } : {}) }]
+      ? [{ id: group.id, title: localized(group.title ?? group.label, group.id), fields: keys, ...groupPresentation(group), ...(overrides ? { fieldOverrides: overrides } : {}) }]
       : [];
-    return [...projected, ...projectGroups(group.groups, excluded)];
+    return [...projected, ...projectGroups(group.groups, excluded, group.visibleWhen)];
   });
 }
 
@@ -300,9 +332,9 @@ function projectTabGroups(tab: CompiledViewGroup): WebFieldGroup[] {
   const overrides = fieldOverrides(tab);
   return [
     ...(ownFields.length > 0
-      ? [{ id: tab.id, title: localized(tab.title ?? tab.label, tab.id), fields: ownFields, ...(overrides ? { fieldOverrides: overrides } : {}) }]
+      ? [{ id: tab.id, title: localized(tab.title ?? tab.label, tab.id), fields: ownFields, ...groupPresentation(tab), ...(overrides ? { fieldOverrides: overrides } : {}) }]
       : []),
-    ...projectGroups(tab.groups),
+    ...projectGroups(tab.groups, new Set(), tab.visibleWhen),
   ];
 }
 
@@ -493,7 +525,7 @@ function projectField(
     cardinality: field.cardinality === "collection" ? "many" : "one",
     required: field.required,
     ...(fieldPolicy ? { fieldPolicy } : {}),
-    ...(presentation ? { presentation } : {}),
+    ...(presentation ? { presentation } : field.options?.type === "static" && field.options.presentation === "tiles" ? { presentation: { component: "ChoiceTiles" } } : {}),
     ...projectedTextLength(field),
     ...(field.relationship?.target ? { relationship: {
       targetEntityId: field.relationship.target,
@@ -509,7 +541,7 @@ function projectField(
     ...(field.allowedDefinitions ? { allowedDefinitions: [...field.allowedDefinitions].sort() } : {}),
     ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
     ...(field.defaultTemplate !== undefined ? { defaultTemplate: field.defaultTemplate } : {}),
-    ...(field.options?.items?.length ? { options: field.options.items.map(({ value, label }) => ({ value, label: localized(label, value) })) } : {}),
+    ...(field.options?.items?.length ? { options: field.options.items.map(({ value, label, icon }) => ({ value, label: localized(label, value), ...(icon ? { icon } : {}) })) } : {}),
     ...(optionSource ? { optionSource } : {}),
     ...(field.children ? { children: field.children.map((child) => projectField(child, `${parent}.${field.key}`, nestedSupports, editNested, presentations)) } : {}),
     ...(field.item ? { item: projectField(field.item, `${parent}.${field.key}`, nestedSupports, editNested, presentations) } : {}),
@@ -760,6 +792,8 @@ function projectEntity(
   const createGroups = createUnsupported ? [] : formGroups(createVariant, undefined, serverOwnedFields);
   const authoredCreateGroups = formGroups(createVariant, undefined, serverOwnedFields);
   const updateGroups = formGroups(updateVariant, createVariant, serverOwnedFields);
+  const modelFieldKeys = new Set(contract.model.fields.map(({ key }) => key));
+  for (const groups of [authoredCreateGroups, updateGroups]) assertGroupVisibility(entityName, groups, modelFieldKeys);
   const createFields = createWritableFieldKeys(source, all);
   const updateFields = new Set(updateGroups.flatMap(({ fields }) => fields));
   // A provider-backed reference is only a relationship: it has no value of its
@@ -860,6 +894,7 @@ function projectEntity(
     }];
   };
   const tabs: WebRecordTab[] = (view?.detail?.groups.items ?? []).flatMap(projectRecordTab);
+  assertGroupVisibility(entityName, tabs.flatMap(({ groups }) => groups), new Set(contract.model.fields.map(({ key }) => key)));
   const authoredContext = contract.interfaces?.web?.recordContext;
   for (const key of authoredContext?.fields ?? []) {
     if (!fields[key]?.supports.read) throw new Error(`${entityName}: context field ${key} is not readable.`);

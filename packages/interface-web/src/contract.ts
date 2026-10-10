@@ -117,6 +117,14 @@ export type WebFieldSuggestions = {
 export type WebFieldOption = {
   value: string;
   label: LocalizedText;
+  /** Battery icon key, e.g. for a choice tile. The host resolves it; unknown keys render no icon. */
+  icon?: string;
+};
+
+/** Same condition shape as field visibility; `logic` defaults to `and`. */
+export type WebVisibilityCondition = {
+  conditions: Array<{ field: string; operator: "eq" | "neq" | "in" | "notIn" | "gt" | "lt" | "gte" | "lte" | "isEmpty" | "isNotEmpty"; value?: unknown }>;
+  logic?: "and" | "or";
 };
 
 export type WebEqualityConstraint = { eq: string | number | boolean };
@@ -184,6 +192,10 @@ export type WebFieldGroup = {
   id: string;
   title: LocalizedText;
   fields: string[];
+  /** Battery icon key shown with the group. */
+  icon?: string;
+  /** The group applies only while these conditions hold for the draft being edited. */
+  visibleWhen?: WebVisibilityCondition;
   /** Per-field presentation-renderer overrides authored on a FieldRef; keyed by field key, sparse. */
   fieldOverrides?: Record<string, { render: { component: WebRendererKey } }>;
 };

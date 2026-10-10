@@ -393,6 +393,8 @@ describe("web manifest projection", () => {
       { id: "kind", title: text("Kind", "Soort"), icon: "tag", fields: ["type"] },
       { id: "street", title: text("Street", "Straat"), icon: "map-pin",
         visibleWhen: { conditions: [{ field: "type", operator: "eq", value: "home" }] }, fields: ["street"] },
+      { id: "outer", title: text("Outer"), visibleWhen: { conditions: [{ field: "type", operator: "neq", value: "postal" }] },
+        groups: [{ id: "inner", title: text("Inner"), visibleWhen: { conditions: [{ field: "city", operator: "isNotEmpty" }] }, fields: ["city"] }] },
     ];
     raw.interfaces.web.views.record.modes.create.groups = groups;
     const validator = createAuthoringValidator();
@@ -414,6 +416,10 @@ describe("web manifest projection", () => {
     expect(created.find((group) => group.id === "street")).toMatchObject({
       icon: "map-pin", visibleWhen: { conditions: [{ field: "type", operator: "eq", value: "home" }] },
     });
+    // A flattened child keeps its parent's condition: both must hold.
+    expect(created.find((group) => group.id === "inner")).toMatchObject({ visibleWhen: { conditions: [
+      { field: "type", operator: "neq", value: "postal" }, { field: "city", operator: "isNotEmpty" },
+    ] } });
     groups[1]!.visibleWhen!.conditions[0]!.field = "missing";
     expect(address).toThrow(/visibleWhen field "missing" is not a field of Address/);
     raw.interfaces.web.views.record.modes.create.groups = [{ ...groups[0], icon: "Not An Icon" }];

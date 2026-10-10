@@ -298,17 +298,32 @@ function assertGroupVisibility(entityName: string, groups: readonly WebFieldGrou
   }
 }
 
+/**
+ * Nested groups are flattened, so a child carries its parent's condition too: both must hold.
+ * Or-logic cannot be combined into one flat condition and is refused where it would be needed.
+ */
+function withParentVisibility(group: CompiledViewGroup, parent: CompiledViewGroup["visibleWhen"]): CompiledViewGroup {
+  if (!parent) return group;
+  if (!group.visibleWhen) return { ...group, visibleWhen: parent };
+  if (group.visibleWhen.logic === "or" || parent.logic === "or") {
+    throw new Error(`Form group "${group.id}" combines its visibleWhen with a parent group's; nested conditions must use "and".`);
+  }
+  return { ...group, visibleWhen: { conditions: [...parent.conditions, ...group.visibleWhen.conditions] } };
+}
+
 function projectGroups(
   groups: readonly CompiledViewGroup[] | undefined,
   excluded: ReadonlySet<string> = new Set(),
+  parentVisibility?: CompiledViewGroup["visibleWhen"],
 ): WebFieldGroup[] {
-  return (groups ?? []).flatMap((group) => {
+  return (groups ?? []).flatMap((authored) => {
+    const group = withParentVisibility(authored, parentVisibility);
     const keys = fieldKeys(group, excluded);
     const overrides = fieldOverrides(group, excluded);
     const projected = keys.length > 0
       ? [{ id: group.id, title: localized(group.title ?? group.label, group.id), fields: keys, ...groupPresentation(group), ...(overrides ? { fieldOverrides: overrides } : {}) }]
       : [];
-    return [...projected, ...projectGroups(group.groups, excluded)];
+    return [...projected, ...projectGroups(group.groups, excluded, group.visibleWhen)];
   });
 }
 
@@ -319,7 +334,7 @@ function projectTabGroups(tab: CompiledViewGroup): WebFieldGroup[] {
     ...(ownFields.length > 0
       ? [{ id: tab.id, title: localized(tab.title ?? tab.label, tab.id), fields: ownFields, ...groupPresentation(tab), ...(overrides ? { fieldOverrides: overrides } : {}) }]
       : []),
-    ...projectGroups(tab.groups),
+    ...projectGroups(tab.groups, new Set(), tab.visibleWhen),
   ];
 }
 
@@ -879,6 +894,7 @@ function projectEntity(
     }];
   };
   const tabs: WebRecordTab[] = (view?.detail?.groups.items ?? []).flatMap(projectRecordTab);
+  assertGroupVisibility(entityName, tabs.flatMap(({ groups }) => groups), new Set(contract.model.fields.map(({ key }) => key)));
   const authoredContext = contract.interfaces?.web?.recordContext;
   for (const key of authoredContext?.fields ?? []) {
     if (!fields[key]?.supports.read) throw new Error(`${entityName}: context field ${key} is not readable.`);

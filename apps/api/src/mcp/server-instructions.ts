@@ -99,7 +99,8 @@ export const PEOPLE_AND_ACCESS_GUIDANCE =
   "tool's own role list. It pre-selects the role for their first sign-in and " +
   "sends an invitation e-mail only when one is needed. Do every part the " +
   "person asked for: when the request also names a relation or contact " +
-  "record, create that Relation first and then invite — it is a separate " +
+  "record, create that Relation first and then invite with its id as " +
+  "relationId, so their account is linked to it — the Relation is a separate " +
   "record that grants no access by itself, so never one in place of the other. " +
   "Account role tools change an existing account and do not apply to someone " +
   "who has only been invited.";

@@ -280,7 +280,12 @@ refusals the Operation declares (`errors: [{ status, code, description }]`),
 which the listing leaves out for its byte budget. Both the listing and the
 describe answer carry a schema in the session's language: the compiled
 catalogue keeps every language under `x-osf-i18n`, and the wire gets one
-`title`/`description` per property. The
+`title`/`description` per property. A CRUD tool's own description follows
+the same rule: the compiler composes it per authored language
+(`descriptionI18n`) from the canonical text, assistant guidance, MCP
+instructions and the operation-written note, filling a part a language lacks
+from English, and the write reminder follows the language the description
+came out in. The
 `osf://schema/entities/{slug}` resource keeps describing the readable field
 model; `osf_describe` is the write contract.
 

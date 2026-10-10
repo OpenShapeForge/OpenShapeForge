@@ -74,7 +74,6 @@ import type { DB } from "../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
 import { validateInvitationTarget } from "./invitation-target.js";
 import { deliverOrganizationInvitation } from "./keycloak-invitation-delivery.js";
-
 import { HttpError } from "../rest/http-error.js";
 import { accessPolicy, customRoleId } from '../accounts/access-policy.js';
 // From the leaf module, NOT from ./identity-link.js: this module and that one
@@ -232,14 +231,12 @@ function rethrowKeycloakError(error: unknown): never {
 async function tenantOrganization(
   trx: Transaction<DB>,
   tenantId: string,
-): Promise<{ organizationId: string; realm: string; slug?: string; name?: string }> {
+): Promise<{ organizationId: string; realm: string }> {
   const result = await sql<{
     keycloak_organization_id: string | null;
     keycloak_realm: string | null;
-    slug?: string | null;
-    name?: string | null;
   }>`
-    select keycloak_organization_id, keycloak_realm, slug, name
+    select keycloak_organization_id, keycloak_realm
       from platform.tenants
      where id = ${tenantId}
   `.execute(trx);
@@ -251,7 +248,7 @@ async function tenantOrganization(
       "This tenant has no linked Keycloak Organization yet; it cannot admit members.",
     );
   }
-  return { organizationId: row.keycloak_organization_id, realm: row.keycloak_realm, ...(row.slug ? { slug: row.slug } : {}), ...(row.name ? { name: row.name } : {}) };
+  return { organizationId: row.keycloak_organization_id, realm: row.keycloak_realm };
 }
 
 type InvitationRow = {
@@ -344,6 +341,12 @@ export async function inviteEmployee(
   if (delivery === "not_required" && keycloak.inviteExistingMember) {
     try {
       accessNotice = await keycloak.inviteExistingMember(organizationId, email) ? "sent" : "failed";
+      if (accessNotice === "failed") {
+        console.warn("[employee-invitation] " + JSON.stringify({
+          outcome: "access_notice_failed", tenantId: session.tenantId, organizationId, invitationId: invitation.id,
+          code: "MEMBER_NOT_FOUND", status: null,
+        }));
+      }
     } catch (error) {
       accessNotice = "failed";
       console.warn("[employee-invitation] " + JSON.stringify({

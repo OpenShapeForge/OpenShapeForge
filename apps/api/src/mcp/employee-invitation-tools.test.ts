@@ -84,7 +84,7 @@ describe("employeeInvitationToolsForSession", () => {
     });
     expect(publicEmployeeAdmission({ ...invitation, delivery: "not_required", accessNotice: "sent" })).toMatchObject({
       reason: "existing_organization_member",
-      nextStep: "Tell the person to open the e-mail and sign in with their existing account; the role applies then.",
+      nextStep: "Tell the person they received an e-mail about their access, and that they sign out and sign in again with their existing account for the role to apply.",
     });
     expect(String(publicEmployeeAdmission({ ...invitation, delivery: "not_required", accessNotice: "failed" }).message)).toContain("no e-mail could be sent");
     expect(publicEmployeeAdmission({ ...invitation, delivery: "already_pending" })).toMatchObject({

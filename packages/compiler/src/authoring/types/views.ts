@@ -6,6 +6,7 @@ import type {
   ViewAction,
   ViewActionDefinition,
   ViewRowAction,
+  VisibilityConfig,
 } from "./common.js";
 
 export interface ListColumn {
@@ -93,6 +94,7 @@ export interface ViewGroupOverride {
   title?: LocalizedText;
   label?: LocalizedText;
   icon?: string;
+  visibleWhen?: VisibilityConfig;
   render?: string;
   fields?: FieldEntry[];
   relationships?: RelationshipUsage[];
@@ -108,6 +110,8 @@ export interface ViewGroup {
   title?: LocalizedText;
   label?: LocalizedText;
   icon?: string;
+  /** Show the group only while these conditions hold for the record being edited. */
+  visibleWhen?: VisibilityConfig;
   render?: string;
   fields?: FieldEntry[];
   relationships?: RelationshipUsage[];

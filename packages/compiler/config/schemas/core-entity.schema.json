@@ -1471,6 +1471,17 @@
           "minLength": 1,
           "x-osf-i18n": { "title": { "en": "Id", "nl": "Id" } }
         },
+        "icon": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Battery icon key shown with the group; the host resolves it.",
+          "x-osf-i18n": { "title": { "en": "Icon", "nl": "Icoon" } }
+        },
+        "visibleWhen": {
+          "$ref": "#/$defs/field/properties/visibility",
+          "description": "Show the group only while these conditions hold for the record being edited.",
+          "x-osf-i18n": { "title": { "en": "Visible when", "nl": "Zichtbaar wanneer" } }
+        },
         "title": {
           "$ref": "#/$defs/localizedText",
           "x-osf-i18n": { "title": { "en": "Title", "nl": "Titel" } }
@@ -2030,9 +2041,19 @@
                   },
                   "label": {
                     "$ref": "#/$defs/localizedText"
+                  },
+                  "icon": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]*$",
+                    "description": "Battery icon key; the host resolves it and renders nothing for an unknown key."
                   }
                 }
               }
+            },
+            "presentation": {
+              "type": "string",
+              "enum": ["tiles"],
+              "description": "Render static options as icon tiles instead of a select."
             },
             "referentieGroep": {
               "type": "string"

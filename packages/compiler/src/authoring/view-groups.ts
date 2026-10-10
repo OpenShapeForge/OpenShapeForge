@@ -7,6 +7,7 @@ import type {
   TimelineConfig,
   ViewGroup,
   ViewGroupOverride,
+  VisibilityConfig,
 } from "./types.js";
 
 type GroupContainer = {
@@ -20,6 +21,7 @@ export interface ResolvedViewGroup {
   title?: LocalizedText;
   label?: LocalizedText;
   icon?: string;
+  visibleWhen?: VisibilityConfig;
   render?: string;
   fields?: FieldEntry[];
   relationships?: RelationshipUsage[];
@@ -68,6 +70,7 @@ function mergeGroupOverride(
     title: override.title ?? group.title,
     label: override.label ?? group.label,
     icon: override.icon ?? group.icon,
+    visibleWhen: override.visibleWhen ?? group.visibleWhen,
     render: override.render ?? group.render,
     fields: override.fields ?? group.fields,
     relationships: override.relationships ?? group.relationships,
@@ -147,6 +150,7 @@ function resolveGroupDefinition(
     title: group.title,
     label: group.label,
     icon: group.icon,
+    visibleWhen: group.visibleWhen,
     render: group.render,
     fields: group.fields,
     relationships: group.relationships,

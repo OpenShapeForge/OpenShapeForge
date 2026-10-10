@@ -281,6 +281,23 @@ function fieldOverrides(
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
+/** A group's icon and its visibility condition travel to the renderer unchanged. */
+function groupPresentation(group: CompiledViewGroup): Pick<WebFieldGroup, "icon" | "visibleWhen"> {
+  return {
+    ...(group.icon ? { icon: group.icon } : {}),
+    ...(group.visibleWhen ? { visibleWhen: structuredClone(group.visibleWhen) } : {}),
+  };
+}
+
+/** A group may only depend on fields the entity actually has. */
+function assertGroupVisibility(entityName: string, groups: readonly WebFieldGroup[], fieldKeys: ReadonlySet<string>): void {
+  for (const group of groups) for (const condition of group.visibleWhen?.conditions ?? []) {
+    if (!fieldKeys.has(condition.field)) {
+      throw new Error(`${entityName} form group "${group.id}" visibleWhen field "${condition.field}" is not a field of ${entityName}.`);
+    }
+  }
+}
+
 function projectGroups(
   groups: readonly CompiledViewGroup[] | undefined,
   excluded: ReadonlySet<string> = new Set(),
@@ -289,7 +306,7 @@ function projectGroups(
     const keys = fieldKeys(group, excluded);
     const overrides = fieldOverrides(group, excluded);
     const projected = keys.length > 0
-      ? [{ id: group.id, title: localized(group.title ?? group.label, group.id), fields: keys, ...(overrides ? { fieldOverrides: overrides } : {}) }]
+      ? [{ id: group.id, title: localized(group.title ?? group.label, group.id), fields: keys, ...groupPresentation(group), ...(overrides ? { fieldOverrides: overrides } : {}) }]
       : [];
     return [...projected, ...projectGroups(group.groups, excluded)];
   });
@@ -300,7 +317,7 @@ function projectTabGroups(tab: CompiledViewGroup): WebFieldGroup[] {
   const overrides = fieldOverrides(tab);
   return [
     ...(ownFields.length > 0
-      ? [{ id: tab.id, title: localized(tab.title ?? tab.label, tab.id), fields: ownFields, ...(overrides ? { fieldOverrides: overrides } : {}) }]
+      ? [{ id: tab.id, title: localized(tab.title ?? tab.label, tab.id), fields: ownFields, ...groupPresentation(tab), ...(overrides ? { fieldOverrides: overrides } : {}) }]
       : []),
     ...projectGroups(tab.groups),
   ];
@@ -493,7 +510,7 @@ function projectField(
     cardinality: field.cardinality === "collection" ? "many" : "one",
     required: field.required,
     ...(fieldPolicy ? { fieldPolicy } : {}),
-    ...(presentation ? { presentation } : {}),
+    ...(presentation ? { presentation } : field.options?.type === "static" && field.options.presentation === "tiles" ? { presentation: { component: "ChoiceTiles" } } : {}),
     ...projectedTextLength(field),
     ...(field.relationship?.target ? { relationship: {
       targetEntityId: field.relationship.target,
@@ -509,7 +526,7 @@ function projectField(
     ...(field.allowedDefinitions ? { allowedDefinitions: [...field.allowedDefinitions].sort() } : {}),
     ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
     ...(field.defaultTemplate !== undefined ? { defaultTemplate: field.defaultTemplate } : {}),
-    ...(field.options?.items?.length ? { options: field.options.items.map(({ value, label }) => ({ value, label: localized(label, value) })) } : {}),
+    ...(field.options?.items?.length ? { options: field.options.items.map(({ value, label, icon }) => ({ value, label: localized(label, value), ...(icon ? { icon } : {}) })) } : {}),
     ...(optionSource ? { optionSource } : {}),
     ...(field.children ? { children: field.children.map((child) => projectField(child, `${parent}.${field.key}`, nestedSupports, editNested, presentations)) } : {}),
     ...(field.item ? { item: projectField(field.item, `${parent}.${field.key}`, nestedSupports, editNested, presentations) } : {}),
@@ -760,6 +777,8 @@ function projectEntity(
   const createGroups = createUnsupported ? [] : formGroups(createVariant, undefined, serverOwnedFields);
   const authoredCreateGroups = formGroups(createVariant, undefined, serverOwnedFields);
   const updateGroups = formGroups(updateVariant, createVariant, serverOwnedFields);
+  const modelFieldKeys = new Set(contract.model.fields.map(({ key }) => key));
+  for (const groups of [authoredCreateGroups, updateGroups]) assertGroupVisibility(entityName, groups, modelFieldKeys);
   const createFields = createWritableFieldKeys(source, all);
   const updateFields = new Set(updateGroups.flatMap(({ fields }) => fields));
   // A provider-backed reference is only a relationship: it has no value of its

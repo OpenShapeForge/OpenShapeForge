@@ -11,8 +11,10 @@ test("managed document type operations preserve read access and separate deletio
   const contract = compile.entities.find(entity => entity.contract.entity.name === "DocumentType")!.contract;
   expect(contract.authorization.roles.read).toContain("CaseFile.All.ReadWrite");
   expect(contract.authorization.roles.read).toContain("DocumentTypes.All.Delete");
-  expect(contract.authorization.roles.create).toEqual(["CaseFile.All.ReadWrite"]);
-  expect(contract.authorization.roles.update).toEqual(["CaseFile.All.ReadWrite"]);
+  expect(contract.authorization.roles.read).toContain("Organization.All.Read");
+  expect(contract.authorization.roles.read).toContain("Organization.All.ReadWrite");
+  expect(contract.authorization.roles.create).toEqual(["CaseFile.All.ReadWrite", "Organization.All.ReadWrite"]);
+  expect(contract.authorization.roles.update).toEqual(["CaseFile.All.ReadWrite", "Organization.All.ReadWrite"]);
   expect(contract.authorization.roles.delete).toEqual(["DocumentTypes.All.Delete"]);
   expect(contract.hardDelete).toEqual({ requireNeverPublished: true });
   expect(Object.keys(contract.entityOperations).sort()).toEqual(["create", "delete", "get", "list", "update"]);

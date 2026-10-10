@@ -10,7 +10,12 @@ description: An immutable derived file of one source document version. Content v
 displayTemplate: "{{target}}"
 authorization:
   roles:
-    read: [CaseFile.All.Read, CaseFile.All.ReadWrite, Organization.Access.Manage]
+    read:
+      - CaseFile.All.Read
+      - CaseFile.All.ReadWrite
+      - Organization.Access.Manage
+      - Organization.All.Read
+      - Organization.All.ReadWrite
 indexes:
   - { name: document_renditions_source_target_pipeline_uidx, fields: [tenantId, sourceDocumentVersion, target, pipelineHash], unique: true }
 fields:

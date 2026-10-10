@@ -8,6 +8,10 @@ import { connectorGovernor, connectorKeyring, connectorRegistry } from "../conne
 import { invokeConnectorOperation } from "../connectors/runtime.js";
 import { SESSION_INFO_TOOL_NAME } from "./session-info.js";
 import { sessionInfoToolResult } from "./session-describe.js";
+import { searchableSessionOperations } from "./searchable-session-operations.js";
+import { entityOperationContract } from "../operations/entity/index.js";
+import { pluginEntityTransportInput } from "../operations/entity/transport-input.js";
+import { entityIsGeneric } from "./generic-tool-projection.js";
 import { parseOperationExecuteArguments, searchOperationDefinitions } from "./operation-search.js";
 import { invokeOperation } from "../operations/runtime.js";
 import {
@@ -150,12 +154,10 @@ export async function staticToolCall(
     try {
       assertParentInvocationActive?.();
       assertInterceptorActive?.();
-      const definitions = await modulePlatform.services.operations.list(
-        moduleSession,
-      );
+      const { definitions, allowedIds } = await searchableSessionOperations(ctx);
       return ok(searchOperationDefinitions({
         definitions,
-        allowedIds: searchableStaticOperationIds,
+        allowedIds,
         arguments: request.params.arguments ?? {},
         locale,
       }));
@@ -182,18 +184,46 @@ export async function staticToolCall(
       );
       assertParentInvocationActive?.();
       assertInterceptorActive?.();
-      const definition = searchableStaticOperationIds.has(parsed.operationId)
-        ? await modulePlatform.services.operations.get(
-            moduleSession,
-            parsed.operationId,
-          )
-        : undefined;
-      if (!definition || !searchableStaticOperationIds.has(definition.id)) {
-        throw new HttpError(
-          404,
-          "NOT_FOUND",
-          "The requested Operation is not available.",
+      const { definitions, entities } = await searchableSessionOperations(ctx);
+      const definition = definitions.find((candidate) => candidate.id === parsed.operationId);
+      if (!definition) {
+        throw new HttpError(404, "NOT_FOUND", "The requested Operation is not available.");
+      }
+      const entity = entities.get(definition.id);
+      if (entity) {
+        // Enter the same adapter as the dedicated/generic tool, including
+        // private elicitation, edit controls, classified fields and notifications.
+        const input = parsed.idempotencyKey === undefined ? parsed.input : pluginEntityTransportInput(
+          entityOperationContract(definition.id), parsed.input, undefined, parsed.idempotencyKey);
+        const outcome = await ctx.dispatchTool(
+          entity.tool.name,
+          { ...input, ...(entityIsGeneric(entity.entity) ? { entity: entity.tool.entity } : {}) },
+          ctx.requestId,
+          true,
+          undefined,
+          assertParentInvocationActive,
+          signal,
+          false,
+          parsed.idempotencyKey,
         );
+        const result = outcome.result;
+        const payload = result.structuredContent;
+        if (result.isError || !payload || typeof payload !== "object" || Array.isArray(payload) || ("data" in payload && "operations" in payload)) return result;
+        const continuation = payload as Record<string, unknown>;
+        // Private configuration may pause before a record exists. Preserve
+        // its UI metadata, but answer the generic executor's canonical envelope.
+        const data = {
+          ...continuation,
+          ...(typeof continuation.resumeWith === "string"
+            ? { resumeWith: { operationId: `${entity.tool.entity}.list`, input: {} } }
+            : {}),
+        };
+        const structuredContent = { data, operations: [] };
+        return { ...result, structuredContent, content: result.content.map((block) => {
+          if (block.type !== "text") return block;
+          try { JSON.parse(block.text); return { ...block, text: JSON.stringify(structuredContent) }; }
+          catch { return block; }
+        }) };
       }
       const result = await modulePlatform.services.operations.execute(
         moduleSession,

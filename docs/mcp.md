@@ -284,6 +284,25 @@ catalogue keeps every language under `x-osf-i18n`, and the wire gets one
 `osf://schema/entities/{slug}` resource keeps describing the readable field
 model; `osf_describe` is the write contract.
 
+When the deployment selects the **searchable Operation projection**, the fixed
+`osf_search_operations` / `osf_execute_operation` pair also covers authorized
+entity CRUD and runtime provider Operations. Search returns the exact MCP input
+schema, including field withholding and concurrency controls, plus canonical
+interaction and prerequisite metadata. Pagination uses `nextCursor`. Covered
+CRUD, authored operation and provider tools no longer consume individual slots
+in `tools/list`; tools without a canonical replacement remain advertised.
+The dedicated projection continues to offer its authored tool names.
+
+Entity execution uses the existing MCP adapter, preserving private configuration,
+confirmation, edit leases and definition-change notifications. A private
+configuration handoff is returned under `data` with an Operation reference in
+`resumeWith`; credentials never become model input. The executor also links the
+existing configuration MCP App for clients supporting it. Required prerequisites
+are invoked through the same executor. Dry runs can preview administrator-owned
+drafts and internal/restricted definitions without changing employee execution
+visibility, and resolve the requested definition directly rather than searching
+only the first page of services.
+
 Tool-selection quality degrades well before a model runs out of context, so the
 compiler **fails the build** when the dedicated tool count would exceed 60,
 naming the entities to switch to `generic`. The same guard exists in bytes:

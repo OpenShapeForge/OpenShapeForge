@@ -155,6 +155,8 @@ describe("MCP App capability negotiation", () => {
       expect(first?.type).toBe("text");
       expect(first?.type === "text" ? first.text : "").not.toContain("private-token");
       expect(JSON.stringify(result._meta)).toContain("private-token");
+      expect(result.structuredContent).toEqual({ status: "awaiting_person" });
+      expect(JSON.stringify(result.structuredContent)).not.toContain("private-token");
       expect(result._meta).toEqual({
         configurationUrl:
           "https://api.example.test/api/entity-configuration/private-token",
@@ -166,6 +168,29 @@ describe("MCP App capability negotiation", () => {
       } else {
         process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = previous;
       }
+    }
+  });
+
+  it("projects private configuration fields from their OSF types for host renderers", () => {
+    const previous = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+    process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = "https://api.example.test";
+    try {
+      const result = configurationAppResult({ status: "awaiting_person" }, "synthetic-token", "Provider", [
+        { key: "region", osfType: "string", required: true, options: { items: [{ value: "eu" }, { value: "us" }] } },
+        { key: "secret", osfType: "string", classification: { sensitivity: "confidential" } },
+        { key: "retries", osfType: "integer" },
+        { key: "enabled", osfType: "boolean" },
+      ]);
+      const configuration = result._meta?.configuration as { fields: { key: string; secret: boolean; schema: unknown }[] };
+      expect(configuration.fields.find(f => f.key === "region")?.schema).toMatchObject({ type: "string", enum: ["eu", "us"] });
+      expect(configuration.fields.find(f => f.key === "secret")?.secret).toBe(true);
+      expect(configuration.fields.find(f => f.key === "retries")?.schema).toMatchObject({ type: "integer" });
+      expect(configuration.fields.find(f => f.key === "enabled")?.schema).toMatchObject({ type: "boolean" });
+      expect(JSON.stringify(result.content)).not.toContain("synthetic-token");
+      expect(JSON.stringify(result.structuredContent)).not.toContain("configuration");
+    } finally {
+      if (previous === undefined) delete process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+      else process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = previous;
     }
   });
 

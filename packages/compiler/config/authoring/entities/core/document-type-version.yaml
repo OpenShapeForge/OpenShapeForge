@@ -13,10 +13,20 @@ indexes:
   - { name: document_type_versions_tenant_number_uidx, fields: [tenantId, documentType, versionNumber], unique: true }
 authorization:
   roles:
-    read: [CaseFile.All.Read, CaseFile.All.ReadWrite]
-    create: [CaseFile.All.ReadWrite]
-    update: [CaseFile.All.ReadWrite]
-  rowAccess: { enabled: true, empty: public }
+    read:
+      - CaseFile.All.Read
+      - CaseFile.All.ReadWrite
+      - Organization.All.Read
+      - Organization.All.ReadWrite
+    create:
+      - CaseFile.All.ReadWrite
+      - Organization.All.ReadWrite
+    update:
+      - CaseFile.All.ReadWrite
+      - Organization.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
 fields:
   - key: documentType
     osfType: DocumentType

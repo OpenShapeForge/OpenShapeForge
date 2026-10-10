@@ -47,10 +47,13 @@ import {
   tenantB,
   test,
 } from "../../graphql/__tests__/e2e/harness.js";
+import { crudToolAvailable } from "../session-projection.js";
+import { getGeneratedCrudTables } from "../../operations/entity/index.js";
 import { __entityMutationControlsForTests } from "../generated-mcp-server.js";
 import {
   acquireLease,
   advertisedSchema,
+  advertisedOperation,
   argsFor,
   authoredKeys,
   buildCreateArgs,
@@ -99,74 +102,34 @@ describe("generated MCP server", () => {
     expect(status).toBe(401);
   });
 
-  test("advertises the compiled tool catalog to an authorized session", async () => {
+  test("discovers the complete authorized canonical CRUD catalog and exact contracts", async () => {
     const { status, body } = await rpc(tenantA, "tools/list");
     expect(status).toBe(200);
-    const tools = body.result.tools as {
-      name: string;
-      outputSchema: Record<string, unknown>;
-      annotations?: { idempotentHint?: boolean };
-    }[];
-    const names = tools.map((tool) => tool.name);
-    const compiledNames = new Set(catalog.tools.map((tool) => tool.name));
-    // The listing is authorized and deduplicated: a tool the session holds no
-    // role for is withheld, and generic entities share one name the session
-    // sees once. The expectation applies the same two rules to the catalog.
-    expect(names.filter((name) => compiledNames.has(name))).toEqual([
-      ...new Set(
-        catalog.tools
-          .filter((tool) => sessionMayInvoke(tenantA, tool.entity, tool.operation as CrudOperation))
-          .map((tool) => tool.name),
-      ),
-    ]);
-
-    const advertisedFor = (
-      operation: "list" | "get" | "create" | "update" | "delete",
-      entity?: string,
-    ) => {
-      const compiled = catalog.tools.find(
-        (tool) => (!entity || tool.entity === entity) && tool.operation === operation,
-      );
-      return tools.find((tool) => tool.name === compiled?.name);
-    };
-    const get = advertisedFor("get", "Relation")!;
-    const list = advertisedFor("list", "Relation")!;
-    const create = advertisedFor("create", "Relation")!;
-    const remove = advertisedFor("delete")!;
-    const update = advertisedFor("update")!;
-    const successSchema = (tool: { outputSchema: Record<string, unknown> }) => {
-      expect(tool.outputSchema.type).toBe("object");
-      expect(Array.isArray(tool.outputSchema.anyOf)).toBe(true);
-      return (tool.outputSchema.anyOf as Record<string, unknown>[])[0]!;
-    };
-    for (const tool of [get, list, create]) {
-      expect(tool.outputSchema.type).toBe("object");
-      expect(Array.isArray(successSchema(tool).oneOf)).toBe(true);
-      const definitions = successSchema(tool).$defs as Record<string, unknown>;
-      expect(definitions.OperationOffer).toBeDefined();
-      expect(definitions.OperationError).toBeDefined();
+    const names = body.result.tools.map((tool: any) => tool.name);
+    expect(names).toContain("osf_search_operations"); expect(names).toContain("osf_execute_operation");
+    const compiledNames = new Set(catalog.tools.map(tool => tool.name));
+    expect(names.filter((name: string) => compiledNames.has(name))).toEqual([]);
+    const ids: string[] = []; let cursor: string | undefined;
+    do {
+      const result = await callTool(tenantA, "osf_search_operations", { limit: 20, ...(cursor ? { cursor } : {}) });
+      expect(toolError(result.body)).toBeUndefined();
+      const page = toolPayload(result.body);
+      ids.push(...page.operations.map((row: any) => row.operation.id)); cursor = page.nextCursor;
+    } while (cursor);
+    expect(new Set(ids).size).toBe(ids.length);
+    const availableTables = new Map(getGeneratedCrudTables().map(table => [table.name, table]));
+    const expected = catalog.tools.filter(tool => crudToolAvailable(tool as Parameters<typeof crudToolAvailable>[0], tenantA as never, availableTables)).map(tool => tool.operationId);
+    const compiledIds = new Set(catalog.tools.map(tool => tool.operationId));
+    expect(ids.filter(id => compiledIds.has(id)).sort()).toEqual([...new Set(expected)].sort());
+    for (const entity of ["DocumentVariant", "TemplateVariant"]) {
+      expect(ids).not.toContain(`${entity}.create`); expect(ids).toContain(`${entity}.get`);
     }
-    const getSuccess = (successSchema(get).oneOf as Record<string, unknown>[])[0]!;
-    const getProperties = getSuccess.properties as Record<string, Record<string, unknown>>;
-    expect(getSuccess.required).toEqual(["data", "operations"]);
-    expect(getProperties.data?.type).toBe("object");
-    expect(getProperties.operations?.type).toBe("array");
-    const listSuccess = (successSchema(list).oneOf as Record<string, unknown>[])[0]!;
-    expect(listSuccess).toMatchObject({
-      properties: {
-        data: {
-          required: ["items", "totalCount", "nextCursor"],
-        },
-      },
-    });
-    // A canonical delete answers with the deletion envelope: `data.deleted`
-    // is the constant true (a missing row is an error, never `deleted: false`).
-    const removeSuccess = (successSchema(remove).oneOf as Record<string, unknown>[])[0]!;
-    expect(removeSuccess.required).toEqual(["data", "operations"]);
-    expect(removeSuccess.properties).toMatchObject({
-      data: { required: ["deleted"], properties: { deleted: { type: "boolean", const: true } } },
-    });
-    expect(update.annotations?.idempotentHint).toBe(false);
+    const get = await advertisedOperation(tenantA, "Relation.get"), list = await advertisedOperation(tenantA, "Relation.list");
+    expect(get.inputSchema.properties.id).toMatchObject({ type: "string", format: "uuid" });
+    expect(get.outputSchema.type).toBe("object");
+    expect(list.outputSchema.required).toEqual(expect.arrayContaining(["items", "totalCount", "nextCursor"]));
+    const remove = await advertisedOperation(tenantA, "Relation.delete");
+    expect(remove.outputSchema.properties.deleted).toMatchObject({ type: "boolean", const: true });
   });
 
   test("binds, authorizes and dispatches a canonical operation tool", async () => {
@@ -200,18 +163,10 @@ describe("generated MCP server", () => {
   });
 
   test("carries the authored field schema into the tool input schema", async () => {
-    const { body } = await rpc(tenantA, "tools/list");
-    const tools = body.result.tools as {
-      name: string;
-      title?: string;
-      description: string;
-      inputSchema: any;
-    }[];
-    const create = tools.find((tool) => tool.name === "relation_create");
-    expect(create).toBeDefined();
-    expect(create!.title).toBe("Create relation");
-    expect(create!.description).toContain("Creates one relation after validating");
-    expect(create!.description).toContain("Ask for missing required fields");
+    const create = await advertisedOperation(tenantA, "Relation.create");
+    expect(create.name).toBe("Create relation");
+    expect(create.description).toContain("Creates one relation after validating");
+    expect(create.description).toContain("Ask for missing required fields");
     const displayName = create!.inputSchema.properties.displayName;
     // Authored validation reaches the model as JSON Schema, not as a 400.
     expect(displayName.maxLength).toBe(200);
@@ -443,10 +398,7 @@ describe("generated MCP server", () => {
         })
       ).body,
     );
-    const { body } = await rpc(tenantA, "tools/list");
-    const create = (body.result.tools as { name: string; inputSchema: any }[]).find(
-      (tool) => tool.name === "payment_detail_create",
-    );
+    const create = await advertisedOperation(tenantA, "PaymentDetail.create");
 
     expect(resource).not.toHaveProperty("jsonSchema");
     expect(
@@ -480,25 +432,22 @@ describe("generated MCP server", () => {
     );
   });
 
-  test("annotates read-only and destructive tools", async () => {
+  test("annotates discovery as read-only and execution as potentially destructive", async () => {
     const { body } = await rpc(tenantA, "tools/list");
     const tools = body.result.tools as { name: string; annotations: any }[];
-    const listName = catalog.tools.find((tool) => tool.operation === "list")!.name;
-    const deleteName = catalog.tools.find((tool) => tool.operation === "delete")!.name;
-    expect(tools.find((t) => t.name === listName)!.annotations.readOnlyHint).toBe(true);
-    expect(tools.find((t) => t.name === deleteName)!.annotations.destructiveHint).toBe(
-      true,
-    );
+    expect(tools.find(tool => tool.name === "osf_search_operations")!.annotations.readOnlyHint).toBe(true);
+    const execution = tools.find(tool => tool.name === "osf_execute_operation")!;
+    expect(execution.annotations.destructiveHint).toBe(true); expect(execution.annotations.readOnlyHint).toBe(false);
+    expect((await advertisedOperation(tenantA, "Relation.list")).effects).toBeDefined();
+    expect((await advertisedOperation(tenantA, "Relation.delete")).effects).toBeDefined();
   });
 
-  test("hides write tools from a read-only session", async () => {
-    const { body } = await rpc(readOnly, "tools/list");
-    const names = (body.result.tools as { name: string }[]).map((tool) => tool.name);
-    expect(names).toContain("relation_list");
-    expect(names).toContain("relation_get");
-    expect(names).not.toContain("relation_create");
-    expect(names).not.toContain("relation_update");
-    expect(names).not.toContain("relation_delete");
+  test("discovers reads but withholds writes from a read-only session", async () => {
+    const result = await callTool(readOnly, "osf_search_operations", { query: "Relation.", limit: 20 });
+    expect(toolError(result.body)).toBeUndefined();
+    const ids = toolPayload(result.body).operations.map((row: any) => row.operation.id);
+    expect(ids).toContain("Relation.list"); expect(ids).toContain("Relation.get");
+    for (const intent of ["create", "update", "delete"]) expect(ids).not.toContain(`Relation.${intent}`);
   });
 
   test("advertises no generated entity tools to a session with no roles", async () => {

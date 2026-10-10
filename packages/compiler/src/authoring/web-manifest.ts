@@ -43,6 +43,7 @@ import type {
   WebEntityInterface,
   WebFieldGroup,
   WebFieldProjection,
+  WebVisibilityCondition,
   WebManifestOptions,
   WebManifestV1,
   WebOperationIntent,
@@ -281,17 +282,64 @@ function fieldOverrides(
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
+/** A group's icon and its visibility condition travel to the renderer unchanged. */
+function groupPresentation(group: CompiledViewGroup): Pick<WebFieldGroup, "icon" | "visibleWhen"> {
+  return {
+    ...(group.icon ? { icon: group.icon } : {}),
+    ...(group.visibleWhen ? { visibleWhen: structuredClone(group.visibleWhen) } : {}),
+  };
+}
+
+/**
+ * A condition is evaluated by the host on the record it shows, so it may only use fields the
+ * Web interface can read.
+ */
+function assertVisibilityFields(
+  entityName: string,
+  scope: string,
+  owners: readonly { id: string; visibleWhen?: WebVisibilityCondition }[],
+  fields: Readonly<Record<string, WebFieldProjection>>,
+): void {
+  for (const owner of owners) for (const condition of owner.visibleWhen?.conditions ?? []) {
+    if (!fields[condition.field]?.supports.read) {
+      throw new Error(`${entityName} ${scope} "${owner.id}" visibleWhen field "${condition.field}" is not a readable field of ${entityName}.`);
+    }
+  }
+}
+
+/**
+ * Nested groups are flattened, so a child carries its parent's condition too: both must hold.
+ * Or-logic cannot be combined into one flat condition and is refused where it would be needed.
+ */
+function withParentVisibility(group: CompiledViewGroup, parent: CompiledViewGroup["visibleWhen"], scope = "Form group"): CompiledViewGroup {
+  if (!parent) return group;
+  if (!group.visibleWhen) return { ...group, visibleWhen: parent };
+  // A single condition reads the same under either logic.
+  const disjunctive = (condition: NonNullable<CompiledViewGroup["visibleWhen"]>) => condition.logic === "or" && condition.conditions.length > 1;
+  if (disjunctive(group.visibleWhen) || disjunctive(parent)) {
+    throw new Error(`${scope} "${group.id}" combines its visibleWhen with a parent group's; nested conditions must use "and".`);
+  }
+  return { ...group, visibleWhen: { conditions: [...parent.conditions, ...group.visibleWhen.conditions] } };
+}
+
 function projectGroups(
   groups: readonly CompiledViewGroup[] | undefined,
   excluded: ReadonlySet<string> = new Set(),
+  parentVisibility?: CompiledViewGroup["visibleWhen"],
+  scope = "Form group",
 ): WebFieldGroup[] {
-  return (groups ?? []).flatMap((group) => {
+  return (groups ?? []).flatMap((authored) => {
+    const group = withParentVisibility(authored, parentVisibility, scope);
     const keys = fieldKeys(group, excluded);
+    // A form group projects fields only; a condition on a relationship-only group could not be honoured.
+    if (authored.visibleWhen && authored.relationship && keys.length === 0 && !group.groups?.length) {
+      throw new Error(`${scope} "${group.id}" has a visibleWhen but no fields to show or hide; place the condition on a group with fields.`);
+    }
     const overrides = fieldOverrides(group, excluded);
     const projected = keys.length > 0
-      ? [{ id: group.id, title: localized(group.title ?? group.label, group.id), fields: keys, ...(overrides ? { fieldOverrides: overrides } : {}) }]
+      ? [{ id: group.id, title: localized(group.title ?? group.label, group.id), fields: keys, ...groupPresentation(group), ...(overrides ? { fieldOverrides: overrides } : {}) }]
       : [];
-    return [...projected, ...projectGroups(group.groups, excluded)];
+    return [...projected, ...projectGroups(group.groups, excluded, group.visibleWhen, scope)];
   });
 }
 
@@ -300,9 +348,9 @@ function projectTabGroups(tab: CompiledViewGroup): WebFieldGroup[] {
   const overrides = fieldOverrides(tab);
   return [
     ...(ownFields.length > 0
-      ? [{ id: tab.id, title: localized(tab.title ?? tab.label, tab.id), fields: ownFields, ...(overrides ? { fieldOverrides: overrides } : {}) }]
+      ? [{ id: tab.id, title: localized(tab.title ?? tab.label, tab.id), fields: ownFields, ...groupPresentation(tab), ...(overrides ? { fieldOverrides: overrides } : {}) }]
       : []),
-    ...projectGroups(tab.groups),
+    ...projectGroups(tab.groups, new Set(), tab.visibleWhen, "Detail group"),
   ];
 }
 
@@ -483,6 +531,9 @@ function projectField(
 ): WebFieldProjection {
   const nestedSupports = editNested ? supports : { read: true, create: false, update: false };
   const presentation = presentations[`${parent}.${field.key}`.split(".").slice(1).join(".")]?.render;
+  if (field.options?.presentation && field.options.type !== "static") {
+    throw new Error(`${parent}.${field.key}: options.presentation "${field.options.presentation}" requires static options.`);
+  }
   const optionSource = fieldOptionSource(field);
   const fieldPolicy = compileFieldValuePolicy(field);
   return {
@@ -493,7 +544,7 @@ function projectField(
     cardinality: field.cardinality === "collection" ? "many" : "one",
     required: field.required,
     ...(fieldPolicy ? { fieldPolicy } : {}),
-    ...(presentation ? { presentation } : {}),
+    ...(presentation ? { presentation } : field.options?.presentation === "tiles" ? { presentation: { component: "ChoiceTiles" } } : {}),
     ...projectedTextLength(field),
     ...(field.relationship?.target ? { relationship: {
       targetEntityId: field.relationship.target,
@@ -509,7 +560,7 @@ function projectField(
     ...(field.allowedDefinitions ? { allowedDefinitions: [...field.allowedDefinitions].sort() } : {}),
     ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
     ...(field.defaultTemplate !== undefined ? { defaultTemplate: field.defaultTemplate } : {}),
-    ...(field.options?.items?.length ? { options: field.options.items.map(({ value, label }) => ({ value, label: localized(label, value) })) } : {}),
+    ...(field.options?.items?.length ? { options: field.options.items.map(({ value, label, icon }) => ({ value, label: localized(label, value), ...(icon ? { icon } : {}) })) } : {}),
     ...(optionSource ? { optionSource } : {}),
     ...(field.children ? { children: field.children.map((child) => projectField(child, `${parent}.${field.key}`, nestedSupports, editNested, presentations)) } : {}),
     ...(field.item ? { item: projectField(field.item, `${parent}.${field.key}`, nestedSupports, editNested, presentations) } : {}),
@@ -714,6 +765,17 @@ function applyRelationshipUsage(
   const fieldByKey = new Map(('contract' in target ? target.contract.model.fields : Object.values(target.fields))
     .map((field) => [field.key, field]));
   const targetName = 'contract' in target ? target.contract.entity.name : target.entityId;
+  const presentation = overrides.presentation;
+  if (presentation) {
+    for (const key of [presentation.titleField, presentation.timestampField, presentation.descriptionField, presentation.relatedField, presentation.iconField].filter(Boolean)) {
+      if (!fieldByKey.has(key!)) throw new Error(`${origin}: timeline field ${key} is not a field of ${targetName}.`);
+    }
+    if (presentation.icons && (!presentation.iconField || (fieldByKey.get(presentation.iconField)?.baseType !== "string" || fieldByKey.get(presentation.iconField)?.cardinality === "collection"))) throw new Error(`${origin}: timeline icons require an existing single string icon field.`);
+    const dateField = fieldByKey.get(presentation.timestampField)!;
+    if (!["date", "datetime"].includes(dateField.baseType)) throw new Error(`${origin}: timeline timestamp must be a date or datetime field.`);
+    if (presentation.relatedField && !fieldByKey.get(presentation.relatedField)?.relationship) throw new Error(`${origin}: timeline relatedField must be a canonical reference.`);
+  }
+
   const columns = overrides.columns?.map((entry) => {
     const key = typeof entry === "string" ? entry : entry.key;
     const field = fieldByKey.get(key);
@@ -736,6 +798,7 @@ function applyRelationshipUsage(
     ...(narrowedQuery ? { source: { ...relationship.source!, query: narrowedQuery } } : {}),
     operations,
     collection: {
+      ...(presentation ? { presentation } : {}),
       ...relationship.collection,
       operations: collectionOperations,
       columns,
@@ -776,6 +839,7 @@ function projectEntity(
   // Every single entity reference is an authored field, so its writability and
   // presentation are projected above; relationships add no implicit fields.
   const fields = Object.fromEntries(explicitFields);
+  for (const groups of [authoredCreateGroups, updateGroups]) assertVisibilityFields(entityName, "form group", groups, fields);
 
   let relationships = Object.fromEntries(contract.model.relationships.flatMap((relationship) => {
     if (relationship.provider) return projectProviderRelationship(entityName, relationship, providers, fields);
@@ -829,15 +893,36 @@ function projectEntity(
   for (const tab of view?.detail?.groups.items ?? []) {
     const usage = tab.relationship;
     if (!usage?.name || !relationships[usage.name]) continue;
-    const target = all.get(relationships[usage.name]!.targetEntityId) ?? providers.get(relationships[usage.name]!.targetEntityId);
+    let relationship = relationships[usage.name]!;
+    let target = all.get(relationship.targetEntityId) ?? providers.get(relationship.targetEntityId);
+    let placement = usage.name;
+    if (usage.through) {
+      const association = all.get(relationship.targetEntityId);
+      const reference = association?.contract.model.relationships.find(item => item.kind === "belongsTo" && item.fieldKey === usage.through);
+      const destination = reference && all.get(reference.target);
+      const inverse = destination?.contract.model.relationships.find(item => item.kind === "hasMany" && item.target === association?.contract.entity.name && item.foreignKey === reference?.foreignKey);
+      if (relationship.kind !== "hasMany" || !relationship.recordField || !reference || !destination?.operations.list || !inverse) {
+        throw new Error(`${entityName}.${tab.id}: through ${usage.through} must resolve a canonical association reference and inverse target collection.`);
+      }
+      placement = `${usage.name}__${usage.through}`;
+      target = destination;
+      relationship = {
+        id: `${entityName}.${placement}`, key: placement, label: localized(tab.label ?? tab.title, tab.id),
+        kind: "hasMany", targetEntityId: destination.contract.entity.name, targetRoute: destination.route,
+        recordField: relationship.recordField,
+        association: { entityId: association!.contract.entity.name, relationship: inverse.key, parentField: relationship.recordField },
+        operations: { list: destination.operations.list, ...(destination.operations.get ? { get: destination.operations.get } : {}) },
+        collection: { ...destination.collection, operations: withoutCreate(destination.collection.operations) },
+      };
+    }
     relationships = {
       ...relationships,
-      [usage.name]: applyRelationshipUsage(relationships[usage.name]!, usage, target, `${entityName}.${tab.id}.${usage.name}`),
+      [placement]: applyRelationshipUsage(relationship, usage, target, `${entityName}.${tab.id}.${placement}`),
     };
   }
 
   const projectRecordTab = (tab: CompiledViewGroup): WebRecordTab[] => {
-    const relationshipId = tab.relationship?.name;
+    const relationshipId = tab.relationship?.through ? `${tab.relationship.name}__${tab.relationship.through}` : tab.relationship?.name;
     if (relationshipId && !relationships[relationshipId]) return [];
     const requestedView = tab.relationship?.view;
     if (requestedView) {
@@ -853,13 +938,17 @@ function projectEntity(
     }
     return [{
       id: tab.id,
+      ...(tab.showInReadNavigation !== undefined ? { showInReadNavigation: tab.showInReadNavigation } : {}),
       label: localized(tab.label ?? tab.title, tab.id),
+      ...(tab.visibleWhen ? { visibleWhen: structuredClone(tab.visibleWhen) } : {}),
       groups: projectTabGroups(tab),
       ...(relationshipId ? { relationshipId } : {}),
       ...(requestedView ? { targetView: requestedView } : {}),
     }];
   };
   const tabs: WebRecordTab[] = (view?.detail?.groups.items ?? []).flatMap(projectRecordTab);
+  assertVisibilityFields(entityName, "detail tab", tabs, fields);
+  assertVisibilityFields(entityName, "detail group", tabs.flatMap(({ groups }) => groups), fields);
   const authoredContext = contract.interfaces?.web?.recordContext;
   for (const key of authoredContext?.fields ?? []) {
     if (!fields[key]?.supports.read) throw new Error(`${entityName}: context field ${key} is not readable.`);
@@ -870,6 +959,64 @@ function projectEntity(
     }
     if (relationships[key]?.kind === "hasMany" && !tabs.some(tab => tab.relationshipId === key)) {
       throw new Error(`${entityName}: collection context relationship ${key} requires a matching detail tab.`);
+    }
+  }
+  const contextRecordKeys = new Set<string>();
+  const contextRecords = authoredContext?.records?.map(definition => {
+    if (contextRecordKeys.has(definition.key)) throw new Error(`${entityName}: duplicate context record ${definition.key}.`);
+    contextRecordKeys.add(definition.key);
+    if (!definition.path.length || definition.path.length > 4) throw new Error(`${entityName}: context record path requires one to four relationships.`);
+    let owner = source;
+    const path = definition.path.map(key => {
+      const relation = owner.contract.model.relationships.find(item => item.key === key);
+      const target = relation && all.get(relation.target);
+      if (!relation || !target || !target.operations[relation.kind === "hasMany" ? "list" : "get"]) throw new Error(`${entityName}: context record path ${key} requires a canonical readable relationship.`);
+      const step = { entityId: owner.contract.entity.name, relationshipId: `${owner.contract.entity.name}.${key}` };
+      owner = target;
+      return step;
+    });
+    const displayField = definition.displayField ?? owner.collection.displayField;
+    const display = owner.contract.model.fields.find(field => field.key === displayField);
+    if (!display || display.baseType !== "string" || display.cardinality === "collection") throw new Error(`${entityName}: context record display field ${displayField} must be a single string.`);
+    for (const [key, value] of Object.entries(definition.when ?? {})) {
+      const field = owner.contract.model.fields.find(field => field.key === key);
+      const valueType = field && contextConditionValueTypes[field.baseType];
+      if (!field || field.cardinality === "collection" || !valueType
+        || (value !== null && (typeof value !== valueType || (field.baseType === "integer" && !Number.isInteger(value))))) throw new Error(`${entityName}: context condition ${key} requires a matching scalar field.`);
+    }
+    if (definition.status) {
+      const statusField = owner.contract.model.fields.find(field => field.key === definition.status!.field);
+      if (!statusField || statusField.baseType !== "string" || statusField.cardinality === "collection") throw new Error(`${entityName}: context status requires a single string field.`);
+    }
+    return { key: definition.key, label: localized(definition.label, definition.key), path, targetEntityId: owner.contract.entity.name, displayField,
+      ...(definition.when ? { when: definition.when } : {}), ...(definition.tone ? { tone: definition.tone } : {}),
+      ...(definition.labelEmphasis !== undefined ? { labelEmphasis: definition.labelEmphasis } : {}), ...(definition.status ? { status: definition.status } : {}) };
+  });
+  const contacts = authoredContext?.contacts;
+  if (contacts) {
+    const assertContactField = (relationshipKey: string, fieldKey: string) => {
+      const relationship = relationships[relationshipKey];
+      const target = relationship && all.get(relationship.targetEntityId);
+      const field = target?.contract.model.fields.find(field => field.key === fieldKey);
+      if (relationship?.kind !== "hasMany" || !relationship.operations.list || !field || field.baseType !== "string" || field.cardinality === "collection") {
+        throw new Error(`${entityName}: contact context ${relationshipKey}.${fieldKey} requires a readable collection with a single string field.`);
+      }
+    };
+    assertContactField(contacts.relationship, contacts.channelField);
+    assertContactField(contacts.relationship, contacts.valueField);
+    if (contacts.preferredChannelField && (!fields[contacts.preferredChannelField]?.supports.read || fields[contacts.preferredChannelField]?.baseType !== "string")) {
+      throw new Error(`${entityName}: contact context preferred channel must be a readable string field.`);
+    }
+    if (contacts.language) assertContactField(contacts.language.relationship, contacts.language.field);
+    const channelKeys = new Set<string>();
+    const child = all.get(relationships[contacts.relationship]!.targetEntityId)!;
+    for (const channel of contacts.channels ?? []) {
+      if (channelKeys.has(channel.key) || !channel.types.length) throw new Error(`${entityName}: contact channels need unique keys and source types.`);
+      channelKeys.add(channel.key);
+      for (const [key, value] of Object.entries(channel.when ?? {})) {
+        const field = child.contract.model.fields.find(field => field.key === key);
+        if (!field || field.cardinality === "collection" || field.baseType !== typeof value) throw new Error(`${entityName}: contact condition ${key} must match an existing child field type.`);
+      }
     }
   }
   const detail = view?.detail;
@@ -931,7 +1078,15 @@ function projectEntity(
     ...(detail?.header.badges?.items.length ? { badges: detail.header.badges.items } : {}),
     layout: {
       tabs: recordTabs,
+      ...(contract.interfaces?.web?.recordWorkspaceTabs !== undefined ? { workspaceTabs: contract.interfaces.web.recordWorkspaceTabs } : {}),
       context: {
+        ...(contextRecords?.length ? { records: contextRecords } : {}),
+        ...(contacts ? { contacts: {
+          relationshipId: contacts.relationship, channelField: contacts.channelField, valueField: contacts.valueField,
+          ...(contacts.channels ? { channels: contacts.channels.map(channel => ({ key: channel.key, types: channel.types, ...(channel.label ? { label: localized(channel.label, channel.key) } : {}), ...(channel.when ? { when: channel.when } : {}) })) } : {}),
+          ...(contacts.preferredChannelField ? { preferredChannelField: contacts.preferredChannelField } : {}),
+          ...(contacts.language ? { language: { relationshipId: contacts.language.relationship, field: contacts.language.field } } : {}),
+        } } : {}),
         groups: authoredContext?.fields.length
           ? [{ id: "summary", title: localized(undefined, "Key facts"), fields: authoredContext.fields }]
           : [],
@@ -1459,6 +1614,11 @@ function projectStandalone(
 }
 
 /** Project resolved entity contracts into the versioned browser interface contract. */
+/** JSON value type of a context condition, by field base type; dates compare as their ISO strings. */
+const contextConditionValueTypes: Record<string, "string" | "number" | "boolean" | undefined> = {
+  string: "string", date: "string", datetime: "string", integer: "number", number: "number", boolean: "boolean",
+};
+
 export function buildWebManifest(
   entities: readonly Pick<CompiledEntityInfo, "slug" | "contract">[],
   options: WebManifestOptions = {},
@@ -1499,6 +1659,16 @@ export function buildWebManifest(
   }
   const projected = projectable.map((entity) => entity.contract.source
     ? providers.get(entity.contract.entity.name)! : projectEntity(entity, byName, providers));
+  // Reading uses the same authored catalog labels as editing. Keep the source
+  // identity for choices and preserve unknown stored codes as renderer fallbacks.
+  for (const entity of [...projected, ...Object.values(pages?.entities ?? {})]) {
+    for (const field of Object.values(entity.fields)) {
+      if (field.optionSource?.type === "referentiedata" && !field.options?.length) {
+        const options = referentiedata[field.optionSource.group];
+        if (options?.length) field.options = options.map(item => ({ value: item.value, label: { ...item.label } }));
+      }
+    }
+  }
   const missing = missingUiTranslations(projected);
   missing.push(...missingUiTranslations(pages?.operations ?? {}));
   if (resolved.requireTranslations) for (const entity of projectable) {

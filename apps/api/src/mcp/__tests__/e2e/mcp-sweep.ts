@@ -168,12 +168,25 @@ export function catalogTool(table: McpTable, operation: CrudOperation) {
  * the shared properties). Throws when the listing omits it, so a test that
  * expected the tool sees why instead of a property read on undefined.
  */
+/** Read the exact authorized contract through canonical discovery. */
+export async function advertisedOperation(identity: Identity, operationId: string): Promise<any> {
+  const response = await rpc(identity, "tools/call", { name: "osf_search_operations", arguments: { query: operationId, limit: 20 } });
+  expect(toolError(response.body)).toBeUndefined();
+  const row = toolPayload(response.body)?.operations?.find((row: any) => row.operation.id === operationId);
+  if (!row) throw new Error(`The session was not offered Operation ${operationId}.`);
+  return row;
+}
+
 export async function advertisedSchema(
   identity: Identity,
   tools: { name: string; inputSchema: any }[],
   table: McpTable,
   operation: CrudOperation,
 ): Promise<any> {
+  if (catalog.operationToolProjection.mode === "searchable") {
+    expect(tools.some(tool => tool.name === "osf_search_operations")).toBe(true);
+    return (await advertisedOperation(identity, operationIdFor(table, operation))).inputSchema;
+  }
   const name = toolNameFor(table, operation);
   const tool = tools.find((candidate) => candidate.name === name);
   if (!tool) throw new Error(`The session was not offered ${name}.`);
@@ -289,6 +302,14 @@ export async function callTool(
   name: string,
   args: Record<string, unknown> = {},
 ) {
+  if (catalog.operationToolProjection.mode === "searchable") {
+    const entry = catalog.tools.find(tool => tool.name === name && (args.entity === undefined || tool.entity === args.entity));
+    if (entry) {
+      const { entity, ...input } = args;
+      return rpc(identity, "tools/call", { name: "osf_execute_operation", arguments: { operationId: entry.operationId, input,
+        ...(typeof input.requestId === "string" ? { idempotencyKey: input.requestId } : {}) } });
+    }
+  }
   return rpc(identity, "tools/call", { name, arguments: args });
 }
 

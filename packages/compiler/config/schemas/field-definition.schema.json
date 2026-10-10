@@ -84,9 +84,17 @@
             "required": ["value", "label"],
             "properties": {
               "value": { "type": "string" },
-              "label": { "$ref": "#/$defs/localizedText" }
+              "label": { "$ref": "#/$defs/localizedText" },
+              "icon": {
+                "type": "string", "pattern": "^[a-z][a-z0-9-]*$",
+                "description": "Icon key shown with the option, e.g. on a tile; the host resolves it."
+              }
             }
           }
+        },
+        "presentation": {
+          "type": "string", "enum": ["tiles"],
+          "description": "Render static options as icon tiles instead of a select. Only for type static."
         },
         "source": { "type": "string" },
         "referentieGroep": { "type": "string" },
@@ -95,6 +103,9 @@
         "labelField": { "type": "string" }
       },
       "allOf": [{
+        "if": { "properties": { "type": { "not": { "const": "static" } } }, "required": ["type"] },
+        "then": { "properties": { "presentation": false } }
+      }, {
         "if": { "properties": { "type": { "const": "entity" } }, "required": ["type"] },
         "then": {
           "required": ["source"],

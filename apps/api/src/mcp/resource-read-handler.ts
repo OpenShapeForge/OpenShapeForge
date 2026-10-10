@@ -110,7 +110,7 @@ export function registerResourceReadHandler(
             text: await renderConfigurationApp(),
             _meta: {
               ui: {
-                csp: { resourceDomains: [callbackOrigin()] },
+                csp: { frameDomains: [callbackOrigin()] },
                 prefersBorder: true,
               },
             },

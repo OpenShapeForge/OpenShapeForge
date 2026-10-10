@@ -420,10 +420,12 @@ export type EntityInterfaceOperationProjection =
   | EntityInterfaceOperationProjectionConfig;
 
 export interface EntityWebRecordLayout {
-  preset?: "main" | "inbox-main-context";
+  preset?: "main" | "main-context" | "inbox-main-context";
+  /** Omit the surrounding workspace tab chrome; record task tabs remain available. */
+  workspaceTabs?: boolean;
   tabs: import("./views.js").ViewGroup[];
   /** Deliberately selected summary, independent of the full record tabs. */
-  context?: { fields: string[]; relationships?: string[] };
+  context?: { fields: string[]; relationships?: string[]; contacts?: import("./views.js").ContactContextPresentation; records?: import("./views.js").RelatedRecordContextPresentation[] };
 }
 
 export type EntityWebNamedViewDefinition =

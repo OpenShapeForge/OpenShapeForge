@@ -375,7 +375,7 @@ function operationWrittenNote(fields: CompiledField[], language = "en"): string 
   ).join("; ");
   return language === "nl"
     ? ` Hier niet in te stellen — deze leggen vast dat een proces heeft plaatsgevonden en ` +
-      `worden alleen geschreven door de genoemde operatie: ${parts}. Er toch een sturen wordt geweigerd.`
+      `worden alleen geschreven door de genoemde operatie: ${parts}. Een meegestuurde waarde wordt geweigerd.`
     : ` Not settable here — these record that a process took place and are written ` +
       `only by the operation named: ${parts}. Sending one anyway is refused.`;
 }
@@ -1025,6 +1025,9 @@ function listedLanguages(
     }
   }
   for (const tool of input.tools) {
+    // A description may be authored in a language only guidance or
+    // instructions carry, which no schema or canonical text names.
+    for (const language of Object.keys(tool.descriptionI18n ?? {})) languages.add(language);
     collect(tool.inputSchema);
     collect(tool.outputSchema);
   }

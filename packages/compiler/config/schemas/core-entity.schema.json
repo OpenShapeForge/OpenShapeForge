@@ -2473,7 +2473,7 @@
           "type": "object",
           "required": ["type"],
           "if": { "properties": { "type": { "not": { "const": "static" } } }, "required": ["type"] },
-          "then": { "not": { "required": ["presentation"] } },
+          "then": { "properties": { "presentation": false } },
           "properties": {
             "type": {
               "type": "string",

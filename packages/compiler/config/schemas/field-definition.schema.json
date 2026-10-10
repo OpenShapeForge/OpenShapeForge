@@ -104,7 +104,7 @@
       },
       "allOf": [{
         "if": { "properties": { "type": { "not": { "const": "static" } } }, "required": ["type"] },
-        "then": { "not": { "required": ["presentation"] } }
+        "then": { "properties": { "presentation": false } }
       }, {
         "if": { "properties": { "type": { "const": "entity" } }, "required": ["type"] },
         "then": {

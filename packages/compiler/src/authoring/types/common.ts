@@ -164,7 +164,7 @@ export interface ComputedField {
 export interface FieldOptionStatic {
   value: string;
   label: LocalizedText;
-  /** Battery icon key shown with the option, e.g. on a tile. */
+  /** Icon key shown with the option, e.g. on a tile; the host resolves it. */
   icon?: string;
 }
 

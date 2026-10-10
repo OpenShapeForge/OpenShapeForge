@@ -482,12 +482,48 @@ describe("web manifest projection", () => {
       { field: "type", operator: "neq", value: "postal" }, { field: "city", operator: "isNotEmpty" },
     ] } });
     groups[1]!.visibleWhen!.conditions[0]!.field = "missing";
-    expect(address).toThrow(/visibleWhen field "missing" is not a field of Address/);
+    expect(address).toThrow(/form group "street" visibleWhen field "missing" is not a readable field of Address/);
     raw.interfaces.web.views.record.modes.create.groups = [{ ...groups[0], icon: "Not An Icon" }];
     expect(() => validator.validate(raw, "address.yaml")).toThrow();
     typeField.options = { ...mode, items: [{ value: "home", label: text("Home"), icon: "House" }] };
     raw.interfaces.web.views.record.modes.create.groups = [groups[0]];
     expect(() => validator.validate(raw, "address.yaml")).toThrow();
+  });
+
+  test("detail tabs carry their condition; nested conditions and tile options are checked", () => {
+    const artifacts = loadEntity(authoringDir, "address");
+    const record = artifacts.coreEntity.interfaces!.web!.views!.record!;
+    const tab = record.layout!.tabs![0]! as { visibleWhen?: unknown; groups?: unknown[] };
+    const address = () => buildWebManifest([{ slug: "address", contract: compile(artifacts) }]).entities.Address!;
+    const present = { conditions: [{ field: "type", operator: "isNotEmpty" }] };
+    tab.visibleWhen = present;
+    const projected = address().views.record!.layout.tabs[0]!;
+    // The tab itself carries the condition, so a tab without field groups keeps it too.
+    expect(projected.visibleWhen).toEqual(present as never);
+    for (const group of projected.groups) expect(group.visibleWhen?.conditions).toContainEqual(present.conditions[0] as never);
+    tab.visibleWhen = { conditions: [{ field: "missing", operator: "isEmpty" }] };
+    expect(address).toThrow(/detail tab "overview" visibleWhen field "missing" is not a readable field of Address/);
+
+    // A single condition reads the same under or-logic; several cannot be flattened into a child.
+    tab.groups = [{ id: "nested", title: text("Nested"), visibleWhen: { conditions: [{ field: "city", operator: "isNotEmpty" }] }, fields: ["city"] }];
+    tab.visibleWhen = { logic: "or", conditions: [{ field: "type", operator: "eq", value: "home" }] };
+    expect(address().views.record!.layout.tabs[0]!.groups.find((group) => group.id === "nested")!.visibleWhen!.conditions).toHaveLength(2);
+    tab.visibleWhen = { logic: "or", conditions: [{ field: "type", operator: "eq", value: "home" }, { field: "type", operator: "eq", value: "postal" }] };
+    expect(address).toThrow(/Detail group "nested" combines its visibleWhen with a parent group's; nested conditions must use "and"/);
+    delete tab.visibleWhen;
+
+    // A form group projects fields only, so a condition on a relationship-only group is refused.
+    record.modes!.create!.groups = [{ id: "relation", title: text("Relation"), relationship: "relationId", visibleWhen: present }] as never;
+    expect(address).toThrow(/Form group "relation" has a visibleWhen but no fields to show or hide/);
+    record.modes!.create!.groups = [];
+
+    // Tiles are a presentation of static options only.
+    const typeField = artifacts.coreEntity.fields.find((candidate) => candidate.key === "type")!;
+    typeField.options = { ...typeField.options!, presentation: "tiles" } as never;
+    expect(address).toThrow(/options.presentation "tiles" requires static options/);
+    const raw = parse(readFileSync(join(authoringDir, "entities/core/address.yaml"), "utf8"));
+    raw.fields.find((candidate: { key: string }) => candidate.key === "type").options.presentation = "tiles";
+    expect(() => createAuthoringValidator().validate(raw, "address.yaml")).toThrow(/options: must NOT be valid|must match "then" schema/);
   });
 
   test("named record relationship views are validated and projected independently", () => {

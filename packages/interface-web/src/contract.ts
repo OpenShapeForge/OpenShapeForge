@@ -117,7 +117,7 @@ export type WebFieldSuggestions = {
 export type WebFieldOption = {
   value: string;
   label: LocalizedText;
-  /** Battery icon key, e.g. for a choice tile. The host resolves it; unknown keys render no icon. */
+  /** Icon key, e.g. for a choice tile. The host resolves it; an unknown key renders no icon. */
   icon?: string;
 };
 
@@ -147,6 +147,10 @@ export type WebFieldProjection = {
   /** Canonical protection metadata; the server remains the enforcement boundary. */
   fieldPolicy?: FieldValuePolicy;
   /** Explicit Web-only exception; defaults still come from the semantic registry. */
+  /**
+   * Renderer hint, e.g. `ChoiceTiles` for static options authored with `presentation: tiles`.
+   * A host without that renderer uses its default input for the field.
+   */
   presentation?: { component: string; props?: Record<string, unknown> };
   id: string;
   key: string;
@@ -169,10 +173,7 @@ export type WebFieldProjection = {
   };
   variables?: "none" | "whole" | "template" | "both";
   suggestions?: WebFieldSuggestions;
-  visibility?: {
-    conditions: Array<{ field: string; operator: "eq" | "neq" | "in" | "notIn" | "gt" | "lt" | "gte" | "lte" | "isEmpty" | "isNotEmpty"; value?: unknown }>;
-    logic?: "and" | "or";
-  };
+  visibility?: WebVisibilityCondition;
   options?: WebFieldOption[];
   optionSource?: WebFieldOptionSource;
   cardinality: "one" | "many";
@@ -192,7 +193,7 @@ export type WebFieldGroup = {
   id: string;
   title: LocalizedText;
   fields: string[];
-  /** Battery icon key shown with the group. */
+  /** Icon key shown with the group; the host resolves it. */
   icon?: string;
   /** The group applies only while these conditions hold for the draft being edited. */
   visibleWhen?: WebVisibilityCondition;
@@ -287,6 +288,8 @@ export type WebRecordTab = {
   id: string;
   label: LocalizedText;
   groups: WebFieldGroup[];
+  /** The tab applies only while these conditions hold for the record shown; its groups carry it too. */
+  visibleWhen?: WebVisibilityCondition;
   relationshipId?: string;
   /** Named view owned by the relationship target selected by this placement. */
   targetView?: string;

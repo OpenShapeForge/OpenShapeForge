@@ -1881,7 +1881,7 @@
         "icon": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9-]*$",
-          "description": "Battery icon key shown with the group; the host resolves it.",
+          "description": "Icon key shown with the group; the host resolves it.",
           "x-osf-i18n": { "title": { "en": "Icon", "nl": "Icoon" } }
         },
         "visibleWhen": {
@@ -2391,18 +2391,23 @@
         "visibility": {
           "type": "object",
           "required": ["conditions"],
+          "x-osf-i18n": { "title": { "en": "Visibility", "nl": "Zichtbaarheid" } },
           "properties": {
             "conditions": {
               "type": "array",
+              "x-osf-i18n": { "title": { "en": "Conditions", "nl": "Voorwaarden" } },
               "items": {
                 "type": "object",
                 "required": ["field", "operator"],
+                "x-osf-i18n": { "title": { "en": "Condition", "nl": "Voorwaarde" } },
                 "properties": {
                   "field": {
-                    "type": "string"
+                    "type": "string",
+                    "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
                   },
                   "operator": {
                     "type": "string",
+                    "x-osf-i18n": { "title": { "en": "Operator", "nl": "Operator" } },
                     "enum": [
                       "eq",
                       "neq",
@@ -2416,13 +2421,16 @@
                       "isNotEmpty"
                     ]
                   },
-                  "value": {}
+                  "value": {
+                    "x-osf-i18n": { "title": { "en": "Value", "nl": "Waarde" } }
+                  }
                 }
               }
             },
             "logic": {
               "type": "string",
-              "enum": ["and", "or"]
+              "enum": ["and", "or"],
+              "x-osf-i18n": { "title": { "en": "Logic", "nl": "Logica" } }
             }
           }
         },
@@ -2464,6 +2472,8 @@
         "options": {
           "type": "object",
           "required": ["type"],
+          "if": { "properties": { "type": { "not": { "const": "static" } } }, "required": ["type"] },
+          "then": { "not": { "required": ["presentation"] } },
           "properties": {
             "type": {
               "type": "string",
@@ -2484,7 +2494,7 @@
                   "icon": {
                     "type": "string",
                     "pattern": "^[a-z][a-z0-9-]*$",
-                    "description": "Battery icon key; the host resolves it and renders nothing for an unknown key."
+                    "description": "Icon key; the host resolves it and renders nothing for an unknown key."
                   }
                 }
               }
@@ -2492,7 +2502,7 @@
             "presentation": {
               "type": "string",
               "enum": ["tiles"],
-              "description": "Render static options as icon tiles instead of a select."
+              "description": "Render static options as icon tiles instead of a select. Only for type static."
             },
             "referentieGroep": {
               "type": "string"

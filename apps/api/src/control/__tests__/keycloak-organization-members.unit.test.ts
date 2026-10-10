@@ -539,3 +539,36 @@ describe("finding a pending invitation by e-mail", () => {
     expect(found).toBeNull();
   });
 });
+
+describe("telling an existing member about new access", () => {
+  const page = (from: number, count: number) => Array.from({ length: count }, (_, i) => ({ id: `user-${from + i}`, email: `user${from + i}@example.com` }));
+  it("finds the member across pages case-insensitively, withdraws a previous invitation, then posts invite-existing-user as a form", async () => {
+    const { fetch, calls } = stubFetch((url) => {
+      if (url.includes("/members?first=0")) return Response.json(page(0, 100));
+      if (url.includes("/members?first=100")) return Response.json([{ id: "target", email: "Person@Example.com" }]);
+      if (url.endsWith("/invitations") || url.includes("/invitations?")) return Response.json([{ id: "old-inv", email: "person@example.com", status: "PENDING", organizationId: "org/acme" }]);
+      return new Response(null, { status: 204 });
+    });
+    expect(await createKeycloakOrganizationMembersClient(config, { fetch }).inviteExistingMember!("org/acme", " person@example.COM ")).toBe(true);
+    const deleted = calls.find((call) => call.init.method === "DELETE");
+    expect(deleted?.url).toContain("/organizations/org%2Facme/invitations/old-inv");
+    const post = calls.find((call) => call.url.endsWith("/members/invite-existing-user"));
+    expect(post?.url).toContain("/organizations/org%2Facme/members/invite-existing-user");
+    expect(String(post?.init.body)).toBe("id=target");
+    expect((post?.init.headers as Record<string, string>)["content-type"]).toBe("application/x-www-form-urlencoded");
+    expect(calls.indexOf(deleted!)).toBeLessThan(calls.indexOf(post!));
+  });
+  it("answers false without posting when no member has the address", async () => {
+    const { fetch, calls } = stubFetch((url) => url.includes("/members?") ? Response.json(page(0, 3)) : Response.json([]));
+    expect(await createKeycloakOrganizationMembersClient(config, { fetch }).inviteExistingMember!("acme", "nobody@example.com")).toBe(false);
+    expect(calls.some((call) => call.url.includes("invite-existing-user"))).toBe(false);
+  });
+  it("surfaces a failed send as a KeycloakAdminError", async () => {
+    const { fetch } = stubFetch((url) => {
+      if (url.includes("/members?")) return Response.json([{ id: "target", email: "person@example.com" }]);
+      if (url.includes("/invitations")) return Response.json([]);
+      return Response.json({ errorMessage: "Failed to send invite email" }, { status: 500 });
+    });
+    await expect(createKeycloakOrganizationMembersClient(config, { fetch }).inviteExistingMember!("acme", "person@example.com")).rejects.toBeInstanceOf(KeycloakAdminError);
+  });
+});

@@ -363,16 +363,27 @@ export function createKeycloakOrganizationMembersClient(
       const wanted = normalizeEmail(email);
       if (wanted.length === 0) return false;
       let id: string | undefined;
-      for (let first = 0; first < 10000 && !id; first += 100) {
+      for (let first = 0; ; first += 100) {
+        if (first >= 10000) {
+          throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Organization member listing exceeds the supported bound.");
+        }
         const { body } = await request(
           `${adminBase}/${encodeURIComponent(organizationId)}/members?first=${first}&max=100`,
           { method: "GET" }, "checking organization membership", "list_organization_members",
         );
         if (!Array.isArray(body)) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid organization member response.");
         id = body.find((row) => typeof row?.email === "string" && normalizeEmail(row.email) === wanted && typeof row?.id === "string")?.id;
-        if (body.length < 100) break;
+        if (id || body.length < 100) break;
       }
       if (!id) return false;
+      // Keycloak keeps one invitation per address (26.5.3 answers a second
+      // invite-existing-user with 409 Duplicate resource), so a previous notice
+      // is withdrawn first; the new one carries a fresh link.
+      const previous = (await listInvitations(organizationId)).find((invitation) => normalizeEmail(invitation.email) === wanted);
+      if (previous) {
+        await request(`${invitationsUrl(organizationId)}/${encodeURIComponent(previous.id)}`, { method: "DELETE" },
+          "cancelling an invitation", "delete_invitation", true);
+      }
       await request(
         `${adminBase}/${encodeURIComponent(organizationId)}/members/invite-existing-user`,
         { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ id }).toString() },

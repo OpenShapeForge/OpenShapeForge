@@ -200,7 +200,18 @@ export type WebFieldGroup = {
   fieldOverrides?: Record<string, { render: { component: WebRendererKey } }>;
 };
 
+export type WebTimelinePresentation = {
+  kind: "timeline";
+  iconField?: string;
+  icons?: Record<string, "phone" | "email" | "whatsapp" | "chat" | "check" | "clock">;
+  titleField: string;
+  timestampField: string;
+  descriptionField?: string;
+  relatedField?: string;
+};
+
 export type WebCollectionView = {
+  presentation?: WebTimelinePresentation;
   id: string;
   kind: "collection";
   renderer: WebRendererKey;
@@ -241,6 +252,8 @@ export type WebRelationshipProjection = {
   positionColumn?: string;
   via?: string;
   through?: { field: string; column: string; target: string };
+  /** Canonical target list is scoped by its inverse association, not by target IDs in the browser. */
+  association?: { entityId: string; relationship: string; parentField: string };
   mutationSupport?: "unsupported" | "atomic";
   allowedDefinitions?: string[];
   constraints?: WebRelationshipConstraints;
@@ -269,6 +282,8 @@ export type WebRelationshipProjection = {
 };
 
 export type WebRecordTab = {
+  /** Supplemental data remains addressable through context and editable in forms. */
+  showInReadNavigation?: boolean;
   id: string;
   label: LocalizedText;
   groups: WebFieldGroup[];
@@ -281,7 +296,7 @@ export type WebRecordView = {
   id: string;
   kind: "record";
   renderer: WebRendererKey;
-  preset: "main" | "inbox-main-context";
+  preset: "main" | "main-context" | "inbox-main-context";
   modes: WebViewMode[];
   routes: {
     read?: string;
@@ -302,7 +317,8 @@ export type WebRecordView = {
   badges?: string[];
   layout: {
     tabs: WebRecordTab[];
-    context: { groups: WebFieldGroup[]; relationships: string[] };
+    workspaceTabs?: boolean;
+    context: { groups: WebFieldGroup[]; relationships: string[]; contacts?: WebContactContext; records?: WebRelatedRecordContext[] };
   };
   variableSources?: WebVariableSource[];
   labels: {
@@ -467,4 +483,24 @@ export type WebManifestOptions = {
   context?: string;
   /** Route language may differ from the default content language. */
   routeLocale?: "en" | "nl";
+};
+
+
+export type WebContactContext = {
+  channels?: Array<{ key: string; types: string[]; label?: LocalizedText; when?: Record<string, string | boolean> }>;
+  relationshipId: string;
+  channelField: string;
+  valueField: string;
+  preferredChannelField?: string;
+  language?: { relationshipId: string; field: string };
+};
+
+export type WebRelatedRecordContext = {
+  key: string; label: LocalizedText;
+  path: Array<{ entityId: string; relationshipId: string }>;
+  targetEntityId: string; displayField: string;
+  when?: Record<string, string | number | boolean | null>;
+  tone?: "default" | "subtle";
+  labelEmphasis?: boolean;
+  status?: { field: string; values: Record<string, "off" | "success" | "danger" | "warning"> };
 };

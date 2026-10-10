@@ -137,6 +137,7 @@ function compileRelationshipUsage(
     render: vr(catalog, "relationshipTab"),
     name: relationship.name,
     via: relationship.via,
+    through: relationship.through,
     view: relationship.view,
     overrides: relationship.overrides,
   };
@@ -225,6 +226,7 @@ function compileGroup(
     label: group.label,
     icon: group.icon,
     visibleWhen: group.visibleWhen,
+    ...(group.showInReadNavigation !== undefined ? { showInReadNavigation: group.showInReadNavigation } : {}),
     render: group.render ? vr(catalog, group.render) : undefined,
     fields: group.fields ? compileFields(group.fields, catalog) : undefined,
     relationships: group.relationships?.map((relationship) => compileRelationshipUsage(relationship, catalog)!),

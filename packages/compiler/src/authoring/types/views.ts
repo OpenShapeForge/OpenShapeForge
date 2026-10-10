@@ -49,7 +49,18 @@ export interface FieldRef {
 
 export type FieldEntry = string | FieldRef;
 
+export type TimelinePresentation = {
+  kind: "timeline";
+  iconField?: string;
+  icons?: Record<string, "phone" | "email" | "whatsapp" | "chat" | "check" | "clock">;
+  titleField: string;
+  timestampField: string;
+  descriptionField?: string;
+  relatedField?: string;
+};
+
 export interface RelationshipOverrides {
+  presentation?: TimelinePresentation;
   columns?: ListColumn[] | string[];
   /** Filter fields exposed by this placement; must narrow the target list Operation. */
   filters?: string[];
@@ -66,6 +77,8 @@ export interface RelationshipOverrides {
 }
 
 export interface RelationshipUsage {
+  /** Present target records through a reference on the association entity. */
+  through?: string;
   name: string;
   via?: string;
   view?: string;
@@ -106,6 +119,8 @@ export interface ViewGroupOverride {
 }
 
 export interface ViewGroup {
+  /** Supplemental data remains addressable through context and editable in forms. */
+  showInReadNavigation?: boolean;
   id?: string;
   title?: LocalizedText;
   label?: LocalizedText;
@@ -302,4 +317,35 @@ export interface ViewContext {
   detail?: DetailPresentation;
   form?: FormPresentation;
   workspace?: WorkspacePresentation;
+}
+
+
+/** Contact context uses canonical child fields and optional parent/person preferences. */
+export interface ContactContextChannel {
+  key: string;
+  types: string[];
+  label?: LocalizedText;
+  /** Reading conditions on existing child values, never authorization. */
+  when?: Record<string, string | boolean>;
+}
+export interface ContactContextPresentation {
+  channels?: ContactContextChannel[];
+  relationship: string;
+  channelField: string;
+  valueField: string;
+  preferredChannelField?: string;
+  language?: { relationship: string; field: string };
+}
+
+/** Read-only context follows existing canonical relationships, never inferred identities. */
+export interface RelatedRecordContextPresentation {
+  key: string;
+  label?: LocalizedText;
+  path: string[];
+  displayField?: string;
+  /** Presentation selection on the terminal record; never an authorization rule. */
+  when?: Record<string, string | number | boolean | null>;
+  tone?: "default" | "subtle";
+  labelEmphasis?: boolean;
+  status?: { field: string; values: Record<string, "off" | "success" | "danger" | "warning"> };
 }

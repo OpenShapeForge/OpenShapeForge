@@ -746,6 +746,17 @@ function applyRelationshipUsage(
   const fieldByKey = new Map(('contract' in target ? target.contract.model.fields : Object.values(target.fields))
     .map((field) => [field.key, field]));
   const targetName = 'contract' in target ? target.contract.entity.name : target.entityId;
+  const presentation = overrides.presentation;
+  if (presentation) {
+    for (const key of [presentation.titleField, presentation.timestampField, presentation.descriptionField, presentation.relatedField, presentation.iconField].filter(Boolean)) {
+      if (!fieldByKey.has(key!)) throw new Error(`${origin}: timeline field ${key} is not a field of ${targetName}.`);
+    }
+    if (presentation.icons && (!presentation.iconField || (fieldByKey.get(presentation.iconField)?.baseType !== "string" || fieldByKey.get(presentation.iconField)?.cardinality === "collection"))) throw new Error(`${origin}: timeline icons require an existing single string icon field.`);
+    const dateField = fieldByKey.get(presentation.timestampField)!;
+    if (!["date", "datetime"].includes(dateField.baseType)) throw new Error(`${origin}: timeline timestamp must be a date or datetime field.`);
+    if (presentation.relatedField && !fieldByKey.get(presentation.relatedField)?.relationship) throw new Error(`${origin}: timeline relatedField must be a canonical reference.`);
+  }
+
   const columns = overrides.columns?.map((entry) => {
     const key = typeof entry === "string" ? entry : entry.key;
     const field = fieldByKey.get(key);
@@ -768,6 +779,7 @@ function applyRelationshipUsage(
     ...(narrowedQuery ? { source: { ...relationship.source!, query: narrowedQuery } } : {}),
     operations,
     collection: {
+      ...(presentation ? { presentation } : {}),
       ...relationship.collection,
       operations: collectionOperations,
       columns,
@@ -863,15 +875,36 @@ function projectEntity(
   for (const tab of view?.detail?.groups.items ?? []) {
     const usage = tab.relationship;
     if (!usage?.name || !relationships[usage.name]) continue;
-    const target = all.get(relationships[usage.name]!.targetEntityId) ?? providers.get(relationships[usage.name]!.targetEntityId);
+    let relationship = relationships[usage.name]!;
+    let target = all.get(relationship.targetEntityId) ?? providers.get(relationship.targetEntityId);
+    let placement = usage.name;
+    if (usage.through) {
+      const association = all.get(relationship.targetEntityId);
+      const reference = association?.contract.model.relationships.find(item => item.kind === "belongsTo" && item.fieldKey === usage.through);
+      const destination = reference && all.get(reference.target);
+      const inverse = destination?.contract.model.relationships.find(item => item.kind === "hasMany" && item.target === association?.contract.entity.name && item.foreignKey === reference?.foreignKey);
+      if (relationship.kind !== "hasMany" || !relationship.recordField || !reference || !destination?.operations.list || !inverse) {
+        throw new Error(`${entityName}.${tab.id}: through ${usage.through} must resolve a canonical association reference and inverse target collection.`);
+      }
+      placement = `${usage.name}__${usage.through}`;
+      target = destination;
+      relationship = {
+        id: `${entityName}.${placement}`, key: placement, label: localized(tab.label ?? tab.title, tab.id),
+        kind: "hasMany", targetEntityId: destination.contract.entity.name, targetRoute: destination.route,
+        recordField: relationship.recordField,
+        association: { entityId: association!.contract.entity.name, relationship: inverse.key, parentField: relationship.recordField },
+        operations: { list: destination.operations.list, ...(destination.operations.get ? { get: destination.operations.get } : {}) },
+        collection: { ...destination.collection, operations: withoutCreate(destination.collection.operations) },
+      };
+    }
     relationships = {
       ...relationships,
-      [usage.name]: applyRelationshipUsage(relationships[usage.name]!, usage, target, `${entityName}.${tab.id}.${usage.name}`),
+      [placement]: applyRelationshipUsage(relationship, usage, target, `${entityName}.${tab.id}.${placement}`),
     };
   }
 
   const projectRecordTab = (tab: CompiledViewGroup): WebRecordTab[] => {
-    const relationshipId = tab.relationship?.name;
+    const relationshipId = tab.relationship?.through ? `${tab.relationship.name}__${tab.relationship.through}` : tab.relationship?.name;
     if (relationshipId && !relationships[relationshipId]) return [];
     const requestedView = tab.relationship?.view;
     if (requestedView) {
@@ -887,6 +920,7 @@ function projectEntity(
     }
     return [{
       id: tab.id,
+      ...(tab.showInReadNavigation !== undefined ? { showInReadNavigation: tab.showInReadNavigation } : {}),
       label: localized(tab.label ?? tab.title, tab.id),
       groups: projectTabGroups(tab),
       ...(relationshipId ? { relationshipId } : {}),
@@ -905,6 +939,63 @@ function projectEntity(
     }
     if (relationships[key]?.kind === "hasMany" && !tabs.some(tab => tab.relationshipId === key)) {
       throw new Error(`${entityName}: collection context relationship ${key} requires a matching detail tab.`);
+    }
+  }
+  const contextRecordKeys = new Set<string>();
+  const contextRecords = authoredContext?.records?.map(definition => {
+    if (contextRecordKeys.has(definition.key)) throw new Error(`${entityName}: duplicate context record ${definition.key}.`);
+    contextRecordKeys.add(definition.key);
+    if (!definition.path.length || definition.path.length > 4) throw new Error(`${entityName}: context record path requires one to four relationships.`);
+    let owner = source;
+    const path = definition.path.map(key => {
+      const relation = owner.contract.model.relationships.find(item => item.key === key);
+      const target = relation && all.get(relation.target);
+      if (!relation || !target || !target.operations[relation.kind === "hasMany" ? "list" : "get"]) throw new Error(`${entityName}: context record path ${key} requires a canonical readable relationship.`);
+      const step = { entityId: owner.contract.entity.name, relationshipId: `${owner.contract.entity.name}.${key}` };
+      owner = target;
+      return step;
+    });
+    const displayField = definition.displayField ?? owner.collection.displayField;
+    const display = owner.contract.model.fields.find(field => field.key === displayField);
+    if (!display || display.baseType !== "string" || display.cardinality === "collection") throw new Error(`${entityName}: context record display field ${displayField} must be a single string.`);
+    for (const [key, value] of Object.entries(definition.when ?? {})) {
+      const field = owner.contract.model.fields.find(field => field.key === key);
+      if (!field || field.cardinality === "collection" || !["string", "number", "boolean"].includes(field.baseType)
+        || (value !== null && typeof value !== field.baseType)) throw new Error(`${entityName}: context condition ${key} requires a matching scalar field.`);
+    }
+    if (definition.status) {
+      const statusField = owner.contract.model.fields.find(field => field.key === definition.status!.field);
+      if (!statusField || statusField.baseType !== "string" || statusField.cardinality === "collection") throw new Error(`${entityName}: context status requires a single string field.`);
+    }
+    return { key: definition.key, label: localized(definition.label, definition.key), path, targetEntityId: owner.contract.entity.name, displayField,
+      ...(definition.when ? { when: definition.when } : {}), ...(definition.tone ? { tone: definition.tone } : {}),
+      ...(definition.labelEmphasis !== undefined ? { labelEmphasis: definition.labelEmphasis } : {}), ...(definition.status ? { status: definition.status } : {}) };
+  });
+  const contacts = authoredContext?.contacts;
+  if (contacts) {
+    const assertContactField = (relationshipKey: string, fieldKey: string) => {
+      const relationship = relationships[relationshipKey];
+      const target = relationship && all.get(relationship.targetEntityId);
+      const field = target?.contract.model.fields.find(field => field.key === fieldKey);
+      if (relationship?.kind !== "hasMany" || !relationship.operations.list || !field || field.baseType !== "string" || field.cardinality === "collection") {
+        throw new Error(`${entityName}: contact context ${relationshipKey}.${fieldKey} requires a readable collection with a single string field.`);
+      }
+    };
+    assertContactField(contacts.relationship, contacts.channelField);
+    assertContactField(contacts.relationship, contacts.valueField);
+    if (contacts.preferredChannelField && (!fields[contacts.preferredChannelField]?.supports.read || fields[contacts.preferredChannelField]?.baseType !== "string")) {
+      throw new Error(`${entityName}: contact context preferred channel must be a readable string field.`);
+    }
+    if (contacts.language) assertContactField(contacts.language.relationship, contacts.language.field);
+    const channelKeys = new Set<string>();
+    const child = all.get(relationships[contacts.relationship]!.targetEntityId)!;
+    for (const channel of contacts.channels ?? []) {
+      if (channelKeys.has(channel.key) || !channel.types.length) throw new Error(`${entityName}: contact channels need unique keys and source types.`);
+      channelKeys.add(channel.key);
+      for (const [key, value] of Object.entries(channel.when ?? {})) {
+        const field = child.contract.model.fields.find(field => field.key === key);
+        if (!field || field.cardinality === "collection" || field.baseType !== typeof value) throw new Error(`${entityName}: contact condition ${key} must match an existing child field type.`);
+      }
     }
   }
   const detail = view?.detail;
@@ -966,7 +1057,15 @@ function projectEntity(
     ...(detail?.header.badges?.items.length ? { badges: detail.header.badges.items } : {}),
     layout: {
       tabs: recordTabs,
+      ...(contract.interfaces?.web?.recordWorkspaceTabs !== undefined ? { workspaceTabs: contract.interfaces.web.recordWorkspaceTabs } : {}),
       context: {
+        ...(contextRecords?.length ? { records: contextRecords } : {}),
+        ...(contacts ? { contacts: {
+          relationshipId: contacts.relationship, channelField: contacts.channelField, valueField: contacts.valueField,
+          ...(contacts.channels ? { channels: contacts.channels.map(channel => ({ key: channel.key, types: channel.types, ...(channel.label ? { label: localized(channel.label, channel.key) } : {}), ...(channel.when ? { when: channel.when } : {}) })) } : {}),
+          ...(contacts.preferredChannelField ? { preferredChannelField: contacts.preferredChannelField } : {}),
+          ...(contacts.language ? { language: { relationshipId: contacts.language.relationship, field: contacts.language.field } } : {}),
+        } } : {}),
         groups: authoredContext?.fields.length
           ? [{ id: "summary", title: localized(undefined, "Key facts"), fields: authoredContext.fields }]
           : [],
@@ -1534,6 +1633,16 @@ export function buildWebManifest(
   }
   const projected = projectable.map((entity) => entity.contract.source
     ? providers.get(entity.contract.entity.name)! : projectEntity(entity, byName, providers));
+  // Reading uses the same authored catalog labels as editing. Keep the source
+  // identity for choices and preserve unknown stored codes as renderer fallbacks.
+  for (const entity of [...projected, ...Object.values(pages?.entities ?? {})]) {
+    for (const field of Object.values(entity.fields)) {
+      if (field.optionSource?.type === "referentiedata" && !field.options?.length) {
+        const options = referentiedata[field.optionSource.group];
+        if (options?.length) field.options = options.map(item => ({ value: item.value, label: { ...item.label } }));
+      }
+    }
+  }
   const missing = missingUiTranslations(projected);
   missing.push(...missingUiTranslations(pages?.operations ?? {}));
   if (resolved.requireTranslations) for (const entity of projectable) {

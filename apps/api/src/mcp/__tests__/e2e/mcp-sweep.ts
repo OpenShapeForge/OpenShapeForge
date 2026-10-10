@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import Ajv2020 from "ajv/dist/2020.js";
 import catalog from "../../../generated/mcp/tools.json" with { type: "json" };
+import { MAX_OPERATION_SEARCH_RESULTS } from "@openshapeforge/operations";
 import {
   createRow,
   eligibleTables,
@@ -161,12 +162,57 @@ export function catalogTool(table: McpTable, operation: CrudOperation) {
   return entry;
 }
 
+/** The projection the compiled catalog selected for the tenant server. */
+export const searchableProjection = catalog.operationToolProjection?.mode === "searchable";
+
 /**
- * The input schema a session is shown for one entity's operation: the tool's
- * own for a dedicated entity, the answer of `osf_describe` for a generic one
- * (the listing only carries the compact projection: the `entity` enum and
- * the shared properties). Throws when the listing omits it, so a test that
- * expected the tool sees why instead of a property read on undefined.
+ * The search result for one canonical Operation, or undefined when this
+ * session's search does not offer it. Search matches words, so the query is
+ * the id itself and the pages are walked until the exact id appears.
+ */
+export async function searchedOperation(identity: Identity, operationId: string): Promise<any> {
+  let cursor: string | undefined;
+  do {
+    const searched = await callTool(identity, catalog.operationToolProjection!.search, {
+      query: operationId,
+      limit: MAX_OPERATION_SEARCH_RESULTS,
+      ...(cursor ? { cursor } : {}),
+    });
+    expect(toolError(searched.body)).toBeUndefined();
+    const page = toolEnvelope(searched.body);
+    const found = (page.operations as any[]).find((entry) => entry.operation.id === operationId);
+    if (found) return found;
+    cursor = page.nextCursor;
+  } while (cursor);
+  return undefined;
+}
+
+/** Every search result this session is offered, walked page by page. */
+export async function allSearchedOperations(identity: Identity): Promise<any[]> {
+  const operations: any[] = [];
+  let cursor: string | undefined;
+  do {
+    const searched = await callTool(identity, catalog.operationToolProjection!.search, {
+      limit: MAX_OPERATION_SEARCH_RESULTS,
+      ...(cursor ? { cursor } : {}),
+    });
+    expect(toolError(searched.body)).toBeUndefined();
+    const page = toolEnvelope(searched.body);
+    operations.push(...page.operations);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return operations;
+}
+
+/**
+ * The input schema a session is shown for one entity's operation. In the
+ * searchable projection a covered CRUD tool leaves tools/list and its exact
+ * schema rides on the search result of its canonical Operation. In the
+ * dedicated projection it is the tool's own for a dedicated entity, the
+ * answer of `osf_describe` for a generic one (the listing only carries the
+ * compact projection: the `entity` enum and the shared properties). Throws
+ * when the session is not offered it, so a test that expected the tool sees
+ * why instead of a property read on undefined.
  */
 export async function advertisedSchema(
   identity: Identity,
@@ -175,6 +221,13 @@ export async function advertisedSchema(
   operation: CrudOperation,
 ): Promise<any> {
   const name = toolNameFor(table, operation);
+  if (searchableProjection) {
+    expect(tools.map((tool) => tool.name)).not.toContain(name);
+    const operationId = operationIdFor(table, operation);
+    const found = await searchedOperation(identity, operationId);
+    if (!found) throw new Error(`The session's search does not offer ${operationId}.`);
+    return found.inputSchema;
+  }
   const tool = tools.find((candidate) => candidate.name === name);
   if (!tool) throw new Error(`The session was not offered ${name}.`);
   if (table.source!.mcp!.tools !== "generic") return tool.inputSchema;

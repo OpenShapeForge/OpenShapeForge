@@ -48,6 +48,9 @@ async function withServer<T>(
       ...(module ? [module] : []),
     ],
     modulePlatform: platform,
+    // The dedicated projection lists the CRUD tools and osf_describe this
+    // suite is about; the searchable one is covered by searchable-session.
+    operationToolProjection: { mode: "dedicated", search: "osf_search_operations", execute: "osf_execute_operation" },
   });
   const client = new Client({ name: "describe-test", version: "1" }, { capabilities: {} });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

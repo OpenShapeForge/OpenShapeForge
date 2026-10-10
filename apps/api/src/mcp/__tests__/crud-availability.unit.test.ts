@@ -98,6 +98,9 @@ async function withServer<T>(roles: string[], tables: Map<string, unknown>, run:
       { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }) } },
     ],
     modulePlatform: platform,
+    // The dedicated projection lists the CRUD tools and osf_describe this
+    // suite is about; the searchable one is covered by searchable-session.
+    operationToolProjection: { mode: "dedicated", search: "osf_search_operations", execute: "osf_execute_operation" },
     tables: tables as never,
   });
   const client = new Client({ name: "availability-test", version: "1" }, { capabilities: {} });

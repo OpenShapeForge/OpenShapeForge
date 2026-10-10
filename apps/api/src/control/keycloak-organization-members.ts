@@ -359,6 +359,28 @@ export function createKeycloakOrganizationMembersClient(
       );
     },
 
+    async inviteExistingMember(organizationId, email) {
+      const wanted = normalizeEmail(email);
+      if (wanted.length === 0) return false;
+      let id: string | undefined;
+      for (let first = 0; first < 10000 && !id; first += 100) {
+        const { body } = await request(
+          `${adminBase}/${encodeURIComponent(organizationId)}/members?first=${first}&max=100`,
+          { method: "GET" }, "checking organization membership", "list_organization_members",
+        );
+        if (!Array.isArray(body)) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid organization member response.");
+        id = body.find((row) => typeof row?.email === "string" && normalizeEmail(row.email) === wanted && typeof row?.id === "string")?.id;
+        if (body.length < 100) break;
+      }
+      if (!id) return false;
+      await request(
+        `${adminBase}/${encodeURIComponent(organizationId)}/members/invite-existing-user`,
+        { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ id }).toString() },
+        "inviting an existing member", "invite_existing_member",
+      );
+      return true;
+    },
+
     async resendInvitation(organizationId, invitationId) {
       await request(
         `${invitationsUrl(organizationId)}/${encodeURIComponent(invitationId)}/resend`,

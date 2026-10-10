@@ -74,6 +74,7 @@ import type { DB } from "../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
 import { validateInvitationTarget } from "./invitation-target.js";
 import { deliverOrganizationInvitation } from "./keycloak-invitation-delivery.js";
+
 import { HttpError } from "../rest/http-error.js";
 import { accessPolicy, customRoleId } from '../accounts/access-policy.js';
 // From the leaf module, NOT from ./identity-link.js: this module and that one
@@ -182,6 +183,8 @@ export type EmployeeInvitation = {
 
 export type EmployeeAdmission = EmployeeInvitation & {
   delivery: "sent" | "not_required" | "already_pending";
+  /** An existing member is mailed an organization invitation instead (Keycloak invite-existing-user). */
+  accessNotice?: "sent" | "failed";
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -229,12 +232,14 @@ function rethrowKeycloakError(error: unknown): never {
 async function tenantOrganization(
   trx: Transaction<DB>,
   tenantId: string,
-): Promise<{ organizationId: string; realm: string }> {
+): Promise<{ organizationId: string; realm: string; slug?: string; name?: string }> {
   const result = await sql<{
     keycloak_organization_id: string | null;
     keycloak_realm: string | null;
+    slug?: string | null;
+    name?: string | null;
   }>`
-    select keycloak_organization_id, keycloak_realm
+    select keycloak_organization_id, keycloak_realm, slug, name
       from platform.tenants
      where id = ${tenantId}
   `.execute(trx);
@@ -246,7 +251,7 @@ async function tenantOrganization(
       "This tenant has no linked Keycloak Organization yet; it cannot admit members.",
     );
   }
-  return { organizationId: row.keycloak_organization_id, realm: row.keycloak_realm };
+  return { organizationId: row.keycloak_organization_id, realm: row.keycloak_realm, ...(row.slug ? { slug: row.slug } : {}), ...(row.name ? { name: row.name } : {}) };
 }
 
 type InvitationRow = {
@@ -332,11 +337,27 @@ export async function inviteEmployee(
   const invitation = await withDbSession(db, session, (trx) =>
     recordEmployeeInvitation(trx, session.tenantId, actor, input, email),
   );
+  // Keycloak sends no invite-user mail to an existing member; its
+  // invite-existing-user mail tells them about the new access instead. A failure
+  // there leaves the admission in place and is reported, not thrown.
+  let accessNotice: EmployeeAdmission["accessNotice"];
+  if (delivery === "not_required" && keycloak.inviteExistingMember) {
+    try {
+      accessNotice = await keycloak.inviteExistingMember(organizationId, email) ? "sent" : "failed";
+    } catch (error) {
+      accessNotice = "failed";
+      console.warn("[employee-invitation] " + JSON.stringify({
+        outcome: "access_notice_failed", tenantId: session.tenantId, organizationId, invitationId: invitation.id,
+        code: error instanceof KeycloakAdminError ? error.code : "UNKNOWN",
+        status: error instanceof KeycloakAdminError ? error.status : null,
+      }));
+    }
+  }
   console.info("[employee-invitation] " + JSON.stringify({
     outcome: "admission_recorded", tenantId: session.tenantId, organizationId,
-    invitationId: invitation.id, actor, role: input.role, delivery,
+    invitationId: invitation.id, actor, role: input.role, delivery, ...(accessNotice ? { accessNotice } : {}),
   }));
-  return { ...invitation, delivery };
+  return { ...invitation, delivery, ...(accessNotice ? { accessNotice } : {}) };
 }
 
 /** Shared persistence after Keycloak confirms membership or an invitation; caller owns authorization. */

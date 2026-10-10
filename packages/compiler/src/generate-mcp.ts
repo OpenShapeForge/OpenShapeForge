@@ -710,6 +710,8 @@ export type McpEntityCatalogEntry = {
    */
   labels?: Record<string, string>;
   description: string;
+  /** The authored `{ en, nl, … }` description, carried through like `labels`. */
+  descriptions?: Record<string, string>;
   domains: string[];
   displayTemplate?: string;
   filterField?: string;
@@ -1302,6 +1304,11 @@ export function buildMcpCatalog(
         ? { labels: { ...(contract.entity.labels as Record<string, string>) } }
         : {}),
       description: entityDescription(contract),
+      ...(contract.entity.description &&
+      typeof contract.entity.description === "object" &&
+      Object.keys(contract.entity.description).length > 0
+        ? { descriptions: { ...(contract.entity.description as Record<string, string>) } }
+        : {}),
       domains: [...contract.entity.domains],
       ...(contract.entity.displayTemplate
         ? { displayTemplate: contract.entity.displayTemplate }

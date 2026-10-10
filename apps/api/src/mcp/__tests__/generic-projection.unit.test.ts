@@ -14,6 +14,8 @@ import {
   __describeGenericEntriesForTests as describeGenericEntries,
   __toolsForSessionForTests as toolsForSession,
 } from "../generated-mcp-server.js";
+import { describeCatalogResource, entitiesForSession } from "../entity-resources.js";
+import { entityDescription } from "../entity-tool-projection.js";
 
 const catalog = rawCatalog as unknown as {
   tools: {
@@ -23,7 +25,7 @@ const catalog = rawCatalog as unknown as {
     inputSchema: Record<string, unknown>;
     errors: { status: number; code: string; description: string }[];
   }[];
-  entities: { entity: string; tools?: string; labels?: Record<string, string> }[];
+  entities: { entity: string; tools?: string; labels?: Record<string, string>; descriptions?: Record<string, string> }[];
 };
 
 const tables = new Map(getGeneratedCrudTables().map((table) => [table.name, table]));
@@ -157,6 +159,18 @@ describe("the generic osf_* listing", () => {
     expect(tools.find((tool) => tool.name === "osf_list")!.description).toContain(`Address (${address.labels.nl})`);
     const described = describeGenericEntity("Address", "list", session(RELATIONS), tables as never, dutch) as any;
     expect(described.title).toBe(address.labels.nl);
+  });
+
+  it("describes entities in the session's language, the authored English otherwise", () => {
+    const entity = { entity: "Widget", description: "A widget.", descriptions: { en: "A widget.", nl: "Een widget." } } as never;
+    expect(entityDescription(entity, dutch)).toBe("Een widget.");
+    expect(entityDescription(entity, english)).toBe("A widget.");
+    expect(entityDescription({ entity: "Plain", description: "Plain." } as never, dutch)).toBe("Plain.");
+    // The schema index reads Relation, which authors Dutch, through the same rule.
+    const index = describeCatalogResource(entitiesForSession(session(RELATIONS), tables as never), dutch);
+    const relation = index.entities.find((entry) => entry.entity === "Relation")!;
+    const authored = catalog.entities.find((entry) => entry.entity === "Relation")!.descriptions!;
+    expect(relation.description).toBe(authored.nl!);
   });
 });
 

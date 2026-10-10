@@ -72,6 +72,8 @@ export type CatalogEntity = {
    */
   labels?: Record<string, string>;
   description: string;
+  /** The authored description per language, kept for the same reason as `labels`. */
+  descriptions?: Record<string, string>;
   domains: string[];
   displayTemplate?: string;
   filterField?: string;

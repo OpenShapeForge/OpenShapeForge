@@ -28,6 +28,14 @@ export function entityTitle(
   return (locale && localizedText(entity.labels, locale)) || entity.title;
 }
 
+/** The entity's authored description in the session's language, when it has one. */
+export function entityDescription(
+  entity: CatalogEntity,
+  locale: ResolvedLocale | undefined,
+): string {
+  return (locale && localizedText(entity.descriptions, locale)) || entity.description;
+}
+
 export let canonicalOperationsById: Map<string, EntityOperationContract> | undefined;
 
 /**

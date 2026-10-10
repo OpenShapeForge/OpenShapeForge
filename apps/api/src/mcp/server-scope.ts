@@ -42,7 +42,7 @@ import { sessionMayInviteEmployees } from "./employee-invitation-tools.js";
 import { projectAgentSkills, visibleAgentSkills, SKILLS_EXTENSION } from "./agent-skills.js";
 import { type SearchableOperationToolNames } from "./operation-search.js";
 import { bindOperationHandlers } from "../operations/runtime.js";
-import { describeTool, entityTitle } from "./entity-tool-projection.js";
+import { describeTool, entityDescription, entityTitle } from "./entity-tool-projection.js";
 import { entitiesForSession, entityResourceUri } from "./entity-resources.js";
 import {
   ENTITY_CONFIGURATION_APP_URI,
@@ -127,7 +127,7 @@ function createServerScopePrologue(input: {
       vocabulary: entitiesForSession(session, tables).map(({ entity }) => ({
         entity: entity.entity,
         label: entityTitle(entity, locale) ?? entity.title,
-        description: entity.description,
+        description: entityDescription(entity, locale),
       })),
       locale,
       client: sessionClientOf(session),

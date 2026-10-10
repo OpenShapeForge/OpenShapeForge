@@ -32,7 +32,7 @@ import {
   catalog,
   crudToolsNamed,
 } from "./catalog.js";
-import { describeTool, entityTitle } from "./entity-tool-projection.js";
+import { describeTool, entityDescription, entityTitle } from "./entity-tool-projection.js";
 import { publicOriginIsHttps } from "./handoff-config.js";
 import { toolsForSession } from "./session-projection.js";
 export function entityIsGeneric(entity: CatalogEntity | undefined): boolean {
@@ -151,7 +151,7 @@ export function describeGenericEntries(
   return {
     entity: wanted,
     ...(entity ? { title: entityTitle(entity, locale) ?? entity.title } : {}),
-    ...(entity ? { description: entity.description } : {}),
+    ...(entity ? { description: entityDescription(entity, locale) } : {}),
     ...(entity ? { resource: entityResourceUri(entity) } : {}),
     operations: Object.fromEntries(
       own.map(({ tool, entity }) => {

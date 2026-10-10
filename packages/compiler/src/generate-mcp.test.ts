@@ -975,6 +975,12 @@ describe("buildMcpCatalog", () => {
       expect(listed(tool("update"), "nl")).toContain(DATA_ACQUISITION_TOOL_FOOTER);
     });
 
+    it("carries the authored entity description in every language", () => {
+      const catalog = buildMcpCatalog([input(contract())], "test");
+      expect(catalog.entities[0]!.description).toBe("A widget.");
+      expect(catalog.entities[0]!.descriptions).toEqual({ en: "A widget." });
+    });
+
     it("leaves an entity with no immutable field identical across create and update", () => {
       const catalog = buildMcpCatalog(
         [

@@ -113,9 +113,18 @@ async function withServer<T>(roles: string[], tables: Map<string, unknown>, run:
   }
 }
 
-const entityEnum = (tools: { name: string; inputSchema: unknown }[], name: string): string[] | undefined =>
-  (tools.find((tool) => tool.name === name)?.inputSchema as { properties?: { entity?: { enum?: string[] } } } | undefined)
-    ?.properties?.entity?.enum;
+async function operationIds(client: Client): Promise<string[]> {
+  const ids: string[] = []; let cursor: string | undefined;
+  do {
+    const result = await client.callTool({ name: "osf_search_operations", arguments: { limit: 20, ...(cursor ? { cursor } : {}) } });
+    expect(result.isError).toBeFalsy();
+    const page = result.structuredContent as { operations: { operation: { id: string } }[]; nextCursor?: string };
+    ids.push(...page.operations.map(row => row.operation.id)); cursor = page.nextCursor;
+  } while (cursor);
+  return ids;
+}
+const operationId = (entity: string, intent: string) =>
+  crudToolsNamed(intent === 'delete' && entity === 'Relation' ? 'relation_delete' : `osf_${intent}`).find(tool => tool.entity === entity)!.operationId;
 
 describe("one availability rule for listing, describe and call", () => {
   it("resolves neither the generic nor the dedicated delete of an owned child", () => {
@@ -137,75 +146,40 @@ describe("one availability rule for listing, describe and call", () => {
     expect(crudToolAvailable(relation, session(...RELATIONS), real)).toBe(true);
   });
 
-  it("answers the real call as for an unknown tool, on the dedicated and the generic name", async () => {
-    for (const [name, args, target] of [
-      ["relation_delete", { id: "33333333-3333-4333-8333-333333333333", expectedVersion: "x" }, "Relation"],
-      ["osf_delete", { entity: "Address", id: "33333333-3333-4333-8333-333333333333" }, "Address"],
-    ] as const) {
-      // Finance roles keep other generic entities deletable, so osf_delete
-      // stays listed and its entity enum is what shows Address withheld.
-      await withServer([...RELATIONS, ...FINANCE], tablesOwning(target), async (client) => {
-        const { tools } = await client.listTools();
-        if (name === "relation_delete") {
-          expect(tools.map((tool) => tool.name)).not.toContain("relation_delete");
-        } else {
-          // osf_delete stays listed for the other generic entities; its
-          // entity enum no longer offers Address.
-          const deletable = entityEnum(tools, "osf_delete");
-          expect(deletable).toBeDefined();
-          expect(deletable).not.toContain("Address");
-          expect(entityEnum(tools, "osf_list")).toContain("Address");
-        }
-        const result = await client.callTool({ name, arguments: { ...args } });
+  it("withholds and refuses an owned child delete through canonical discovery and execution", async () => {
+    for (const entity of ["Relation", "Address"]) {
+      await withServer([...RELATIONS, ...FINANCE], tablesOwning(entity), async client => {
+        const id = operationId(entity, "delete"), ids = await operationIds(client);
+        expect(ids).not.toContain(id);
+        expect(ids).toContain(operationId("Address", "list"));
+        const result = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: id, input: { id: "33333333-3333-4333-8333-333333333333" } } });
         expect(result.isError).toBe(true);
-        const text = String((result.content as { text?: string }[])[0]?.text);
-        // The dedicated name is unknown; the generic name is known and refuses
-        // the entity by naming the ones it can address — Address not among them.
-        expect(text).toMatch(
-          name === "relation_delete"
-            ? /^NOT_FOUND/
-            : /^BAD_USER_INPUT: "Address" is not one of the entities "osf_delete" can address in this session: Budget, BudgetLine, Quote, QuoteLine\./,
-        );
-        expect(text).not.toContain("RELATION_COLLECTION_MUTATION_UNSUPPORTED");
+        expect(result.structuredContent).toMatchObject({ error: { code: "NOT_FOUND" } });
       });
     }
   });
-
-  it("withholds and refuses a create the collection policy would refuse, through the real server", async () => {
-    // Quote's lines must hold at least one line: the owner's generic create
-    // cannot satisfy that atomically, so osf_create no longer offers Quote.
-    await withServer(FINANCE, tablesWithRequiredLines(), async (client) => {
-      const { tools } = await client.listTools();
-      expect(entityEnum(tools, "osf_create")).not.toContain("Quote");
-      expect(entityEnum(tools, "osf_create")).toContain("QuoteLine");
-      expect(entityEnum(tools, "osf_list")).toContain("Quote");
-      const result = await client.callTool({ name: "osf_create", arguments: { entity: "Quote", quoteNumber: "Q-1" } });
-      expect(result.isError).toBe(true);
-      expect(String((result.content as { text?: string }[])[0]?.text)).toMatch(
-        /^BAD_USER_INPUT: "Quote" is not one of the entities "osf_create" can address in this session: Budget, BudgetLine, QuoteLine\./,
-      );
+  it("withholds impossible creates but retains readable and independently creatable Operations", async () => {
+    const quote = operationId("Quote", "create"), line = operationId("QuoteLine", "create");
+    await withServer(FINANCE, tablesWithRequiredLines(), async client => {
+      const ids = await operationIds(client);
+      expect(ids).not.toContain(quote); expect(ids).toContain(line); expect(ids).toContain(operationId("Quote", "list"));
+      const result = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: quote, input: { quoteNumber: "Q-1" } } });
+      expect(result.isError).toBe(true); expect(result.structuredContent).toMatchObject({ error: { code: "NOT_FOUND" } });
     });
-    // The line's owner key is required and managed by the owner: the child's
-    // generic create cannot set it, so osf_create no longer offers QuoteLine.
     const emptyCreates = tablesWithRequiredOwnerKey();
     for (const [key, table] of emptyCreates) {
       if (["Budget", "BudgetLine"].includes(table.source?.authoringEntityName ?? "")) {
         emptyCreates.set(key, { ...table, source: { ...table.source!, crud: { ...table.source!.crud!, operations: { ...table.source!.crud!.operations, create: false } } } });
       }
     }
-    await withServer(FINANCE, emptyCreates, async (client) => {
-      const { tools } = await client.listTools();
-      // Withhold all remaining generic creates to retain the empty-enum proof.
-      expect(entityEnum(tools, "osf_create")).toBeUndefined();
-      expect(entityEnum(tools, "osf_list")).toContain("QuoteLine");
-      const result = await client.callTool({ name: "osf_create", arguments: { entity: "QuoteLine", lineNumber: 1 } });
-      expect(result.isError).toBe(true);
-      expect(String((result.content as { text?: string }[])[0]?.text)).toBe('NOT_FOUND: Unknown tool "osf_create".');
+    await withServer(FINANCE, emptyCreates, async client => {
+      const ids = await operationIds(client);
+      expect(ids).not.toContain(quote); expect(ids).not.toContain(line); expect(ids).toContain(operationId("QuoteLine", "list"));
+      const result = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: line, input: { lineNumber: 1 } } });
+      expect(result.isError).toBe(true); expect(result.structuredContent).toMatchObject({ error: { code: "NOT_FOUND" } });
     });
-    // On the unchanged manifest both creates are offered.
-    await withServer(FINANCE, new Map(getGeneratedCrudTables().map((table) => [table.name, table])), async (client) => {
-      const { tools } = await client.listTools();
-      expect(entityEnum(tools, "osf_create")).toEqual(expect.arrayContaining(["Quote", "QuoteLine"]));
+    await withServer(FINANCE, new Map(getGeneratedCrudTables().map(table => [table.name, table])), async client => {
+      expect(await operationIds(client)).toEqual(expect.arrayContaining([quote, line]));
     });
   });
 });

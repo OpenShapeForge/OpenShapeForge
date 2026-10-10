@@ -31,7 +31,7 @@ export async function searchableSessionOperations(scope: ServerScope) {
       const data = branches.map((branch) => (branch.properties as Record<string, Record<string, unknown>> | undefined)?.data).find(Boolean);
       if (!data) throw new Error(`CRUD Operation ${definition.id} has no data output schema.`);
       const output = { ...data, ...(schema.$defs ? { $defs: schema.$defs } : {}) };
-      return { ...definition, input: { kind: "json-schema", schema: tool.inputSchema }, output: { kind: "json-schema", schema: output } };
+      return { ...definition, name: tool.title ?? definition.name, description: tool.description, input: { kind: "json-schema", schema: tool.inputSchema }, output: { kind: "json-schema", schema: output } };
     }),
   };
 }

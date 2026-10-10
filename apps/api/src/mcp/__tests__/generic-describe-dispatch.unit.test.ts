@@ -1,12 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-/**
- * osf_describe through the real server: listed, callable through tools/call,
- * and authorized through the module authorization path — the one that
- * classifies a name by its source and answered NOT_FOUND for a tool it had
- * just listed while the name was not classified as a core tool. The e2e
- * helper reads schemas through tools/call only, which is why it did not see
- * that path. Runs on the compiled catalogue and manifest, without a database.
- */
+/** Canonical entity schema discovery and module authorization through a real MCP server, without a database. */
 import accountsRuntime from "../../accounts/runtime.js";
 import { describe, expect, it } from "bun:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
@@ -62,19 +55,18 @@ async function withServer<T>(
   }
 }
 
-describe.skipIf(!generic)("osf_describe through the real dispatch path", () => {
-  it("is listed and answers the exact per-entity schema through tools/call", async () => {
-    await withServer(["Relations.All.ReadWrite"], async (client) => {
+describe.skipIf(!generic)("canonical entity schemas through the real dispatch path", () => {
+  it("discovers an authorized entity Operation with its exact input schema", async () => {
+    await withServer(["Relations.All.ReadWrite"], async client => {
       const { tools } = await client.listTools();
-      expect(tools.map((tool) => tool.name)).toContain("osf_describe");
-      const result = await client.callTool({
-        name: "osf_describe",
-        arguments: { entity: "Address", operation: "create" },
-      });
+      expect(tools.map(tool => tool.name)).toContain("osf_search_operations");
+      expect(tools.map(tool => tool.name)).not.toContain("osf_describe");
+      const result = await client.callTool({ name: "osf_search_operations", arguments: { query: "Address.create", limit: 20 } });
       expect(result.isError).toBeFalsy();
-      const data = (result.structuredContent as { data: { operations: Record<string, { inputSchema: { properties: Record<string, unknown> } }> } }).data;
-      expect(Object.keys(data.operations)).toEqual(["create"]);
-      expect(Object.keys(data.operations.create!.inputSchema.properties).length).toBeGreaterThan(3);
+      const page = result.structuredContent as { operations: { operation: { id: string }; inputSchema: { properties: Record<string, unknown> } }[] };
+      const address = page.operations.find(row => row.operation.id === "Address.create");
+      expect(address).toBeDefined();
+      expect(address!.inputSchema.properties).toHaveProperty("street");
     });
   });
 
@@ -91,7 +83,7 @@ describe.skipIf(!generic)("osf_describe through the real dispatch path", () => {
             text: JSON.stringify(
               await ref.current!.services.mcp.authorize(ctx.session, {
                 action: "call",
-                subject: { kind: "tool", name: "osf_describe" },
+                subject: { kind: "tool", name: "osf_search_operations" },
               }),
             ),
           }],

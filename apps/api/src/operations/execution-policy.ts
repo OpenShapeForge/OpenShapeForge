@@ -528,13 +528,42 @@ export async function assertAdmittedBeforeEffects(
   trx: Transaction<DB>,
   session: DbSessionInput,
 ): Promise<void> {
-  const pending = pendingAdmissions.getStore();
+  const pending = boundAdmission(trx, session);
   if (!pending || pending.decided) return;
-  if (pending.trx !== trx || pending.tenantId !== session.tenantId ||
-    pending.userId !== session.userId) {
-    return;
-  }
   pending.decided = true;
   await pending.decide();
+}
+
+function boundAdmission(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+): PendingAdmission | undefined {
+  const pending = pendingAdmissions.getStore();
+  if (!pending || pending.trx !== trx || pending.tenantId !== session.tenantId ||
+    pending.userId !== session.userId) {
+    return undefined;
+  }
+  return pending;
+}
+
+/**
+ * The wiring check an owner with several write paths owes itself: by the time
+ * it has written, one of those paths must have taken the bound decision.
+ *
+ * A boundary that is missed is otherwise invisible — the change simply happens
+ * ungoverned — so a write path that reaches a commit without a decision fails
+ * here instead. It says nothing about a policy's answer; it catches core.
+ */
+export function assertEffectsWereAdmitted(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  owner: string,
+): void {
+  const pending = boundAdmission(trx, session);
+  if (!pending || pending.decided) return;
+  throw new Error(
+    `The ${owner} wrote before its host execution admission was decided. ` +
+      "This is a core boundary defect: the decision belongs immediately before the first effect.",
+  );
 }
 

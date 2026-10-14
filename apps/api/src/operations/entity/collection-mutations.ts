@@ -23,7 +23,7 @@ import { assertRelationshipConstraintsInTransaction } from "./relationship-const
 import type { EntityOperationContract, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
 import type { LeaseProtectedOperation } from "./edit-leases.js";
 import { hasConsumedCollectionLease } from "./collection-lease-context.js";
-import { assertAdmittedBeforeEffects } from "../execution-policy.js";
+import { assertAdmittedBeforeEffects, assertEffectsWereAdmitted } from "../execution-policy.js";
 
 /** Compiler/boot-owned binding, never a request-selected table or FK. */
 export type CollectionMutationBinding = { entityName: string; field: string; action: "insert" | "move" | "update" | "remove" };
@@ -246,11 +246,16 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
           );
         }
       }
-      // The parent and every sibling are locked, each is authorized, the
-      // cardinality and related-state guards have passed: the last point
-      // before this collection changes, and the first at which no lock wait
-      // stands between a host execution policy's decision and the writes.
-      await assertAdmittedBeforeEffects(trx, session);
+      // Host execution admission is NOT taken here, even though the parent
+      // and every sibling are locked by now. A child create still prepares
+      // default templates, entity-value references (`for share` on each
+      // referenced record) and related-owner state, and a child update
+      // prepares the same below — all of which can wait on another
+      // transaction. The decision belongs after the last of those waits, so
+      // each write path below takes it immediately before its own first
+      // statement, and the child create owner takes it inside its own
+      // preparation (entity/mutations.ts). One decision covers the whole
+      // multi-write mutation: it is one transaction, atomic either way.
       if (createOp) {
         const created = await createGeneratedEntityInTransaction(trx, session, target, { ...insertValues, ...(relation.sortable ? { [fieldNameForColumn(position!)]: rows.length } : {}) }, { registry: entityValues, tables: catalog.tables, ...(catalog.derivedTools ? { derivedTools: catalog.derivedTools } : {}) });
         childId = String(created.id);
@@ -274,6 +279,9 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
           const assignments = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} = ${value}`);
           const changes = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} is distinct from ${value}`);
           if (changes.length) {
+            // Past the entity-value and relationship preparation above, which
+            // is where this path can still wait.
+            await assertAdmittedBeforeEffects(trx, session);
             const updated = await sql<{ row: GeneratedEntityRow }>`update ${sql.id(target.schema, target.table)} set ${sql.join([...assignments, sql`updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')`])}
               where id = ${childId}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid and (${sql.join(changes, sql` or `)}) returning to_jsonb(${sql.id(target.table)}.*) as row`.execute(trx);
             const row = updated.rows[0]?.row;
@@ -285,6 +293,8 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
             }
           }
         } else {
+          // Past this child's related-state guard above.
+          await assertAdmittedBeforeEffects(trx, session);
           const deleted = await sql<{ row: GeneratedEntityRow }>`delete from ${sql.id(target.schema, target.table)}
             where id = ${childId}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid returning to_jsonb(${sql.id(target.table)}.*) as row`.execute(trx);
           const row = deleted.rows[0]?.row;
@@ -304,6 +314,9 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
         if (!previous && index === rows.length) continue;
         if (previous && Number(previous[position!.name]) === index) continue;
         if (!previous) await permission(trx, session, target, id, updateOp!, "edit");
+        // A move writes nothing before this; for the other actions the
+        // decision above already stands for this transaction.
+        await assertAdmittedBeforeEffects(trx, session);
         const result = await sql<{ row: GeneratedEntityRow }>`update ${sql.id(target.schema, target.table)} set ${sql.id(position!.name)} = ${index},
           updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')
           where id = ${id}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid returning to_jsonb(${sql.id(target.table)}.*) as row`.execute(trx);
@@ -315,6 +328,11 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       if (!changed) {
         return { parent: projectGeneratedEntityRow(owner, session, locked.rows[0].row, entityValues), childId, orderedIds: relation.sortable ? ordered : [...ordered].sort() };
       }
+      // Something was written, so one of the paths above must have taken the
+      // decision. Refuse rather than touch the parent if a write path ever
+      // reaches here without one: a missed boundary must be loud, not a
+      // silently ungoverned change.
+      assertEffectsWereAdmitted(trx, session, "collection mutation");
       const touched = await sql<{ row: GeneratedEntityRow }>`update ${sql.id(owner.schema, owner.table)} set updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')
         where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid returning to_jsonb(${sql.id(owner.table)}.*) as row`.execute(trx);
       const parentRow = touched.rows[0]?.row;

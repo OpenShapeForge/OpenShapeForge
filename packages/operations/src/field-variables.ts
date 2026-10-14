@@ -105,6 +105,8 @@ export type VariableValueShape = {
   readonly enum?: readonly (string | number | boolean)[];
   /** The entity a reference names. Present on both sides or on neither. */
   readonly target?: string;
+  readonly unit?: string;
+  readonly currency?: string;
 };
 
 export type VariableSlot = VariableValueShape & {
@@ -376,6 +378,9 @@ export function variableCompatibility(
       `${slot.path} takes a ${slot.osfType} value, the variable is a ${offer.osfType} value.`,
     );
   }
+  if (offer.unit !== slot.unit || offer.currency !== slot.currency) {
+    return incompatible("INCOMPATIBLE_TYPE", `${slot.path} and the variable declare different unit or currency contexts.`);
+  }
   if (slot.enum !== undefined) {
     const allowed = new Set<string | number | boolean>(slot.enum);
     if (offer.enum === undefined || !offer.enum.every((value) => allowed.has(value))) {
@@ -558,7 +563,7 @@ export function escapeMarkdownVariableText(text: string): string {
 export function fieldVariableSlot(
   field: Pick<
     ResolvedOperationField,
-    "key" | "osfType" | "baseType" | "cardinality" | "required" | "validation" | "relationship" | "variables"
+    "key" | "osfType" | "baseType" | "cardinality" | "required" | "validation" | "relationship" | "variables" | "unit" | "render"
   >,
   options: { readonly path?: string; readonly enum?: readonly (string | number | boolean)[] } = {},
 ): VariableSlot {
@@ -572,5 +577,7 @@ export function fieldVariableSlot(
     ...(options.enum ? { enum: options.enum } : {}),
     ...(field.relationship?.target ? { target: field.relationship.target } : {}),
     ...(field.validation ? { validation: field.validation } : {}),
+    ...(field.unit ? { unit: field.unit } : {}),
+    ...(field.osfType === "currency" && typeof field.render?.props?.currency === "string" ? { currency: field.render.props.currency } : {}),
   });
 }

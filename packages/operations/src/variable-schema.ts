@@ -110,6 +110,7 @@ export function schemaVariableShape(
     : typeof value["x-osf-type"] === "string" ? value["x-osf-type"] : baseType;
   const target = targetOf(node) ?? targetOf(value);
   const enumeration = enumOf(value) ?? enumOf(node);
+  const context = record(node["x-osf-value-context"]) ?? record(value["x-osf-value-context"]);
   return Object.freeze({
     osfType,
     baseType,
@@ -117,6 +118,8 @@ export function schemaVariableShape(
     nullable: options.required !== true,
     ...(enumeration ? { enum: enumeration } : {}),
     ...(target ? { target } : {}),
+    ...(typeof context?.unit === "string" ? { unit: context.unit } : {}),
+    ...(typeof context?.currency === "string" ? { currency: context.currency } : {}),
   });
 }
 

@@ -52,6 +52,8 @@ export function contentVariableShape(shape: ContentReferencingShape): VariableVa
     nullable: shape.nullable === true,
     ...(shape.enum ? { enum: shape.enum as readonly (string | number | boolean)[] } : {}),
     ...(shape.relationship?.target ? { target: shape.relationship.target } : {}),
+    ...(shape.unit ? { unit: shape.unit } : {}),
+    ...(shape.currency ? { currency: shape.currency } : {}),
   };
 }
 

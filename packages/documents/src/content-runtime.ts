@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { isFieldVariableMode, operationFailure } from "@openshapeforge/operations";
+import { isFieldVariableMode, operationFailure, schemaVariableShape } from "@openshapeforge/operations";
 import type { ModuleOperationContext, ModuleOperationHandler, RuntimeEntityValueCarrier, RuntimeEntityValueDefinition, RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
 import { materializeTemplateContent } from "./content/materialize.js";
@@ -41,6 +41,8 @@ export function contentFieldProjection(field: Readonly<Record<string, unknown>>)
   return {
     baseType: baseType as ContentField["baseType"],
     ...(typeof field.osfType === "string" ? { osfType: field.osfType } : {}),
+    ...(typeof field.unit === "string" ? { unit: field.unit } : {}),
+    ...(field.osfType === "currency" && isObject(field.render) && isObject(field.render.props) && typeof field.render.props.currency === "string" ? { currency: field.render.props.currency } : {}),
     ...(isFieldVariableMode(field.variables) && field.variables !== "none" ? { variables: field.variables } : {}),
     required: field.required === true,
     cardinality: (field.cardinalityBounds ?? field.cardinality ?? "single") as NonNullable<ContentField["cardinality"]>,
@@ -95,12 +97,14 @@ export function parameterShape(schema: Record<string, unknown>, required: boolea
       max: typeof schema.maxItems === "number" ? schema.maxItems : "unbounded",
     }, ...(schema.default !== undefined ? { defaultValue: schema.default as JsonValue } : {}) };
   }
-  const baseType = schema.type === "string" && schema.format === "date" ? "date"
-    : schema.type === "string" && schema.format === "date-time" ? "datetime" : schema.type;
+  const shape = schemaVariableShape(schema, { required });
+  const baseType = shape?.baseType;
   if (typeof baseType !== "string" || !BASE_TYPES.includes(baseType)) refuse("INVALID_DEFINITION", "The template parameter shape is unsupported.");
   const requiredKeys = Array.isArray(schema.required) ? schema.required : [];
   return {
     baseType: baseType as ContentValueShape["baseType"], required,
+    ...(shape?.unit ? { unit: shape.unit } : {}),
+    ...(shape?.currency ? { currency: shape.currency } : {}),
     ...(typeof schema["x-osf-type"] === "string" ? { osfType: schema["x-osf-type"] } : {}),
     ...(isFieldVariableMode(schema["x-osf-variables"]) ? { variables: schema["x-osf-variables"] } : {}),
     ...(isObject(schema["x-osf-reference"]) && typeof schema["x-osf-reference"].entity === "string" ? { relationship: { target: schema["x-osf-reference"].entity } } : {}),

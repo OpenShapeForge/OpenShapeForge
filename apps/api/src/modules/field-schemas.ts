@@ -44,6 +44,7 @@ export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
     ajv.addKeyword(operationTypeKeyword);
     ajv.addKeyword(operationVariablesKeyword);
     for (const keyword of valueInvariantKeywords) ajv.addKeyword(keyword);
+    ajv.addKeyword({ keyword: "x-osf-value-context", schemaType: "object", valid: true });
     try {
       if (schema.$async === true) return invalidDefinition();
       const validate = ajv.compile(schema);

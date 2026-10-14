@@ -57,7 +57,7 @@ function nullableSchema(schema: JsonObject): JsonObject {
 
 /** The annotations a form reads from a property node, kept on a wrapper (`anyOf`/`oneOf`) around it. */
 function presentation(schema: JsonObject): JsonObject {
-  return Object.fromEntries(Object.entries(schema).filter(([key]) => key === "x-osf-type" || key === "x-osf-reference" || key === "x-osf-i18n"));
+  return Object.fromEntries(Object.entries(schema).filter(([key]) => key === "x-osf-type" || key === "x-osf-reference" || key === "x-osf-i18n" || key === "x-osf-presentation" || key === "x-osf-value-context" || key === "x-osf-variables"));
 }
 
 export type EntityRecordOutputOptions = {

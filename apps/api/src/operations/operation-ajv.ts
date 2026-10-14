@@ -29,6 +29,7 @@ export function createOperationAjv(coerceTypes = false): OperationAjv {
   // ajv-formats is CJS; under NodeNext the default import is typed as the
   // module namespace rather than the callable it is at runtime.
   (addFormats as unknown as (target: OperationAjv) => unknown)(instance);
+  instance.addKeyword({ keyword: "x-osf-value-context", schemaType: "object", valid: true });
   // Presentation-only bindings used by generated forms. They neither validate
   // nor authorize a value, but strict ajv must recognize each keyword.
   instance.addKeyword({ keyword: "x-osf-sourceField", schemaType: "string", valid: true });

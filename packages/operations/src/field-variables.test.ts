@@ -26,6 +26,19 @@ import { fieldSchema } from "./field-schema.js";
 import { resolveFields } from "./field-resolution.js";
 import { schemaVariableShape, schemaVariableSlot } from "./variable-schema.js";
 
+test("whole variables preserve unit and currency contexts from authoritative schemas", () => {
+  const money = slot({osfType:"currency",baseType:"number",currency:"EUR"});
+  expect(variableCompatibility(money, {...money,currency:"USD"}, "whole").compatible).toBe(false);
+  expect(variableCompatibility(money, money, "whole").compatible).toBe(true);
+  const weight = slot({osfType:"number",baseType:"number",unit:"kg"});
+  expect(variableCompatibility(weight, {...weight,unit:"g"}, "whole").compatible).toBe(false);
+  const resolved = resolveFields([{key:"amount",osfType:"currency",variables:"whole",unit:"EUR"}], {
+    osfTypes:{currency:{baseType:"number",render:{component:"MoneyInput",props:{currency:"EUR"}}}},
+  })[0]!;
+  expect(schemaVariableShape(fieldSchema(resolved))).toMatchObject({currency:"EUR",unit:"EUR"});
+  expect(fieldVariableSlot(resolved)).toMatchObject({currency:"EUR",unit:"EUR"});
+});
+
 function slot(overrides: Partial<VariableSlot> = {}): VariableSlot {
   return {
     path: "FieldAcceptance.text",

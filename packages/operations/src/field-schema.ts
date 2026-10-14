@@ -103,6 +103,11 @@ function withFieldMetadata(
   if (title) schema.title = title;
   // The type a form renders the property through; the JSON type beside it is what validates.
   schema["x-osf-type"] = field.osfType;
+  const context = {
+    ...(field.unit ? { unit: field.unit } : {}),
+    ...(field.osfType === "currency" && typeof field.render?.props?.currency === "string" ? { currency: field.render.props.currency } : {}),
+  };
+  if (Object.keys(context).length) schema["x-osf-value-context"] = context;
   if (field.render?.component) schema["x-osf-presentation"] = structuredClone(field.render);
   // The variable shapes this field accepts, where it authors any; a property
   // without the keyword takes literals alone.

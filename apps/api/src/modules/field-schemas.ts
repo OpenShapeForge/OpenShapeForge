@@ -5,6 +5,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import {
   operationChoiceKeyword,
+  operationExactNumericKeyword,
   operationFieldObjectSchema,
   operationI18nKeyword,
   operationInputFieldsKeyword,
@@ -27,8 +28,9 @@ export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
   validate(schema, values) {
     // A short-lived compiler avoids retaining every stored/dynamic form forever.
     // No async loader, coercion, removal or defaults: validation never rewrites input.
-    const ajv = new Ajv2020.default({ allErrors: true, strict: false, strictSchema: true });
+    const ajv = new Ajv2020.default({ allErrors: true, strict: false, strictSchema: true, allowUnionTypes: true });
     addFormats.default(ajv);
+    ajv.addKeyword(operationExactNumericKeyword);
     ajv.addKeyword(operationI18nKeyword);
     ajv.addKeyword(operationInputFieldsKeyword);
     ajv.addKeyword(operationReferenceKeyword);
@@ -110,7 +112,7 @@ export function createRuntimeFieldSchemaCompiler(
   registry: GeneratedRuntimeFieldSchemaRegistry,
 ): RuntimeFieldSchemaCompiler {
   assertRegistry(registry);
-  const ajv = new Ajv2020.default({ allErrors: true, strict: false });
+  const ajv = new Ajv2020.default({ allErrors: true, strict: false, allowUnionTypes: true });
   addFormats.default(ajv);
   const validate = ajv.compile(registry.fieldDefinitionSchema);
   const compiler: RuntimeFieldSchemaCompiler = {

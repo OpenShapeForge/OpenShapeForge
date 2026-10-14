@@ -79,6 +79,10 @@ const VIOLATION_CODES: Record<string, string> = {
   maxItems: "TOO_MANY_ITEMS",
   uniqueItems: "DUPLICATE_ITEMS",
   multipleOf: "INVALID_MULTIPLE",
+  // The exact bounds of a numeric value's text form (x-osf-exact): not a
+  // different contract from `minimum`/`maximum`, the same one applied to the
+  // other form of the same value.
+  "x-osf-exact": "INVALID_NUMBER",
 };
 
 function fieldPath(error: ErrorObject): string | undefined {
@@ -115,15 +119,20 @@ function violationMessage(error: ErrorObject, field: string | undefined): string
 /**
  * One violation per distinct field and code, in schema order. A value of the
  * wrong type fails every other constraint on its field as well; only the type
- * violation is reported, since the others are consequences of it.
+ * violation is reported, since the others are consequences of it. A numeric
+ * value's text form is the same case: the decimal `pattern` beside
+ * `x-osf-exact` restates what the exact comparison already said, so the
+ * numeric violation stands alone.
  */
 export function violationsFromAjvErrors(errors: readonly ErrorObject[]): OperationViolation[] {
   const seen = new Set<string>();
   const wrongType = new Set(errors.filter((error) => error.keyword === "type").map(fieldPath));
+  const inexactNumber = new Set(errors.filter((error) => error.keyword === "x-osf-exact").map(fieldPath));
   const violations: OperationViolation[] = [];
   for (const error of errors) {
     const field = fieldPath(error);
     if (error.keyword !== "type" && wrongType.has(field)) continue;
+    if (error.keyword === "pattern" && inexactNumber.has(field)) continue;
     const code = VIOLATION_CODES[error.keyword] ?? error.keyword.replace(/[A-Z]/g, (c) => `_${c}`).toUpperCase();
     const key = `${field ?? ""}:${code}`;
     if (seen.has(key)) continue;

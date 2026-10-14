@@ -114,7 +114,9 @@ test("compiler-authored fields resolve their base from the single osfType axis",
   expect(schema).toMatchObject({
     required: ["count"],
     properties: {
-      count: { type: "integer" },
+      // A numeric property publishes both of its forms: the JSON number a
+      // form sends and the exact decimal text every transport projects.
+      count: { type: ["integer", "string"], pattern: "^-?(?:0|[1-9][0-9]*)$", "x-osf-exact": { integer: true } },
       note: { type: "string", maxLength: 80 },
       record: { type: "string", format: "uuid", "x-osf-reference": { entity: "ExampleRecord" } },
       address: { type: "object", properties: { street: { type: "string" } }, required: ["street"] },

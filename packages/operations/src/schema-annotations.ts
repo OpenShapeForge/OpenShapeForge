@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { exactNumericViolation, type ExactNumericBounds, type ExactNumericViolation } from "./exact-numeric.js";
+
 /**
  * Form fields from an authorized record; execution still validates its
  * canonical definition. `field` is a FieldDefinition collection on the
@@ -113,6 +115,68 @@ export const operationTypeKeyword = {
   // A camelCase catalog or base key, or a PascalCase entity name; never a path or a dashed name.
   metaSchema: { type: "string", pattern: "^[A-Za-z][A-Za-z0-9]*$" },
 };
+
+/**
+ * The exact-comparison half of a numeric property's contract.
+ *
+ * A `numeric` or `bigint` value crosses every transport as decimal text, so a
+ * numeric property accepts either the JSON number a form sends or that exact
+ * text (`field-schema-metadata.ts`). `minimum`/`maximum` beside it constrain
+ * the number form — JSON Schema ignores them for a string — and this keyword
+ * applies the same authored bounds and closed domain to the text form, by
+ * exact decimal comparison rather than through an IEEE double.
+ *
+ * Unlike every other `x-osf-*` keyword this one validates: it is the only
+ * place an exact bound on the text form is enforced, so an annotation-only
+ * reading would drop the constraint instead of documenting it.
+ */
+export const operationExactNumericKeyword = {
+  keyword: "x-osf-exact",
+  schemaType: "object" as const,
+  errors: true as const,
+  metaSchema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      integer: { type: "boolean" },
+      minimum: { type: ["number", "string"] },
+      maximum: { type: ["number", "string"] },
+      enum: { type: "array", items: { type: ["number", "string"] } },
+    },
+  },
+  validate: exactNumericKeywordValidator(),
+};
+
+const EXACT_NUMERIC_MESSAGES: Record<ExactNumericViolation, string> = {
+  notNumeric: "must be a number, as a JSON number or as exact decimal text",
+  notInteger: "must be a whole number",
+  belowMinimum: "must be at least the authored minimum",
+  aboveMaximum: "must be at most the authored maximum",
+  notInEnum: "must be one of the allowed values",
+};
+
+/**
+ * The keyword's own validator. `unknown` parameters and a validator that
+ * carries its error list on itself are the shape ajv's schema-validate
+ * contract expects, without this package depending on ajv's types.
+ */
+function exactNumericKeywordValidator(): (schema: unknown, data: unknown) => boolean {
+  const validate = (schema: unknown, data: unknown): boolean => {
+    // Only the text form needs this: the number form is already constrained by
+    // the ordinary numeric keywords beside it.
+    if (typeof data !== "string") return true;
+    const bounds: ExactNumericBounds = schema && typeof schema === "object" && !Array.isArray(schema)
+      ? (schema as ExactNumericBounds)
+      : {};
+    const violation = exactNumericViolation(data, bounds);
+    if (!violation) return true;
+    (validate as { errors?: unknown }).errors = [
+      { keyword: "x-osf-exact", message: EXACT_NUMERIC_MESSAGES[violation], params: { violation } },
+    ];
+    return false;
+  };
+  return validate;
+}
 
 /**
  * Whether the property accepts a variable instead of a literal, and in which

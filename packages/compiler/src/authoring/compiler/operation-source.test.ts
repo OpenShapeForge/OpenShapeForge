@@ -94,7 +94,8 @@ test("the same source contract serves group-role assignments, without Account br
   }
   const compiled = contract(assignment);
   const list = compiled.pluginOperations!.find(op => op.key === "list")!;
-  expect((list.definition.output!.schema as any).properties.items.items.properties.version.type).toBe("integer");
+  // Both forms of the numeric property, the integer first.
+  expect((list.definition.output!.schema as any).properties.items.items.properties.version.type).toEqual(["integer", "string"]);
   expect((list.definition.input!.schema as any).properties.groupId.type).toBe("string");
   expect(list.definition.auth).toEqual({ mode: "session", roles: ["Organization.Access.Read"] });
   expect(deriveEntityOsfTypes([assignment], {}).GroupRoleAssignment!.kind).toBe("provider");

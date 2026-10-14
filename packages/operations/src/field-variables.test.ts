@@ -4,7 +4,10 @@ import {
   assertVariableCompatible,
   assertVariableSourceValue,
   compatibleVariableOffers,
+  declaredVariableOffer,
+  escapeMarkdownVariableText,
   fieldVariableSlot,
+  isDeclaredVariableNamespace,
   matchesBaseType,
   parseVariableReference,
   variableCompatibility,
@@ -21,6 +24,7 @@ import {
 } from "./field-variables.js";
 import { fieldSchema } from "./field-schema.js";
 import { resolveFields } from "./field-resolution.js";
+import { schemaVariableShape, schemaVariableSlot } from "./variable-schema.js";
 
 function slot(overrides: Partial<VariableSlot> = {}): VariableSlot {
   return {
@@ -314,5 +318,97 @@ describe("whole-token detection", () => {
     expect(wholeVariableExpression("Due: {{local.amount}}")).toBeUndefined();
     expect(wholeVariableExpression("{{local.a}}{{local.b}}")).toBeUndefined();
     expect(wholeVariableExpression("plain text")).toBeUndefined();
+  });
+});
+
+describe("a namespace whose keys declare their own type", () => {
+  const declaring: VariableCatalogue = { chips: { kind: "declared" }, local: { kind: "map", offers: {} } };
+
+  test("its shapes cannot be read before a key is resolved", () => {
+    expect(() => variableOffer(declaring, parseVariableReference("chips.phone"))).toThrow(/resolve chips\.phone/);
+    // Not a caller refusal: nothing the request could have said would fix it.
+    try {
+      variableOffer(declaring, parseVariableReference("chips.phone"));
+    } catch (error) {
+      expect(error).not.toBeInstanceOf(VariableError);
+    }
+  });
+
+  test("it enumerates nothing and answers about itself", () => {
+    expect(variableOffers(declaring)).toEqual([]);
+    expect(isDeclaredVariableNamespace(declaring, "chips")).toBe(true);
+    expect(isDeclaredVariableNamespace(declaring, "local")).toBe(false);
+    expect(isDeclaredVariableNamespace({}, "chips")).toBe(false);
+  });
+
+  test("the resolved contract is compared like any other offer", () => {
+    const reference = parseVariableReference("chips.fee");
+    const offer = declaredVariableOffer(reference, offered({ osfType: "currency", baseType: "number" }));
+    expect(offer.source).toEqual(reference);
+    expect(variableCompatibility(slot({ osfType: "currency", baseType: "number" }), offer, "whole").compatible).toBe(true);
+    expect(variableCompatibility(slot({ osfType: "percentage", baseType: "number" }), offer, "whole"))
+      .toMatchObject({ compatible: false, code: "INCOMPATIBLE_TYPE" });
+  });
+});
+
+describe("a variable filled into Markdown is data", () => {
+  test("every inline construct a value could open is escaped", () => {
+    expect(escapeMarkdownVariableText("Bouw*Groep* BV")).toBe("Bouw\\*Groep\\* BV");
+    expect(escapeMarkdownVariableText("[click](javascript:alert(1))")).toBe("\\[click\\]\\(javascript\\:alert\\(1\\)\\)");
+    expect(escapeMarkdownVariableText("![img](x onerror=y)")).toBe("\\!\\[img\\]\\(x onerror\\=y\\)");
+    expect(escapeMarkdownVariableText("<script>alert(1)</script>")).toBe("\\<script\\>alert\\(1\\)\\<\\/script\\>");
+    expect(escapeMarkdownVariableText("&lt;b&gt;")).toBe("\\&lt\\;b\\&gt\\;");
+    expect(escapeMarkdownVariableText("`code`")).toBe("\\`code\\`");
+    expect(escapeMarkdownVariableText("a | b")).toBe("a \\| b");
+    expect(escapeMarkdownVariableText("# Heading")).toBe("\\# Heading");
+    expect(escapeMarkdownVariableText("- item")).toBe("\\- item");
+    expect(escapeMarkdownVariableText("> quote")).toBe("\\> quote");
+    expect(escapeMarkdownVariableText("1. step")).toBe("1\\. step");
+    expect(escapeMarkdownVariableText("snake_case_name")).toBe("snake\\_case\\_name");
+    expect(escapeMarkdownVariableText("C:\\path")).toBe("C\\:\\\\path");
+    expect(escapeMarkdownVariableText("~~strike~~")).toBe("\\~\\~strike\\~\\~");
+  });
+
+  test("letters, digits and spacing are left exactly as they are", () => {
+    expect(escapeMarkdownVariableText("Plain text 42")).toBe("Plain text 42");
+    expect(escapeMarkdownVariableText("line\nline")).toBe("line\nline");
+    expect(escapeMarkdownVariableText("")).toBe("");
+    expect(escapeMarkdownVariableText("naïve café")).toBe("naïve café");
+  });
+});
+
+describe("the slot a transport already publishes", () => {
+  test("a compiled property is read back as its own contract", () => {
+    const [field] = resolveFields([
+      { key: "amount", osfType: "currency", required: true, variables: "whole", validation: { min: 0 } },
+    ], { osfTypes: { currency: { baseType: "number", label: { en: "Currency amount" } } } });
+    expect(schemaVariableSlot("Invoice.amount", fieldSchema(field!), { required: true })).toEqual({
+      path: "Invoice.amount",
+      mode: "whole",
+      osfType: "currency",
+      baseType: "number",
+      cardinality: "single",
+      nullable: false,
+    });
+  });
+
+  test("a collection, a reference and a closed domain survive the round trip", () => {
+    const [lines] = resolveFields([{ key: "lines", osfType: "string", cardinality: "collection", variables: "whole" }], {});
+    expect(schemaVariableShape(fieldSchema(lines!))).toMatchObject({ cardinality: "collection", baseType: "string" });
+    const [owner] = resolveFields([{ key: "owner", osfType: "Relation", variables: "whole" }], {
+      osfTypes: { Relation: { kind: "entity", entity: "Relation", baseType: "string", validation: { format: "uuid" }, label: { en: "Relation" } } },
+    });
+    expect(schemaVariableShape(fieldSchema(owner!))).toMatchObject({ osfType: "Relation", target: "Relation" });
+    const [status] = resolveFields([
+      { key: "status", osfType: "string", variables: "whole", options: { type: "static", items: [{ value: "open" }, { value: "done" }] } },
+    ], {});
+    expect(schemaVariableShape(fieldSchema(status!))?.enum).toEqual(["open", "done"]);
+  });
+
+  test("a property without a mode accepts nothing, and an unknown mode is not a mode", () => {
+    const [plain] = resolveFields([{ key: "plain", osfType: "string" }], {});
+    expect(schemaVariableSlot("E.plain", fieldSchema(plain!))?.mode).toBe("none");
+    expect(schemaVariableSlot("E.plain", { type: "string", "x-osf-variables": "sometimes" })).toBeUndefined();
+    expect(schemaVariableSlot("E.odd", { type: "null" })).toBeUndefined();
   });
 });

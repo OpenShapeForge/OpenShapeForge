@@ -55,11 +55,25 @@ describe("entity write contract validation", () => {
       metadata: { source: 3 },
     }, { partial: true }));
     expect(error.violations).toEqual(expect.arrayContaining([
-      { field: "estimatedMinutes", code: "INVALID_TYPE", message: expect.any(String) },
+      // Text that is not a number at all: one numeric violation, not the
+      // decimal pattern restating it.
+      { field: "estimatedMinutes", code: "INVALID_NUMBER", message: expect.any(String) },
       { field: "title", code: "TOO_SHORT", message: expect.any(String) },
       { field: "colour", code: "UNKNOWN_FIELD", message: "colour is not a field of this Operation." },
       { field: "metadata.source", code: "INVALID_TYPE", message: expect.any(String) },
     ]));
+  });
+
+  test("a numeric value is accepted in both of its forms, with its bounds compared exactly", () => {
+    // The platform projects a numeric value as exact decimal text, so the
+    // write contract accepts that text back — and holds it to the same
+    // authored bounds, without rounding it through a double first.
+    expect(() => assertEntityValuesValid(update, task, { estimatedMinutes: 42 }, { partial: true })).not.toThrow();
+    expect(() => assertEntityValuesValid(update, task, { estimatedMinutes: "42" }, { partial: true })).not.toThrow();
+    const fraction = violationsOf(() => assertEntityValuesValid(update, task, { estimatedMinutes: "42.5" }, { partial: true }));
+    expect(fraction.violations).toEqual([{ field: "estimatedMinutes", code: "INVALID_NUMBER", message: expect.any(String) }]);
+    const exponent = violationsOf(() => assertEntityValuesValid(update, task, { estimatedMinutes: "4e2" }, { partial: true }));
+    expect(exponent.violations).toEqual([{ field: "estimatedMinutes", code: "INVALID_NUMBER", message: expect.any(String) }]);
   });
 
   test("null clears a nullable column but never satisfies a NOT NULL one", () => {

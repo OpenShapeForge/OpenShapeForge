@@ -8,7 +8,7 @@ import { loadEntity } from "./loader.js";
 import { createAuthoringValidator } from "./schema-validation.js";
 import { buildWebManifest } from "./web-manifest.js";
 import { compiledObjectSchema } from "../field-json-schema.js";
-import { operationI18nKeyword, operationReferenceKeyword, operationTypeKeyword } from "@openshapeforge/operations";
+import { operationExactNumericKeyword, operationI18nKeyword, operationReferenceKeyword, operationTypeKeyword } from "@openshapeforge/operations";
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 
@@ -37,11 +37,12 @@ test("real v3 case templates retain inline action values and ordinary top-level 
   expect(step.model.relationships.some(relation => relation.fieldKey === "actions")).toBe(false);
   expect(step.storage.columns.filter(column => /work_queue/.test(column.column))).toHaveLength(1);
 
-  const ajv = new Ajv2020({ strict: true });
+  const ajv = new Ajv2020({ strict: true, allowUnionTypes: true });
   addFormats.default(ajv);
   ajv.addKeyword(operationI18nKeyword);
   ajv.addKeyword(operationReferenceKeyword);
   ajv.addKeyword(operationTypeKeyword);
+  ajv.addKeyword(operationExactNumericKeyword);
   const validate = ajv.compile(compiledObjectSchema([actions], {}, { requireRequired: true }));
   const value = { actions: [
     { key: "later", sequenceNumber: 20, kind: "task", required: true, startMode: "manual", taskTemplate: { title: "First in array", defaultWorkQueueId: "00000000-0000-4000-8000-000000000001" } },

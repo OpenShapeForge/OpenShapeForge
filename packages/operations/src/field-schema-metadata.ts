@@ -13,12 +13,39 @@ import type {
   ResolvedOperationField,
 } from "./field-schema-types.js";
 import { localizedText, numericRule, stringRule } from "./field-resolution.js";
+import { DECIMAL_PATTERN, INTEGER_TEXT_PATTERN } from "./scalar-projection.js";
 
-function baseTypeSchema(field: Pick<ResolvedOperationField, "baseType">): OperationJsonSchema {
+/**
+ * A numeric value is accepted in both of its forms: the JSON number a form
+ * sends, and the exact decimal text every transport projects it as
+ * (`scalar-projection.ts`) — so a value read out of the platform, or out of a
+ * typed global, is accepted again where its own type is wanted, with every
+ * digit intact. `pattern` constrains the text form (JSON Schema ignores it for
+ * a number), `minimum`/`maximum` constrain the number form, and `x-osf-exact`
+ * applies the same authored bounds to the text form by exact comparison.
+ *
+ * A closed numeric domain keeps the single number form: `enum` compares by
+ * value equality, so admitting text there would mean enumerating spellings.
+ */
+function numericSchema(
+  baseType: "integer" | "number",
+  enumerated: boolean,
+): OperationJsonSchema {
+  if (enumerated) return { type: baseType };
+  return {
+    type: [baseType, "string"],
+    pattern: baseType === "integer" ? INTEGER_TEXT_PATTERN : DECIMAL_PATTERN,
+  };
+}
+
+function baseTypeSchema(
+  field: Pick<ResolvedOperationField, "baseType">,
+  enumerated: boolean,
+): OperationJsonSchema {
   switch (field.baseType) {
     case "boolean": return { type: "boolean" };
-    case "integer": return { type: "integer" };
-    case "number": return { type: "number" };
+    case "integer": return numericSchema("integer", enumerated);
+    case "number": return numericSchema("number", enumerated);
     case "date": return { type: "string", format: "date" };
     case "datetime": return { type: "string", format: "date-time" };
     case "object": return { type: "object" };
@@ -26,27 +53,47 @@ function baseTypeSchema(field: Pick<ResolvedOperationField, "baseType">): Operat
   }
 }
 
+export type ConstrainedTypeOptions = {
+  /** Whether the field also projects a closed `enum`; see `numericSchema`. */
+  enumerated?: boolean;
+};
+
 /**
  * Base type plus every authored validation bound. Deliberately does NOT add
  * `enum`, `description` or `default` — see the file header on key order.
  */
-export function constrainedType(field: Pick<ResolvedOperationField, "baseType" | "validation">): OperationJsonSchema {
-  const schema = baseTypeSchema(field);
+export function constrainedType(
+  field: Pick<ResolvedOperationField, "baseType" | "validation">,
+  options: ConstrainedTypeOptions = {},
+): OperationJsonSchema {
+  const numeric = field.baseType === "integer" || field.baseType === "number";
+  const exact = numeric && !options.enumerated;
+  const schema = baseTypeSchema(field, options.enumerated === true);
   const validation = field.validation;
-  if (!validation) return schema;
-  const minLength = numericRule(validation.minLength);
-  const maxLength = numericRule(validation.maxLength);
-  const minimum = numericRule(validation.min);
-  const maximum = numericRule(validation.max);
-  const pattern = stringRule(validation.pattern);
-  if (minLength !== undefined) schema.minLength = minLength;
-  if (maxLength !== undefined) schema.maxLength = maxLength;
-  if (minimum !== undefined) schema.minimum = minimum;
-  if (maximum !== undefined) schema.maximum = maximum;
-  if (pattern !== undefined) schema.pattern = pattern;
-  // `format: uuid` is both a JSON Schema format and the signal the storage
-  // layer uses to pick a uuid column, so it carries through unchanged.
-  if (validation.format !== undefined) schema.format = validation.format;
+  const minimum = numericRule(validation?.min);
+  const maximum = numericRule(validation?.max);
+  if (validation) {
+    const minLength = numericRule(validation.minLength);
+    const maxLength = numericRule(validation.maxLength);
+    const pattern = stringRule(validation.pattern);
+    if (minLength !== undefined) schema.minLength = minLength;
+    if (maxLength !== undefined) schema.maxLength = maxLength;
+    if (minimum !== undefined) schema.minimum = minimum;
+    if (maximum !== undefined) schema.maximum = maximum;
+    // A numeric field's own `pattern` would otherwise overwrite the decimal
+    // spelling its text form is admitted by; authored patterns belong to text.
+    if (pattern !== undefined && !numeric) schema.pattern = pattern;
+    // `format: uuid` is both a JSON Schema format and the signal the storage
+    // layer uses to pick a uuid column, so it carries through unchanged.
+    if (validation.format !== undefined) schema.format = validation.format;
+  }
+  if (exact) {
+    schema["x-osf-exact"] = {
+      ...(field.baseType === "integer" ? { integer: true } : {}),
+      ...(minimum !== undefined ? { minimum } : {}),
+      ...(maximum !== undefined ? { maximum } : {}),
+    };
+  }
   return schema;
 }
 

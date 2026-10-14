@@ -135,7 +135,16 @@ export type VariableOffer = VariableValueShape & {
  */
 export type VariableNamespaceSource =
   | { readonly kind: "map"; readonly offers: Readonly<Record<string, VariableValueShape>> }
-  | { readonly kind: "uniform"; readonly offer: VariableValueShape };
+  | { readonly kind: "uniform"; readonly offer: VariableValueShape }
+  /**
+   * Every key of this namespace carries its own stored contract, read together
+   * with its value under the owning source's authorization — the Chip
+   * catalogue, whose value is typed by the FieldDefinition stored beside it.
+   * There is nothing to enumerate up front and nothing the caller may declare:
+   * the owner resolves the key first and hands the shape it found to
+   * `declaredVariableOffer`.
+   */
+  | { readonly kind: "declared" };
 
 export type VariableCatalogue = Readonly<Partial<Record<VariableNamespace, VariableNamespaceSource>>>;
 
@@ -230,10 +239,39 @@ export function parseVariableReference(expression: string): VariableReference {
 export function variableOffer(catalogue: VariableCatalogue, reference: VariableReference): VariableOffer {
   const source = Object.hasOwn(catalogue, reference.namespace) ? catalogue[reference.namespace] : undefined;
   if (!source) refuse("UNKNOWN_VARIABLE", `No ${reference.namespace} variables are available here.`);
+  if (source.kind === "declared") {
+    // Not a refusal the caller could fix: whoever asked wired a namespace
+    // whose shapes are only known once a key is resolved into the path that
+    // compares shapes before resolving one.
+    throw new Error(
+      `${reference.namespace} variables declare their own type; resolve ${reference.namespace}.${reference.key} and compare through declaredVariableOffer.`,
+    );
+  }
   const shape = source.kind === "uniform"
     ? source.offer
     : Object.hasOwn(source.offers, reference.key) ? source.offers[reference.key] : undefined;
   if (!shape) refuse("UNKNOWN_VARIABLE", `${reference.namespace}.${reference.key} is not available.`);
+  return Object.freeze({ ...shape, source: reference });
+}
+
+/** Whether this namespace's shapes come from the source itself, per key. */
+export function isDeclaredVariableNamespace(
+  catalogue: VariableCatalogue,
+  namespace: VariableNamespace,
+): boolean {
+  return (Object.hasOwn(catalogue, namespace) ? catalogue[namespace] : undefined)?.kind === "declared";
+}
+
+/**
+ * The offer of one key of a declared namespace, from the contract its own
+ * source stores. The shape is the source's, never the caller's: an adapter
+ * passes what it read through an authorized canonical read, and the ordinary
+ * compatibility comparison runs on it unchanged.
+ */
+export function declaredVariableOffer(
+  reference: VariableReference,
+  shape: VariableValueShape,
+): VariableOffer {
   return Object.freeze({ ...shape, source: reference });
 }
 
@@ -474,6 +512,38 @@ export function variableText(value: unknown): string {
   if (typeof value === "number" && Number.isFinite(value)) return String(decimalText(value));
   if (typeof value === "bigint") return value.toString();
   refuse("UNFORMATTABLE_VALUE", "Only a text, numeric or boolean variable can be written into text.");
+}
+
+/**
+ * Every ASCII punctuation character, the exact set CommonMark says may be
+ * backslash-escaped. One class, so nothing is covered by accident and nothing
+ * is left out: the emphasis and strong delimiters, the link and image
+ * brackets and parentheses, the code-span backtick, the raw-HTML `<` and the
+ * entity `&`, the heading `#`, the list and rule markers, the table pipe, the
+ * blockquote `>` and the escape character itself.
+ */
+const MARKDOWN_PUNCTUATION = /[!-/:-@[-`{-~]/g;
+
+/**
+ * One variable's text as DATA inside Markdown.
+ *
+ * A filled value is never syntax: a client named `Bouw*Groep* BV` must not
+ * turn into emphasis where the template writes `**Klant:** {{local.client}}`,
+ * and a value of `[x](javascript:…)`, `<img onerror=…>`, `&lt;`, `` `code` ``
+ * or `|` must not become a link, raw HTML, an entity, a code span or a table
+ * cell. Escaping only the emphasis characters left every one of those open,
+ * so the whole punctuation class is escaped instead — a backslash before an
+ * ASCII punctuation character renders as that character and nothing else.
+ *
+ * Two deliberate limits, both of them properties of Markdown rather than of
+ * this function: a backslash escape is literal text inside a code span, so a
+ * value spliced into one the author opened is not protected by it (the
+ * content engine escapes the value, it does not rewrite the author's
+ * formatting); and a line break inside a multi-line value stays a line break,
+ * because a multi-line global is legitimately multi-line.
+ */
+export function escapeMarkdownVariableText(text: string): string {
+  return text.replace(MARKDOWN_PUNCTUATION, (character) => `\\${character}`);
 }
 
 /**

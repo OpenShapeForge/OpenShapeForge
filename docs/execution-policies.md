@@ -205,17 +205,23 @@ A governed Operation is decided twice, deliberately:
    | --- | --- | --- |
    | `operations/runtime.ts` custom and native Operations | the record lock, availability decision, lease and confirmation this invocation consumed | the handler, and `markEffectsAdmitted` for a keyed one |
    | `entity/mutations.ts` generated create, update and delete | the `for update` row lock, record permissions, consumed lease and challenge, entity-value, relationship and related-state preparation | the insert, update or delete statement |
-   | `entity/collection-mutations.ts` native collections | the parent lock, every sibling lock, each sibling's own authorization and the cardinality and related-state guards | the first child or parent write |
+   | `entity/collection-mutations.ts` native collections | the parent lock, every sibling lock, each sibling's own authorization, the cardinality and related-state guards — and the child's OWN preparation, which the child owner above decides after | the first child, sibling or parent write |
    | `jobs/worker.ts` queued runs | the claim lock | the contributed handler |
    | `modules/platform.ts` record-derived providers | the committed receipt claim | `markEffectsAdmitted` and the provider |
 
 The second one is the decisive one, and WHERE it sits is the whole point. A
 mutation owner's work waits: on another transaction holding the row, on the
-siblings of a collection, on a receipt claim. A decision taken before that
-wait is a decision about state that can be gone by the time anything is
-written — a freeze can begin, or a deadline pass, while the owner is parked on
-a lock. Because the decision runs in the transaction that owns the write, the
-two commit together or not at all.
+siblings of a collection, on each record a child's entity-value references
+(`for share`), on a receipt claim. A decision taken before that wait is a
+decision about state that can be gone by the time anything is written — a
+freeze can begin, or a deadline pass, while the owner is parked on a lock.
+Because the decision runs in the transaction that owns the write, the two
+commit together or not at all.
+
+A collection mutation is several writes in one transaction, so it is decided
+once, at whichever of its paths reaches a write first — and never before the
+work that path still has to prepare. A write path that ever reached a commit
+without a decision fails as a core defect rather than proceeding ungoverned.
 
 Ordering follows from that: a refusal precedes every data change and every
 external effect; a refused keyed Operation leaves no receipt a later retry
@@ -223,8 +229,8 @@ could replay (the claim is deleted, not completed); a refusal never reports an
 uncertain external delivery, because it is decided before core admits effects;
 and every mutation control this invocation consumed on the way in — an edit
 lease, a single-use confirmation challenge — rolls back with the refused
-transaction, so the caller can retry the same request once the tenant may
-write again.
+invocation, so the caller can retry the same request once the tenant may write
+again (below, for how that holds inside another Operation's transaction too).
 
 Core's own identity bookkeeping reaches the same owners through the
 runtime-surface create and update paths and binds no decision there, so it
@@ -289,6 +295,27 @@ returns — whatever the decision was:
 
 Repeated evaluation must be sound: core decides twice per governed invocation
 (see above), and a nested call or a retry decides again.
+
+**A refused invocation takes its own work with it, and only its own.** A
+governed invocation often runs in somebody else's transaction: a canonical
+Operation that writes its own rows and then reaches entity CRUD, another
+Operation or a keyed one through core joins that caller's transaction, and the
+refusal comes back to it as an error result rather than as a thrown error — so
+nothing about the caller's transaction would otherwise remove the refused
+work from it. Each governed invocation therefore runs inside its own savepoint
+(`db/session.ts` `withInvocationSavepoint`, applied by the entity mutation
+boundary, the canonical Operation transaction and the database-only keyed
+receipt). On refusal — or any other failure — that savepoint is rolled back
+before the error becomes a result:
+
+- the mutation controls the invocation consumed are not consumed: the same
+  edit lease and the same single-use confirmation challenge still work once
+  the tenant may write again;
+- a database-only keyed Operation leaves no receipt at all — not `completed`,
+  not `running`, not `outcome_unknown` — and its idempotency key is free;
+- the caller's own work, written before the nested call AND after it, commits
+  normally. A nested failure no longer takes the caller's transaction down
+  with it either.
 
 Everything that is not an explicit, well-formed decision is a refusal:
 

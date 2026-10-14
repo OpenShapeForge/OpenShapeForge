@@ -87,7 +87,10 @@ export const composeTemplate: ModuleOperationHandler = async (input, context) =>
 export function parameterShape(schema: Record<string, unknown>, required: boolean): TemplateParameter {
   if (schema.type === "array") {
     const item = parameterShape(object(schema.items, "parameter items"), false);
-    return { ...item, required, cardinality: {
+    return { ...item, required,
+      ...(typeof schema["x-osf-type"] === "string" ? { osfType: schema["x-osf-type"] } : {}),
+      ...(isFieldVariableMode(schema["x-osf-variables"]) ? { variables: schema["x-osf-variables"] } : {}),
+      cardinality: {
       min: typeof schema.minItems === "number" ? schema.minItems : 0,
       max: typeof schema.maxItems === "number" ? schema.maxItems : "unbounded",
     }, ...(schema.default !== undefined ? { defaultValue: schema.default as JsonValue } : {}) };
@@ -98,6 +101,8 @@ export function parameterShape(schema: Record<string, unknown>, required: boolea
   const requiredKeys = Array.isArray(schema.required) ? schema.required : [];
   return {
     baseType: baseType as ContentValueShape["baseType"], required,
+    ...(typeof schema["x-osf-type"] === "string" ? { osfType: schema["x-osf-type"] } : {}),
+    ...(isFieldVariableMode(schema["x-osf-variables"]) ? { variables: schema["x-osf-variables"] } : {}),
     ...(isObject(schema["x-osf-reference"]) && typeof schema["x-osf-reference"].entity === "string" ? { relationship: { target: schema["x-osf-reference"].entity } } : {}),
     ...(Array.isArray(schema.enum) ? { enum: schema.enum as JsonValue[] } : {}),
     ...(isObject(schema.properties) ? { fields: Object.fromEntries(Object.entries(schema.properties).map(([name, child]) => [name, parameterShape(object(child, "parameter"), requiredKeys.includes(name))])) } : {}),

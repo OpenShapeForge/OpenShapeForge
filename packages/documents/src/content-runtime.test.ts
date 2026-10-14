@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import type { ModuleOperationContext, RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
-import { composeTemplate, contentFieldProjection, materializeFields, materializeTemplate } from "./content-runtime.js";
+import { composeTemplate, contentFieldProjection, materializeFields, materializeTemplate, parameterShape } from "./content-runtime.js";
 
 const ids = {
   tenant: "10000000-0000-4000-8000-000000000001", template: "10000000-0000-4000-8000-000000000002",
@@ -247,3 +247,9 @@ describe("template materialization runtime adapter", () => {
     expect(contentFieldProjection({ osfType: "object", baseType: "object", cardinality: "collection", cardinalityBounds: { min: 1, max: 3 }, children: [{ key: "title", osfType: "string", baseType: "string", required: true }] })).toMatchObject({ cardinality: { min: 1, max: 3 }, fields: { title: { baseType: "string", required: true } } });
   });
 });
+
+ test("parameter projection preserves the semantic axis and variable mode for scalars and collections",()=>{
+   const scalar=parameterShape({type:"number","x-osf-type":"currency","x-osf-variables":"whole"},true);
+   expect(scalar).toMatchObject({osfType:"currency",baseType:"number",variables:"whole",required:true});
+   expect(parameterShape({type:"array",items:{type:"string","x-osf-type":"Relation","x-osf-reference":{entity:"Relation"}},"x-osf-type":"Relation","x-osf-variables":"whole"},false)).toMatchObject({osfType:"Relation",variables:"whole",relationship:{target:"Relation"},cardinality:{min:0,max:"unbounded"}});
+ });

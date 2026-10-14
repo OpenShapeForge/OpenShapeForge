@@ -237,6 +237,8 @@ export interface FieldDefinitionAuthoringMetadata {
   profile?: string;
   pinned?: boolean;
   locked?: boolean;
+  /** Properties fixed to the carrier's authored default while other definition properties remain editable. */
+  lockedKeys?: string[];
   singleton?: boolean;
   visibleProperties?: string[];
 }

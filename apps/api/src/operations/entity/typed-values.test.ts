@@ -143,6 +143,10 @@ describe("the policy boundary of a definition that arrives at runtime", () => {
     // A reference needs its target read, authorized against the real row,
     // which only a reference COLUMN gets.
     ["an entity reference", { key: "value", osfType: "Relation", required: true }],
+    ["a deferred typed value", { key: "value", osfType: "typedValue", typedBy: { definitionField: "definition" } }],
+    ["a nested deferred typed value", { key: "value", osfType: "object", children: [
+      { key: "nested", osfType: "typedValue", typedBy: { definitionField: "definition" } },
+    ] }],
     // And an osfType this build does not know types nothing at all.
     ["an unknown type", { key: "value", osfType: "notAType", required: true }],
   ];

@@ -120,6 +120,14 @@ describe("the schema registry", () => {
       osfType: "fieldDefinition",
     };
     expect(canonical(semanticField)).toBe(true);
+    const pairedDefinition = {
+      ...semanticField,
+      required: true,
+      authoring: { profile: "fullFieldDefinition", lockedKeys: ["key"] },
+      defaultValue: { key: "value", osfType: "string", required: false },
+    };
+    expect(canonical(pairedDefinition)).toBe(true);
+    expect(canonical({ ...pairedDefinition, authoring: { lockedKeys: ["__proto__"] } })).toBe(false);
 
     for (const ambiguous of [
       { ...semanticField, children: [{ key: "extra", osfType: "string" }] },

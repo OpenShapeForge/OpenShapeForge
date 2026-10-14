@@ -67,6 +67,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+/** A stored definition must describe a concrete value, not defer to another sibling. */
+function hasDeferredValueDefinition(definition: Readonly<Record<string, unknown>>): boolean {
+  if (definition.osfType === "typedValue" || definition.typedBy !== undefined) return true;
+  for (const key of ["children", "shape"]) {
+    const children = definition[key];
+    if (Array.isArray(children) && children.some((child) => isRecord(child) && hasDeferredValueDefinition(child))) return true;
+  }
+  return isRecord(definition.item) && hasDeferredValueDefinition(definition.item);
+}
+
 /**
  * The supported shape of a definition that types a value at runtime, through
  * the guard the entity-value runtime uses for the same position. The stored
@@ -85,6 +95,7 @@ export function assertTypedDefinitionSupported(
 ): void {
   try {
     assertEntityValueFieldPolicy({ key: field, osfType: "object", children: [definition] });
+    if (hasDeferredValueDefinition(definition)) throw new Error("A concrete value definition is required.");
   } catch {
     throw origin === "submitted"
       ? generatedCrudError(
@@ -94,7 +105,7 @@ export function assertTypedDefinitionSupported(
             detail:
               "A value typed by a stored definition is kept in one JSON column, so the definition may not carry " +
               "a classification, an authorization or permissions block, secureInput, writtenBy or immutable, " +
-              "at any depth, and may not be a relationship or an entity-typed value. Use a field of its own " +
+              "at any depth, and may not be a relationship, an entity-typed value, or another deferred typedBy value. Use a field of its own " +
               "for a value that needs one of those.",
           },
         )

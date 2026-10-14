@@ -233,6 +233,7 @@
         "profile": { "type": "string", "minLength": 1 },
         "pinned": { "type": "boolean" },
         "locked": { "type": "boolean" },
+        "lockedKeys": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1, "not": { "enum": ["__proto__", "prototype", "constructor"] } } },
         "singleton": { "type": "boolean" },
         "visibleProperties": {
           "type": "array",
@@ -675,7 +676,6 @@
           "then": {
             "not": {
               "anyOf": [
-                { "properties": { "required": {} }, "required": ["required"] },
                 { "properties": { "children": {} }, "required": ["children"] },
                 { "properties": { "item": {} }, "required": ["item"] }
               ]

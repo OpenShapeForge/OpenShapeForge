@@ -12786,6 +12786,17 @@
           "key": "definition",
           "osfType": "fieldDefinition",
           "required": true,
+          "defaultValue": {
+            "key": "value",
+            "osfType": "string",
+            "required": false
+          },
+          "authoring": {
+            "profile": "fullFieldDefinition",
+            "lockedKeys": [
+              "key"
+            ]
+          },
           "label": {
             "en": "Value type",
             "nl": "Waardetype"

@@ -145,7 +145,7 @@ export type WebFieldOptionSource =
  */
 export type WebFieldProjection = {
   /** Canonical editor profile and lock metadata; the API remains authoritative. */
-  authoring?: {profile?:string;pinned?:boolean;locked?:boolean;singleton?:boolean;visibleProperties?:string[]};
+  authoring?: {profile?:string;pinned?:boolean;locked?:boolean;lockedKeys?:string[];singleton?:boolean;visibleProperties?:string[]};
   /** Canonical protection metadata; the server remains the enforcement boundary. */
   fieldPolicy?: FieldValuePolicy;
   /** Explicit Web-only exception; defaults still come from the semantic registry. */

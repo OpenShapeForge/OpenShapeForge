@@ -740,12 +740,19 @@ the entity-value runtime fails closed on, through the same shared guard: no
 `classification`, `authorization`, `permissions`, `secureInput`, `writtenBy` or
 `immutable` at any depth — authored on the field or inherited from its
 osf-type, which is why `email` and `phone` (pii in the catalog) are refused —
-no relationship or entity-typed value, and no osf-type the registry does not
+no relationship, entity-typed value or nested deferred `typedValue`/`typedBy`, and no osf-type the registry does not
 know. On a write that is a `BAD_USER_INPUT` refusal naming the field; on a read
 of an already-stored definition it is refused as well, so a value this runtime
 cannot protect is never handed over. A variable that must carry a guarded or
 referencing value needs a field of its own, with the column the runtime can
 protect.
+
+A single definition editor may use `authoring.lockedKeys: [key]` to preserve
+the key from its carrier's `defaultValue`, while its type and other properties
+remain editable. Chip uses the default `{key: value, osfType: string, required:
+false}`; the API independently requires that paired definition key to be
+`value`. An authoring profile does not change whether the carrier itself is
+required.
 
 ### `variables:` — the field that accepts a variable
 

@@ -61,6 +61,7 @@ export {
   constrainedType,
   describeField,
   fieldEnumeration,
+  type ConstrainedTypeOptions,
   type DescribeFieldOptions,
   type FieldEnumeration,
 } from "./field-schema-metadata.js";
@@ -69,12 +70,13 @@ function valueSchema(
   field: ResolvedOperationField,
   registry: OperationFieldSchemaRegistry,
   options: OperationFieldSchemaOptions,
+  enumerated: boolean,
 ): OperationJsonSchema {
   if (field.schema) return structuredClone(field.schema) as OperationJsonSchema;
   if (field.baseType === "object" && field.children?.length) {
     return objectSchema(field.children, registry, { ...options, requireRequired: options.requireNestedRequired ?? true });
   }
-  return constrainedType(field);
+  return constrainedType(field, { enumerated });
 }
 
 function withFieldMetadata(
@@ -130,7 +132,13 @@ export function fieldSchema(
   registry: OperationFieldSchemaRegistry = {},
   options: OperationFieldSchemaOptions = {},
 ): OperationJsonSchema {
-  const schema = withFieldMetadata(valueSchema(field, registry, options), field, fieldEnumeration(field, registry), options);
+  const enumeration = fieldEnumeration(field, registry);
+  const schema = withFieldMetadata(
+    valueSchema(field, registry, options, enumeration !== undefined),
+    field,
+    enumeration,
+    options,
+  );
   if (field.cardinality !== "collection") return schema;
   // A variable fills the whole collection property, not one row of it.
   const { title, description, "x-osf-i18n": uiCopy, default: defaultValue, "x-osf-variables": variables, ...outerItemSchema } = schema;

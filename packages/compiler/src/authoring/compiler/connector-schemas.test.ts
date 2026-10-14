@@ -38,7 +38,14 @@ describe("connector field schemas", () => {
   it("resolves a catalog osf type through the catalog and refuses one it cannot resolve", () => {
     const osfTypes = { amount: { baseType: "number" as const, label: { en: "Amount" } } };
     const field = { key: "total", osfType: "amount", validation: { min: 0 } } as FieldDefinition;
-    expect(connectorFieldSchema(field, osfTypes)).toEqual({ type: "number", minimum: 0, "x-osf-type": "amount" });
+    // Both forms of a numeric value, with the authored bound on each of them.
+    expect(connectorFieldSchema(field, osfTypes)).toEqual({
+      type: ["number", "string"],
+      pattern: "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+      minimum: 0,
+      "x-osf-exact": { minimum: 0 },
+      "x-osf-type": "amount",
+    });
     // Without the catalog the base is unknown; a silent string would misdescribe the wire contract.
     expect(() => connectorFieldSchema(field)).toThrow("Connector field total: unknown osfType amount.");
     expect(() => buildOperationSchemas([field], { cardinality: "one", fields: [] })).toThrow("unknown osfType amount");
@@ -47,8 +54,8 @@ describe("connector field schemas", () => {
   it("maps value types and formats", () => {
     const cases: [string, Record<string, unknown>][] = [
       ["boolean", { type: "boolean" }],
-      ["integer", { type: "integer" }],
-      ["number", { type: "number" }],
+      ["integer", { type: ["integer", "string"], pattern: "^-?(?:0|[1-9][0-9]*)$", "x-osf-exact": { integer: true } }],
+      ["number", { type: ["number", "string"], pattern: "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$", "x-osf-exact": {} }],
       ["date", { type: "string", format: "date" }],
       ["datetime", { type: "string", format: "date-time" }],
       ["object", { type: "object" }],
@@ -247,10 +254,13 @@ describe("shared constraint mapping", () => {
       expect(connectorSchema[key]).toEqual(value);
     }
     expect(shared).toEqual({
-      type: "integer",
+      type: ["integer", "string"],
+      pattern: "^-?(?:0|[1-9][0-9]*)$",
       minimum: 1,
       maximum: 10,
       format: "int64",
+      // The same bounds on the exact text form, compared as numbers.
+      "x-osf-exact": { integer: true, minimum: 1, maximum: 10 },
     });
   });
 });

@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: BUSL-1.1
 export { FIELD_ITEM_ID, type FieldValuePolicy } from "./field-value-policy.js";
-export { operationChoiceKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword, operationTypeKeyword, operationVariablesKeyword } from "./schema-annotations.js";
+export { operationChoiceKeyword, operationExactNumericKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword, operationTypeKeyword, operationVariablesKeyword } from "./schema-annotations.js";
+export type { ExactDecimal, ExactNumericBounds, ExactNumericViolation } from "./exact-numeric.js";
+export {
+  compareExactNumeric,
+  exactDecimal,
+  exactNumericEquals,
+  exactNumericViolation,
+  isExactDecimalText,
+  isExactIntegerText,
+  isExactWholeNumber,
+  MAX_EXACT_NUMERIC_LENGTH,
+} from "./exact-numeric.js";
 export type {
   FieldVariableMode,
   VariableCatalogue,
@@ -36,7 +47,12 @@ export {
   variableText,
   variableTokens,
   wholeVariableExpression,
+  declaredVariableOffer,
+  escapeMarkdownVariableText,
+  isDeclaredVariableNamespace,
 } from "./field-variables.js";
+export type { SchemaVariableShapeOptions } from "./variable-schema.js";
+export { schemaVariableMode, schemaVariableShape, schemaVariableSlot } from "./variable-schema.js";
 
 export type {
   OperationEnvelope,

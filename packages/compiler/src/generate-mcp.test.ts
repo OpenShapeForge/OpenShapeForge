@@ -654,10 +654,13 @@ describe("buildMcpCatalog", () => {
         maxLength: 200,
         pattern: "^[a-z]+$",
       });
+      // A numeric property is offered in both of its forms, with the authored
+      // bounds on the number and the same bounds on the exact text.
       expect(prop(create.inputSchema, "score")).toMatchObject({
-        type: "integer",
+        type: ["integer", "string"],
         minimum: 0,
         maximum: 10,
+        "x-osf-exact": { integer: true, minimum: 0, maximum: 10 },
       });
       expect(create.inputSchema.required).toEqual(["name"]);
     });

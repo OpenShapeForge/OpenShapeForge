@@ -39,9 +39,13 @@ describe("bounded integer storage and GraphQL projection", () => {
     expect(fieldSqlType(field)).toBe("bigint");
     expect(fieldGraphqlBaseType(field)).toBe("Decimal");
     expect(constrainedType({ ...field, baseType: "integer" })).toEqual({
-      type: "integer",
+      // A wide integer crosses every transport as exact text, so the property
+      // accepts that form too, with the same bounds compared exactly.
+      type: ["integer", "string"],
+      pattern: "^-?(?:0|[1-9][0-9]*)$",
       minimum: -2_147_483_649,
       maximum: Number.MAX_SAFE_INTEGER,
+      "x-osf-exact": { integer: true, minimum: -2_147_483_649, maximum: Number.MAX_SAFE_INTEGER },
     });
   });
 

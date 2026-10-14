@@ -22,6 +22,7 @@
         "shape": true,
         "options": true,
         "render": false,
+        "moneyDisplay": true,
         "aiHint": true,
         "defaultValue": true,
         "value": false,
@@ -51,6 +52,7 @@
         "shape": true,
         "options": true,
         "render": false,
+        "moneyDisplay": true,
         "aiHint": true,
         "defaultValue": true,
         "value": false,
@@ -84,6 +86,7 @@
         "shape": false,
         "options": false,
         "render": false,
+        "moneyDisplay": true,
         "aiHint": true,
         "defaultValue": false,
         "value": false,
@@ -113,6 +116,7 @@
         "shape": true,
         "options": true,
         "render": false,
+        "moneyDisplay": true,
         "aiHint": true,
         "defaultValue": true,
         "value": false,
@@ -146,6 +150,7 @@
         "shape": false,
         "options": false,
         "render": false,
+        "moneyDisplay": true,
         "aiHint": true,
         "defaultValue": false,
         "value": false,
@@ -815,6 +820,13 @@
       }
     },
     "numericRange": {
+      "schema": {
+        "x-osf-ordered-fields": {
+          "lower": "from",
+          "upper": "to",
+          "kind": "numeric"
+        }
+      },
       "kind": "object",
       "label": {
         "en": "Numeric range",
@@ -863,6 +875,13 @@
       }
     },
     "dateRange": {
+      "schema": {
+        "x-osf-ordered-fields": {
+          "lower": "from",
+          "upper": "to",
+          "kind": "date"
+        }
+      },
       "kind": "object",
       "label": {
         "en": "Date range",
@@ -1071,6 +1090,10 @@
       ]
     },
     "timeZone": {
+      "schema": {
+        "type": "string",
+        "x-osf-time-zone": true
+      },
       "label": {
         "en": "Time zone",
         "nl": "Tijdzone"
@@ -1141,6 +1164,36 @@
       "icon": "ListChecks",
       "render": {
         "display": "FieldDefinitionView",
+        "input": "JsonFieldEditor"
+      }
+    },
+    "keyValueMap": {
+      "kind": "object",
+      "label": {
+        "en": "Text value map",
+        "nl": "Tekstwaardemap"
+      },
+      "baseType": "object",
+      "schema": {
+        "type": "object",
+        "propertyNames": {
+          "minLength": 1,
+          "maxLength": 160,
+          "not": {
+            "enum": [
+              "constructor",
+              "prototype",
+              "__proto__"
+            ]
+          }
+        },
+        "additionalProperties": {
+          "type": "string",
+          "maxLength": 8000
+        }
+      },
+      "render": {
+        "display": "TextDisplay",
         "input": "JsonFieldEditor"
       }
     },

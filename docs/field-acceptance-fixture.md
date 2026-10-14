@@ -66,14 +66,10 @@ only the entity's read role never receives the value.
 | 35 | `payoutIban` | `iban` | whole | type carries pattern, classification, retention, audit |
 | 36 | `commercialTotal` | `object` + children | | `net: currency`, `vatRate: percentage`, `gross: currency` |
 
-**Why `measurement` is structured.** A fixed-unit measurement is a plain number
-with the field's own `unit:`. 12 uses the structured type because a variable's
-declared shape (`VariableValueShape`) carries `osfType`, `baseType`,
-`cardinality`, nullability, domain and reference target — **not** `unit` and not
-`currency`. So a bare `number` variable would satisfy a `number` field declaring
-`unit: kg`. Keeping the unit inside the value closes that for 12; closing it for
-the fixed-unit form means adding unit context to the compatibility comparison,
-which belongs to the compatibility owner.
+**Why `measurement` is structured.** A variable-unit measurement keeps both
+amount and unit inside its value. A fixed-unit field instead declares `unit:`.
+Variable compatibility carries both unit and currency context and refuses a
+whole-value binding between different contexts; it performs no conversion.
 
 **36 is composition only.** Nothing recomputes `gross`. That is why it is an
 authored object rather than a catalogue type that would imply an invariant the
@@ -218,12 +214,25 @@ metadata on the catalogue entry's `props`, read by the shared money formatter.
 They restate the formatter's own defaults and change neither storage nor
 arithmetic: a presentation in millions still stores units.
 
-They live on the catalogue type because there is nowhere else to put them. A
-schema-3 field may not author `render` at all — field presentation belongs to the
-renderer registry, and `assertEntityAuthoring` refuses it — and a web view's
-field entry may override the *component* but not its props. So the display scale
-is currently a per-type decision: a report that wants thousands where another
-screen wants units has no way to say so. That gap is listed below.
+The catalogue supplies defaults. Stored FieldDefinitions may set the same
+properties on `render.props`; the field editor exposes them through its explicit
+`moneyDisplay` profile control. Core entity fields retain their schema-3 data
+contract, while a Web view's field entry can override presentation per view:
+
+```yaml
+- key: amount
+  render:
+    component: MoneyInput
+    props:
+      decimalPlaces: 0
+      scale: millions
+```
+
+The compiler validates decimal places as an integer from 0 to 20 and scale as
+one of the three declared choices. The host projection retains the properties.
+The shared exact formatter rounds presentation only; edits and canonical writes
+keep the unscaled value. Authored numeric bounds may use exact decimal text,
+including bounds beyond JavaScript's safe integer range.
 
 ## Presentation
 
@@ -256,8 +265,6 @@ the nearest supported contract and says so rather than implying the missing one.
 
 | gap | affects | status |
 | --- | --- | --- |
-| `unit`/`currency` are not part of the variable value shape | 12 and any fixed-unit numeric | belongs to the compatibility owner |
-| the display axis cannot be set per field | 10, 11 | a field authors no `render`, and a web view overrides the component but not its props, so scale and decimals are a per-type decision |
 | nothing expands a `recurrence` | 26 | the type is a value contract; no scheduler for it exists |
 
 ## Running it

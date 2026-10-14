@@ -183,6 +183,7 @@ export function resolveFields(
       baseType,
       cardinality,
       ...(bounds ? { cardinalityBounds: bounds } : {}),
+      ...(field.variables ? { variables: field.variables } : {}),
       required: field.required === true || required,
       label: field.label ?? semantic?.label ?? { en: field.key, nl: field.key },
       ...(field.description !== undefined ? { description: field.description } : {}),

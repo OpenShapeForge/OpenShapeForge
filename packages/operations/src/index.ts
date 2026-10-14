@@ -1,6 +1,39 @@
 // SPDX-License-Identifier: BUSL-1.1
 export { FIELD_ITEM_ID, type FieldValuePolicy } from "./field-value-policy.js";
-export { operationChoiceKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword, operationTypeKeyword } from "./schema-annotations.js";
+export { operationChoiceKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword, operationTypeKeyword, operationVariablesKeyword } from "./schema-annotations.js";
+export type {
+  FieldVariableMode,
+  VariableCatalogue,
+  VariableCompatibility,
+  VariableNamespace,
+  VariableNamespaceSource,
+  VariableOffer,
+  VariableReference,
+  VariableRefusalCode,
+  VariableScope,
+  VariableSlot,
+  VariableUsage,
+  VariableValueShape,
+} from "./field-variables.js";
+export {
+  assertVariableCompatible,
+  assertVariableSourceValue,
+  compatibleVariableOffers,
+  fieldVariableSlot,
+  matchesBaseType,
+  parseVariableReference,
+  permitsVariableUsage,
+  VARIABLE_NAMESPACE_SCOPES,
+  VARIABLE_NAMESPACES,
+  VARIABLE_TOKEN,
+  VariableError,
+  variableCompatibility,
+  variableOffer,
+  variableOffers,
+  variableText,
+  variableTokens,
+  wholeVariableExpression,
+} from "./field-variables.js";
 
 export type {
   OperationEnvelope,

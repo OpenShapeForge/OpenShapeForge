@@ -7,6 +7,7 @@ import {
   operationInputFieldsKeyword,
   operationReferenceKeyword,
   operationTypeKeyword,
+  operationVariablesKeyword,
 } from "@openshapeforge/operations";
 
 export type OperationAjv = InstanceType<typeof Ajv2020.default>;
@@ -34,5 +35,6 @@ export function createOperationAjv(coerceTypes = false): OperationAjv {
   instance.addKeyword(operationI18nKeyword);
   instance.addKeyword(operationInputFieldsKeyword);
   instance.addKeyword(operationTypeKeyword);
+  instance.addKeyword(operationVariablesKeyword);
   return instance;
 }

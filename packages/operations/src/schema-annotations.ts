@@ -113,3 +113,17 @@ export const operationTypeKeyword = {
   // A camelCase catalog or base key, or a PascalCase entity name; never a path or a dashed name.
   metaSchema: { type: "string", pattern: "^[A-Za-z][A-Za-z0-9]*$" },
 };
+
+/**
+ * Whether the property accepts a variable instead of a literal, and in which
+ * shape (`./field-variables.ts`). Stamped only where the field authors a mode:
+ * a property without it takes literals alone, so `{{…}}` in its value is text.
+ * The keyword documents the contract; the binding itself is accepted and
+ * resolved server-side, never by the transport that advertises it.
+ */
+export const operationVariablesKeyword = {
+  keyword: "x-osf-variables",
+  schemaType: "string" as const,
+  valid: true,
+  metaSchema: { type: "string", enum: ["whole", "template", "both"] },
+};

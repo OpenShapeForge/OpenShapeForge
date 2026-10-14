@@ -12,6 +12,7 @@ import {
   resolveFieldBaseType,
   type OperationFieldBaseType,
   operationTypeKeyword,
+  operationVariablesKeyword,
   type OperationFieldDefinition,
   type OperationFieldSchemaRegistry,
 } from "@openshapeforge/operations";
@@ -37,6 +38,7 @@ export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
     ajv.addKeyword({ keyword: "x-osf-default-template", schemaType: "string", valid: true });
     ajv.addKeyword(operationChoiceKeyword);
     ajv.addKeyword(operationTypeKeyword);
+    ajv.addKeyword(operationVariablesKeyword);
     try {
       if (schema.$async === true) return invalidDefinition();
       const validate = ajv.compile(schema);

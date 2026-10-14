@@ -94,6 +94,9 @@ function withFieldMetadata(
   if (title) schema.title = title;
   // The type a form renders the property through; the JSON type beside it is what validates.
   schema["x-osf-type"] = field.osfType;
+  // The variable shapes this field accepts, where it authors any; a property
+  // without the keyword takes literals alone.
+  if (field.variables && field.variables !== "none") schema["x-osf-variables"] = field.variables;
   if (enumeration) schema.enum = typedEnumValues(enumeration.values, field.baseType);
   if (field.options?.type === "entity") {
     if (!field.options.source?.trim()) throw new Error(`Entity options for ${field.key} require a source.`);
@@ -129,7 +132,8 @@ export function fieldSchema(
 ): OperationJsonSchema {
   const schema = withFieldMetadata(valueSchema(field, registry, options), field, fieldEnumeration(field, registry), options);
   if (field.cardinality !== "collection") return schema;
-  const { title, description, "x-osf-i18n": uiCopy, default: defaultValue, ...outerItemSchema } = schema;
+  // A variable fills the whole collection property, not one row of it.
+  const { title, description, "x-osf-i18n": uiCopy, default: defaultValue, "x-osf-variables": variables, ...outerItemSchema } = schema;
   let items: OperationJsonSchema = field.item
     ? {
         allOf: [outerItemSchema, fieldSchema(field.item, registry, options)],
@@ -140,6 +144,7 @@ export function fieldSchema(
   const array: OperationJsonSchema = { type: "array", items };
   // The collection is a use of the same type as its items: a form resolves the property, not the row.
   array["x-osf-type"] = field.osfType;
+  if (variables !== undefined) array["x-osf-variables"] = variables;
   if (uiCopy !== undefined) array["x-osf-i18n"] = uiCopy;
   if (title !== undefined) array.title = title;
   if (description !== undefined) array.description = description;

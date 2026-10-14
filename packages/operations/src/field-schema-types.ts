@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Input and registry types for the FieldDefinition to JSON Schema projection. */
 
+import type { FieldVariableMode } from "./field-variables.js";
+
 export type OperationJsonSchema = Record<string, unknown>;
 export type OperationLocalizedText = string | Readonly<{
   en?: string;
@@ -52,6 +54,8 @@ export type OperationFieldDefinition = {
   /** A base type, a osf-type catalog key, or an entity name. */
   osfType: string;
   cardinality?: OperationFieldCardinality;
+  /** Whether this field accepts a variable instead of a literal, and in which shape. */
+  variables?: FieldVariableMode;
   required?: boolean;
   label?: OperationLocalizedText;
   description?: OperationLocalizedText;
@@ -127,6 +131,8 @@ export type ResolvedOperationField = {
   osfType: string;
   baseType: OperationFieldBaseType;
   cardinality: "single" | "collection";
+  /** The authored variable mode; absent means `none` (see ./field-variables.ts). */
+  variables?: FieldVariableMode;
   /** Exact authored collection bounds retained after cardinality normalization. */
   cardinalityBounds?: { min?: number; max?: number | "unbounded" };
   required: boolean;

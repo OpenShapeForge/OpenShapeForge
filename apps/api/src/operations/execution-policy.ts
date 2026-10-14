@@ -140,6 +140,12 @@ export type ExecutionPolicyRegistration = {
   failures?: readonly ModuleLoadFailure[];
   /** The module objects as they were before `init` ran. */
   candidates?: readonly RuntimeModule[];
+  /**
+   * Module names the host requires as policy owners
+   * ({@link readRequiredExecutionPolicyModules}). This is the knowledge that
+   * survives a module which never produced an object at all.
+   */
+  required?: readonly string[];
 };
 
 function declaresExecutionPolicy(module: RuntimeModule | undefined): boolean {
@@ -147,21 +153,88 @@ function declaresExecutionPolicy(module: RuntimeModule | undefined): boolean {
 }
 
 /**
+ * The host's explicit statement of which modules MUST own execution policies
+ * here, as server configuration rather than authored syntax.
+ *
+ * A module object only exists once its runtime entry point imported and
+ * constructed. An import that throws, a factory that throws, an export that is
+ * not a module and a name that disagrees with the registration all leave
+ * `modules/registry.ts` with a failure and no object — so core cannot read
+ * whether the thing that vanished was the tenant's enforcement owner. This
+ * list is that knowledge, kept outside the object: a name here must end up
+ * contributing a policy, or the process refuses to start.
+ *
+ * Unset — the default, and every host that deliberately runs no policy — means
+ * core requires none and behaves exactly as before.
+ */
+export const REQUIRED_EXECUTION_POLICY_MODULES_ENV =
+  "OPENSHAPEFORGE_REQUIRED_EXECUTION_POLICY_MODULES";
+
+export function readRequiredExecutionPolicyModules(
+  env: NodeJS.ProcessEnv = process.env,
+): readonly string[] {
+  const raw = env[REQUIRED_EXECUTION_POLICY_MODULES_ENV];
+  if (raw === undefined || raw.trim() === "") return [];
+  const names = [...new Set(raw.split(",").map((name) => name.trim()).filter(Boolean))].sort();
+  if (names.length === 0) {
+    throw new Error(
+      `${REQUIRED_EXECUTION_POLICY_MODULES_ENV} is set but names no module. ` +
+        "Leave it unset for a host that requires no execution policy owner.",
+    );
+  }
+  return names;
+}
+
+/**
+ * Refuse this process when a required policy owner is not here, whatever else
+ * survived. Called at every bootstrap that executes Operations, before the
+ * surfaces are assembled, and again when the policies are bound — a process
+ * that keeps serving its ordinary CRUD and its core job worker without the
+ * owner the host named would admit exactly the changes that owner refuses.
+ */
+export function assertRequiredExecutionPolicyOwners(
+  registration: Pick<ExecutionPolicyRegistration, "loaded" | "failures" | "required">,
+): void {
+  const required = registration.required ?? [];
+  if (required.length === 0) return;
+  const owners = new Map(registration.loaded.map((module) => [module.name, module]));
+  const failures = new Map((registration.failures ?? []).map((failure) => [failure.name, failure]));
+  const problems = required.flatMap((name) => {
+    if (declaresExecutionPolicy(owners.get(name))) return [];
+    const failure = failures.get(name);
+    if (failure) return [`${JSON.stringify(name)} (${failure.reason}: ${failure.message})`];
+    if (owners.has(name)) return [`${JSON.stringify(name)} loaded but contributed no execution policy`];
+    return [`${JSON.stringify(name)} is not a loaded runtime module of this process`];
+  });
+  if (problems.length === 0) return;
+  throw new Error(
+    `${REQUIRED_EXECUTION_POLICY_MODULES_ENV} requires ${required.map((name) => JSON.stringify(name)).join(", ")} ` +
+      `to own host execution policies here, and ${problems.join("; ")}. ` +
+      "A tenant the host means to govern would otherwise be free to change anything, " +
+      "so this process refuses to start.",
+  );
+}
+
+/**
  * Core boot binds the loaded modules' policies once. A duplicate name is
  * refused here rather than silently last-wins, so the refusal a tenant sees
- * cannot depend on module load order alone. A configured contributor that did
- * not survive initialisation refuses boot: serving without it would silently
- * admit every change the host meant to govern.
+ * cannot depend on module load order alone.
  *
- * A module that never loaded at all contributes no object core can read, so
- * its contract is unknown here; docs/execution-policies.md states that limit
- * and what a host does about it.
+ * Two fail-closed boot rules, because an enforcement owner can go missing in
+ * two different ways:
+ *
+ *  - a module whose object exists and whose `init` threw is recognised by its
+ *    own declaration, whether or not the host named it;
+ *  - a module the host NAMED as a required owner must actually contribute a
+ *    policy here, which is what catches an import, factory, export or name
+ *    failure that left no object to read at all
+ *    ({@link assertRequiredExecutionPolicyOwners}).
  */
 export function registerOperationExecutionPolicies(
   db: OpenShapeForgeDatabase,
   registration: readonly RuntimeModule[] | ExecutionPolicyRegistration,
 ): void {
-  const { loaded, failures = [], candidates = [] } = Array.isArray(registration)
+  const { loaded, failures = [], candidates = [], required = [] } = Array.isArray(registration)
     ? { loaded: registration as readonly RuntimeModule[] }
     : registration as ExecutionPolicyRegistration;
   const byName = new Map(candidates.map((module) => [module.name, module]));
@@ -174,6 +247,7 @@ export function registerOperationExecutionPolicies(
         "An execution policy that cannot run would admit every change it governs, so this process refuses to start.",
     );
   }
+  assertRequiredExecutionPolicyOwners({ loaded, failures, required });
   const registered: RegisteredPolicy[] = [];
   const names = new Set<string>();
   for (const module of loaded) {
@@ -396,3 +470,4 @@ export async function assertOperationAdmitted(
   const denial = await operationAdmissionRefusal(db, session, operation);
   if (denial) refusal(denial);
 }
+

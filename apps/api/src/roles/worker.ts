@@ -34,7 +34,10 @@ import { createDatabaseRuntime, type DatabaseRuntime } from "../db/connection.js
 import { WORKER_ROLE } from "../db/migrations/worker-role.js";
 import { createJobsRuntimeModule } from "../jobs/module.js";
 import { configuredDurableWorkerBroker } from "../operations/durable-worker.js";
-import { registerOperationExecutionPolicies } from "../operations/execution-policy.js";
+import {
+  readRequiredExecutionPolicyModules,
+  registerOperationExecutionPolicies,
+} from "../operations/execution-policy.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../modules/field-schemas.js";
 import { runtimeSettings } from "../modules/settings.js";
 import type { ModuleWorker, ModuleWorkerHandle, ModuleWorkerLogger } from "../modules/contract.js";
@@ -201,6 +204,9 @@ export async function startWorkerRole(
       loaded: initialised.loaded,
       failures: initialised.failures,
       candidates: registry.loaded,
+      // The host's own list of required owners, which is what still knows an
+      // enforcement owner is missing when its module left no object behind.
+      required: readRequiredExecutionPolicyModules(options.env ?? process.env),
     });
     // The core jobs module is not in the generated registry — nothing can
     // drop it — and joins the loaded plugins here so `job-worker` is indexed

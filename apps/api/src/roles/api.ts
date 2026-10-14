@@ -9,7 +9,11 @@
 import { API_BUILD_IDENTITY } from "../config/build-identity.js";
 import rateLimit from "@fastify/rate-limit";
 import { registerEntityOperationAvailability } from "../operations/entity/availability.js";
-import { registerOperationExecutionPolicies } from "../operations/execution-policy.js";
+import {
+  assertRequiredExecutionPolicyOwners,
+  readRequiredExecutionPolicyModules,
+  registerOperationExecutionPolicies,
+} from "../operations/execution-policy.js";
 import {
   registerOperationalRoutes,
   type OperationalRoutesOptions,
@@ -168,6 +172,13 @@ export function createApiApp(options: {
   logStream?: { write(message: string): void };
   /** Controlled operation catalog override for startup invariant tests. */
   operationContracts?: readonly OperationContract[];
+  /**
+   * The modules this host requires as execution policy owners. Defaults to
+   * the server configuration
+   * ({@link readRequiredExecutionPolicyModules}); a parameter so a boot
+   * invariant test does not have to mutate the process environment.
+   */
+  requiredExecutionPolicyModules?: readonly string[];
 }) {
   if (process.env.OPENSHAPEFORGE_ROUTE_ALIASES !== undefined) {
     throw new Error(
@@ -180,6 +191,8 @@ export function createApiApp(options: {
     failures: [],
   };
   const operationContracts = options.operationContracts ?? listOperationContracts();
+  const requiredPolicyOwners = options.requiredExecutionPolicyModules ??
+    readRequiredExecutionPolicyModules();
   const limits = readApiLimits();
   const trustProxy = limits.trustProxy;
 
@@ -391,6 +404,16 @@ export function createApiApp(options: {
     };
     const initialised = await initRuntimeModules(modules, moduleContext);
     initialisedModules = initialised.loaded;
+    // Before any surface is assembled: a module the host requires as an
+    // execution policy owner and that is not here — for any reason, including
+    // one that left no object to recognise — must stop this process from
+    // serving, whatever else loaded. Checked even without a database, where
+    // the registry below cannot be bound at all.
+    assertRequiredExecutionPolicyOwners({
+      loaded: initialised.loaded,
+      failures: initialised.failures,
+      required: requiredPolicyOwners,
+    });
     if (modulePlatform) {
       maintenanceRuntime = { platform: modulePlatform.services, modules: initialised.loaded };
     }
@@ -420,6 +443,7 @@ export function createApiApp(options: {
         loaded: initialised.loaded,
         failures: initialised.failures,
         candidates: modules.loaded,
+        required: requiredPolicyOwners,
       });
     }
     const egressOwner = assertSingleModuleEgressOwner(initialised.loaded);

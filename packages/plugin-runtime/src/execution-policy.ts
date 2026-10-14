@@ -20,17 +20,29 @@
  *    exactly that session. Row-level security applies as it does to every
  *    other tenant read, so a policy cannot read another tenant's rows and
  *    never receives a database URL or a privileged connection.
- *  - The policy runs BEFORE the Operation handler, so a denial precedes every
- *    data and external effect of the Operation it refuses.
+ *  - The policy runs BEFORE the Operation handler — and before a queued job's
+ *    handler — so a denial precedes every data and external effect of the work
+ *    it refuses.
+ *  - A governed invocation is decided twice: once early, for a friendly
+ *    refusal before any work is started, and once inside the transaction that
+ *    owns the effects, immediately before them. The second decision is the
+ *    decisive one, because a lock, a lease or a committed receipt claim can
+ *    have taken time the first decision knew nothing about.
  *
  * What core requires of a policy:
  *
- *  - It must be a read-only decision. Core joins the owning Operation
- *    transaction when there is one, so a write here would commit with — or
- *    roll back — work the policy has no business touching.
+ *  - It must be a read-only decision, and core enforces that: each evaluation
+ *    runs in its own savepoint with the transaction tightened to read-only,
+ *    and that savepoint is rolled back whatever the decision was. A write is
+ *    refused by the database; nothing a policy did survives its decision.
  *  - It must return one explicit decision. A malformed result, a thrown
  *    error and a rejected promise are all read as a denial: a policy that
  *    cannot answer must not silently widen what the tenant may do.
+ *  - It must not count its own calls. Core asks twice per governed
+ *    invocation, again for nested execution, and again when queued work runs.
+ *  - It must be able to run in every process that executes Operations. A
+ *    module that contributes a policy and then fails to initialise stops the
+ *    API role and the worker role from starting.
  *
  * Which Operations are governed, how several policies compose, and what the
  * guard deliberately does not reach are documented in
@@ -45,15 +57,24 @@ import type { PluginDatabaseSchema, PluginSessionContext } from "./index.js";
  * a policy gets, and none of them is caller input.
  */
 export type RuntimeExecutionOperation = Readonly<{
-  /** Canonical Operation id, as the compiler emitted it. */
+  /**
+   * Canonical Operation id, as the compiler emitted it. For a queued job it
+   * is the registered job kind, which is server-owned in the same way.
+   */
   id: string;
   /**
    * Canonical intent. Entity Operations use `list`, `get`, `create`,
    * `update` and `delete`; authored and record-derived ones use `invoke`
-   * unless they are entity-backed CRUD. Open on purpose: a policy decides on
-   * the effects below, and must not break when an intent is added.
+   * unless they are entity-backed CRUD; a queued job uses `job`. Open on
+   * purpose: a policy decides on the effects below, and must not break when an
+   * intent is added.
    */
   intent: string;
+  /**
+   * What this execution may do. A job handler declares nothing a compiler can
+   * check, so core reports the governed classification for one: a data write
+   * that may also write externally.
+   */
   effects: Readonly<{
     data: "read" | "write" | "delete";
     external: "none" | "read" | "write";

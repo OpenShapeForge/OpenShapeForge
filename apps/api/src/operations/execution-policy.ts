@@ -16,6 +16,13 @@
  *    `execution-policy.ts`). Core registers them once at boot, keyed on the
  *    database connection, exactly as `registerEntityOperationAvailability`
  *    does: a request can never select, add or replace a policy implementation.
+ *    Every process that runs canonical Operations registers them — the API
+ *    role and the worker role both (roles/api.ts, roles/worker.ts) — because a
+ *    connection with no registry admits everything.
+ *  - A module that was CONFIGURED to contribute a policy and then failed to
+ *    initialise refuses boot. An absent enforcement owner must never turn a
+ *    frozen tenant writable, and that is indistinguishable, at request time,
+ *    from a host that deliberately contributes none.
  *  - A host that contributes none keeps its behaviour unchanged — the guard
  *    returns before it reads the session or opens a transaction.
  *  - Only GOVERNED Operations are consulted: the ones whose compiler-owned
@@ -31,6 +38,11 @@
  *    order and the FIRST refusal denies. A policy that throws, rejects or
  *    returns a malformed decision denies with core's own wording — an owner
  *    that cannot answer must never widen what the tenant may do.
+ *  - Each policy decides inside its own savepoint with the transaction
+ *    tightened to read-only. A decision is a read; a policy that writes is
+ *    refused by the database, and whatever it managed to do is rolled back to
+ *    that savepoint — so neither its write nor its failure can commit with,
+ *    or roll back, the work it is deciding about.
  *
  * The refusal is core's: `EXECUTION_NOT_PERMITTED` (403), carrying only the
  * policy's own friendly sentence. A policy cannot choose the code, so it
@@ -38,12 +50,13 @@
  * internal cause, SQL text or another tenant's data into a caller's answer.
  */
 import { operationFailure, type OperationError } from "@openshapeforge/operations";
-import type { Transaction } from "kysely";
+import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { ModuleExecutionPolicy, RuntimeModule } from "../modules/contract.js";
+import type { ModuleLoadFailure } from "../modules/registry.js";
 
 /** Core's canonical code for a refused governed execution. */
 export const EXECUTION_NOT_PERMITTED = "EXECUTION_NOT_PERMITTED";
@@ -114,17 +127,56 @@ function normalizedEffects(
 }
 
 /**
+ * What a process knows about its policy contributors at boot.
+ *
+ * `loaded` are the modules that initialised; their policies are the ones that
+ * run. `failures` and `candidates` are how core recognises an enforcement
+ * owner that is MISSING: a module object is available from the moment it
+ * loads, so a module that declared `executionPolicies` and then threw in
+ * `init` is still identifiable by name among the candidates.
+ */
+export type ExecutionPolicyRegistration = {
+  loaded: readonly RuntimeModule[];
+  failures?: readonly ModuleLoadFailure[];
+  /** The module objects as they were before `init` ran. */
+  candidates?: readonly RuntimeModule[];
+};
+
+function declaresExecutionPolicy(module: RuntimeModule | undefined): boolean {
+  return (module?.executionPolicies?.length ?? 0) > 0;
+}
+
+/**
  * Core boot binds the loaded modules' policies once. A duplicate name is
  * refused here rather than silently last-wins, so the refusal a tenant sees
- * cannot depend on module load order alone.
+ * cannot depend on module load order alone. A configured contributor that did
+ * not survive initialisation refuses boot: serving without it would silently
+ * admit every change the host meant to govern.
+ *
+ * A module that never loaded at all contributes no object core can read, so
+ * its contract is unknown here; docs/execution-policies.md states that limit
+ * and what a host does about it.
  */
 export function registerOperationExecutionPolicies(
   db: OpenShapeForgeDatabase,
-  modules: readonly RuntimeModule[],
+  registration: readonly RuntimeModule[] | ExecutionPolicyRegistration,
 ): void {
+  const { loaded, failures = [], candidates = [] } = Array.isArray(registration)
+    ? { loaded: registration as readonly RuntimeModule[] }
+    : registration as ExecutionPolicyRegistration;
+  const byName = new Map(candidates.map((module) => [module.name, module]));
+  const missing = failures.filter((failure) => declaresExecutionPolicy(byName.get(failure.name)));
+  if (missing.length > 0) {
+    throw new Error(
+      `Runtime module${missing.length > 1 ? "s" : ""} ${
+        missing.map((failure) => `${JSON.stringify(failure.name)} (${failure.reason}: ${failure.message})`).join(", ")
+      } contribute host execution policies and did not initialise. ` +
+        "An execution policy that cannot run would admit every change it governs, so this process refuses to start.",
+    );
+  }
   const registered: RegisteredPolicy[] = [];
   const names = new Set<string>();
-  for (const module of modules) {
+  for (const module of loaded) {
     const policies = [...(module.executionPolicies ?? [])].sort((left, right) =>
       String(left?.name ?? "").localeCompare(String(right?.name ?? ""))
     );
@@ -245,64 +297,102 @@ function decidedRefusal(
 }
 
 /**
- * Refuse this invocation when a trusted policy says the tenant may not change
- * anything right now. Returns normally — admitting the Operation — when no
- * policy is registered, when the Operation's declared effects are not
- * governed, or when every policy admits it.
+ * One policy's decision, isolated.
  *
- * Call this BEFORE the handler and before any external effect. The policy
+ * The savepoint and `transaction_read_only` are what make a decision a read:
+ * the database refuses a policy's write outright, and the rollback discards
+ * whatever it did before it threw — including the statement that poisoned the
+ * transaction, which would otherwise take the caller's unrelated earlier work
+ * with it. The transaction continues exactly as the policy found it.
+ */
+async function isolatedDecision(
+  trx: Transaction<DB>,
+  index: number,
+  policy: ModuleExecutionPolicy,
+  request: ReturnType<typeof governedRequest>,
+  capability: TrustedSessionContext,
+): Promise<OperationError | undefined> {
+  const savepoint = sql.raw(`osf_execution_policy_${index}`);
+  await sql`savepoint ${savepoint}`.execute(trx);
+  let decision: unknown;
+  let failed = false;
+  try {
+    await sql`select set_config('transaction_read_only', 'on', true)`.execute(trx);
+    decision = await policy.evaluate(request, { db: trx, session: capability });
+  } catch {
+    failed = true;
+  } finally {
+    // Not conditional on success: an admitting policy that wrote must not
+    // commit that write either.
+    await sql`rollback to savepoint ${savepoint}`.execute(trx);
+    await sql`release savepoint ${savepoint}`.execute(trx);
+  }
+  return failed ? opaqueRefusal(policy.name) : decidedRefusal(policy.name, decision);
+}
+
+/**
+ * Why a trusted policy refuses this invocation, or `undefined` when it may
+ * proceed: because no policy is registered, because the Operation's declared
+ * effects are not governed, or because every policy admitted it.
+ *
+ * Evaluate BEFORE the handler and before any external effect. The policy
  * transaction is the owning Operation transaction when there is one
  * (`withDbSession` joins the active session's transaction), so a policy read
- * and the write it governs see the same tenant state; outside one, the guard
- * opens and commits its own read-only tenant transaction and therefore cannot
- * roll back unrelated earlier work.
+ * and the write it governs are decided and applied together; outside one the
+ * guard opens its own tenant transaction, which — every decision being rolled
+ * back to its savepoint — commits nothing.
  */
-export async function assertOperationAdmitted(
+export async function operationAdmissionRefusal(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput | undefined,
   operation: GovernedOperation,
-): Promise<void> {
+): Promise<OperationError | undefined> {
   const policies = registries.get(db);
-  if (!policies || policies.length === 0) return;
-  if (!isGovernedOperation(operation.effects)) return;
+  if (!policies || policies.length === 0) return undefined;
+  if (!isGovernedOperation(operation.effects)) return undefined;
   // No tenant, no tenant policy: a control-realm operator acts for the
   // platform, and an unauthenticated call never reaches a governed handler.
-  if (!session?.tenantId || !session.userId) return;
+  if (!session?.tenantId || !session.userId) return undefined;
   const request = governedRequest(operation);
   const capability = policySession(session as TrustedSessionContext);
-  let denial: OperationError | undefined;
   try {
-    await withDbSession(db, session, async (trx) => {
-      for (const { policy } of policies) {
-        let decision: unknown;
-        try {
-          decision = await policy.evaluate(request, {
-            db: trx as Transaction<DB>,
-            session: capability,
-          });
-        } catch {
-          denial = opaqueRefusal(policy.name);
-          return;
-        }
-        denial = decidedRefusal(policy.name, decision);
-        if (denial) return;
+    return await withDbSession(db, session, async (trx) => {
+      for (const [index, { policy }] of policies.entries()) {
+        const denial = await isolatedDecision(
+          trx as Transaction<DB>,
+          index,
+          policy,
+          request,
+          capability,
+        );
+        if (denial) return denial;
       }
+      return undefined;
     });
   } catch (cause) {
-    // The policy transaction itself failed (connection, timeout, a policy
-    // that poisoned it). Fail closed on a governed change; the cause stays
-    // in the server log, never in the caller's answer.
+    // The policy transaction itself failed (connection, timeout, a savepoint
+    // that could not be taken). Fail closed on a governed change; the cause
+    // stays in the server log, never in the caller's answer.
     console.error(
       `[execution-policy] ${operation.id} could not be admitted: ${
         cause instanceof Error ? cause.message : String(cause)
       }`,
     );
-    refusal({
+    return {
       code: EXECUTION_NOT_PERMITTED,
       message: "This change is not permitted right now.",
       detail: "The server could not evaluate its execution policies.",
       retryable: true,
-    });
+    };
   }
+}
+
+/** {@link operationAdmissionRefusal} as the canonical failure callers throw. */
+export async function assertOperationAdmitted(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput | undefined,
+  operation: GovernedOperation,
+): Promise<void> {
+  const denial = await operationAdmissionRefusal(db, session, operation);
   if (denial) refusal(denial);
 }

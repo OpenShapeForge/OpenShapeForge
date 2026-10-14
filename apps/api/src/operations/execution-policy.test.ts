@@ -24,11 +24,13 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { ModuleExecutionPolicy, RuntimeModule } from "../modules/contract.js";
+import type { ModuleLoadFailure } from "../modules/registry.js";
 import { toHttpError } from "../rest/http-error.js";
 import {
   assertOperationAdmitted,
   EXECUTION_NOT_PERMITTED,
   isGovernedOperation,
+  operationAdmissionRefusal,
   operationExecutionPoliciesConfigured,
   registerOperationExecutionPolicies,
   type GovernedOperation,
@@ -76,6 +78,10 @@ function module(
   ...policies: ModuleExecutionPolicy[]
 ): RuntimeModule {
   return { name, executionPolicies: policies } as RuntimeModule;
+}
+
+function failure(name: string, reason: ModuleLoadFailure["reason"]): ModuleLoadFailure {
+  return { name, specifier: "(loaded)", reason, message: "its catalog could not be hydrated" };
 }
 
 /** A policy that answers the same way for every governed Operation. */
@@ -157,12 +163,71 @@ describe("registering contributed policies", () => {
       ])
     ).toThrow(/invalid execution policy/);
   });
+
+  test("a configured contributor that failed to initialise refuses boot", () => {
+    // The module object exists from the moment it loads, so core can tell a
+    // MISSING enforcement owner from a host that deliberately has none.
+    const db = offlineDatabase();
+    const contributor = module("tenant-policy", fixedPolicy("freeze", { admitted: true }));
+    expect(() =>
+      registerOperationExecutionPolicies(db, {
+        loaded: [{ name: "surviving-crud" } as RuntimeModule],
+        failures: [failure("tenant-policy", "init_failed")],
+        candidates: [contributor, { name: "surviving-crud" } as RuntimeModule],
+      })
+    ).toThrow(/"tenant-policy" \(init_failed[\s\S]*did not initialise/);
+    expect(operationExecutionPoliciesConfigured(db)).toBe(false);
+  });
+
+  test("a failed module that contributes no policy leaves registration unchanged", () => {
+    const db = offlineDatabase();
+    const contributor = module("tenant-policy", fixedPolicy("freeze", { admitted: true }));
+    registerOperationExecutionPolicies(db, {
+      loaded: [contributor],
+      failures: [failure("unrelated", "init_failed")],
+      candidates: [contributor, { name: "unrelated" } as RuntimeModule],
+    });
+    expect(operationExecutionPoliciesConfigured(db)).toBe(true);
+  });
+
+  test("a module that never loaded is registered as the unknown it is", () => {
+    // Nothing of a module that failed to import exists for core to read, so
+    // its contract cannot be judged here; docs/execution-policies.md names
+    // this limit and what a host does about it.
+    const db = offlineDatabase();
+    const contributor = module("tenant-policy", fixedPolicy("freeze", { admitted: true }));
+    registerOperationExecutionPolicies(db, {
+      loaded: [contributor],
+      failures: [failure("never-imported", "module_missing")],
+      candidates: [contributor],
+    });
+    expect(operationExecutionPoliciesConfigured(db)).toBe(true);
+  });
 });
 
 describe("admission", () => {
   test("without a registered policy every governed Operation is admitted", async () => {
     const db = offlineDatabase();
     await assertOperationAdmitted(db, tenantSession(), WRITE);
+  });
+
+  test("the refusal is also available as a value, for a caller that settles it", async () => {
+    // The job worker records the refusal on the queue row rather than
+    // throwing it at a caller, so it needs the decision, not an exception.
+    const db = offlineDatabase();
+    expect(await operationAdmissionRefusal(db, tenantSession(), WRITE)).toBeUndefined();
+    registerOperationExecutionPolicies(db, [
+      module("host", fixedPolicy("deadline", {
+        admitted: false,
+        refusal: { message: "This workspace is read-only.", retryAt: "2026-10-20T00:00:00Z" },
+      })),
+    ]);
+    expect(await operationAdmissionRefusal(db, tenantSession(), WRITE)).toEqual({
+      code: EXECUTION_NOT_PERMITTED,
+      message: "This workspace is read-only.",
+      retryable: true,
+      retryAt: "2026-10-20T00:00:00Z",
+    });
   });
 
   test("an admitting policy admits the write", async () => {

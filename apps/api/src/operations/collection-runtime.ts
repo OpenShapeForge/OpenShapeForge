@@ -3,6 +3,7 @@ import { operationFailure } from "@openshapeforge/operations";
 import { withModuleOperationTransaction } from "../modules/platform.js";
 import type { ModuleOperationHandler } from "../modules/contract.js";
 import { executeCollectionMutationInTransaction, type CollectionMutationBinding, type CollectionMutationRequest } from "./entity/collection-mutations.js";
+import { assertOperationAdmitted, withOwnedExecutionAdmission } from "./execution-policy.js";
 import type { OperationContract } from "./runtime.js";
 import { getGeneratedCrudTables } from "./entity/catalog.js";
 import { serializeEntityRow } from "./entity/serialize-result.js";
@@ -41,7 +42,18 @@ export function nativeCollectionHandler(operation: OperationContract): ModuleOpe
         id: operation.key, entityId: operation.target!.entityId!, entityName: binding.entityName,
         intent: "invoke", concurrency: operation.concurrency!,
       };
-      const result = await executeCollectionMutationInTransaction(trx, context.session!, binding, input as CollectionMutationRequest, guard);
+      // Host execution admission belongs after this owner's parent and
+      // sibling locks, not before them: bind the decision to this transaction
+      // and let the collection owner take it immediately before it writes
+      // (operations/execution-policy.ts). The canonical runtime has already
+      // taken the early one for a friendly refusal.
+      const admit = () => assertOperationAdmitted(context.db!, context.session, {
+        id: operation.key,
+        intent: operation.intent ?? "invoke",
+        effects: operation.effects,
+      });
+      const result = await withOwnedExecutionAdmission(trx, context.session!, admit, () =>
+        executeCollectionMutationInTransaction(trx, context.session!, binding, input as CollectionMutationRequest, guard));
       return { ...result, parent: serializeEntityRow(parents[0]!, result.parent) };
     });
     return { value };

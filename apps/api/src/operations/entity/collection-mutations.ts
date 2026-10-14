@@ -23,6 +23,7 @@ import { assertRelationshipConstraintsInTransaction } from "./relationship-const
 import type { EntityOperationContract, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
 import type { LeaseProtectedOperation } from "./edit-leases.js";
 import { hasConsumedCollectionLease } from "./collection-lease-context.js";
+import { assertAdmittedBeforeEffects } from "../execution-policy.js";
 
 /** Compiler/boot-owned binding, never a request-selected table or FK. */
 export type CollectionMutationBinding = { entityName: string; field: string; action: "insert" | "move" | "update" | "remove" };
@@ -245,6 +246,11 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
           );
         }
       }
+      // The parent and every sibling are locked, each is authorized, the
+      // cardinality and related-state guards have passed: the last point
+      // before this collection changes, and the first at which no lock wait
+      // stands between a host execution policy's decision and the writes.
+      await assertAdmittedBeforeEffects(trx, session);
       if (createOp) {
         const created = await createGeneratedEntityInTransaction(trx, session, target, { ...insertValues, ...(relation.sortable ? { [fieldNameForColumn(position!)]: rows.length } : {}) }, { registry: entityValues, tables: catalog.tables, ...(catalog.derivedTools ? { derivedTools: catalog.derivedTools } : {}) });
         childId = String(created.id);

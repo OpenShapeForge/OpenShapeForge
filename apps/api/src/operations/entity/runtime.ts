@@ -56,7 +56,7 @@ import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "../
 import { requireOperationPrerequisites } from "../prerequisite-receipts.js";
 import { executeEntityPlugin } from "./plugin-executor.js";
 import { entityBusinessUnavailability } from "./availability.js";
-import { assertOperationAdmitted } from "../execution-policy.js";
+import { assertOperationAdmitted, withOwnedExecutionAdmission } from "../execution-policy.js";
 import { assertEntityValuesValid, assertOperationInputValid, type EntityValuesValidation } from "./input-validation.js";
 import {
   assertNoCallerElicitedOutput,
@@ -852,12 +852,15 @@ export async function executeEntityOperation(
      * committed without the write or the write without the decision. Opened
      * only around the mutation — the offers that follow a successful write
      * are reads of committed state.
+     *
+     * The decision itself is left to the mutation owner, which takes it once
+     * it holds its row lock and has consumed this request's controls and
+     * prepared its writes — the only point at which "nothing has happened
+     * yet" is still true and no further wait remains.
      */
     const governed = <T>(mutate: () => Promise<T>): Promise<T> =>
-      withDbSession(db, session, async () => {
-        await admit();
-        return mutate();
-      });
+      withDbSession(db, session, (trx) =>
+        withOwnedExecutionAdmission(trx, session, admit, mutate));
     // Admission on actual execution, not on the offer: the ordinary CRUD
     // fast path is where REST, GraphQL and MCP all write, so the host
     // execution policies run here too — after authorization, so a refusal

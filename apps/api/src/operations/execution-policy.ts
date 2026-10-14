@@ -49,6 +49,7 @@
  * cannot impersonate a declared Operation failure, and cannot smuggle an
  * internal cause, SQL text or another tenant's data into a caller's answer.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { operationFailure, type OperationError } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
@@ -469,5 +470,71 @@ export async function assertOperationAdmitted(
 ): Promise<void> {
   const denial = await operationAdmissionRefusal(db, session, operation);
   if (denial) refusal(denial);
+}
+
+/**
+ * The decisive admission, taken by the owner that performs the effects.
+ *
+ * A write boundary is not where its transaction opens. The generated mutation
+ * owner locks its row `for update`, re-checks record permissions, consumes an
+ * edit lease or a confirmation challenge and prepares entity-value,
+ * relationship and related-state writes; the collection owner locks the parent
+ * and every sibling and authorizes each of them. All of that WAITS: on another
+ * transaction holding the row, on the database, on whatever that other
+ * transaction is doing. A decision taken before the wait is a decision about a
+ * state that may be gone by the time anything is written.
+ *
+ * So the owner decides, where it alone knows that nothing irreversible has
+ * happened yet. Core binds the decision to the transaction and the verified
+ * identity it belongs to (as `collection-lease-context.ts` binds a consumed
+ * lease), the owner consumes it immediately before its first effect, and a
+ * refusal there throws inside that transaction — so the row is untouched and
+ * every control the invocation consumed on the way in rolls back with it.
+ *
+ * Nothing request-supplied can bind, forge or clear one of these. A caller
+ * that binds none — core's own identity bookkeeping on the runtime-surface
+ * create and update paths — reaches the same boundary and passes it unchanged.
+ */
+type PendingAdmission = {
+  trx: Transaction<DB>;
+  tenantId: string;
+  userId: string;
+  decide: () => Promise<void>;
+  decided: boolean;
+};
+
+const pendingAdmissions = new AsyncLocalStorage<PendingAdmission>();
+
+export function withOwnedExecutionAdmission<T>(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  decide: () => Promise<void>,
+  work: () => Promise<T>,
+): Promise<T> {
+  if (!session.tenantId || !session.userId) return work();
+  return pendingAdmissions.run(
+    { trx, tenantId: session.tenantId, userId: session.userId, decide, decided: false },
+    work,
+  );
+}
+
+/**
+ * Consume the bound decision, once, immediately before the first irreversible
+ * effect of this transaction. A no-op when nothing was bound, when it was
+ * already decided, or when the transaction or identity is not the one it was
+ * bound to.
+ */
+export async function assertAdmittedBeforeEffects(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+): Promise<void> {
+  const pending = pendingAdmissions.getStore();
+  if (!pending || pending.decided) return;
+  if (pending.trx !== trx || pending.tenantId !== session.tenantId ||
+    pending.userId !== session.userId) {
+    return;
+  }
+  pending.decided = true;
+  await pending.decide();
 }
 

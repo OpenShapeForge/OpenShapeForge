@@ -46,6 +46,11 @@ import {
 } from "../../operations/execution-policy.js";
 import { getGeneratedCrudTables } from "../../operations/entity/index.js";
 import { createGeneratedEntityForTable } from "../../operations/entity/mutations.js";
+import { entityOperationContract } from "../../operations/entity/runtime.js";
+import {
+  acquireEntityEditLease,
+  type LeaseProtectedOperation,
+} from "../../operations/entity/edit-leases.js";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
@@ -244,6 +249,68 @@ async function relationCount(tenantId: string): Promise<number> {
   return Number(rows.rows[0]!.count);
 }
 
+/**
+ * Hold a real `for update` lock on one row, on its own connection, until the
+ * returned release is called. This is the wait the decisive admission has to
+ * survive: whatever a mutation owner does after it locks, it does on state
+ * that may have changed while it was queued behind another transaction.
+ */
+async function withHeldRowLock<T>(
+  table: string,
+  id: string,
+  blocked: (release: () => Promise<void>) => Promise<T>,
+): Promise<T> {
+  let release!: () => void;
+  const until = new Promise<void>((resolve) => { release = resolve; });
+  let locked!: () => void;
+  const acquired = new Promise<void>((resolve) => { locked = resolve; });
+  const holding = privileged!.db.transaction().execute(async (trx) => {
+    await sql.raw(`select 1 from ${table} where id = '${id}'::uuid for update`).execute(trx);
+    locked();
+    await until;
+  });
+  await acquired;
+  let released = false;
+  const letGo = async () => {
+    if (released) return;
+    released = true;
+    release();
+    await holding;
+  };
+  try {
+    return await blocked(letGo);
+  } finally {
+    // Never leave the lock behind: every later test would queue behind it.
+    await letGo();
+  }
+}
+
+/**
+ * Wait until the mutation owner is genuinely parked on the held lock, with
+ * its early admission already behind it. A row-lock wait is a
+ * `transactionid` wait rather than a table lock, so this reads the waiting
+ * backend rather than `pg_locks.relation`.
+ */
+async function waitUntilBlockedAfterAdmission(): Promise<void> {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const rows = await sql<{ count: string }>`
+      select count(*)::text as count from pg_stat_activity
+      where datname = current_database() and pid <> pg_backend_pid()
+        and wait_event_type = 'Lock'
+    `.execute(privileged!.db);
+    if (Number(rows.rows[0]!.count) > 0 && policyCalls.length > 0) return;
+    await Bun.sleep(25);
+  }
+  const activity = await sql<{ state: string; wait: string | null; query: string }>`
+    select state, wait_event_type as wait, left(query, 80) as query from pg_stat_activity
+    where datname = current_database() and pid <> pg_backend_pid()
+  `.execute(privileged!.db);
+  throw new Error(
+    `No statement ever blocked on the held row lock after being admitted (decisions: ${
+      policyCalls.length}, activity: ${JSON.stringify(activity.rows)}).`,
+  );
+}
+
 let tenantA = randomUUID();
 let tenantB = randomUUID();
 
@@ -304,6 +371,9 @@ describe("host execution policies against PostgreSQL", () => {
     await sql`truncate public.execution_policy_deadline`.execute(privileged!.db);
     await sql`delete from platform.operation_execution_receipts`.execute(privileged!.db);
     await sql`delete from erp.relations`.execute(privileged!.db);
+    await sql`delete from erp.document_variants`.execute(privileged!.db);
+    await sql`delete from erp.documents`.execute(privileged!.db);
+    await sql`delete from erp.document_types`.execute(privileged!.db);
     // A keyed Operation's receipt row belongs to a registered tenant.
     for (const tenantId of [tenantA, tenantB]) {
       await sql`insert into platform.tenants (id, slug, name, status)
@@ -538,6 +608,231 @@ describe("host execution policies against PostgreSQL", () => {
     `.execute(privileged!.db);
     expect(receipts.rows[0]!.count).toBe("0");
   });
+
+  /**
+   * The window the review named: the mutation owner's own wait. The early
+   * decision admits, the owner then queues behind a real row lock, the tenant
+   * is frozen while it waits, and only the decision the owner takes after the
+   * lock — immediately before its write — can see that.
+   */
+  /** Freeze and unfreeze tenant A at the persisted row, as the server would. */
+  const writesUntilTenantA = (instant: string) => sql`
+    update public.execution_policy_deadline set writes_until = ${instant}::timestamptz
+    where tenant_id = ${tenantA}::uuid`.execute(privileged!.db);
+  const freezeTenantA = () => writesUntilTenantA("2026-10-14T08:00:00Z");
+  const unfreezeTenantA = () => writesUntilTenantA("2099-01-01T00:00:00Z");
+
+  const relationTable = () => getGeneratedCrudTables().find(
+    (candidate) => candidate.source?.authoringEntityName === "Relation",
+  )!;
+
+  /** The real edit lease `Relation.update` and `Relation.delete` require. */
+  const takeEditLease = (actor: TrustedSessionContext, operationId: string, id: string) =>
+    acquireEntityEditLease(app!.db, actor, {
+      operation: entityOperationContract(operationId) as unknown as LeaseProtectedOperation,
+      table: relationTable(),
+      targetId: id,
+    });
+
+  test("refuses an update that waited for a held row lock, and consumes no lease", async () => {
+    const actor = session(tenantA);
+    const created = await execute(actor, "Relation.create", "create", {
+      values: { displayName: "Before the wait", relationType: "organization" },
+    });
+    const id = (created as { data: { id: string } }).data.id;
+    const lease = await takeEditLease(actor, "Relation.update", id);
+    const input = {
+      id,
+      values: { displayName: "Renamed while frozen" },
+      expectedVersion: lease.targetVersion,
+      leaseToken: lease.leaseToken,
+    };
+    policyCalls.length = 0;
+
+    const refused = await withHeldRowLock("erp.relations", id, async (release) => {
+      const updating = execute(actor, "Relation.update", "update", input);
+      await waitUntilBlockedAfterAdmission();
+      // The early decision has already admitted this update, on a tenant that
+      // could still write; nothing has decided since, and the owner is parked
+      // on the lock with its controls still ahead of it.
+      expect(policyCalls).toHaveLength(1);
+      await freezeTenantA();
+      await release();
+      return updating;
+    });
+
+    expect(refused).toMatchObject({
+      error: { code: EXECUTION_NOT_PERMITTED, message: "This workspace is read-only." },
+    });
+    expect(policyCalls).toHaveLength(2);
+    const row = await sql<{ display_name: string }>`
+      select display_name from erp.relations where id = ${id}::uuid
+    `.execute(privileged!.db);
+    expect(row.rows[0]!.display_name).toBe("Before the wait");
+
+    // The lease is single-use and was consumed inside the refused
+    // transaction; it rolled back with it, so the very same token still
+    // works once the tenant may write again.
+    await unfreezeTenantA();
+    expect(await execute(actor, "Relation.update", "update", input)).not.toHaveProperty("error");
+  }, 60_000);
+
+  test("refuses a delete that waited for a held row lock, and consumes no confirmation", async () => {
+    const actor = session(tenantA);
+    const created = await execute(actor, "Relation.create", "create", {
+      values: { displayName: "Survives the freeze", relationType: "organization" },
+    });
+    const id = (created as { data: { id: string } }).data.id;
+    const lease = await takeEditLease(actor, "Relation.delete", id);
+    // The server-issued challenge this delete also requires.
+    const challenged = await execute(actor, "Relation.delete", "delete", {
+      id,
+      expectedVersion: lease.targetVersion,
+      leaseToken: lease.leaseToken,
+    });
+    const challenge = (challenged as unknown as {
+      error: { code: string; data: { confirmation: { challengeToken: string } } };
+    }).error;
+    expect(challenge.code).toBe("CONFIRMATION_REQUIRED");
+    const input = {
+      id,
+      expectedVersion: lease.targetVersion,
+      leaseToken: lease.leaseToken,
+      confirmationToken: challenge.data.confirmation.challengeToken,
+      confirmationAnswer: "Survives the freeze",
+    };
+    policyCalls.length = 0;
+
+    const refused = await withHeldRowLock("erp.relations", id, async (release) => {
+      const deleting = execute(actor, "Relation.delete", "delete", input);
+      await waitUntilBlockedAfterAdmission();
+      expect(policyCalls).toHaveLength(1);
+      await freezeTenantA();
+      await release();
+      return deleting;
+    });
+
+    expect(refused).toMatchObject({ error: { code: EXECUTION_NOT_PERMITTED } });
+    expect(policyCalls).toHaveLength(2);
+    expect(await relationCount(tenantA)).toBe(1);
+
+    // Single-use lease and single-use challenge: both rolled back with the
+    // refusal, so the same confirmed request completes afterwards.
+    await unfreezeTenantA();
+    expect(await execute(actor, "Relation.delete", "delete", input)).not.toHaveProperty("error");
+    expect(await relationCount(tenantA)).toBe(0);
+  }, 60_000);
+
+  test("refuses a collection mutation that waited for its parent's lock, consuming no control", async () => {
+    // The parent and its document type are fixture state, written as the
+    // server, not through the Operation under test.
+    await sql`
+      insert into erp.document_types
+        (id, tenant_id, code, name, requires_registration, allows_external_publication, lifecycle_status)
+      values
+        (${randomUUID()}::uuid, ${tenantA}::uuid, 'report', 'Report', false, false, 'draft')
+    `.execute(privileged!.db);
+    const parentRows = await sql<{ id: string; version: string }>`
+      insert into erp.documents
+        (id, tenant_id, title, document_type, status, is_external, lifecycle_status)
+      values
+        (${randomUUID()}::uuid, ${tenantA}::uuid, 'Minutes', 'report', 'draft', false, 'draft')
+      -- The version token at full microsecond precision, as every read of it
+      -- projects it; a millisecond-rounded one is a VERSION_CONFLICT.
+      returning id, to_json(updated_at)#>>'{}' as version
+    `.execute(privileged!.db);
+    const { id, version: updatedAt } = parentRows.rows[0]!;
+    policyCalls.length = 0;
+
+    // The collection owner locks the parent first; hold that row.
+    const refused = await withHeldRowLock("erp.documents", id, async (release) => {
+      const inserting = execute(session(tenantA), "Document.insertVariant", "invoke", {
+        id,
+        expectedVersion: updatedAt,
+        values: { channel: "document", locale: "nl-NL" },
+      });
+      await waitUntilBlockedAfterAdmission();
+      expect(policyCalls).toHaveLength(1);
+      await freezeTenantA();
+      await release();
+      return inserting;
+    });
+
+    expect(refused).toMatchObject({ error: { code: EXECUTION_NOT_PERMITTED } });
+    expect(policyCalls).toHaveLength(2);
+    // No child, an untouched parent version — so no control was consumed and
+    // no receipt could claim this ran — and the collection is still empty.
+    const variants = await sql<{ count: string }>`
+      select count(*)::text as count from erp.document_variants where document_id = ${id}::uuid
+    `.execute(privileged!.db);
+    expect(variants.rows[0]!.count).toBe("0");
+    const parent = await sql<{ version: string }>`
+      select to_json(updated_at)#>>'{}' as version from erp.documents where id = ${id}::uuid
+    `.execute(privileged!.db);
+    expect(parent.rows[0]!.version).toBe(updatedAt);
+    const receipts = await sql<{ count: string }>`
+      select count(*)::text as count from platform.operation_execution_receipts
+    `.execute(privileged!.db);
+    expect(receipts.rows[0]!.count).toBe("0");
+  }, 60_000);
+
+  /**
+   * The collection owner's own wait, past every decision core can take
+   * outside it: the parent is locked and its version validated by then, and
+   * the owner is blocked on a SIBLING row it must lock before it may reorder
+   * or touch anything. Only the decision the owner itself takes immediately
+   * before its writes can see a freeze that arrives here.
+   */
+  test("refuses a collection mutation blocked on a sibling child lock", async () => {
+    await sql`
+      insert into erp.document_types
+        (id, tenant_id, code, name, requires_registration, allows_external_publication, lifecycle_status)
+      values
+        (${randomUUID()}::uuid, ${tenantA}::uuid, 'report', 'Report', false, false, 'draft')
+    `.execute(privileged!.db);
+    const parentRows = await sql<{ id: string; version: string }>`
+      insert into erp.documents
+        (id, tenant_id, title, document_type, status, is_external, lifecycle_status)
+      values
+        (${randomUUID()}::uuid, ${tenantA}::uuid, 'Minutes', 'report', 'draft', false, 'draft')
+      returning id, to_json(updated_at)#>>'{}' as version
+    `.execute(privileged!.db);
+    const { id, version: updatedAt } = parentRows.rows[0]!;
+    const siblingId = randomUUID();
+    await sql`
+      insert into erp.document_variants (id, tenant_id, document_id, channel, locale)
+      values (${siblingId}::uuid, ${tenantA}::uuid, ${id}::uuid, 'email', 'nl-NL')
+    `.execute(privileged!.db);
+    policyCalls.length = 0;
+
+    const refused = await withHeldRowLock("erp.document_variants", siblingId, async (release) => {
+      const inserting = execute(session(tenantA), "Document.insertVariant", "invoke", {
+        id,
+        expectedVersion: updatedAt,
+        values: { channel: "document", locale: "nl-NL" },
+      });
+      await waitUntilBlockedAfterAdmission();
+      // Both decisions core can take before the handler are already in, and
+      // both admitted: the owner is inside its own transaction, past the
+      // parent lock, waiting for a sibling.
+      expect(policyCalls).toHaveLength(2);
+      await freezeTenantA();
+      await release();
+      return inserting;
+    });
+
+    // Only the owner's own pre-effect decision can account for this refusal.
+    expect(refused).toMatchObject({ error: { code: EXECUTION_NOT_PERMITTED } });
+    expect(policyCalls).toHaveLength(3);
+    const variants = await sql<{ count: string }>`
+      select count(*)::text as count from erp.document_variants where document_id = ${id}::uuid
+    `.execute(privileged!.db);
+    expect(variants.rows[0]!.count).toBe("1");
+    const parent = await sql<{ version: string }>`
+      select to_json(updated_at)#>>'{}' as version from erp.documents where id = ${id}::uuid
+    `.execute(privileged!.db);
+    expect(parent.rows[0]!.version).toBe(updatedAt);
+  }, 60_000);
 
   test("a policy cannot write: its decision transaction is read-only", async () => {
     const attempts: string[] = [];

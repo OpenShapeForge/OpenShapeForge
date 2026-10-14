@@ -15,6 +15,7 @@ test("preserves locale, currency minor units, signs and rounding boundaries",()=
  expect(formatMoneyDisplay("999.995",{decimalPlaces:2})).toBe("€1,000.00");
  expect(formatMoneyDisplay("1234.56",{locale:"nl-NL",decimalPlaces:0})).toBe("€ 1.235");
  expect(formatMoneyDisplay("1.2345",{currency:"BHD"})).toContain("1.235");
+ expect(formatMoneyDisplay("1234.56",{locale:"ar-EG",currency:"EUR",decimalPlaces:2})).toContain("١٬٢٣٤٫٥٦");
  expect(formatMoneyDisplay("1234",{currency:"JPY"})).toContain("1,234");
 });
 test("refuses malformed values and invalid display settings",()=>{

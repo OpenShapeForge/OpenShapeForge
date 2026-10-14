@@ -13,11 +13,14 @@ export function formatMoneyDisplay(amount: string, options: MoneyDisplay = {}): 
   if (!["units", "thousands", "millions"].includes(scale)) throw new Error("Unsupported money display scale.");
   const shift = scale === "millions" ? 6 : scale === "thousands" ? 3 : 0;
   const negative = amount.startsWith("-"), [integer, fraction = ""] = amount.replace(/^-/, "").split(".");
-  let digits = BigInt(integer! + fraction), precision = fraction.length + shift;
+  let digits = BigInt(integer! + fraction);
+  const precision = fraction.length + shift;
   if (precision > places) { const divisor = 10n ** BigInt(precision - places); digits = (digits + divisor / 2n) / divisor; }
   else digits *= 10n ** BigInt(places - precision);
   const divisor = 10n ** BigInt(places), whole = digits / divisor;
-  const decimals = (digits % divisor).toString().padStart(places, "0");
+  const digitFormat = new Intl.NumberFormat(locale, {useGrouping:false});
+  const localizedDigits = Array.from({length:10}, (_, digit) => digitFormat.format(digit));
+  const decimals = (digits % divisor).toString().padStart(places, "0").replace(/\d/g, digit => localizedDigits[Number(digit)]!);
   // Intl supplies grouping, currency placement and locale punctuation for an exact BigInt.
   const parts = new Intl.NumberFormat(locale, { style: "currency", currency, minimumFractionDigits: places, maximumFractionDigits: places }).formatToParts(negative && digits !== 0n ? -whole : whole);
   let result = parts.map(part => part.type === "fraction" ? decimals : part.value).join("");

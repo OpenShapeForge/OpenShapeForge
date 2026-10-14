@@ -76,6 +76,8 @@ export interface CompiledRender {
 }
 
 export interface CompiledField {
+  /** Canonical field-definition editor policy, projected unchanged to hosts. */
+  authoring?: import("./field-definition.js").FieldDefinitionAuthoringMetadata;
   key: string;
   /** The authored type axis: a base type, a osf-type key or an entity name. */
   osfType: string;

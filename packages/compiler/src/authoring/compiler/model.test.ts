@@ -141,3 +141,11 @@ test("inherits semantic choices recursively while explicit options win", () => {
   expect(fields[2]!.children?.[0]?.options).toEqual(options);
   expect(fields[3]!.item?.options).toEqual(options);
 });
+
+
+test("model compilation retains the canonical field authoring profile",()=>{
+ const authoring={profile:"templateParameter",locked:true,visibleProperties:["moneyDisplay"]};
+ const fields=resolveModelFields([{key:"parameters",osfType:"string",authoring}],catalog,{});
+ expect(fields[0]!.authoring).toEqual(authoring);
+ expect(fields[0]!.authoring).not.toBe(authoring);
+});

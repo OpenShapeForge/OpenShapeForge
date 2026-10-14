@@ -545,6 +545,7 @@ function projectField(
     cardinality: field.cardinality === "collection" ? "many" : "one",
     required: field.required,
     ...(fieldPolicy ? { fieldPolicy } : {}),
+    ...(field.authoring ? { authoring: structuredClone(field.authoring) } : {}),
     ...(presentation ? { presentation } : field.options?.presentation === "tiles" ? { presentation: { component: "ChoiceTiles" } } : {}),
     ...projectedTextLength(field),
     ...(field.relationship?.target ? { relationship: {

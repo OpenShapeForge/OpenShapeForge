@@ -162,6 +162,13 @@ function entity(
 }
 
 describe("web manifest projection", () => {
+  test("projects canonical field-authoring profile and lock metadata without mutation",()=>{
+    const authoring={profile:"templateParameter",locked:true,visibleProperties:["moneyDisplay"]};
+    const template=entity("Template","template",[field("parameters",{osfType:"fieldDefinition",baseType:"object",authoring})],coreView());
+    const projected=buildWebManifest([template]).entities.Template!.fields.parameters!;
+    expect(projected.authoring).toEqual(authoring);
+    expect(projected.authoring).not.toBe(authoring);
+  });
   test("projects typed value pairs and authored numeric display defaults to hosts", () => {
     const variable = entity("Variable", "variable", [
       field("definition", {osfType:"fieldDefinition",baseType:"object"}),

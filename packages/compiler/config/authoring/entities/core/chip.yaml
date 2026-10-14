@@ -3,7 +3,8 @@ kind: coreEntity
 module: core
 entity: Chip
 title: Chip
-description: A tenant-scoped reusable global text variable for authored messages, templates, and workflow configuration.
+description: A tenant-scoped reusable global variable for authored messages, templates, and workflow configuration. Each
+  variable stores the field definition that types its value, so what it may fill is decided by its own declared type.
 language: en
 displayTemplate: "{{name}}"
 filterField: name
@@ -72,21 +73,35 @@ fields:
     persisted:
       column: name
       storageClass: core
-  - key: value
+  - key: definition
+    osfType: fieldDefinition
     required: true
+    label:
+      en: Value type
+      nl: Waardetype
+    description:
+      en: The field definition that types this variable's value. It is what a field the variable fills is checked
+        against, so a text variable cannot fill a monetary field and the other way round. Its key is `value`.
+      nl: De velddefinitie die de waarde van deze variabele typeert. Een veld dat de variabele invult wordt hiertegen
+        gecontroleerd, dus een tekstvariabele kan geen geldbedrag invullen en omgekeerd. De sleutel is `value`.
+    persisted:
+      column: definition
+      storageClass: core
+  - key: value
+    osfType: typedValue
+    required: true
+    typedBy:
+      definitionField: definition
     label:
       en: Value
       nl: Waarde
     description:
-      en: Plain text value inserted when this chip is rendered.
-      nl: Platte tekstwaarde die wordt ingevoegd wanneer deze chip wordt gerenderd.
-    validation:
-      minLength: 1
-      maxLength: 8000
+      en: The variable's value, in the type its definition declares. Checked against that definition on every write.
+      nl: De waarde van de variabele, in het type dat de definitie aangeeft. Wordt bij elke schrijfactie tegen die
+        definitie gecontroleerd.
     persisted:
       column: value
       storageClass: core
-    osfType: multilineText
   - key: description
     required: false
     label:
@@ -204,12 +219,6 @@ interfaces:
   graphql: {}
   web:
     fields:
-      value:
-        render:
-          component: InputMultiline
-          props:
-            rows: 5
-            maxLength: 8000
       description:
         render:
           component: Textarea

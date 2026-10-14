@@ -48,6 +48,15 @@ export type GeneratedCrudColumn = {
     conflictColumns: string[];
     maxLength?: number;
   };
+  /** Authored `typedBy`: the sibling column whose stored FieldDefinition types this value. */
+  typedBy?: {
+    definitionField: string;
+    definitionColumn: string;
+  };
+  /** The server-owned bindings map of this table, and the fields it may carry a binding for. */
+  fieldBindings?: {
+    fields: Array<{ field: string; column: string; variables: "whole" | "template" | "both" }>;
+  };
 };
 
 export type GeneratedCrudRelationship = {
@@ -275,6 +284,13 @@ export type EntityOperationInput = ListPageInput & {
   blueprintId?: string;
   blueprintBindings?: Record<string, Record<string, string>>;
   values?: Record<string, unknown>;
+  /**
+   * The field-binding controls, as the caller sent them: the shape is the
+   * binding runtime's to judge (`field-bindings.ts`), so an unsupported one is
+   * refused by name rather than dropped on the way in.
+   */
+  bindings?: unknown;
+  unbind?: unknown;
   expectedVersion?: string;
   leaseToken?: string;
   confirmed?: boolean;

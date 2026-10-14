@@ -58,6 +58,7 @@ import {
   type EntityRelationshipTarget,
   entitySortableFieldKeys,
   entityValuesSchema,
+  withEntityBindingControls,
   withEntityOperationControls,
   writableEntityFields,
 } from "./entity-operation-json-schema.js";
@@ -624,7 +625,10 @@ function buildToolsForEntity(
         "create",
         `${description} Creates a new record.`,
       ),
-      inputSchema: withEntityOperationControls(inputSchema, contract.entityOperations.create),
+      inputSchema: withEntityOperationControls(
+        withEntityBindingControls(inputSchema, contract),
+        contract.entityOperations.create,
+      ),
       outputSchema: outputSchema("create"),
       annotations: entityAnnotations("create"),
       errors: declaredErrors("create"),
@@ -648,22 +652,25 @@ function buildToolsForEntity(
         `${description} Partially updates a record; omitted fields are left unchanged.`,
       ),
       inputSchema: withEntityOperationControls(
-        canonicalUpdate?.input.kind === "json-schema"
-          ? canonicalUpdate.input.schema
-          : {
-              type: "object",
-              properties: {
-                id: {
-                  type: "string",
-                  format: "uuid",
-                  description: `Identifier of the ${label}.`,
+        withEntityBindingControls(
+          canonicalUpdate?.input.kind === "json-schema"
+            ? canonicalUpdate.input.schema
+            : {
+                type: "object",
+                properties: {
+                  id: {
+                    type: "string",
+                    format: "uuid",
+                    description: `Identifier of the ${label}.`,
+                  },
+                  values: patch,
                 },
-                values: patch,
+                required: ["id", "values"],
+                additionalProperties: false,
+                ...(Object.keys(definitions).length > 0 ? { $defs: definitions } : {}),
               },
-              required: ["id", "values"],
-              additionalProperties: false,
-              ...(Object.keys(definitions).length > 0 ? { $defs: definitions } : {}),
-            },
+          contract,
+        ),
         canonicalUpdate,
       ),
       outputSchema: outputSchema("update"),

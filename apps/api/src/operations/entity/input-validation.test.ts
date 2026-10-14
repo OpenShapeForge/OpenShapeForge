@@ -25,6 +25,19 @@ function violationsOf(run: () => void) {
 }
 
 describe("entity write contract validation", () => {
+  test("a required binding target is mandatory again after source resolution", () => {
+    const values = (create.inputSchema!.properties as Record<string, unknown>).values as Record<string, unknown> & { required: string[] };
+    const operation = { ...create, inputSchema: { ...create.inputSchema,
+      properties: { ...create.inputSchema!.properties as Record<string, unknown>, values: { ...values, required: values.required.filter((field) => field !== "title") } },
+    } };
+    const boundTable = { ...task, columns: [...task.columns, {
+      name: "field_bindings", type: "jsonb", required: false, primaryKey: false, generated: null,
+      fieldBindings: { fields: [{ field: "title", column: "title", variables: "whole" as const }] },
+    }] };
+    expect(() => assertEntityValuesValid(operation, boundTable, { title: "Resolved", type: "follow_up", status: "open" }, { partial: false })).not.toThrow();
+    expect(violationsOf(() => assertEntityValuesValid(operation, boundTable, { type: "follow_up", status: "open" }, { partial: false })).violations)
+      .toEqual([{ field: "title", code: "REQUIRED", message: "title is required." }]);
+  });
   test("a create with every required field and authored option passes", () => {
     expect(() => assertEntityValuesValid(create, task, { title: "Call back", type: "follow_up", status: "open" }, { partial: false })).not.toThrow();
   });

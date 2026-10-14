@@ -61,7 +61,6 @@ export {
   constrainedType,
   describeField,
   fieldEnumeration,
-  type ConstrainedTypeOptions,
   type DescribeFieldOptions,
   type FieldEnumeration,
 } from "./field-schema-metadata.js";
@@ -70,7 +69,6 @@ function valueSchema(
   field: ResolvedOperationField,
   registry: OperationFieldSchemaRegistry,
   options: OperationFieldSchemaOptions,
-  enumerated: boolean,
 ): OperationJsonSchema {
   if (field.schema) {
     const extension = structuredClone(field.schema) as OperationJsonSchema;
@@ -83,13 +81,14 @@ function valueSchema(
   if (field.baseType === "object" && field.children?.length) {
     return objectSchema(field.children, registry, { ...options, requireRequired: options.requireNestedRequired ?? true });
   }
-  return constrainedType(field, { enumerated });
+  return constrainedType(field);
 }
 
 function withFieldMetadata(
   schema: OperationJsonSchema,
   field: ResolvedOperationField,
   enumeration: FieldEnumeration | undefined,
+  domain: readonly (string | number | boolean)[] | undefined,
   options: OperationFieldSchemaOptions,
 ): OperationJsonSchema {
   const title = localizedText(field.label);
@@ -113,7 +112,22 @@ function withFieldMetadata(
   // The variable shapes this field accepts, where it authors any; a property
   // without the keyword takes literals alone.
   if (field.variables && field.variables !== "none") schema["x-osf-variables"] = field.variables;
-  if (enumeration) schema.enum = typedEnumValues(enumeration.values, field.baseType);
+  // The closed domain, in the keyword that can hold it. A NUMERIC domain goes
+  // to the exact comparison beside the bounds, because `enum` reads the number
+  // 1 and the exact text "1" — the form every numeric value is projected in —
+  // as different values (see `numericSchema`). Every other type keeps `enum`,
+  // where spelling IS identity.
+  if (domain) {
+    if (isNumericBaseType(field.baseType)) {
+      const exact = schema["x-osf-exact"];
+      schema["x-osf-exact"] = {
+        ...(exact && typeof exact === "object" && !Array.isArray(exact) ? exact : {}),
+        enum: [...domain],
+      };
+    } else {
+      schema.enum = [...domain];
+    }
+  }
   if (field.options?.type === "entity") {
     if (!field.options.source?.trim()) throw new Error(`Entity options for ${field.key} require a source.`);
     schema["x-osf-reference"] = { entity: field.options.source, valueField: field.options.valueField ?? "id" };
@@ -140,6 +154,10 @@ function withFieldMetadata(
   return schema;
 }
 
+function isNumericBaseType(baseType: ResolvedOperationField["baseType"]): boolean {
+  return baseType === "integer" || baseType === "number";
+}
+
 /** Project one resolved field into deterministic JSON Schema, without bundled definitions. */
 export function fieldSchema(
   field: ResolvedOperationField,
@@ -147,10 +165,14 @@ export function fieldSchema(
   options: OperationFieldSchemaOptions = {},
 ): OperationJsonSchema {
   const enumeration = fieldEnumeration(field, registry);
+  // The closed domain in the field's own type, projected once: a numeric
+  // domain goes into `x-osf-exact`, every other one into `enum`.
+  const domain = enumeration ? typedEnumValues(enumeration.values, field.baseType) : undefined;
   const schema = withFieldMetadata(
-    valueSchema(field, registry, options, enumeration !== undefined),
+    valueSchema(field, registry, options),
     field,
     enumeration,
+    domain,
     options,
   );
   if (field.cardinality !== "collection") {

@@ -29,6 +29,8 @@ type OperationSource = {
   authorization: CompiledAuthorization;
   /** The entity's compiled relationships; a collection field makes its generic writes refusable. */
   relationships?: readonly Pick<CompiledRelationship, "kind">[];
+  /** The entity has a persisted field that accepts a variable, so every read and write resolves bindings. */
+  fieldBindings?: boolean;
 };
 
 function defaultEffects(intent: EntityOperationIntent) {
@@ -133,6 +135,7 @@ function compileOperation(
         recordPermissions: source.authorization.rowAccess?.recordPermissions !== undefined,
         secureInput: definition?.interaction !== undefined,
         collections: (source.relationships ?? []).some((relationship) => relationship.kind === "hasMany"),
+        ...(source.fieldBindings ? { fieldBindings: true } : {}),
       }),
       pluginImplementation ? definition?.errors : undefined,
     ),

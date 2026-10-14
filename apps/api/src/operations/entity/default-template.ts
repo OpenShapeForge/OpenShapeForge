@@ -5,6 +5,7 @@ import type { DB } from '../../generated/db/types.js';
 import type { DbSessionInput } from '../../db/session.js';
 import { getGeneratedCrudTables, requireEntityOperation, projectGeneratedEntityRow } from './catalog.js';
 import { recordPermissionsAllowRow } from './record-permissions.js';
+import { resolveBoundEntityRows } from './field-bindings.js';
 import type { GeneratedCrudColumn, GeneratedCrudTable, GeneratedEntityRow } from './types.js';
 /** Materialize omitted fields in the same tenant transaction as the canonical create. */
 export async function applyDefaultTemplates(trx: Transaction<DB>, session: DbSessionInput, table: GeneratedCrudTable, input: Map<GeneratedCrudColumn, unknown>, tables: readonly GeneratedCrudTable[] = getGeneratedCrudTables()) {
@@ -36,7 +37,11 @@ export async function applyDefaultTemplates(trx: Transaction<DB>, session: DbSes
         const reply = await sql<{row: GeneratedEntityRow}>`select to_jsonb(candidate.*) as row from ${sql.id(target!.schema,target!.table)} as candidate where ${sql.id(target!.primaryKey!)}::text = ${id} ${tenant} limit 1`.execute(trx);
         const row = reply.rows[0]?.row;
         if (!row || target!.source?.authorization?.recordPermissions && !recordPermissionsAllowRow(target!,row,['view'],session)) refuse();
-        projected = projectGeneratedEntityRow(target!, session, row!);
+        // A bound field of the source record holds the value of its last
+        // write. A default is materialized once and kept, so it is taken from
+        // the source as it reads NOW, through the same resolution every live
+        // read goes through.
+        projected = (await resolveBoundEntityRows(trx, session, target!, [projectGeneratedEntityRow(target!, session, row!)]))[0]!;
         related.set(cacheKey, projected);
       }
       const source = target!.columns.find(candidate => candidate.sourceField === field);

@@ -78,6 +78,7 @@ export function resolveModelFields(
     if (field.variables) compiled.variables = field.variables;
     if (field.sortable) compiled.sortable = field.sortable;
     if (field.entityValue) compiled.entityValue = { ...field.entityValue };
+    if (field.typedBy) compiled.typedBy = { ...field.typedBy };
     if (field.allowedDefinitions) compiled.allowedDefinitions = [...field.allowedDefinitions].sort();
     if (field.childAuthorization) compiled.childAuthorization = field.childAuthorization;
     if (field.childLock) compiled.childLock = field.childLock;

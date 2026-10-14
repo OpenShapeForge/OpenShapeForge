@@ -14,6 +14,7 @@ import {
 } from "./catalog.js";
 import { fieldColumnMap, tableColumnMap } from "./columns.js";
 import { resolveComputedEntityRows } from "./computed-fields.js";
+import { assertBoundFieldQueryAllowed, resolveBoundEntityRows } from "./field-bindings.js";
 import type {
   CountedEntityConnection,
   GeneratedCrudColumn,
@@ -163,6 +164,10 @@ function buildFilterConditions(
       // Sub-filter keys name related fields exactly (see the lookup below).
       assertClassifiedQueryAllowed(related, session, { filter: any as Record<string, unknown> }, true);
       assertElicitedQueryAllowed(related, { filter: any as Record<string, unknown> }, true);
+      // A related record's bound field is no more a filterable column here
+      // than it is on its own list: the exists() below would compare the
+      // value of its last write.
+      assertBoundFieldQueryAllowed(related, { filter: any as Record<string, unknown> }, true);
       const relatedFields = fieldColumnMap(related);
       const relatedConditions = [];
       for (const [relatedKey, relatedValue] of Object.entries(any as Record<string, unknown>)) {
@@ -296,6 +301,8 @@ async function listGeneratedEntityRowsForTable(
   // This helper intentionally bypasses entity-role checks for trusted runtime
   // projections, but it must not bypass the value-oracle boundary.
   assertElicitedQueryAllowed(table, input);
+  // Nor the one boundary a bound value has: its column may be stale.
+  assertBoundFieldQueryAllowed(table, input);
   const limit = normalizeLimit(input.limit);
   const offset = decodeOffsetCursor(input.cursor);
   const fixedWhere = [...tenantFixedWhere(table, session), ...(input.fixedWhere ?? [])];
@@ -329,8 +336,12 @@ async function listGeneratedEntityRowsForTable(
     const projectedRows = projectOutput
       ? projectRows(table, session, storageRows)
       : storageRows;
+    // A bound field's value is resolved again for this reader, in this
+    // transaction: the column holds the value of the last write, which a
+    // later change of the source makes stale.
     const rows = projectOutput
-      ? await resolveComputedEntityRows(trx, resolvedSession, table, projectedRows)
+      ? await resolveComputedEntityRows(trx, resolvedSession, table,
+          await resolveBoundEntityRows(trx, resolvedSession, table, projectedRows))
       : projectedRows;
     return {
       rows,
@@ -403,9 +414,10 @@ export async function getGeneratedEntity(
   const row = await fetchGeneratedEntityRow(db, session, table, input.id);
   if (row === null) return null;
   const projected = projectGeneratedEntityRow(table, session, row);
-  return withDbSession(db, session, async (trx, resolvedSession) =>
-    (await resolveComputedEntityRows(trx, resolvedSession, table, [projected]))[0] ?? null,
-  );
+  return withDbSession(db, session, async (trx, resolvedSession) => {
+    const bound = await resolveBoundEntityRows(trx, resolvedSession, table, [projected]);
+    return (await resolveComputedEntityRows(trx, resolvedSession, table, bound))[0] ?? null;
+  });
 }
 
 /**

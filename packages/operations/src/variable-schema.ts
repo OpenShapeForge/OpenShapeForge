@@ -69,13 +69,22 @@ function itemsOf(schema: Readonly<Record<string, unknown>>): Readonly<Record<str
   return { ...merged, ...Object.fromEntries(Object.entries(items).filter(([key]) => key !== "allOf")) };
 }
 
+/**
+ * The closed domain of a property, from the keyword that carries it: `enum`
+ * for every type whose values JSON Schema can enumerate once, and
+ * `x-osf-exact.enum` for a numeric one, whose two forms cannot both be listed
+ * there (`field-schema-metadata.ts`). Reading both keeps one contract: the
+ * domain a binding is compared against is the domain the write path enforces.
+ */
 function enumOf(schema: Readonly<Record<string, unknown>>): readonly (string | number | boolean)[] | undefined {
-  if (!Array.isArray(schema.enum)) return undefined;
-  const values = schema.enum.filter(
+  const exact = record(schema["x-osf-exact"])?.enum;
+  const published = Array.isArray(schema.enum) ? schema.enum : Array.isArray(exact) ? exact : undefined;
+  if (!published) return undefined;
+  const values = published.filter(
     (value): value is string | number | boolean =>
       typeof value === "string" || typeof value === "number" || typeof value === "boolean",
   );
-  return values.length === schema.enum.length ? values : undefined;
+  return values.length === published.length ? values : undefined;
 }
 
 function targetOf(schema: Readonly<Record<string, unknown>>): string | undefined {

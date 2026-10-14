@@ -191,6 +191,39 @@ describe("whole-value compatibility", () => {
     expect(refusal(slot({ mode: "whole" }), offered({ enum: ["open"] }))).toBeUndefined();
   });
 
+  test("a numeric domain is compared as numbers, not as spellings", () => {
+    const priority = slot({ osfType: "integer", baseType: "integer", mode: "whole", enum: [1, 2] });
+    const numeric = (values: readonly (string | number)[]) =>
+      offered({ osfType: "integer", baseType: "integer", enum: values });
+    // The platform projects a numeric column as exact decimal text, so a
+    // source declaring "1" offers the same member of the domain as 1 does.
+    expect(refusal(priority, numeric(["1"]))).toBeUndefined();
+    expect(refusal(priority, numeric(["1.0", "2"]))).toBeUndefined();
+    expect(refusal(priority, numeric([1, 2]))).toBeUndefined();
+    expect(refusal(priority, numeric(["3"]))).toBe("INCOMPATIBLE_DOMAIN");
+    // Text keeps spelling as identity: "1" and 1 are not the same value there.
+    expect(refusal(slot({ mode: "whole", enum: ["1"] }), offered({ enum: ["01"] })))
+      .toBe("INCOMPATIBLE_DOMAIN");
+  });
+
+  test("a numeric destination reads its closed domain from the schema that publishes it", () => {
+    const [field] = resolveFields([{
+      key: "priority",
+      osfType: "integer",
+      variables: "whole",
+      options: { type: "static", items: [{ value: "1" }, { value: "2" }] },
+    }], {});
+    const published = fieldSchema(field!, {});
+    const destination = schemaVariableSlot("Example.priority", published);
+    expect(destination?.enum).toEqual(["1", "2"]);
+    // Which is the domain the same projection enforces: a source offering the
+    // number form of a member fits, a source offering 3 does not.
+    expect(refusal(destination!, offered({ osfType: "integer", baseType: "integer", enum: [1] })))
+      .toBeUndefined();
+    expect(refusal(destination!, offered({ osfType: "integer", baseType: "integer", enum: [3] })))
+      .toBe("INCOMPATIBLE_DOMAIN");
+  });
+
   test("the mode decides which shapes are accepted at all", () => {
     expect(refusal(slot({ mode: "none" }), offered())).toBe("VARIABLES_NOT_PERMITTED");
     expect(refusal(slot({ mode: "template" }), offered())).toBe("VARIABLES_NOT_PERMITTED");

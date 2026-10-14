@@ -132,6 +132,10 @@ function operationControlFields(
   const operation = operationContractForSchema(table, intent);
   return [
     ...(intent === "create" && table.source?.blueprint ? ["      blueprintId: String", "      blueprintBindings: JSON"] : []),
+    // Offered only where a field of this entity accepts a variable at all.
+    ...(intent !== "delete" && table.columns.some((column) => column.fieldBindings)
+      ? ["      bindings: JSON", "      unbind: [String!]"]
+      : []),
     ...(operation?.concurrency?.version ? ["      expectedVersion: String!"] : []),
     ...(operation?.concurrency?.editLease ? ["      leaseToken: String!"] : []),
     ...(operation?.interaction.confirmation.mode === "acknowledgement"
@@ -682,6 +686,10 @@ function selectionIncludes(info: GraphQLResolveInfo, name: string): boolean {
 const GRAPHQL_OPERATION_CONTROLS = new Set([
   "blueprintId",
   "blueprintBindings",
+  // Field bindings are controls, not values: the map they produce is
+  // server-owned and holds only what the runtime resolved and compared.
+  "bindings",
+  "unbind",
   "expectedVersion",
   "leaseToken",
   "confirmed",

@@ -19,6 +19,8 @@ const RUNTIME_MODULES = [
   "runtime.ts",
   "mutations.ts",
   "queries.ts",
+  "field-bindings.ts",
+  "typed-values.ts",
   "record-permissions.ts",
   "input-validation.ts",
   "write-policy.ts",
@@ -34,6 +36,9 @@ const NOT_A_REQUEST_REFUSAL = new Set([
   "INTERNAL_SERVER_ERROR",
   "GENERATED_CRUD_NOT_ENABLED",
   "GENERATED_CRUD_OPERATION_NOT_ENABLED",
+  // Compiled metadata that does not describe its own table, or a stored
+  // definition this runtime cannot enforce: a build or data fault.
+  "INVALID_DEFINITION",
   // Refusals of the lease and confirmation tools themselves, not of a CRUD Operation.
   "LEASE_NOT_SUPPORTED",
   "LEASE_ACQUIRE_FAILED",
@@ -41,6 +46,7 @@ const NOT_A_REQUEST_REFUSAL = new Set([
   // Field-level violation kinds nested inside a VALIDATION answer.
   "INVALID_TYPE",
   "INVALID_DATETIME",
+  "INVALID_VALUE",
   "REQUIRED",
   // Availability offer diagnostics accompany a successful read, not a refused CRUD request.
   "OPERATION_UNAVAILABLE",

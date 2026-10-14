@@ -23,16 +23,19 @@ import { DECIMAL_PATTERN, INTEGER_TEXT_PATTERN } from "./scalar-projection.js";
  * typed global, is accepted again where its own type is wanted, with every
  * digit intact. `pattern` constrains the text form (JSON Schema ignores it for
  * a number), `minimum`/`maximum` constrain the number form, and `x-osf-exact`
- * applies the same authored bounds to the text form by exact comparison.
+ * applies the same authored bounds AND the closed domain to both forms by
+ * exact decimal comparison.
  *
- * A closed numeric domain keeps the single number form: `enum` compares by
- * value equality, so admitting text there would mean enumerating spellings.
+ * A closed numeric domain therefore lives in `x-osf-exact.enum` (stamped in
+ * `field-schema.ts`) and NOT in the JSON `enum` keyword: `enum` compares by
+ * strict equality, so a number-only domain rejects the very text the platform
+ * projects the value as (`1` vs `"1"`), and listing both spellings would
+ * publish each member twice. The exact comparison reads `1`, `1.0` and `"1"`
+ * as one member; the authored values stay visible beside it in the property's
+ * description and in `x-osf-i18n.enum`, and `variable-schema.ts` reads the
+ * domain from there.
  */
-function numericSchema(
-  baseType: "integer" | "number",
-  enumerated: boolean,
-): OperationJsonSchema {
-  if (enumerated) return { type: baseType };
+function numericSchema(baseType: "integer" | "number"): OperationJsonSchema {
   return {
     type: [baseType, "string"],
     pattern: baseType === "integer" ? INTEGER_TEXT_PATTERN : DECIMAL_PATTERN,
@@ -41,12 +44,11 @@ function numericSchema(
 
 function baseTypeSchema(
   field: Pick<ResolvedOperationField, "baseType">,
-  enumerated: boolean,
 ): OperationJsonSchema {
   switch (field.baseType) {
     case "boolean": return { type: "boolean" };
-    case "integer": return numericSchema("integer", enumerated);
-    case "number": return numericSchema("number", enumerated);
+    case "integer": return numericSchema("integer");
+    case "number": return numericSchema("number");
     case "date": return { type: "string", format: "date" };
     case "datetime": return { type: "string", format: "date-time" };
     case "object": return { type: "object" };
@@ -54,22 +56,16 @@ function baseTypeSchema(
   }
 }
 
-export type ConstrainedTypeOptions = {
-  /** Whether the field also projects a closed `enum`; see `numericSchema`. */
-  enumerated?: boolean;
-};
-
 /**
  * Base type plus every authored validation bound. Deliberately does NOT add
- * `enum`, `description` or `default` — see the file header on key order.
+ * the closed domain, `description` or `default` — see the file header on key
+ * order, and `field-schema.ts` for where a domain is stamped.
  */
 export function constrainedType(
   field: Pick<ResolvedOperationField, "baseType" | "validation">,
-  options: ConstrainedTypeOptions = {},
 ): OperationJsonSchema {
   const numeric = field.baseType === "integer" || field.baseType === "number";
-  const exact = numeric && !options.enumerated;
-  const schema = baseTypeSchema(field, options.enumerated === true);
+  const schema = baseTypeSchema(field);
   const validation = field.validation;
   const minimum = numeric ? exactNumericRule(validation?.min) : numericRule(validation?.min);
   const maximum = numeric ? exactNumericRule(validation?.max) : numericRule(validation?.max);
@@ -88,7 +84,7 @@ export function constrainedType(
     // layer uses to pick a uuid column, so it carries through unchanged.
     if (validation.format !== undefined) schema.format = validation.format;
   }
-  if (exact) {
+  if (numeric) {
     schema["x-osf-exact"] = {
       ...(field.baseType === "integer" ? { integer: true } : {}),
       ...(minimum !== undefined ? { minimum } : {}),

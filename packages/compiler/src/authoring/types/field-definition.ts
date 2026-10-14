@@ -263,6 +263,8 @@ export interface FieldDefinition {
   sortable?: boolean;
   /** A typed embedded entity value; relational leaves are lowered to real foreign keys. */
   entityValue?: { definitionField: string; parameterBindings?: boolean };
+  /** This value's contract is the FieldDefinition stored in the named sibling field. */
+  typedBy?: { definitionField: string };
   /** Allowed entity-value definitions on this relationship collection. */
   allowedDefinitions?: string[];
   /**

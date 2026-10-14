@@ -468,6 +468,7 @@ export type RuntimeModule = {
   seeds?: ModuleSeed[];                             // appended to the migration chain
   workers?: Record<string, ModuleWorker>;           // background roles, keyed by role name
   jobHandlers?: Record<string, ModuleJobHandler>;   // durable job kinds, keyed by kind — see jobs.md
+  executionPolicies?: readonly ModuleExecutionPolicy[]; // host-wide execution admission — see execution-policies.md
 };
 ```
 
@@ -514,6 +515,16 @@ tenant session for the job's tenant. A kind two modules both register fails
 composition at boot. The queue, its states — including `outcome_unknown`, the
 job form of `OPERATION_OUTCOME_UNKNOWN` — the `mail.deliver` kind and the
 operator Operations are described in [jobs.md](jobs.md).
+
+`executionPolicies` is the orthogonal seam: not one authored action on one
+record, but whether this tenant may change anything at all right now. Core
+evaluates every contributed policy before it runs a governed canonical
+Operation — any data write or delete, or an external write — on every
+transport, under the caller's own tenant-scoped transaction and verified
+session. Reads, sign-in and core's own identity bookkeeping stay outside it; a
+host that contributes none keeps its current behaviour exactly. The contract,
+the composition rule, the `EXECUTION_NOT_PERMITTED` refusal and the limits are
+in [execution-policies.md](execution-policies.md).
 
 `platform.webhookSecrets`, when the host provides it, is how a plugin accepts
 signed inbound webhooks without reading the signing secret: `seal` encrypts a

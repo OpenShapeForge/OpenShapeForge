@@ -13,6 +13,7 @@
     ".": "./src/index.ts",
     "./build-identity": "./src/build-identity.ts",
     "./connector": "./src/connector.ts",
+    "./execution-policy": "./src/execution-policy.ts",
     "./language": "./src/language.ts",
     "./acting-relation": "./src/acting-relation.ts",
     "./secrets": "./src/secrets.ts",

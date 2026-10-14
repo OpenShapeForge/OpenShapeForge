@@ -47,6 +47,7 @@ import { generatedVersioning } from "./versioning-registry.js";
 import { organizationServiceIdentities } from "../auth/organization-service-identities.js";
 import { operationContractFingerprint } from "../operations/contract-fingerprint.js";
 import { executeKeyedOperation } from "../operations/execution-receipts.js";
+import { assertOperationAdmitted } from "../operations/execution-policy.js";
 import { operationErrorOf } from "@openshapeforge/operations";
 import { ArtifactStorageRuntime } from "./artifact-storage.js";
 import { runtimeSettings } from "./settings.js";
@@ -913,6 +914,20 @@ export class ModulePlatformRuntime {
     }
     const contractFailure = contractPreconditionFailure(match.definition, request);
     if (contractFailure) return contractFailure;
+    // Record-derived provider Operations do not pass through the canonical
+    // runtime, so the host execution policies are evaluated here on the
+    // definition's own declared effects, before the provider is reached.
+    try {
+      await assertOperationAdmitted(this.#db, session, {
+        id: match.definition.id,
+        intent: match.definition.intent,
+        effects: match.definition.effects,
+      });
+    } catch (error) {
+      const operationError = operationErrorOf(error);
+      if (operationError) return { error: operationError };
+      throw error;
+    }
     const stack = this.#operationCallStack.getStore() ?? [];
     if (stack.includes(request.operation.id)) {
       return {
@@ -1008,6 +1023,22 @@ export class ModulePlatformRuntime {
           retryable: false,
         },
       };
+    }
+    // The bridge runs a core implementation behind a canonical Operation key,
+    // so the host execution policies apply to it as well. A key this process
+    // has no registered definition for is treated as a governed change: the
+    // conservative reading, never looser than the Operation it stands in for.
+    try {
+      const definition = this.#staticOperations.get(request.operation)?.definition;
+      await assertOperationAdmitted(this.#db, session, {
+        id: request.operation,
+        intent: definition?.intent ?? "invoke",
+        effects: definition?.effects ?? { data: "write", external: "write" },
+      });
+    } catch (error) {
+      const operationError = operationErrorOf(error);
+      if (operationError) return { error: operationError };
+      throw error;
     }
     return this.#hostOperationExecutor(session, request, options);
   }

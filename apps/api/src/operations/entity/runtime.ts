@@ -56,6 +56,7 @@ import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "../
 import { requireOperationPrerequisites } from "../prerequisite-receipts.js";
 import { executeEntityPlugin } from "./plugin-executor.js";
 import { entityBusinessUnavailability } from "./availability.js";
+import { assertOperationAdmitted } from "../execution-policy.js";
 import { assertEntityValuesValid, assertOperationInputValid, type EntityValuesValidation } from "./input-validation.js";
 import {
   assertNoCallerElicitedOutput,
@@ -839,6 +840,16 @@ export async function executeEntityOperation(
     requireEntityOperation(table, request.operation.intent, session);
     const entityName = authoredEntityId(table);
     const operation = entityOperationContract(request.operation.id);
+    // Admission on actual execution, not on the offer: the ordinary CRUD
+    // fast path is where REST, GraphQL and MCP all write, so the host
+    // execution policies run here too — after authorization, so a refusal
+    // discloses nothing to a caller who was never allowed the action, and
+    // before any mutation, lease, challenge or plugin handler.
+    await assertOperationAdmitted(db, session, {
+      id: operation.id,
+      intent: operation.intent,
+      effects: operation.effects,
+    });
     if (operation.implementation?.type === "plugin") {
       if (operation.intent !== "create" && operation.intent !== "update" &&
         operation.intent !== "delete") {

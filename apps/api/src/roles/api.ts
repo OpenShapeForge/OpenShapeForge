@@ -9,6 +9,7 @@
 import { API_BUILD_IDENTITY } from "../config/build-identity.js";
 import rateLimit from "@fastify/rate-limit";
 import { registerEntityOperationAvailability } from "../operations/entity/availability.js";
+import { registerOperationExecutionPolicies } from "../operations/execution-policy.js";
 import {
   registerOperationalRoutes,
   type OperationalRoutesOptions,
@@ -409,6 +410,13 @@ export function createApiApp(options: {
     });
     modulePlatform?.registerArtifactStorage(initialised.loaded);
     modulePlatform?.registerOperationProviders(initialised.loaded);
+    // Host-wide execution admission, bound once from the modules that
+    // actually initialised — a module that failed to load contributes no
+    // policy, exactly as it contributes no provider. A build with no
+    // contribution leaves every execution path unchanged.
+    if (databaseRuntime) {
+      registerOperationExecutionPolicies(databaseRuntime.db, initialised.loaded);
+    }
     const egressOwner = assertSingleModuleEgressOwner(initialised.loaded);
     if (modulePlatform) {
       modulePlatform.registerDeclarativeServiceExecutor(

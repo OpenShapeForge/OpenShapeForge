@@ -39,19 +39,28 @@ function valuesSchemaOf(operation: EntityOperationContract): ValuesSchema | unde
   return values as ValuesSchema;
 }
 
-function validatorFor(operation: EntityOperationContract, partial: boolean): ValidateFunction | undefined {
+function validatorFor(operation: EntityOperationContract, table: GeneratedCrudTable, partial: boolean): ValidateFunction | undefined {
   const mode = partial ? "partial" : "full";
   const cached = validators.get(operation)?.get(mode);
   if (cached) return cached;
   const values = valuesSchemaOf(operation);
   if (!values) return undefined;
   const { required, ...rest } = values;
+  // Incoming schemas permit a required literal to be supplied by a binding.
+  // After resolution the original NOT NULL value is mandatory again. Read the
+  // compiler-owned backing columns rather than trusting caller binding input.
+  const boundFields = table.columns.flatMap((column) => column.fieldBindings?.fields ?? []);
+  const boundRequired = boundFields.flatMap(({ field, column: name }) => {
+    const column = table.columns.find((candidate) => candidate.name === name);
+    return column?.required && !column.defaultTemplate && Object.hasOwn(values.properties ?? {}, field) ? [field] : [];
+  });
+  const resolvedRequired = [...new Set([...(required ?? []), ...boundRequired])];
   // `$ref` targets are rooted in the Operation schema, not its values subtree:
   // carry the bundled definitions along so a reference still resolves.
   const definitions = operation.inputSchema?.$defs;
   const schema = {
     ...rest,
-    ...(partial || !required ? {} : { required }),
+    ...(partial || resolvedRequired.length === 0 ? {} : { required: resolvedRequired }),
     ...(definitions && typeof definitions === "object" && !Array.isArray(definitions) ? { $defs: definitions } : {}),
   };
   const validate = ajv.compile(schema);
@@ -124,6 +133,18 @@ function violationMessage(error: ErrorObject, field: string | undefined): string
  * `x-osf-exact` restates what the exact comparison already said, so the
  * numeric violation stands alone.
  */
+/**
+ * A closed numeric domain is compared exactly rather than by `enum` (see
+ * `x-osf-exact`), so a value outside it is the same refusal a closed text
+ * domain gives: a caller reads NOT_IN_OPTIONS whatever the field's type is.
+ */
+function exactNumericCode(error: ErrorObject): string | undefined {
+  return error.keyword === "x-osf-exact" &&
+    (error.params as { violation?: unknown }).violation === "notInEnum"
+    ? "NOT_IN_OPTIONS"
+    : undefined;
+}
+
 export function violationsFromAjvErrors(errors: readonly ErrorObject[]): OperationViolation[] {
   const seen = new Set<string>();
   const wrongType = new Set(errors.filter((error) => error.keyword === "type").map(fieldPath));
@@ -133,7 +154,9 @@ export function violationsFromAjvErrors(errors: readonly ErrorObject[]): Operati
     const field = fieldPath(error);
     if (error.keyword !== "type" && wrongType.has(field)) continue;
     if (error.keyword === "pattern" && inexactNumber.has(field)) continue;
-    const code = VIOLATION_CODES[error.keyword] ?? error.keyword.replace(/[A-Z]/g, (c) => `_${c}`).toUpperCase();
+    const code = exactNumericCode(error) ??
+      VIOLATION_CODES[error.keyword] ??
+      error.keyword.replace(/[A-Z]/g, (c) => `_${c}`).toUpperCase();
     const key = `${field ?? ""}:${code}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -166,7 +189,7 @@ export function assertEntityValuesValid(
   values: Readonly<Record<string, unknown>>,
   options: EntityValuesValidation,
 ): void {
-  const validate = validatorFor(operation, options.partial);
+  const validate = validatorFor(operation, table, options.partial);
   if (!validate) return;
   const clearable = nullableFields(table);
   const checked = Object.fromEntries(

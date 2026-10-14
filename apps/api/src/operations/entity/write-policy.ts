@@ -63,8 +63,37 @@ export function isCallerWritableColumn(
     !isElicitedOutputColumn(table, column) &&
     !entityValuePhysicalColumns(table).has(column.name) &&
     !collectionManagedFields(table, getGeneratedCrudTables()).has(column.name) &&
-    !isOperationWrittenColumn(column)
+    !isOperationWrittenColumn(column) &&
+    // The bindings map is written by the field-binding runtime from the
+    // `bindings` and `unbind` controls, never as a value: a caller that could
+    // set it directly would set a binding the runtime never resolved or
+    // compared against the destination.
+    column.fieldBindings === undefined
   );
+}
+
+/**
+ * Refuse a body that carries the bindings map as a value. Dropping it
+ * silently would read as a binding that was accepted, and the column is
+ * server-owned precisely because a binding has to be resolved and compared
+ * before it is stored.
+ */
+export function assertNoCallerFieldBindings(
+  table: GeneratedCrudTable,
+  input: Record<string, unknown>,
+): void {
+  const column = table.columns.find((candidate) => candidate.fieldBindings !== undefined);
+  if (!column) return;
+  const field = fieldNameForColumn(column);
+  if (
+    Object.prototype.hasOwnProperty.call(input, field) ||
+    Object.prototype.hasOwnProperty.call(input, column.name)
+  ) {
+    throw generatedCrudError(
+      `"${field}" is set through the bindings and unbind controls of this Operation, not as a value.`,
+      "BAD_USER_INPUT",
+    );
+  }
 }
 
 /**

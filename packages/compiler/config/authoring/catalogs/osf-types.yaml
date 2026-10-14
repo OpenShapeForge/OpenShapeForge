@@ -343,6 +343,21 @@ types:
       display: TextDisplay
       input: VariableTemplateInput
 
+  # A value whose type comes from a stored FieldDefinition beside it rather
+  # than from this catalog: the destination names that definition with
+  # `typedBy`, and the field-schema service projects it into the value's own
+  # schema. `baseType: object` is the storage and transport axis — a jsonb
+  # column, GraphQL JSON — not a claim that the value is an object: null, 0,
+  # false and an empty collection are all real values of a typed global.
+  typedValue:
+    baseType: object
+    schema: { $ref: "#/$defs/typedValue" }
+    label: { en: Typed value, nl: Getypeerde waarde }
+    icon: Variable
+    render:
+      display: TextDisplay
+      input: JsonFieldEditor
+
   # A stored FieldDefinition is the authored field contract itself: its value
   # schema is the field-definition authoring schema, bundled by the compiler.
   fieldDefinition:

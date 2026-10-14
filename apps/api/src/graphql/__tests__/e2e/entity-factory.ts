@@ -169,7 +169,8 @@ export function nextMarker(): string {
 
 /** A JSON-schema property as the compiler projects it into an Operation contract. */
 type FieldSchema = {
-  type?: string;
+  /** A numeric property publishes both of its forms, so this may be a union. */
+  type?: string | string[];
   format?: string;
   enum?: unknown[];
   maxLength?: number;
@@ -179,6 +180,8 @@ type FieldSchema = {
   required?: string[];
   properties?: Record<string, FieldSchema>;
   "x-osf-reference"?: { entity: string; valueField?: string };
+  /** A numeric property carries its closed domain here, compared exactly. */
+  "x-osf-exact"?: { enum?: unknown[] };
 };
 
 /**
@@ -204,7 +207,15 @@ export function schemaSample(
   marker: string,
 ): unknown {
   if (Array.isArray(schema?.enum) && schema.enum.length > 0) return schema.enum[0];
-  if (schema?.type === "object" && schema.properties) {
+  // A numeric domain is published for exact comparison rather than as `enum`,
+  // because a number and its decimal text are one value there; either
+  // spelling of the first member is an accepted sample.
+  const exactDomain = schema?.["x-osf-exact"]?.enum;
+  if (Array.isArray(exactDomain) && exactDomain.length > 0) return exactDomain[0];
+  // A numeric property publishes the JSON number and the exact decimal text
+  // it is projected as; the sample stays the number form.
+  const types = schema?.type === undefined ? [] : Array.isArray(schema.type) ? schema.type : [schema.type];
+  if (types.includes("object") && schema?.properties) {
     return Object.fromEntries(
       Object.entries(schema.properties).map(([key, property]) => [
         key,
@@ -212,14 +223,15 @@ export function schemaSample(
       ]),
     );
   }
-  if (schema?.type === "integer" || schema?.type === "number") {
-    const min = typeof schema.minimum === "number" ? schema.minimum : 0;
-    const max = typeof schema.maximum === "number" ? schema.maximum : (schema.type === "integer" ? 400 : 11);
-    const preferred = schema.type === "integer" ? 400 : 1.5;
+  if (types.includes("integer") || types.includes("number")) {
+    const integer = types.includes("integer");
+    const min = typeof schema?.minimum === "number" ? schema.minimum : 0;
+    const max = typeof schema?.maximum === "number" ? schema.maximum : (integer ? 400 : 11);
+    const preferred = integer ? 400 : 1.5;
     const value = Math.min(max, Math.max(min, preferred));
-    return schema.type === "integer" ? Math.round(value) : value;
+    return integer ? Math.round(value) : value;
   }
-  if (schema?.type === "boolean") return true;
+  if (types.includes("boolean")) return true;
   const rawSample = sampleValue(column, marker);
   if (typeof rawSample !== "string") return rawSample;
   let sample: string = rawSample;
@@ -264,6 +276,14 @@ function authoredFieldSchema(table: GeneratedTable, field: string): Pick<FieldSc
 /** `schemaSample` against the field's projected create schema on `table`, or its authored contract when there is no create. */
 export function contractSample(table: GeneratedTable, column: Column, marker: string): unknown {
   const field = fieldName(column);
+  // A typed-value pair: the definition states the contract, the value obeys
+  // it. The pair has to agree, so the two halves are sampled together rather
+  // than from each column's own type.
+  const typed = table.columns.find((candidate) => candidate.typedBy?.definitionColumn === column.name);
+  if (typed) {
+    return { key: fieldName(typed), osfType: "multilineText", required: true, label: { en: "Value" } };
+  }
+  if (column.typedBy) return `e2e-${marker}-${field}`;
   return schemaSample(column, createFieldSchema(table, field) ?? authoredFieldSchema(table, field), marker);
 }
 

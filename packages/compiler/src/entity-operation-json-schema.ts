@@ -17,7 +17,15 @@ import {
 } from "./field-json-schema.js";
 import type { JsonSchema } from "./plugins.js";
 import { compileFieldValuePolicy, fieldValuePolicySchema, partialFieldPolicySchema } from "./authoring/field-value-policy.js";
-import { isScalarType, scalarJsonSchema } from "@openshapeforge/operations";
+import {
+  FIELD_BINDINGS_FIELD,
+  isScalarType,
+  MAX_BINDING_TEMPLATE_LENGTH,
+  MAX_VARIABLE_REFERENCE_LENGTH,
+  scalarJsonSchema,
+  VARIABLE_NAMESPACES,
+  VARIABLE_REFERENCE_PATTERN,
+} from "@openshapeforge/operations";
 import {
   operationControlProperties,
   type OperationControlSchema,
@@ -64,6 +72,133 @@ export type EntityRecordOutputOptions = {
   /** A transport's own wording for a field, kept beside the shared title. */
   describeField?: (field: CompiledField) => string | undefined;
 };
+
+/**
+ * The persisted fields of this entity that accept a variable in place of a
+ * literal, with the shape each one authored. A field is bindable only where
+ * it is persisted: the binding is stored beside the value it resolved to.
+ */
+export function bindableEntityFields(
+  contract: CompiledEntityContract,
+): Array<{ key: string; variables: "whole" | "template" | "both" }> {
+  const persisted = new Set(contract.storage.columns.map((column) => column.field));
+  return contract.model.fields
+    .filter((field) => field.variables !== undefined && field.variables !== "none" && persisted.has(field.key))
+    .map((field) => ({ key: field.key, variables: field.variables as "whole" | "template" | "both" }))
+    .sort((left, right) => left.key.localeCompare(right.key));
+}
+
+/**
+ * What may be written into one bindable field: a reference the whole value is
+ * taken from, or the authored template whose tokens are filled. Each field
+ * offers only the shapes its own mode authors, so the published contract says
+ * what the write path will compare rather than a superset of it.
+ */
+function bindingInputSchema(variables: "whole" | "template" | "both"): JsonObject {
+  const whole: JsonObject = {
+    type: "string",
+    pattern: VARIABLE_REFERENCE_PATTERN,
+    maxLength: MAX_VARIABLE_REFERENCE_LENGTH,
+    description:
+      `The variable this field's whole value is taken from, as ${VARIABLE_NAMESPACES.map((namespace) => `${namespace}.key`).join(" or ")}. ` +
+      "Its declared type must fit this field; the value is resolved server-side and revalidated on every read.",
+  };
+  const template: JsonObject = {
+    type: "object",
+    additionalProperties: false,
+    required: ["template"],
+    properties: {
+      template: {
+        type: "string",
+        maxLength: MAX_BINDING_TEMPLATE_LENGTH,
+        description: "The authored text whose `{{namespace.key}}` tokens are filled with each variable's formatted value.",
+      },
+    },
+  };
+  return variables === "whole" ? whole : variables === "template" ? template : { oneOf: [whole, template] };
+}
+
+/**
+ * The two binding controls of a create or update, beside `values`: what to
+ * bind, and what to freeze as a literal again. Offered only where the entity
+ * has a bindable field, so an entity without one keeps the contract it had.
+ */
+export function entityBindingControlProperties(contract: CompiledEntityContract): JsonObject {
+  const bindable = bindableEntityFields(contract);
+  if (bindable.length === 0) return {};
+  return {
+    bindings: {
+      type: "object",
+      additionalProperties: false,
+      description:
+        "Fields to bind to a variable instead of a literal. A literal in `values` clears that field's binding; " +
+        "a binding is stored apart from the value it resolved to and is revalidated against its source on every read.",
+      properties: Object.fromEntries(bindable.map(({ key, variables }) => [key, bindingInputSchema(variables)])),
+    },
+    unbind: {
+      type: "array",
+      uniqueItems: true,
+      maxItems: bindable.length,
+      description:
+        "Fields whose binding is removed. The source is resolved once more and that value is written as a literal, " +
+        "so the record keeps the value it has now rather than a stale one.",
+      items: { type: "string", enum: bindable.map(({ key }) => key) },
+    },
+  };
+}
+
+/**
+ * The same two controls merged into a FLAT transport input schema — an MCP
+ * entity tool, whose create takes its fields at the top level. A tool that did
+ * not advertise them would refuse a binding as an undeclared argument, so the
+ * three interfaces would offer three different write contracts.
+ */
+export function withEntityBindingControls(
+  schema: JsonSchema,
+  contract: CompiledEntityContract,
+): JsonSchema {
+  const controls = entityBindingControlProperties(contract);
+  if (Object.keys(controls).length === 0) return schema;
+  const properties = { ...(schema.properties as Record<string, unknown> | undefined), ...controls };
+  const nested = properties.values && typeof properties.values === "object" ? properties.values as JsonObject : undefined;
+  const bindable = new Set(bindableEntityFields(contract).map((field) => field.key));
+  const requiredBindings = new Set<string>();
+  const relaxRequired = (value: unknown): unknown => {
+    if (!Array.isArray(value)) return value;
+    return value.filter((field) => {
+      if (typeof field !== "string" || !bindable.has(field)) return true;
+      requiredBindings.add(field);
+      return false;
+    });
+  };
+  let required = schema.required;
+  if (nested) properties.values = { ...nested, required: relaxRequired(nested.required) };
+  else required = relaxRequired(required);
+  // Blueprint inputs defer copied literals too. Preserve their source guard
+  // while permitting a required bindable field to arrive through bindings.
+  const existing = ((schema.allOf ?? []) as JsonObject[]).map((condition) => {
+    const then = condition.then as JsonObject | undefined;
+    if (!then) return condition;
+    const thenProperties = then.properties as JsonObject | undefined;
+    const thenValues = thenProperties?.values as JsonObject | undefined;
+    if (nested && thenValues) return { ...condition, then: { ...then, properties: {
+      ...thenProperties, values: { ...thenValues, required: relaxRequired(thenValues.required) },
+    } } };
+    if (!nested && then.required) return { ...condition, then: { ...then, required: relaxRequired(then.required) } };
+    return condition;
+  });
+  const alternatives = [...requiredBindings].map((field) => ({ anyOf: [
+    nested ? { required: ["values"], properties: { values: { required: [field] } } } : { required: [field] },
+    { required: ["bindings"], properties: { bindings: { required: [field] } } },
+    ...(contract.blueprint ? [{ required: ["blueprintId"] }] : []),
+  ] }));
+  return {
+    ...schema,
+    properties,
+    ...(required === undefined ? {} : { required }),
+    ...(existing.length || alternatives.length ? { allOf: [...existing, ...alternatives] } : {}),
+  };
+}
 
 /**
  * Persisted record shape returned by every canonical entity read/write. It
@@ -123,6 +258,24 @@ export function entityRecordOutputSchema(
       };
       add(key, { ...schema, "x-osf-i18n": { title: labels[key] } }, true);
     }
+  }
+  // The bindings a record carries, read beside the values they resolved to.
+  // Present on every read of a bindable entity, so a reader can tell a bound
+  // field from a literal one without inferring it from the value.
+  const bindable = bindableEntityFields(contract);
+  if (bindable.length > 0 && !(FIELD_BINDINGS_FIELD in properties)) {
+    add(FIELD_BINDINGS_FIELD, nullableSchema({
+      type: "object",
+      additionalProperties: false,
+      title: "Field bindings",
+      description: "Per bound field, the variable its value is taken from, or the authored template its text is filled from.",
+      properties: Object.fromEntries(bindable.map(({ key }) => [key, {
+        oneOf: [
+          { type: "object", additionalProperties: false, required: ["kind", "ref"], properties: { kind: { const: "whole" }, ref: { type: "string" } } },
+          { type: "object", additionalProperties: false, required: ["kind", "source"], properties: { kind: { const: "template" }, source: { type: "string" } } },
+        ],
+      }])),
+    }), false);
   }
   return { type: "object", properties, required, additionalProperties: true };
 }
@@ -541,7 +694,11 @@ export function entityOperationJsonSchemas(
       const requiredValues = Array.isArray(values.required) ? values.required as string[] : [];
       const copyValues = blueprint ? { ...values, required: requiredValues.filter((key) => !blueprint.fields.includes(key)) } : values;
       const inputSchema = controlled(
-        { values: copyValues, ...(blueprint ? { blueprintId: { type: "string", minLength: 1 }, blueprintBindings: blueprintBindingsSchema } : {}) },
+        {
+          values: copyValues,
+          ...entityBindingControlProperties(contract),
+          ...(blueprint ? { blueprintId: { type: "string", minLength: 1 }, blueprintBindings: blueprintBindingsSchema } : {}),
+        },
         ["values"],
       );
       if (blueprint) {
@@ -552,7 +709,7 @@ export function entityOperationJsonSchemas(
       }
       return {
         inputSchema: {
-          ...inputSchema,
+          ...withEntityBindingControls(inputSchema, contract),
           ...(Object.keys(definitions).length > 0 ? { $defs: definitions } : {}),
         },
         outputSchema: record,
@@ -560,7 +717,7 @@ export function entityOperationJsonSchemas(
     }
     case "update": {
       const { values, definitions } = entityValuesSchema(contract, "update", contracts, referentiedata);
-      const inputSchema = controlled({ id, values }, ["id", "values"]);
+      const inputSchema = controlled({ id, values, ...entityBindingControlProperties(contract) }, ["id", "values"]);
       return {
         inputSchema: {
           ...inputSchema,

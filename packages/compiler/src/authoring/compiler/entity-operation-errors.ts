@@ -33,6 +33,8 @@ export type EntityOperationErrorPolicy = {
   secureInput?: boolean | undefined;
   /** The entity has a collection field; membership of an owned collection is added by withOwnedChildErrors. */
   collections?: boolean | undefined;
+  /** The entity has a persisted field that accepts a variable, so reads and writes resolve bindings. */
+  fieldBindings?: boolean | undefined;
 };
 
 /**
@@ -54,6 +56,9 @@ export function deriveEntityOperationErrors(
   if (intent === "create" && policy.secureInput) situations.push("secureInput");
   if (intent === "delete") situations.push("delete");
   if (!reads && policy.collections) situations.push("collection");
+  // Both ways round: a live read resolves the record's bindings, and a write
+  // resolves the ones it will leave behind.
+  if (policy.fieldBindings) situations.push("fieldBindings");
   if (policy.concurrency?.version) situations.push("version");
   if (policy.concurrency?.editLease) situations.push("editLease");
   if (policy.confirmation.mode !== "none") situations.push("confirmation");

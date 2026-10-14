@@ -16,6 +16,8 @@ import {
 import { fieldNameForColumn, tableColumnMap } from "./columns.js";
 import { normalizeEntityStorageRow } from "./serialize-result.js";
 import { entityValueCarriers, entityValuePhysicalColumns, projectEntityValueRow } from "./entity-value-io.js";
+import { assertStoredTypedValuesSupported } from "./typed-values.js";
+import { projectVisibleFieldBindings } from "./field-binding-policy.js";
 import { generatedEntityValues } from "../../modules/entity-value-registry.js";
 import type {
   GeneratedCrudColumn,
@@ -157,7 +159,9 @@ export function projectRows(
     table.source?.secureInputOnCreate !== undefined ||
     table.source?.mcp?.elicitOnCreate !== undefined;
   const hasBigint = table.columns.some((column) => column.type === "bigint");
-  if (!hasClassification && !hasElicitedOutput && !hasBigint && !entityValueCarriers(table, entityValues).length) {
+  const hasTypedValue = table.columns.some((column) => column.typedBy);
+  const hasBindings = table.columns.some((column) => column.fieldBindings);
+  if (!hasClassification && !hasElicitedOutput && !hasBigint && !hasTypedValue && !hasBindings && !entityValueCarriers(table, entityValues).length) {
     return rows;
   }
   return rows.map((row) => projectGeneratedEntityRow(table, session, row, entityValues));
@@ -201,10 +205,17 @@ export function projectGeneratedEntityRow(
     table.source?.authorization,
     session,
   );
+  // A value typed by a stored FieldDefinition is carried by one json column,
+  // so the column-shaped redaction above cannot reach inside it. Whether this
+  // runtime can protect that definition at all is therefore decided here, on
+  // the one projection every read goes through — including the binding
+  // runtime's own source reads.
+  assertStoredTypedValuesSupported(table, classified);
   const column = elicitedOutputColumn(table);
-  return column
+  const output = column
     ? redactElicitedValues(classified, column.name)
     : classified;
+  return projectVisibleFieldBindings(table, session, output);
 }
 
 /** Elicited values cannot be used as list membership or ordering oracles. */

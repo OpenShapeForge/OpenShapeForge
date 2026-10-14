@@ -526,6 +526,12 @@ export const HTTP_STATUS_BY_CODE = {
   INTERACTION_REQUIRED: 409,
   // A generic write that would change a collection.
   RELATION_COLLECTION_MUTATION_UNSUPPORTED: 409,
+  // A value this request depends on — the variable a bound field is filled
+  // from, a template's source record — is unavailable or no longer fits what
+  // it fills. The record exists and the caller may read it; its dependency is
+  // what has to be resolved, so it is a conflict rather than a bad request.
+  DEPENDENCY_UNRESOLVED: 409,
+  DEPENDENCY_INVALID: 409,
   TOO_MANY_REQUESTS: 429,
   INTERNAL_SERVER_ERROR: 500,
   GENERATED_CRUD_NOT_ENABLED: 404,

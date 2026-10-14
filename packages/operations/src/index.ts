@@ -37,8 +37,10 @@ export {
   matchesBaseType,
   parseVariableReference,
   permitsVariableUsage,
+  MAX_VARIABLE_REFERENCE_LENGTH,
   VARIABLE_NAMESPACE_SCOPES,
   VARIABLE_NAMESPACES,
+  VARIABLE_REFERENCE_PATTERN,
   VARIABLE_TOKEN,
   VariableError,
   variableCompatibility,
@@ -51,6 +53,15 @@ export {
   escapeMarkdownVariableText,
   isDeclaredVariableNamespace,
 } from "./field-variables.js";
+export type { FieldBinding, FieldBindingMap } from "./field-bindings.js";
+export {
+  bindingKindPermitted,
+  fieldBindingMap,
+  FIELD_BINDINGS_COLUMN,
+  FIELD_BINDINGS_FIELD,
+  isFieldBinding,
+  MAX_BINDING_TEMPLATE_LENGTH,
+} from "./field-bindings.js";
 export type { SchemaVariableShapeOptions } from "./variable-schema.js";
 export { schemaVariableMode, schemaVariableShape, schemaVariableSlot } from "./variable-schema.js";
 

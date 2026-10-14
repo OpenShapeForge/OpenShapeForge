@@ -42,6 +42,11 @@ export function entityMutationControls(args: Record<string, unknown>) {
     ...(typeof args.confirmationAnswer === "string"
       ? { confirmationAnswer: args.confirmationAnswer }
       : {}),
+    // The field-binding controls, passed on exactly as sent: a shape the
+    // runtime refuses must not be dropped here, because a dropped binding
+    // reads as a binding that was accepted.
+    ...(args.bindings !== undefined ? { bindings: args.bindings } : {}),
+    ...(args.unbind !== undefined ? { unbind: args.unbind } : {}),
   };
 }
 

@@ -65,6 +65,11 @@ const RESERVED_LIST_PARAMS = new Set([
 const MUTATION_CONTROL_FIELDS = new Set([
   "blueprintId",
   "blueprintBindings",
+  // The field-binding controls: what to bind to a variable, and what to
+  // freeze back into a literal. Controls, not values — the bindings map is
+  // server-owned and is written only from what the runtime resolved.
+  "bindings",
+  "unbind",
   "expectedVersion",
   "leaseToken",
   "confirmed",
@@ -75,21 +80,37 @@ const MUTATION_CONTROL_FIELDS = new Set([
 type MutationControlField =
   | "blueprintId"
   | "blueprintBindings"
+  | "bindings"
+  | "unbind"
   | "expectedVersion"
   | "leaseToken"
   | "confirmed"
   | "confirmationToken"
   | "confirmationAnswer";
 
+type MutationControlValue =
+  | string
+  | boolean
+  | readonly unknown[]
+  | Record<string, unknown>;
+
 function expectedMutationControlType(
   field: MutationControlField,
-): "string" | "boolean" | "object" {
-  return field === "blueprintBindings" ? "object" : field === "confirmed" ? "boolean" : "string";
+): "string" | "boolean" | "object" | "array" {
+  if (field === "blueprintBindings" || field === "bindings") return "object";
+  if (field === "unbind") return "array";
+  return field === "confirmed" ? "boolean" : "string";
+}
+
+function mutationControlTypeMatches(expected: ReturnType<typeof expectedMutationControlType>, value: unknown): boolean {
+  if (expected === "array") return Array.isArray(value);
+  if (expected === "object") return value !== null && typeof value === "object" && !Array.isArray(value);
+  return typeof value === expected;
 }
 
 function splitMutationBody(body: unknown): {
   valuesBody: unknown;
-  controls: Record<string, string | boolean | Record<string, Record<string, string>>>;
+  controls: Record<string, MutationControlValue>;
 } {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     return { valuesBody: body, controls: {} };
@@ -99,20 +120,21 @@ function splitMutationBody(body: unknown): {
     if (!MUTATION_CONTROL_FIELDS.has(key)) continue;
     const field = key as MutationControlField;
     const expectedType = expectedMutationControlType(field);
-    if (typeof value !== expectedType || (field === "blueprintBindings" && (value === null || Array.isArray(value)))) {
+    if (!mutationControlTypeMatches(expectedType, value)) {
       if (field === "blueprintId") throw new HttpError(400, "BAD_USER_INPUT", "blueprintId must be a string.");
       if (field === "blueprintBindings") throw new HttpError(400, "BAD_USER_INPUT", "blueprintBindings must be an object.");
-      throw invalidMutationControlTypeFailure(field as Exclude<MutationControlField, "blueprintBindings" | "blueprintId">, expectedType as "string" | "boolean");
+      if (field === "bindings") throw new HttpError(400, "BAD_USER_INPUT", "bindings must be an object of field bindings.");
+      if (field === "unbind") throw new HttpError(400, "BAD_USER_INPUT", "unbind must be an array of field names.");
+      throw invalidMutationControlTypeFailure(field as "expectedVersion" | "leaseToken" | "confirmed" | "confirmationToken" | "confirmationAnswer", expectedType as "string" | "boolean");
     }
   }
   const controls = Object.fromEntries(
     entries.filter(
       ([key, value]) =>
         MUTATION_CONTROL_FIELDS.has(key) &&
-        ((key === "blueprintBindings" && typeof value === "object") || typeof value === "string" ||
-          (key === "confirmed" && typeof value === "boolean")),
+        mutationControlTypeMatches(expectedMutationControlType(key as MutationControlField), value),
     ),
-  ) as Record<string, string | boolean | Record<string, Record<string, string>>>;
+  ) as Record<string, MutationControlValue>;
   const valuesBody = Object.fromEntries(
     entries.filter(([key]) => !MUTATION_CONTROL_FIELDS.has(key)),
   );

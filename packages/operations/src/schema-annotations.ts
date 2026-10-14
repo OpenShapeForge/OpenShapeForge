@@ -123,12 +123,18 @@ export const operationTypeKeyword = {
  * numeric property accepts either the JSON number a form sends or that exact
  * text (`field-schema-metadata.ts`). `minimum`/`maximum` beside it constrain
  * the number form — JSON Schema ignores them for a string — and this keyword
- * applies the same authored bounds and closed domain to the text form, by
- * exact decimal comparison rather than through an IEEE double.
+ * applies the same authored bounds to the text form, by exact decimal
+ * comparison rather than through an IEEE double.
+ *
+ * The closed numeric DOMAIN lives here for BOTH forms, and in `enum` for
+ * neither: strict equality reads `1` and `"1"` as different values, so an
+ * `enum` of numbers rejects the exact text the platform projects a numeric
+ * value as, and an `enum` of both spellings publishes every member twice.
  *
  * Unlike every other `x-osf-*` keyword this one validates: it is the only
- * place an exact bound on the text form is enforced, so an annotation-only
- * reading would drop the constraint instead of documenting it.
+ * place an exact bound on the text form, or a numeric domain in either form,
+ * is enforced, so an annotation-only reading would drop the constraint
+ * instead of documenting it.
  */
 export const operationExactNumericKeyword = {
   keyword: "x-osf-exact",
@@ -162,13 +168,21 @@ const EXACT_NUMERIC_MESSAGES: Record<ExactNumericViolation, string> = {
  */
 function exactNumericKeywordValidator(): (schema: unknown, data: unknown) => boolean {
   const validate = (schema: unknown, data: unknown): boolean => {
-    // Only the text form needs this: the number form is already constrained by
-    // the ordinary numeric keywords beside it.
-    if (typeof data !== "string") return true;
+    if (typeof data !== "string" && typeof data !== "number") return true;
     const bounds: ExactNumericBounds = schema && typeof schema === "object" && !Array.isArray(schema)
       ? (schema as ExactNumericBounds)
       : {};
-    const violation = exactNumericViolation(data, bounds);
+    // The text form is held to the whole contract here, because JSON Schema
+    // ignores `minimum`, `maximum` and `type: integer` for a string.
+    //
+    // The number form keeps those ordinary keywords beside this one, so
+    // repeating them would report one violation twice. Its closed DOMAIN is
+    // only here: `enum` cannot admit both forms of a number at once, so the
+    // exact comparison decides membership — `1`, `1.0` and `"1"` are one
+    // member of the same domain.
+    const violation = typeof data === "number"
+      ? (bounds.enum === undefined ? undefined : exactNumericViolation(data, { enum: bounds.enum }))
+      : exactNumericViolation(data, bounds);
     if (!violation) return true;
     (validate as { errors?: unknown }).errors = [
       { keyword: "x-osf-exact", message: EXACT_NUMERIC_MESSAGES[violation], params: { violation } },

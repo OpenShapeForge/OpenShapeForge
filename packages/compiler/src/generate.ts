@@ -862,6 +862,12 @@ function renderManifestJson(
       ...(column.deriveOnCreate === undefined
         ? {}
         : { deriveOnCreate: column.deriveOnCreate }),
+      // Authored `typedBy` — the sibling definition column the write path
+      // validates this JSON value against.
+      ...(column.typedBy === undefined ? {} : { typedBy: column.typedBy }),
+      // The server-owned bindings map and the fields it may carry a binding
+      // for, with the variable mode each one authored.
+      ...(column.fieldBindings === undefined ? {} : { fieldBindings: column.fieldBindings }),
     })),
     // The worker surface, republished so the migrate chain can derive the
     // worker role's grants from the same declarations the policy was emitted

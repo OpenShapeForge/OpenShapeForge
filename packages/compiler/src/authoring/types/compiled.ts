@@ -91,6 +91,8 @@ export interface CompiledField {
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
   entityValue?: { definitionField: string; parameterBindings?: boolean };
+  /** The sibling field whose stored FieldDefinition types this value. */
+  typedBy?: { definitionField: string };
   allowedDefinitions?: string[];
   childAuthorization?: "owner";
   childLock?: string;

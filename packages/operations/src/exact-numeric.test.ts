@@ -74,11 +74,16 @@ test("a numeric property publishes both of its forms with the same authored boun
   });
 });
 
-test("a closed numeric domain keeps its single value form", () => {
+test("a closed numeric domain is published for exact comparison, in both forms", () => {
   const schema = operationFieldObjectSchema([
     { key: "priority", osfType: "integer", options: { type: "static", items: [{ value: "1" }, { value: "2" }] } },
   ], {});
   const properties = schema.properties as Record<string, Record<string, unknown>>;
-  expect(properties.priority).toMatchObject({ type: "integer", enum: [1, 2] });
-  expect(properties.priority!["x-osf-exact"]).toBeUndefined();
+  expect(properties.priority).toMatchObject({
+    type: ["integer", "string"],
+    "x-osf-exact": { integer: true, enum: ["1", "2"] },
+  });
+  // Not `enum`: strict equality would read the number 1 and the text "1" —
+  // the form every numeric column is projected in — as different values.
+  expect(properties.priority!.enum).toBeUndefined();
 });

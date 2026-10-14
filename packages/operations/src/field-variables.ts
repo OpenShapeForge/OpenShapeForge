@@ -38,7 +38,7 @@
  */
 
 import { isBaseType } from "./field-resolution.js";
-import { isExactDecimalText, isExactIntegerText } from "./exact-numeric.js";
+import { exactNumericEquals, isExactDecimalText, isExactIntegerText } from "./exact-numeric.js";
 import { decimalText } from "./scalar-projection.js";
 import type {
   OperationFieldBaseType,
@@ -183,9 +183,24 @@ function refuse(code: VariableRefusalCode, message: string): never {
 
 /** A key segment that would reach the prototype chain is never a variable key. */
 const UNSAFE_KEY_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
-const KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)*$/;
+const KEY_SOURCE = "[A-Za-z][A-Za-z0-9_-]*(?:\\.[A-Za-z0-9_-]+)*";
+const KEY_PATTERN = new RegExp(`^${KEY_SOURCE}$`);
 /** The Chip key contract (`chip.yaml`) is the longest key any namespace admits. */
 const MAX_KEY_LENGTH = 160;
+
+/**
+ * The reference grammar as a JSON Schema pattern, so a published contract
+ * advertises exactly what the parser accepts. Length is bounded by
+ * `maxLength` beside it rather than by the pattern; the prototype-reaching
+ * key segments the parser also refuses cannot be expressed here, which is why
+ * the parse remains the authority.
+ */
+export const VARIABLE_REFERENCE_PATTERN =
+  `^(?:${VARIABLE_NAMESPACES.join("|")})\\.${KEY_SOURCE}$`;
+
+/** The longest reference expression the grammar admits, namespace included. */
+export const MAX_VARIABLE_REFERENCE_LENGTH =
+  MAX_KEY_LENGTH + 1 + Math.max(...VARIABLE_NAMESPACES.map((namespace) => namespace.length));
 
 /**
  * One `{{ … }}` token. The inner run is unbounded and brace-free, so an
@@ -377,8 +392,7 @@ export function variableCompatibility(
     );
   }
   if (slot.enum !== undefined) {
-    const allowed = new Set<string | number | boolean>(slot.enum);
-    if (offer.enum === undefined || !offer.enum.every((value) => allowed.has(value))) {
+    if (offer.enum === undefined || !offer.enum.every((value) => domainAdmits(slot, value))) {
       return incompatible(
         "INCOMPATIBLE_DOMAIN",
         `${slot.path} admits only its own allowed values, which the variable does not declare.`,
@@ -386,6 +400,24 @@ export function variableCompatibility(
     }
   }
   return compatible;
+}
+
+/**
+ * Whether one value of the source's domain is a member of the destination's.
+ *
+ * A numeric domain is compared as numbers: the two sides are published in the
+ * forms their own types project — a JSON number here, the exact decimal text
+ * there — and `1`, `1.0` and `"1"` are one value. Strict membership would
+ * read them as three, and refuse a variable whose domain is literally the
+ * destination's. Every other type compares by value, where spelling IS
+ * identity.
+ */
+function domainAdmits(slot: VariableSlot, value: string | number | boolean): boolean {
+  const domain = slot.enum ?? [];
+  if (slot.baseType !== "integer" && slot.baseType !== "number") {
+    return domain.includes(value);
+  }
+  return domain.some((allowed) => exactNumericEquals(allowed, value));
 }
 
 /**

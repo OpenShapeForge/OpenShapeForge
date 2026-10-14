@@ -917,12 +917,13 @@ export class ModulePlatformRuntime {
     // Record-derived provider Operations do not pass through the canonical
     // runtime, so the host execution policies are evaluated here on the
     // definition's own declared effects, before the provider is reached.
+    const admit = () => assertOperationAdmitted(this.#db, session, {
+      id: match.definition.id,
+      intent: match.definition.intent,
+      effects: match.definition.effects,
+    });
     try {
-      await assertOperationAdmitted(this.#db, session, {
-        id: match.definition.id,
-        intent: match.definition.intent,
-        effects: match.definition.effects,
-      });
+      await admit();
     } catch (error) {
       const operationError = operationErrorOf(error);
       if (operationError) return { error: operationError };
@@ -986,6 +987,11 @@ export class ModulePlatformRuntime {
         contractFingerprint: operationContractFingerprint(match.definition),
         externalWrite: match.definition.effects.external === "write",
         execute: async (markEffectsAdmitted) => {
+          // Decided again on live state, after the receipt claim was locked
+          // and committed and before effects are admitted: a refusal that
+          // arrives while this request waited for its claim must delete that
+          // claim, not report an uncertain external delivery.
+          await admit();
           markEffectsAdmitted();
           return execute();
         },

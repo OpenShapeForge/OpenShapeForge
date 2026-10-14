@@ -1246,20 +1246,26 @@ export async function invokeOperation(
     requireOperationAuthorization(bound.operation, activeContext.session);
     assertGrantSubjectTarget(bound.operation, activeContext.session, input);
     // Host execution policies, on the declared effects of the Operation that
-    // is actually about to run: after authorization, so a refusal discloses
-    // nothing to a caller who was never allowed the action, and before the
-    // input schema, the keyed receipt, any transaction and the handler — so a
-    // refusal precedes every data and external effect. A nested `execute`
-    // reaches this again on its own Operation's declaration, so a read cannot
-    // lend its admission to a write it dispatches. Without a database no
-    // policy can be registered, so the check is skipped with it.
-    if (activeContext.db) {
+    // is actually about to run. Without a database no policy can be
+    // registered, so the check is skipped with it.
+    const admit = async () => {
+      if (!activeContext.db) return;
       await assertOperationAdmitted(activeContext.db, activeContext.session, {
         id: bound.operation.key,
         intent: operationIntent(bound.operation),
         effects: bound.operation.effects,
       });
-    }
+    };
+    // The early decision: after authorization, so a refusal discloses nothing
+    // to a caller who was never allowed the action, and before the input
+    // schema, the keyed receipt, any transaction and the handler — so the
+    // ordinary refusal is friendly and precedes every effect. A nested
+    // `execute` reaches this again on its own Operation's declaration, so a
+    // read cannot lend its admission to a write it dispatches. It is decided
+    // again inside the owning transaction below, immediately before effects:
+    // this one can be minutes old by the time a lease, a challenge or a row
+    // lock has been consumed.
+    await admit();
     const validation = validatorsFor(bound.operation);
     // The compiler augments a custom Operation's canonical schema with the
     // platform-owned mutation controls. Validate that complete request before
@@ -1402,7 +1408,14 @@ export async function invokeOperation(
         bound,
         input,
         activeContext,
-        (handlerInput) => {
+        async (handlerInput) => {
+          // The decisive admission: inside the owning Operation transaction
+          // when there is one, after every record lock, availability
+          // decision, lease and confirmation this invocation consumed, and
+          // before `markEffectsAdmitted` — so a refusal here neither leaves a
+          // receipt claiming success nor reports an uncertain external
+          // delivery. It is the same decision, on live state.
+          await admit();
           markEffectsAdmitted();
           return invokeHandler(handlerInput);
         },

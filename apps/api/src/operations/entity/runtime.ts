@@ -10,7 +10,7 @@ import {
 } from "@openshapeforge/operations";
 import { sanitizeError } from "@openshapeforge/observability";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
-import type { DbSessionInput } from "../../db/session.js";
+import { withDbSession, type DbSessionInput } from "../../db/session.js";
 import { normalizeTimestampToken } from "../../db/timestamps.js";
 import rawOperationCatalog from "../../generated/operations/catalog.json" with { type: "json" };
 import { collectionManagedFields, collectionMutationError, withoutCollectionInputs } from "./collection-policy.js";
@@ -840,16 +840,30 @@ export async function executeEntityOperation(
     requireEntityOperation(table, request.operation.intent, session);
     const entityName = authoredEntityId(table);
     const operation = entityOperationContract(request.operation.id);
+    const admit = () => assertOperationAdmitted(db, session, {
+      id: operation.id,
+      intent: operation.intent,
+      effects: operation.effects,
+    });
+    /**
+     * The owning transaction of a generated mutation, opened here so the
+     * admission and the write it governs are one atomic unit: the mutation's
+     * own `withDbSession` joins this transaction, so the decision cannot be
+     * committed without the write or the write without the decision. Opened
+     * only around the mutation — the offers that follow a successful write
+     * are reads of committed state.
+     */
+    const governed = <T>(mutate: () => Promise<T>): Promise<T> =>
+      withDbSession(db, session, async () => {
+        await admit();
+        return mutate();
+      });
     // Admission on actual execution, not on the offer: the ordinary CRUD
     // fast path is where REST, GraphQL and MCP all write, so the host
     // execution policies run here too — after authorization, so a refusal
     // discloses nothing to a caller who was never allowed the action, and
     // before any mutation, lease, challenge or plugin handler.
-    await assertOperationAdmitted(db, session, {
-      id: operation.id,
-      intent: operation.intent,
-      effects: operation.effects,
-    });
+    await admit();
     if (operation.implementation?.type === "plugin") {
       if (operation.intent !== "create" && operation.intent !== "update" &&
         operation.intent !== "delete") {
@@ -980,17 +994,17 @@ export async function executeEntityOperation(
         requireCreateOperationConfirmation(operation, request.input);
         const interactionError = secureInputInteractionError(operation);
         if (interactionError) return { intent: "create", error: interactionError };
-        const data = blueprintId !== undefined
-          ? await createFromBlueprint(db, session, table, blueprintId, values,
+        const data = await governed(() => blueprintId !== undefined
+          ? createFromBlueprint(db, session, table, blueprintId, values,
               (merged) => assertEntityValuesValid(operation, table, merged, { partial: false }),
               operation.stamps?.length
                 ? { operation: operation.id, values: trustedOperationStampValues(operation, session) }
                 : undefined, request.input?.blueprintBindings)
-          : await createGeneratedEntity(db, session, {
+          : createGeneratedEntity(db, session, {
               table: table.name,
               values,
               ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
-            });
+            }));
         return {
           intent: "create",
           data,
@@ -1034,13 +1048,13 @@ export async function executeEntityOperation(
                 : {}),
             }
           : undefined;
-        const data = await updateGeneratedEntity(db, session, {
+        const data = await governed(() => updateGeneratedEntity(db, session, {
           table: table.name,
           id: requireId(request.input),
           values,
           ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
           ...(guard ? { guard } : {}),
-        });
+        }));
         return {
           intent: "update",
           data,
@@ -1082,11 +1096,11 @@ export async function executeEntityOperation(
                 : {}),
             }
           : undefined;
-        const deleted = await deleteGeneratedEntity(db, session, {
+        const deleted = await governed(() => deleteGeneratedEntity(db, session, {
           table: table.name,
           id: requireId(request.input),
           ...(guard ? { guard } : {}),
-        });
+        }));
         return {
           intent: "delete",
           data: { deleted },

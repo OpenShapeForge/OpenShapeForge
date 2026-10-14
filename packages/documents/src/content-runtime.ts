@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { operationFailure } from "@openshapeforge/operations";
+import { isFieldVariableMode, operationFailure } from "@openshapeforge/operations";
 import type { ModuleOperationContext, ModuleOperationHandler, RuntimeEntityValueCarrier, RuntimeEntityValueDefinition, RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
 import { materializeTemplateContent } from "./content/materialize.js";
@@ -31,9 +31,17 @@ export function contentFieldProjection(field: Readonly<Record<string, unknown>>)
   if (typeof baseType !== "string" || !BASE_TYPES.includes(baseType)) refuse("INVALID_DEFINITION", "A block field has no resolved base type.");
   const nested = Array.isArray(field.children) ? field.children : undefined;
   const relationship = isObject(field.relationship) && typeof field.relationship.target === "string" ? { target: field.relationship.target } : undefined;
+  // The authored variable mode travels with the field: it is what makes a
+  // `{{…}}` token in this field's value a binding rather than text. A mode
+  // this build does not recognise is a broken definition rather than a field
+  // that quietly stops accepting the variables its author declared.
+  if (field.variables !== undefined && !isFieldVariableMode(field.variables)) {
+    refuse("INVALID_DEFINITION", "A block field declares an unsupported variable mode.");
+  }
   return {
     baseType: baseType as ContentField["baseType"],
     ...(typeof field.osfType === "string" ? { osfType: field.osfType } : {}),
+    ...(isFieldVariableMode(field.variables) && field.variables !== "none" ? { variables: field.variables } : {}),
     required: field.required === true,
     cardinality: (field.cardinalityBounds ?? field.cardinality ?? "single") as NonNullable<ContentField["cardinality"]>,
     ...(nested ? { fields: Object.fromEntries(nested.map((child) => { const shape = object(child, "field"); return [text(shape.key, "field key"), contentFieldProjection(shape)]; })) } : {}),

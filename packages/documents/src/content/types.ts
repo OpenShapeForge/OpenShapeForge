@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import type { FieldVariableMode } from "@openshapeforge/operations";
 import type { JsonObject, JsonValue } from "./json.js";
 
 export type ContentCardinality =
@@ -15,6 +16,12 @@ export type ContentValueShape = {
   readonly nullable?: boolean;
   readonly enum?: readonly JsonValue[];
   readonly fields?: Readonly<Record<string, ContentValueShape>>;
+  /**
+   * Whether this value accepts a variable instead of a literal, as the field
+   * authored it. Absent is `none`: a `{{…}}` sequence in such a value is
+   * text, not a binding (see ./variables.ts).
+   */
+  readonly variables?: FieldVariableMode;
 };
 
 export type ContentField = ContentValueShape & {

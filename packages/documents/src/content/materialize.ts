@@ -1,4 +1,16 @@
 // SPDX-License-Identifier: BUSL-1.1
+import {
+  assertVariableCompatible,
+  assertVariableSourceValue,
+  assertVariableUsagePermitted,
+  permitsVariableUsage,
+  variableText,
+  variableTokens,
+  wholeVariableExpression,
+  type VariableCatalogue,
+  type VariableOffer,
+  type VariableSlot,
+} from "@openshapeforge/operations";
 import { contentError } from "./errors.js";
 import {
   canonicalJson,
@@ -11,6 +23,7 @@ import {
 import type {
   CompiledContentBlockDefinition,
   CompiledContentBlockRegistry,
+  ContentBlock,
   ContentEntityReference,
   ContentResolvedEntity,
   ContentResolvedVariable,
@@ -30,6 +43,16 @@ import {
   validateContentRegistry,
   validateContentValues,
 } from "./validation.js";
+import {
+  contentItemShape,
+  contentVariableCatalogue,
+  contentVariableFailure,
+  contentVariableOffer,
+  contentVariableReference,
+  contentVariableShape,
+  contentVariableSlot,
+} from "./variables.js";
+import type { ContentValueShape } from "./types.js";
 
 /**
  * Resolves a pinned template into data, not HTML. Renderers must escape/sanitize for their
@@ -105,17 +128,38 @@ export async function materializeTemplateContent(
     return value.value;
   }
 
-  async function variable(expression: string, parameters: JsonObject): Promise<JsonValue> {
-    // Use the existing Chip authoring namespace; do not introduce a second
-    // spelling for the same platform variable in document templates.
-    const match = /^(local|chips)\.([A-Za-z][A-Za-z0-9_.-]*)$/.exec(expression.trim());
-    if (!match)
-      contentError("INVALID_VALUE", "Variables must use {{local.key}} or {{chips.key}}.");
-    const key = match[2]!;
-    if (match[1] === "chips") return global(key);
-    if (!Object.hasOwn(parameters, key))
-      contentError("MISSING_VARIABLE", `Local variable ${key} is missing.`);
-    return parameters[key]!;
+  /** The variables and their values one template version's blocks may name. */
+  type VariableScope = { readonly catalogue: VariableCatalogue; readonly parameters: JsonObject };
+
+  /**
+   * One binding, resolved through the shared typed-variable contract: the
+   * reference is parsed, the namespace that owns it declares the variable's
+   * type, that type must fit the destination in this shape, and only then is
+   * a value read. A value that breaks its own source's contract is refused;
+   * nothing falls back to a literal or an empty value.
+   */
+  async function bind(
+    expression: string,
+    slot: VariableSlot,
+    usage: "whole" | "template",
+    scope: VariableScope,
+  ): Promise<{ readonly offer: VariableOffer; readonly value: JsonValue }> {
+    const reference = contentVariableReference(expression);
+    const offer = contentVariableOffer(scope.catalogue, reference);
+    try {
+      assertVariableCompatible(slot, offer, usage);
+    } catch (error) {
+      contentVariableFailure(error);
+    }
+    const value = reference.scope === "global"
+      ? await global(reference.key)
+      : Object.hasOwn(scope.parameters, reference.key) ? scope.parameters[reference.key] : undefined;
+    try {
+      assertVariableSourceValue(offer, value);
+    } catch (error) {
+      contentVariableFailure(error);
+    }
+    return { offer, value: value as JsonValue };
   }
 
   /**
@@ -126,14 +170,45 @@ export async function materializeTemplateContent(
    */
   const markdownText = (text: string) => text.replace(/[\\*_]/g, (character) => `\\${character}`);
 
-  async function interpolate(value: JsonValue, parameters: JsonObject, markdown = false): Promise<JsonValue> {
+  /**
+   * Fill the variables of one authored value, under the contract of the field
+   * that holds it.
+   *
+   * A field that authors no mode takes literals only: its text is returned
+   * untouched, so `{{` in ordinary content is content. A field that permits a
+   * whole-value binding and holds exactly one token is bound to that
+   * variable's typed value — resolved first, then validated by the field's
+   * own canonical validator after substitution. A field that permits a
+   * template has every token replaced by the variable's formatted text, and a
+   * Markdown destination escapes each replacement so a value cannot become
+   * syntax.
+   */
+  async function interpolate(
+    value: JsonValue,
+    shape: ContentValueShape | undefined,
+    path: string,
+    scope: VariableScope,
+    markdown: boolean,
+  ): Promise<JsonValue> {
+    const slot = contentVariableSlot(path, shape);
     if (typeof value === "string") {
-      // One unbounded run per `{{`, trimmed by variable(): surrounding `\s*`
-      // around a lazy group backtracks cubically on an unclosed `{{`.
-      const matches = [...value.matchAll(/\{\{([^{}]+)\}\}/g)];
-      if (matches.length === 1 && matches[0]![0] === value) {
-        const whole = await variable(matches[0]![1]!, parameters);
-        return markdown && typeof whole === "string" ? markdownText(whole) : whole;
+      if (slot.mode === "none") return value;
+      // One unbounded run per `{{`, trimmed by the reference parser:
+      // surrounding `\s*` around a lazy group backtracks cubically on an
+      // unclosed `{{`.
+      const whole = wholeVariableExpression(value);
+      if (whole !== undefined && permitsVariableUsage(slot.mode, "whole")) {
+        // The typed value of the variable is the value of the field; it is
+        // data, not Markdown source, so it is not escaped here.
+        return (await bind(whole, slot, "whole", scope)).value;
+      }
+      const matches = variableTokens(value);
+      if (matches.length > 0) {
+        try {
+          assertVariableUsagePermitted(slot, "template");
+        } catch (error) {
+          contentVariableFailure(error);
+        }
       }
       let result = "";
       let offset = 0;
@@ -141,10 +216,14 @@ export async function materializeTemplateContent(
         const literal = value.slice(offset, match.index);
         if (/\{\{|\}\}/.test(literal))
           contentError("INVALID_VALUE", "Malformed variable expression.");
-        const replacement = await variable(match[1]!, parameters);
-        if (!["string", "number", "boolean"].includes(typeof replacement))
-          contentError("INVALID_VALUE", "Inline text variables must resolve to scalar values.");
-        const text = markdown ? markdownText(String(replacement)) : String(replacement);
+        const bound = await bind(match[1]!, slot, "template", scope);
+        let text: string;
+        try {
+          text = variableText(bound.value);
+        } catch (error) {
+          contentVariableFailure(error);
+        }
+        if (markdown) text = markdownText(text);
         if (result.length + literal.length + text.length > CONTENT_LIMITS.stringCharacters)
           contentError("CONTENT_LIMIT_EXCEEDED", "Expanded text exceeds the size budget.");
         result += literal + text;
@@ -158,17 +237,58 @@ export async function materializeTemplateContent(
       return result + remaining;
     }
     if (Array.isArray(value)) {
+      // A collection's rows hold values of the same type, one at a time.
+      const item = shape ? contentItemShape(shape) : undefined;
       const result: JsonValue[] = [];
-      for (const child of value) result.push(await interpolate(child, parameters, markdown));
+      for (const child of value) result.push(await interpolate(child, item, path, scope, markdown));
       return result;
     }
     if (value && typeof value === "object") {
+      const fields = shape?.fields;
       const result: Record<string, JsonValue> = Object.create(null);
-      for (const key of Object.keys(value).sort())
-        result[key] = await interpolate((value as JsonObject)[key]!, parameters, markdown);
+      for (const key of Object.keys(value).sort()) {
+        // Only a declared child has a contract to bind against. An object
+        // whose entries are not declared holds literals.
+        const child = fields && Object.hasOwn(fields, key) ? fields[key] : undefined;
+        result[key] = await interpolate((value as JsonObject)[key]!, child, `${path}.${key}`, scope, markdown);
+      }
       return result;
     }
     return value;
+  }
+
+  /**
+   * The contract of the local values a composition block passes to the
+   * template it includes: that template version's own typed parameters, each
+   * one carrying the mode the including field authored. So a parameter of the
+   * outer template may be bound through to the inner one, and the binding is
+   * compared against the type the inner template declares rather than
+   * against a free-form object.
+   */
+  async function compositionParameterShape(
+    definition: CompiledContentBlockDefinition,
+    references: ContentBlock["references"],
+  ): Promise<ContentValueShape | undefined> {
+    const composition = definition.composition;
+    if (!composition?.parametersField) return undefined;
+    const field = Object.hasOwn(definition.fields, composition.parametersField)
+      ? definition.fields[composition.parametersField]
+      : undefined;
+    const variables = field?.variables;
+    if (!field || !variables || variables === "none") return field;
+    const reference = Object.hasOwn(references, composition.templateVersionField)
+      ? references[composition.templateVersionField]
+      : undefined;
+    if (!reference || Array.isArray(reference) || !("id" in reference)) return field;
+    // The same resolve `visit` performs for this inclusion, cached by id: one
+    // authorized read of the version, whichever of the two needs it first.
+    const nested = await template(reference.id);
+    return {
+      ...field,
+      fields: Object.fromEntries(
+        Object.entries(nested.parameters).map(([key, parameter]) => [key, { ...parameter, variables }]),
+      ),
+    };
   }
 
   async function entity(reference: ContentEntityReference) {
@@ -217,6 +337,11 @@ export async function materializeTemplateContent(
     const variant = selectContentTemplateVariant(version, request.channel, request.locale);
     const parameters = resolveTemplateParameters(version.parameters, parameterInput);
     await resolvers.validateParameters?.(version, parameters);
+    // The variables this version's blocks may name: its own typed parameters
+    // as `local`, the tenant's Chip catalogue as `chips`. A nested template
+    // gets its own scope, so an inclusion never reads the parameters of the
+    // template that included it.
+    const scope: VariableScope = { catalogue: contentVariableCatalogue(version.parameters), parameters };
     // Capture only the selected channel's source body; other channel variants are not output.
     templates.push({
       path,
@@ -252,12 +377,23 @@ export async function materializeTemplateContent(
       const boundReferences = Object.fromEntries(Object.entries(block.references).map(([key, reference]) => {
         if (reference && !Array.isArray(reference) && "parameter" in reference) {
           const name = reference.parameter;
+          // The stored spelling of a local binding on a typed reference: a
+          // reference is never text, so the binding is its own structure
+          // instead of a token inside a string. The name is bounded by the
+          // column that holds it, and the binding itself goes through the
+          // same compatibility comparison as `{{local.key}}`.
           if (Object.keys(reference).length !== 1 || !/^[a-z][A-Za-z0-9]{0,127}$/.test(name)) contentError("INVALID_VALUE", "Invalid local parameter binding.");
-          const parameter = Object.hasOwn(version.parameters, name) ? version.parameters[name] : undefined;
-          const target = definition.fields[key]?.relationship?.target;
-          if (!target || parameter?.relationship?.target !== target || parameter.cardinality && parameter.cardinality !== "single") contentError("DEPENDENCY_INVALID", `Parameter ${name} does not match relationship ${key}.`);
-          if (!Object.hasOwn(parameters, name) || typeof parameters[name] !== "string") contentError("MISSING_VARIABLE", `Entity parameter ${name} is missing.`);
-          return [key, { entity: target, id: parameters[name] as string }];
+          const field = Object.hasOwn(definition.fields, key) ? definition.fields[key] : undefined;
+          const slot = contentVariableSlot(`block references.${key}`, field);
+          if (!slot.target) contentError("DEPENDENCY_INVALID", `${key} is not a typed reference, so it takes no parameter binding.`);
+          const offer = contentVariableOffer(scope.catalogue, contentVariableReference(`local.${name}`));
+          try {
+            assertVariableCompatible(slot, offer, "whole");
+            assertVariableSourceValue(offer, Object.hasOwn(parameters, name) ? parameters[name] : undefined);
+          } catch (error) {
+            contentVariableFailure(error);
+          }
+          return [key, { entity: slot.target, id: parameters[name] as string }];
         }
         return [key, reference];
       }));
@@ -267,9 +403,12 @@ export async function materializeTemplateContent(
         Object.entries(definition.fields).filter(([, field]) => !field.relationship),
       );
       // Markdown fields get their filled variables escaped; every other field keeps the raw value.
+      const parametersShape = await compositionParameterShape(definition, block.references);
       const values: Record<string, JsonValue> = Object.create(null);
       for (const key of Object.keys(block.values).sort()) {
-        values[key] = await interpolate(block.values[key]!, parameters, definition.fields[key]?.osfType === "markdown");
+        const field = Object.hasOwn(definition.fields, key) ? definition.fields[key] : undefined;
+        const shape = key === definition.composition?.parametersField ? parametersShape : field;
+        values[key] = await interpolate(block.values[key]!, shape, `block values.${key}`, scope, field?.osfType === "markdown");
       }
       validateContentValues(values, valueFields, "block values");
       accountExpandedContent(values);

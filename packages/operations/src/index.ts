@@ -18,8 +18,11 @@ export type {
 export {
   assertVariableCompatible,
   assertVariableSourceValue,
+  assertVariableUsagePermitted,
   compatibleVariableOffers,
+  FIELD_VARIABLE_MODES,
   fieldVariableSlot,
+  isFieldVariableMode,
   matchesBaseType,
   parseVariableReference,
   permitsVariableUsage,

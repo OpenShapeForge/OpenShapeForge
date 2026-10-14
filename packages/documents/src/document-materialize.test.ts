@@ -21,13 +21,15 @@ const carrier: RuntimeEntityValueCarrier = {
   valuesColumn: "values", definitionColumn: "definition_key",
   definitions: {
     TextBlock: {
-      entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true }],
+      // As authored: a text body holds a template, an inclusion binds its
+      // version and parameters whole.
+      entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true, variables: "template" }],
       valueSchema: { type: "object", properties: { markdown: { type: "string", minLength: 1 } }, required: ["markdown"], additionalProperties: false },
       references: [], materializeOperationId: "TextBlock.materialize",
     },
     IncludeBlock: {
       entityName: "IncludeBlock", schemaVersion: 1, definitionHash: "b".repeat(64),
-      fields: [{ key: "version", osfType: "TemplateVersion", baseType: "string", required: true, relationship: { target: "TemplateVersion" } }, { key: "parameters", osfType: "object", baseType: "object" }],
+      fields: [{ key: "version", osfType: "TemplateVersion", baseType: "string", required: true, variables: "whole", relationship: { target: "TemplateVersion" } }, { key: "parameters", osfType: "object", baseType: "object", variables: "both" }],
       valueSchema: { type: "object", properties: { parameters: { type: "object" } }, additionalProperties: false },
       references: [{ fieldKey: "version", targetEntity: "TemplateVersion", schema: "erp", table: "template_versions", column: "include_version_id", required: true }],
       materializeOperationId: "IncludeBlock.compose",

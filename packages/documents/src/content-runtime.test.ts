@@ -13,12 +13,15 @@ const carrier: RuntimeEntityValueCarrier = {
   valuesColumn: "values", definitionColumn: "definition_key",
   definitions: {
     TextBlock: {
-      entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true }],
+      // As authored: the text body holds a template, an included version and
+      // its parameters are bound whole, so the projection must carry those
+      // modes through to the engine.
+      entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true, variables: "template" }],
       valueSchema: { type: "object", properties: { markdown: { type: "string", minLength: 1 } }, required: ["markdown"], additionalProperties: false },
       references: [], materializeOperationId: "TextBlock.materialize",
     },
     IncludeBlock: {
-      entityName: "IncludeBlock", schemaVersion: 1, definitionHash: "b".repeat(64), fields: [{ key: "version", osfType: "TemplateVersion", baseType: "string", required: true, relationship: { target: "TemplateVersion" } }, { key: "parameters", osfType: "object", baseType: "object" }],
+      entityName: "IncludeBlock", schemaVersion: 1, definitionHash: "b".repeat(64), fields: [{ key: "version", osfType: "TemplateVersion", baseType: "string", required: true, variables: "whole", relationship: { target: "TemplateVersion" } }, { key: "parameters", osfType: "object", baseType: "object", variables: "both" }],
       valueSchema: { type: "object", properties: { parameters: { type: "object" } }, additionalProperties: false },
       references: [{ fieldKey: "version", targetEntity: "TemplateVersion", schema: "erp", table: "template_versions", column: "include_version_id", required: true }],
     },
@@ -34,9 +37,9 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
   const data = { markdown: "Hello {{local.name}} from {{chips.brand}}", chip: "Example", tenant: ids.tenant, unavailableOperation: false, disallowText: false,
     redactChip: false, redactBlockValues: false, missingRead: "", snapshotTemplate: ids.template, liveText: "LIVE-ROW-MUST-NOT-LEAK", variantLocale: "en", variantDefault: false };
   const compiledCarrier = structuredClone({ ...carrier, definitions: { ...carrier.definitions,
-    TextBlock: { ...carrier.definitions.TextBlock!, fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true,
+    TextBlock: { ...carrier.definitions.TextBlock!, fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true, variables: "template",
       ...(blockDefault === undefined ? {} : { defaultValue: blockDefault }) },
-      ...(withReference ? [{ key: "brand", osfType: "Chip", baseType: "string", required: true, relationship: { target: "Chip" } }] : [])],
+      ...(withReference ? [{ key: "brand", osfType: "Chip", baseType: "string", required: true, variables: "whole", relationship: { target: "Chip" } }] : [])],
       references: withReference ? [{ fieldKey: "brand", targetEntity: "Chip", column: "text_brand_id", schema: "erp", table: "chips", required: true,
         ...(withBinding ? { parameterColumn: "text_brand_parameter" } : {}) }] : [],
     },

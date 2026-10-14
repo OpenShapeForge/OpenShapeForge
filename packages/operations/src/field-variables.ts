@@ -47,6 +47,20 @@ import type {
 
 export type FieldVariableMode = "none" | "whole" | "template" | "both";
 
+/**
+ * Every mode a field may author. Exported so a surface that reads a mode out
+ * of compiled metadata can refuse an unrecognised one instead of discarding
+ * it — dropping a mode would silently turn a field that accepts variables
+ * into one that holds the token as text.
+ */
+export const FIELD_VARIABLE_MODES = Object.freeze(
+  ["none", "whole", "template", "both"] as const satisfies readonly FieldVariableMode[],
+);
+
+export function isFieldVariableMode(value: unknown): value is FieldVariableMode {
+  return typeof value === "string" && (FIELD_VARIABLE_MODES as readonly string[]).includes(value);
+}
+
 /** How a variable fills its destination: as the whole typed value, or as text inside one. */
 export type VariableUsage = "whole" | "template";
 
@@ -170,8 +184,9 @@ const MAX_KEY_LENGTH = 160;
  */
 export const VARIABLE_TOKEN = /\{\{([^{}]+)\}\}/g;
 
-export function variableTokens(text: string): RegExpMatchArray[] {
-  return [...text.matchAll(VARIABLE_TOKEN)];
+/** A global match always carries its index; the lib type leaves it optional. */
+export function variableTokens(text: string): RegExpExecArray[] {
+  return [...text.matchAll(VARIABLE_TOKEN)] as RegExpExecArray[];
 }
 
 /**
@@ -278,13 +293,11 @@ export function variableCompatibility(
   offer: VariableValueShape,
   usage: VariableUsage,
 ): VariableCompatibility {
-  if (!permitsVariableUsage(slot.mode, usage)) {
-    return incompatible(
-      "VARIABLES_NOT_PERMITTED",
-      usage === "whole"
-        ? `${slot.path} does not accept a variable as its value.`
-        : `${slot.path} does not accept variables in its text.`,
-    );
+  try {
+    assertVariableUsagePermitted(slot, usage);
+  } catch (error) {
+    if (!(error instanceof VariableError)) throw error;
+    return incompatible(error.code, error.message);
   }
   if (usage === "template") {
     if (slot.baseType !== "string" || slot.cardinality !== "single") {
@@ -334,6 +347,21 @@ export function variableCompatibility(
     }
   }
   return compatible;
+}
+
+/**
+ * The mode half of compatibility, for a caller that must refuse a shape
+ * before it knows which variable was named — so that a field which takes no
+ * template says so instead of first reporting an unknown key.
+ */
+export function assertVariableUsagePermitted(slot: VariableSlot, usage: VariableUsage): void {
+  if (permitsVariableUsage(slot.mode, usage)) return;
+  refuse(
+    "VARIABLES_NOT_PERMITTED",
+    usage === "whole"
+      ? `${slot.path} does not accept a variable as its value.`
+      : `${slot.path} does not accept variables in its text.`,
+  );
 }
 
 export function assertVariableCompatible(

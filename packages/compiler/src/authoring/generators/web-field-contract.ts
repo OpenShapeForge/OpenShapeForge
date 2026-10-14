@@ -57,7 +57,7 @@ const CONTRACT_DECLARATIONS: readonly ContractDeclaration[] = [
   { kind: "interface", name: "FieldDefinitionWorkflowInspector" },
   { kind: "interface", name: "FieldDefinitionAuthoringMetadata" },
   { kind: "interface", name: "FieldDefinition" },
-  { kind: "type", name: "OsfTypeSchemaReference" },
+  { kind: "type", name: "OsfTypeValueSchema" },
   { kind: "interface", name: "OsfTypeDefinition" },
   { kind: "type", name: "FieldSuggestions" },
   { kind: "type", name: "FieldRelationship" },

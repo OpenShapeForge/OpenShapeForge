@@ -24,7 +24,7 @@ import {
 import { cardinalityOf, collectionShape, constrainedType } from "@openshapeforge/operations";
 import type { FieldDefinition, FieldDefinitionValueType } from "../types/field-definition.js";
 import type { ConnectorOperationOutput } from "../types/connector.js";
-import type { OsfTypeDefinition, OsfTypeSchemaReference } from "../types/authoring.js";
+import type { OsfTypeDefinition, OsfTypeValueSchema } from "../types/authoring.js";
 import { osfTypeDefinitionOf, resolveBaseType } from "../entity-fields.js";
 
 /**
@@ -43,7 +43,7 @@ export type ConnectorOsfTypes = Record<string, OsfTypeDefinition>;
 
 type ResolvedConnectorField = FieldDefinition & {
   baseType: FieldDefinitionValueType;
-  schema?: OsfTypeSchemaReference;
+  schema?: OsfTypeValueSchema;
   cardinality: "single" | "collection";
   cardinalityBounds?: { min?: number; max?: number | "unbounded" };
   required: boolean;

@@ -35,12 +35,18 @@
             "$ref": "core-entity.schema.json#/$defs/field/properties/options"
           },
           "schema": {
-            "description": "The complete value schema of this type, as a $ref into the bundled field-definition definitions. A type that declares one is projected through it instead of through baseType and shape.",
+            "description": "The value schema of this type: a local bundled definition reference, a complete inline JSON Schema, or an invariant extension merged with declared object children. Strict compiler and runtime validators check the emitted vocabulary.",
             "type": "object",
-            "required": ["$ref"],
-            "additionalProperties": false,
+            "allOf": [
+              {
+                "$ref": "https://json-schema.org/draft/2020-12/schema"
+              }
+            ],
             "properties": {
-              "$ref": { "type": "string", "pattern": "^#/\\$defs/[A-Za-z][A-Za-z0-9]*$" }
+              "$ref": {
+                "type": "string",
+                "pattern": "^#/\\$defs/[A-Za-z][A-Za-z0-9]*$"
+              }
             }
           },
           "lookup": {

@@ -82,6 +82,13 @@ function loadFromDisk(definition: unknown, slug = "object-store") {
 }
 
 describe("the schema registry", () => {
+  it("validates inline semantic schemas and keeps bundled references local", () => {
+    const catalogue = (schema: unknown) => ({schemaVersion:1,kind:"osfTypeCatalog",types:{value:{label:{en:"Value"},baseType:"object",schema}}});
+    expect(validator.validate(catalogue({type:"object",additionalProperties:{type:"string"}}), "types.yaml")).toBe("osf-type-catalog.schema.json");
+    expect(validator.validate(catalogue({"x-osf-ordered-fields":{lower:"from",upper:"to",kind:"numeric"}}), "types.yaml")).toBe("osf-type-catalog.schema.json");
+    expect(() => validator.validate(catalogue({type:42}), "types.yaml")).toThrow();
+    expect(() => validator.validate(catalogue({$ref:"https://example.invalid/remote"}), "types.yaml")).toThrow();
+  });
   it("loads every schema, so a dangling $ref cannot hide", () => {
     // The failure this replaces: compiled-entity-contract.schema.json referenced
     // canonical-field.schema.json, a file that does not exist, and nothing

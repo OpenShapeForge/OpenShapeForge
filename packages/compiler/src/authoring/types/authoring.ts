@@ -115,7 +115,7 @@ export interface OsfTypeDefinition {
    * recursive contract (a stored FieldDefinition) is a catalog type like any
    * other, with no engine code that knows its name.
    */
-  schema?: OsfTypeSchemaReference;
+  schema?: OsfTypeValueSchema;
   lookup?: OsfTypeLookupDefinition;
   render?: {
     display: string;
@@ -164,7 +164,7 @@ export interface OsfTypeDefinition {
   filterField?: string;
 }
 
-export type OsfTypeSchemaReference = { $ref: string } & Record<string, unknown>;
+export type OsfTypeValueSchema = Record<string, unknown>;
 
 export interface OsfTypeCatalog {
   schemaVersion: number;

@@ -25,11 +25,16 @@
  *   - a module that failed to load or initialise is fatal IF it owns the
  *     requested role. The API tolerates a missing module because its other
  *     surfaces still work; here the module IS the process.
+ *   - a module that was configured to contribute a host execution policy and
+ *     failed to initialise is fatal whatever role was requested: a worker that
+ *     drained the queue without the policy would run exactly the work the
+ *     policy exists to refuse (operations/execution-policy.ts).
  */
 import { createDatabaseRuntime, type DatabaseRuntime } from "../db/connection.js";
 import { WORKER_ROLE } from "../db/migrations/worker-role.js";
 import { createJobsRuntimeModule } from "../jobs/module.js";
 import { configuredDurableWorkerBroker } from "../operations/durable-worker.js";
+import { registerOperationExecutionPolicies } from "../operations/execution-policy.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../modules/field-schemas.js";
 import { runtimeSettings } from "../modules/settings.js";
 import type { ModuleWorker, ModuleWorkerHandle, ModuleWorkerLogger } from "../modules/contract.js";
@@ -187,6 +192,16 @@ export async function startWorkerRole(
     // registers handlers there would otherwise have its worker claim work it
     // cannot resolve, burning the retry bound on a configuration problem.
     initialised = await initRuntimeModules(registry, { db: databaseRuntime.db });
+    // The host execution policies, on THIS process's connection. The registry
+    // is keyed on the database handle, and a worker creates its own: without
+    // this, every governed Operation a background run reaches would be
+    // admitted here while the same Operation is refused in the API — which is
+    // exactly the window a job queued before a deadline runs in.
+    registerOperationExecutionPolicies(databaseRuntime.db, {
+      loaded: initialised.loaded,
+      failures: initialised.failures,
+      candidates: registry.loaded,
+    });
     // The core jobs module is not in the generated registry — nothing can
     // drop it — and joins the loaded plugins here so `job-worker` is indexed
     // like any contributed role and drains every module's job kinds.

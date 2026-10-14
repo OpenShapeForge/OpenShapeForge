@@ -411,11 +411,16 @@ export function createApiApp(options: {
     modulePlatform?.registerArtifactStorage(initialised.loaded);
     modulePlatform?.registerOperationProviders(initialised.loaded);
     // Host-wide execution admission, bound once from the modules that
-    // actually initialised — a module that failed to load contributes no
-    // policy, exactly as it contributes no provider. A build with no
-    // contribution leaves every execution path unchanged.
+    // actually initialised. A build with no contribution leaves every
+    // execution path unchanged; a module that was configured to contribute a
+    // policy and failed to initialise stops boot here, because an API serving
+    // without its enforcement owner would turn a frozen tenant writable.
     if (databaseRuntime) {
-      registerOperationExecutionPolicies(databaseRuntime.db, initialised.loaded);
+      registerOperationExecutionPolicies(databaseRuntime.db, {
+        loaded: initialised.loaded,
+        failures: initialised.failures,
+        candidates: modules.loaded,
+      });
     }
     const egressOwner = assertSingleModuleEgressOwner(initialised.loaded);
     if (modulePlatform) {

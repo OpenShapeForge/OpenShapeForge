@@ -240,6 +240,41 @@ describe("startWorkerRole", () => {
     expect(order).toEqual(["init", "start", "stop", "close"]);
   });
 
+  /**
+   * The enforcement owner is not optional. A policy module need own no worker
+   * role and no canonical Operation, so nothing else in this boot path
+   * notices its absence — and a worker that drains the queue without it runs
+   * exactly the work the policy exists to refuse.
+   */
+  test("refuses to start when a configured policy module fails to initialise", async () => {
+    const policyModule: RuntimeModule = {
+      name: "tenant-policy",
+      executionPolicies: [{ name: "tenant-write-deadline", evaluate: () => ({ admitted: true }) }],
+      init: async () => {
+        throw new Error("its catalog could not be hydrated");
+      },
+    };
+    await expect(startWorkerRole("probe", {
+      databaseUrl,
+      log: silentLog,
+      // The requested role is perfectly available; the policy is not.
+      modules: registry([policyModule, moduleWith("probe-module", ["probe"])]),
+    })).rejects.toThrow(/"tenant-policy" \(init_failed[\s\S]*did not initialise/);
+  });
+
+  test("a module with no policy that fails to initialise still leaves the worker running", async () => {
+    const handle = await startWorkerRole("probe", {
+      databaseUrl,
+      log: silentLog,
+      modules: registry([
+        { name: "unrelated", init: async () => { throw new Error("no catalog"); } },
+        moduleWith("probe-module", ["probe"]),
+      ]),
+    });
+    expect(handle).toMatchObject({ role: "probe", module: "probe-module" });
+    await handle.stop();
+  });
+
   test("requires claim resolution and atomic contract pinning as one durable boundary", async () => {
     for (const partial of ["resolver", "pinner"] as const) {
       await expect(startWorkerRole("probe", {

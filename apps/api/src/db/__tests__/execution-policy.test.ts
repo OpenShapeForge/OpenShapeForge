@@ -46,7 +46,11 @@ import {
 } from "../../operations/execution-policy.js";
 import { getGeneratedCrudTables } from "../../operations/entity/index.js";
 import { createGeneratedEntityForTable } from "../../operations/entity/mutations.js";
-import { entityOperationContract } from "../../operations/entity/runtime.js";
+import {
+  entityOperationContract,
+  entityOperationRef,
+  executeEntityOperation,
+} from "../../operations/entity/runtime.js";
 import {
   acquireEntityEditLease,
   type LeaseProtectedOperation,
@@ -126,6 +130,16 @@ const CUSTOM_KEYED = customOperation(
   { data: "write", external: "none" },
   { mode: "idempotency-key", header: "Idempotency-Key", inputField: "requestKey" },
 );
+/** The outer Operation of the nested cases; its input names the nested call. */
+const CUSTOM_NESTED: OperationContract = {
+  ...customOperation("example.nested", { data: "write", external: "none" }),
+  inputSchema: {
+    type: "object",
+    required: ["nested"],
+    properties: { nested: { type: "object" } },
+    additionalProperties: false,
+  },
+};
 
 let admin: SQL | undefined;
 let created = false;
@@ -146,7 +160,11 @@ const policyCalls: { policy: string; tenantId: string | null; relations: number 
  * state is changed in between — the deadline passing while a lock, a lease or
  * a provider claim was being prepared.
  */
-let betweenDecisions: ((count: number) => Promise<void>) | undefined;
+let betweenDecisions:
+  | ((count: number, operationId: string) => Promise<void>)
+  | undefined;
+/** What a nested invocation answered the outer handler that kept going. */
+const nestedResults: unknown[] = [];
 
 const exampleModule: RuntimeModule = {
   name: "execution-policy-example",
@@ -172,6 +190,39 @@ const exampleModule: RuntimeModule = {
       ran.push("keyed");
       return { value: { ran: true } };
     },
+    /**
+     * An outer canonical Operation that writes, invokes a governed Operation
+     * through core, keeps whatever that one answered and writes again — the
+     * shape in which a nested refusal reaches a caller as a result rather
+     * than as a thrown error.
+     */
+    nested: async (input, context) => {
+      ran.push("nested");
+      const request = (input as { nested: Record<string, unknown> }).nested;
+      const session = context.session!;
+      const write = (label: string) => context.platform!.db.withSession(session, (trx) =>
+        sql`insert into erp.relations (id, tenant_id, display_name, relation_type)
+            values (${randomUUID()}::uuid, ${session.tenantId}::uuid, ${label}, 'organization')`
+          .execute(trx));
+      await write("Outer earlier row");
+      if (request.kind === "keyed") {
+        nestedResults.push(await context.platform!.operations.execute(session, {
+          operation: { id: "example.keyed", intent: "invoke" },
+          input: {},
+          idempotencyKey: String(request.idempotencyKey),
+        }));
+      } else {
+        const table = getGeneratedCrudTables().find(
+          (candidate) => candidate.source?.authoringEntityName === "Relation",
+        )!;
+        nestedResults.push(await executeEntityOperation(context.db!, session, {
+          operation: entityOperationRef(table, request.kind as "update" | "delete"),
+          input: request.input as Record<string, unknown>,
+        }));
+      }
+      await write("Outer later row");
+      return { value: { ran: true } };
+    },
   },
 };
 
@@ -182,11 +233,11 @@ const exampleModule: RuntimeModule = {
  */
 const deadlinePolicy: ModuleExecutionPolicy = {
   name: "tenant-write-deadline",
-  evaluate: async (_request, context) => {
+  evaluate: async (request, context) => {
     const rows = await sql<{ tenant_id: string; writes_until: Date }>`
       select tenant_id, writes_until from public.execution_policy_deadline
     `.execute(context.db);
-    await betweenDecisions?.(policyCalls.length + 1);
+    await betweenDecisions?.(policyCalls.length + 1, request.operation.id);
     const relations = await sql<{ count: string }>`
       select count(*)::text as count from erp.relations
     `.execute(context.db);
@@ -345,7 +396,9 @@ describe("host execution policies against PostgreSQL", () => {
         CUSTOM_PUBLISH,
         CUSTOM_READ,
         CUSTOM_KEYED,
+        CUSTOM_NESTED,
         listOperationContracts().find((operation) => operation.key === "Document.insertVariant")!,
+        listOperationContracts().find((operation) => operation.key === "DocumentVariant.insertBlock")!,
       ],
     ));
     registerOperationExecutionPolicies(app.db, [
@@ -364,6 +417,7 @@ describe("host execution policies against PostgreSQL", () => {
     ran.length = 0;
     delivered.length = 0;
     policyCalls.length = 0;
+    nestedResults.length = 0;
     betweenDecisions = undefined;
     serverNow = new Date("2026-10-14T09:00:00.000Z");
     tenantA = randomUUID();
@@ -373,7 +427,11 @@ describe("host execution policies against PostgreSQL", () => {
     await sql`delete from erp.relations`.execute(privileged!.db);
     await sql`delete from erp.document_variants`.execute(privileged!.db);
     await sql`delete from erp.documents`.execute(privileged!.db);
+    await sql`delete from erp.blocks`.execute(privileged!.db);
     await sql`delete from erp.document_types`.execute(privileged!.db);
+    await sql`delete from erp.template_versions`.execute(privileged!.db);
+    await sql`delete from erp.templates`.execute(privileged!.db);
+    await sql`delete from platform.entity_events`.execute(privileged!.db);
     // A keyed Operation's receipt row belongs to a registered tenant.
     for (const tenantId of [tenantA, tenantB]) {
       await sql`insert into platform.tenants (id, slug, name, status)
@@ -832,6 +890,232 @@ describe("host execution policies against PostgreSQL", () => {
       select to_json(updated_at)#>>'{}' as version from erp.documents where id = ${id}::uuid
     `.execute(privileged!.db);
     expect(parent.rows[0]!.version).toBe(updatedAt);
+  }, 60_000);
+
+  /**
+   * The last wait of all: the child's own preparation. The collection owner
+   * has the parent and every sibling locked by the time it hands over, and
+   * the child create then resolves default templates and takes a `for share`
+   * lock on each record its entity-value references — core-owned reads that
+   * wait on whoever holds those rows. A decision taken before that hand-over
+   * cannot see a freeze that arrives during it.
+   */
+  test("refuses a collection insert blocked on a referenced record's preparation", async () => {
+    const actor = session(tenantA, { roles: [...WRITE_ROLES, "Templates.Manage", "Templates.Read"] });
+    const template = randomUUID();
+    const templateVersion = randomUUID();
+    await sql`
+      insert into erp.templates (id, tenant_id, key, name, lifecycle_status)
+      values (${template}::uuid, ${tenantA}::uuid, 'minutes', 'Minutes', 'draft')
+    `.execute(privileged!.db);
+    await sql`
+      insert into erp.template_versions
+        (id, tenant_id, template_id, version_number, status, snapshot, content_hash, published_by, published_at)
+      values
+        (${templateVersion}::uuid, ${tenantA}::uuid, ${template}::uuid, 1, 'published', '{}'::jsonb,
+         ${"a".repeat(64)}, ${randomUUID()}::uuid, now())
+    `.execute(privileged!.db);
+    await sql`
+      insert into erp.document_types
+        (id, tenant_id, code, name, requires_registration, allows_external_publication, lifecycle_status)
+      values (${randomUUID()}::uuid, ${tenantA}::uuid, 'report', 'Report', false, false, 'draft')
+    `.execute(privileged!.db);
+    const document = randomUUID();
+    await sql`
+      insert into erp.documents
+        (id, tenant_id, title, document_type, status, is_external, lifecycle_status)
+      values (${document}::uuid, ${tenantA}::uuid, 'Minutes', 'report', 'draft', false, 'draft')
+    `.execute(privileged!.db);
+    const variants = await sql<{ id: string; version: string }>`
+      insert into erp.document_variants (id, tenant_id, document_id, channel, locale)
+      values (${randomUUID()}::uuid, ${tenantA}::uuid, ${document}::uuid, 'document', 'nl-NL')
+      returning id, to_json(updated_at)#>>'{}' as version
+    `.execute(privileged!.db);
+    const { id: variantId, version: variantVersion } = variants.rows[0]!;
+    policyCalls.length = 0;
+
+    // Hold the REFERENCED template version, which only the child's own
+    // preparation reads; the parent and siblings stay free.
+    const refused = await withHeldRowLock("erp.template_versions", templateVersion, async (release) => {
+      const inserting = execute(actor, "DocumentVariant.insertBlock", "invoke", {
+        id: variantId,
+        expectedVersion: variantVersion,
+        values: {
+          definitionKey: "TemplateBlock",
+          values: { version: templateVersion, parameters: {} },
+        },
+      });
+      await waitUntilBlockedAfterAdmission();
+      // Every decision core takes before the child owner has been taken, and
+      // all of them admitted: the collection owner has handed over and the
+      // child is preparing its reference.
+      expect(policyCalls).toHaveLength(2);
+      await freezeTenantA();
+      await release();
+      return inserting;
+    });
+
+    expect(refused).toMatchObject({ error: { code: EXECUTION_NOT_PERMITTED } });
+    // Only a decision taken after that preparation can account for this.
+    expect(policyCalls).toHaveLength(3);
+    const blocks = await sql<{ count: string }>`
+      select count(*)::text as count from erp.blocks
+      where document_variant_id = ${variantId}::uuid
+    `.execute(privileged!.db);
+    expect(blocks.rows[0]!.count).toBe("0");
+    const parent = await sql<{ version: string }>`
+      select to_json(updated_at)#>>'{}' as version from erp.document_variants
+      where id = ${variantId}::uuid
+    `.execute(privileged!.db);
+    expect(parent.rows[0]!.version).toBe(variantVersion);
+    const journal = await sql<{ count: string }>`
+      select count(*)::text as count from platform.entity_events
+      where tenant_id = ${tenantA}::uuid
+    `.execute(privileged!.db);
+    expect(journal.rows[0]!.count).toBe("0");
+  }, 60_000);
+
+  /**
+   * A nested governed invocation joins its caller's transaction, and its
+   * refusal reaches that caller as an error result rather than as a thrown
+   * error — so nothing about the caller's transaction forces the refused
+   * invocation's work out of it. These prove that the invocation is its own
+   * rollback boundary: the controls it consumed and the receipt it claimed go
+   * with the refusal, while the caller's unrelated work — written before AND
+   * after — commits.
+   */
+  const outerRows = async (): Promise<string[]> => {
+    const rows = await sql<{ display_name: string }>`
+      select display_name from erp.relations
+      where tenant_id = ${tenantA}::uuid and display_name like 'Outer %' order by display_name
+    `.execute(privileged!.db);
+    return rows.rows.map((row) => row.display_name);
+  };
+
+  test("a nested update refused after consuming its lease leaves the caller's work intact", async () => {
+    const actor = session(tenantA);
+    const created = await execute(actor, "Relation.create", "create", {
+      values: { displayName: "Nested target", relationType: "organization" },
+    });
+    const id = (created as { data: { id: string } }).data.id;
+    const lease = await takeEditLease(actor, "Relation.update", id);
+    const input = {
+      id,
+      values: { displayName: "Renamed by the nested call" },
+      expectedVersion: lease.targetVersion,
+      leaseToken: lease.leaseToken,
+    };
+    policyCalls.length = 0;
+
+    // The nested update blocks on a real row lock; the freeze lands while the
+    // outer Operation is parked inside it, having already written its first
+    // unrelated row.
+    const outcome = await withHeldRowLock("erp.relations", id, async (release) => {
+      const invoking = execute(actor, "example.nested", "invoke", {
+        nested: { kind: "update", input },
+      });
+      await waitUntilBlockedAfterAdmission();
+      await freezeTenantA();
+      await release();
+      return invoking;
+    });
+
+    // The outer Operation succeeded and kept the refusal it was given.
+    expect(outcome).toMatchObject({ data: { ran: true } });
+    expect(nestedResults).toHaveLength(1);
+    expect(nestedResults[0]).toMatchObject({
+      error: { code: EXECUTION_NOT_PERMITTED, message: "This workspace is read-only." },
+    });
+    // Both of the caller's unrelated writes committed, the refused one did not.
+    expect(await outerRows()).toEqual(["Outer earlier row", "Outer later row"]);
+    const row = await sql<{ display_name: string }>`
+      select display_name from erp.relations where id = ${id}::uuid
+    `.execute(privileged!.db);
+    expect(row.rows[0]!.display_name).toBe("Nested target");
+
+    // The lease the refused invocation consumed rolled back with it.
+    await unfreezeTenantA();
+    expect(await execute(actor, "Relation.update", "update", input)).not.toHaveProperty("error");
+  }, 60_000);
+
+  test("a nested delete refused after consuming its confirmation keeps both controls", async () => {
+    const actor = session(tenantA);
+    const created = await execute(actor, "Relation.create", "create", {
+      values: { displayName: "Nested delete target", relationType: "organization" },
+    });
+    const id = (created as { data: { id: string } }).data.id;
+    const lease = await takeEditLease(actor, "Relation.delete", id);
+    const challenged = await execute(actor, "Relation.delete", "delete", {
+      id,
+      expectedVersion: lease.targetVersion,
+      leaseToken: lease.leaseToken,
+    });
+    const challenge = (challenged as unknown as {
+      error: { code: string; data: { confirmation: { challengeToken: string } } };
+    }).error;
+    expect(challenge.code).toBe("CONFIRMATION_REQUIRED");
+    const input = {
+      id,
+      expectedVersion: lease.targetVersion,
+      leaseToken: lease.leaseToken,
+      confirmationToken: challenge.data.confirmation.challengeToken,
+      confirmationAnswer: "Nested delete target",
+    };
+    policyCalls.length = 0;
+
+    const outcome = await withHeldRowLock("erp.relations", id, async (release) => {
+      const invoking = execute(actor, "example.nested", "invoke", {
+        nested: { kind: "delete", input },
+      });
+      await waitUntilBlockedAfterAdmission();
+      await freezeTenantA();
+      await release();
+      return invoking;
+    });
+
+    expect(outcome).toMatchObject({ data: { ran: true } });
+    expect(nestedResults[0]).toMatchObject({ error: { code: EXECUTION_NOT_PERMITTED } });
+    expect(await outerRows()).toEqual(["Outer earlier row", "Outer later row"]);
+
+    // Single-use lease AND single-use challenge both survived the refusal.
+    await unfreezeTenantA();
+    expect(await execute(actor, "Relation.delete", "delete", input)).not.toHaveProperty("error");
+    const remaining = await sql<{ count: string }>`
+      select count(*)::text as count from erp.relations where id = ${id}::uuid
+    `.execute(privileged!.db);
+    expect(remaining.rows[0]!.count).toBe("0");
+  }, 60_000);
+
+  test("a nested keyed Operation refused after claiming its receipt leaves none behind", async () => {
+    const actor = session(tenantA);
+    // Freeze between the nested keyed Operation's own two decisions: its
+    // claim is committed into the caller's transaction by then, and its
+    // handler has not run.
+    betweenDecisions = async (_count, operationId) => {
+      if (operationId !== "example.keyed") return;
+      betweenDecisions = undefined;
+      await freezeTenantA();
+    };
+
+    const outcome = await execute(actor, "example.nested", "invoke", {
+      nested: { kind: "keyed", idempotencyKey: "nested-receipt-1" },
+    });
+
+    expect(outcome).toMatchObject({ data: { ran: true } });
+    expect(nestedResults[0]).toMatchObject({ error: { code: EXECUTION_NOT_PERMITTED } });
+    expect(ran).toEqual(["nested"]);
+    expect(await outerRows()).toEqual(["Outer earlier row", "Outer later row"]);
+    // No running, completed or outcome_unknown receipt for work that never
+    // happened — the claim rolled back with the refused invocation.
+    const receipts = await sql<{ count: string }>`
+      select count(*)::text as count from platform.operation_execution_receipts
+    `.execute(privileged!.db);
+    expect(receipts.rows[0]!.count).toBe("0");
+
+    // And the key is free: the same request succeeds once writes are allowed.
+    await unfreezeTenantA();
+    expect(await execute(actor, "example.keyed", "invoke", {}, "nested-receipt-1"))
+      .toMatchObject({ data: { ran: true } });
   }, 60_000);
 
   test("a policy cannot write: its decision transaction is read-only", async () => {

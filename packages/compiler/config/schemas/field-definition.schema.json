@@ -248,7 +248,7 @@
           "x-osf-i18n": { "title": { "en": "Component", "nl": "Component" } },
           "x-osf-choice": "component"
         },
-        "props": { "type": "object", "x-osf-i18n": { "title": { "en": "Properties", "nl": "Eigenschappen" } } }
+        "props": { "type": "object", "properties": { "decimalPlaces": { "type": "integer", "minimum": 0, "maximum": 20 }, "scale": { "type": "string", "enum": ["units", "thousands", "millions"] } }, "x-osf-i18n": { "title": { "en": "Properties", "nl": "Eigenschappen" } } }
       }
     },
     "fieldDefinition": {

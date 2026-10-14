@@ -42,7 +42,7 @@ export interface ListPresentation {
 
 export interface FieldRef {
   key: string;
-  render?: string;
+  render?: string | { component: string; props?: Record<string, unknown> };
   /** Hydration-only field: included in selection + renderer state but not rendered. */
   fieldDisplayMode?: "hidden";
 }

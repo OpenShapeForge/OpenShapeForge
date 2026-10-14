@@ -484,9 +484,15 @@ describe("coreEntity properties the compiler implements", () => {
     const document = webViews([{ id: "main", fields: [
       "idempotencyKey",
       { key: "idempotencyKey", render: "TextDisplay" },
+      { key: "idempotencyKey", render: { component: "MoneyInput", props: { decimalPlaces: 0, scale: "millions" } } },
       { key: "idempotencyKey", fieldDisplayMode: "hidden" },
     ] }]);
     expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+    for (const props of [{ decimalPlaces: -1 }, { decimalPlaces: 21 }, { decimalPlaces: 1.5 }, { scale: "billion" }]) {
+      expect(() => validator.validate(webViews([{ id: "main", fields: [
+        { key: "idempotencyKey", render: { component: "MoneyInput", props } },
+      ] }]), "billing-run.yaml")).toThrow();
+    }
     expect(() => validator.validate(webViews([{ id: "main", fields: [{ key: "idempotencyKey", hidden: true }] }]), "billing-run.yaml"))
       .toThrow(/fields\/0/);
     expect(() => validator.validate(webViews([{ id: "main", fields: [{ key: "idempotencyKey", fieldDisplayMode: "collapsed" }] }]), "billing-run.yaml"))
@@ -563,7 +569,7 @@ describe("coreEntity properties the compiler implements", () => {
     // Shared definitions can be visited first from a named view or a record.
     // Assert the choice site independently of that traversal order.
     expect(seen.some(path => path.endsWith("->webViewGroupV2.relationship"))).toBe(true);
-    expect(seen.some(path => path.endsWith("->webFieldEntryV2|oneOf1.render"))).toBe(true);
+    expect(seen.some(path => path.endsWith("->webFieldEntryV2|oneOf1.render|oneOf0"))).toBe(true);
     expect(seen.some((path) => path.includes("variableSources"))).toBe(false);
   });
 

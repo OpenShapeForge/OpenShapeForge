@@ -58,6 +58,7 @@ import type {
 
 export interface CompiledViewRender {
   component: string;
+  props?: Record<string, unknown>;
 }
 
 export interface CompiledColumn {

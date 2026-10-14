@@ -198,7 +198,7 @@ export type WebFieldGroup = {
   /** The group applies only while these conditions hold for the draft being edited. */
   visibleWhen?: WebVisibilityCondition;
   /** Per-field presentation-renderer overrides authored on a FieldRef; keyed by field key, sparse. */
-  fieldOverrides?: Record<string, { render: { component: WebRendererKey } }>;
+  fieldOverrides?: Record<string, { render: { component: WebRendererKey; props?: Record<string, unknown> } }>;
 };
 
 export type WebTimelinePresentation = {

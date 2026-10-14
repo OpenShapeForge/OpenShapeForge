@@ -273,7 +273,7 @@ function fieldKeys(
 function fieldOverrides(
   group: CompiledViewGroup,
   excluded: ReadonlySet<string> = new Set(),
-): Record<string, { render: { component: string } }> | undefined {
+): Record<string, { render: { component: string; props?: Record<string, unknown> } }> | undefined {
   const entries = (group.fields ?? []).flatMap((entry) => {
     if (typeof entry === "string" || !entry.renderOverride) return [];
     if (entry.fieldDisplayMode === "hidden" || excluded.has(entry.key)) return [];

@@ -161,6 +161,7 @@ export function resolveFields(
   registry: OperationFieldSchemaRegistry,
   ancestry: readonly string[] = [],
 ): ResolvedOperationField[] {
+  if (ancestry.length > 32) throw new Error("Field definitions exceed the supported nesting depth.");
   return fields.map((field) => {
     const semantic = isBaseType(field.osfType) || !registry.osfTypes || !Object.hasOwn(registry.osfTypes, field.osfType)
       ? undefined

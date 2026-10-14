@@ -205,6 +205,7 @@ export function objectSchema(
   const required: string[] = [];
   const keys = new Set<string>();
   for (const field of fields) {
+    if (["__proto__", "prototype", "constructor"].includes(field.key)) throw new Error("FieldDefinition uses a reserved object key.");
     if (keys.has(field.key)) throw new Error(`FieldDefinition key ${JSON.stringify(field.key)} is duplicated.`);
     keys.add(field.key);
     properties[field.key] = fieldSchema(field, registry, options);

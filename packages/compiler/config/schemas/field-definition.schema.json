@@ -262,7 +262,7 @@
       "type": "object",
       "required": ["key", "osfType"],
       "properties": {
-        "key": { "type": "string", "minLength": 1 },
+        "key": { "type": "string", "minLength": 1, "not": { "enum": ["__proto__", "prototype", "constructor"] } },
         "osfType": {
           "type": "string",
           "minLength": 1,

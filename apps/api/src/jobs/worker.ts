@@ -26,16 +26,32 @@
  * worker cannot prove that a thrown error happened before an external effect,
  * so an unclassified throw is settled apart as `outcome_unknown`. A handler
  * that knows repetition is safe returns the explicit `retry` outcome instead.
+ *
+ * Between that lock and the handler sits the host execution admission guard
+ * (operations/execution-policy.ts). A job is the one execution path whose
+ * authorization is older than its effects — it was admitted when it was
+ * enqueued, and it runs whenever a worker gets to it — so a tenant that may
+ * no longer change anything must be refused here, before the handler writes a
+ * row or delivers a message. That refusal is a KNOWN outcome: nothing ran, so
+ * it is never `outcome_unknown`.
  */
 import { sql, type Transaction } from "kysely";
+import type { OperationError } from "@openshapeforge/operations";
 import type { RuntimeJobError, RuntimeJobOutcome } from "@openshapeforge/plugin-runtime";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession } from "../db/session.js";
 import type { DB } from "../generated/db/types.js";
 import type { ModuleWorkerHandle, ModuleWorkerLogger } from "../modules/contract.js";
+import { operationAdmissionRefusal } from "../operations/execution-policy.js";
 import type { JobHandlerRegistry } from "./handlers.js";
 import { sweepDoneJobs } from "./queries.js";
-import { lockClaimedJob, settleJob, type SettleJobInput, type SettleJobResult } from "./settle.js";
+import {
+  lockClaimedJob,
+  retryDelayMs,
+  settleJob,
+  type SettleJobInput,
+  type SettleJobResult,
+} from "./settle.js";
 import { claimJobs, type ClaimedJob } from "./store.js";
 
 /**
@@ -150,9 +166,57 @@ export type JobRunResult =
   | { ran: false };
 
 /**
+ * What a queued job is, as far as a host execution policy is concerned.
+ *
+ * A job handler is a function; nothing in the compiler declares what it
+ * writes, and the payload that would claim to is the caller's. So core
+ * classifies every queued run as the governed case — a data change that may
+ * also write externally — which is what `mail.deliver` is and what any
+ * handler is allowed to be. The identity is the registered kind, never a
+ * value from the row's payload.
+ */
+const QUEUED_JOB_EFFECTS = { data: "write", external: "write" } as const;
+
+/**
+ * The refusal settlement for a job a policy would not admit: requeued for
+ * the moment the refusal names, attempt-neutral, or terminally `failed` when
+ * the refusal names no end. Either way the queue records the structured
+ * denial — never the worker's generic `outcome_unknown`, which would claim an
+ * external effect may have happened when the handler never started.
+ */
+export function refusedJobSettlement(
+  job: ClaimedJob,
+  denial: OperationError,
+  now: number = Date.now(),
+): SettleJobInput {
+  const error: RuntimeJobError = {
+    code: denial.code,
+    message: denial.message,
+    ...(denial.detail ? { detail: { reason: denial.detail } } : {}),
+  };
+  const base = { id: job.id, claimToken: job.claimToken, error };
+  const named = typeof denial.retryAt === "string" ? Date.parse(denial.retryAt) : Number.NaN;
+  if (Number.isFinite(named)) {
+    return { ...base, outcome: "not_admitted", retryAt: new Date(Math.max(named, now)) };
+  }
+  // Retryable with no named end: come back on the ordinary backoff rather
+  // than closing work the host may well admit in a minute.
+  if (denial.retryable) {
+    return {
+      ...base,
+      outcome: "not_admitted",
+      retryAt: new Date(now + retryDelayMs(job.attempts)),
+    };
+  }
+  return { ...base, outcome: "failed" };
+}
+
+/**
  * Run one claimed job to its settled outcome. A kind nobody handles is `dead`
  * at once — retrying it would only spend the attempt budget on a configuration
- * problem. Once the handler has started, an unclassified failure is
+ * problem. A run a host execution policy refuses is settled without starting
+ * the handler ({@link refusedJobSettlement}). Once the handler has started, an
+ * unclassified failure is
  * `outcome_unknown`: the worker cannot know whether an external effect already
  * happened. Handlers opt into automatic retry by returning `retry` explicitly.
  *
@@ -191,6 +255,22 @@ export async function runClaimedJob(
       { tenantId: job.tenantId, userId: job.actorId, ...job.actorSession },
       async (trx): Promise<JobRunResult> => {
         if (!(await lockClaimedJob(trx, job))) return { ran: false };
+        // Admission inside the claim's own transaction, after the claim is
+        // proven to still hold and immediately before the handler: the policy
+        // reads the live persisted state through this very transaction, so a
+        // tenant that lost its writes while this job waited in the queue — or
+        // while this worker waited for the lock — is refused here rather than
+        // on the admission its enqueue once had. The claim and the settle
+        // around it are the host's own queue bookkeeping and stay outside.
+        const denial = await operationAdmissionRefusal(
+          db,
+          { tenantId: job.tenantId, userId: job.actorId, ...job.actorSession },
+          { id: job.kind, intent: "job", effects: QUEUED_JOB_EFFECTS },
+        );
+        if (denial) {
+          const settlement = refusedJobSettlement(job, denial);
+          return { ran: true, settlement, result: await settleJob(trx, settlement) };
+        }
         handlerStarted = true;
         const outcome = await registered.handler(job.payload, {
           job: {

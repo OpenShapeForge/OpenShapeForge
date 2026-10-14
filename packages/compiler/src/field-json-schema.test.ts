@@ -214,6 +214,7 @@ describe("compiled field JSON Schema projection", () => {
       default: "active",
       "x-osf-i18n": { title: { en: "status" }, description: { en: "Lifecycle status." }, enum: { active: { en: "Active", nl: "Actief" }, closed: { en: "Closed", nl: "Gesloten" } } },
       "x-osf-type": "string",
+      "x-osf-presentation": {component:"ReferenceSelect",props:{referentieGroep:"STATUS"}},
     });
   });
 
@@ -287,7 +288,7 @@ describe("compiled field JSON Schema projection", () => {
     expect(schema.items).toEqual({
       allOf: [
         { type: "string", maxLength: 8, enum: ["primary", "backup"], "x-osf-type": "string" },
-        { type: "string", title: "Code", description: "Code", "x-osf-i18n": { title: { en: "Code" } }, "x-osf-type": "string" },
+        { type: "string", title: "Code", description: "Code", "x-osf-i18n": { title: { en: "Code" } }, "x-osf-type": "string", "x-osf-presentation": {component:"Input"} },
       ],
       "x-osf-type": "string",
     });
@@ -416,7 +417,7 @@ describe("compiled field JSON Schema projection", () => {
     const properties = schema.properties as Record<string, Record<string, unknown>>;
 
     expect(properties.definition?.$ref).toBe("#/$defs/fieldDefinition");
-    expect(properties.definitions?.items).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-type": "fieldDefinition" });
+    expect(properties.definitions?.items).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-type": "fieldDefinition", "x-osf-presentation": {component:"Input"} });
     expect(Object.keys(schema.$defs as object).filter((key) => key === "fieldDefinition")).toHaveLength(1);
     expect(() => new Ajv2020.default({ strict: false }).compile(schema)).not.toThrow();
   });
@@ -428,7 +429,7 @@ describe("compiled field JSON Schema projection", () => {
     });
     const schema = declared.object([{ key: "form", osfType: "object", children: [{ key: "fields", osfType: "fieldDefinition", cardinality: "collection" }] }]);
     const form = (schema.properties as Record<string, Record<string, unknown>>).form!;
-    expect((form.properties as Record<string, Record<string, unknown>>).fields!.items).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-type": "fieldDefinition" });
+    expect((form.properties as Record<string, Record<string, unknown>>).fields!.items).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-type": "fieldDefinition", "x-osf-presentation": {component:"CollectionEditor"} });
     expect(form.$defs).toBeUndefined();
     expect(Object.keys(schema.$defs as object)).toContain("fieldDefinition");
     const validate = new Ajv2020.default({ strict: false }).compile(schema);

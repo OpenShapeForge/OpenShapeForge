@@ -151,7 +151,7 @@ export function assertDefaultSatisfiesContract(field: Field): void {
     if (maxLength !== undefined && value.length > maxLength) refuse(`is longer than maxLength ${maxLength}`);
     if (pattern !== undefined && !new RegExp(pattern, "u").test(value)) refuse(`does not match pattern ${pattern}`);
   }
-  if (field.baseType === "number" || field.baseType === "integer") {
+  if (typeof value === "number" || field.baseType === "number" || field.baseType === "integer") {
     const min = exactNumericRule(validation.min);
     const max = exactNumericRule(validation.max);
     if (min !== undefined && compareExactNumeric(value, min) === -1) refuse(`is below min ${min}`);

@@ -8,7 +8,7 @@ import { loadEntity } from "./loader.js";
 import { createAuthoringValidator } from "./schema-validation.js";
 import { buildWebManifest } from "./web-manifest.js";
 import { compiledObjectSchema } from "../field-json-schema.js";
-import { operationExactNumericKeyword, operationI18nKeyword, operationReferenceKeyword, operationTypeKeyword } from "@openshapeforge/operations";
+import { operationFieldMetadataKeywords, operationExactNumericKeyword, operationI18nKeyword, operationReferenceKeyword, operationTypeKeyword } from "@openshapeforge/operations";
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 
@@ -42,6 +42,7 @@ test("real v3 case templates retain inline action values and ordinary top-level 
   ajv.addKeyword(operationI18nKeyword);
   ajv.addKeyword(operationReferenceKeyword);
   ajv.addKeyword(operationTypeKeyword);
+  for (const keyword of operationFieldMetadataKeywords) ajv.addKeyword(keyword);
   ajv.addKeyword(operationExactNumericKeyword);
   const validate = ajv.compile(compiledObjectSchema([actions], {}, { requireRequired: true }));
   const value = { actions: [

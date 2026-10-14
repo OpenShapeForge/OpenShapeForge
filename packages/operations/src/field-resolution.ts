@@ -181,6 +181,7 @@ export function resolveFields(
     const target = semantic?.kind === "entity" ? semantic.entity : undefined;
     return {
       key: field.key,
+      ...(field.typedBy ? { typedBy: { ...field.typedBy } } : {}),
       osfType: field.osfType,
       baseType,
       cardinality,

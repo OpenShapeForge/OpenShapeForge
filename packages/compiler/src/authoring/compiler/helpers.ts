@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // ── Naming & pluralization helpers ──
 import type { Field } from "../types.js";
-import { cardinalityOf } from "@openshapeforge/operations";
+import { cardinalityOf, exactNumericRule, compareExactNumeric } from "@openshapeforge/operations";
 
 export const FIELD_VALUE_TYPE_TO_SQL: Record<string, string> = {
   string: "text",
@@ -27,18 +27,14 @@ export const FIELD_VALUE_TYPE_TO_GQL: Record<string, string> = {
 const POSTGRES_INTEGER_MIN = -2_147_483_648;
 const POSTGRES_INTEGER_MAX = 2_147_483_647;
 
-function numericValidationRule(rule: unknown): number | undefined {
-  const value = rule && typeof rule === "object" ? (rule as { value?: unknown }).value : rule;
-  return typeof value === "number" ? value : undefined;
-}
 
 function needsWideInteger(field: Pick<Field, "baseType" | "validation">): boolean {
   if (field.baseType !== "integer") return false;
-  const minimum = numericValidationRule(field.validation?.min);
-  const maximum = numericValidationRule(field.validation?.max);
+  const minimum = exactNumericRule(field.validation?.min);
+  const maximum = exactNumericRule(field.validation?.max);
   return (
-    (minimum !== undefined && minimum < POSTGRES_INTEGER_MIN) ||
-    (maximum !== undefined && maximum > POSTGRES_INTEGER_MAX)
+    (minimum !== undefined && compareExactNumeric(minimum, POSTGRES_INTEGER_MIN) === -1) ||
+    (maximum !== undefined && compareExactNumeric(maximum, POSTGRES_INTEGER_MAX) === 1)
   );
 }
 

@@ -1,3 +1,4 @@
+import { exactNumericRule, compareExactNumeric } from "@openshapeforge/operations";
 // SPDX-License-Identifier: BUSL-1.1
 import { createHash } from "node:crypto";
 import type { ColumnDefinition, TableConstraintDefinition } from "../schema.js";
@@ -150,10 +151,10 @@ export function assertDefaultSatisfiesContract(field: Field): void {
     if (maxLength !== undefined && value.length > maxLength) refuse(`is longer than maxLength ${maxLength}`);
     if (pattern !== undefined && !new RegExp(pattern, "u").test(value)) refuse(`does not match pattern ${pattern}`);
   }
-  if (typeof value === "number") {
-    const min = numericRule(validation.min);
-    const max = numericRule(validation.max);
-    if (min !== undefined && value < min) refuse(`is below min ${min}`);
-    if (max !== undefined && value > max) refuse(`is above max ${max}`);
+  if (field.baseType === "number" || field.baseType === "integer") {
+    const min = exactNumericRule(validation.min);
+    const max = exactNumericRule(validation.max);
+    if (min !== undefined && compareExactNumeric(value, min) === -1) refuse(`is below min ${min}`);
+    if (max !== undefined && compareExactNumeric(value, max) === 1) refuse(`is above max ${max}`);
   }
 }

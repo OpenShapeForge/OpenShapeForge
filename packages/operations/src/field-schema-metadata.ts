@@ -1,3 +1,4 @@
+import { exactNumericRule } from "./exact-numeric.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * The pieces a projected property is assembled from: the constrained JSON
@@ -70,16 +71,16 @@ export function constrainedType(
   const exact = numeric && !options.enumerated;
   const schema = baseTypeSchema(field, options.enumerated === true);
   const validation = field.validation;
-  const minimum = numericRule(validation?.min);
-  const maximum = numericRule(validation?.max);
+  const minimum = numeric ? exactNumericRule(validation?.min) : numericRule(validation?.min);
+  const maximum = numeric ? exactNumericRule(validation?.max) : numericRule(validation?.max);
   if (validation) {
     const minLength = numericRule(validation.minLength);
     const maxLength = numericRule(validation.maxLength);
     const pattern = stringRule(validation.pattern);
     if (minLength !== undefined) schema.minLength = minLength;
     if (maxLength !== undefined) schema.maxLength = maxLength;
-    if (minimum !== undefined) schema.minimum = minimum;
-    if (maximum !== undefined) schema.maximum = maximum;
+    if (typeof minimum === "number") schema.minimum = minimum;
+    if (typeof maximum === "number") schema.maximum = maximum;
     // A numeric field's own `pattern` would otherwise overwrite the decimal
     // spelling its text form is admitted by; authored patterns belong to text.
     if (pattern !== undefined && !numeric) schema.pattern = pattern;

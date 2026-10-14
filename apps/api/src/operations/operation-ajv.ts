@@ -4,7 +4,7 @@ import addFormats from "ajv-formats";
 import {
   valueInvariantKeywords,
   operationChoiceKeyword,
-  operationExactNumericKeyword,
+  operationExactNumericKeyword, operationFieldMetadataKeywords,
   operationI18nKeyword,
   operationInputFieldsKeyword,
   operationReferenceKeyword,
@@ -29,11 +29,9 @@ export function createOperationAjv(coerceTypes = false): OperationAjv {
   // ajv-formats is CJS; under NodeNext the default import is typed as the
   // module namespace rather than the callable it is at runtime.
   (addFormats as unknown as (target: OperationAjv) => unknown)(instance);
-  instance.addKeyword({ keyword: "x-osf-value-context", schemaType: "object", valid: true });
   // Presentation-only bindings used by generated forms. They neither validate
   // nor authorize a value, but strict ajv must recognize each keyword.
   instance.addKeyword({ keyword: "x-osf-sourceField", schemaType: "string", valid: true });
-  instance.addKeyword({ keyword: "x-osf-presentation", schemaType: "object", valid: true });
   instance.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });
   instance.addKeyword({ keyword: "x-osf-default-template", schemaType: "string", valid: true });
   // The authoring editor's choice marker (which catalog a string is chosen from); presentation metadata as well.
@@ -43,6 +41,7 @@ export function createOperationAjv(coerceTypes = false): OperationAjv {
   instance.addKeyword(operationInputFieldsKeyword);
   instance.addKeyword(operationTypeKeyword);
   instance.addKeyword(operationVariablesKeyword);
+  for (const keyword of operationFieldMetadataKeywords) instance.addKeyword(keyword);
   for (const keyword of valueInvariantKeywords) instance.addKeyword(keyword);
   // The one x-osf keyword that validates: the exact bounds of a numeric
   // value's text form, which the numeric keywords beside it do not see.

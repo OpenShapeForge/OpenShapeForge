@@ -164,6 +164,7 @@ export type WebFieldProjection = {
   baseType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   /** Logical dynamic form metadata; physical storage stays server-side. */
   entityValue?: { definitionField: string; parameterBindings?: boolean };
+  typedBy?: { definitionField: string };
   allowedDefinitions?: string[];
   relationship?: {
     targetEntityId: string;

@@ -103,6 +103,7 @@ function withFieldMetadata(
   if (title) schema.title = title;
   // The type a form renders the property through; the JSON type beside it is what validates.
   schema["x-osf-type"] = field.osfType;
+  if (field.typedBy) schema["x-osf-typed-by"] = { ...field.typedBy };
   const context = {
     ...(field.unit ? { unit: field.unit } : {}),
     ...(field.osfType === "currency" && typeof field.render?.props?.currency === "string" ? { currency: field.render.props.currency } : {}),

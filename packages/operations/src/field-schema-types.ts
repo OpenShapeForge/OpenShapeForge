@@ -52,6 +52,7 @@ export type OperationFieldRelationship = {
 
 export type OperationFieldDefinition = {
   key: string;
+  typedBy?: { definitionField: string };
   /** A base type, a osf-type catalog key, or an entity name. */
   osfType: string;
   cardinality?: OperationFieldCardinality;
@@ -131,6 +132,7 @@ export type OperationFieldSchemaOptions = {
  */
 export type ResolvedOperationField = {
   key: string;
+  typedBy?: { definitionField: string };
   osfType: string;
   baseType: OperationFieldBaseType;
   cardinality: "single" | "collection";

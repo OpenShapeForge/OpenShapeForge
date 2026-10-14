@@ -162,6 +162,16 @@ function entity(
 }
 
 describe("web manifest projection", () => {
+  test("projects typed value pairs and authored numeric display defaults to hosts", () => {
+    const variable = entity("Variable", "variable", [
+      field("definition", {osfType:"fieldDefinition",baseType:"object"}),
+      field("value", {osfType:"typedValue",baseType:"object",typedBy:{definitionField:"definition"}}),
+      field("amount", {osfType:"currency",baseType:"number",render:{component:"MoneyInput",props:{currency:"EUR",decimalPlaces:0,scale:"millions"}}}),
+    ], coreView());
+    const projected = buildWebManifest([variable]).entities.Variable!.fields;
+    expect(projected.value!.typedBy).toEqual({definitionField:"definition"});
+    expect(projected.amount!.presentation).toEqual({component:"MoneyInput",props:{currency:"EUR",decimalPlaces:0,scale:"millions"}});
+  });
   test("read labels use the authored reference catalog without replacing canonical codes", () => {
     const contact = entity("ContactMoment", "contact", [field("channel", { options: { type: "referentiedata", referentieGroep: "COMMUNICATIONCHANNEL" } })], coreView());
     const manifest = buildWebManifest([contact], {}, { catalogs: [], operations: [] }, { COMMUNICATIONCHANNEL: [{ value: "phone", label: { en: "Phone", nl: "Telefoon" } }] });

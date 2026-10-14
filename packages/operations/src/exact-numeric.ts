@@ -94,6 +94,16 @@ export function compareExactNumeric(left: unknown, right: unknown): -1 | 0 | 1 |
   return scaledLeft === scaledRight ? 0 : scaledLeft < scaledRight ? -1 : 1;
 }
 
+/** The value of an authored numeric bound, preserving its exact decimal spelling. */
+export function exactNumericRule(rule: unknown): string | number | undefined {
+  if (rule === undefined) return undefined;
+  const value = rule && typeof rule === "object" ? (rule as {value?: unknown}).value : rule;
+  if ((typeof value !== "number" && typeof value !== "string") || !exactDecimal(value)) {
+    throw new Error("Numeric bounds require a finite number or exact decimal text.");
+  }
+  return value;
+}
+
 /** Whether two numeric values are the same number, whatever their spelling. */
 export function exactNumericEquals(left: unknown, right: unknown): boolean {
   return compareExactNumeric(left, right) === 0;

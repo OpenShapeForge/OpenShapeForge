@@ -40,10 +40,10 @@
         },
         "uniqueBy": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$", "not": { "enum": ["constructor", "prototype", "__proto__"] } },
         "min": {
-          "oneOf": [{ "type": "number" }, { "$ref": "#/$defs/validationRule" }]
+          "oneOf": [{ "type": "number" }, { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$", "maxLength": 1024 }, { "$ref": "#/$defs/validationRule" }]
         },
         "max": {
-          "oneOf": [{ "type": "number" }, { "$ref": "#/$defs/validationRule" }]
+          "oneOf": [{ "type": "number" }, { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$", "maxLength": 1024 }, { "$ref": "#/$defs/validationRule" }]
         },
         "pattern": {
           "oneOf": [{ "type": "string" }, { "$ref": "#/$defs/validationRule" }]

@@ -3,7 +3,7 @@ export { FIELD_ITEM_ID, type FieldValuePolicy } from "./field-value-policy.js";
 export { operationChoiceKeyword, operationExactNumericKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword, operationTypeKeyword, operationVariablesKeyword } from "./schema-annotations.js";
 export type { ExactDecimal, ExactNumericBounds, ExactNumericViolation } from "./exact-numeric.js";
 export {
-  compareExactNumeric,
+  compareExactNumeric, exactNumericRule,
   exactDecimal,
   exactNumericEquals,
   exactNumericViolation,
@@ -168,5 +168,6 @@ export { ENTITY_RUNTIME_ERRORS, ENTITY_RUNTIME_ERROR_STATUS } from "./entity-run
 export { defaultTemplatePaths, renderDefaultTemplate } from './default-template.js';
 
 export { formatMoneyDisplay, formatNumericDisplay, type MoneyDisplay, type NumericDisplay } from "./money-display.js";
+export { operationFieldMetadataKeywords } from "./schema-annotations.js";
 
 export { valueInvariantKeywords, orderedFieldsKeyword, uniqueByKeyword, timeZoneKeyword, isIanaTimeZone } from "./value-invariants.js";

@@ -162,9 +162,9 @@ const EXACT_NUMERIC_MESSAGES: Record<ExactNumericViolation, string> = {
  */
 function exactNumericKeywordValidator(): (schema: unknown, data: unknown) => boolean {
   const validate = (schema: unknown, data: unknown): boolean => {
-    // Only the text form needs this: the number form is already constrained by
-    // the ordinary numeric keywords beside it.
-    if (typeof data !== "string") return true;
+    // Text-authored bounds cannot be represented by ordinary JSON numeric
+    // keywords. Apply the exact rule to both accepted numeric wire forms.
+    if (typeof data !== "string" && typeof data !== "number") return true;
     const bounds: ExactNumericBounds = schema && typeof schema === "object" && !Array.isArray(schema)
       ? (schema as ExactNumericBounds)
       : {};
@@ -191,3 +191,10 @@ export const operationVariablesKeyword = {
   valid: true,
   metaSchema: { type: "string", enum: ["whole", "template", "both"] },
 };
+
+/** Server-owned field metadata used by generated forms and typed-value readers. */
+export const operationFieldMetadataKeywords = [
+  { keyword: "x-osf-presentation", schemaType: "object" as const, valid: true },
+  { keyword: "x-osf-value-context", schemaType: "object" as const, valid: true },
+  { keyword: "x-osf-typed-by", schemaType: "object" as const, valid: true },
+] as const;

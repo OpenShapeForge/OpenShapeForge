@@ -47,3 +47,15 @@ test("real catalogue invariants validate at both canonical and dynamic schema bo
     expect(JSON.stringify(result)).not.toContain("secret-customer");
   }
 });
+
+test("authored decimal bounds stay exact beyond the safe integer range", () => {
+  const bounded = operationFieldObjectSchema([{key:"amount",osfType:"number",required:true,
+    validation:{min:"9007199254740993.01",max:"9007199254740993.02"}}]);
+  const accepts = createOperationAjv().compile(bounded);
+  expect(accepts({amount:"9007199254740993.01"})).toBe(true);
+  expect(accepts({amount:"9007199254740993.02"})).toBe(true);
+  for (const amount of ["9007199254740993.00", "9007199254740993.03",9007199254740992]) {
+    expect(accepts({amount})).toBe(false);
+    expect(runtimeJsonSchemas.validate(bounded,{amount}).valid).toBe(false);
+  }
+});

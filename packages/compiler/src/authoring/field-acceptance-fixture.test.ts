@@ -208,8 +208,10 @@ describe("the 48-field acceptance fixture", () => {
     expect(children("commercialTotal")).toEqual(["net:number", "vatRate:number", "gross:number"]);
     expect(children("lineGroups"))
       .toEqual(["lineId:string", "description:string", "quantity:integer", "lineTotal:number"]);
-    // 39 is a keyed map: unique keys by construction, no declared value contract.
+    // 39 is a keyed map: unique keys by construction and bounded text values.
     expect(field("settings").children).toBeUndefined();
+    expect(field("settings").osfType).toBe("keyValueMap");
+    expect(field("lineGroups").validation?.uniqueBy).toBe("lineId");
   });
 
   it("keeps the real bounds of a bounded type", () => {

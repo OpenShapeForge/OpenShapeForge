@@ -16,6 +16,7 @@ export interface FieldValidation {
   minLength?: number | ValidationRule;
   maxLength?: number | ValidationRule;
   minItems?: number | ValidationRule;
+  uniqueBy?: string;
   min?: number | ValidationRule;
   max?: number | ValidationRule;
   pattern?: string | ValidationRule;

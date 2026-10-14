@@ -408,9 +408,10 @@ types:
       unit: s
 
   # A span is one value, not two fields that happen to sit next to each other.
-  # Ordering (`from` <= `to`) is NOT enforced: no authored cross-field
-  # comparison exists in the authoring contract today.
+  # The same ordering invariant runs at every canonical write boundary.
   numericRange:
+    schema:
+      x-osf-ordered-fields: { lower: from, upper: to, kind: numeric }
     kind: object
     label: { en: Numeric range, nl: Getalbereik }
     baseType: object
@@ -440,8 +441,10 @@ types:
       display: TextDisplay
       input: Input
 
-  # As numericRange, over calendar dates. Ordering is likewise not enforced.
+  # As numericRange, over valid, ordered calendar dates.
   dateRange:
+    schema:
+      x-osf-ordered-fields: { lower: from, upper: to, kind: date }
     kind: object
     label: { en: Date range, nl: Periode }
     baseType: object
@@ -551,6 +554,7 @@ types:
   # FORM; membership is the runtime's own zone database, not something a regular
   # expression can express (Mars/Phobos matches the form and is not a zone).
   timeZone:
+    schema: { type: string, x-osf-time-zone: true }
     label: { en: Time zone, nl: Tijdzone }
     baseType: string
     icon: Globe
@@ -598,3 +602,16 @@ types:
     render:
       display: FieldDefinitionView
       input: JsonFieldEditor
+
+  keyValueMap:
+    kind: object
+    label: { en: Text value map, nl: Tekstwaardemap }
+    baseType: object
+    schema:
+      type: object
+      propertyNames:
+        minLength: 1
+        maxLength: 160
+        not: { enum: [constructor, prototype, __proto__] }
+      additionalProperties: { type: string, maxLength: 8000 }
+    render: { display: TextDisplay, input: JsonFieldEditor }

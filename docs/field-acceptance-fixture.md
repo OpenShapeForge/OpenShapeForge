@@ -155,16 +155,16 @@ size. No new file contract was added.
 | # | field | osfType | vars | notes |
 | --- | --- | --- | --- | --- |
 | 37 | `lineGroups` | `object` collection + children | | children include `lineId: identifier` |
-| 39 | `settings` | `object` | | a keyed map |
+| 39 | `settings` | `keyValueMap` | | a map of bounded text values |
 | 40 | `localizedTitle` | `string`, `localized: true` | | see below |
 | 44 | `valueContract` | `fieldDefinition` | | an object with a real bundled JSON Schema |
 
 **39 is a true keyed object.** Key uniqueness is structural: a JSON object
 cannot carry the same key twice. An array of `{ key, value }` records with
 `uniqueItems` would **not** give that, because two structurally different
-records may carry the same `key`. What is missing is a declared contract for the
-entry *values*; `children` names fixed keys only. The field is an untyped map and
-is documented as one.
+records may carry the same `key`. `keyValueMap` requires bounded text values
+and rejects prototype-related keys. Repeated groups use `validation.uniqueBy`
+to enforce their own stable item identities.
 
 **40 accepts no variable, on purpose.** `localized: true` makes the field's
 *value* `{ en, nl, fr }`-shaped while its `baseType` stays `string`. A variable
@@ -244,6 +244,11 @@ value contract is not the same thing as having a control for it, and this
 document claims only the former. Nothing here is a fallback renderer presented
 as a finished field.
 
+Numeric and date ranges enforce ordered endpoints at canonical and dynamic API
+validation boundaries. Time zones are checked against the runtime IANA database.
+Money display supports decimal places and units, thousands or millions; both
+properties are declared by the money and number component contracts.
+
 ## Open gaps
 
 Each is a capability the authoring contract does not have. The fixture authors
@@ -251,12 +256,7 @@ the nearest supported contract and says so rather than implying the missing one.
 
 | gap | affects | status |
 | --- | --- | --- |
-| no authored cross-field comparison, so `from <= to` is undeclarable | 14, 24 | `validation.requires` is presence-only; `validation.custom` resolves exactly one named rule (`elfproef`) in the web form runtime, unknown names pass and no server path enforces it; authored CHECK expressions are not an authoring concept |
-| no closed-set source for an IANA zone name | 48 | `options.type: dynamic` has one implemented source, `entityTypes.list`. The pattern checks the naming *form*; membership is the runtime's zone database |
-| no per-value contract for a keyed map | 39 | `children` names fixed keys only |
-| no array-scoped uniqueness for a stable item id | 37 | the id is authored and required; distinctness is caller-supplied |
 | `unit`/`currency` are not part of the variable value shape | 12 and any fixed-unit numeric | belongs to the compatibility owner |
-| `decimalPlaces`/`scale` are not declared props of `MoneyInput`/`NumberInput` | 10, 11 | they reach the compiled field and the formatter reads them; `catalogs/components.yaml` does not declare them |
 | the display axis cannot be set per field | 10, 11 | a field authors no `render`, and a web view overrides the component but not its props, so scale and decimals are a per-type decision |
 | nothing expands a `recurrence` | 26 | the type is a value contract; no scheduler for it exists |
 

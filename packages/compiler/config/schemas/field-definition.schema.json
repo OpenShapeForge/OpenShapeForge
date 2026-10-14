@@ -38,6 +38,7 @@
         "minItems": {
           "oneOf": [{ "type": "integer", "minimum": 0 }, { "$ref": "#/$defs/validationRule" }]
         },
+        "uniqueBy": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$", "not": { "enum": ["constructor", "prototype", "__proto__"] } },
         "min": {
           "oneOf": [{ "type": "number" }, { "$ref": "#/$defs/validationRule" }]
         },

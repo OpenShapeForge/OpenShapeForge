@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import {
+  valueInvariantKeywords,
   operationChoiceKeyword,
   operationExactNumericKeyword,
   operationFieldObjectSchema,
@@ -41,6 +42,7 @@ export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
     ajv.addKeyword(operationChoiceKeyword);
     ajv.addKeyword(operationTypeKeyword);
     ajv.addKeyword(operationVariablesKeyword);
+    for (const keyword of valueInvariantKeywords) ajv.addKeyword(keyword);
     try {
       if (schema.$async === true) return invalidDefinition();
       const validate = ajv.compile(schema);

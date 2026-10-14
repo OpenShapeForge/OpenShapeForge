@@ -72,7 +72,14 @@ function valueSchema(
   options: OperationFieldSchemaOptions,
   enumerated: boolean,
 ): OperationJsonSchema {
-  if (field.schema) return structuredClone(field.schema) as OperationJsonSchema;
+  if (field.schema) {
+    const extension = structuredClone(field.schema) as OperationJsonSchema;
+    // Invariant-only schemas extend the declared children rather than replacing their contract.
+    if (field.baseType === "object" && field.children?.length && !extension.properties && !extension.$ref) {
+      return { ...objectSchema(field.children, registry, { ...options, requireRequired: options.requireNestedRequired ?? true }), ...extension };
+    }
+    return extension;
+  }
   if (field.baseType === "object" && field.children?.length) {
     return objectSchema(field.children, registry, { ...options, requireRequired: options.requireNestedRequired ?? true });
   }
@@ -139,7 +146,10 @@ export function fieldSchema(
     enumeration,
     options,
   );
-  if (field.cardinality !== "collection") return schema;
+  if (field.cardinality !== "collection") {
+    if (field.validation?.uniqueBy) throw new Error(`${field.key}: uniqueBy requires a collection.`);
+    return schema;
+  }
   // A variable fills the whole collection property, not one row of it.
   const { title, description, "x-osf-i18n": uiCopy, default: defaultValue, "x-osf-variables": variables, ...outerItemSchema } = schema;
   let items: OperationJsonSchema = field.item
@@ -150,6 +160,12 @@ export function fieldSchema(
       }
     : outerItemSchema;
   const array: OperationJsonSchema = { type: "array", items };
+  if (field.validation?.uniqueBy) {
+    const children = field.item?.children ?? field.children;
+    const identity = children?.find(child => child.key === field.validation!.uniqueBy);
+    if (!identity || identity.cardinality !== "single" || identity.baseType === "object") throw new Error(`${field.key}: uniqueBy must name a declared scalar child.`);
+    array["x-osf-unique-by"] = { field: identity.key, numeric: identity.baseType === "integer" || identity.baseType === "number" };
+  }
   // The collection is a use of the same type as its items: a form resolves the property, not the row.
   array["x-osf-type"] = field.osfType;
   if (variables !== undefined) array["x-osf-variables"] = variables;

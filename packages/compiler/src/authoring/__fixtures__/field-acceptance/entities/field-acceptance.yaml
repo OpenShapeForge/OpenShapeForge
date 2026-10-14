@@ -469,11 +469,11 @@ fields:
 
   # ─── Structured (37, 39, 40, 44) ───────────────────────────────────────────
   # 37 — repeated typed groups, each carrying its own stable id. Distinctness of
-  # those ids within one row is caller-supplied: no array-scoped uniqueness
-  # exists in the authoring contract.
+  # those ids within one row is enforced by validation.uniqueBy.
   - key: lineGroups
     osfType: object
     cardinality: collection
+    validation: { uniqueBy: lineId }
     label: { en: Line groups, nl: Regelgroepen }
     persisted: { column: line_groups, storageClass: core }
     children:
@@ -497,14 +497,13 @@ fields:
 
   # 39 — a key-value map. A true keyed object, so a key cannot repeat: an array
   # of {key,value} records with uniqueItems would not give that, because two
-  # different records may carry the same key. The entry VALUES are untyped —
-  # `children` names fixed keys only — and that gap is documented, not papered over.
+  # different records may carry the same key. Each entry has a bounded text value.
   - key: settings
-    osfType: object
+    osfType: keyValueMap
     label: { en: Settings, nl: Instellingen }
     description:
-      en: A key-value map. Keys are unique by construction; the entry values carry no declared contract.
-      nl: Een sleutel-waardemap. Sleutels zijn per constructie uniek; de waarden hebben geen gedeclareerd contract.
+      en: A map of named text values.
+      nl: Een map van benoemde tekstwaarden.
     persisted: { column: settings, storageClass: core }
 
   # 40 — a value that differs per language. `variables: none` on purpose: a

@@ -18,6 +18,7 @@ export type OperationFieldValidation = {
   pattern?: unknown;
   format?: string;
   minItems?: unknown;
+  uniqueBy?: string;
 };
 
 export type OperationFieldOptions = {

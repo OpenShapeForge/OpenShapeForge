@@ -2,6 +2,7 @@
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import {
+  valueInvariantKeywords,
   operationChoiceKeyword,
   operationExactNumericKeyword,
   operationI18nKeyword,
@@ -40,6 +41,7 @@ export function createOperationAjv(coerceTypes = false): OperationAjv {
   instance.addKeyword(operationInputFieldsKeyword);
   instance.addKeyword(operationTypeKeyword);
   instance.addKeyword(operationVariablesKeyword);
+  for (const keyword of valueInvariantKeywords) instance.addKeyword(keyword);
   // The one x-osf keyword that validates: the exact bounds of a numeric
   // value's text form, which the numeric keywords beside it do not see.
   instance.addKeyword(operationExactNumericKeyword);

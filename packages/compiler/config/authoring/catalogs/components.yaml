@@ -197,6 +197,8 @@ components:
       - max
       - unit
       - currency
+      - decimalPlaces
+      - scale
 
   Switch:
     kind: field
@@ -282,6 +284,8 @@ components:
     description: Currency-aware numeric input with formatting.
     props:
       - currency
+      - decimalPlaces
+      - scale
 
   AreaInput:
     kind: field

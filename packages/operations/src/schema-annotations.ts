@@ -166,8 +166,8 @@ const EXACT_NUMERIC_MESSAGES: Record<ExactNumericViolation, string> = {
  * carries its error list on itself are the shape ajv's schema-validate
  * contract expects, without this package depending on ajv's types.
  */
-function exactNumericKeywordValidator(): (schema: unknown, data: unknown) => boolean {
-  const validate = (schema: unknown, data: unknown): boolean => {
+function exactNumericKeywordValidator(): (schema: unknown, data: unknown, parentSchema?: unknown) => boolean {
+  const validate = (schema: unknown, data: unknown, parentSchema?: unknown): boolean => {
     if (typeof data !== "string" && typeof data !== "number") return true;
     const bounds: ExactNumericBounds = schema && typeof schema === "object" && !Array.isArray(schema)
       ? (schema as ExactNumericBounds)
@@ -177,13 +177,17 @@ function exactNumericKeywordValidator(): (schema: unknown, data: unknown) => boo
     //
     // The number form keeps ordinary numeric bounds beside this keyword;
     // text-authored bounds have no numeric-keyword equivalent, so validate
-    // them here too. Its closed DOMAIN is only here: `enum` cannot admit both forms of a number at once, so the
+    // them here too. Its closed DOMAIN is only here: `enum` cannot admit both
+    // forms of a number at once, so the
     // exact comparison decides membership — `1`, `1.0` and `"1"` are one
     // member of the same domain.
+    const parent = parentSchema && typeof parentSchema === "object" ? parentSchema as Record<string, unknown> : {};
+    const integerType = parent.type === "integer" || Array.isArray(parent.type) && parent.type.includes("integer") && !parent.type.includes("number");
     const violation = typeof data === "number"
       ? exactNumericViolation(data, {
-          ...(typeof bounds.min === "string" ? { min: bounds.min } : {}),
-          ...(typeof bounds.max === "string" ? { max: bounds.max } : {}),
+          ...(bounds.minimum !== undefined && parent.minimum !== bounds.minimum ? { minimum: bounds.minimum } : {}),
+          ...(bounds.maximum !== undefined && parent.maximum !== bounds.maximum ? { maximum: bounds.maximum } : {}),
+          ...(bounds.integer && !integerType ? { integer: true } : {}),
           ...(bounds.enum === undefined ? {} : { enum: bounds.enum }),
         })
       : exactNumericViolation(data, bounds);

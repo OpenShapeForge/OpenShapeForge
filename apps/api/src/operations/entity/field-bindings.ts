@@ -498,7 +498,7 @@ async function variableValue(
 }
 
 function hasReferencedValue(shape: VariableValueShape): boolean {
-  return Boolean(shape.target);
+  return Boolean(shape.target) || Object.values(shape.children ?? {}).some(hasReferencedValue);
 }
 
 /** The declared contract of any field of this record, bindable or not. */

@@ -9,6 +9,7 @@ import {
   isExactWholeNumber,
   MAX_EXACT_NUMERIC_LENGTH,
   operationFieldObjectSchema,
+  operationExactNumericKeyword,
 } from "./index.js";
 
 test("exact text is recognized only in its canonical decimal spelling", () => {
@@ -52,6 +53,18 @@ test("bounds and the closed domain are applied by exact comparison", () => {
   expect(exactNumericViolation("not a number", {})).toBe("notNumeric");
   // A double would round this into range; exact comparison does not.
   expect(exactNumericViolation("9007199254740993", { maximum: 9007199254740992 })).toBe("aboveMaximum");
+});
+
+test("exact keyword retains text bounds and domains on JSON numbers without duplicating standard bounds", () => {
+  const validate = operationExactNumericKeyword.validate;
+  expect(validate({ minimum: "0.10000000000000001" }, 0.1)).toBe(false);
+  expect(validate({ minimum: "0.10000000000000001" }, "0.10000000000000001")).toBe(true);
+  expect(validate({ maximum: "1.00000000000000001", enum: ["1"] }, 2)).toBe(false);
+  expect(validate({ enum: ["1.00"] }, 1)).toBe(true);
+  // A standalone keyword is a contract too; numeric bounds cannot disappear.
+  expect(validate({ minimum: 1 }, 0)).toBe(false);
+  expect(validate({ minimum: 1 }, 0, { minimum: 1 })).toBe(true);
+  expect(validate({ integer: true }, 1.5)).toBe(false);
 });
 
 test("a numeric property publishes both of its forms with the same authored bounds", () => {

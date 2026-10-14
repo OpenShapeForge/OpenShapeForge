@@ -96,6 +96,14 @@ export type ContentResolvedVariable = {
   readonly tenantId: string;
   readonly sourceId: string;
   readonly sourceVersionId: string;
+  /**
+   * The contract the global's own source declares for its value, read with
+   * the value itself under the adapter's authorization. A global is typed by
+   * its stored definition rather than by the namespace it lives in, so the
+   * shape travels with every resolution and is frozen into the snapshot
+   * beside the source identity it came from.
+   */
+  readonly shape: ContentValueShape;
   readonly value: JsonValue;
 };
 

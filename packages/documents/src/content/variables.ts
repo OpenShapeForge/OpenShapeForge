@@ -7,17 +7,19 @@
  *
  * The two namespaces a template may name:
  *
- * - `chips.<key>`: the tenant-wide Chip catalogue. A Chip's value is plain
- *   text by its own authored contract (`entities/core/chip.yaml`: a required
- *   `multilineText`), so that is the shape every global offers. A text global
- *   is therefore refused where a typed value is wanted — it is not widened to
- *   a number because the destination would like one.
+ * - `chips.<key>`: the tenant-wide Chip catalogue. Each Chip stores the
+ *   FieldDefinition that types its value, so the shape of a global is read
+ *   from its own source — with the value, under the adapter's authorization —
+ *   rather than fixed by this namespace. A text global is still refused where
+ *   a typed value is wanted: nothing is widened because the destination would
+ *   like it to be.
  * - `local.<key>`: the parameters of the template version being materialized.
  *   Those are canonical FieldDefinitions, so each one offers its own authored
  *   type, cardinality, domain and reference target.
  */
 
 import {
+  declaredVariableOffer,
   parseVariableReference,
   variableOffer,
   VariableError,
@@ -29,19 +31,7 @@ import {
 } from "@openshapeforge/operations";
 import { contentError } from "./errors.js";
 import { contentCardinality } from "./validation.js";
-import type { ContentValueShape, TemplateParameter } from "./types.js";
-
-/**
- * What a tenant-wide global offers. Fixed by the Chip contract rather than by
- * the adapter that reads chips, so no resolver can claim a richer type for a
- * value that is stored and validated as text.
- */
-export const GLOBAL_VARIABLE_SHAPE: VariableValueShape = Object.freeze({
-  osfType: "multilineText",
-  baseType: "string",
-  cardinality: "single",
-  nullable: false,
-} as const);
+import type { ContentResolvedVariable, ContentValueShape, TemplateParameter } from "./types.js";
 
 /**
  * A value shape that may name a referenced entity: a block field, a template
@@ -93,9 +83,23 @@ export function contentVariableCatalogue(
   const offers: Record<string, VariableValueShape> = Object.create(null);
   for (const [key, parameter] of Object.entries(parameters)) offers[key] = contentVariableShape(parameter);
   return Object.freeze({
-    chips: { kind: "uniform", offer: GLOBAL_VARIABLE_SHAPE },
+    // A Chip declares its own value type; the engine reads that contract from
+    // the resolved global instead of assuming one for the whole catalogue.
+    chips: { kind: "declared" },
     local: { kind: "map", offers },
   });
+}
+
+/**
+ * The offer of one global, from the contract its own source declared. The
+ * adapter has already read both under the caller's authorization; this only
+ * states them in the terms the shared comparison uses.
+ */
+export function contentGlobalVariableOffer(
+  reference: VariableReference,
+  resolved: ContentResolvedVariable,
+): VariableOffer {
+  return declaredVariableOffer(reference, contentVariableShape(resolved.shape));
 }
 
 export function contentVariableReference(expression: string): VariableReference {

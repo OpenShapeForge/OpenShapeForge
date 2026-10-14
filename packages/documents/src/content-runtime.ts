@@ -163,14 +163,59 @@ export function canonicalReader(context: ModuleOperationContext, operationDefini
   };
 }
 
-/** Global variables use the existing Chip namespace, read through its canonical Operation. */
-export function chipResolver(trx: unknown, tenantId: string, read: CanonicalReader): ContentResolvers["resolveGlobalVariable"] {
+/**
+ * Global variables use the existing Chip namespace, read through its
+ * canonical Operation: the value AND the FieldDefinition that types it, in
+ * one authorized read, after authorization and redaction. The shape travels
+ * with the value because that is what makes a global typed — a resolver that
+ * claimed a shape of its own could widen a text global into a number.
+ *
+ * A definition that is not a canonical FieldDefinition for this field, or a
+ * value the current disclosure policy withholds, is a dependency failure
+ * rather than a global that quietly resolves to nothing.
+ */
+export function chipResolver(
+  trx: unknown,
+  tenantId: string,
+  read: CanonicalReader,
+  shapeOf: (definition: Readonly<Record<string, unknown>>) => ContentValueShape,
+): ContentResolvers["resolveGlobalVariable"] {
   return async (key) => {
     const found = (await rows<{ id: string }>(trx, "select id from erp.chips where tenant_id = $1 and key = $2 for share", [tenantId, key]))[0];
     if (!found) return null;
     const chip = await read("Chip", uuid(found.id, "chip id"));
-    if (!chip || chip.key !== key || typeof chip.value !== "string") return null;
-    return { tenantId, sourceId: found.id, sourceVersionId: `${found.id}@${text(chip.updatedAt, "chip version")}`, value: chip.value };
+    if (!chip || chip.key !== key) return null;
+    const definition = object(chip.definition, "chip value definition");
+    if (definition.key !== CHIP_VALUE_FIELD) refuse("DEPENDENCY_INVALID", "The global's stored definition does not describe its value.");
+    return {
+      tenantId,
+      sourceId: found.id,
+      sourceVersionId: `${found.id}@${text(chip.updatedAt, "chip version")}`,
+      shape: shapeOf(definition),
+      value: (chip.value ?? null) as JsonValue,
+    };
+  };
+}
+
+/** The Chip field whose value a global resolves to (entities/core/chip.yaml). */
+export const CHIP_VALUE_FIELD = "value";
+
+/**
+ * The engine's shape for one stored FieldDefinition, through the same
+ * field-schema service every stored definition is projected by. The
+ * definition is the source's own contract, so an unreadable one is a broken
+ * source rather than an untyped value.
+ */
+export function storedDefinitionShape(context: ModuleOperationContext): (definition: Readonly<Record<string, unknown>>) => ContentValueShape {
+  const { platform } = contextServices(context);
+  return (definition) => {
+    let schema: Record<string, unknown>;
+    try { schema = platform.schemas.fields.object([definition]); }
+    catch { refuse("DEPENDENCY_INVALID", "The stored value definition is not a valid field definition."); }
+    const properties = object(schema!.properties ?? {}, "definition properties");
+    const key = text(definition.key, "definition key");
+    const required = Array.isArray(schema!.required) ? schema!.required : [];
+    return parameterShape(object(properties[key], "definition value schema"), required.includes(key));
   };
 }
 
@@ -273,7 +318,7 @@ export function contentResolvers(context: ModuleOperationContext, trx: unknown, 
       parameterFields.set(id, frozen.parameterFields);
       return { id, tenantId, templateId, versionNumber: Number(version.versionNumber), parameters: parameterShapes(context, frozen.parameterFields), variants: projected };
     },
-    resolveGlobalVariable: chipResolver(trx, tenantId, read),
+    resolveGlobalVariable: chipResolver(trx, tenantId, read, storedDefinitionShape(context)),
     resolveEntity: entityResolver(tenantId, read),
     validateParameters(version, values) {
       const fields = parameterFields.get(version.id);

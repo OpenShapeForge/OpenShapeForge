@@ -167,6 +167,6 @@ export type { EntityRuntimeError, EntityRuntimeErrorSituation } from "./entity-r
 export { ENTITY_RUNTIME_ERRORS, ENTITY_RUNTIME_ERROR_STATUS } from "./entity-runtime-errors.js";
 export { defaultTemplatePaths, renderDefaultTemplate } from './default-template.js';
 
-export { formatMoneyDisplay, type MoneyDisplay } from "./money-display.js";
+export { formatMoneyDisplay, formatNumericDisplay, type MoneyDisplay, type NumericDisplay } from "./money-display.js";
 
 export { valueInvariantKeywords, orderedFieldsKeyword, uniqueByKeyword, timeZoneKeyword, isIanaTimeZone } from "./value-invariants.js";

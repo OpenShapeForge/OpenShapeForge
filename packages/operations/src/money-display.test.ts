@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
 import {test, expect} from "bun:test";
-import {formatMoneyDisplay} from "./money-display.js";
+import {formatMoneyDisplay, formatNumericDisplay} from "./money-display.js";
+test("numeric settings scale and round exact text without adding a currency", () => {
+ expect(formatNumericDisplay("9007199254740993.995", {decimalPlaces:2,scale:"millions",locale:"en-US"})).toBe("9,007,199,254.74 million");
+ expect(formatNumericDisplay("1.234", {locale:"en-US"})).toBe("1.234");
+ expect(formatNumericDisplay("-0.015", {decimalPlaces:2,locale:"en-US"})).toBe("-0.02");
+ expect(formatNumericDisplay("1234567.89", {decimalPlaces:1,scale:"thousands",locale:"nl-NL"})).toBe("1.234,6 duizend");
+});
 test("rounds and scales the display of exact decimals without changing the value",()=>{
  const value="1234567.895";
  expect(formatMoneyDisplay(value,{decimalPlaces:2})).toBe("€1,234,567.90");

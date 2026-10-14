@@ -62,11 +62,29 @@ export default {
 ```
 
 Core binds the policies of every module that loaded and initialised cleanly,
-once, at boot (`roles/api.ts`), keyed on the database connection — the same way
-`registerEntityOperationAvailability` binds availability handlers. A module
-that failed to load contributes no policy. A policy name contributed twice, a
-blank name or a missing `evaluate` is refused at boot rather than resolved
-silently.
+once, at boot, keyed on the database connection — the same way
+`registerEntityOperationAvailability` binds availability handlers. A policy
+name contributed twice, a blank name or a missing `evaluate` is refused at boot
+rather than resolved silently.
+
+Every process that runs canonical Operations binds them, each on the
+connection it creates:
+
+| Process | Where |
+| --- | --- |
+| The API role | `roles/api.ts`, once the modules have initialised |
+| The worker role — every contributed worker, the core `job-worker` included | `roles/worker.ts`, before any worker starts |
+
+Both because the registry is keyed on the database handle: a process that
+skipped this step would admit, on its own connection, exactly the governed work
+the policy refuses on the other one.
+
+A module that was configured to contribute a policy and then failed to
+initialise **refuses boot**, in the API and in a worker alike, naming the
+module and the reason. An enforcement owner that cannot run must never turn a
+frozen tenant writable, and at request time its absence is indistinguishable
+from a host that deliberately contributes none. A module that fails to
+initialise and contributes no policy keeps the ordinary fail-soft behaviour.
 
 ## What a policy may see
 
@@ -112,7 +130,7 @@ Operations; those remain governed by their own operator roles.
 ## Where admission is checked
 
 Admission is checked on actual execution, never only on an offer, a projection
-or a UI state. The four places core runs a canonical Operation each ask:
+or a UI state. The places core runs governed work each ask:
 
 | Path | Call site |
 | --- | --- |
@@ -120,17 +138,67 @@ or a UI state. The four places core runs a canonical Operation each ask:
 | The ordinary entity CRUD fast path — REST, GraphQL, MCP, resource reads | `operations/entity/runtime.ts`, in `executeEntityOperation` |
 | Record-derived provider Operations | `modules/platform.ts`, before `provider.execute` |
 | The host compatibility bridge (`invokeHostOperation`) | `modules/platform.ts` |
+| A claimed job, before its contributed handler | `jobs/worker.ts`, in `runClaimedJob` |
 
 In each case the guard runs **after** authorization — so a refusal discloses
 nothing to a caller who was never allowed the action — and **before** the input
-schema, the idempotency receipt, any mutation control and the handler. A
-refusal therefore precedes every data change and every external effect of the
-Operation it refuses, and a keyed Operation that is refused persists no receipt
-a later retry could replay.
+schema, the idempotency receipt, any mutation control and the handler.
 
-A durable worker or broker re-enters through the canonical Operation API with a
-service identity, so work queued while the tenant could still write is decided
-again, on the live policy, when it actually executes.
+### Twice: early, and again where the effects are
+
+A governed Operation is decided twice, deliberately:
+
+1. **Early**, before the input schema, the receipt, any transaction and any
+   mutation control. This is the friendly refusal: nothing has happened yet, so
+   the caller gets the policy's own sentence and no work was started.
+2. **Again inside the owning execution boundary**, immediately before the
+   effects: inside the transaction that will write, after every record lock,
+   availability decision, lease and confirmation this invocation consumed, and
+   before core admits the effects of a keyed Operation.
+
+The second one is the decisive one. The first can be minutes old by the time a
+row lock, an edit lease, a confirmation challenge or a committed receipt claim
+has been dealt with, and a persisted freeze can begin — or a deadline pass —
+in exactly that window. Because the second decision runs in the transaction
+that owns the write, the decision and the change commit together or not at all.
+
+Ordering follows from that: a refusal precedes every data change and every
+external effect, a refused keyed Operation leaves no receipt a later retry
+could replay (the claim is deleted, not completed), and a refusal never reports
+an uncertain external delivery, because it is decided before core admits
+effects.
+
+A policy is therefore called more than once per invocation and must not count
+its own calls; the decision is a function of trusted state, not of how often it
+is asked.
+
+### Queued and background work
+
+A job ([jobs.md](jobs.md)) is the one execution path whose authorization is
+older than its effects: it was admitted when someone enqueued it and it runs
+whenever a worker reaches it. So the `job-worker` role decides again, inside
+the claimed job's own transaction — after the claim is proven to still hold and
+before the contributed handler writes a row or reaches a provider.
+
+Core classifies a queued run conservatively as a data change that may also
+write externally (`data: write`, `external: write`), identified by its
+registered kind. A job handler is a function: nothing in the compiler declares
+what it writes, and the payload that would claim to is the caller's, so the
+governed reading is the only safe one.
+
+A refusal there is a **known** settlement, never `outcome_unknown` — nothing
+ran:
+
+| Refusal | Settlement |
+| --- | --- |
+| Names a `retryAt` | Queued again for exactly that moment, with the attempt it never made given back. |
+| Retryable with no named end | Queued again on the ordinary backoff, attempt-neutral. |
+| Open-ended (not retryable), including a policy that could not answer | `failed`, with `EXECUTION_NOT_PERMITTED` recorded as the job's error. |
+
+Claiming, locking and settling are the host's own queue bookkeeping and stay
+outside the governed effects, so a frozen tenant's queue is still managed
+correctly. A durable worker or broker that re-enters through the canonical
+Operation API over HTTP is decided by the API process in the ordinary way.
 
 Nested execution is decided on its own declaration: a handler that calls
 `context.execute(...)`, `invokeHostOperation` or entity CRUD reaches the guard
@@ -141,15 +209,24 @@ cannot lend its admission to a governed change it delegates.
 
 `withDbSession` joins the active session's transaction when there is one, so a
 policy evaluated inside an owning Operation transaction reads the same tenant
-state that transaction will write, and a policy evaluated outside one opens and
-commits its own read-only tenant transaction — it cannot roll back unrelated
-earlier work.
+state that transaction will write; outside one, the guard opens its own tenant
+transaction.
 
-A policy must be a read-only decision. It is called inside the owning
-transaction when there is one, so a write there would commit with, or be rolled
-back by, work the policy has no business touching. Repeated evaluation must be
-sound: core evaluates once per invocation, and a nested call or a retry
-evaluates again.
+**A decision is a read, and core enforces that.** Each policy is evaluated
+inside its own savepoint with the transaction tightened to
+`transaction_read_only`, and that savepoint is rolled back when the decision
+returns — whatever the decision was:
+
+- a policy that writes is refused by the database rather than by convention;
+- an admitting policy's write cannot ride along with the change it admitted;
+- a policy that writes and then throws leaves neither the write nor the failed
+  statement behind, and the surrounding transaction — the caller's unrelated
+  earlier work, a queued job's own settlement — continues unharmed, which is
+  also why a poisoned decision surfaces as the canonical refusal instead of an
+  internal error.
+
+Repeated evaluation must be sound: core decides twice per governed invocation
+(see above), and a nested call or a retry decides again.
 
 Everything that is not an explicit, well-formed decision is a refusal:
 
@@ -199,15 +276,28 @@ purpose: adding a policy can only ever narrow what a tenant may do.
   contract, and this guard will not catch it. What core does hold is every
   governed change that goes through canonical execution, including the ones a
   read-classified Operation dispatches.
-- **A job handler's own writes are not an Operation.** The durable queue runs
-  contributed `jobHandlers` directly against a tenant transaction
-  ([jobs.md](jobs.md)). Those writes are outside this guard; a queued job that
-  works through canonical Operations — the durable broker's normal route — is
-  inside it.
-- **A plugin-backed entity Operation is evaluated twice.** It passes the
-  entity fast path and then the canonical runtime, and each asks on its own.
-  The decision is a read-only function of trusted state, so the second answer
-  matches the first; a policy must not count its own calls.
+- **A queued run is classified, not declared.** Core governs a job by its
+  conservative classification, not by a contract the handler ships, so a
+  read-only job is refused along with the writing ones while a tenant is
+  frozen. Narrowing that needs server-owned per-kind effect facts, which this
+  contract does not yet define.
+- **A module that never loaded is an unknown, not a contributor.** Boot
+  refuses when a module that DECLARED `executionPolicies` fails to initialise,
+  because the module object exists to be read. A module whose runtime entry
+  point cannot be imported at all leaves core nothing to read: its
+  contributions are invisible, and the ordinary fail-soft load applies. A host
+  that depends on a policy should keep it in a module whose canonical
+  Operations already make a load failure fatal
+  ([plugins.md](plugins.md)), and should check boot logs for load failures.
+- **The last word is a decision, not a lock.** The second decision runs inside
+  the owning transaction immediately before the effects, which closes the
+  window the early check leaves open. It does not freeze time: a policy's state
+  can still change during the write statement itself. Admission is a decision
+  at a moment, and `retryAt` wording should allow for that.
+- **The same Operation may be asked several times.** A governed invocation
+  decides twice by design, a plugin-backed entity Operation passes the entity
+  fast path and then the canonical runtime, and nested execution decides again.
+  A policy must be a function of trusted state and must not count its calls.
 - **An unclassifiable declaration is treated as a change.** Only a runtime
   Operation provider — plugin code — can report effects outside the compiler's
   vocabulary; core reads those as a governed write rather than admitting them.

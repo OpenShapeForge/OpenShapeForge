@@ -520,11 +520,16 @@ operator Operations are described in [jobs.md](jobs.md).
 record, but whether this tenant may change anything at all right now. Core
 evaluates every contributed policy before it runs a governed canonical
 Operation — any data write or delete, or an external write — on every
-transport, under the caller's own tenant-scoped transaction and verified
-session. Reads, sign-in and core's own identity bookkeeping stay outside it; a
-host that contributes none keeps its current behaviour exactly. The contract,
-the composition rule, the `EXECUTION_NOT_PERMITTED` refusal and the limits are
-in [execution-policies.md](execution-policies.md).
+transport, and before a claimed job reaches a contributed `jobHandlers`
+handler, under the caller's own tenant-scoped transaction and verified session.
+Reads, sign-in and core's own identity bookkeeping stay outside it; a host that
+contributes none keeps its current behaviour exactly. Two consequences for a
+module that contributes one: a decision must be a read — core evaluates it in a
+read-only savepoint it rolls back either way — and a module that declares a
+policy and then throws in `init` stops the process from starting, in the API
+role and in the worker role alike. The contract, the composition rule, the
+`EXECUTION_NOT_PERMITTED` refusal and the limits are in
+[execution-policies.md](execution-policies.md).
 
 `platform.webhookSecrets`, when the host provides it, is how a plugin accepts
 signed inbound webhooks without reading the signing secret: `seal` encrypts a

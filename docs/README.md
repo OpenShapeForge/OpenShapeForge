@@ -20,7 +20,7 @@ journal, and manifest-derived e2e + load tests. Start with
 | [operations.md](operations.md) | CORS ownership, persisted web operations, metrics/error privacy, readiness, OpenTelemetry, and GraphiQL |
 | [mcp.md](mcp.md) | The generated MCP server: opting in, the tool catalog built from field definitions, per-session tool listing, classification handling |
 | [testing.md](testing.md) | Proof gates, the manifest-derived e2e suite, HTML reports, the k6 perf suite |
-| [execution-policies.md](execution-policies.md) | Host-wide execution admission: `executionPolicies`, which Operations are governed, the tenant-scoped transaction and session a policy sees, composition, `EXECUTION_NOT_PERMITTED`, and the limits |
+| [execution-policies.md](execution-policies.md) | Host-wide execution admission: `executionPolicies`, which Operations are governed, where it is decided (including inside the owning transaction and before a queued job's handler), the read-only decision boundary, fail-closed boot, composition, `EXECUTION_NOT_PERMITTED`, and the limits |
 | [operation-availability.md](operation-availability.md) | Current record action availability: `operationAvailabilityHandlers`, batched offers, re-evaluation inside the write |
 | [capability-grants.md](capability-grants.md) | Token-authorized Operations for recipients without an account: `auth.mode: capability`, the grant table, resolution into a grant session, attempt limits, issuing and revoking, audit |
 | [migrations.md](migrations.md) | The reset model: the build chain, db:reset and the empty-database bootstrap, the checksum refusal, drift signals, caveats |

@@ -31,7 +31,9 @@ queued ──claim──▶ running ──settle──▶ done
 
 - **`queued`** — due once `available_at` has passed. A retry puts the job back
   here with an exponential, jittered `available_at` (30 s doubling, capped at
-  an hour).
+  an hour). A run a host execution policy refused before it started comes back
+  here too, for the moment the refusal names and without having spent an
+  attempt (below).
 - **`running`** — claimed. The row holds `lease_until` and the SHA-256 of a
   one-time claim token. Only the holder of that token can settle the run; a
   lease that expires is reclaimed by the next claim, and one that expires at
@@ -160,6 +162,19 @@ Composition fails closed: a kind two active modules both register stops the
 API and the worker at boot, and a queued job whose kind no module handles ends
 `dead` with `NO_HANDLER` on its first claim rather than spending the retry
 budget on a configuration problem.
+
+Between that lock and the handler sits host execution admission
+([execution-policies.md](execution-policies.md)), on a host that contributes a
+policy. A job's authorization is older than its effects — it was admitted when
+it was enqueued and it runs whenever a worker reaches it — so the policies are
+asked again here, with the run classified conservatively as a data change that
+may also write externally. A refusal is settled without starting the handler
+and is a **known** outcome, never `outcome_unknown`: queued again for the
+moment the refusal names (with the attempt it never made given back), or
+`failed` with `EXECUTION_NOT_PERMITTED` when the refusal names no end. The
+claim and the settle themselves are the queue's own bookkeeping and are never
+refused, so a frozen tenant's queue keeps being managed. A host that
+contributes no policy is unaffected.
 
 ## The worker
 

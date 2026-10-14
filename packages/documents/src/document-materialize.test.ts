@@ -107,7 +107,12 @@ function fixture(options: {
       schemas: {
         entityValues: { get: () => carrier, collection: (entity: string) => ({ targetEntity: "Block", allowedDefinitions: entity === "DocumentVariant" ? ["TextBlock", "IncludeBlock"] : ["TextBlock", "IncludeBlock"] }) },
         fields: {
-          object: () => ({ type: "object", properties: { name: { type: "string", default: "Reader" } } }),
+          // One field-schema service: template parameters, and the stored
+          // FieldDefinition a Chip carries for its own value.
+          object: (fields: readonly Record<string, unknown>[]) =>
+            fields.length === 1 && fields[0]!.key === "value"
+              ? { type: "object", required: ["value"], properties: { value: { type: "string", "x-osf-type": "multilineText" } } }
+              : { type: "object", properties: { name: { type: "string", default: "Reader" } } },
           validateObject(_fields: unknown, values: unknown) { validated.push(values); return { valid: true }; },
         },
         json: { validate: () => ({ valid: true }) },
@@ -142,7 +147,9 @@ function fixture(options: {
           if (request.operation.intent === "get") {
             reads.push(`${request.operation.entityName}:${request.input.id}`);
             const base = { id: request.input.id, tenantId: ids.tenant, updatedAt: "2026-01-01T00:00:00Z" };
-            if (request.operation.entityName === "Chip") return { data: { ...base, key: "brand", value: data.chip }, operations: [] };
+            if (request.operation.entityName === "Chip") {
+              return { data: { ...base, key: "brand", definition: { key: "value", osfType: "multilineText", required: true, label: { en: "Value" } }, value: data.chip }, operations: [] };
+            }
             if (request.input.id === ids.version) {
               const frozenBlock = { id: ids.templateBlock, tenant_id: ids.tenant, variant_id: ids.templateVariant, variant_id_position: 0, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.frozenText } };
               return { data: { ...base, template: ids.template, versionNumber: 3, snapshot: templateSnapshot(ids.template, ids.templateVariant, [frozenBlock]) }, operations: [] };

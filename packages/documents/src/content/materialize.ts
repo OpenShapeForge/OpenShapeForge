@@ -3,6 +3,8 @@ import {
   assertVariableCompatible,
   assertVariableSourceValue,
   assertVariableUsagePermitted,
+  escapeMarkdownVariableText,
+  isDeclaredVariableNamespace,
   permitsVariableUsage,
   variableText,
   variableTokens,
@@ -44,6 +46,7 @@ import {
   validateContentValues,
 } from "./validation.js";
 import {
+  contentGlobalVariableOffer,
   contentItemShape,
   contentVariableCatalogue,
   contentVariableFailure,
@@ -106,16 +109,29 @@ export async function materializeTemplateContent(
     return version;
   }
 
-  async function global(key: string): Promise<JsonValue> {
-    if (Object.hasOwn(globals, key)) return globals[key]!.value;
+  /**
+   * One global, with the contract its own source declares for it. A Chip
+   * stores the FieldDefinition that types its value, so the shape is not
+   * known before the key is resolved: the authorized read happens first and
+   * the declared shape it returns is what the destination is compared
+   * against. The identity, version, tenant and shape are frozen into the
+   * snapshot exactly as they were read.
+   */
+  async function global(key: string): Promise<ContentResolvedVariable> {
+    if (Object.hasOwn(globals, key)) return globals[key]!;
     countDependency();
     const resolved = await resolvers.resolveGlobalVariable(key, context);
     if (!resolved)
       contentError("MISSING_VARIABLE", `Global variable ${key} could not be resolved.`);
+    // Before the result is frozen: a source that does not state the contract
+    // of its own value is a broken dependency, not an untyped value.
+    if (!resolved.shape || typeof resolved.shape !== "object" || typeof resolved.shape.baseType !== "string")
+      contentError("DEPENDENCY_INVALID", `Global variable ${key} declares no value type.`);
     const value = immutableContent({
       tenantId: resolved.tenantId,
       sourceId: resolved.sourceId,
       sourceVersionId: resolved.sourceVersionId,
+      shape: resolved.shape,
       value: resolved.value,
     });
     if (value.tenantId !== request.tenantId)
@@ -125,7 +141,7 @@ export async function materializeTemplateContent(
     if (!Object.hasOwn(value, "value"))
       contentError("DEPENDENCY_INVALID", "Global variable has no snapshot value.");
     globals[key] = value;
-    return value.value;
+    return value;
   }
 
   /** The variables and their values one template version's blocks may name. */
@@ -145,14 +161,30 @@ export async function materializeTemplateContent(
     scope: VariableScope,
   ): Promise<{ readonly offer: VariableOffer; readonly value: JsonValue }> {
     const reference = contentVariableReference(expression);
-    const offer = contentVariableOffer(scope.catalogue, reference);
+    // A namespace whose keys declare their own contract is resolved before it
+    // can be compared: the read is authorized either way, and the shape it
+    // returns is the source's, never the caller's. The shape a template may
+    // not bind at all — a mode the field does not author — is still refused
+    // first, so an unbindable field reads no global.
+    const declared = isDeclaredVariableNamespace(scope.catalogue, reference.namespace);
+    if (declared) {
+      try {
+        assertVariableUsagePermitted(slot, usage);
+      } catch (error) {
+        contentVariableFailure(error);
+      }
+    }
+    const resolved = declared ? await global(reference.key) : undefined;
+    const offer = resolved
+      ? contentGlobalVariableOffer(reference, resolved)
+      : contentVariableOffer(scope.catalogue, reference);
     try {
       assertVariableCompatible(slot, offer, usage);
     } catch (error) {
       contentVariableFailure(error);
     }
-    const value = reference.scope === "global"
-      ? await global(reference.key)
+    const value = resolved
+      ? resolved.value
       : Object.hasOwn(scope.parameters, reference.key) ? scope.parameters[reference.key] : undefined;
     try {
       assertVariableSourceValue(offer, value);
@@ -161,14 +193,6 @@ export async function materializeTemplateContent(
     }
     return { offer, value: value as JsonValue };
   }
-
-  /**
-   * A variable filled into Markdown is text, not syntax: a client named
-   * `Bouw*Groep* BV` must not turn into emphasis (or lose its asterisks) where
-   * the template writes `**Klant:** {{local.clientName}}`. The inline
-   * delimiters and the escape character itself are backslash-escaped.
-   */
-  const markdownText = (text: string) => text.replace(/[\\*_]/g, (character) => `\\${character}`);
 
   /**
    * Fill the variables of one authored value, under the contract of the field
@@ -223,7 +247,7 @@ export async function materializeTemplateContent(
         } catch (error) {
           contentVariableFailure(error);
         }
-        if (markdown) text = markdownText(text);
+        if (markdown) text = escapeMarkdownVariableText(text);
         if (result.length + literal.length + text.length > CONTENT_LIMITS.stringCharacters)
           contentError("CONTENT_LIMIT_EXCEEDED", "Expanded text exceeds the size budget.");
         result += literal + text;

@@ -38,6 +38,7 @@
  */
 
 import { isBaseType } from "./field-resolution.js";
+import { isExactDecimalText, isExactIntegerText } from "./exact-numeric.js";
 import { decimalText } from "./scalar-projection.js";
 import type {
   OperationFieldBaseType,
@@ -437,18 +438,21 @@ function isDateText(value: unknown): boolean {
 
 /**
  * Whether one value has a base type, in the one reading every surface shares.
- * An integer is a safe integer, a number is finite, a date and a datetime are
- * their exact ISO spellings, an object is a plain object. Collections are the
- * caller's: this is the type of one value.
+ * A date and a datetime are their exact ISO spellings, an object is a plain
+ * object. A numeric value is accepted in both of the forms the platform
+ * projects it in — the JSON number and the exact decimal text — because a
+ * `numeric` or `bigint` value leaves storage as text and that text is the
+ * value, not a string that resembles one. Collections are the caller's: this
+ * is the type of one value.
  */
 export function matchesBaseType(baseType: OperationFieldBaseType, value: unknown): boolean {
   switch (baseType) {
     case "object":
       return typeof value === "object" && value !== null && !Array.isArray(value);
     case "integer":
-      return typeof value === "number" && Number.isSafeInteger(value);
+      return (typeof value === "number" && Number.isSafeInteger(value)) || isExactIntegerText(value);
     case "number":
-      return typeof value === "number" && Number.isFinite(value);
+      return (typeof value === "number" && Number.isFinite(value)) || isExactDecimalText(value);
     case "date":
       return isDateText(value);
     case "datetime":

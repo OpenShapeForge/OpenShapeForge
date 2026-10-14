@@ -35,7 +35,9 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
   const reads: string[] = [];
   const queries: string[] = [];
   const data = { markdown: "Hello {{local.name}} from {{chips.brand}}", chip: "Example", tenant: ids.tenant, unavailableOperation: false, disallowText: false,
-    redactChip: false, redactBlockValues: false, missingRead: "", snapshotTemplate: ids.template, liveText: "LIVE-ROW-MUST-NOT-LEAK", variantLocale: "en", variantDefault: false };
+    redactChip: false, redactBlockValues: false, missingRead: "", snapshotTemplate: ids.template, liveText: "LIVE-ROW-MUST-NOT-LEAK", variantLocale: "en", variantDefault: false,
+    // The stored FieldDefinition the global declares for its own value.
+    chipValueType: "string", chipOsfType: "multilineText", chipDefinitionKey: "value" };
   const compiledCarrier = structuredClone({ ...carrier, definitions: { ...carrier.definitions,
     TextBlock: { ...carrier.definitions.TextBlock!, fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true, variables: "template",
       ...(blockDefault === undefined ? {} : { defaultValue: blockDefault }) },
@@ -65,8 +67,13 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
       schemas: {
         entityValues: { get: () => compiledCarrier, collection: () => ({ targetEntity: "Block", allowedDefinitions: data.disallowText ? ["IncludeBlock"] : Object.keys(carrier.definitions) }) },
         fields: {
-          object: () => ({ type: "object", properties: { name: { type: "string", default: "Reader" },
-            ...(withBinding ? { brand: { type: "string", format: "uuid", "x-osf-reference": { entity: "Chip" } } } : {}) } }),
+          // The one field-schema service, over template parameters and over
+          // the FieldDefinition a Chip stores for its own value alike.
+          object: (fields: readonly Record<string, unknown>[]) =>
+            fields.length === 1 && fields[0]!.key === "value"
+              ? { type: "object", required: ["value"], properties: { value: { type: data.chipValueType, "x-osf-type": data.chipOsfType } } }
+              : { type: "object", properties: { name: { type: "string", default: "Reader" },
+                ...(withBinding ? { brand: { type: "string", format: "uuid", "x-osf-reference": { entity: "Chip" } } } : {}) } },
           validateObject: () => ({ valid: true }),
         },
         json: { validate(schema: unknown, values: unknown) { calls.push({ schema, values }); return { valid: true }; } },
@@ -106,7 +113,8 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
               // Live rows drifted after publish; a materialization that shows them is a bug.
               TemplateVariant: { ...base, template: ids.template, channel: "document", locale: "en" },
               Block: { ...base, variant: ids.variant, definitionKey: "TextBlock", definitionVersion: 1, values: { markdown: data.liveText } },
-              Chip: { ...base, key: "brand", value: data.redactChip ? null : data.chip },
+              Chip: { ...base, key: "brand", definition: { key: data.chipDefinitionKey, osfType: data.chipOsfType, required: true, label: { en: "Value" } },
+                value: data.redactChip ? null : data.chip },
             };
             return { data: records[entity], operations: [] };
           }

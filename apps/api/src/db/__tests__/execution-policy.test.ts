@@ -49,10 +49,11 @@ import { createGeneratedEntityForTable } from "../../operations/entity/mutations
 import { createDatabaseRuntime, type DatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
+import { ensureScratchDatabaseRoles } from "./__fixtures__/scratch-roles.js";
 
 const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL ??
   "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
-const APP_ROLE_PASSWORD = "openshapeforge_app";
+let APP_ROLE_PASSWORD = "openshapeforge_app";
 const SCRATCH = `execution_policy_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
 
 const WRITE_ROLES = [
@@ -134,6 +135,13 @@ const delivered: string[] = [];
 let serverNow = new Date("2026-10-14T09:00:00.000Z");
 /** Which policies the guard reached, and what they saw of their tenant. */
 const policyCalls: { policy: string; tenantId: string | null; relations: number }[] = [];
+/**
+ * Test-owned delay between two decisions of the same invocation: core decides
+ * early and again inside the owning transaction, and this is where trusted
+ * state is changed in between — the deadline passing while a lock, a lease or
+ * a provider claim was being prepared.
+ */
+let betweenDecisions: ((count: number) => Promise<void>) | undefined;
 
 const exampleModule: RuntimeModule = {
   name: "execution-policy-example",
@@ -173,6 +181,7 @@ const deadlinePolicy: ModuleExecutionPolicy = {
     const rows = await sql<{ tenant_id: string; writes_until: Date }>`
       select tenant_id, writes_until from public.execution_policy_deadline
     `.execute(context.db);
+    await betweenDecisions?.(policyCalls.length + 1);
     const relations = await sql<{ count: string }>`
       select count(*)::text as count from erp.relations
     `.execute(context.db);
@@ -244,6 +253,9 @@ describe("host execution policies against PostgreSQL", () => {
     await admin.unsafe(`create database "${SCRATCH}"`);
     created = true;
     privileged = createDatabaseRuntime({ databaseUrl: databaseUrl(), maxConnections: 4 });
+    // A dedicated cluster has none of the host's cluster-wide roles yet, and
+    // the migration chain refuses to run without them.
+    APP_ROLE_PASSWORD = (await ensureScratchDatabaseRoles(privileged.db)).app;
     await privileged.db.connection().execute((trx) => runMigrationChain(trx));
     await sql`
       create table public.execution_policy_deadline (
@@ -285,12 +297,18 @@ describe("host execution policies against PostgreSQL", () => {
     ran.length = 0;
     delivered.length = 0;
     policyCalls.length = 0;
+    betweenDecisions = undefined;
     serverNow = new Date("2026-10-14T09:00:00.000Z");
     tenantA = randomUUID();
     tenantB = randomUUID();
     await sql`truncate public.execution_policy_deadline`.execute(privileged!.db);
     await sql`delete from platform.operation_execution_receipts`.execute(privileged!.db);
     await sql`delete from erp.relations`.execute(privileged!.db);
+    // A keyed Operation's receipt row belongs to a registered tenant.
+    for (const tenantId of [tenantA, tenantB]) {
+      await sql`insert into platform.tenants (id, slug, name, status)
+        values (${tenantId}::uuid, ${tenantId}, ${tenantId}, 'active')`.execute(privileged!.db);
+    }
     // Tenant A may write until 10:00; tenant B until the far future.
     await sql`insert into public.execution_policy_deadline (tenant_id, writes_until) values
       (${tenantA}::uuid, '2026-10-14T10:00:00Z'), (${tenantB}::uuid, '2099-01-01T00:00:00Z')`
@@ -303,7 +321,13 @@ describe("host execution policies against PostgreSQL", () => {
     });
     expect(result).not.toHaveProperty("error");
     expect(await relationCount(tenantA)).toBe(1);
-    expect(policyCalls.map((call) => call.policy)).toEqual(["tenant-write-deadline"]);
+    // Twice, deliberately: the early decision that produces a friendly
+    // refusal before any work, and the decisive one inside the transaction
+    // that owns the write.
+    expect(policyCalls.map((call) => call.policy)).toEqual([
+      "tenant-write-deadline",
+      "tenant-write-deadline",
+    ]);
   });
 
   test("refuses entity create, update and delete past the deadline, and writes nothing", async () => {
@@ -346,8 +370,9 @@ describe("host execution policies against PostgreSQL", () => {
     const read = await execute(actor, "example.read", "invoke");
     expect(read).toMatchObject({ data: { ran: true } });
     expect(ran).toContain("read");
-    // A read is never offered to a policy at all.
-    expect(policyCalls).toHaveLength(1);
+    // A read is never offered to a policy at all: the only decisions are the
+    // two the admitted create above made.
+    expect(policyCalls).toHaveLength(2);
   });
 
   test("refuses a custom plugin write before its handler runs", async () => {
@@ -423,16 +448,16 @@ describe("host execution policies against PostgreSQL", () => {
     await execute(session(tenantA), "Relation.create", "create", {
       values: { displayName: "A one", relationType: "organization" },
     });
-    expect(policyCalls).toEqual([
-      { policy: "tenant-write-deadline", tenantId: tenantA, relations: 0 },
-    ]);
+    expect(new Set(policyCalls.map((call) => JSON.stringify(call)))).toEqual(
+      new Set([JSON.stringify({ policy: "tenant-write-deadline", tenantId: tenantA, relations: 0 })]),
+    );
     policyCalls.length = 0;
     await execute(session(tenantB), "Relation.create", "create", {
       values: { displayName: "B three", relationType: "organization" },
     });
-    expect(policyCalls).toEqual([
-      { policy: "tenant-write-deadline", tenantId: tenantB, relations: 2 },
-    ]);
+    expect(new Set(policyCalls.map((call) => JSON.stringify(call)))).toEqual(
+      new Set([JSON.stringify({ policy: "tenant-write-deadline", tenantId: tenantB, relations: 2 })]),
+    );
   });
 
   test("a tenant with no persisted policy row keeps writing", async () => {
@@ -465,6 +490,130 @@ describe("host execution policies against PostgreSQL", () => {
       registerOperationExecutionPolicies(app!.db, [
         { ...exampleModule, executionPolicies: [deadlinePolicy] },
       ]);
+    }
+  });
+
+  /**
+   * The window the early check cannot cover: core decided, and only then did
+   * the invocation lock its record, consume its lease, prepare its provider
+   * claim — work that waits. `betweenDecisions` passes the deadline exactly
+   * there, by moving the PERSISTED row, so only a decision taken inside the
+   * owning execution boundary can see it.
+   */
+  const expireDuringFirstDecision = (count: number) => count !== 1
+    ? Promise.resolve()
+    : sql`update public.execution_policy_deadline
+            set writes_until = '2026-10-14T08:00:00Z'
+          where tenant_id = ${tenantA}::uuid`
+        .execute(privileged!.db).then(() => undefined);
+
+  test("refuses an entity write whose admission went stale while the work waited", async () => {
+    betweenDecisions = expireDuringFirstDecision;
+    expect(await execute(session(tenantA), "Relation.create", "create", {
+      values: { displayName: "Admitted, then not", relationType: "organization" },
+    })).toMatchObject({ error: { code: EXECUTION_NOT_PERMITTED, message: "This workspace is read-only." } });
+    // The first decision admitted on the state it read; the second refused.
+    expect(policyCalls).toHaveLength(2);
+    expect(await relationCount(tenantA)).toBe(0);
+  });
+
+  test("refuses a custom plugin write whose admission went stale, before its handler", async () => {
+    betweenDecisions = expireDuringFirstDecision;
+    expect(await execute(session(tenantA), "example.write", "invoke", { note: "x" }))
+      .toMatchObject({ error: { code: EXECUTION_NOT_PERMITTED } });
+    expect(ran).toEqual([]);
+    expect(policyCalls).toHaveLength(2);
+    expect(await relationCount(tenantA)).toBe(0);
+  });
+
+  test("refuses a keyed Operation whose admission went stale, leaving no replayable receipt", async () => {
+    betweenDecisions = expireDuringFirstDecision;
+    expect(await execute(session(tenantA), "example.keyed", "invoke", {}, "stale-1"))
+      .toMatchObject({ error: { code: EXECUTION_NOT_PERMITTED } });
+    expect(ran).toEqual([]);
+    // The claim this request committed before deciding again is deleted, not
+    // left behind as a completed or uncertain outcome.
+    const receipts = await sql<{ count: string }>`
+      select count(*)::text as count from platform.operation_execution_receipts
+    `.execute(privileged!.db);
+    expect(receipts.rows[0]!.count).toBe("0");
+  });
+
+  test("a policy cannot write: its decision transaction is read-only", async () => {
+    const attempts: string[] = [];
+    const writer: ModuleExecutionPolicy = {
+      name: "writes-then-admits",
+      evaluate: async (_request, context) => {
+        try {
+          await sql`insert into erp.relations (id, tenant_id, display_name, relation_type)
+            values (${randomUUID()}::uuid, ${context.session.tenantId}::uuid, 'Policy row', 'organization')`
+            .execute(context.db);
+          attempts.push("accepted");
+        } catch (error) {
+          attempts.push(error instanceof Error ? error.message : String(error));
+        }
+        return { admitted: true };
+      },
+    };
+    registerOperationExecutionPolicies(app!.db, [
+      { ...exampleModule, executionPolicies: [writer] },
+    ]);
+    try {
+      const result = await execute(session(tenantA), "Relation.create", "create", {
+        values: { displayName: "Admitted", relationType: "organization" },
+      });
+      expect(result).not.toHaveProperty("error");
+      expect(attempts.every((attempt) => /read-only transaction/.test(attempt))).toBe(true);
+      // Exactly the Operation's own row: the policy's insert was refused by
+      // the database, and the rollback to its savepoint removed any trace.
+      expect(await relationCount(tenantA)).toBe(1);
+    } finally {
+      registerOperationExecutionPolicies(app!.db, [
+        { ...exampleModule, executionPolicies: [deadlinePolicy] },
+      ]);
+    }
+  });
+
+  test("a policy that writes and then fails neither commits its write nor the Operation", async () => {
+    const writeThenThrow: ModuleExecutionPolicy = {
+      name: "writes-then-throws",
+      evaluate: async (_request, context) => {
+        // Both halves are rolled back to the decision's savepoint: the write
+        // the database would refuse anyway, and the statement that poisons
+        // the transaction and would otherwise take the caller's work with it.
+        await sql`insert into erp.relations (id, tenant_id, display_name, relation_type)
+          values (${randomUUID()}::uuid, ${context.session.tenantId}::uuid, 'Policy row', 'organization')`
+          .execute(context.db).catch(() => undefined);
+        await sql`select * from public.table_that_does_not_exist`.execute(context.db);
+        return { admitted: true };
+      },
+    };
+    const writeThenDeny: ModuleExecutionPolicy = {
+      name: "writes-then-denies",
+      evaluate: async (_request, context) => {
+        await sql`insert into erp.relations (id, tenant_id, display_name, relation_type)
+          values (${randomUUID()}::uuid, ${context.session.tenantId}::uuid, 'Policy row', 'organization')`
+          .execute(context.db).catch(() => undefined);
+        return { admitted: false, refusal: { message: "Not now." } };
+      },
+    };
+    for (const policy of [writeThenThrow, writeThenDeny]) {
+      registerOperationExecutionPolicies(app!.db, [
+        { ...exampleModule, executionPolicies: [policy] },
+      ]);
+      try {
+        expect(await execute(session(tenantA), "Relation.create", "create", {
+          values: { displayName: "Never", relationType: "organization" },
+        })).toMatchObject({ error: { code: EXECUTION_NOT_PERMITTED } });
+        expect(await relationCount(tenantA)).toBe(0);
+        // The same connection keeps serving: a poisoned transaction would
+        // have surfaced as an internal error on the next read instead.
+        expect(await execute(session(tenantA), "Relation.list", "list")).not.toHaveProperty("error");
+      } finally {
+        registerOperationExecutionPolicies(app!.db, [
+          { ...exampleModule, executionPolicies: [deadlinePolicy] },
+        ]);
+      }
     }
   });
 

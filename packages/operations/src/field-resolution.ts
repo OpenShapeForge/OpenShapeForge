@@ -192,7 +192,7 @@ export function resolveFields(
       ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
       ...(validation ? { validation } : {}),
       ...(options ? { options } : {}),
-      ...(field.render ? { render: field.render } : {}),
+      ...((field.render || semantic?.render) ? { render: { ...semantic?.render, ...field.render, props: { ...semantic?.render?.props, ...field.render?.props } } } : {}),
       ...(target
         ? { relationship: { kind: cardinality === "collection" ? "hasMany" : "belongsTo", entity: slug(target), target, ...(field.relationship?.constraints ? { constraints: field.relationship.constraints } : {}) } }
         : field.relationship

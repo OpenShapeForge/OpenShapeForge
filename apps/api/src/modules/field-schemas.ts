@@ -37,6 +37,7 @@ export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
     ajv.addKeyword(operationReferenceKeyword);
     // Match canonical Operation validation: this is presentation metadata,
     // never an alternative to the artifact object's actual value constraints.
+  ajv.addKeyword({ keyword: "x-osf-presentation", schemaType: "object", valid: true });
     ajv.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });
     ajv.addKeyword({ keyword: "x-osf-default-template", schemaType: "string", valid: true });
     ajv.addKeyword(operationChoiceKeyword);

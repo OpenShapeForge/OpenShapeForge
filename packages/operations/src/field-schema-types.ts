@@ -66,7 +66,7 @@ export type OperationFieldDefinition = {
   validation?: OperationFieldValidation;
   options?: OperationFieldOptions;
   reference?: { kind?: string; group?: string };
-  render?: { props?: Readonly<Record<string, unknown>> };
+  render?: { component?: string; props?: Readonly<Record<string, unknown>> };
   relationship?: OperationFieldRelationship;
   computed?: { expression?: string };
   shape?: readonly OperationFieldDefinition[];
@@ -75,6 +75,7 @@ export type OperationFieldDefinition = {
 };
 
 export type OperationFieldOsfType = {
+  render?: { component?: string; props?: Readonly<Record<string, unknown>> };
   kind?: string;
   entity?: string;
   baseType: OperationFieldBaseType;
@@ -144,7 +145,7 @@ export type ResolvedOperationField = {
   defaultValue?: unknown;
   validation?: OperationFieldValidation;
   options?: OperationFieldOptions;
-  render?: { props?: Readonly<Record<string, unknown>> };
+  render?: { component?: string; props?: Readonly<Record<string, unknown>> };
   relationship?: OperationFieldRelationship;
   computed?: { expression?: string };
   /** The catalog-declared value schema of the field's type, when it has one. */

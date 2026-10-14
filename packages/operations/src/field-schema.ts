@@ -103,6 +103,7 @@ function withFieldMetadata(
   if (title) schema.title = title;
   // The type a form renders the property through; the JSON type beside it is what validates.
   schema["x-osf-type"] = field.osfType;
+  if (field.render?.component) schema["x-osf-presentation"] = structuredClone(field.render);
   // The variable shapes this field accepts, where it authors any; a property
   // without the keyword takes literals alone.
   if (field.variables && field.variables !== "none") schema["x-osf-variables"] = field.variables;
@@ -151,7 +152,7 @@ export function fieldSchema(
     return schema;
   }
   // A variable fills the whole collection property, not one row of it.
-  const { title, description, "x-osf-i18n": uiCopy, default: defaultValue, "x-osf-variables": variables, ...outerItemSchema } = schema;
+  const { title, description, "x-osf-i18n": uiCopy, default: defaultValue, "x-osf-variables": variables, "x-osf-presentation": presentation, ...outerItemSchema } = schema;
   let items: OperationJsonSchema = field.item
     ? {
         allOf: [outerItemSchema, fieldSchema(field.item, registry, options)],
@@ -168,6 +169,7 @@ export function fieldSchema(
   }
   // The collection is a use of the same type as its items: a form resolves the property, not the row.
   array["x-osf-type"] = field.osfType;
+  if (presentation !== undefined) { array["x-osf-presentation"] = presentation; if (!field.item) items["x-osf-presentation"] = presentation; }
   if (variables !== undefined) array["x-osf-variables"] = variables;
   if (uiCopy !== undefined) array["x-osf-i18n"] = uiCopy;
   if (title !== undefined) array.title = title;

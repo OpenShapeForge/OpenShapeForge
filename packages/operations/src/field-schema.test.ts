@@ -240,3 +240,15 @@ test("a catalog type's optionSource is the default choice source; authored optio
   expect(properties.authored!.enum).toEqual(["x"]);
   expect(properties.authored!["x-osf-reference"]).toBeUndefined();
 });
+
+
+test("canonical presentation merges type defaults with authored props without touching exact value schemas", () => {
+  const registry = {osfTypes: {currency: {baseType: "number" as const, render:{component:"MoneyInput",props:{currency:"EUR",decimalPlaces:2,scale:"units"}}}}};
+  const definitions = [{key:"amount",osfType:"currency",render:{props:{decimalPlaces:0,scale:"millions"}}}];
+  const schema = operationFieldObjectSchema(definitions, registry);
+  expect(schema).toMatchObject({properties:{amount:{type:["number","string"],"x-osf-presentation":{component:"MoneyInput",props:{currency:"EUR",decimalPlaces:0,scale:"millions"}}}}});
+  expect(registry.osfTypes.currency.render.props.scale).toBe("units");
+  expect(definitions[0]!.render.props).toEqual({decimalPlaces:0,scale:"millions"});
+  const collection = operationFieldObjectSchema([{...definitions[0]!,cardinality:"collection"}],registry);
+  expect(collection).toMatchObject({properties:{amount:{type:"array","x-osf-presentation":{component:"MoneyInput"},items:{"x-osf-presentation":{component:"MoneyInput"}}}}});
+});

@@ -10,7 +10,7 @@ import {
 } from "@openshapeforge/operations";
 import { sanitizeError } from "@openshapeforge/observability";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
-import { withDbSession, type DbSessionInput } from "../../db/session.js";
+import { withDbSession, withInvocationSavepoint, type DbSessionInput } from "../../db/session.js";
 import { normalizeTimestampToken } from "../../db/timestamps.js";
 import rawOperationCatalog from "../../generated/operations/catalog.json" with { type: "json" };
 import { collectionManagedFields, collectionMutationError, withoutCollectionInputs } from "./collection-policy.js";
@@ -860,7 +860,15 @@ export async function executeEntityOperation(
      */
     const governed = <T>(mutate: () => Promise<T>): Promise<T> =>
       withDbSession(db, session, (trx) =>
-        withOwnedExecutionAdmission(trx, session, admit, mutate));
+        // The invocation's own rollback boundary. This transaction may be a
+        // caller's: an outer Operation that wrote its own rows and then
+        // reached entity CRUD through core joins it, and the refusal below is
+        // returned to that caller as an error result rather than thrown
+        // through it. Without a boundary the lease and challenge this
+        // mutation consumed would stay behind, to be committed with the
+        // caller's unrelated work.
+        withInvocationSavepoint(trx, () =>
+          withOwnedExecutionAdmission(trx, session, admit, mutate)));
     // Admission on actual execution, not on the offer: the ordinary CRUD
     // fast path is where REST, GraphQL and MCP all write, so the host
     // execution policies run here too — after authorization, so a refusal

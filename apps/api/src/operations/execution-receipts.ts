@@ -9,6 +9,7 @@ import {
   applyDbSession,
   createDbSessionContext,
   withDbSession,
+  withInvocationSavepoint,
 } from "../db/session.js";
 
 const RECEIPT_VERSION = 1;
@@ -382,7 +383,13 @@ export async function executeKeyedOperation<T>(
   if (testExecutor) return testExecutor(session, options);
   const identity = keyedOperationReceiptIdentity(session, options);
   if (!options.externalWrite) {
-    return withDbSession(db, session, async (trx) => {
+    // Database-only: the receipt and the authored effects share one
+    // transaction, which may be a caller's. The claim, the effects and the
+    // completion therefore live in this invocation's own savepoint, so a
+    // failure — a refusal taken before effects, a conflict after them — takes
+    // the `running` row with it instead of leaving the caller to commit a
+    // receipt for work that never happened.
+    return withDbSession(db, session, (trx) => withInvocationSavepoint(trx, async () => {
       await options.authorizeReplay?.(trx);
       if (!await acquireLock(trx, identity)) {
         throw inProgress(new Date(Date.now() + LOCAL_IN_FLIGHT_RETRY_MS).toISOString());
@@ -393,7 +400,7 @@ export async function executeKeyedOperation<T>(
       const value = await options.execute(() => undefined);
       await complete(trx, identity, value, options.encode);
       return value;
-    });
+    }));
   }
 
   const first = await withCommittedReceiptTransaction(db, session, async (trx) => {

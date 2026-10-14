@@ -4,7 +4,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Server } from "@modelcontextprotocol/server";
 import { sql, type Transaction } from "kysely";
 import { assertSameDatabase, type OpenShapeForgeDatabase } from "../db/connection.js";
-import { withDbSession } from "../db/session.js";
+import { withDbSession, withInvocationSavepoint } from "../db/session.js";
 import { enqueueJob } from "../jobs/store.js";
 import { appendEntityEventInTransaction } from "../platform/entity-events.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
@@ -1326,7 +1326,16 @@ export async function withModuleOperationSession<T>(
   return runtime.withActiveOperationSession(verifiedSession, work);
 }
 
-/** Core-only transaction wrapper used by canonical custom write Operations. */
+/**
+ * Core-only transaction wrapper used by canonical custom write Operations.
+ *
+ * The guarded work runs inside its own savepoint. This transaction is often
+ * somebody else's — a nested `execute`, a host bridge call or an artifact
+ * stage reaches here on the transaction that is already open — and a failure
+ * after this invocation consumed its mutation controls must take those
+ * controls with it rather than leave them for the caller to commit
+ * (db/session.ts `withInvocationSavepoint`).
+ */
 export async function withModuleOperationTransaction<T>(
   platform: ModulePlatformServices | undefined,
   session: TrustedSessionContext | undefined,
@@ -1340,7 +1349,10 @@ export async function withModuleOperationTransaction<T>(
   if (!runtime || runtime !== current.runtime || session !== current.session) {
     throw new Error("Protected Operation requires the live verified session.");
   }
-  return runtime.withOperationTransaction(session, work);
+  return runtime.withOperationTransaction(
+    session,
+    (trx) => withInvocationSavepoint(trx, () => work(trx)),
+  );
 }
 
 /**

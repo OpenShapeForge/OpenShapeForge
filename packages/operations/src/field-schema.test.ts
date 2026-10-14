@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
-import { cardinalityOf, operationFieldObjectSchema, resolveFieldBaseType } from "./field-schema.js";
+import { cardinalityOf, operationFieldObjectSchema, resolveFieldBaseType, type OperationFieldDefinition } from "./field-schema.js";
 
 test("stored field definitions cannot reach object prototypes or unbounded recursive schemas", () => {
   for (const key of ["__proto__", "prototype", "constructor"]) {
     expect(() => operationFieldObjectSchema([{key,osfType:"string"}])).toThrow(/reserved/);
     expect(() => operationFieldObjectSchema([{key:"parent",osfType:"object",children:[{key,osfType:"string"}]}])).toThrow(/reserved/);
   }
-  const cyclic: {key:string;osfType:string;children?:any[]} = {key:"parent",osfType:"object"};
+  const cyclic: OperationFieldDefinition = {key:"parent",osfType:"object"};
   cyclic.children = [cyclic];
   expect(() => operationFieldObjectSchema([cyclic])).toThrow(/nesting depth/);
 });

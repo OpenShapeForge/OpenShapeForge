@@ -37,7 +37,7 @@
  * resolved value, so a refusal cannot print the secret it refused.
  */
 
-import { isBaseType } from "./field-resolution.js";
+import { isBaseType, typedEnumValues } from "./field-resolution.js";
 import { isExactDecimalText, isExactIntegerText } from "./exact-numeric.js";
 import { decimalText } from "./scalar-projection.js";
 import type {
@@ -107,6 +107,7 @@ export type VariableValueShape = {
   readonly target?: string;
   readonly unit?: string;
   readonly currency?: string;
+  readonly children?: Readonly<Record<string, VariableValueShape>>;
 };
 
 export type VariableSlot = VariableValueShape & {
@@ -334,6 +335,11 @@ export function variableCompatibility(
   offer: VariableValueShape,
   usage: VariableUsage,
 ): VariableCompatibility {
+  return compatibilityAtDepth(slot, offer, usage, 0);
+}
+
+function compatibilityAtDepth(slot: VariableSlot, offer: VariableValueShape, usage: VariableUsage, depth: number): VariableCompatibility {
+  if (depth > 32) return incompatible("INCOMPATIBLE_TYPE", "The variable value shape exceeds the supported nesting depth.");
   try {
     assertVariableUsagePermitted(slot, usage);
   } catch (error) {
@@ -380,6 +386,17 @@ export function variableCompatibility(
   }
   if (offer.unit !== slot.unit || offer.currency !== slot.currency) {
     return incompatible("INCOMPATIBLE_TYPE", `${slot.path} and the variable declare different unit or currency contexts.`);
+  }
+  if (slot.children || offer.children) {
+    const requiredKeys = Object.keys(slot.children ?? {}).sort();
+    const offeredKeys = Object.keys(offer.children ?? {}).sort();
+    if (requiredKeys.length !== offeredKeys.length || requiredKeys.some((key,index) => key !== offeredKeys[index])) {
+      return incompatible("INCOMPATIBLE_TYPE", `${slot.path} and the variable declare different object shapes.`);
+    }
+    for (const key of requiredKeys) {
+      const nested = compatibilityAtDepth({ ...slot.children![key]!, path: `${slot.path}.${key}`, mode: "whole" }, offer.children![key]!, "whole", depth + 1);
+      if (!nested.compatible) return nested;
+    }
   }
   if (slot.enum !== undefined) {
     const allowed = new Set<string | number | boolean>(slot.enum);
@@ -563,7 +580,7 @@ export function escapeMarkdownVariableText(text: string): string {
 export function fieldVariableSlot(
   field: Pick<
     ResolvedOperationField,
-    "key" | "osfType" | "baseType" | "cardinality" | "required" | "validation" | "relationship" | "variables" | "unit" | "render"
+    "key" | "osfType" | "baseType" | "cardinality" | "required" | "validation" | "relationship" | "variables" | "unit" | "render" | "children" | "item"
   >,
   options: { readonly path?: string; readonly enum?: readonly (string | number | boolean)[] } = {},
 ): VariableSlot {
@@ -577,6 +594,11 @@ export function fieldVariableSlot(
     ...(options.enum ? { enum: options.enum } : {}),
     ...(field.relationship?.target ? { target: field.relationship.target } : {}),
     ...(field.validation ? { validation: field.validation } : {}),
+    ...((field.item?.children ?? field.children)?.length ? { children: Object.fromEntries((field.item?.children ?? field.children)!.map(child => {
+      const values = child.options?.type === "static" && child.options.items ? typedEnumValues(child.options.items.map(item => item.value), child.baseType) as (string|number|boolean)[] : undefined;
+      const {path,mode,validation,...shape} = fieldVariableSlot(child, values ? {enum:values} : {});
+      return [child.key,shape];
+    })) } : {}),
     ...(field.unit ? { unit: field.unit } : {}),
     ...(field.osfType === "currency" && typeof field.render?.props?.currency === "string" ? { currency: field.render.props.currency } : {}),
   });

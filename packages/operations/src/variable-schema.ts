@@ -96,6 +96,11 @@ export function schemaVariableShape(
   schema: OperationJsonSchema,
   options: SchemaVariableShapeOptions = {},
 ): VariableValueShape | undefined {
+  return shapeAtDepth(schema, options, 0);
+}
+
+function shapeAtDepth(schema: OperationJsonSchema, options: SchemaVariableShapeOptions, depth: number): VariableValueShape | undefined {
+  if (depth > 32) return undefined;
   const node = record(schema);
   if (!node) return undefined;
   const collection = jsonType(node) === "array";
@@ -111,6 +116,16 @@ export function schemaVariableShape(
   const target = targetOf(node) ?? targetOf(value);
   const enumeration = enumOf(value) ?? enumOf(node);
   const context = record(node["x-osf-value-context"]) ?? record(value["x-osf-value-context"]);
+  let children: Record<string, VariableValueShape> | undefined;
+  const properties = record(value.properties);
+  if (properties) {
+    children = Object.create(null) as Record<string, VariableValueShape>;
+    for (const [key,child] of Object.entries(properties)) {
+      const projected = shapeAtDepth(child as OperationJsonSchema, {required:Array.isArray(value.required) && value.required.includes(key)}, depth + 1);
+      if (!projected) return undefined;
+      children[key] = projected;
+    }
+  }
   return Object.freeze({
     osfType,
     baseType,
@@ -120,6 +135,7 @@ export function schemaVariableShape(
     ...(target ? { target } : {}),
     ...(typeof context?.unit === "string" ? { unit: context.unit } : {}),
     ...(typeof context?.currency === "string" ? { currency: context.currency } : {}),
+    ...(children ? { children } : {}),
   });
 }
 

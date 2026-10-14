@@ -54,6 +54,7 @@ export function contentVariableShape(shape: ContentReferencingShape): VariableVa
     ...(shape.relationship?.target ? { target: shape.relationship.target } : {}),
     ...(shape.unit ? { unit: shape.unit } : {}),
     ...(shape.currency ? { currency: shape.currency } : {}),
+    ...(shape.fields ? { children: Object.fromEntries(Object.entries(shape.fields).map(([key,child]) => [key,contentVariableShape(child)])) } : {}),
   };
 }
 

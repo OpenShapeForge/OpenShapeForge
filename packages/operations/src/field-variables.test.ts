@@ -39,6 +39,17 @@ test("whole variables preserve unit and currency contexts from authoritative sch
   expect(fieldVariableSlot(resolved)).toMatchObject({currency:"EUR",unit:"EUR"});
 });
 
+test("whole object variables preserve nested monetary and measurement contexts", () => {
+  const schemas = (currency: string) => fieldSchema(resolveFields([{key:"invoice",osfType:"object",variables:"whole",children:[
+    {key:"amount",osfType:"currency",render:{component:"MoneyInput",props:{currency}}},
+    {key:"weight",osfType:"number",unit:"kg"},
+  ]}], {osfTypes:{currency:{baseType:"number",render:{component:"MoneyInput",props:{currency:"EUR"}}}}})[0]!);
+  const target = schemaVariableSlot("invoice", schemas("EUR"))!;
+  expect(variableCompatibility(target, schemaVariableShape(schemas("USD"))!, "whole").compatible).toBe(false);
+  expect(variableCompatibility(target, schemaVariableShape(schemas("EUR"))!, "whole").compatible).toBe(true);
+  expect(variableCompatibility(target, {osfType:"object",baseType:"object",cardinality:"single"}, "whole").compatible).toBe(false);
+});
+
 function slot(overrides: Partial<VariableSlot> = {}): VariableSlot {
   return {
     path: "FieldAcceptance.text",

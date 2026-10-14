@@ -218,6 +218,75 @@ interfaces:
   rest: {}
   graphql: {}
   web:
+    views:
+      collection:
+        route:
+          en: /chips
+          nl: /chips
+        title:
+          en: Chips
+          nl: Chips
+        columns:
+          - key: name
+            sortable: true
+          - key: value
+          - key: category
+            sortable: true
+          - key: isActive
+        defaultSort:
+          key: name
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /chips/:id
+            nl: /chips/:id
+          create:
+            en: /chips/new
+            nl: /chips/new
+        title: "{{name}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Variable
+                    nl: Variabele
+                  fields:
+                    - key
+                    - name
+                    - definition
+                    - value
+                    - description
+                    - category
+                    - isActive
+        modes:
+          create:
+            title:
+              en: Create Chip
+              nl: Chip aanmaken
+            groups:
+              - title:
+                  en: Variable
+                  nl: Variabele
+                fields:
+                  - key
+                  - name
+                  - definition
+                  - value
+                  - description
+                  - category
+                  - isActive
+          update:
+            title:
+              en: Edit Chip
+              nl: Chip bewerken
     fields:
       description:
         render:

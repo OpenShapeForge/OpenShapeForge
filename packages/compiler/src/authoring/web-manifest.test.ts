@@ -162,6 +162,18 @@ function entity(
 }
 
 describe("web manifest projection", () => {
+  test("the real Chip authoring exposes editable typed values through ordinary Battery views",()=>{
+    const artifacts=loadEntity(authoringDir,"chip");
+    const raw=parse(readFileSync(join(authoringDir,"entities/core/chip.yaml"),"utf8"));
+    expect(()=>createAuthoringValidator().validate(raw,"chip.yaml")).not.toThrow();
+    const projected=buildWebManifest([{slug:"chip",contract:compile(artifacts)}]).entities.Chip!;
+    expect(projected.views.collection?.route).toBe("/chips");
+    expect(projected.views.collection?.columns.map(column=>column.key)).toEqual(["name","value","category","isActive"]);
+    expect(projected.views.record?.routes).toEqual({read:"/chips/:id",create:"/chips/new"});
+    expect(projected.views.record?.formGroups.create?.[0]?.fields).toContain("definition");
+    expect(projected.views.record?.formGroups.create?.[0]?.fields).toContain("value");
+    expect(projected.fields.value!.typedBy).toEqual({definitionField:"definition"});
+  });
   test("projects canonical field-authoring profile and lock metadata without mutation",()=>{
     const authoring={profile:"templateParameter",locked:true,visibleProperties:["moneyDisplay"]};
     const template=entity("Template","template",[field("parameters",{osfType:"fieldDefinition",baseType:"object",authoring})],coreView());

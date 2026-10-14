@@ -307,6 +307,15 @@ types:
       display: TextDisplay
       input: Input
 
+  # `baseType: number` is the LOGICAL type: scalar-projection stores a
+  # PostgreSQL numeric and returns exact decimal text, so no amount passes
+  # through a float. `decimalPlaces` and `scale` are DISPLAY metadata read by
+  # the shared money formatter — they restate the formatter's own defaults and
+  # change neither storage nor arithmetic: a presentation in millions still
+  # stores units. The axis sits here and not on a field because a schema-3
+  # field authors no render at all, and a web view may override the component
+  # but not its props; a report that wants another scale has nowhere to say so
+  # yet (docs/field-acceptance-fixture.md records that gap).
   currency:
     label: { en: Currency amount, nl: Geldbedrag }
     baseType: number
@@ -316,6 +325,8 @@ types:
       input: MoneyInput
     props:
       currency: EUR
+      decimalPlaces: 2
+      scale: units
 
   # A caller-supplied stable key: a code someone quotes, types and sorts on,
   # never prose. Bounded and POSIX-safe, so the contract is a real database

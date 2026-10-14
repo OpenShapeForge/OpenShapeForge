@@ -664,7 +664,9 @@
         "input": "MoneyInput"
       },
       "props": {
-        "currency": "EUR"
+        "currency": "EUR",
+        "decimalPlaces": 2,
+        "scale": "units"
       }
     },
     "identifier": {

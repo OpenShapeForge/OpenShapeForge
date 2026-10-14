@@ -204,6 +204,13 @@ purpose: adding a policy can only ever narrow what a tenant may do.
   ([jobs.md](jobs.md)). Those writes are outside this guard; a queued job that
   works through canonical Operations — the durable broker's normal route — is
   inside it.
+- **A plugin-backed entity Operation is evaluated twice.** It passes the
+  entity fast path and then the canonical runtime, and each asks on its own.
+  The decision is a read-only function of trusted state, so the second answer
+  matches the first; a policy must not count its own calls.
+- **An unclassifiable declaration is treated as a change.** Only a runtime
+  Operation provider — plugin code — can report effects outside the compiler's
+  vocabulary; core reads those as a governed write rather than admitting them.
 - **Row-level security is still the floor.** A policy is an admission decision,
   not an isolation mechanism. Tenant isolation remains RLS's job, and the
   policy's own reads are subject to it.

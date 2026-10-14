@@ -87,7 +87,30 @@ const registries = new WeakMap<OpenShapeForgeDatabase, readonly RegisteredPolicy
 export function isGovernedOperation(
   effects: GovernedOperation["effects"],
 ): boolean {
-  return effects.data !== "read" || effects.external === "write";
+  const declared = normalizedEffects(effects);
+  return declared.data !== "read" || declared.external === "write";
+}
+
+const DATA_EFFECTS = new Set(["read", "write", "delete"]);
+const EXTERNAL_EFFECTS = new Set(["none", "read", "write"]);
+
+/**
+ * The declaration as core will act on it. A value outside the compiler's own
+ * vocabulary — only reachable from a runtime Operation provider, which is
+ * plugin code — is read as the governed one: an unclassifiable Operation must
+ * never be looser than a declared change.
+ */
+function normalizedEffects(
+  effects: GovernedOperation["effects"] | undefined,
+): GovernedOperation["effects"] {
+  const data = effects?.data;
+  const external = effects?.external;
+  return {
+    data: typeof data === "string" && DATA_EFFECTS.has(data) ? data : "write",
+    external: typeof external === "string" && EXTERNAL_EFFECTS.has(external)
+      ? external
+      : "write",
+  };
 }
 
 /**
@@ -147,15 +170,15 @@ const opaqueRefusal = (policy: string): OperationError => ({
  * core authorized this invocation with and cannot mutate or widen it.
  */
 function policySession(session: TrustedSessionContext): TrustedSessionContext {
+  const list = (value: unknown) =>
+    Object.freeze(Array.isArray(value) ? [...value] : []);
   const relation = session.relation;
   return Object.freeze({
     ...session,
-    roles: Object.freeze([...session.roles]),
-    groups: Object.freeze([...session.groups]),
-    ...(session.relationGroupIds
-      ? { relationGroupIds: Object.freeze([...session.relationGroupIds]) }
-      : {}),
-    ...(session.oauthScopes ? { oauthScopes: Object.freeze([...session.oauthScopes]) } : {}),
+    roles: list(session.roles),
+    groups: list(session.groups),
+    ...(session.relationGroupIds ? { relationGroupIds: list(session.relationGroupIds) } : {}),
+    ...(session.oauthScopes ? { oauthScopes: list(session.oauthScopes) } : {}),
     ...(relation && typeof relation === "object"
       ? { relation: Object.freeze({ ...relation }) }
       : {}),
@@ -167,10 +190,7 @@ function governedRequest(operation: GovernedOperation) {
     operation: Object.freeze({
       id: operation.id,
       intent: operation.intent,
-      effects: Object.freeze({
-        data: operation.effects.data,
-        external: operation.effects.external,
-      }),
+      effects: Object.freeze(normalizedEffects(operation.effects)),
     }),
   });
 }

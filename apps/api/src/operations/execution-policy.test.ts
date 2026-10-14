@@ -117,6 +117,14 @@ describe("which Operations the guard governs", () => {
     expect(isGovernedOperation({ data: "read", external: "none" })).toBe(false);
     expect(isGovernedOperation({ data: "read", external: "read" })).toBe(false);
   });
+
+  test("a declaration outside the compiler's vocabulary counts as a change", () => {
+    // Only a runtime Operation provider can report this, and it is plugin
+    // code: core reads what it cannot classify as the governed case.
+    expect(isGovernedOperation({ data: "maybe", external: "none" } as never)).toBe(true);
+    expect(isGovernedOperation({ data: "read", external: "sometimes" } as never)).toBe(true);
+    expect(isGovernedOperation(undefined as never)).toBe(true);
+  });
 });
 
 describe("registering contributed policies", () => {
@@ -258,6 +266,40 @@ describe("admission", () => {
     );
     await assertOperationAdmitted(db, undefined, WRITE);
     expect(calls).toEqual([]);
+  });
+
+  test("an unclassifiable declaration is refused like a governed write", async () => {
+    const db = offlineDatabase();
+    registerOperationExecutionPolicies(db, [
+      module("host", fixedPolicy("deny-all", { admitted: false, refusal: { message: "No." } })),
+    ]);
+    expect(
+      (await refusalOf(assertOperationAdmitted(db, tenantSession(), {
+        id: "provider.unknown",
+        intent: "invoke",
+        effects: { data: "whatever", external: "whatever" } as never,
+      }))).code,
+    ).toBe(EXECUTION_NOT_PERMITTED);
+  });
+
+  test("a session whose roles are absent still reaches the policy as an empty set", async () => {
+    const db = offlineDatabase();
+    let roles: readonly string[] | undefined;
+    registerOperationExecutionPolicies(db, [
+      module("host", {
+        name: "inspect",
+        evaluate: (_request, context) => {
+          roles = context.session.roles;
+          return { admitted: true };
+        },
+      }),
+    ]);
+    await assertOperationAdmitted(
+      db,
+      { tenantId: randomUUID(), userId: randomUUID(), roles: null, groups: null },
+      WRITE,
+    );
+    expect(roles).toEqual([]);
   });
 });
 

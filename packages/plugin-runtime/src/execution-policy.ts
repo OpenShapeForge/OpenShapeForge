@@ -16,10 +16,21 @@
  *    what core then admits, and nothing from the request body, a header, a
  *    claimed role or a client clock reaches it.
  *  - `context.session` is the host's verified live session capability, and
- *    `context.db` a tenant-scoped transaction opened (or joined) under
- *    exactly that session. Row-level security applies as it does to every
- *    other tenant read, so a policy cannot read another tenant's rows and
- *    never receives a database URL or a privileged connection.
+ *    `context.db` a transaction core opened (or joined) and initialized under
+ *    exactly that session, so row-level security applies to the policy's
+ *    reads as it does to any other read of that tenant's data. Core supplies
+ *    no second connection, no privileged or cross-tenant session and no
+ *    database URL alongside it, and no caller can select, supply or reorder a
+ *    policy implementation.
+ *
+ *    This is a trusted-module capability, not a sandbox. A policy is server
+ *    code in the host's own process, with the same SQL authority every other
+ *    runtime module already holds (`init`'s database handle,
+ *    `platform.db.withSession`): core does not confine what SQL it issues or
+ *    what it does with what it reads, and rolling the decision back cannot
+ *    unread a row. Respecting the session context it is handed is the
+ *    contributing module's responsibility, exactly as elsewhere in this
+ *    contract.
  *  - The policy runs BEFORE the Operation handler — and before a queued job's
  *    handler — so a denial precedes every data and external effect of the work
  *    it refuses.
@@ -31,10 +42,12 @@
  *
  * What core requires of a policy:
  *
- *  - It must be a read-only decision, and core enforces that: each evaluation
- *    runs in its own savepoint with the transaction tightened to read-only,
- *    and that savepoint is rolled back whatever the decision was. A write is
- *    refused by the database; nothing a policy did survives its decision.
+ *  - It must be a read-only decision, and core holds the WRITE half of that
+ *    to the database: each evaluation runs in its own savepoint with the
+ *    transaction tightened to read-only, and that savepoint is rolled back
+ *    whatever the decision was, so nothing the policy wrote or broke survives
+ *    its decision. The decision must also be a decision — see the trust note
+ *    above for what core does not confine.
  *  - It must return one explicit decision. A malformed result, a thrown
  *    error and a rejected promise are all read as a denial: a policy that
  *    cannot answer must not silently widen what the tenant may do.

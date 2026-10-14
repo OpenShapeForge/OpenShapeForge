@@ -523,12 +523,15 @@ Operation — any data write or delete, or an external write — on every
 transport, and before a claimed job reaches a contributed `jobHandlers`
 handler, under the caller's own tenant-scoped transaction and verified session.
 Reads, sign-in and core's own identity bookkeeping stay outside it; a host that
-contributes none keeps its current behaviour exactly. Two consequences for a
+contributes none keeps its current behaviour exactly. Three consequences for a
 module that contributes one: a decision must be a read — core evaluates it in a
-read-only savepoint it rolls back either way — and a module that declares a
+read-only savepoint it rolls back either way, though it sandboxes neither the
+SQL nor the JavaScript a trusted module runs there; a module that declares a
 policy and then throws in `init` stops the process from starting, in the API
-role and in the worker role alike. The contract, the composition rule, the
-`EXECUTION_NOT_PERMITTED` refusal and the limits are in
+role and in the worker role alike; and a host that cannot afford to lose the
+owner names it in `OPENSHAPEFORGE_REQUIRED_EXECUTION_POLICY_MODULES`, which
+also catches the module that never imported at all. The contract, the
+composition rule, the `EXECUTION_NOT_PERMITTED` refusal and the limits are in
 [execution-policies.md](execution-policies.md).
 
 `platform.webhookSecrets`, when the host provides it, is how a plugin accepts

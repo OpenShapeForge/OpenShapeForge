@@ -79,12 +79,37 @@ Both because the registry is keyed on the database handle: a process that
 skipped this step would admit, on its own connection, exactly the governed work
 the policy refuses on the other one.
 
-A module that was configured to contribute a policy and then failed to
-initialise **refuses boot**, in the API and in a worker alike, naming the
-module and the reason. An enforcement owner that cannot run must never turn a
-frozen tenant writable, and at request time its absence is indistinguishable
-from a host that deliberately contributes none. A module that fails to
-initialise and contributes no policy keeps the ordinary fail-soft behaviour.
+### Requiring the owner (fail-closed boot)
+
+An enforcement owner that is not here must never turn a frozen tenant
+writable, and at request time its absence is indistinguishable from a host
+that deliberately contributes none. Two rules cover the two ways it can go
+missing.
+
+**A module whose object exists.** It declared `executionPolicies` and its
+`init` threw: core recognises it by its own declaration and **refuses boot**,
+in the API role and in a worker alike, naming the module and the reason. A
+module that fails to initialise and declares no policy keeps the ordinary
+fail-soft behaviour.
+
+**A module that never produced an object.** An import that throws, a factory
+that throws, an export that is not a runtime module, a name that disagrees
+with the registration — `modules/registry.ts` records a failure and no object,
+so nothing is left for core to read. The host therefore names its required
+owners as server configuration:
+
+```
+OPENSHAPEFORGE_REQUIRED_EXECUTION_POLICY_MODULES=tenant-policy,billing-freeze
+```
+
+Every name in that list must end up contributing a policy in this process, or
+the API role and the worker role **refuse to start** — whatever else survived,
+including the ordinary entity CRUD and the core job worker. It is checked even
+in a process with no database, and `createApiApp`'s
+`requiredExecutionPolicyModules` is the same thing as a typed boot option.
+
+Unset is the default: a host that deliberately runs no execution policy, or
+that accepts the fail-soft load for the ones it has, is unaffected.
 
 ## What a policy may see
 
@@ -92,20 +117,41 @@ initialise and contributes no policy keeps the ordinary fail-soft behaviour.
 
 | Field | Meaning |
 | --- | --- |
-| `id` | Canonical Operation id as the compiler emitted it. |
-| `intent` | `list`, `get`, `create`, `update`, `delete` for entity Operations; `invoke` otherwise. |
+| `id` | Canonical Operation id as the compiler emitted it; a queued job's registered kind. |
+| `intent` | `list`, `get`, `create`, `update`, `delete` for entity Operations; `job` for a queued run; `invoke` otherwise. |
 | `effects.data` | `read`, `write` or `delete`. |
 | `effects.external` | `none`, `read` or `write`. |
 
 `context.session` is a frozen copy of the verified live session core
-authorized this invocation with, and `context.db` is a tenant-scoped
-transaction opened — or joined — under exactly that session.
+authorized this invocation with, and `context.db` is a transaction core opened
+— or joined — and initialized under exactly that session, so row-level
+security applies to the policy's reads as it does to any other read of that
+tenant's data.
 
 Deliberately absent: the request input, HTTP headers, a client clock, claimed
-roles, a database URL, a privileged or cross-tenant connection, and any mutable
+roles, a database URL, a second or privileged connection, and any mutable
 annotation on the Operation. A policy that writes to `context.session` or to
 `request.operation` changes nothing: both are frozen, and the next policy sees
-the originals.
+the originals. Nothing a caller sends selects, supplies, reorders or disables a
+policy.
+
+### What this capability is not
+
+A policy is trusted server code in the host's own process, and this contract
+does not turn its transaction into a SQL sandbox. It holds the same authority
+every other runtime module already holds — the database handle `init` receives,
+`platform.db.withSession` — so it *can* issue SQL that changes its own session
+settings, and core does not stop it, any more than core stops a module's
+`init` from doing the same. Rolling the decision back cannot unread a row
+either.
+
+What core does own is exactly this: the transaction is initialized under the
+verified session and under row-level security, no additional privileged
+session or connection is handed over, the request cannot choose the policy,
+and the decision's own writes and failures are rolled back (below). Respecting
+the tenant context it is given is the contributing module's responsibility, as
+it is everywhere else in the runtime contract — see
+[plugins.md](plugins.md) for that trust model.
 
 ## Which Operations are governed
 
@@ -151,22 +197,38 @@ A governed Operation is decided twice, deliberately:
 1. **Early**, before the input schema, the receipt, any transaction and any
    mutation control. This is the friendly refusal: nothing has happened yet, so
    the caller gets the policy's own sentence and no work was started.
-2. **Again inside the owning execution boundary**, immediately before the
-   effects: inside the transaction that will write, after every record lock,
-   availability decision, lease and confirmation this invocation consumed, and
-   before core admits the effects of a keyed Operation.
+2. **Again at the pre-effect boundary of the owner that performs the
+   effects** — inside the transaction that will write, after everything that
+   can WAIT, and before anything irreversible:
 
-The second one is the decisive one. The first can be minutes old by the time a
-row lock, an edit lease, a confirmation challenge or a committed receipt claim
-has been dealt with, and a persisted freeze can begin — or a deadline pass —
-in exactly that window. Because the second decision runs in the transaction
-that owns the write, the decision and the change commit together or not at all.
+   | Owner | Decides after | And before |
+   | --- | --- | --- |
+   | `operations/runtime.ts` custom and native Operations | the record lock, availability decision, lease and confirmation this invocation consumed | the handler, and `markEffectsAdmitted` for a keyed one |
+   | `entity/mutations.ts` generated create, update and delete | the `for update` row lock, record permissions, consumed lease and challenge, entity-value, relationship and related-state preparation | the insert, update or delete statement |
+   | `entity/collection-mutations.ts` native collections | the parent lock, every sibling lock, each sibling's own authorization and the cardinality and related-state guards | the first child or parent write |
+   | `jobs/worker.ts` queued runs | the claim lock | the contributed handler |
+   | `modules/platform.ts` record-derived providers | the committed receipt claim | `markEffectsAdmitted` and the provider |
+
+The second one is the decisive one, and WHERE it sits is the whole point. A
+mutation owner's work waits: on another transaction holding the row, on the
+siblings of a collection, on a receipt claim. A decision taken before that
+wait is a decision about state that can be gone by the time anything is
+written — a freeze can begin, or a deadline pass, while the owner is parked on
+a lock. Because the decision runs in the transaction that owns the write, the
+two commit together or not at all.
 
 Ordering follows from that: a refusal precedes every data change and every
-external effect, a refused keyed Operation leaves no receipt a later retry
-could replay (the claim is deleted, not completed), and a refusal never reports
-an uncertain external delivery, because it is decided before core admits
-effects.
+external effect; a refused keyed Operation leaves no receipt a later retry
+could replay (the claim is deleted, not completed); a refusal never reports an
+uncertain external delivery, because it is decided before core admits effects;
+and every mutation control this invocation consumed on the way in — an edit
+lease, a single-use confirmation challenge — rolls back with the refused
+transaction, so the caller can retry the same request once the tenant may
+write again.
+
+Core's own identity bookkeeping reaches the same owners through the
+runtime-surface create and update paths and binds no decision there, so it
+passes the boundary unchanged ([plugins.md](plugins.md)).
 
 A policy is therefore called more than once per invocation and must not count
 its own calls; the decision is a function of trusted state, not of how often it
@@ -281,19 +343,19 @@ purpose: adding a policy can only ever narrow what a tenant may do.
   read-only job is refused along with the writing ones while a tenant is
   frozen. Narrowing that needs server-owned per-kind effect facts, which this
   contract does not yet define.
-- **A module that never loaded is an unknown, not a contributor.** Boot
-  refuses when a module that DECLARED `executionPolicies` fails to initialise,
-  because the module object exists to be read. A module whose runtime entry
-  point cannot be imported at all leaves core nothing to read: its
-  contributions are invisible, and the ordinary fail-soft load applies. A host
-  that depends on a policy should keep it in a module whose canonical
-  Operations already make a load failure fatal
-  ([plugins.md](plugins.md)), and should check boot logs for load failures.
-- **The last word is a decision, not a lock.** The second decision runs inside
-  the owning transaction immediately before the effects, which closes the
-  window the early check leaves open. It does not freeze time: a policy's state
-  can still change during the write statement itself. Admission is a decision
-  at a moment, and `retryAt` wording should allow for that.
+- **A missing owner is only recognised by declaration or by requirement.** A
+  module that declared `executionPolicies` and failed to initialise is caught
+  by core; one whose entry point never produced an object is caught only
+  because the host named it in
+  `OPENSHAPEFORGE_REQUIRED_EXECUTION_POLICY_MODULES`. A host that depends on a
+  policy and leaves that list unset keeps the ordinary fail-soft load for the
+  import-failure case, which is a configuration choice, not an enforcement
+  guarantee.
+- **The last word is a decision, not a lock.** The decisive decision runs at
+  the owner's pre-effect boundary, which closes the window every wait before
+  it opens. It does not freeze time: nothing stops a policy's state changing
+  during the write statement itself. Admission is a decision at a moment, and
+  `retryAt` wording should allow for that.
 - **The same Operation may be asked several times.** A governed invocation
   decides twice by design, a plugin-backed entity Operation passes the entity
   fast path and then the canonical runtime, and nested execution decides again.
@@ -301,9 +363,12 @@ purpose: adding a policy can only ever narrow what a tenant may do.
 - **An unclassifiable declaration is treated as a change.** Only a runtime
   Operation provider — plugin code — can report effects outside the compiler's
   vocabulary; core reads those as a governed write rather than admitting them.
-- **Row-level security is still the floor.** A policy is an admission decision,
-  not an isolation mechanism. Tenant isolation remains RLS's job, and the
-  policy's own reads are subject to it.
+- **Row-level security is still the floor, and the policy is trusted code
+  standing on it.** A policy is an admission decision, not an isolation
+  mechanism: tenant isolation remains RLS's job and the policy's own reads are
+  subject to it, under the session core initialized. Core does not confine the
+  SQL or the JavaScript a trusted module runs there, and never claimed to —
+  see "What this capability is not" above.
 - **No clock override is exposed.** Core gives a policy no time source and no
   way to make one caller-supplied. A host that needs a testable clock keeps it
   inside its own policy implementation.

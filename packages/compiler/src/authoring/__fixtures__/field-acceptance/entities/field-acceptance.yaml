@@ -1,0 +1,646 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: FieldAcceptance
+title: Field Acceptance
+language: en
+labels: { en: Field acceptance, nl: Veldacceptatie }
+pluralLabels: { en: Field acceptances, nl: Veldacceptaties }
+description: >-
+  Synthetic acceptance fixture. Exactly 48 authored top-level fields, one per numbered
+  entry of the field catalogue, so one entity carries every value contract OSF can
+  express and the typed-variable rules can be checked against all of them at once.
+  Compiled only by field-acceptance-fixture.test.ts against a throwaway copy of the
+  real authoring tree: it belongs to no layer, reaches no generated artifact, no
+  migration and no deployed schema. Records are fake. See
+  docs/field-acceptance-fixture.md for the numbered mapping and the open owner gaps.
+displayTemplate: "{{title}}"
+filterField: title
+domains:
+  - example
+authorization:
+  roles:
+    read:
+      - Relations.All.Read
+      - Relations.All.ReadWrite
+    create:
+      - Relations.All.ReadWrite
+    update:
+      - Relations.All.ReadWrite
+    delete:
+      - Relations.All.Delete
+fields:
+  # ─── Text (01–08) ──────────────────────────────────────────────────────────
+  # 01 — single-line text. `both`: the whole value may be one variable, and its
+  # text may interpolate several.
+  - key: title
+    osfType: string
+    required: true
+    variables: both
+    label: { en: Title, nl: Titel }
+    description: { en: Single-line text that identifies the record., nl: Eenregelige tekst die het record identificeert. }
+    validation: { minLength: 1, maxLength: 200 }
+    persisted: { column: title, storageClass: core }
+
+  # 02 — multi-line plain text.
+  - key: summary
+    osfType: multilineText
+    variables: both
+    label: { en: Summary, nl: Samenvatting }
+    validation: { maxLength: 2000 }
+    persisted: { column: summary, storageClass: core }
+
+  # 03 — markdown source. `template` only: a formatted body is written as text
+  # with variables spliced into it, never replaced wholesale by one binding.
+  - key: body
+    osfType: markdown
+    variables: template
+    label: { en: Body, nl: Inhoud }
+    validation: { maxLength: 20000 }
+    persisted: { column: body, storageClass: core }
+
+  # 04 — e-mail address; the catalogue type carries the pattern and the pii
+  # classification, so this field does not restate either.
+  - key: contactEmail
+    osfType: email
+    variables: whole
+    label: { en: E-mail address, nl: E-mailadres }
+    persisted: { column: contact_email, storageClass: core }
+
+  # 05 — telephone number.
+  - key: contactPhone
+    osfType: phone
+    variables: whole
+    label: { en: Telephone number, nl: Telefoonnummer }
+    persisted: { column: contact_phone, storageClass: core }
+
+  # 06 — web address.
+  - key: website
+    osfType: url
+    variables: whole
+    label: { en: Website, nl: Website }
+    persisted: { column: website, storageClass: core }
+
+  # 07 — a stable key someone quotes and types. The catalogue pattern reaches
+  # the database as a CHECK, so the constraint is not merely a form hint.
+  - key: reference
+    osfType: identifier
+    variables: whole
+    label: { en: Reference, nl: Kenmerk }
+    persisted: { column: reference, storageClass: core }
+
+  # 08 — a protected value. Not a `secret` type: `secret` exists only for
+  # connector configuration. This is the protected-field contract entity fields
+  # really enforce — a confidential classification plus field-level roles, so a
+  # caller holding only the entity's read role never receives it.
+  - key: protectedNote
+    osfType: string
+    label: { en: Protected note, nl: Vertrouwelijke notitie }
+    description:
+      en: Readable and writable only by the narrower field roles, never by a plain reader of the record.
+      nl: Alleen leesbaar en schrijfbaar met de smallere veldrollen, nooit door een gewone lezer van het record.
+    validation: { maxLength: 2000 }
+    classification:
+      sensitivity: confidential
+      category: example
+    authorization:
+      roles:
+        read:
+          - Relations.All.ReadWrite
+        write:
+          - Relations.All.ReadWrite
+    audit: true
+    persisted: { column: protected_note, storageClass: core }
+
+  # ─── Numeric and money (09–14, 35, 36) ─────────────────────────────────────
+  # 09 — a counted whole number.
+  - key: quantity
+    osfType: integer
+    variables: whole
+    label: { en: Quantity, nl: Aantal }
+    validation: { min: 0, max: 1000000 }
+    persisted: { column: quantity, storageClass: core }
+
+  # 10 — a monetary amount. Stored as PostgreSQL numeric and returned as exact
+  # decimal text by scalar-projection. The display axis (decimalPlaces, scale)
+  # comes from the catalogue type's props: a schema-3 field may not author
+  # `render`, because field presentation belongs to the renderer registry.
+  - key: amount
+    osfType: currency
+    variables: whole
+    label: { en: Amount, nl: Bedrag }
+    currency: EUR
+    persisted: { column: amount, storageClass: core }
+
+  # 11 — a rate in percent. Its own type, so an arbitrary number cannot fill it.
+  # The bounds are this field's: a completion is 0–100, a growth rate is not.
+  - key: completion
+    osfType: percentage
+    variables: whole
+    label: { en: Completion, nl: Gereed }
+    validation: { min: 0, max: 100 }
+    persisted: { column: completion, storageClass: core }
+
+  # 12 — a measurement whose unit varies per record, so the unit travels inside
+  # the value and a binding cannot lose it. A fixed-unit measurement would be a
+  # plain number with this field's own `unit`.
+  - key: netWeight
+    osfType: measurement
+    label: { en: Net weight, nl: Nettogewicht }
+    persisted: { column: net_weight, storageClass: core }
+
+  # 13 — elapsed time in canonical integer seconds, said in the type's key.
+  - key: processingTime
+    osfType: durationSeconds
+    variables: whole
+    label: { en: Processing time, nl: Doorlooptijd }
+    persisted: { column: processing_time, storageClass: core }
+
+  # 14 — one span, not two fields. `from <= to` is not declarable today; see the
+  # fixture documentation.
+  - key: budgetRange
+    osfType: numericRange
+    label: { en: Budget range, nl: Budgetbereik }
+    persisted: { column: budget_range, storageClass: core }
+
+  # 35 — bank account number; the catalogue type carries the pattern, the
+  # confidential classification, the retention policy and the audit flag.
+  - key: payoutIban
+    osfType: iban
+    variables: whole
+    label: { en: Payout IBAN, nl: Uitbetalings-IBAN }
+    persisted: { column: payout_iban, storageClass: core }
+
+  # 36 — a commercial amount composed of its parts. Composition only: no
+  # billing engine runs here and nothing recomputes `gross`, which is why this
+  # is an authored object rather than a catalogue type claiming an invariant.
+  - key: commercialTotal
+    osfType: object
+    label: { en: Commercial total, nl: Commercieel totaal }
+    persisted: { column: commercial_total, storageClass: core }
+    children:
+      - key: net
+        osfType: currency
+        required: true
+        label: { en: Net amount, nl: Nettobedrag }
+      - key: vatRate
+        osfType: percentage
+        required: true
+        label: { en: VAT rate, nl: Btw-tarief }
+        validation: { min: 0, max: 100 }
+      - key: gross
+        osfType: currency
+        required: true
+        label: { en: Gross amount, nl: Brutobedrag }
+
+  # ─── Truth and selection (15–20, 46) ───────────────────────────────────────
+  # 15 — a two-valued flag: required with a default, so it is never null.
+  - key: isActive
+    osfType: boolean
+    required: true
+    defaultValue: false
+    label: { en: Active, nl: Actief }
+    persisted: { column: is_active, storageClass: core }
+
+  # 16 — a three-valued flag. Not required and no default, so null (not yet
+  # decided), true and false remain three distinct answers.
+  - key: isApproved
+    osfType: boolean
+    label: { en: Approved, nl: Goedgekeurd }
+    description: { en: Null means not yet decided; false is a decision., nl: Null betekent nog niet besloten; false is een besluit. }
+    persisted: { column: is_approved, storageClass: core }
+
+  # 17 — one value from a closed set. The options carry their own icons and ask
+  # to be shown as tiles, which is the existing static-options contract.
+  - key: category
+    osfType: string
+    variables: whole
+    label: { en: Category, nl: Categorie }
+    options:
+      type: static
+      presentation: tiles
+      items:
+        - { value: housing, label: { en: Housing, nl: Wonen }, icon: house }
+        - { value: finance, label: { en: Finance, nl: Financieel }, icon: banknote }
+        - { value: maintenance, label: { en: Maintenance, nl: Onderhoud }, icon: wrench }
+    persisted: { column: category, storageClass: core }
+
+  # 18 — several values from a closed set. A collection: a scalar variable can
+  # never fill it and it can never fill a scalar.
+  - key: tags
+    osfType: string
+    cardinality: collection
+    variables: whole
+    label: { en: Tags, nl: Labels }
+    options:
+      type: static
+      items:
+        - { value: urgent, label: { en: Urgent, nl: Urgent } }
+        - { value: review, label: { en: Needs review, nl: Beoordeling nodig } }
+        - { value: archived, label: { en: Archived, nl: Gearchiveerd } }
+    persisted: { column: tags, storageClass: core }
+
+  # 19 — a status that is a declared state machine. Its transitions are its only
+  # writers: generic create takes no value (the column defaults to `draft`) and
+  # generic update refuses one. `approve` is also what writes 43 and 47, so no
+  # extra Operation exists to carry fixture metadata.
+  - key: status
+    osfType: string
+    required: true
+    defaultValue: draft
+    label: { en: Status, nl: Status }
+    options:
+      type: static
+      items:
+        - { value: draft, label: { en: Draft, nl: Concept } }
+        - { value: approved, label: { en: Approved, nl: Goedgekeurd } }
+        - { value: withdrawn, label: { en: Withdrawn, nl: Ingetrokken } }
+    transitions:
+      initial: draft
+      rules:
+        - key: approve
+          from: [draft]
+          to: approved
+          label: { en: Approve, nl: Goedkeuren }
+          description:
+            en: Approve this record, naming the immutable document version that carries the signed evidence.
+            nl: Keur dit record goed, met de onveranderlijke documentversie die het ondertekende bewijs bevat.
+          preconditions:
+            - field: reference
+              present: true
+              refusal:
+                en: A record needs its reference before it can be approved.
+                nl: Een record heeft zijn kenmerk nodig voordat het goedgekeurd kan worden.
+          writes:
+            - { field: signedVersion, required: true }
+          stamps:
+            - { field: approvedAt, value: now }
+        - key: withdraw
+          from: [draft, approved]
+          to: withdrawn
+          label: { en: Withdraw, nl: Intrekken }
+          description:
+            en: Withdraw this record so it is no longer offered.
+            nl: Trek dit record in zodat het niet langer wordt aangeboden.
+          confirmation: { mode: acknowledgement }
+    persisted: { column: status, storageClass: core }
+
+  # 20 — a bounded score. The 1–5 bounds are the type's, because a rating whose
+  # range varies per field is a number, not a rating.
+  - key: score
+    osfType: rating
+    variables: whole
+    label: { en: Score, nl: Score }
+    persisted: { column: score, storageClass: core }
+
+  # 46 — an approved colour identifier; the catalogue type's pattern admits only
+  # a six-digit hex value. Option icons are the kebab keys on 17's items.
+  - key: accentColor
+    osfType: color
+    variables: whole
+    label: { en: Accent colour, nl: Accentkleur }
+    persisted: { column: accent_color, storageClass: core }
+
+  # ─── Time (21–26, 48) ──────────────────────────────────────────────────────
+  # 21 — a calendar date. A date never silently becomes a datetime.
+  - key: startDate
+    osfType: date
+    variables: whole
+    label: { en: Start date, nl: Startdatum }
+    persisted: { column: start_date, storageClass: core }
+
+  # 22 — a time of day with no date and no zone.
+  - key: openingTime
+    osfType: localTime
+    variables: whole
+    label: { en: Opening time, nl: Openingstijd }
+    persisted: { column: opening_time, storageClass: core }
+
+  # 23 — an instant. Its zone context is explicit: field 48 for presentation,
+  # and canonically the tenant's own clock (platform.tenants.time_zone) wherever
+  # an instant has to become a calendar date.
+  - key: submittedAt
+    osfType: datetime
+    variables: whole
+    label: { en: Submitted at, nl: Ingediend op }
+    persisted: { column: submitted_at, storageClass: core }
+
+  # 24 — one date span. `from <= to` is not declarable today.
+  - key: effectivePeriod
+    osfType: dateRange
+    label: { en: Effective period, nl: Geldigheidsperiode }
+    persisted: { column: effective_period, storageClass: core }
+
+  # 25 — a named calendar period as a value (2026, 2026-H1, 2026-Q3, 2026-11,
+  # 2026-W42). A FiscalPeriod record is a different thing: a bookkeeping period
+  # with its own lifecycle.
+  - key: reportingPeriod
+    osfType: calendarPeriod
+    variables: whole
+    label: { en: Reporting period, nl: Rapportageperiode }
+    persisted: { column: reporting_period, storageClass: core }
+
+  # 26 — a bounded declarative schedule. A stored value only: nothing in OSF
+  # expands it into occurrences.
+  - key: reviewSchedule
+    osfType: recurrence
+    label: { en: Review schedule, nl: Beoordelingsritme }
+    persisted: { column: review_schedule, storageClass: core }
+
+  # 48 — an IANA zone name. The pattern checks the naming form; membership is
+  # the runtime's zone database.
+  - key: displayTimeZone
+    osfType: timeZone
+    variables: whole
+    defaultValue: Europe/Amsterdam
+    label: { en: Display time zone, nl: Weergavetijdzone }
+    persisted: { column: display_time_zone, storageClass: core }
+
+  # ─── Relationships (27–34, 38, 45) ─────────────────────────────────────────
+  # 27 — one reference to one record. A Relation reference is not an arbitrary
+  # uuid: only another Relation reference can fill it.
+  - key: relatedRelation
+    osfType: Relation
+    variables: whole
+    label: { en: Related relation, nl: Gerelateerde relatie }
+    persisted: { column: relation_id, storageClass: core }
+    relationship:
+      ownership: reference
+      inverse: false
+
+  # 28 — a collection of referenced records. An inverse collection is derived
+  # from the referencing field, so the only authorable form is this read-only
+  # traversal: the contact moments of the relation this record names.
+  - key: relationContactMoments
+    osfType: ContactMoment
+    cardinality: collection
+    label: { en: Contact moments, nl: Contactmomenten }
+    relationship:
+      ownership: reference
+      inverse: relationId
+      via: relatedRelation
+
+  # 29 — hierarchy, as a self-reference. The `children` collection on the other
+  # side is derived from this field, never authored twice.
+  - key: parentAcceptance
+    osfType: FieldAcceptance
+    variables: whole
+    label: { en: Parent record, nl: Bovenliggend record }
+    persisted: { column: parent_id, storageClass: core }
+    relationship:
+      ownership: reference
+      inverse:
+        key: children
+        label: { en: Child records, nl: Onderliggende records }
+
+  # 30 — one attached document.
+  - key: attachment
+    osfType: Document
+    variables: whole
+    label: { en: Attachment, nl: Bijlage }
+    persisted: { column: document_id, storageClass: core }
+    relationship:
+      ownership: reference
+      inverse: false
+
+  # 31 — a collection of documents, again as a traversal: the documents of the
+  # relation this record names.
+  - key: relationDocuments
+    osfType: Document
+    cardinality: collection
+    label: { en: Documents of the relation, nl: Documenten van de relatie }
+    relationship:
+      ownership: reference
+      inverse: relationId
+      via: relatedRelation
+
+  # 32 — an image. Not a new file contract: DocumentRendition is the existing
+  # immutable derived file of a document version, with its own file name, MIME
+  # type and byte size.
+  - key: previewRendition
+    osfType: DocumentRendition
+    variables: whole
+    label: { en: Preview image, nl: Voorbeeldafbeelding }
+    persisted: { column: preview_rendition_id, storageClass: core }
+    relationship:
+      ownership: reference
+      inverse: false
+
+  # 33 — an address by reference; Address owns its own composition.
+  - key: postalAddress
+    osfType: Address
+    variables: whole
+    label: { en: Postal address, nl: Postadres }
+    persisted: { column: address_id, storageClass: core }
+    relationship:
+      ownership: reference
+      inverse: false
+
+  # 34 — a person by reference; the name parts are NaturalPerson's own fields,
+  # not re-modelled here.
+  - key: contactPerson
+    osfType: NaturalPerson
+    variables: whole
+    label: { en: Contact person, nl: Contactpersoon }
+    persisted: { column: natural_person_id, storageClass: core }
+    relationship:
+      ownership: reference
+      inverse: false
+
+  # 38 — the line items of an owned child set: the versions of the attached
+  # document. The ownership is declared where OSF declares it — Document's own
+  # `versioning` block (versionsField: versions, snapshot.ownedRelationships:
+  # recursive) — and this field is the supported read-only traversal of it. A
+  # parent-side owned-child collection field is not authorable, and is not faked.
+  - key: attachmentVersions
+    osfType: DocumentVersion
+    cardinality: collection
+    label: { en: Versions of the attachment, nl: Versies van de bijlage }
+    relationship:
+      ownership: reference
+      inverse: documentId
+      via: attachment
+
+  # 45 — a point on earth, with the bounds latitude and longitude really have.
+  - key: location
+    osfType: coordinates
+    label: { en: Location, nl: Locatie }
+    persisted: { column: location, storageClass: core }
+
+  # ─── Structured (37, 39, 40, 44) ───────────────────────────────────────────
+  # 37 — repeated typed groups, each carrying its own stable id. Distinctness of
+  # those ids within one row is caller-supplied: no array-scoped uniqueness
+  # exists in the authoring contract.
+  - key: lineGroups
+    osfType: object
+    cardinality: collection
+    label: { en: Line groups, nl: Regelgroepen }
+    persisted: { column: line_groups, storageClass: core }
+    children:
+      - key: lineId
+        osfType: identifier
+        required: true
+        label: { en: Line ID, nl: Regel-id }
+      - key: description
+        osfType: string
+        required: true
+        label: { en: Description, nl: Omschrijving }
+        validation: { maxLength: 200 }
+      - key: quantity
+        osfType: integer
+        required: true
+        label: { en: Quantity, nl: Aantal }
+        validation: { min: 1 }
+      - key: lineTotal
+        osfType: currency
+        label: { en: Line total, nl: Regeltotaal }
+
+  # 39 — a key-value map. A true keyed object, so a key cannot repeat: an array
+  # of {key,value} records with uniqueItems would not give that, because two
+  # different records may carry the same key. The entry VALUES are untyped —
+  # `children` names fixed keys only — and that gap is documented, not papered over.
+  - key: settings
+    osfType: object
+    label: { en: Settings, nl: Instellingen }
+    description:
+      en: A key-value map. Keys are unique by construction; the entry values carry no declared contract.
+      nl: Een sleutel-waardemap. Sleutels zijn per constructie uniek; de waarden hebben geen gedeclareerd contract.
+    persisted: { column: settings, storageClass: core }
+
+  # 40 — a value that differs per language. `variables: none` on purpose: a
+  # localized value is {en,nl,fr}-shaped while its base type stays `string`, so
+  # a variable slot would describe it as plain text and mis-state the contract.
+  - key: localizedTitle
+    osfType: string
+    localized: true
+    label: { en: Localized title, nl: Meertalige titel }
+    persisted: { column: localized_title, storageClass: core }
+
+  # 44 — an object whose value schema is a real bundled JSON Schema: a stored
+  # FieldDefinition, projected through the field-definition schema rather than
+  # through baseType alone.
+  - key: valueContract
+    osfType: fieldDefinition
+    label: { en: Value contract, nl: Waardecontract }
+    persisted: { column: value_contract, storageClass: core }
+
+  # ─── System and derived (41–43, 47) ────────────────────────────────────────
+  # 41 — a computed value with a real resolver: label rules are evaluated per
+  # request from label_rules, and each label's result type is the LabelRule
+  # record's own outputType. Not persisted, never written by a caller.
+  - key: labels
+    osfType: labelSet
+    readOnly: true
+    label: { en: Labels, nl: Labels }
+    description:
+      en: Runtime-resolved label rule outputs for this record. Not persisted; computed per request from label_rules.
+      nl: Tijdens runtime bepaalde uitkomsten van labelregels voor dit record. Niet opgeslagen; per verzoek berekend uit label_rules.
+
+  # 42 — a formula in an explicit dialect: the canonical expression contract that
+  # LabelRule.expression already uses, evaluated by the generated
+  # expression-evaluator whose operators are declared up front. Stored and
+  # validated as structure; never a string that something eval's.
+  - key: eligibility
+    osfType: condition
+    label: { en: Eligibility rule, nl: Geschiktheidsregel }
+    persisted: { column: eligibility, storageClass: core }
+
+  # 43 — system metadata. Stamped with the transaction time by `approve` and by
+  # nothing else: absent from the generated create and update inputs on every
+  # transport, and refused if a caller sends it anyway.
+  - key: approvedAt
+    osfType: datetime
+    readOnly: true
+    label: { en: Approved at, nl: Goedgekeurd op }
+    persisted: { column: approved_at, storageClass: core }
+
+  # 47 — the signed artifact, by reference: a pinned reference to the immutable
+  # DocumentVersion that carries the evidence, and a required input of `approve`.
+  # No signature is simulated and no Operation exists for this field alone — OSF
+  # has no signature artifact of its own, and this records which immutable
+  # version was signed.
+  - key: signedVersion
+    osfType: DocumentVersion
+    readOnly: true
+    label: { en: Signed version, nl: Ondertekende versie }
+    persisted: { column: signed_version_id, storageClass: core }
+    relationship:
+      ownership: reference
+      inverse: false
+      version: pinned
+operations:
+  list:
+    name: List field acceptance records
+    description: Returns a filtered and sorted page of field acceptance records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get a field acceptance record
+    description: Returns one field acceptance record.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create a field acceptance record
+    description: Creates a field acceptance record.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update a field acceptance record
+    description: Updates a field acceptance record.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete a field acceptance record
+    description: Deletes a field acceptance record.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp:
+    tools: generic

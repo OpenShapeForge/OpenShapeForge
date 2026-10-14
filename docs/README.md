@@ -23,6 +23,7 @@ journal, and manifest-derived e2e + load tests. Start with
 | [capability-grants.md](capability-grants.md) | Token-authorized Operations for recipients without an account: `auth.mode: capability`, the grant table, resolution into a grant session, attempt limits, issuing and revoking, audit |
 | [migrations.md](migrations.md) | The reset model: the build chain, db:reset and the empty-database bootstrap, the checksum refusal, drift signals, caveats |
 | [consuming.md](consuming.md) | Using the compiler from a host repo; the web app; current limitations |
+| [field-acceptance-fixture.md](field-acceptance-fixture.md) | The opt-in 48-field fixture: the numbered value catalogue, the variable mode per field, who owns each contract, and the gaps the authoring contract does not cover |
 
 Also in this directory: **`entities.generated.md`** — the live reference of
 every generated entity (columns + GraphQL operation names), produced by the

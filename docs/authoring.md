@@ -418,6 +418,14 @@ Catalog files under `catalogs/` merge across authoring layers automatically
   entities, and the seven base types are not catalog entries. Resolution
   priority for render/validation: explicit field config → semantic type →
   base-type default → fallback.
+  An entry may also declare `children`, which is how a typed object value
+  (`measurement`, `numericRange`, `dateRange`, `coordinates`, `recurrence`)
+  carries its own shape instead of every field restating it. Add an entry when
+  the *meaning* carries validation or an identity a base type does not — so
+  that, for instance, an arbitrary `number` cannot fill a `percentage` and a
+  bound value cannot lose the unit it was measured in.
+  [field-acceptance-fixture.md](field-acceptance-fixture.md) walks the whole
+  catalogue of field value contracts, one authored field per entry.
 - **`components.yaml`** — the render-component catalog: default component per
   base type (string → `Input`, boolean → `Switch`, …), view defaults, and
   component definitions with their allowed props.

@@ -170,8 +170,8 @@ describe("web manifest projection", () => {
     expect(projected.views.collection?.route).toBe("/chips");
     expect(projected.views.collection?.columns.map(column=>column.key)).toEqual(["name","value","category","isActive"]);
     expect(projected.views.record?.routes).toEqual({read:"/chips/:id",create:"/chips/new"});
-    expect(projected.views.record?.formGroups.create?.[0]?.fields).toContain("definition");
-    expect(projected.views.record?.formGroups.create?.[0]?.fields).toContain("value");
+    expect(projected.views.record?.formGroups?.create?.[0]?.fields).toContain("definition");
+    expect(projected.views.record?.formGroups?.create?.[0]?.fields).toContain("value");
     expect(projected.fields.value!.typedBy).toEqual({definitionField:"definition"});
   });
   test("projects canonical field-authoring profile and lock metadata without mutation",()=>{

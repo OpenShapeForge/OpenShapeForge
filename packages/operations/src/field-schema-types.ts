@@ -75,7 +75,8 @@ export type OperationFieldDefinition = {
 };
 
 export type OperationFieldOsfType = {
-  render?: { component?: string; props?: Readonly<Record<string, unknown>> };
+  render?: { component?: string; input?: string; display?: string; props?: Readonly<Record<string, unknown>> };
+  props?: Readonly<Record<string, unknown>>;
   kind?: string;
   entity?: string;
   baseType: OperationFieldBaseType;

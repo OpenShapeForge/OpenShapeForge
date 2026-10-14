@@ -176,6 +176,8 @@ export function resolveFields(
     const validation = semantic?.validation || field.validation
       ? { ...semantic?.validation, ...field.validation }
       : undefined;
+    const component = field.render?.component ?? semantic?.render?.component ?? semantic?.render?.input ?? semantic?.render?.display;
+    const render = component ? {component,props:{...semantic?.props,...semantic?.render?.props,...field.render?.props}} : field.render;
     const target = semantic?.kind === "entity" ? semantic.entity : undefined;
     return {
       key: field.key,
@@ -192,7 +194,7 @@ export function resolveFields(
       ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
       ...(validation ? { validation } : {}),
       ...(options ? { options } : {}),
-      ...((field.render || semantic?.render) ? { render: { ...semantic?.render, ...field.render, props: { ...semantic?.render?.props, ...field.render?.props } } } : {}),
+      ...(render ? {render} : {}),
       ...(target
         ? { relationship: { kind: cardinality === "collection" ? "hasMany" : "belongsTo", entity: slug(target), target, ...(field.relationship?.constraints ? { constraints: field.relationship.constraints } : {}) } }
         : field.relationship

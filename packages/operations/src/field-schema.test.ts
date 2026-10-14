@@ -252,3 +252,10 @@ test("canonical presentation merges type defaults with authored props without to
   const collection = operationFieldObjectSchema([{...definitions[0]!,cardinality:"collection"}],registry);
   expect(collection).toMatchObject({properties:{amount:{type:"array","x-osf-presentation":{component:"MoneyInput"},items:{"x-osf-presentation":{component:"MoneyInput"}}}}});
 });
+
+
+test("raw authoring catalogue render input/display and sibling props project into one presentation", () => {
+  const registry = {osfTypes:{currency:{baseType:"number" as const,render:{input:"MoneyInput",display:"MoneyInput"},props:{currency:"EUR",decimalPlaces:2,scale:"units"}}}};
+  expect(operationFieldObjectSchema([{key:"amount",osfType:"currency",render:{props:{decimalPlaces:0}}}],registry))
+    .toMatchObject({properties:{amount:{"x-osf-presentation":{component:"MoneyInput",props:{currency:"EUR",decimalPlaces:0,scale:"units"}}}}});
+});

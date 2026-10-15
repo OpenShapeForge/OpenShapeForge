@@ -116,11 +116,20 @@ test("published blueprint lookup is scoped, authorized and read-only across tena
     expect((await asApp(customer,'Other.All.ReadWrite',db=>sql`select * from app.read_blueprints('Example','standard',null,20,0)`.execute(db))).rows).toEqual([]);
     expect((await sql<{count:number}>`select count(*)::int as count from platform.blueprint_copies where tenant_id=${customer}`.execute(runtime.db)).rows[0]!.count).toBe(1);
     expect((await sql<{count:number}>`select count(*)::int as count from platform.blueprint_versions where tenant_id=${bp} and version=2`.execute(runtime.db)).rows[0]!.count).toBe(1);
+    expect((await asApp(customer,'Other.All.ReadWrite',db=>sql`select * from app.read_blueprints('Example','standard',null,20,0,true)`.execute(db))).rows.map((row:any)=>row.version)).toEqual([4]);
+    expect((await asApp(customer,'Example.All.ReadWrite',db=>sql`select * from app.read_blueprints('Example','standard',null,20,0,true)`.execute(db))).rows).toEqual([]);
+    expect((await asApp(stranger,'Other.All.ReadWrite',db=>sql`select * from app.read_blueprints('Example','standard',null,20,0,true)`.execute(db))).rows).toEqual([]);
+    await sql`insert into platform.blueprint_libraries values (${stranger}, ${bp})`.execute(runtime.db);
+    expect((await asApp(stranger,'Other.All.ReadWrite',db=>sql`select * from app.read_blueprints('Example','standard',null,20,0,true)`.execute(db))).rows).toEqual([]);
+    await asApp(bp,'platform-operator',db=>sql`insert into platform.blueprint_versions
+      (tenant_id,entity_name,blueprint_id,version,source_record_id,label,reader_roles,values_json)
+      values (${bp},'Example','standard',5,${randomUUID()},'Restored',array['Other.All.ReadWrite'],'{}'::jsonb)`.execute(db));
+    expect((await asApp(customer,'Other.All.ReadWrite',read)).rows.map(row=>row.version)).toEqual([5]);
     const owner = await sql<{ owner: string; bypass: boolean; public_execute: boolean }>`
       select r.rolname as owner, r.rolbypassrls as bypass,
         exists(select 1 from aclexplode(p.proacl) a where a.grantee = 0 and a.privilege_type = 'EXECUTE') as public_execute
       from pg_proc p join pg_roles r on r.oid = p.proowner
-      where p.oid = 'app.read_blueprints(text,text,text,integer,integer)'::regprocedure
+      where p.oid = 'app.read_blueprints(text,text,text,integer,integer,boolean)'::regprocedure
     `.execute(runtime.db);
     expect(owner.rows[0]).toEqual({ owner: 'openshapeforge_blueprint_reader', bypass: false, public_execute: false });
   } finally {

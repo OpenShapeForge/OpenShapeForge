@@ -12,8 +12,10 @@ export function isBlueprintThumbnail(value: unknown): value is string {
   try{bytes=atob(match[2]!);}catch{return false;}
   if(!bytes.length||bytes.length>BLUEPRINT_THUMBNAIL_MAX_BYTES)return false;
   const prefix=(values:number[])=>values.every((byte,index)=>bytes.charCodeAt(index)===byte);
+  const uint32=(offset:number)=>bytes.charCodeAt(offset)*16777216+bytes.charCodeAt(offset+1)*65536+bytes.charCodeAt(offset+2)*256+bytes.charCodeAt(offset+3);
+  const pngDimensions=()=>[uint32(16),uint32(20)].every(size=>Number.isInteger(size)&&size>0&&size<=2048);
   switch(match[1]){
-    case 'png':return bytes.length>=33&&prefix([137,80,78,71,13,10,26,10])&&bytes.slice(12,16)==='IHDR'&&bytes.slice(-8,-4)==='IEND';
+    case 'png':return bytes.length>=33&&prefix([137,80,78,71,13,10,26,10])&&bytes.slice(12,16)==='IHDR'&&bytes.slice(-8,-4)==='IEND'&&pngDimensions();
     case 'jpeg':return bytes.length>=4&&prefix([255,216,255])&&bytes.charCodeAt(bytes.length-2)===255&&bytes.charCodeAt(bytes.length-1)===217;
     case 'gif':return bytes.length>=14&&(bytes.startsWith('GIF87a')||bytes.startsWith('GIF89a'))&&bytes.endsWith(';');
     case 'webp':return bytes.length>=20&&bytes.startsWith('RIFF')&&bytes.slice(8,12)==='WEBP'&&['VP8 ','VP8L','VP8X'].includes(bytes.slice(12,16))&&(bytes.charCodeAt(4)+bytes.charCodeAt(5)*256+bytes.charCodeAt(6)*65536+bytes.charCodeAt(7)*16777216)===bytes.length-8;

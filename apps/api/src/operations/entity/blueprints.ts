@@ -38,11 +38,14 @@ function text(input: Record<string, unknown>, key: string): string {
 function allowedValues(table: GeneratedCrudTable, values: Record<string, unknown>) {
   return Object.fromEntries(policy(table).fields.map(field => [field, values[field] ?? null]));
 }
-async function readPublished(db: OpenShapeForgeDatabase, session: DbSessionInput, table: GeneratedCrudTable, blueprintId: string | null, search = "", limit = 51, offset = 0): Promise<Published[]> {
+function isRetired(source: Published): boolean {
+  return (source.values_json.$presentation as { retired?: boolean } | undefined)?.retired === true;
+}
+async function readPublished(db: OpenShapeForgeDatabase, session: DbSessionInput, table: GeneratedCrudTable, blueprintId: string | null, search = "", limit = 51, offset = 0, includeRetiredForCopy = false): Promise<Published[]> {
   policy(table);
   requireWriter(table, session);
   return withDbSession(db, session, async trx => (await sql<Published>`
-    select * from app.read_blueprints(${nameOf(table)}, ${blueprintId}, ${search}, ${limit}, ${offset})
+    select * from app.read_blueprints(${nameOf(table)}, ${blueprintId}, ${search}, ${limit}, ${offset}, ${includeRetiredForCopy})
   `.execute(trx)).rows);
 }
 function graphTable(entity: string): GeneratedCrudTable {
@@ -159,9 +162,9 @@ async function status(db: OpenShapeForgeDatabase, session: DbSessionInput, table
   return withDbSession(db, session, async trx => {
     const copy = (await sql<{ blueprint_tenant_id: string; blueprint_id: string; source_version: number }>`select blueprint_tenant_id, blueprint_id, source_version from platform.blueprint_copies where tenant_id = ${session.tenantId}::uuid and entity_name = ${nameOf(table)} and record_id = ${id}::uuid`.execute(trx)).rows[0];
     if (!copy) return { source: null, updateAvailable: false };
-    const source = (await readPublished(db, session, table, copy.blueprint_id))[0];
+    const source = (await readPublished(db, session, table, copy.blueprint_id, "", 1, 0, true))[0];
     if (!source || source.tenant_id !== copy.blueprint_tenant_id) return { source: null, updateAvailable: false };
-    return { source: { blueprintId: copy.blueprint_id, version: copy.source_version, latestVersion: source.version, label: source.label }, updateAvailable: policy(table).mode !== "copy" && source.version > copy.source_version };
+    return { source: { blueprintId: copy.blueprint_id, version: copy.source_version, latestVersion: source.version, label: source.label }, updateAvailable: policy(table).mode !== "copy" && source.version > copy.source_version && !isRetired(source) };
   });
 }
 async function reset(db: OpenShapeForgeDatabase, session: DbSessionInput, table: GeneratedCrudTable, input: Record<string, unknown>) {
@@ -171,8 +174,9 @@ async function reset(db: OpenShapeForgeDatabase, session: DbSessionInput, table:
   return withDbSession(db, session, async trx => {
     const copy = (await sql<{ blueprint_tenant_id: string; blueprint_id: string }>`select blueprint_tenant_id, blueprint_id from platform.blueprint_copies where tenant_id = ${session.tenantId}::uuid and entity_name = ${nameOf(table)} and record_id = ${id}::uuid for update`.execute(trx)).rows[0];
     if (!copy) throw generatedCrudError("Record has no blueprint source.", "NOT_FOUND");
-    const source = (await readPublished(db, session, table, copy.blueprint_id))[0];
+    const source = (await readPublished(db, session, table, copy.blueprint_id, "", 1, 0, true))[0];
     if (!source || source.tenant_id !== copy.blueprint_tenant_id) throw generatedCrudError("Blueprint is unavailable.", "NOT_FOUND");
+    if (isRetired(source)) throw generatedCrudError("The blueprint is retired and cannot be reset.", "BAD_USER_INPUT");
     if (source.version !== input.blueprintVersion) throw generatedCrudError("The blueprint has changed. Review its newest version first.", "VERSION_CONFLICT");
     // The canonical static executor checks the record version, edit lease and
     // confirmation in this same transaction before entering the handler.

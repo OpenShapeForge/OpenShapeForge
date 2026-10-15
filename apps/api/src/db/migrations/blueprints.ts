@@ -16,7 +16,7 @@ import { ensureCheckConstraint, ensureForeignKey } from "./sql-invariants.js";
  * grants and the one cross-tenant read function.
  *
  * Published snapshots are the only cross-tenant surface. The definer has no
- * BYPASSRLS and can read only these two bookkeeping tables, never source data.
+ * BYPASSRLS and can read only these three bookkeeping tables, never source data.
  */
 /** The cross-tenant definer role, as the generated manifest's role contract names it. */
 const BLUEPRINT_READER_ROLE = databaseRole("blueprintReader").name;
@@ -119,11 +119,14 @@ export async function applyBlueprintsMigration(db: OpenShapeForgeDatabase) {
         )
       );
 
-    grant select on platform.blueprint_libraries, platform.blueprint_versions
+    grant select on platform.blueprint_libraries, platform.blueprint_versions, platform.blueprint_copies
       to ${sql.id(BLUEPRINT_READER_ROLE)};
+    -- Remove the former arity, not publication data. Omitted sixth arguments
+    -- keep list/create availability rules; only existing-copy status opts in.
+    drop function if exists app.read_blueprints(text, text, text, integer, integer);
     create or replace function app.read_blueprints(
       entity text, source_blueprint_id text default null, search text default null,
-      page_limit integer default 20, page_offset integer default 0
+      page_limit integer default 20, page_offset integer default 0, include_retired_for_copy boolean default false
     ) returns table(tenant_id uuid, blueprint_id text, version integer, label text, values_json jsonb)
     language sql stable security definer
     set search_path = pg_catalog
@@ -140,7 +143,12 @@ export async function applyBlueprintsMigration(db: OpenShapeForgeDatabase) {
           and ($2 is null or v.blueprint_id = $2)
         order by v.blueprint_id, v.version desc
       ) latest
-      where not (latest.values_json @> '{"$presentation":{"retired":true}}'::jsonb)
+      where (not (latest.values_json @> '{"$presentation":{"retired":true}}'::jsonb)
+        or ($6 and exists (
+          select 1 from platform.blueprint_copies c
+          where c.tenant_id = app.current_tenant() and c.entity_name = $1
+            and c.blueprint_tenant_id = latest.tenant_id and c.blueprint_id = latest.blueprint_id
+        )))
         and latest.reader_roles && string_to_array(current_setting('app.roles', true), ',')
         and ($3 is null or latest.label ilike '%' || $3 || '%'
           or latest.blueprint_id ilike '%' || $3 || '%')
@@ -152,11 +160,11 @@ export async function applyBlueprintsMigration(db: OpenShapeForgeDatabase) {
     -- moment of the transfer (a superuser migrator skips that check; the
     -- restricted one does not). Grant it for the transfer only.
     grant create on schema app to ${sql.id(BLUEPRINT_READER_ROLE)};
-    alter function app.read_blueprints(text, text, text, integer, integer)
+    alter function app.read_blueprints(text, text, text, integer, integer, boolean)
       owner to ${sql.id(BLUEPRINT_READER_ROLE)};
     revoke create on schema app from ${sql.id(BLUEPRINT_READER_ROLE)};
-    revoke all on function app.read_blueprints(text, text, text, integer, integer) from public;
-    grant execute on function app.read_blueprints(text, text, text, integer, integer) to ${sql.id(APP_ROLE)};
+    revoke all on function app.read_blueprints(text, text, text, integer, integer, boolean) from public;
+    grant execute on function app.read_blueprints(text, text, text, integer, integer, boolean) to ${sql.id(APP_ROLE)};
   `.execute(db);
 }
 
@@ -167,6 +175,6 @@ export async function applyBlueprintsGrants(db: OpenShapeForgeDatabase) {
   await sql`
     grant select, insert, update, delete on platform.blueprint_libraries to ${sql.id(APP_ROLE)};
     revoke update, delete on platform.blueprint_versions from ${sql.id(APP_ROLE)};
-    revoke all on function app.read_blueprints(text, text, text, integer, integer) from public;
+    revoke all on function app.read_blueprints(text, text, text, integer, integer, boolean) from public;
   `.execute(db);
 }

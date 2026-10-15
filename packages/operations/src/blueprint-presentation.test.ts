@@ -13,3 +13,10 @@ test('publication preserves image and retirement unless explicitly changed',()=>
  expect(()=>blueprintPresentation({retired:'false'},{})).toThrow('boolean');
  expect(blueprintPresentation({thumbnail:png,retired:true},{})).toEqual(original);
 });
+
+test('PNG publication refuses zero or excessive dimensions even with a tiny encoded payload',()=>{
+ for(const size of [0,2049,8000]){
+  const bytes=Buffer.from(png.split(',')[1]!,'base64');bytes.writeUInt32BE(size,16);
+  expect(isBlueprintThumbnail(`data:image/png;base64,${bytes.toString('base64')}`)).toBe(false);
+ }
+});

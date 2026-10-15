@@ -3,11 +3,28 @@ import { describe, expect, it } from "bun:test";
 import {
   OAuthTokenLifecycleError,
   oauthTokenNeedsRefresh,
+  oauthExpiresIn,
   parseOAuthTokenSet,
   refreshOAuthTokenSet,
 } from "../token-lifecycle.js";
 
 describe("OAuth token lifecycle", () => {
+  it("normalizes decimal-string expiry and rejects malformed provider values", () => {
+    expect(oauthExpiresIn("600")).toBe(600);
+    expect(oauthExpiresIn(600)).toBe(600);
+    expect(oauthExpiresIn("0")).toBe(0);
+    for (const value of ["", "600seconds", "-1", " 600 ", "1e3", "Infinity", -1, Infinity, null, {}, 0.5]) {
+      expect(oauthExpiresIn(value)).toBeUndefined();
+    }
+  });
+
+  it("keeps a decimal-string provider lifetime when refreshing", async () => {
+    const tokens = await refreshOAuthTokenSet({ tokenUrl: "https://provider.example/token",
+      clientId: "client", clientSecret: "secret", refreshToken: "refresh", now: 1_000_000,
+      boundFetch: async () => Response.json({ access_token: "access", expires_in: "600" }) });
+    expect(tokens.expiresAt).toBe(1600);
+  });
+
   it("uses the configured leeway without a scheduler", () => {
     const now = Date.UTC(2026, 0, 1, 0, 0, 0);
     expect(oauthTokenNeedsRefresh(Math.floor(now / 1000) + 61, 60, now)).toBe(

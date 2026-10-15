@@ -179,6 +179,14 @@ export function oauthTokenNeedsRefresh(
   return expiresAt <= Math.floor(now / 1000) + refreshLeewaySeconds;
 }
 
+/** Providers may encode OAuth seconds as a JSON number or a decimal string. */
+export function oauthExpiresIn(value: unknown): number | undefined {
+  const seconds = typeof value === "string" && /^\d+$/.test(value)
+    ? Number(value) : value;
+  return typeof seconds === "number" && Number.isSafeInteger(seconds) && seconds >= 0
+    ? seconds : undefined;
+}
+
 /** Refresh one token set without reading a provider error body. */
 export async function refreshOAuthTokenSet(input: {
   tokenUrl: string;
@@ -237,11 +245,7 @@ export async function refreshOAuthTokenSet(input: {
       "The provider token endpoint returned no access token.",
     );
   }
-  const expiresIn =
-    typeof payload.expires_in === "number" &&
-    Number.isFinite(payload.expires_in)
-      ? payload.expires_in
-      : 3600;
+  const expiresIn = oauthExpiresIn(payload.expires_in) ?? 3600;
   return {
     accessToken: payload.access_token,
     refreshToken:

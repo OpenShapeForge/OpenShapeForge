@@ -7,7 +7,7 @@
  */
 
 import { hostAllowed } from "../connectors/executor.js";
-import { refreshOAuthTokenSet } from "../connectors/token-lifecycle.js";
+import { oauthExpiresIn, refreshOAuthTokenSet } from "../connectors/token-lifecycle.js";
 import type { SecretKeyring } from "../connectors/secrets.js";
 import { fetchWithAllowedRedirects } from "./declarative-execution.js";
 import { encryptSecret, keyringFromEnv } from "../connectors/secrets.js";
@@ -111,6 +111,7 @@ export async function exchangeCodeForTokens(
   }
 
   const scope = connectionTokenSecretScope(pending.connectionTable);
+  const expiresIn = oauthExpiresIn(payload.expires_in);
   const values: JsonRecord = {
     // Which scopes the provider actually granted: the token response's
     // `scope` when present, else the requested set. The connect flow
@@ -137,10 +138,10 @@ export async function exchangeCodeForTokens(
           ),
         }
       : {}),
-    ...(typeof payload.expires_in === "number"
+    ...(expiresIn !== undefined
       ? {
           accessTokenExpiresAt: new Date(
-            Date.now() + payload.expires_in * 1000,
+            Date.now() + expiresIn * 1000,
           ).toISOString(),
         }
       : {}),

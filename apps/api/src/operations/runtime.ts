@@ -1842,10 +1842,12 @@ export function registerRuntimeOperationRestRoutes(
   if (!runtime.platform || !runtime.db) return;
   const withSession = async <T>(
     request: FastifyRequest,
-    work: (session: TrustedSessionContext) => Promise<T>,
+    work: (session: TrustedSessionContext, definition?: RuntimeOperationDefinition) => Promise<T>,
     operationId?: string,
   ): Promise<T> => {
     const headers = headersFromFastify(request.headers);
+    const control = runtime.control?.config.ok ? runtime.control.config.config : undefined;
+    const controlCandidate = control && bearerIssuerOf(headers) === control.operator.issuer;
     const active = <R>(session: TrustedSessionContext, action: (session: TrustedSessionContext) => Promise<R>) =>
       withModuleOperationSession(runtime.platform!, session, (verified) => action(verified!));
     const available = (session: TrustedSessionContext) => active(
@@ -1856,20 +1858,24 @@ export function registerRuntimeOperationRestRoutes(
     // never merge the two sessions or retry a business refusal under another.
     let tenant: TrustedSessionContext | undefined;
     let tenantError: unknown;
-    try {
-      const resolved = await resolveSessionContext(headers, { db: runtime.db, mcpAppResource: true });
-      if (resolved.userId && resolved.credential !== "none") tenant = resolved;
-    } catch (error) {
-      tenantError = error;
+    // A distinct control issuer cannot be a tenant credential. Do not consult
+    // an unrelated or intentionally absent tenant verifier in that deployment.
+    if (!controlCandidate || control?.operator.issuer === process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER) {
+      try {
+        const resolved = await resolveSessionContext(headers, { db: runtime.db, mcpAppResource: true });
+        if (resolved.userId && resolved.credential !== "none") tenant = resolved;
+      } catch (error) {
+        tenantError = error;
+      }
     }
     // Discovery has one catalog: an admitted tenant wins deterministically.
-    if (tenant && (operationId === undefined || await available(tenant))) {
-      return active(tenant, work);
+    let tenantDefinition: RuntimeOperationDefinition | undefined;
+    if (tenant && (operationId === undefined || !controlCandidate || (tenantDefinition = await available(tenant)))) {
+      return active(tenant, (session) => work(session, tenantDefinition));
     }
-    const control = runtime.control?.config.ok ? runtime.control.config.config : undefined;
     let operator: TrustedSessionContext | undefined;
     let controlError: unknown;
-    if (control && bearerIssuerOf(headers) === control.operator.issuer) {
+    if (control && controlCandidate) {
       try {
         operator = await resolveControlSession(headers, control, { mcpAppResource: true });
       } catch (error) {
@@ -1879,7 +1885,7 @@ export function registerRuntimeOperationRestRoutes(
     if (operator) {
       const definition = operationId === undefined ? undefined : await available(operator);
       if (operationId === undefined || (definition && runtimeDefinitionAuthModes.get(definition) === "control")) {
-        return active(operator, work);
+        return active(operator, (session) => work(session, definition));
       }
     }
     // Preserve normal unavailable-Operation results without widening authority.
@@ -1934,7 +1940,7 @@ export function registerRuntimeOperationRestRoutes(
         }
         const definition = await withSession(
           request,
-          (session) => runtime.platform!.operations.get(session, id),
+          async (session, definition) => definition ?? runtime.platform!.operations.get(session, id),
           id,
         );
         if (!definition) {

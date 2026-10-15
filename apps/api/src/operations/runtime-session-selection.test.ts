@@ -30,6 +30,7 @@ let db: Kysely<DB>;
 let platform: ModulePlatformRuntime;
 const writes: TrustedSessionContext[] = [];
 const controls: TrustedSessionContext[] = [];
+let providerGets = 0;
 const providerDefinition: RuntimeOperationDefinition = {
   id: "example.definition.save", intent: "invoke", name: "Save definition", description: "Save an organization definition.",
   input: { kind: "json-schema", schema: { type: "object" } }, output: { kind: "json-schema", schema: { type: "object" } },
@@ -65,11 +66,11 @@ beforeEach(() => {
   __resetSessionResolverForTests(); stubLinkedMembershipForTests(["Example.Definitions.Manage"]);
   __setTenantForOrganizationForTests(async (_realm, id) => ({ "org-a": tenantA, "org-b": tenantB }[id] ?? null));
   db = new Kysely<DB>({ dialect: { createAdapter: () => new PostgresAdapter(), createDriver: () => new DummyDriver(), createIntrospector: database => new PostgresIntrospector(database), createQueryCompiler: () => new PostgresQueryCompiler() } });
-  platform = new ModulePlatformRuntime(db); writes.length = 0; controls.length = 0;
+  platform = new ModulePlatformRuntime(db); writes.length = 0; controls.length = 0; providerGets = 0;
   const allowed = (session: { tenantId?: string | null; roles: readonly string[] }) => session.tenantId === tenantA && session.roles.includes("Example.Definitions.Manage");
   platform.registerOperationProviders([{ name: "example", operationProviders: [{ id: "example.definitions",
     list: async session => allowed(session) ? [providerDefinition] : [],
-    get: async (session, id) => id === providerDefinition.id && allowed(session) ? providerDefinition : undefined,
+    get: async (session, id) => { providerGets++; return id === providerDefinition.id && allowed(session) ? providerDefinition : undefined; },
     execute: async context => { writes.push(context.session as TrustedSessionContext); return { data: { saved: true, tenantId: context.session.tenantId }, operations: [] }; },
   }] }]);
   const module: RuntimeModule = { name: "example", operationHandlers: { inspect: async (_input, context) => { controls.push(context.session!); return { value: { inspected: true } }; } } };
@@ -87,9 +88,36 @@ test("a verified dual-role member discovers, reads and saves the tenant provider
   const catalog = await app.inject({ method: "GET", url: "/api/operations", headers: bearer() });
   expect(catalog.statusCode).toBe(200); expect(catalog.json().map((x: { id: string }) => x.id)).toEqual([providerDefinition.id]);
   const definition = await app.inject({ method: "GET", url: `/api/operations/${providerDefinition.id}`, headers: bearer() });
-  expect(definition.statusCode).toBe(200); expect(definition.json().id).toBe(providerDefinition.id);
+  expect(definition.statusCode).toBe(200); expect(definition.json().id).toBe(providerDefinition.id); expect(providerGets).toBe(1);
   const response = await execute(providerDefinition.id); expect(response.statusCode).toBe(200); expect(response.json()).toMatchObject({ data: { saved: true, tenantId: tenantA } });
   expect(writes).toHaveLength(1); expect(writes[0]).toMatchObject({ credential: "bearer", tenantId: tenantA, roles: ["Example.Definitions.Manage"] }); expect(controls).toHaveLength(0);
+});
+test("tenant-only routes avoid a second provider lookup when no control context is configured", async () => {
+  await app.close(); app = Fastify(); registerRuntimeOperationRestRoutes(app, { db, platform: platform.services });
+  const definition = await app.inject({ method: "GET", url: `/api/operations/${providerDefinition.id}`, headers: bearer() });
+  expect(definition.statusCode).toBe(200); expect(providerGets).toBe(1);
+  expect((await execute(providerDefinition.id)).json()).toMatchObject({ data: { saved: true } });
+  expect(providerGets).toBe(2); expect(writes).toHaveLength(1);
+});
+test.each(["distinct tenant issuer", "no tenant verifier"])("non-host control deployment with %s preserves control authentication", async deployment => {
+  process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "off";
+  if (deployment === "no tenant verifier") {
+    delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+    delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI;
+  } else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = "https://identity.example.test/realms/tenant-only";
+  __resetSessionResolverForTests();
+  const claims = { organization: undefined, scope: "openid", realm_access: { roles: ["platform-operator"] }, resource_access: {} };
+  const headers = bearer(claims);
+  const catalog = await app.inject({ method: "GET", url: "/api/operations", headers });
+  expect(catalog.statusCode).toBe(200); expect(catalog.json().map((x: { id: string }) => x.id)).toEqual([controlOperation.key]);
+  const definition = await app.inject({ method: "GET", url: `/api/operations/${controlOperation.key}`, headers });
+  expect(definition.statusCode).toBe(200); expect(definition.json().id).toBe(controlOperation.key);
+  expect((await execute(controlOperation.key, headers)).json()).toMatchObject({ data: { inspected: true } });
+  expect(controls).toHaveLength(1); expect(writes).toHaveLength(0);
+  for (const [headers, status, code] of [[bearer(claims, true), 401, "UNAUTHENTICATED"], [bearer({ ...claims, realm_access: { roles: [] } }), 403, "FORBIDDEN"]] as const) {
+    const refused = await execute(controlOperation.key, headers); expect(refused.statusCode).toBe(status); expect(refused.json()).toMatchObject({ error: { code } });
+  }
+  expect(controls).toHaveLength(1); expect(writes).toHaveLength(0);
 });
 test("the same dual-role identity uses only its control credential for a canonical control Operation", async () => {
   const definition = await app.inject({ method: "GET", url: `/api/operations/${controlOperation.key}`, headers: bearer() }); expect(definition.statusCode).toBe(200);

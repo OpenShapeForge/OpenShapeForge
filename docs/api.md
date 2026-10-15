@@ -218,6 +218,23 @@ values are `400`; an invisible document is `404`. A failure while creating
 the first version rolls back the document too. There is no separate document
 command envelope: the generic projection is the transport.
 
+## Runtime Operation session selection
+
+`GET /api/operations` returns one session-filtered catalog. When the same
+verified identity has both an admitted organization session and platform
+operator authority, discovery selects the organization catalog. It does not
+merge the catalogs or their roles. A pure operator credential continues to
+receive the control catalog; platform administration also exposes the explicit
+control surface below.
+
+`GET /api/operations/{id}` and `POST /api/operations/{id}/execute` select the
+available canonical Operation before invocation. Organization Operations use
+the independently verified organization session and its existing admission,
+roles and tenant binding. A canonical control Operation uses the independently
+verified control credential. A tenant session cannot stand in for a control
+credential, and an operator role cannot grant organization access. A business
+refusal is returned once, without retry under another session.
+
 ## The tenant control surface
 
 The platform's own administration is a catalog of canonical Operations

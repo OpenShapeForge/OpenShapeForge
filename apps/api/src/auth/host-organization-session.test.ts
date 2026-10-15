@@ -461,7 +461,7 @@ describe("explicit service credentials in host mode", () => {
     } finally { await db.destroy(); }
   });
 
-  test("shared runtime routes fall back from control to tenant authentication for a same-issuer token", async () => {
+  test("shared runtime routes select the verified tenant context for same-issuer tenant Operations", async () => {
     const { db } = serviceRegistry();
     const operation: OperationContract = {
       key: "records.list",
@@ -518,8 +518,8 @@ describe("explicit service credentials in host mode", () => {
       expect(response.statusCode).toBe(200);
       expect((response.json() as { id: string }).id).toBe(operation.key);
 
-      // Even before host mode is enabled, a shared issuer can mint tenant
-      // credentials for a different client than the control client.
+      // Tenant Operation selection also works outside host mode when a shared
+      // issuer mints a tenant credential for a different control-plane client.
       process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "off";
       const sharedRealmResponse = await app.inject({
         method: "GET",

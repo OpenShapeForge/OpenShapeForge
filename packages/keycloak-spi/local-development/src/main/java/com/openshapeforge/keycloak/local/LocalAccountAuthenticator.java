@@ -19,6 +19,8 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.UserSessionModel;
+import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.util.JsonSerialization;
 
@@ -112,9 +114,24 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
         if (user == null || !eligible(user.isEnabled(), user.getServiceAccountClientLink(), user.getUsername())) {
             challenge(context, "osfLocalAccountUnavailable"); return;
         }
+        var old = browserSessionToReplace(context, user);
+        if (old != null) {
+            // Only the SSO session owning this browser authentication is replaced.
+            // End its client sessions before Keycloak attaches the selected user;
+            // otherwise attachSession rejects the two different identities.
+            AuthenticationManager.backchannelLogout(context.getSession(), old, true);
+            AuthenticationManager.expireIdentityCookie(context.getSession());
+        }
         context.setUser(user);
         context.getEvent().detail("auth_method", ID);
         context.success();
+    }
+
+    static UserSessionModel browserSessionToReplace(AuthenticationFlowContext context, UserModel selected) {
+        if (selected == null || !eligible(selected.isEnabled(), selected.getServiceAccountClientLink(), selected.getUsername())) return null;
+        var auth = context.getAuthenticationSession();
+        var old = context.getSession().sessions().getUserSession(context.getRealm(), auth.getParentSession().getId());
+        return old != null && old.getUser() != null && !old.getUser().getId().equals(selected.getId()) ? old : null;
     }
 
     @Override public boolean requiresUser() { return false; }

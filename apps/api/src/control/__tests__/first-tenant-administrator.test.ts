@@ -328,10 +328,12 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
   it('resends an accepted member notice without reopening admission or changing the role', async () => {
     await invite();
     await sql`update platform.employee_invitations set status='accepted', accepted_at=now()`.execute(owner.db);
+    members = ['admin@example.com'];
     expect((await manage('list') as any).invitations[0].canResend).toBe(true);
     expect(await manage('resend', 'org-acme-invite')).toMatchObject({ status: 'resent', role: 'org_admin', delivery: 'email_sent' });
     expect((await sql<any>`select status,role from platform.employee_invitations`.execute(owner.db)).rows)
       .toEqual([{status:'accepted',role:'org_admin'}]);
+    expect(sends).toEqual(['org-acme:admin@example.com', 'org-acme:admin@example.com']);
   });
 
   it('refuses foreign, stale, accepted and untracked invitations before mutation', async () => {

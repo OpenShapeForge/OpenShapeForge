@@ -288,7 +288,14 @@ export async function manageTenantInvitations(
           throw new FirstAdministratorError("SMTP_NOT_CONFIGURED", "Configure SMTP before resending invitations.");
         }
         // No automatic retry: a timeout does not prove that mail was not sent.
-        await clients.members.resendInvitation(organization.id, invitation.id);
+        // Keycloak's resend endpoint rejects existing organization members.
+        // Their native invite-existing-user operation replaces the old notice.
+        if (await clients.members.hasMemberByEmail(organization.id, invitation.email)) {
+          const delivery = await deliverInvitation(clients.members, organization.id, { email: invitation.email });
+          if (delivery !== "email_sent") throw new FirstAdministratorError("INVITATION_STATE_CHANGED", "The membership changed; no new mail was confirmed. Refresh before resending.");
+        } else {
+          await clients.members.resendInvitation(organization.id, invitation.id);
+        }
         return {
           tenant: input.slug,
           email: invitation.email,

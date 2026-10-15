@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import { operationChoiceKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword, operationTypeKeyword } from "@openshapeforge/operations";
+import { operationFieldMetadataKeywords, valueInvariantKeywords, operationChoiceKeyword, operationExactNumericKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword, operationTypeKeyword, operationVariablesKeyword } from "@openshapeforge/operations";
 import type {
   CompilerPlugin,
   CompiledPluginOperation,
@@ -479,7 +479,9 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
 }
 
 function operationSchemaValidator() {
-  const ajv = new Ajv2020.default({ strict: true, allErrors: true });
+  // A numeric property publishes both of its forms (the JSON number and the
+  // exact decimal text); that union type is part of the compiled contract.
+  const ajv = new Ajv2020.default({ strict: true, allErrors: true, allowUnionTypes: true });
   (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
   ajv.addKeyword({
     keyword: "x-osf-sourceField",
@@ -496,6 +498,10 @@ function operationSchemaValidator() {
   ajv.addKeyword(operationInputFieldsKeyword);
   ajv.addKeyword(operationChoiceKeyword);
   ajv.addKeyword(operationTypeKeyword);
+  ajv.addKeyword(operationVariablesKeyword);
+  for (const keyword of operationFieldMetadataKeywords) ajv.addKeyword(keyword);
+  ajv.addKeyword(operationExactNumericKeyword);
+  for (const keyword of valueInvariantKeywords) ajv.addKeyword(keyword);
   return ajv;
 }
 

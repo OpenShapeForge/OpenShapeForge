@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { operationFailure } from "@openshapeforge/operations";
+import { isFieldVariableMode, operationFailure, schemaVariableShape } from "@openshapeforge/operations";
 import type { ModuleOperationContext, ModuleOperationHandler, RuntimeEntityValueCarrier, RuntimeEntityValueDefinition, RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
 import { materializeTemplateContent } from "./content/materialize.js";
@@ -31,9 +31,19 @@ export function contentFieldProjection(field: Readonly<Record<string, unknown>>)
   if (typeof baseType !== "string" || !BASE_TYPES.includes(baseType)) refuse("INVALID_DEFINITION", "A block field has no resolved base type.");
   const nested = Array.isArray(field.children) ? field.children : undefined;
   const relationship = isObject(field.relationship) && typeof field.relationship.target === "string" ? { target: field.relationship.target } : undefined;
+  // The authored variable mode travels with the field: it is what makes a
+  // `{{…}}` token in this field's value a binding rather than text. A mode
+  // this build does not recognise is a broken definition rather than a field
+  // that quietly stops accepting the variables its author declared.
+  if (field.variables !== undefined && !isFieldVariableMode(field.variables)) {
+    refuse("INVALID_DEFINITION", "A block field declares an unsupported variable mode.");
+  }
   return {
     baseType: baseType as ContentField["baseType"],
     ...(typeof field.osfType === "string" ? { osfType: field.osfType } : {}),
+    ...(typeof field.unit === "string" ? { unit: field.unit } : {}),
+    ...(field.osfType === "currency" && isObject(field.render) && isObject(field.render.props) && typeof field.render.props.currency === "string" ? { currency: field.render.props.currency } : {}),
+    ...(isFieldVariableMode(field.variables) && field.variables !== "none" ? { variables: field.variables } : {}),
     required: field.required === true,
     cardinality: (field.cardinalityBounds ?? field.cardinality ?? "single") as NonNullable<ContentField["cardinality"]>,
     ...(nested ? { fields: Object.fromEntries(nested.map((child) => { const shape = object(child, "field"); return [text(shape.key, "field key"), contentFieldProjection(shape)]; })) } : {}),
@@ -79,17 +89,24 @@ export const composeTemplate: ModuleOperationHandler = async (input, context) =>
 export function parameterShape(schema: Record<string, unknown>, required: boolean): TemplateParameter {
   if (schema.type === "array") {
     const item = parameterShape(object(schema.items, "parameter items"), false);
-    return { ...item, required, cardinality: {
+    return { ...item, required,
+      ...(typeof schema["x-osf-type"] === "string" ? { osfType: schema["x-osf-type"] } : {}),
+      ...(isFieldVariableMode(schema["x-osf-variables"]) ? { variables: schema["x-osf-variables"] } : {}),
+      cardinality: {
       min: typeof schema.minItems === "number" ? schema.minItems : 0,
       max: typeof schema.maxItems === "number" ? schema.maxItems : "unbounded",
     }, ...(schema.default !== undefined ? { defaultValue: schema.default as JsonValue } : {}) };
   }
-  const baseType = schema.type === "string" && schema.format === "date" ? "date"
-    : schema.type === "string" && schema.format === "date-time" ? "datetime" : schema.type;
+  const shape = schemaVariableShape(schema, { required });
+  const baseType = shape?.baseType;
   if (typeof baseType !== "string" || !BASE_TYPES.includes(baseType)) refuse("INVALID_DEFINITION", "The template parameter shape is unsupported.");
   const requiredKeys = Array.isArray(schema.required) ? schema.required : [];
   return {
     baseType: baseType as ContentValueShape["baseType"], required,
+    ...(shape?.unit ? { unit: shape.unit } : {}),
+    ...(shape?.currency ? { currency: shape.currency } : {}),
+    ...(typeof schema["x-osf-type"] === "string" ? { osfType: schema["x-osf-type"] } : {}),
+    ...(isFieldVariableMode(schema["x-osf-variables"]) ? { variables: schema["x-osf-variables"] } : {}),
     ...(isObject(schema["x-osf-reference"]) && typeof schema["x-osf-reference"].entity === "string" ? { relationship: { target: schema["x-osf-reference"].entity } } : {}),
     ...(Array.isArray(schema.enum) ? { enum: schema.enum as JsonValue[] } : {}),
     ...(isObject(schema.properties) ? { fields: Object.fromEntries(Object.entries(schema.properties).map(([name, child]) => [name, parameterShape(object(child, "parameter"), requiredKeys.includes(name))])) } : {}),
@@ -150,14 +167,59 @@ export function canonicalReader(context: ModuleOperationContext, operationDefini
   };
 }
 
-/** Global variables use the existing Chip namespace, read through its canonical Operation. */
-export function chipResolver(trx: unknown, tenantId: string, read: CanonicalReader): ContentResolvers["resolveGlobalVariable"] {
+/**
+ * Global variables use the existing Chip namespace, read through its
+ * canonical Operation: the value AND the FieldDefinition that types it, in
+ * one authorized read, after authorization and redaction. The shape travels
+ * with the value because that is what makes a global typed — a resolver that
+ * claimed a shape of its own could widen a text global into a number.
+ *
+ * A definition that is not a canonical FieldDefinition for this field, or a
+ * value the current disclosure policy withholds, is a dependency failure
+ * rather than a global that quietly resolves to nothing.
+ */
+export function chipResolver(
+  trx: unknown,
+  tenantId: string,
+  read: CanonicalReader,
+  shapeOf: (definition: Readonly<Record<string, unknown>>) => ContentValueShape,
+): ContentResolvers["resolveGlobalVariable"] {
   return async (key) => {
     const found = (await rows<{ id: string }>(trx, "select id from erp.chips where tenant_id = $1 and key = $2 for share", [tenantId, key]))[0];
     if (!found) return null;
     const chip = await read("Chip", uuid(found.id, "chip id"));
-    if (!chip || chip.key !== key || typeof chip.value !== "string") return null;
-    return { tenantId, sourceId: found.id, sourceVersionId: `${found.id}@${text(chip.updatedAt, "chip version")}`, value: chip.value };
+    if (!chip || chip.key !== key) return null;
+    const definition = object(chip.definition, "chip value definition");
+    if (definition.key !== CHIP_VALUE_FIELD) refuse("DEPENDENCY_INVALID", "The global's stored definition does not describe its value.");
+    return {
+      tenantId,
+      sourceId: found.id,
+      sourceVersionId: `${found.id}@${text(chip.updatedAt, "chip version")}`,
+      shape: shapeOf(definition),
+      value: (chip.value ?? null) as JsonValue,
+    };
+  };
+}
+
+/** The Chip field whose value a global resolves to (entities/core/chip.yaml). */
+export const CHIP_VALUE_FIELD = "value";
+
+/**
+ * The engine's shape for one stored FieldDefinition, through the same
+ * field-schema service every stored definition is projected by. The
+ * definition is the source's own contract, so an unreadable one is a broken
+ * source rather than an untyped value.
+ */
+export function storedDefinitionShape(context: ModuleOperationContext): (definition: Readonly<Record<string, unknown>>) => ContentValueShape {
+  const { platform } = contextServices(context);
+  return (definition) => {
+    let schema: Record<string, unknown>;
+    try { schema = platform.schemas.fields.object([definition]); }
+    catch { refuse("DEPENDENCY_INVALID", "The stored value definition is not a valid field definition."); }
+    const properties = object(schema!.properties ?? {}, "definition properties");
+    const key = text(definition.key, "definition key");
+    const required = Array.isArray(schema!.required) ? schema!.required : [];
+    return parameterShape(object(properties[key], "definition value schema"), required.includes(key));
   };
 }
 
@@ -260,7 +322,7 @@ export function contentResolvers(context: ModuleOperationContext, trx: unknown, 
       parameterFields.set(id, frozen.parameterFields);
       return { id, tenantId, templateId, versionNumber: Number(version.versionNumber), parameters: parameterShapes(context, frozen.parameterFields), variants: projected };
     },
-    resolveGlobalVariable: chipResolver(trx, tenantId, read),
+    resolveGlobalVariable: chipResolver(trx, tenantId, read, storedDefinitionShape(context)),
     resolveEntity: entityResolver(tenantId, read),
     validateParameters(version, values) {
       const fields = parameterFields.get(version.id);

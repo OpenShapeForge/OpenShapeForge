@@ -22,6 +22,7 @@
         "shape": true,
         "options": true,
         "render": false,
+        "moneyDisplay": true,
         "aiHint": true,
         "defaultValue": true,
         "value": false,
@@ -51,6 +52,7 @@
         "shape": true,
         "options": true,
         "render": false,
+        "moneyDisplay": true,
         "aiHint": true,
         "defaultValue": true,
         "value": false,
@@ -84,6 +86,7 @@
         "shape": false,
         "options": false,
         "render": false,
+        "moneyDisplay": true,
         "aiHint": true,
         "defaultValue": false,
         "value": false,
@@ -113,6 +116,7 @@
         "shape": true,
         "options": true,
         "render": false,
+        "moneyDisplay": true,
         "aiHint": true,
         "defaultValue": true,
         "value": false,
@@ -146,6 +150,7 @@
         "shape": false,
         "options": false,
         "render": false,
+        "moneyDisplay": true,
         "aiHint": true,
         "defaultValue": false,
         "value": false,
@@ -664,7 +669,589 @@
         "input": "MoneyInput"
       },
       "props": {
-        "currency": "EUR"
+        "currency": "EUR",
+        "decimalPlaces": 2,
+        "scale": "units"
+      }
+    },
+    "identifier": {
+      "label": {
+        "en": "Identifier",
+        "nl": "Kenmerk"
+      },
+      "baseType": "string",
+      "icon": "Hash",
+      "validation": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._\\-]*$",
+        "minLength": 1,
+        "maxLength": 64
+      },
+      "render": {
+        "display": "TextDisplay",
+        "input": "Input"
+      }
+    },
+    "percentage": {
+      "label": {
+        "en": "Percentage",
+        "nl": "Percentage"
+      },
+      "baseType": "number",
+      "icon": "Percent",
+      "render": {
+        "display": "TextDisplay",
+        "input": "NumberInput"
+      },
+      "props": {
+        "unit": "%",
+        "decimalPlaces": 2
+      }
+    },
+    "measurement": {
+      "kind": "object",
+      "label": {
+        "en": "Measurement",
+        "nl": "Meetwaarde"
+      },
+      "baseType": "object",
+      "icon": "Ruler",
+      "render": {
+        "display": "TextDisplay",
+        "input": "JsonFieldEditor"
+      },
+      "children": [
+        {
+          "key": "value",
+          "osfType": "number",
+          "required": true,
+          "label": {
+            "en": "Value",
+            "nl": "Waarde"
+          }
+        },
+        {
+          "key": "unit",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Unit",
+            "nl": "Eenheid"
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "mm",
+                "label": {
+                  "en": "Millimetre",
+                  "nl": "Millimeter"
+                }
+              },
+              {
+                "value": "cm",
+                "label": {
+                  "en": "Centimetre",
+                  "nl": "Centimeter"
+                }
+              },
+              {
+                "value": "m",
+                "label": {
+                  "en": "Metre",
+                  "nl": "Meter"
+                }
+              },
+              {
+                "value": "m2",
+                "label": {
+                  "en": "Square metre",
+                  "nl": "Vierkante meter"
+                }
+              },
+              {
+                "value": "m3",
+                "label": {
+                  "en": "Cubic metre",
+                  "nl": "Kubieke meter"
+                }
+              },
+              {
+                "value": "g",
+                "label": {
+                  "en": "Gram",
+                  "nl": "Gram"
+                }
+              },
+              {
+                "value": "kg",
+                "label": {
+                  "en": "Kilogram",
+                  "nl": "Kilogram"
+                }
+              },
+              {
+                "value": "kWh",
+                "label": {
+                  "en": "Kilowatt hour",
+                  "nl": "Kilowattuur"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "durationSeconds": {
+      "label": {
+        "en": "Duration",
+        "nl": "Duur"
+      },
+      "baseType": "integer",
+      "icon": "Timer",
+      "validation": {
+        "min": 0
+      },
+      "render": {
+        "display": "TextDisplay",
+        "input": "NumberInput"
+      },
+      "props": {
+        "unit": "s"
+      }
+    },
+    "numericRange": {
+      "schema": {
+        "x-osf-ordered-fields": {
+          "lower": "from",
+          "upper": "to",
+          "kind": "numeric"
+        }
+      },
+      "kind": "object",
+      "label": {
+        "en": "Numeric range",
+        "nl": "Getalbereik"
+      },
+      "baseType": "object",
+      "icon": "ArrowLeftRight",
+      "render": {
+        "display": "TextDisplay",
+        "input": "JsonFieldEditor"
+      },
+      "children": [
+        {
+          "key": "from",
+          "osfType": "number",
+          "required": true,
+          "label": {
+            "en": "From",
+            "nl": "Van"
+          }
+        },
+        {
+          "key": "to",
+          "osfType": "number",
+          "required": true,
+          "label": {
+            "en": "To",
+            "nl": "Tot"
+          }
+        }
+      ]
+    },
+    "localTime": {
+      "label": {
+        "en": "Time of day",
+        "nl": "Tijdstip"
+      },
+      "baseType": "string",
+      "icon": "Clock",
+      "validation": {
+        "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$"
+      },
+      "render": {
+        "display": "TextDisplay",
+        "input": "Input"
+      }
+    },
+    "dateRange": {
+      "schema": {
+        "x-osf-ordered-fields": {
+          "lower": "from",
+          "upper": "to",
+          "kind": "date"
+        }
+      },
+      "kind": "object",
+      "label": {
+        "en": "Date range",
+        "nl": "Periode"
+      },
+      "baseType": "object",
+      "icon": "CalendarRange",
+      "render": {
+        "display": "TextDisplay",
+        "input": "JsonFieldEditor"
+      },
+      "children": [
+        {
+          "key": "from",
+          "osfType": "date",
+          "required": true,
+          "label": {
+            "en": "From",
+            "nl": "Van"
+          }
+        },
+        {
+          "key": "to",
+          "osfType": "date",
+          "required": true,
+          "label": {
+            "en": "To",
+            "nl": "Tot"
+          }
+        }
+      ]
+    },
+    "calendarPeriod": {
+      "label": {
+        "en": "Calendar period",
+        "nl": "Kalenderperiode"
+      },
+      "baseType": "string",
+      "icon": "CalendarDays",
+      "validation": {
+        "pattern": "^[0-9]{4}(-(Q[1-4]|H[12]|0[1-9]|1[0-2]|W(0[1-9]|[1-4][0-9]|5[0-3])))?$",
+        "maxLength": 8
+      },
+      "render": {
+        "display": "TextDisplay",
+        "input": "Input"
+      }
+    },
+    "recurrence": {
+      "schema": {
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "endCondition"
+              ],
+              "properties": {
+                "endCondition": {
+                  "const": "onDate"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "end": true
+              },
+              "required": [
+                "end"
+              ]
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "endCondition"
+              ],
+              "properties": {
+                "endCondition": {
+                  "const": "afterCount"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "count": true
+              },
+              "required": [
+                "count"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "start": true,
+                "end": true,
+                "endCondition": true
+              },
+              "required": [
+                "start",
+                "end"
+              ],
+              "anyOf": [
+                {
+                  "not": {
+                    "properties": {
+                      "endCondition": true
+                    },
+                    "required": [
+                      "endCondition"
+                    ]
+                  }
+                },
+                {
+                  "properties": {
+                    "endCondition": {
+                      "const": "onDate"
+                    }
+                  }
+                }
+              ]
+            },
+            "then": {
+              "x-osf-ordered-fields": {
+                "lower": "start",
+                "upper": "end",
+                "kind": "date"
+              }
+            }
+          }
+        ]
+      },
+      "kind": "object",
+      "label": {
+        "en": "Recurrence",
+        "nl": "Herhaling"
+      },
+      "baseType": "object",
+      "icon": "Repeat",
+      "render": {
+        "display": "TextDisplay",
+        "input": "JsonFieldEditor"
+      },
+      "children": [
+        {
+          "key": "frequency",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Frequency",
+            "nl": "Frequentie"
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "daily",
+                "label": {
+                  "en": "Daily",
+                  "nl": "Dagelijks"
+                }
+              },
+              {
+                "value": "weekly",
+                "label": {
+                  "en": "Weekly",
+                  "nl": "Wekelijks"
+                }
+              },
+              {
+                "value": "monthly",
+                "label": {
+                  "en": "Monthly",
+                  "nl": "Maandelijks"
+                }
+              },
+              {
+                "value": "quarterly",
+                "label": {
+                  "en": "Quarterly",
+                  "nl": "Per kwartaal"
+                }
+              },
+              {
+                "value": "yearly",
+                "label": {
+                  "en": "Yearly",
+                  "nl": "Jaarlijks"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "key": "interval",
+          "osfType": "integer",
+          "required": true,
+          "label": {
+            "en": "Every",
+            "nl": "Elke"
+          },
+          "defaultValue": 1,
+          "validation": {
+            "min": 1,
+            "max": 366
+          }
+        },
+        {
+          "key": "dayOfMonth",
+          "osfType": "integer",
+          "label": {
+            "en": "Day of the month",
+            "nl": "Dag van de maand"
+          },
+          "validation": {
+            "min": 1,
+            "max": 31
+          }
+        },
+        {
+          "key": "occurrences",
+          "osfType": "integer",
+          "label": {
+            "en": "Number of occurrences",
+            "nl": "Aantal herhalingen"
+          },
+          "validation": {
+            "min": 1,
+            "max": 1000
+          }
+        },
+        {
+          "key": "start",
+          "osfType": "date",
+          "label": {
+            "en": "Starting from",
+            "nl": "Vanaf"
+          }
+        },
+        {
+          "key": "end",
+          "osfType": "date",
+          "label": {
+            "en": "Ending on",
+            "nl": "Einddatum"
+          }
+        },
+        {
+          "key": "endCondition",
+          "osfType": "string",
+          "label": {
+            "en": "Ends",
+            "nl": "Eindigt"
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "never",
+                "label": {
+                  "en": "Never",
+                  "nl": "Nooit"
+                }
+              },
+              {
+                "value": "onDate",
+                "label": {
+                  "en": "On date",
+                  "nl": "Op datum"
+                }
+              },
+              {
+                "value": "afterCount",
+                "label": {
+                  "en": "After count",
+                  "nl": "Na aantal"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "key": "count",
+          "osfType": "integer",
+          "label": {
+            "en": "Occurrences",
+            "nl": "Herhalingen"
+          },
+          "validation": {
+            "min": 1,
+            "max": 1000
+          }
+        }
+      ]
+    },
+    "rating": {
+      "label": {
+        "en": "Rating",
+        "nl": "Beoordeling"
+      },
+      "baseType": "integer",
+      "icon": "Star",
+      "validation": {
+        "min": 1,
+        "max": 5
+      },
+      "render": {
+        "display": "TextDisplay",
+        "input": "NumberInput"
+      }
+    },
+    "coordinates": {
+      "kind": "object",
+      "label": {
+        "en": "Coordinates",
+        "nl": "Coördinaten"
+      },
+      "baseType": "object",
+      "icon": "MapPin",
+      "render": {
+        "display": "TextDisplay",
+        "input": "MapPicker"
+      },
+      "children": [
+        {
+          "key": "latitude",
+          "osfType": "number",
+          "required": true,
+          "label": {
+            "en": "Latitude",
+            "nl": "Breedtegraad"
+          },
+          "validation": {
+            "min": -90,
+            "max": 90
+          }
+        },
+        {
+          "key": "longitude",
+          "osfType": "number",
+          "required": true,
+          "label": {
+            "en": "Longitude",
+            "nl": "Lengtegraad"
+          },
+          "validation": {
+            "min": -180,
+            "max": 180
+          }
+        }
+      ]
+    },
+    "timeZone": {
+      "schema": {
+        "type": "string",
+        "x-osf-time-zone": true
+      },
+      "label": {
+        "en": "Time zone",
+        "nl": "Tijdzone"
+      },
+      "baseType": "string",
+      "icon": "Globe",
+      "validation": {
+        "pattern": "^(UTC|[A-Za-z_]+\\/[A-Za-z0-9_\\+\\-]+(\\/[A-Za-z0-9_\\+\\-]+)?)$",
+        "maxLength": 64
+      },
+      "render": {
+        "display": "TextDisplay",
+        "input": "Input"
       }
     },
     "condition": {
@@ -706,6 +1293,21 @@
         "input": "VariableTemplateInput"
       }
     },
+    "typedValue": {
+      "baseType": "object",
+      "schema": {
+        "$ref": "#/$defs/typedValue"
+      },
+      "label": {
+        "en": "Typed value",
+        "nl": "Getypeerde waarde"
+      },
+      "icon": "Variable",
+      "render": {
+        "display": "TextDisplay",
+        "input": "JsonFieldEditor"
+      }
+    },
     "fieldDefinition": {
       "baseType": "object",
       "schema": {
@@ -722,6 +1324,36 @@
       "icon": "ListChecks",
       "render": {
         "display": "FieldDefinitionView",
+        "input": "JsonFieldEditor"
+      }
+    },
+    "keyValueMap": {
+      "kind": "object",
+      "label": {
+        "en": "Text value map",
+        "nl": "Tekstwaardemap"
+      },
+      "baseType": "object",
+      "schema": {
+        "type": "object",
+        "propertyNames": {
+          "minLength": 1,
+          "maxLength": 160,
+          "not": {
+            "enum": [
+              "constructor",
+              "prototype",
+              "__proto__"
+            ]
+          }
+        },
+        "additionalProperties": {
+          "type": "string",
+          "maxLength": 8000
+        }
+      },
+      "render": {
+        "display": "TextDisplay",
         "input": "JsonFieldEditor"
       }
     },
@@ -12296,25 +12928,56 @@
           }
         },
         {
-          "key": "value",
+          "key": "definition",
+          "osfType": "fieldDefinition",
           "required": true,
+          "defaultValue": {
+            "key": "value",
+            "osfType": "string",
+            "required": false,
+            "validation": {
+              "minLength": 1,
+              "maxLength": 8000
+            }
+          },
+          "authoring": {
+            "profile": "fullFieldDefinition",
+            "lockedKeys": [
+              "key"
+            ]
+          },
+          "label": {
+            "en": "Value type",
+            "nl": "Waardetype"
+          },
+          "description": {
+            "en": "The field definition that types this variable's value. It is what a field the variable fills is checked against, so a text variable cannot fill a monetary field and the other way round. Its key is `value`.",
+            "nl": "De velddefinitie die de waarde van deze variabele typeert. Een veld dat de variabele invult wordt hiertegen gecontroleerd, dus een tekstvariabele kan geen geldbedrag invullen en omgekeerd. De sleutel is `value`."
+          },
+          "persisted": {
+            "column": "definition",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "value",
+          "osfType": "typedValue",
+          "required": true,
+          "typedBy": {
+            "definitionField": "definition"
+          },
           "label": {
             "en": "Value",
             "nl": "Waarde"
           },
           "description": {
-            "en": "Plain text value inserted when this chip is rendered.",
-            "nl": "Platte tekstwaarde die wordt ingevoegd wanneer deze chip wordt gerenderd."
-          },
-          "validation": {
-            "minLength": 1,
-            "maxLength": 8000
+            "en": "The variable's value, in the type its definition declares. Checked against that definition on every write.",
+            "nl": "De waarde van de variabele, in het type dat de definitie aangeeft. Wordt bij elke schrijfactie tegen die definitie gecontroleerd."
           },
           "persisted": {
             "column": "value",
             "storageClass": "core"
-          },
-          "osfType": "multilineText"
+          }
         },
         {
           "key": "description",
@@ -21396,7 +22059,6 @@
               }
             ]
           },
-          "variables": "template",
           "suggestions": {
             "sourceKey": "entityFields"
           }
@@ -21413,6 +22075,7 @@
             "nl": "Template met dynamische variabelen dat een gepersonaliseerde uitleg produceert wanneer op het label wordt geklikt."
           },
           "osfType": "variableTemplate",
+          "variables": "template",
           "validation": {
             "maxLength": 2000
           },
@@ -21428,7 +22091,6 @@
               }
             ]
           },
-          "variables": "template",
           "suggestions": {
             "sourceKey": "entityFields"
           }

@@ -39,6 +39,20 @@ function contract(input: CoreEntity) {
   return compile(artifacts);
 }
 
+test("view money display settings survive compiler and host projection without changing value contracts", () => {
+  const input = entity();
+  input.interfaces!.web!.views!.record!.layout!.tabs![0]!.fields = [
+    { key: "label", render: { component: "MoneyInput", props: { decimalPlaces: 0, scale: "millions", currency: "EUR" } } },
+  ];
+  assertEntityAuthoring(input, "source.yaml");
+  const compiled = contract(input);
+  const web = buildWebManifest([{ slug: "account", contract: compiled }], { requireTranslations: true });
+  expect(web.entities.Account!.views.record!.layout.tabs[0]!.groups[0]!.fieldOverrides!.label!.render).toEqual({
+    component: "MoneyInput", props: { decimalPlaces: 0, scale: "millions", currency: "EUR" },
+  });
+  expect(compiled.model.fields.find(field => field.key === "label")!.osfType).toBe("string");
+});
+
 test("REST-driven source collections require positive Web and REST projections", () => {
   const model = contract(entity());
   expect(hasWebRestCollection(model)).toBe(true);
@@ -94,7 +108,8 @@ test("the same source contract serves group-role assignments, without Account br
   }
   const compiled = contract(assignment);
   const list = compiled.pluginOperations!.find(op => op.key === "list")!;
-  expect((list.definition.output!.schema as any).properties.items.items.properties.version.type).toBe("integer");
+  // Both forms of the numeric property, the integer first.
+  expect((list.definition.output!.schema as any).properties.items.items.properties.version.type).toEqual(["integer", "string"]);
   expect((list.definition.input!.schema as any).properties.groupId.type).toBe("string");
   expect(list.definition.auth).toEqual({ mode: "session", roles: ["Organization.Access.Read"] });
   expect(deriveEntityOsfTypes([assignment], {}).GroupRoleAssignment!.kind).toBe("provider");

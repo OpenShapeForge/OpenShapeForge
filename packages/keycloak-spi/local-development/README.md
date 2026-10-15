@@ -13,6 +13,13 @@ and disabled `KC_PROXY_HEADERS`. Never trust forwarded peer addresses, DNS names
 subnets or arbitrary LAN peers. URI checks are secondary; hostname configuration
 is not caller identity. Hosts own the account-picker translations.
 
+Selecting a different eligible account ends only the SSO session owning the
+current browser authentication and expires its identity cookie before Keycloak
+attaches the selected user. This avoids the native different-user conflict in
+every host using this provider. Selecting the same account preserves its session;
+invalid, disabled and service-account selections never end an existing session.
+Other browsers and devices are not enumerated or logged out.
+
 Hosts must provide `osfLocalAccountTitle` and `osfLocalAccountUnavailable` message
 keys. Place `localAccounts` in an HTML-escaped data attribute, never interpolate
 its JSON/user names into executable script. The child theme is required when

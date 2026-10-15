@@ -230,7 +230,7 @@
                 "type": "object",
                 "properties": {
                   "key": { "type": "string" },
-                  "render": { "type": "string" },
+                  "render": { "oneOf": [{ "type": "string" }, { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/render" }] },
                   "fieldDisplayMode": { "type": "string", "enum": ["hidden"] }
                 }
               }
@@ -274,7 +274,7 @@
                 "type": "object",
                 "properties": {
                   "key": { "type": "string" },
-                  "render": { "type": "string" },
+                  "render": { "oneOf": [{ "type": "string" }, { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/render" }] },
                   "fieldDisplayMode": { "type": "string", "enum": ["hidden"] }
                 }
               }

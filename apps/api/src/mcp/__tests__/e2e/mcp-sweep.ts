@@ -138,6 +138,8 @@ export function sessionMayInvoke(identity: Identity, entity: string, operation: 
 export const MUTATION_CONTROLS = new Set([
   "blueprintId",
   "blueprintBindings",
+  "bindings",
+  "unbind",
   "expectedVersion",
   "leaseToken",
   "confirmed",

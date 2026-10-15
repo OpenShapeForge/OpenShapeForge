@@ -14,17 +14,23 @@ import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.authentication.Authenticator;
 import org.keycloak.authentication.AuthenticatorFactory;
+import org.keycloak.authentication.AuthenticationProcessor;
 import org.keycloak.models.AuthenticationExecutionModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.UserSessionModel;
+import org.keycloak.services.managers.AuthenticationManager;
+import org.keycloak.services.util.AuthenticationFlowURLHelper;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.util.JsonSerialization;
+import jakarta.ws.rs.core.Response;
 
 /** Opt-in, separately built local provider. Never changes credentials or memberships. */
 public final class LocalAccountAuthenticator implements Authenticator, AuthenticatorFactory {
     public static final String ID = "osf-local-account-login";
+    private static final String REPLACEMENT_USER = "osf.local-replacement-user";
 
     static boolean localUri(String value) {
         try {
@@ -78,6 +84,19 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
 
     @Override public void authenticate(AuthenticationFlowContext context) {
         if (!allowed(context)) { context.attempted(); return; }
+        String replacement = context.getAuthenticationSession().getAuthNote(REPLACEMENT_USER);
+        if (replacement != null) {
+            context.getAuthenticationSession().removeAuthNote(REPLACEMENT_USER);
+            var user = context.getSession().users().getUserById(context.getRealm(), replacement);
+            if (user == null || !eligible(user.isEnabled(), user.getServiceAccountClientLink(), user.getUsername())
+                    || browserSessionToReplace(context, user) != null) {
+                challenge(context, "osfLocalAccountUnavailable"); return;
+            }
+            context.setUser(user);
+            context.getEvent().detail("auth_method", ID);
+            context.success();
+            return;
+        }
         challenge(context, null);
     }
 
@@ -112,9 +131,34 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
         if (user == null || !eligible(user.isEnabled(), user.getServiceAccountClientLink(), user.getUsername())) {
             challenge(context, "osfLocalAccountUnavailable"); return;
         }
+        var old = browserSessionToReplace(context, user);
+        if (old != null) {
+            // Only the SSO session owning this browser authentication is replaced.
+            // End its client sessions before Keycloak attaches the selected user;
+            // otherwise attachSession rejects the two different identities.
+            AuthenticationManager.backchannelLogout(context.getSession(), old, true);
+            AuthenticationManager.expireIdentityCookie(context.getSession());
+            // Rotate the root authentication session too. Persistent Keycloak
+            // sessions cannot change user under the previous browser-session id.
+            // Native recreation preserves the client's PKCE, nonce and state.
+            var next = AuthenticationProcessor.recreate(context.getSession(), context.getAuthenticationSession());
+            AuthenticationProcessor.resetFlow(next, context.getFlowPath());
+            next.setAuthNote(REPLACEMENT_USER, user.getId());
+            var target = new AuthenticationFlowURLHelper(context.getSession(), context.getRealm(), context.getUriInfo())
+                .getLastExecutionUrl(next);
+            context.forceChallenge(Response.seeOther(target).build());
+            return;
+        }
         context.setUser(user);
         context.getEvent().detail("auth_method", ID);
         context.success();
+    }
+
+    static UserSessionModel browserSessionToReplace(AuthenticationFlowContext context, UserModel selected) {
+        if (selected == null || !eligible(selected.isEnabled(), selected.getServiceAccountClientLink(), selected.getUsername())) return null;
+        var auth = context.getAuthenticationSession();
+        var old = context.getSession().sessions().getUserSession(context.getRealm(), auth.getParentSession().getId());
+        return old != null && old.getUser() != null && !old.getUser().getId().equals(selected.getId()) ? old : null;
     }
 
     @Override public boolean requiresUser() { return false; }

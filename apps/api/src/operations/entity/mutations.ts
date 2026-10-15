@@ -36,6 +36,7 @@ import type {
 } from "./types.js";
 import {
   assertNoCallerElicitedOutput,
+  assertNoCallerFieldBindings,
   assertNoOperationWrittenValues,
   addTrustedOperationValues,
   normalizeWritableValues,
@@ -57,6 +58,7 @@ import { assertPublishableRelatedMutationInTransaction } from "./derived-executi
 import { assertHardDeleteAllowedInTransaction } from "./deletion-guards.js";
 import { assertAdmittedBeforeEffects } from "../execution-policy.js";
 import { assertCallerTopLevelFields, prepareProtectedFieldWrites } from "./field-policy.js";
+import { assertTypedValuesValid } from "./typed-values.js";
 import { isDeepStrictEqual } from "node:util";
 
 async function fetchGeneratedRowInTransaction(
@@ -128,6 +130,7 @@ export async function mergeGeneratedEntityObjectForTable(
   id: string,
   field: string,
   patch: Record<string, unknown>,
+  entityValues: EntityValueIOContext = {},
 ): Promise<GeneratedEntityRow | null> {
   if (entityValueCarriers(table).some((carrier) => carrier.fieldKey === field)) throw generatedCrudError("Entity values require a canonical whole-value update.", "BAD_USER_INPUT");
   const column = writableColumnMap(table, "update").get(field);
@@ -137,20 +140,12 @@ export async function mergeGeneratedEntityObjectForTable(
       "INTERNAL_SERVER_ERROR",
     );
   }
-  if (column.fieldPolicy) {
-    const supplied = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
-    return applyGeneratedRowUpdate(db, session, table, id, new Map([[column, supplied]]),
-      undefined, {}, false, [], column);
-  }
-  const values = new Map<GeneratedCrudColumn, unknown>([
-    [
-      column,
-      sql`coalesce(${sql.id(column.name)}, '{}'::jsonb) || ${jsonbLiteral(
-        patch,
-      )}`,
-    ],
-  ]);
-  return applyGeneratedRowUpdate(db, session, table, id, values);
+  // Materialize the complete value under the row lock before relationship and
+  // publication validation. A SQL merge expression is not a connection value
+  // and would make required credentials appear absent to those guards.
+  const supplied = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
+  return applyGeneratedRowUpdate(db, session, table, id, new Map([[column, supplied]]),
+    undefined, entityValues, false, [], column);
 }
 
 /**
@@ -188,6 +183,8 @@ export async function createGeneratedEntity(
   input: {
     table: string;
     values: Record<string, unknown>;
+    /** The server-owned bindings map, already resolved and compared. */
+    fieldBindings?: { column: string; value: unknown };
     trusted?: { operation: string; values: Record<string, unknown> };
   },
 ): Promise<GeneratedEntityRow> {
@@ -196,12 +193,32 @@ export async function createGeneratedEntity(
   if (unsupported) throw operationFailure(unsupported);
   assertNoCallerElicitedOutput(table, input.values);
   assertNoOperationWrittenValues(table, input.values);
+  assertNoCallerFieldBindings(table, input.values);
   assertCallerTopLevelFields(table, session, input.values, "create");
   assertCreateRecordPermissions(table, session, input.values);
   const values = prepareProtectedFieldWrites(table, session,
     normalizeWritableValues(table, input.values, "create"), "create");
   if (input.trusted) addTrustedOperationValues(table, values, input.trusted.operation, input.trusted.values);
+  if (input.fieldBindings) addFieldBindingValue(table, values, input.fieldBindings);
   return insertGeneratedRow(db, session, table, values);
+}
+
+/**
+ * The bindings map, written as the server-owned value it is. The column is
+ * resolved from the table rather than taken from the caller, so only the
+ * runtime's own prepared map can land in it.
+ */
+function addFieldBindingValue(
+  table: GeneratedCrudTable,
+  values: ReturnType<typeof normalizeWritableValues>,
+  bindings: { column: string; value: unknown },
+) {
+  const column = table.columns.find((candidate) => candidate.fieldBindings !== undefined);
+  if (!column || column.name !== bindings.column) {
+    throw generatedCrudError("Field-binding storage metadata is invalid.", "INTERNAL_SERVER_ERROR");
+  }
+  values.set(column, bindings.value === null ? null : jsonbLiteral(bindings.value as Record<string, unknown>));
+  return values;
 }
 
 function fieldRow(table: GeneratedCrudTable, row: GeneratedEntityRow): Record<string, unknown> {
@@ -242,6 +259,14 @@ export async function createGeneratedEntityInTransaction(
   return insertGeneratedRowInTransaction(trx, session, table, normalizeWritableValues(table, rawValues, "create", entityValues.registry), entityValues);
 }
 
+/** Preserve scalar/array JSON types through Bun's otherwise scalar parameter inference. */
+function columnStorageValue(column: GeneratedCrudColumn, value: unknown): unknown {
+  if (column.type !== "jsonb" || !column.typedBy || value === null) return value;
+  // The existing JSON helper serializes objects once. Extracting an envelope's
+  // member also handles numbers, booleans and arrays without a text/float cast.
+  return sql`${jsonbLiteral({ value })} -> 'value'`;
+}
+
 async function insertGeneratedRowInTransaction(
   trx: Transaction<DB>,
   session: DbSessionInput,
@@ -252,6 +277,9 @@ async function insertGeneratedRowInTransaction(
   const defaulted = await applyDefaultTemplates(trx, session, table, values, entityValues.tables);
   const identified = prepareProtectedFieldWrites(table, session, defaulted, "create", undefined, false);
   const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, identified, "create", undefined, entityValues);
+  // A value typed by a stored FieldDefinition is checked against it here, so
+  // the pair holds however the write arrived.
+  assertTypedValuesValid(table, fieldValues(prepared), undefined);
   await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
   await assertPublishableRelatedMutationInTransaction(trx, session, table, {
     kind: "create",
@@ -284,7 +312,7 @@ async function insertGeneratedRowInTransaction(
       );
     }
     const columns = [...candidateValues.keys()];
-    const sqlValues = [...candidateValues.values()];
+    const sqlValues = [...candidateValues.entries()].map(([column, value]) => columnStorageValue(column, value));
     if (table.tenantScoped && tenantColumn) {
       columns.push(tenantColumn);
       sqlValues.push(session.tenantId);
@@ -344,6 +372,8 @@ export async function updateGeneratedEntity(
     table: string;
     id: string;
     values: Record<string, unknown>;
+    /** The server-owned bindings map, already resolved and compared. */
+    fieldBindings?: { column: string; value: unknown };
     trusted?: { operation: string; values: Record<string, unknown> };
     guard?: {
       operation: ChallengeProtectedOperation & LeaseProtectedOperation;
@@ -359,10 +389,12 @@ export async function updateGeneratedEntity(
   if (unsupported) throw operationFailure(unsupported);
   assertNoCallerElicitedOutput(table, input.values);
   assertNoOperationWrittenValues(table, input.values);
+  assertNoCallerFieldBindings(table, input.values);
   assertCallerTopLevelFields(table, session, input.values, "update");
   assertUpdateRecordPermissions(table, input.values);
   const values = normalizeWritableValues(table, input.values, "update");
   if (input.trusted) addTrustedOperationValues(table, values, input.trusted.operation, input.trusted.values);
+  if (input.fieldBindings) addFieldBindingValue(table, values, input.fieldBindings);
   return applyGeneratedRowUpdate(db, session, table, input.id, values, input.guard, {}, true,
     Object.keys(input.trusted?.values ?? {}));
 }
@@ -456,6 +488,9 @@ async function applyGeneratedRowUpdate(
 
     const protectedValues = prepareProtectedFieldWrites(table, session, values, "update", current ?? undefined, caller, trustedFields);
     const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, protectedValues, "update", current ?? undefined, entityValues);
+    // Either half of a typed-value pair may be the one that changes; the row
+    // under the lock supplies the other.
+    assertTypedValuesValid(table, fieldValues(prepared), current ?? undefined);
     await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
     if (current) {
       await assertPublishableRelatedMutationInTransaction(trx, session, table, {
@@ -468,12 +503,12 @@ async function applyGeneratedRowUpdate(
         ...(entityValues.derivedTools ? { entries: entityValues.derivedTools } : {}),
       });
     }
-    const assignments = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} = ${value}`);
+    const assignments = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} = ${columnStorageValue(column, value)}`);
     // A write happens only when a content column actually changes, compared
     // in the database against the locked row: a value supplied as stored, or
     // no value at all, leaves the version token, the draft rule and the
     // event journal alone and returns the row as it is.
-    const changes = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} is distinct from ${value}`);
+    const changes = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} is distinct from ${columnStorageValue(column, value)}`);
     const draft = assignments.length ? draftRule(table) : undefined;
     if (draft) assignments.push(sql`${sql.id(draft.column)} = ${draft.value}`);
     if (updatedAt && assignments.length) assignments.push(sql`${sql.id(updatedAt.name)} = ${carriers.length ? sql`greatest(clock_timestamp(), ${sql.id(updatedAt.name)} + interval '1 microsecond')` : sql`now()`}`);

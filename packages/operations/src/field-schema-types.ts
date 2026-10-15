@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Input and registry types for the FieldDefinition to JSON Schema projection. */
 
+import type { FieldVariableMode } from "./field-variables.js";
+
 export type OperationJsonSchema = Record<string, unknown>;
 export type OperationLocalizedText = string | Readonly<{
   en?: string;
@@ -16,6 +18,7 @@ export type OperationFieldValidation = {
   pattern?: unknown;
   format?: string;
   minItems?: unknown;
+  uniqueBy?: string;
 };
 
 export type OperationFieldOptions = {
@@ -49,9 +52,12 @@ export type OperationFieldRelationship = {
 
 export type OperationFieldDefinition = {
   key: string;
+  typedBy?: { definitionField: string };
   /** A base type, a osf-type catalog key, or an entity name. */
   osfType: string;
   cardinality?: OperationFieldCardinality;
+  /** Whether this field accepts a variable instead of a literal, and in which shape. */
+  variables?: FieldVariableMode;
   required?: boolean;
   label?: OperationLocalizedText;
   description?: OperationLocalizedText;
@@ -61,7 +67,7 @@ export type OperationFieldDefinition = {
   validation?: OperationFieldValidation;
   options?: OperationFieldOptions;
   reference?: { kind?: string; group?: string };
-  render?: { props?: Readonly<Record<string, unknown>> };
+  render?: { component?: string; props?: Readonly<Record<string, unknown>> };
   relationship?: OperationFieldRelationship;
   computed?: { expression?: string };
   shape?: readonly OperationFieldDefinition[];
@@ -70,6 +76,8 @@ export type OperationFieldDefinition = {
 };
 
 export type OperationFieldOsfType = {
+  render?: { component?: string; input?: string; display?: string; props?: Readonly<Record<string, unknown>> };
+  props?: Readonly<Record<string, unknown>>;
   kind?: string;
   entity?: string;
   baseType: OperationFieldBaseType;
@@ -124,9 +132,12 @@ export type OperationFieldSchemaOptions = {
  */
 export type ResolvedOperationField = {
   key: string;
+  typedBy?: { definitionField: string };
   osfType: string;
   baseType: OperationFieldBaseType;
   cardinality: "single" | "collection";
+  /** The authored variable mode; absent means `none` (see ./field-variables.ts). */
+  variables?: FieldVariableMode;
   /** Exact authored collection bounds retained after cardinality normalization. */
   cardinalityBounds?: { min?: number; max?: number | "unbounded" };
   required: boolean;
@@ -137,7 +148,7 @@ export type ResolvedOperationField = {
   defaultValue?: unknown;
   validation?: OperationFieldValidation;
   options?: OperationFieldOptions;
-  render?: { props?: Readonly<Record<string, unknown>> };
+  render?: { component?: string; props?: Readonly<Record<string, unknown>> };
   relationship?: OperationFieldRelationship;
   computed?: { expression?: string };
   /** The catalog-declared value schema of the field's type, when it has one. */

@@ -26,7 +26,7 @@ import type {
   ViewRowAction,
 } from "./common.js";
 import type { FieldDefinitionDeriveOnCreate, FieldDefinitionValueType } from "./field-definition.js";
-import type { OsfTypeSchemaReference } from "./authoring.js";
+import type { OsfTypeValueSchema } from "./authoring.js";
 import type {
   ListColumn,
   ListFilter,
@@ -58,6 +58,7 @@ import type {
 
 export interface CompiledViewRender {
   component: string;
+  props?: Record<string, unknown>;
 }
 
 export interface CompiledColumn {
@@ -75,6 +76,8 @@ export interface CompiledRender {
 }
 
 export interface CompiledField {
+  /** Canonical field-definition editor policy, projected unchanged to hosts. */
+  authoring?: import("./field-definition.js").FieldDefinitionAuthoringMetadata;
   key: string;
   /** The authored type axis: a base type, a osf-type key or an entity name. */
   osfType: string;
@@ -91,6 +94,8 @@ export interface CompiledField {
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
   entityValue?: { definitionField: string; parameterBindings?: boolean };
+  /** The sibling field whose stored FieldDefinition types this value. */
+  typedBy?: { definitionField: string };
   allowedDefinitions?: string[];
   childAuthorization?: "owner";
   childLock?: string;
@@ -127,7 +132,7 @@ export interface CompiledField {
   graphqlType?: string;
   options?: FieldOptions;
   /** The catalog-declared value schema of the field's type, when it has one. */
-  schema?: OsfTypeSchemaReference;
+  schema?: OsfTypeValueSchema;
   lookup?: OsfTypeLookupDefinition;
   permissions?: FieldPermissions;
   authorization?: FieldAuthorizationConfig;

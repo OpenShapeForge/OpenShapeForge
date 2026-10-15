@@ -322,6 +322,26 @@ export type ColumnDefinition = {
     conflictColumns: string[];
     maxLength?: number;
   };
+  /**
+   * Authored `typedBy` on the field that backs this column: the sibling whose
+   * stored FieldDefinition is this value's contract. The shared entity write
+   * path compiles that definition through the field-schema service and
+   * validates the value against it, so the pair must be resolvable from the
+   * manifest alone.
+   */
+  typedBy?: {
+    definitionField: string;
+    definitionColumn: string;
+  };
+  /**
+   * The server-owned map of field bindings for this table (one per bindable
+   * entity). Lists the fields that may be bound and the variable shape each
+   * one authored, so the runtime resolves bindings from the manifest instead
+   * of a second copy of the field metadata.
+   */
+  fieldBindings?: {
+    fields: Array<{ field: string; column: string; variables: "whole" | "template" | "both" }>;
+  };
 };
 
 export type LocalizedTextManifest = {

@@ -122,7 +122,9 @@ function compileFields(
     }
     return {
       key: f.key,
-      ...(hasRender ? { renderOverride: vr(catalog, f.render!) } : {}),
+      ...(hasRender ? { renderOverride: typeof f.render === "string"
+        ? vr(catalog, f.render)
+        : { ...vr(catalog, f.render!.component), ...(f.render!.props ? { props: structuredClone(f.render!.props) } : {}) } } : {}),
       ...(displayMode ? { fieldDisplayMode: displayMode } : {}),
     };
   });

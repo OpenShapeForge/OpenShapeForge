@@ -16,6 +16,7 @@ import rawOperationCatalog from "../../generated/operations/catalog.json" with {
 import { collectionManagedFields, collectionMutationError, withoutCollectionInputs } from "./collection-policy.js";
 import {
   generatedCrudError,
+  projectGeneratedEntityRow,
   getGeneratedCrudTables,
   requireEntityOperation,
 } from "./catalog.js";
@@ -44,6 +45,7 @@ import type {
   EntityOperationResult,
   GeneratedCrudExposureOperation,
   GeneratedCrudTable,
+  GeneratedEntityRow,
   ListPageInput,
 } from "./types.js";
 import { fieldNameForColumn } from "./columns.js";
@@ -60,9 +62,11 @@ import { assertOperationAdmitted, withOwnedExecutionAdmission } from "../executi
 import { assertEntityValuesValid, assertOperationInputValid, type EntityValuesValidation } from "./input-validation.js";
 import {
   assertNoCallerElicitedOutput,
+  assertNoCallerFieldBindings,
   assertNoForeignOperationWrittenValues,
   assertNoOperationWrittenValues,
 } from "./write-policy.js";
+import { bindableFields, fieldBindingsColumn, prepareFieldBindings, type PreparedFieldBindings } from "./field-bindings.js";
 import { sessionRelation } from "../../auth/identity-link.js";
 import { sql } from "kysely";
 
@@ -222,8 +226,40 @@ function requireContractValues(
 ): void {
   assertNoCallerElicitedOutput(table, values);
   assertNoOperationWrittenValues(table, values);
+  assertNoCallerFieldBindings(table, values);
   assertCallerTopLevelFields(table, session, values, operation.intent as "create" | "update");
   assertEntityValuesValid(operation, table, values, options);
+}
+
+function projectBindingWriteRow(table: GeneratedCrudTable, session: DbSessionInput, row: GeneratedEntityRow | null): GeneratedEntityRow | undefined {
+  if (!row) return undefined;
+  const projected = projectGeneratedEntityRow(table, session, row);
+  // Keep the full server-owned map when projecting source values: output
+  // redaction must not silently delete an existing hidden field's binding.
+  const column = fieldBindingsColumn(table);
+  return column ? { ...projected, [column.name]: row[column.name] } : projected;
+}
+
+/**
+ * The binding half of a write, before the contract is checked: every binding
+ * this record will have is resolved under the caller's own identity and
+ * tenant, and the resolved values join the caller's literals — so the
+ * Operation's compiled contract validates a bound value exactly as it
+ * validates a literal one, and the stored map agrees with the stored values.
+ */
+async function prepareWriteBindings(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  input: EntityOperationInput | undefined,
+  values: Record<string, unknown>,
+  current: GeneratedEntityRow | undefined,
+): Promise<PreparedFieldBindings> {
+  return prepareFieldBindings(db, session, table, {
+    values,
+    ...(input?.bindings !== undefined ? { bindings: input.bindings } : {}),
+    ...(input?.unbind !== undefined ? { unbind: input.unbind } : {}),
+  }, current);
 }
 
 function requireControl(
@@ -994,7 +1030,16 @@ export async function executeEntityOperation(
       }
       case "create": {
         const blueprintId = typeof request.input?.blueprintId === "string" ? request.input.blueprintId : undefined;
-        const values = blueprintId === undefined ? requireValues(request.input) : request.input?.values ?? {};
+        const supplied = blueprintId === undefined ? requireValues(request.input) : request.input?.values ?? {};
+        // The bindings first: a bound field's value is part of the payload
+        // the contract below has to hold for.
+        if (blueprintId !== undefined && (request.input?.bindings !== undefined || request.input?.unbind !== undefined)) {
+          // A blueprint completes the overlay from another record's values;
+          // binding a field of the copy is a second write, not part of it.
+          throw generatedCrudError("A blueprint create does not take field bindings.", "BAD_USER_INPUT");
+        }
+        const prepared = await prepareWriteBindings(db, session, table, request.input, supplied, undefined);
+        const values = prepared.values;
         // The payload first: an invalid create must answer VALIDATION, never
         // a prerequisite or CONFIRMATION_REQUIRED it would only fail after. A
         // blueprint create completes the caller's overlay from the blueprint
@@ -1014,6 +1059,7 @@ export async function executeEntityOperation(
           : createGeneratedEntity(db, session, {
               table: table.name,
               values,
+              ...(prepared.bindings ? { fieldBindings: prepared.bindings } : {}),
               ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
             }));
         return {
@@ -1036,7 +1082,15 @@ export async function executeEntityOperation(
         const concurrencyGuard = mutationConcurrencyGuard(operation, request.input);
         // Before any confirmation or lease work: an illegal payload must not
         // start a challenge it can only fail on the confirmed retry.
-        const values = requireValues(request.input);
+        const supplied = requireValues(request.input);
+        // The record as it is now: what its bindings are, and what a binding
+        // on `local.<field>` reads for a field this write does not touch.
+        const bindable = bindableFields(table).size > 0;
+        const current = bindable
+          ? await fetchGeneratedEntityRow(db, session, table, requireId(request.input))
+          : undefined;
+        const prepared = await prepareWriteBindings(db, session, table, request.input, supplied, projectBindingWriteRow(table, session, current ?? null));
+        const values = prepared.values;
         requireContractValues(operation, table, values, { partial: true }, session);
         const confirmation = await prepareMutationConfirmation(
           db,
@@ -1059,13 +1113,23 @@ export async function executeEntityOperation(
                 : {}),
             }
           : undefined;
-        const data = await governed(() => updateGeneratedEntity(db, session, {
-          table: table.name,
-          id: requireId(request.input),
-          values,
-          ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
-          ...(guard ? { guard } : {}),
-        }));
+        const data = await governed(async () => {
+          // Revalidate against the row locked in this write transaction. The
+          // earlier preflight prevents invalid inputs from starting challenges.
+          const committed = bindable
+            ? await prepareWriteBindings(db, session, table, request.input, supplied,
+                projectBindingWriteRow(table, session, await fetchGeneratedEntityRow(db, session, table, requireId(request.input), true)))
+            : prepared;
+          requireContractValues(operation, table, committed.values, { partial: true }, session);
+          return updateGeneratedEntity(db, session, {
+            table: table.name,
+            id: requireId(request.input),
+            values: committed.values,
+            ...(committed.bindings ? { fieldBindings: committed.bindings } : {}),
+            ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
+            ...(guard ? { guard } : {}),
+          });
+        });
         return {
           intent: "update",
           data,

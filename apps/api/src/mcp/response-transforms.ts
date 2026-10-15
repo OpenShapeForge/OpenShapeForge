@@ -314,6 +314,24 @@ function runSteps(scope: Scope, steps: unknown, index: number): Rec {
         );
         break;
       }
+      case "unique": {
+        const by = requireString(step, i, "by");
+        unary((list) => {
+          if (!Array.isArray(list)) return [];
+          const seen = new Set<string | number | boolean>();
+          return list.filter((item) => {
+            const key = isRecord(item) ? readPath({ value: item }, by) : undefined;
+            if (!((typeof key === "string" && key.length > 0) ||
+                  (typeof key === "number" && Number.isFinite(key)) || typeof key === "boolean")) {
+              throw misconfigured(i, step.op, "`by` must resolve to a non-empty scalar key on every item");
+            }
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+        });
+        break;
+      }
       case "map": {
         if (!Array.isArray(step.steps))
           throw misconfigured(i, step.op, "`steps` must be an array");

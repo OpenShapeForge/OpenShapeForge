@@ -4,6 +4,9 @@ import { evaluateExpression } from "../../generated/compiler/expression-evaluato
 import type { CompilerExpressionInput } from "../../generated/compiler/canonical-condition.js";
 import type { DB } from "../../generated/db/types.js";
 import type { DbSessionContext } from "../../db/session.js";
+import { generatedCrudError, getGeneratedCrudTables, projectGeneratedEntityRow } from "./catalog.js";
+import { fieldBindingsColumn, resolveBoundEntityRows } from "./field-bindings.js";
+import { fieldBindingMap, operationErrorOf } from "@openshapeforge/operations";
 import { fieldNameForColumn } from "./columns.js";
 import type { GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
 
@@ -16,6 +19,7 @@ export type LabelRuleRow = {
   expression: unknown;
   description_template: string | null;
   priority: number;
+  description_bound?: boolean;
 };
 
 export type ComputedLabel = {
@@ -85,7 +89,7 @@ export function evaluateLabelRules(
       label: rule.label,
       variant: rule.variant,
       value,
-      description: interpolate(rule.description_template, payload),
+      description: rule.description_bound ? rule.description_template : interpolate(rule.description_template, payload),
     });
   }
   return { asMap, items };
@@ -96,9 +100,8 @@ async function activeLabelRules(
   session: DbSessionContext,
   entityType: string,
 ) {
-  const result = await sql<LabelRuleRow>`
-    select id::text, key, label, variant, output_type, expression,
-      description_template, priority
+  const result = await sql<GeneratedEntityRow>`
+    select *
     from ${sql.id("erp", "label_rules")}
     where tenant_id = ${session.tenantId}::uuid
       and entity_type = ${entityType}
@@ -107,7 +110,26 @@ async function activeLabelRules(
       and (end_date is null or end_date >= current_date)
     order by priority desc, key asc, id asc
   `.execute(trx);
-  return result.rows;
+  const table = getGeneratedCrudTables().find((candidate) => candidate.schema === "erp" && candidate.table === "label_rules");
+  if (!table) throw new Error("LabelRule table is missing from the generated manifest.");
+  const rules: LabelRuleRow[] = [];
+  const column = fieldBindingsColumn(table);
+  for (const stored of result.rows) {
+    try {
+      const projected = projectGeneratedEntityRow(table, session, stored);
+      const bindings = fieldBindingMap(column ? projected[column.name] : undefined);
+      if (bindings === undefined) throw generatedCrudError("The stored field bindings are not valid.", "INVALID_DEFINITION");
+      const [row] = await resolveBoundEntityRows(trx, session, table, [projected]);
+      rules.push({ ...row, description_bound: Object.hasOwn(bindings, "descriptionTemplate") } as unknown as LabelRuleRow);
+    } catch (error) {
+      // Labels are optional annotations on another entity's read. Omit only
+      // the refused rule; never serve its stale value or block unrelated rows.
+      // Its own canonical LabelRule read retains the actionable refusal.
+      const failure = operationErrorOf(error);
+      if (!failure || !["DEPENDENCY_UNRESOLVED", "DEPENDENCY_INVALID", "INVALID_DEFINITION", "FORBIDDEN"].includes(failure.code)) throw error;
+    }
+  }
+  return rules;
 }
 
 export async function resolveComputedEntityRows(

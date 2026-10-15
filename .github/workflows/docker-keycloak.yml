@@ -80,6 +80,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
+          --init
           --health-cmd "pg_isready -U keycloak -d keycloak"
           --health-interval 5s
           --health-timeout 3s

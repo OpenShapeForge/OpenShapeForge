@@ -17,6 +17,7 @@ import type {
   OperationLocalizedText,
   ResolvedOperationField,
 } from "./field-schema-types.js";
+import { isExactDecimalText, isExactIntegerText } from "./exact-numeric.js";
 
 export function localizedText(value: OperationLocalizedText | undefined): string | undefined {
   if (value === undefined) return undefined;
@@ -28,21 +29,30 @@ export function localizedText(value: OperationLocalizedText | undefined): string
 /**
  * Authored option values are strings (the authoring schema admits nothing
  * else); an enumeration on a typed field carries the values in that type, so
- * `{ type: integer, enum: [1] }` validates what a client sends. A value that
- * does not convert exactly (`yes` on a boolean, `1.5` or an unsafe integer on
- * an integer) is an authoring error, never a string smuggled into a typed
+ * `{ type: boolean, enum: [true] }` validates what a client sends. A value
+ * that is not of that type (`yes` on a boolean, `1.5` on an integer, `abc` on
+ * a number) is an authoring error, never a string smuggled into a typed
  * enumeration.
+ *
+ * A NUMERIC domain keeps its authored decimal text, and is compared by exact
+ * decimal comparison where it is enforced (`x-osf-exact`, see
+ * `field-schema-metadata.ts`). `Number(text)` is deliberately not used: it
+ * rounds `9007199254740993` and rewrites `12.50` before anything is compared,
+ * and a numeric value crosses every transport as that same decimal text, so
+ * the domain and the value are compared in one exact representation instead of
+ * through an IEEE double. Spelling is not identity there: `1`, `1.0` and `"1"`
+ * are one member of the domain.
  */
 export function typedEnumValues(values: readonly string[], baseType: string | undefined): (string | number | boolean)[] {
   return values.map((value) => {
     const text = value.trim();
     if (baseType === "integer") {
-      if (!/^-?\d+$/.test(text) || !Number.isSafeInteger(Number(text))) throw new Error(`Enumeration value ${JSON.stringify(value)} is not a safe integer.`);
-      return Number(text);
+      if (!isExactIntegerText(text)) throw new Error(`Enumeration value ${JSON.stringify(value)} is not an integer.`);
+      return text;
     }
     if (baseType === "number") {
-      if (text === "" || !Number.isFinite(Number(text))) throw new Error(`Enumeration value ${JSON.stringify(value)} is not a finite number.`);
-      return Number(text);
+      if (!isExactDecimalText(text)) throw new Error(`Enumeration value ${JSON.stringify(value)} is not a number.`);
+      return text;
     }
     if (baseType === "boolean") {
       if (text !== "true" && text !== "false") throw new Error(`Enumeration value ${JSON.stringify(value)} is not a boolean.`);
@@ -161,6 +171,7 @@ export function resolveFields(
   registry: OperationFieldSchemaRegistry,
   ancestry: readonly string[] = [],
 ): ResolvedOperationField[] {
+  if (ancestry.length > 32) throw new Error("Field definitions exceed the supported nesting depth.");
   return fields.map((field) => {
     const semantic = isBaseType(field.osfType) || !registry.osfTypes || !Object.hasOwn(registry.osfTypes, field.osfType)
       ? undefined
@@ -176,13 +187,17 @@ export function resolveFields(
     const validation = semantic?.validation || field.validation
       ? { ...semantic?.validation, ...field.validation }
       : undefined;
+    const component = field.render?.component ?? semantic?.render?.component ?? semantic?.render?.input ?? semantic?.render?.display;
+    const render = component ? {component,props:{...semantic?.props,...semantic?.render?.props,...field.render?.props}} : field.render;
     const target = semantic?.kind === "entity" ? semantic.entity : undefined;
     return {
       key: field.key,
+      ...(field.typedBy ? { typedBy: { ...field.typedBy } } : {}),
       osfType: field.osfType,
       baseType,
       cardinality,
       ...(bounds ? { cardinalityBounds: bounds } : {}),
+      ...(field.variables ? { variables: field.variables } : {}),
       required: field.required === true || required,
       label: field.label ?? semantic?.label ?? { en: field.key, nl: field.key },
       ...(field.description !== undefined ? { description: field.description } : {}),
@@ -191,7 +206,7 @@ export function resolveFields(
       ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
       ...(validation ? { validation } : {}),
       ...(options ? { options } : {}),
-      ...(field.render ? { render: field.render } : {}),
+      ...(render ? {render} : {}),
       ...(target
         ? { relationship: { kind: cardinality === "collection" ? "hasMany" : "belongsTo", entity: slug(target), target, ...(field.relationship?.constraints ? { constraints: field.relationship.constraints } : {}) } }
         : field.relationship

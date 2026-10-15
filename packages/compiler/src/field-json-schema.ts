@@ -256,18 +256,11 @@ export function createFieldSchemaCompiler(input: {
   return {
     compile,
     field: (field, options = {}) =>
-      operationFieldSchema(
-        field as unknown as OperationFieldDefinition,
-        registry,
-        projectorOptions(options),
-      ),
+      compiledFieldSchema(compile([field])[0]!, input.referentiedata, options),
     object: (fields, options = {}) => {
       const { requireRequired, ...rest } = options;
-      return operationFieldObjectSchema(
-        fields as unknown as readonly OperationFieldDefinition[],
-        registry,
-        { ...projectorOptions(rest), ...(requireRequired !== undefined ? { requireRequired } : {}) },
-      );
+      return compiledObjectSchema(compile(fields), input.referentiedata,
+        { ...rest, requireRequired: requireRequired ?? true });
     },
   };
 }

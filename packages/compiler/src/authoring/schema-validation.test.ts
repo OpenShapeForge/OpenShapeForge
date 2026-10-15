@@ -82,6 +82,13 @@ function loadFromDisk(definition: unknown, slug = "object-store") {
 }
 
 describe("the schema registry", () => {
+  it("validates inline semantic schemas and keeps bundled references local", () => {
+    const catalogue = (schema: unknown) => ({schemaVersion:1,kind:"osfTypeCatalog",types:{value:{label:{en:"Value"},baseType:"object",schema}}});
+    expect(validator.validate(catalogue({type:"object",additionalProperties:{type:"string"}}), "types.yaml")).toBe("osf-type-catalog.schema.json");
+    expect(validator.validate(catalogue({"x-osf-ordered-fields":{lower:"from",upper:"to",kind:"numeric"}}), "types.yaml")).toBe("osf-type-catalog.schema.json");
+    expect(() => validator.validate(catalogue({type:42}), "types.yaml")).toThrow();
+    expect(() => validator.validate(catalogue({$ref:"https://example.invalid/remote"}), "types.yaml")).toThrow();
+  });
   it("loads every schema, so a dangling $ref cannot hide", () => {
     // The failure this replaces: compiled-entity-contract.schema.json referenced
     // canonical-field.schema.json, a file that does not exist, and nothing
@@ -113,6 +120,14 @@ describe("the schema registry", () => {
       osfType: "fieldDefinition",
     };
     expect(canonical(semanticField)).toBe(true);
+    const pairedDefinition = {
+      ...semanticField,
+      required: true,
+      authoring: { profile: "fullFieldDefinition", lockedKeys: ["key"] },
+      defaultValue: { key: "value", osfType: "string", required: false },
+    };
+    expect(canonical(pairedDefinition)).toBe(true);
+    expect(canonical({ ...pairedDefinition, authoring: { lockedKeys: ["__proto__"] } })).toBe(false);
 
     for (const ambiguous of [
       { ...semanticField, children: [{ key: "extra", osfType: "string" }] },
@@ -484,9 +499,15 @@ describe("coreEntity properties the compiler implements", () => {
     const document = webViews([{ id: "main", fields: [
       "idempotencyKey",
       { key: "idempotencyKey", render: "TextDisplay" },
+      { key: "idempotencyKey", render: { component: "MoneyInput", props: { decimalPlaces: 0, scale: "millions" } } },
       { key: "idempotencyKey", fieldDisplayMode: "hidden" },
     ] }]);
     expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+    for (const props of [{ decimalPlaces: -1 }, { decimalPlaces: 21 }, { decimalPlaces: 1.5 }, { scale: "billion" }]) {
+      expect(() => validator.validate(webViews([{ id: "main", fields: [
+        { key: "idempotencyKey", render: { component: "MoneyInput", props } },
+      ] }]), "billing-run.yaml")).toThrow();
+    }
     expect(() => validator.validate(webViews([{ id: "main", fields: [{ key: "idempotencyKey", hidden: true }] }]), "billing-run.yaml"))
       .toThrow(/fields\/0/);
     expect(() => validator.validate(webViews([{ id: "main", fields: [{ key: "idempotencyKey", fieldDisplayMode: "collapsed" }] }]), "billing-run.yaml"))
@@ -563,7 +584,7 @@ describe("coreEntity properties the compiler implements", () => {
     // Shared definitions can be visited first from a named view or a record.
     // Assert the choice site independently of that traversal order.
     expect(seen.some(path => path.endsWith("->webViewGroupV2.relationship"))).toBe(true);
-    expect(seen.some(path => path.endsWith("->webFieldEntryV2|oneOf1.render"))).toBe(true);
+    expect(seen.some(path => path.endsWith("->webFieldEntryV2|oneOf1.render|oneOf0"))).toBe(true);
     expect(seen.some((path) => path.includes("variableSources"))).toBe(false);
   });
 

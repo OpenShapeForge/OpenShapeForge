@@ -20,6 +20,7 @@ profiles:
       shape: true
       options: true
       render: false
+      moneyDisplay: true
       aiHint: true
       defaultValue: true
       value: false
@@ -46,6 +47,7 @@ profiles:
       shape: true
       options: true
       render: false
+      moneyDisplay: true
       aiHint: true
       defaultValue: true
       value: false
@@ -75,6 +77,7 @@ profiles:
       shape: false
       options: false
       render: false
+      moneyDisplay: true
       aiHint: true
       defaultValue: false
       value: false
@@ -101,6 +104,7 @@ profiles:
       shape: true
       options: true
       render: false
+      moneyDisplay: true
       aiHint: true
       defaultValue: true
       value: false
@@ -130,6 +134,7 @@ profiles:
       shape: false
       options: false
       render: false
+      moneyDisplay: true
       aiHint: true
       defaultValue: false
       value: false

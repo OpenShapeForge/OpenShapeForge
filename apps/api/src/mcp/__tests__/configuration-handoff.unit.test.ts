@@ -20,7 +20,6 @@ import {
   findExistingConfiguration,
   handoffFailureCode,
   handoffModelValues,
-  mergeConfigurationValues,
   parseSubmission,
   storeSubmission,
 } from "../configuration-submission.js";
@@ -256,21 +255,7 @@ describe("resubmitting a key that already exists", () => {
     expect(findExistingConfiguration(rows, { modelValues: {} })).toBeUndefined();
   });
 
-  it("replaces the submitted keys in place and keeps the untouched ones", () => {
-    const stored = {
-      clientId: "old-id",
-      clientSecret: { keyId: "k1", ciphertext: "old", iv: "a", tag: "b" },
-      subdomain: "acme",
-    };
-    const rotated = { keyId: "k1", ciphertext: "new", iv: "c", tag: "d" };
-    const merged = mergeConfigurationValues(stored, { clientSecret: rotated, clientId: "old-id" });
-    expect(merged).toEqual({ clientId: "old-id", clientSecret: rotated, subdomain: "acme" });
-    expect(Object.keys(merged)).toHaveLength(3);
-    expect(mergeConfigurationValues(null, { clientId: "x" })).toEqual({ clientId: "x" });
-    expect(mergeConfigurationValues(["not", "an", "object"], { clientId: "x" })).toEqual({
-      clientId: "x",
-    });
-  });
+
 });
 
 describe("handoffFailureCode", () => {

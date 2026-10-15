@@ -144,6 +144,8 @@ export type WebFieldOptionSource =
  * component or renderer as their default behaviour.
  */
 export type WebFieldProjection = {
+  /** Canonical editor profile and lock metadata; the API remains authoritative. */
+  authoring?: {profile?:string;pinned?:boolean;locked?:boolean;lockedKeys?:string[];singleton?:boolean;visibleProperties?:string[]};
   /** Canonical protection metadata; the server remains the enforcement boundary. */
   fieldPolicy?: FieldValuePolicy;
   /** Explicit Web-only exception; defaults still come from the semantic registry. */
@@ -164,6 +166,7 @@ export type WebFieldProjection = {
   baseType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   /** Logical dynamic form metadata; physical storage stays server-side. */
   entityValue?: { definitionField: string; parameterBindings?: boolean };
+  typedBy?: { definitionField: string };
   allowedDefinitions?: string[];
   relationship?: {
     targetEntityId: string;
@@ -198,7 +201,7 @@ export type WebFieldGroup = {
   /** The group applies only while these conditions hold for the draft being edited. */
   visibleWhen?: WebVisibilityCondition;
   /** Per-field presentation-renderer overrides authored on a FieldRef; keyed by field key, sparse. */
-  fieldOverrides?: Record<string, { render: { component: WebRendererKey } }>;
+  fieldOverrides?: Record<string, { render: { component: WebRendererKey; props?: Record<string, unknown> } }>;
 };
 
 export type WebTimelinePresentation = {

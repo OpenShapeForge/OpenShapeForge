@@ -153,12 +153,10 @@ export async function peekConfiguration(
 export async function consumeConfiguration(
   token: string,
   db?: OpenShapeForgeDatabase,
-): Promise<void> {
-  if (db) {
-    await consumeHandoff({ db, kind: "entity_configuration", token });
-    return;
-  }
-  pendingByToken.delete(token);
+  session?: DbSessionInput,
+): Promise<boolean> {
+  if (db) return consumeHandoff({ db, kind: "entity_configuration", token, ...(session ? { session } : {}) });
+  return pendingByToken.delete(token);
 }
 
 /** Resolve the latest handoff through the normal authenticated web session. */

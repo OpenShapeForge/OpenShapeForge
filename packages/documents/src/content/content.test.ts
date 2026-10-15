@@ -19,11 +19,14 @@ import {
 } from "./index.js";
 
 const tenantId = "tenant-example";
+// Each field states which variable shapes it accepts, as the authored
+// definition does: text bodies hold a template, a typed value or reference is
+// bound whole, and a field without a mode takes literals only.
 const metadata: CompiledContentBlockRegistry = {
   TextSection: {
     entityName: "TextSection",
     schemaVersion: 3,
-    fields: { body: { osfType: "richText", baseType: "string", required: true } },
+    fields: { body: { osfType: "richText", baseType: "string", required: true, variables: "template" } },
     renderers: { document: "richText", email: "emailText", whatsapp: "plainText" },
   },
   RecordSummary: {
@@ -35,6 +38,7 @@ const metadata: CompiledContentBlockRegistry = {
         osfType: "ExampleRecord",
         baseType: "string",
         cardinality: { min: 1, max: 1 },
+        variables: "whole",
         relationship: { target: "ExampleRecord" },
       },
     },
@@ -44,8 +48,8 @@ const metadata: CompiledContentBlockRegistry = {
     entityName: "TemplateSlot",
     schemaVersion: 3,
     fields: {
-      version: { baseType: "string", required: true, relationship: { target: "TemplateVersion" } },
-      parameters: { baseType: "object" },
+      version: { baseType: "string", required: true, variables: "whole", relationship: { target: "TemplateVersion" } },
+      parameters: { baseType: "object", variables: "both" },
     },
     renderers: {},
     composition: { templateVersionField: "version", parametersField: "parameters" },
@@ -85,6 +89,14 @@ function version(id: string, blocks: readonly ContentBlock[]): ContentTemplateVe
   };
 }
 
+/**
+ * The contract a plain-text global stores for its value: what a Chip whose
+ * definition is a required `multilineText` declares. A global is typed by its
+ * own stored definition, so every resolver hands this shape over with the
+ * value it resolved.
+ */
+const TEXT_GLOBAL = { osfType: "multilineText", baseType: "string", required: true } as const;
+
 function fixture(blocks: readonly ContentBlock[] = [text()]) {
   const versions: Record<string, ContentTemplateVersion> = { root: version("root", blocks) };
   const registry: Record<string, CompiledContentBlockRegistry[string]> = structuredClone(metadata);
@@ -99,7 +111,7 @@ function fixture(blocks: readonly ContentBlock[] = [text()]) {
       calls.global++;
       expect(key).toBe("brand.name");
       expect(context.tenantId).toBe(tenantId);
-      return { tenantId, sourceId: "brand", sourceVersionId: "brand-v1", value: "Example" };
+      return { tenantId, sourceId: "brand", sourceVersionId: "brand-v1", shape: TEXT_GLOBAL, value: "Example" };
     },
     resolveEntity(reference, context) {
       calls.entity++;
@@ -228,6 +240,7 @@ describe("canonical content snapshots", () => {
         tenantId,
         sourceId: "brand",
         sourceVersionId: "v1",
+        shape: TEXT_GLOBAL,
         value: "Example",
         transportMetadata: "Not content",
       }),
@@ -326,7 +339,11 @@ describe("template variants and local/global variables", () => {
       tone: "formal",
     });
     expect(() => resolveTemplateParameters(definitions, {})).toThrow("required");
-    expect(() => resolveTemplateParameters(definitions, { count: "2" })).toThrow("integer");
+    // A numeric value is accepted in either of the forms the platform projects
+    // it in; what is refused is text that is not a number.
+    expect(resolveTemplateParameters(definitions, { count: "2" })).toEqual({ count: "2", tone: "formal" });
+    expect(() => resolveTemplateParameters(definitions, { count: "two" })).toThrow("integer");
+    expect(() => resolveTemplateParameters(definitions, { count: "2.5" })).toThrow("integer");
     expect(() => resolveTemplateParameters(definitions, { count: 2, extra: true })).toThrow(
       "unsupported",
     );
@@ -349,8 +366,8 @@ describe("template variants and local/global variables", () => {
       entityName: "Numbers",
       schemaVersion: 3,
       fields: {
-        amount: { baseType: "number" },
-        counts: { baseType: "integer", cardinality: { min: 1, max: 3 } },
+        amount: { baseType: "number", variables: "whole" },
+        counts: { baseType: "integer", cardinality: { min: 1, max: 3 }, variables: "whole" },
       },
       renderers: { document: "numbers" },
     };
@@ -399,7 +416,7 @@ describe("template variants and local/global variables", () => {
 
   test("a variable filled into a Markdown field is escaped text, other fields keep the raw value", async () => {
     const f = fixture([text("md", "**Client:** {{local.name}}"), text("whole", "{{local.name}}"), text("plain", "Plain {{local.name}}")]);
-    f.registry.TextSection = { ...f.registry.TextSection!, fields: { body: { osfType: "markdown", baseType: "string", required: true } } };
+    f.registry.TextSection = { ...f.registry.TextSection!, fields: { body: { osfType: "markdown", baseType: "string", required: true, variables: "template" } } };
     const escaped = await materializeTemplateContent({ ...f.request, parameters: { name: "Bouw*Groep* _Acme_ 2*3\\4" } }, f.registry, f.resolvers);
     expect(escaped.blocks.map((block) => block.values.body)).toEqual([
       "**Client:** Bouw\\*Groep\\* \\_Acme\\_ 2\\*3\\\\4", "Bouw\\*Groep\\* \\_Acme\\_ 2\\*3\\\\4", "Plain Bouw\\*Groep\\* \\_Acme\\_ 2\\*3\\\\4",
@@ -407,6 +424,24 @@ describe("template variants and local/global variables", () => {
     const g = fixture([text("rich", "Rich {{local.name}}")]);
     const raw = await materializeTemplateContent({ ...g.request, parameters: { name: "Bouw*Groep*" } }, g.registry, g.resolvers);
     expect(raw.blocks[0]!.values.body).toBe("Rich Bouw*Groep*");
+  });
+
+  test("a Markdown field escapes every construct a value could open, not only emphasis", async () => {
+    const f = fixture([text("md", "See {{local.name}}")]);
+    f.registry.TextSection = { ...f.registry.TextSection!, fields: { body: { osfType: "markdown", baseType: "string", required: true, variables: "template" } } };
+    const hostile = "[click](javascript:alert(1)) <img src=x onerror=alert(1)> &lt;b&gt; `code` | cell";
+    const snapshot = await materializeTemplateContent({ ...f.request, parameters: { name: hostile } }, f.registry, f.resolvers);
+    const body = snapshot.blocks[0]!.values.body as string;
+    // No construct survives unescaped: no link, no raw HTML, no entity, no
+    // code span, no table cell.
+    expect(body).toBe(
+      "See \\[click\\]\\(javascript\\:alert\\(1\\)\\) \\<img src\\=x onerror\\=alert\\(1\\)\\> \\&lt\\;b\\&gt\\; \\`code\\` \\| cell",
+    );
+    // Each construct's opening character carries the escape, so none of them
+    // is syntax any more.
+    for (const construct of ["\\[click", "\\<img", "\\&lt", "\\`code", "\\| cell"]) {
+      expect(body).toContain(construct);
+    }
   });
 
   test("resolved values are data, not recursively evaluated template expressions", async () => {
@@ -427,18 +462,143 @@ describe("template variants and local/global variables", () => {
     },
   );
 
-  test("rejects object substitution in inline text", async () => {
+  // Who broke the contract decides the code. A global that does not keep the
+  // Chip catalogue's own text contract is a failure of that dependency, like a
+  // cross-tenant or unversioned global; a value the caller supplies for a
+  // declared parameter is an invalid value. Neither is widened to fit the
+  // destination, and neither falls back to a literal.
+  test("refuses a global whose value breaks the Chip text contract, in either shape", async () => {
+    const objectGlobal: ContentResolvers = {
+      ...fixture().resolvers,
+      resolveGlobalVariable: () => ({
+        tenantId,
+        sourceId: "brand",
+        sourceVersionId: "v1",
+        shape: TEXT_GLOBAL,
+        value: { name: "Example" },
+      }),
+    };
+    const inline = fixture();
+    await rejectsCode(
+      materializeTemplateContent(inline.request, inline.registry, objectGlobal),
+      "DEPENDENCY_INVALID",
+    );
+    // The same object refused as a whole-value binding, where a text field
+    // takes the global's own type and so gets as far as reading the value.
+    const whole = fixture([text("whole", "{{chips.brand.name}}")]);
+    whole.registry.TextSection = {
+      ...whole.registry.TextSection!,
+      fields: { body: { osfType: "multilineText", baseType: "string", required: true, variables: "both" } },
+    };
+    await rejectsCode(
+      materializeTemplateContent(whole.request, whole.registry, objectGlobal),
+      "DEPENDENCY_INVALID",
+    );
+  });
+
+  test("a global is typed by its own stored definition, in both directions", async () => {
+    // A typed global fills a destination of the same type.
+    const money = fixture([{ id: "amount", definitionKey: "RecordSummary", schemaVersion: 3, values: { heading: "Fee" }, references: {} }]);
+    money.registry.RecordSummary = {
+      ...money.registry.RecordSummary!,
+      fields: { heading: { osfType: "currency", baseType: "number", required: true, variables: "whole" } },
+    };
+    const currencyGlobal = {
+      tenantId, sourceId: "fee", sourceVersionId: "v1",
+      shape: { osfType: "currency", baseType: "number", required: true } as const,
+      value: "12.50",
+    };
+    money.versions.root!.variants.forEach((variant) => {
+      (variant.blocks[0] as { values: JsonObject }).values = { heading: "{{chips.default.fee}}" };
+    });
+    const snapshot = await materializeTemplateContent(money.request, money.registry, {
+      ...money.resolvers,
+      resolveGlobalVariable: () => currencyGlobal,
+    });
+    // Exact decimal text, carried through as the value it is.
+    expect(snapshot.blocks[0]!.values.heading).toBe("12.50");
+    // The declared shape and the source it was read from are both frozen in.
+    expect(snapshot.globals["default.fee"]).toMatchObject({ sourceId: "fee", sourceVersionId: "v1", shape: { osfType: "currency" } });
+
+    // The same global is refused as the value of a text field: a currency
+    // amount is not a text value because the destination would like one. It
+    // may still be written INTO text, which is a formatting operation on a
+    // formattable scalar rather than a typed value filling a typed field.
+    const prose = fixture([text("prose", "{{chips.default.fee}}")]);
+    prose.registry.TextSection = {
+      ...prose.registry.TextSection!,
+      fields: { body: { osfType: "richText", baseType: "string", required: true, variables: "both" } },
+    };
+    await rejectsCode(
+      materializeTemplateContent(prose.request, prose.registry, { ...prose.resolvers, resolveGlobalVariable: () => currencyGlobal }),
+      "INVALID_VALUE",
+    );
+    const inline = fixture([text("inline", "Fee: {{chips.default.fee}}")]);
+    const spliced = await materializeTemplateContent(inline.request, inline.registry, {
+      ...inline.resolvers,
+      resolveGlobalVariable: () => currencyGlobal,
+    });
+    // Every digit of the stored decimal, not a double's rendering of it.
+    // (Plain text, not Markdown: a Markdown destination escapes it as data.)
+    expect(spliced.blocks[0]!.values.body).toBe("Fee: 12.50");
+
+    // And a text global is refused where the typed value is wanted.
+    const typed = fixture([{ id: "amount", definitionKey: "RecordSummary", schemaVersion: 3, values: { heading: "{{chips.default.fee}}" }, references: {} }]);
+    typed.registry.RecordSummary = money.registry.RecordSummary;
+    await rejectsCode(
+      materializeTemplateContent(typed.request, typed.registry, {
+        ...typed.resolvers,
+        resolveGlobalVariable: () => ({ ...currencyGlobal, shape: TEXT_GLOBAL, value: "12.50" }),
+      }),
+      "INVALID_VALUE",
+    );
+  });
+
+  test("a source that stops declaring a value type is a dependency failure", async () => {
     const f = fixture();
     await rejectsCode(
       materializeTemplateContent(f.request, f.registry, {
         ...f.resolvers,
-        resolveGlobalVariable: () => ({
-          tenantId,
-          sourceId: "brand",
-          sourceVersionId: "v1",
-          value: { name: "Example" },
-        }),
+        resolveGlobalVariable: () => ({ tenantId, sourceId: "brand", sourceVersionId: "v1", value: "Example" } as never),
       }),
+      "DEPENDENCY_INVALID",
+    );
+  });
+
+  test("a value the source withholds is never filled in as empty", async () => {
+    const f = fixture();
+    await rejectsCode(
+      materializeTemplateContent(f.request, f.registry, {
+        // What a redacted Chip value projects as: the record is readable, the
+        // value is not. A required source that resolves to null is refused.
+        ...f.resolvers,
+        resolveGlobalVariable: () => ({ tenantId, sourceId: "brand", sourceVersionId: "v1", shape: TEXT_GLOBAL, value: null }),
+      }),
+      "DEPENDENCY_INVALID",
+    );
+  });
+
+  test("a local and a global of the same name stay two variables", async () => {
+    const f = fixture([text("both", "{{local.name}} / {{chips.name}}")]);
+    f.versions.root = {
+      ...f.versions.root!,
+      parameters: { name: { baseType: "string", defaultValue: "Local" } },
+      variants: f.versions.root!.variants,
+    };
+    const snapshot = await materializeTemplateContent(f.request, f.registry, {
+      ...f.resolvers,
+      resolveGlobalVariable: (key) => {
+        expect(key).toBe("name");
+        return { tenantId, sourceId: "name", sourceVersionId: "v1", shape: TEXT_GLOBAL, value: "Global" };
+      },
+    });
+    expect(snapshot.blocks[0]!.values.body).toBe("Local / Global");
+  });
+
+  test("refuses an object the caller supplies for a declared text parameter", async () => {
+    const f = fixture();
+    await rejectsCode(
+      materializeTemplateContent({ ...f.request, parameters: { name: { first: "Acme" } } }, f.registry, f.resolvers),
       "INVALID_VALUE",
     );
   });
@@ -452,6 +612,7 @@ describe("template variants and local/global variables", () => {
           tenantId: "other-tenant",
           sourceId: "brand",
           sourceVersionId: "v1",
+          shape: TEXT_GLOBAL,
           value: "Other",
         }),
       }),
@@ -464,6 +625,7 @@ describe("template variants and local/global variables", () => {
           tenantId,
           sourceId: "brand",
           sourceVersionId: "",
+          shape: TEXT_GLOBAL,
           value: "Other",
         }),
       }),
@@ -672,7 +834,7 @@ describe("compiled entity block definitions and typed relationships", () => {
         fields: { age: { baseType: "integer" as const, required: true } },
       },
     };
-    expect(() => resolveTemplateParameters(nested, { person: { age: "2" } })).toThrow("integer");
+    expect(() => resolveTemplateParameters(nested, { person: { age: "two" } })).toThrow("integer");
     expect(() => resolveTemplateParameters(nested, { person: { age: 2, other: true } })).toThrow(
       "unsupported",
     );
@@ -681,11 +843,24 @@ describe("compiled entity block definitions and typed relationships", () => {
     ).toThrow("date");
   });
 
-  test("rejects prototype keys absent from the compiled metadata or parameter values", async () => {
+  test("rejects prototype keys in compiled metadata and in variable references", async () => {
     const f = fixture([{ ...text(), definitionKey: "constructor" }]);
     await rejectsCode(f.run(), "BLOCK_UNKNOWN");
+    // A reserved name is refused by the grammar, like any other key a variable
+    // reference cannot spell — not reported as a merely absent variable. The
+    // refusal therefore also holds when the name *is* declared and supplied,
+    // which a lookup-time check would have resolved.
     f.versions.root = version("root", [text("prototype", "{{local.constructor}}")]);
-    await rejectsCode(f.run(), "MISSING_VARIABLE");
+    await rejectsCode(f.run(), "INVALID_VALUE");
+    f.versions.root = {
+      ...version("root", [text("prototype", "{{local.constructor}}")]),
+      parameters: { constructor: { baseType: "string" as const, required: true } },
+    };
+    await rejectsCode(
+      materializeTemplateContent({ ...f.request, parameters: { constructor: "owned" } }, f.registry, f.resolvers),
+      "INVALID_VALUE",
+    );
+    expect(f.calls.global).toBe(0);
   });
 });
 
@@ -816,6 +991,7 @@ describe("template composition", () => {
           tenantId,
           sourceId: "brand",
           sourceVersionId: "v1",
+          shape: TEXT_GLOBAL,
           value: "a".repeat(CONTENT_LIMITS.stringCharacters / 2 + 1),
         }),
       }),

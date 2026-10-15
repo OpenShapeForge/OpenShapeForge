@@ -276,6 +276,11 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     crud,
     authorization,
     relationships,
+    // A persisted field that accepts a variable makes this entity's reads and
+    // writes resolve bindings, which has refusals of its own to declare.
+    fieldBindings: modelFields.some((field) =>
+      field.variables !== undefined && field.variables !== "none" &&
+      columns.some((column) => column.field === field.key)),
   });
   if (blueprint && (entityOperations.create?.implementation.type !== "entity" ||
       entityOperations.update?.implementation.type !== "entity")) {

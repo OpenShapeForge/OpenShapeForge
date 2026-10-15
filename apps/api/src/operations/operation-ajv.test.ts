@@ -24,3 +24,13 @@ describe("the x-osf-choice annotation", () => {
     expect(() => ajv.compile({ type: "string", "x-osf-choice": { kind: "operation" } })).toThrow();
   });
 });
+
+test("presentation annotations never coerce or round an exact numeric input", () => {
+  const amount = "9007199254740993.995";
+  const schema = {type:"object",properties:{amount:{type:["number","string"],"x-osf-exact":{},"x-osf-presentation":{component:"MoneyInput",props:{currency:"EUR",decimalPlaces:0,scale:"millions"}}}},additionalProperties:false};
+  const value = {amount};
+  const validate = createOperationAjv().compile(schema);
+  expect(validate(value)).toBe(true);
+  expect(value.amount).toBe(amount);
+  expect(validate({amount:"not a number"})).toBe(false);
+});

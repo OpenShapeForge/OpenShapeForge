@@ -138,8 +138,15 @@ describe("host organization binding through real bearer verification and resolve
     expect(lookups).toHaveLength(0);
   });
 
-  test.each(["openid", "organization:alpha", "organization:*"])("requires generic scope, rejects %s", async (scope) => {
+  test.each(["openid", "organization:beta", "organization:*", "organization:alpha organization:beta", "organization organization:beta"])("rejects absent, wildcard or mismatched selection scope %s", async (scope) => {
     expect((await resolveSessionContext(await headers({ scope }))).credential).toBe("none");
+  });
+
+  test.each(["openid organization:alpha", "openid organization:alpha organization:alpha", "openid organization profile organization"])("a selected single membership accepts semantically duplicate scopes: %s", async (scope) => {
+    const session = await resolveSessionContext(await headers({ scope }));
+    expect(session.credential).toBe("bearer");
+    expect(session.tenantId).toBe(TENANT_A);
+    expect(lookups).toEqual([["host", "org-a"]]);
   });
 
   test("tid must match the registry; malformed tid is also refused", async () => {
@@ -461,7 +468,7 @@ describe("explicit service credentials in host mode", () => {
     } finally { await db.destroy(); }
   });
 
-  test("shared runtime routes fall back from control to tenant authentication for a same-issuer token", async () => {
+  test("shared runtime routes select the verified tenant context for same-issuer tenant Operations", async () => {
     const { db } = serviceRegistry();
     const operation: OperationContract = {
       key: "records.list",
@@ -518,8 +525,8 @@ describe("explicit service credentials in host mode", () => {
       expect(response.statusCode).toBe(200);
       expect((response.json() as { id: string }).id).toBe(operation.key);
 
-      // Even before host mode is enabled, a shared issuer can mint tenant
-      // credentials for a different client than the control client.
+      // Tenant Operation selection also works outside host mode when a shared
+      // issuer mints a tenant credential for a different control-plane client.
       process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "off";
       const sharedRealmResponse = await app.inject({
         method: "GET",

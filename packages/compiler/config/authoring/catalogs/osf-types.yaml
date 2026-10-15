@@ -307,6 +307,15 @@ types:
       display: TextDisplay
       input: Input
 
+  # `baseType: number` is the LOGICAL type: scalar-projection stores a
+  # PostgreSQL numeric and returns exact decimal text, so no amount passes
+  # through a float. `decimalPlaces` and `scale` are DISPLAY metadata read by
+  # the shared money formatter — they restate the formatter's own defaults and
+  # change neither storage nor arithmetic: a presentation in millions still
+  # stores units. The axis sits here and not on a field because a schema-3
+  # field authors no render at all, and a web view may override the component
+  # but not its props; a report that wants another scale has nowhere to say so
+  # yet (docs/field-acceptance-fixture.md records that gap).
   currency:
     label: { en: Currency amount, nl: Geldbedrag }
     baseType: number
@@ -316,6 +325,282 @@ types:
       input: MoneyInput
     props:
       currency: EUR
+      decimalPlaces: 2
+      scale: units
+
+  # A caller-supplied stable key: a code someone quotes, types and sorts on,
+  # never prose. Bounded and POSIX-safe, so the contract is a real database
+  # CHECK rather than only a client-side hint.
+  identifier:
+    label: { en: Identifier, nl: Kenmerk }
+    baseType: string
+    icon: Hash
+    validation:
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._\\-]*$"
+      minLength: 1
+      maxLength: 64
+    render:
+      display: TextDisplay
+      input: Input
+
+  # A rate expressed in percent, and its own type on purpose: an arbitrary
+  # number must not be able to fill it and it must not fill an arbitrary
+  # number. Bounds belong to the field — a completion is 0..100, a growth rate
+  # is not. `decimalPlaces` is display only; the stored value is exact.
+  percentage:
+    label: { en: Percentage, nl: Percentage }
+    baseType: number
+    icon: Percent
+    render:
+      display: TextDisplay
+      input: NumberInput
+    props:
+      unit: "%"
+      decimalPlaces: 2
+
+  # A quantity whose unit travels WITH the value, for the case where the unit
+  # varies per record. A measurement in a unit the entity fixes stays a plain
+  # number with the field's own `unit`; this type exists so a bound or copied
+  # value can never lose which unit it was measured in.
+  measurement:
+    kind: object
+    label: { en: Measurement, nl: Meetwaarde }
+    baseType: object
+    icon: Ruler
+    render:
+      display: TextDisplay
+      input: JsonFieldEditor
+    children:
+      - key: value
+        osfType: number
+        required: true
+        label: { en: Value, nl: Waarde }
+      - key: unit
+        osfType: string
+        required: true
+        label: { en: Unit, nl: Eenheid }
+        options:
+          type: static
+          items:
+            - { value: mm, label: { en: Millimetre, nl: Millimeter } }
+            - { value: cm, label: { en: Centimetre, nl: Centimeter } }
+            - { value: m, label: { en: Metre, nl: Meter } }
+            - { value: m2, label: { en: Square metre, nl: Vierkante meter } }
+            - { value: m3, label: { en: Cubic metre, nl: Kubieke meter } }
+            - { value: g, label: { en: Gram, nl: Gram } }
+            - { value: kg, label: { en: Kilogram, nl: Kilogram } }
+            - { value: kWh, label: { en: Kilowatt hour, nl: Kilowattuur } }
+
+  # Elapsed time in the one canonical unit, said in the key so no reader has to
+  # guess. Deliberately not an ISO-8601 duration string: `retention.duration`
+  # spells a retention policy, which is not a field value contract, and a
+  # period like P1M has no fixed length in seconds.
+  durationSeconds:
+    label: { en: Duration, nl: Duur }
+    baseType: integer
+    icon: Timer
+    validation:
+      min: 0
+    render:
+      display: TextDisplay
+      input: NumberInput
+    props:
+      unit: s
+
+  # A span is one value, not two fields that happen to sit next to each other.
+  # The same ordering invariant runs at every canonical write boundary.
+  numericRange:
+    schema:
+      x-osf-ordered-fields: { lower: from, upper: to, kind: numeric }
+    kind: object
+    label: { en: Numeric range, nl: Getalbereik }
+    baseType: object
+    icon: ArrowLeftRight
+    render:
+      display: TextDisplay
+      input: JsonFieldEditor
+    children:
+      - key: from
+        osfType: number
+        required: true
+        label: { en: From, nl: Van }
+      - key: to
+        osfType: number
+        required: true
+        label: { en: To, nl: Tot }
+
+  # A time of day with no date and no zone: opening hours, a cut-off. The
+  # pattern rejects 25:00 and 12:70 rather than merely shaping the text.
+  localTime:
+    label: { en: Time of day, nl: Tijdstip }
+    baseType: string
+    icon: Clock
+    validation:
+      pattern: "^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$"
+    render:
+      display: TextDisplay
+      input: Input
+
+  # As numericRange, over valid, ordered calendar dates.
+  dateRange:
+    schema:
+      x-osf-ordered-fields: { lower: from, upper: to, kind: date }
+    kind: object
+    label: { en: Date range, nl: Periode }
+    baseType: object
+    icon: CalendarRange
+    render:
+      display: TextDisplay
+      input: JsonFieldEditor
+    children:
+      - key: from
+        osfType: date
+        required: true
+        label: { en: From, nl: Van }
+      - key: to
+        osfType: date
+        required: true
+        label: { en: To, nl: Tot }
+
+  # A named calendar period as a VALUE — 2026, 2026-H1, 2026-Q3, 2026-11,
+  # 2026-W42. Distinct from FiscalPeriod, which is a record with its own
+  # lifecycle: a reporting label is not a bookkeeping period.
+  calendarPeriod:
+    label: { en: Calendar period, nl: Kalenderperiode }
+    baseType: string
+    icon: CalendarDays
+    validation:
+      pattern: "^[0-9]{4}(-(Q[1-4]|H[12]|0[1-9]|1[0-2]|W(0[1-9]|[1-4][0-9]|5[0-3])))?$"
+      maxLength: 8
+    render:
+      display: TextDisplay
+      input: Input
+
+  # A bounded declarative schedule, so storing one needs no text grammar and no
+  # parser. It is a VALUE contract: nothing in OSF expands a recurrence into
+  # occurrences, and this type does not pretend otherwise.
+  recurrence:
+    schema:
+      allOf:
+        - if: { required: [endCondition], properties: { endCondition: { const: onDate } } }
+          then: { properties: { end: true }, required: [end] }
+        - if: { required: [endCondition], properties: { endCondition: { const: afterCount } } }
+          then: { properties: { count: true }, required: [count] }
+        - if:
+            properties: { start: true, end: true, endCondition: true }
+            required: [start, end]
+            anyOf:
+              - not: { properties: { endCondition: true }, required: [endCondition] }
+              - properties: { endCondition: { const: onDate } }
+          then:
+            x-osf-ordered-fields: { lower: start, upper: end, kind: date }
+    kind: object
+    label: { en: Recurrence, nl: Herhaling }
+    baseType: object
+    icon: Repeat
+    render:
+      display: TextDisplay
+      input: JsonFieldEditor
+    children:
+      - key: frequency
+        osfType: string
+        required: true
+        label: { en: Frequency, nl: Frequentie }
+        options:
+          type: static
+          items:
+            - { value: daily, label: { en: Daily, nl: Dagelijks } }
+            - { value: weekly, label: { en: Weekly, nl: Wekelijks } }
+            - { value: monthly, label: { en: Monthly, nl: Maandelijks } }
+            - { value: quarterly, label: { en: Quarterly, nl: Per kwartaal } }
+            - { value: yearly, label: { en: Yearly, nl: Jaarlijks } }
+      - key: interval
+        osfType: integer
+        required: true
+        label: { en: Every, nl: Elke }
+        defaultValue: 1
+        validation: { min: 1, max: 366 }
+      - key: dayOfMonth
+        osfType: integer
+        label: { en: Day of the month, nl: Dag van de maand }
+        validation: { min: 1, max: 31 }
+      - key: occurrences
+        osfType: integer
+        label: { en: Number of occurrences, nl: Aantal herhalingen }
+        validation: { min: 1, max: 1000 }
+
+      # Calendar dates and the explicit ending mode emitted by the native field.
+      # Inactive ending values may remain while switching modes; no occurrences
+      # are expanded or scheduled by this stored value contract.
+      - key: start
+        osfType: date
+        label: { en: Starting from, nl: Vanaf }
+      - key: end
+        osfType: date
+        label: { en: Ending on, nl: Einddatum }
+      - key: endCondition
+        osfType: string
+        label: { en: Ends, nl: Eindigt }
+        options:
+          type: static
+          items:
+            - { value: never, label: { en: Never, nl: Nooit } }
+            - { value: onDate, label: { en: On date, nl: Op datum } }
+            - { value: afterCount, label: { en: After count, nl: Na aantal } }
+      - key: count
+        osfType: integer
+        label: { en: Occurrences, nl: Herhalingen }
+        validation: { min: 1, max: 1000 }
+
+  # A bounded score. The bounds are the type's, because a rating whose range
+  # varies per field is not a rating, it is a number.
+  rating:
+    label: { en: Rating, nl: Beoordeling }
+    baseType: integer
+    icon: Star
+    validation:
+      min: 1
+      max: 5
+    render:
+      display: TextDisplay
+      input: NumberInput
+
+  # A point on earth, with the bounds latitude and longitude really have.
+  coordinates:
+    kind: object
+    label: { en: Coordinates, nl: Coördinaten }
+    baseType: object
+    icon: MapPin
+    render:
+      display: TextDisplay
+      input: MapPicker
+    children:
+      - key: latitude
+        osfType: number
+        required: true
+        label: { en: Latitude, nl: Breedtegraad }
+        validation: { min: -90, max: 90 }
+      - key: longitude
+        osfType: number
+        required: true
+        label: { en: Longitude, nl: Lengtegraad }
+        validation: { min: -180, max: 180 }
+
+  # An IANA zone name — the thing platform.tenants.time_zone holds and
+  # `<instant> at time zone <name>` consumes. The pattern checks the IANA naming
+  # FORM; membership is the runtime's own zone database, not something a regular
+  # expression can express (Mars/Phobos matches the form and is not a zone).
+  timeZone:
+    schema: { type: string, x-osf-time-zone: true }
+    label: { en: Time zone, nl: Tijdzone }
+    baseType: string
+    icon: Globe
+    validation:
+      pattern: "^(UTC|[A-Za-z_]+\\/[A-Za-z0-9_\\+\\-]+(\\/[A-Za-z0-9_\\+\\-]+)?)$"
+      maxLength: 64
+    render:
+      display: TextDisplay
+      input: Input
 
   condition:
     baseType: object
@@ -343,6 +628,21 @@ types:
       display: TextDisplay
       input: VariableTemplateInput
 
+  # A value whose type comes from a stored FieldDefinition beside it rather
+  # than from this catalog: the destination names that definition with
+  # `typedBy`, and the field-schema service projects it into the value's own
+  # schema. `baseType: object` is the storage and transport axis — a jsonb
+  # column, GraphQL JSON — not a claim that the value is an object: null, 0,
+  # false and an empty collection are all real values of a typed global.
+  typedValue:
+    baseType: object
+    schema: { $ref: "#/$defs/typedValue" }
+    label: { en: Typed value, nl: Getypeerde waarde }
+    icon: Variable
+    render:
+      display: TextDisplay
+      input: JsonFieldEditor
+
   # A stored FieldDefinition is the authored field contract itself: its value
   # schema is the field-definition authoring schema, bundled by the compiler.
   fieldDefinition:
@@ -354,3 +654,16 @@ types:
     render:
       display: FieldDefinitionView
       input: JsonFieldEditor
+
+  keyValueMap:
+    kind: object
+    label: { en: Text value map, nl: Tekstwaardemap }
+    baseType: object
+    schema:
+      type: object
+      propertyNames:
+        minLength: 1
+        maxLength: 160
+        not: { enum: [constructor, prototype, __proto__] }
+      additionalProperties: { type: string, maxLength: 8000 }
+    render: { display: TextDisplay, input: JsonFieldEditor }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import type { ModuleOperationContext, RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
-import { composeTemplate, contentFieldProjection, materializeFields, materializeTemplate } from "./content-runtime.js";
+import { composeTemplate, contentFieldProjection, materializeFields, materializeTemplate, parameterShape } from "./content-runtime.js";
 
 const ids = {
   tenant: "10000000-0000-4000-8000-000000000001", template: "10000000-0000-4000-8000-000000000002",
@@ -13,12 +13,15 @@ const carrier: RuntimeEntityValueCarrier = {
   valuesColumn: "values", definitionColumn: "definition_key",
   definitions: {
     TextBlock: {
-      entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true }],
+      // As authored: the text body holds a template, an included version and
+      // its parameters are bound whole, so the projection must carry those
+      // modes through to the engine.
+      entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true, variables: "template" }],
       valueSchema: { type: "object", properties: { markdown: { type: "string", minLength: 1 } }, required: ["markdown"], additionalProperties: false },
       references: [], materializeOperationId: "TextBlock.materialize",
     },
     IncludeBlock: {
-      entityName: "IncludeBlock", schemaVersion: 1, definitionHash: "b".repeat(64), fields: [{ key: "version", osfType: "TemplateVersion", baseType: "string", required: true, relationship: { target: "TemplateVersion" } }, { key: "parameters", osfType: "object", baseType: "object" }],
+      entityName: "IncludeBlock", schemaVersion: 1, definitionHash: "b".repeat(64), fields: [{ key: "version", osfType: "TemplateVersion", baseType: "string", required: true, variables: "whole", relationship: { target: "TemplateVersion" } }, { key: "parameters", osfType: "object", baseType: "object", variables: "both" }],
       valueSchema: { type: "object", properties: { parameters: { type: "object" } }, additionalProperties: false },
       references: [{ fieldKey: "version", targetEntity: "TemplateVersion", schema: "erp", table: "template_versions", column: "include_version_id", required: true }],
     },
@@ -32,11 +35,13 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
   const reads: string[] = [];
   const queries: string[] = [];
   const data = { markdown: "Hello {{local.name}} from {{chips.brand}}", chip: "Example", tenant: ids.tenant, unavailableOperation: false, disallowText: false,
-    redactChip: false, redactBlockValues: false, missingRead: "", snapshotTemplate: ids.template, liveText: "LIVE-ROW-MUST-NOT-LEAK", variantLocale: "en", variantDefault: false };
+    redactChip: false, redactBlockValues: false, missingRead: "", snapshotTemplate: ids.template, liveText: "LIVE-ROW-MUST-NOT-LEAK", variantLocale: "en", variantDefault: false,
+    // The stored FieldDefinition the global declares for its own value.
+    chipValueType: "string", chipOsfType: "multilineText", chipDefinitionKey: "value" };
   const compiledCarrier = structuredClone({ ...carrier, definitions: { ...carrier.definitions,
-    TextBlock: { ...carrier.definitions.TextBlock!, fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true,
+    TextBlock: { ...carrier.definitions.TextBlock!, fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true, variables: "template",
       ...(blockDefault === undefined ? {} : { defaultValue: blockDefault }) },
-      ...(withReference ? [{ key: "brand", osfType: "Chip", baseType: "string", required: true, relationship: { target: "Chip" } }] : [])],
+      ...(withReference ? [{ key: "brand", osfType: "Chip", baseType: "string", required: true, variables: "whole", relationship: { target: "Chip" } }] : [])],
       references: withReference ? [{ fieldKey: "brand", targetEntity: "Chip", column: "text_brand_id", schema: "erp", table: "chips", required: true,
         ...(withBinding ? { parameterColumn: "text_brand_parameter" } : {}) }] : [],
     },
@@ -62,8 +67,13 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
       schemas: {
         entityValues: { get: () => compiledCarrier, collection: () => ({ targetEntity: "Block", allowedDefinitions: data.disallowText ? ["IncludeBlock"] : Object.keys(carrier.definitions) }) },
         fields: {
-          object: () => ({ type: "object", properties: { name: { type: "string", default: "Reader" },
-            ...(withBinding ? { brand: { type: "string", format: "uuid", "x-osf-reference": { entity: "Chip" } } } : {}) } }),
+          // The one field-schema service, over template parameters and over
+          // the FieldDefinition a Chip stores for its own value alike.
+          object: (fields: readonly Record<string, unknown>[]) =>
+            fields.length === 1 && fields[0]!.key === "value"
+              ? { type: "object", required: ["value"], properties: { value: { type: data.chipValueType, "x-osf-type": data.chipOsfType } } }
+              : { type: "object", properties: { name: { type: "string", default: "Reader" },
+                ...(withBinding ? { brand: { type: "string", format: "uuid", "x-osf-reference": { entity: "Chip" } } } : {}) } },
           validateObject: () => ({ valid: true }),
         },
         json: { validate(schema: unknown, values: unknown) { calls.push({ schema, values }); return { valid: true }; } },
@@ -103,7 +113,8 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
               // Live rows drifted after publish; a materialization that shows them is a bug.
               TemplateVariant: { ...base, template: ids.template, channel: "document", locale: "en" },
               Block: { ...base, variant: ids.variant, definitionKey: "TextBlock", definitionVersion: 1, values: { markdown: data.liveText } },
-              Chip: { ...base, key: "brand", value: data.redactChip ? null : data.chip },
+              Chip: { ...base, key: "brand", definition: { key: data.chipDefinitionKey, osfType: data.chipOsfType, required: true, label: { en: "Value" } },
+                value: data.redactChip ? null : data.chip },
             };
             return { data: records[entity], operations: [] };
           }
@@ -244,3 +255,11 @@ describe("template materialization runtime adapter", () => {
     expect(contentFieldProjection({ osfType: "object", baseType: "object", cardinality: "collection", cardinalityBounds: { min: 1, max: 3 }, children: [{ key: "title", osfType: "string", baseType: "string", required: true }] })).toMatchObject({ cardinality: { min: 1, max: 3 }, fields: { title: { baseType: "string", required: true } } });
   });
 });
+
+ test("parameter projection preserves the semantic axis and variable mode for scalars and collections",()=>{
+   const scalar=parameterShape({type:"number","x-osf-type":"currency","x-osf-variables":"whole"},true);
+   expect(scalar).toMatchObject({osfType:"currency",baseType:"number",variables:"whole",required:true});
+   expect(parameterShape({type:["number","string"],"x-osf-type":"currency","x-osf-value-context":{currency:"EUR",unit:"EUR"}},true)).toMatchObject({baseType:"number",currency:"EUR",unit:"EUR"});
+   expect(contentFieldProjection({osfType:"currency",baseType:"number",unit:"EUR",render:{props:{currency:"EUR"}}})).toMatchObject({currency:"EUR",unit:"EUR"});
+   expect(parameterShape({type:"array",items:{type:"string","x-osf-type":"Relation","x-osf-reference":{entity:"Relation"}},"x-osf-type":"Relation","x-osf-variables":"whole"},false)).toMatchObject({osfType:"Relation",variables:"whole",relationship:{target:"Relation"},cardinality:{min:0,max:"unbounded"}});
+ });

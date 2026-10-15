@@ -126,6 +126,17 @@ describe("exchangeCodeForTokens", () => {
     expect(values.grantedScopes).toEqual(["tickets:read", "read"]);
   });
 
+  it("stores a decimal-string expiry from a provider without premature refresh", async () => {
+    const handoff = await mintAuthorization({ ...BASE, authorizationUrl: "https://auth.example.com/authorize" });
+    const pending = (await redeemState(handoff.state))!;
+    const before = Date.now();
+    const { values } = await exchangeCodeForTokens(pending, "code", (async () => Response.json({
+      access_token: "synthetic-access", refresh_token: "synthetic-refresh", expires_in: "600",
+    })) as unknown as typeof fetch, KEYRING);
+    expect(Date.parse(String(values.accessTokenExpiresAt))).toBeGreaterThanOrEqual(before + 600_000);
+    expect(Date.parse(String(values.accessTokenExpiresAt))).toBeLessThanOrEqual(Date.now() + 600_000);
+  });
+
   it("fails closed on an out-of-egress token endpoint and a missing keyring", async () => {
     const handoff = await mintAuthorization({
       ...BASE,

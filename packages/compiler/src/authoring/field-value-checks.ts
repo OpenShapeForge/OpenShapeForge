@@ -1,3 +1,4 @@
+import { exactNumericRule, compareExactNumeric } from "@openshapeforge/operations";
 // SPDX-License-Identifier: BUSL-1.1
 import { createHash } from "node:crypto";
 import type { ColumnDefinition, TableConstraintDefinition } from "../schema.js";
@@ -59,7 +60,9 @@ export function isPosixSafePattern(pattern: string): boolean {
   return depth === 0;
 }
 
-function constraintName(table: string, column: string, kind: "options" | "pattern" | "requires"): string {
+type CheckKind = "options" | "pattern" | "requires" | "bindings";
+
+function constraintName(table: string, column: string, kind: CheckKind): string {
   const name = `${table}_${column}_${kind}_check`;
   return name.length <= 63 ? name : `${name.slice(0, 50)}_${digestOf(name)}`;
 }
@@ -68,7 +71,7 @@ function checkConstraint(
   schema: string,
   table: string,
   column: string,
-  kind: "options" | "pattern" | "requires",
+  kind: CheckKind,
   expression: string,
 ): TableConstraintDefinition {
   const name = constraintName(table, column, kind);
@@ -123,6 +126,28 @@ export function fieldValueCheckConstraints(
 }
 
 /**
+ * The database backstop for the server-owned bindings map: an object, and no
+ * key that is not one of this entity's bindable fields. The runtime decides
+ * which binding is acceptable — the shape, the source, the actor — but a
+ * write that reaches the column by another route cannot leave a binding on a
+ * field that authors none.
+ */
+export function fieldBindingsCheckConstraint(
+  schema: string,
+  table: string,
+  column: string,
+  fields: readonly string[],
+): TableConstraintDefinition {
+  const allowed = fields.length > 0
+    ? `ARRAY[${[...fields].sort().map(literal).join(", ")}]::text[]`
+    : "ARRAY[]::text[]";
+  return checkConstraint(
+    schema, table, column, "bindings",
+    `${ident(column)} IS NULL OR (jsonb_typeof(${ident(column)}) = 'object' AND (${ident(column)} - ${allowed}) = '{}'::jsonb)`,
+  );
+}
+
+/**
  * An authored `defaultValue` is a value the row takes when the caller omits
  * the field, so it has to satisfy the field's own contract: the static
  * options, the pattern, the length and numeric bounds the JSON schema and the
@@ -150,10 +175,10 @@ export function assertDefaultSatisfiesContract(field: Field): void {
     if (maxLength !== undefined && value.length > maxLength) refuse(`is longer than maxLength ${maxLength}`);
     if (pattern !== undefined && !new RegExp(pattern, "u").test(value)) refuse(`does not match pattern ${pattern}`);
   }
-  if (typeof value === "number") {
-    const min = numericRule(validation.min);
-    const max = numericRule(validation.max);
-    if (min !== undefined && value < min) refuse(`is below min ${min}`);
-    if (max !== undefined && value > max) refuse(`is above max ${max}`);
+  if (typeof value === "number" || field.baseType === "number" || field.baseType === "integer") {
+    const min = exactNumericRule(validation.min);
+    const max = exactNumericRule(validation.max);
+    if (min !== undefined && compareExactNumeric(value, min) === -1) refuse(`is below min ${min}`);
+    if (max !== undefined && compareExactNumeric(value, max) === 1) refuse(`is above max ${max}`);
   }
 }

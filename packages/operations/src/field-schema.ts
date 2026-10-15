@@ -70,7 +70,14 @@ function valueSchema(
   registry: OperationFieldSchemaRegistry,
   options: OperationFieldSchemaOptions,
 ): OperationJsonSchema {
-  if (field.schema) return structuredClone(field.schema) as OperationJsonSchema;
+  if (field.schema) {
+    const extension = structuredClone(field.schema) as OperationJsonSchema;
+    // Invariant-only schemas extend the declared children rather than replacing their contract.
+    if (field.baseType === "object" && field.children?.length && !extension.properties && !extension.$ref) {
+      return { ...objectSchema(field.children, registry, { ...options, requireRequired: options.requireNestedRequired ?? true }), ...extension };
+    }
+    return extension;
+  }
   if (field.baseType === "object" && field.children?.length) {
     return objectSchema(field.children, registry, { ...options, requireRequired: options.requireNestedRequired ?? true });
   }
@@ -81,6 +88,7 @@ function withFieldMetadata(
   schema: OperationJsonSchema,
   field: ResolvedOperationField,
   enumeration: FieldEnumeration | undefined,
+  domain: readonly (string | number | boolean)[] | undefined,
   options: OperationFieldSchemaOptions,
 ): OperationJsonSchema {
   const title = localizedText(field.label);
@@ -94,7 +102,32 @@ function withFieldMetadata(
   if (title) schema.title = title;
   // The type a form renders the property through; the JSON type beside it is what validates.
   schema["x-osf-type"] = field.osfType;
-  if (enumeration) schema.enum = typedEnumValues(enumeration.values, field.baseType);
+  if (field.typedBy) schema["x-osf-typed-by"] = { ...field.typedBy };
+  const context = {
+    ...(field.unit ? { unit: field.unit } : {}),
+    ...(field.osfType === "currency" && typeof field.render?.props?.currency === "string" ? { currency: field.render.props.currency } : {}),
+  };
+  if (Object.keys(context).length) schema["x-osf-value-context"] = context;
+  if (field.render?.component) schema["x-osf-presentation"] = structuredClone(field.render);
+  // The variable shapes this field accepts, where it authors any; a property
+  // without the keyword takes literals alone.
+  if (field.variables && field.variables !== "none") schema["x-osf-variables"] = field.variables;
+  // The closed domain, in the keyword that can hold it. A NUMERIC domain goes
+  // to the exact comparison beside the bounds, because `enum` reads the number
+  // 1 and the exact text "1" — the form every numeric value is projected in —
+  // as different values (see `numericSchema`). Every other type keeps `enum`,
+  // where spelling IS identity.
+  if (domain) {
+    if (isNumericBaseType(field.baseType)) {
+      const exact = schema["x-osf-exact"];
+      schema["x-osf-exact"] = {
+        ...(exact && typeof exact === "object" && !Array.isArray(exact) ? exact : {}),
+        enum: [...domain],
+      };
+    } else {
+      schema.enum = [...domain];
+    }
+  }
   if (field.options?.type === "entity") {
     if (!field.options.source?.trim()) throw new Error(`Entity options for ${field.key} require a source.`);
     schema["x-osf-reference"] = { entity: field.options.source, valueField: field.options.valueField ?? "id" };
@@ -121,15 +154,33 @@ function withFieldMetadata(
   return schema;
 }
 
+function isNumericBaseType(baseType: ResolvedOperationField["baseType"]): boolean {
+  return baseType === "integer" || baseType === "number";
+}
+
 /** Project one resolved field into deterministic JSON Schema, without bundled definitions. */
 export function fieldSchema(
   field: ResolvedOperationField,
   registry: OperationFieldSchemaRegistry = {},
   options: OperationFieldSchemaOptions = {},
 ): OperationJsonSchema {
-  const schema = withFieldMetadata(valueSchema(field, registry, options), field, fieldEnumeration(field, registry), options);
-  if (field.cardinality !== "collection") return schema;
-  const { title, description, "x-osf-i18n": uiCopy, default: defaultValue, ...outerItemSchema } = schema;
+  const enumeration = fieldEnumeration(field, registry);
+  // The closed domain in the field's own type, projected once: a numeric
+  // domain goes into `x-osf-exact`, every other one into `enum`.
+  const domain = enumeration ? typedEnumValues(enumeration.values, field.baseType) : undefined;
+  const schema = withFieldMetadata(
+    valueSchema(field, registry, options),
+    field,
+    enumeration,
+    domain,
+    options,
+  );
+  if (field.cardinality !== "collection") {
+    if (field.validation?.uniqueBy) throw new Error(`${field.key}: uniqueBy requires a collection.`);
+    return schema;
+  }
+  // A variable fills the whole collection property, not one row of it.
+  const { title, description, "x-osf-i18n": uiCopy, default: defaultValue, "x-osf-variables": variables, "x-osf-presentation": presentation, ...outerItemSchema } = schema;
   let items: OperationJsonSchema = field.item
     ? {
         allOf: [outerItemSchema, fieldSchema(field.item, registry, options)],
@@ -138,8 +189,16 @@ export function fieldSchema(
       }
     : outerItemSchema;
   const array: OperationJsonSchema = { type: "array", items };
+  if (field.validation?.uniqueBy) {
+    const children = field.item?.children ?? field.children;
+    const identity = children?.find(child => child.key === field.validation!.uniqueBy);
+    if (!identity || identity.cardinality !== "single" || identity.baseType === "object") throw new Error(`${field.key}: uniqueBy must name a declared scalar child.`);
+    array["x-osf-unique-by"] = { field: identity.key, numeric: identity.baseType === "integer" || identity.baseType === "number" };
+  }
   // The collection is a use of the same type as its items: a form resolves the property, not the row.
   array["x-osf-type"] = field.osfType;
+  if (presentation !== undefined) { array["x-osf-presentation"] = presentation; if (!field.item) items["x-osf-presentation"] = presentation; }
+  if (variables !== undefined) array["x-osf-variables"] = variables;
   if (uiCopy !== undefined) array["x-osf-i18n"] = uiCopy;
   if (title !== undefined) array.title = title;
   if (description !== undefined) array.description = description;
@@ -168,6 +227,7 @@ export function objectSchema(
   const required: string[] = [];
   const keys = new Set<string>();
   for (const field of fields) {
+    if (["__proto__", "prototype", "constructor"].includes(field.key)) throw new Error("FieldDefinition uses a reserved object key.");
     if (keys.has(field.key)) throw new Error(`FieldDefinition key ${JSON.stringify(field.key)} is duplicated.`);
     keys.add(field.key);
     properties[field.key] = fieldSchema(field, registry, options);

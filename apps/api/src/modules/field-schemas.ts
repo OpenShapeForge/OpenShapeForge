@@ -4,7 +4,9 @@ import { readFileSync } from "node:fs";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import {
+  valueInvariantKeywords,
   operationChoiceKeyword,
+  operationExactNumericKeyword, operationFieldMetadataKeywords,
   operationFieldObjectSchema,
   operationI18nKeyword,
   operationInputFieldsKeyword,
@@ -12,6 +14,7 @@ import {
   resolveFieldBaseType,
   type OperationFieldBaseType,
   operationTypeKeyword,
+  operationVariablesKeyword,
   type OperationFieldDefinition,
   type OperationFieldSchemaRegistry,
 } from "@openshapeforge/operations";
@@ -26,8 +29,9 @@ export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
   validate(schema, values) {
     // A short-lived compiler avoids retaining every stored/dynamic form forever.
     // No async loader, coercion, removal or defaults: validation never rewrites input.
-    const ajv = new Ajv2020.default({ allErrors: true, strict: false, strictSchema: true });
+    const ajv = new Ajv2020.default({ allErrors: true, strict: false, strictSchema: true, allowUnionTypes: true });
     addFormats.default(ajv);
+    ajv.addKeyword(operationExactNumericKeyword);
     ajv.addKeyword(operationI18nKeyword);
     ajv.addKeyword(operationInputFieldsKeyword);
     ajv.addKeyword(operationReferenceKeyword);
@@ -37,6 +41,9 @@ export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
     ajv.addKeyword({ keyword: "x-osf-default-template", schemaType: "string", valid: true });
     ajv.addKeyword(operationChoiceKeyword);
     ajv.addKeyword(operationTypeKeyword);
+    ajv.addKeyword(operationVariablesKeyword);
+    for (const keyword of operationFieldMetadataKeywords) ajv.addKeyword(keyword);
+    for (const keyword of valueInvariantKeywords) ajv.addKeyword(keyword);
     try {
       if (schema.$async === true) return invalidDefinition();
       const validate = ajv.compile(schema);
@@ -108,7 +115,7 @@ export function createRuntimeFieldSchemaCompiler(
   registry: GeneratedRuntimeFieldSchemaRegistry,
 ): RuntimeFieldSchemaCompiler {
   assertRegistry(registry);
-  const ajv = new Ajv2020.default({ allErrors: true, strict: false });
+  const ajv = new Ajv2020.default({ allErrors: true, strict: false, allowUnionTypes: true });
   addFormats.default(ajv);
   const validate = ajv.compile(registry.fieldDefinitionSchema);
   const compiler: RuntimeFieldSchemaCompiler = {

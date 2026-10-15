@@ -273,7 +273,7 @@ function fieldKeys(
 function fieldOverrides(
   group: CompiledViewGroup,
   excluded: ReadonlySet<string> = new Set(),
-): Record<string, { render: { component: string } }> | undefined {
+): Record<string, { render: { component: string; props?: Record<string, unknown> } }> | undefined {
   const entries = (group.fields ?? []).flatMap((entry) => {
     if (typeof entry === "string" || !entry.renderOverride) return [];
     if (entry.fieldDisplayMode === "hidden" || excluded.has(entry.key)) return [];
@@ -530,7 +530,8 @@ function projectField(
   presentations: Record<string, { render: NonNullable<WebFieldProjection["presentation"]> }> = {},
 ): WebFieldProjection {
   const nestedSupports = editNested ? supports : { read: true, create: false, update: false };
-  const presentation = presentations[`${parent}.${field.key}`.split(".").slice(1).join(".")]?.render;
+  const presentation = presentations[`${parent}.${field.key}`.split(".").slice(1).join(".")]?.render
+    ?? (field.render.props && Object.keys(field.render.props).length ? structuredClone(field.render) : undefined);
   if (field.options?.presentation && field.options.type !== "static") {
     throw new Error(`${parent}.${field.key}: options.presentation "${field.options.presentation}" requires static options.`);
   }
@@ -544,6 +545,7 @@ function projectField(
     cardinality: field.cardinality === "collection" ? "many" : "one",
     required: field.required,
     ...(fieldPolicy ? { fieldPolicy } : {}),
+    ...(field.authoring ? { authoring: structuredClone(field.authoring) } : {}),
     ...(presentation ? { presentation } : field.options?.presentation === "tiles" ? { presentation: { component: "ChoiceTiles" } } : {}),
     ...projectedTextLength(field),
     ...(field.relationship?.target ? { relationship: {
@@ -557,6 +559,7 @@ function projectField(
     ...(field.suggestions ? { suggestions: field.suggestions } : {}),
     ...(field.visibility ? { visibility: field.visibility } : {}),
     ...(field.entityValue ? { entityValue: { ...field.entityValue } } : {}),
+    ...(field.typedBy ? { typedBy: { ...field.typedBy } } : {}),
     ...(field.allowedDefinitions ? { allowedDefinitions: [...field.allowedDefinitions].sort() } : {}),
     ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
     ...(field.defaultTemplate !== undefined ? { defaultTemplate: field.defaultTemplate } : {}),

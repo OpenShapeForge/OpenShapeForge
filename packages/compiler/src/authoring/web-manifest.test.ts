@@ -162,6 +162,37 @@ function entity(
 }
 
 describe("web manifest projection", () => {
+  test("the real Chip authoring exposes editable typed values through ordinary Battery views",()=>{
+    const artifacts=loadEntity(authoringDir,"chip");
+    const raw=parse(readFileSync(join(authoringDir,"entities/core/chip.yaml"),"utf8"));
+    expect(()=>createAuthoringValidator().validate(raw,"chip.yaml")).not.toThrow();
+    const projected=buildWebManifest([{slug:"chip",contract:compile(artifacts)}]).entities.Chip!;
+    expect(projected.views.collection?.route).toBe("/chips");
+    expect(projected.views.collection?.columns.map(column=>column.key)).toEqual(["name","value","category","isActive"]);
+    expect(projected.views.record?.routes).toEqual({read:"/chips/:id",create:"/chips/new"});
+    expect(projected.views.record?.formGroups?.create?.[0]?.fields).toContain("definition");
+    expect(projected.views.record?.formGroups?.create?.[0]?.fields).toContain("value");
+    expect(projected.fields.value!.typedBy).toEqual({definitionField:"definition"});
+    expect(projected.fields.definition!.authoring).toEqual({profile:"fullFieldDefinition",lockedKeys:["key"]});
+    expect(projected.fields.definition!.defaultValue).toEqual({key:"value",osfType:"string",required:false,validation:{minLength:1,maxLength:8000}});
+  });
+  test("projects canonical field-authoring profile and lock metadata without mutation",()=>{
+    const authoring={profile:"templateParameter",locked:true,visibleProperties:["moneyDisplay"]};
+    const template=entity("Template","template",[field("parameters",{osfType:"fieldDefinition",baseType:"object",authoring})],coreView());
+    const projected=buildWebManifest([template]).entities.Template!.fields.parameters!;
+    expect(projected.authoring).toEqual(authoring);
+    expect(projected.authoring).not.toBe(authoring);
+  });
+  test("projects typed value pairs and authored numeric display defaults to hosts", () => {
+    const variable = entity("Variable", "variable", [
+      field("definition", {osfType:"fieldDefinition",baseType:"object"}),
+      field("value", {osfType:"typedValue",baseType:"object",typedBy:{definitionField:"definition"}}),
+      field("amount", {osfType:"currency",baseType:"number",render:{component:"MoneyInput",props:{currency:"EUR",decimalPlaces:0,scale:"millions"}}}),
+    ], coreView());
+    const projected = buildWebManifest([variable]).entities.Variable!.fields;
+    expect(projected.value!.typedBy).toEqual({definitionField:"definition"});
+    expect(projected.amount!.presentation).toEqual({component:"MoneyInput",props:{currency:"EUR",decimalPlaces:0,scale:"millions"}});
+  });
   test("read labels use the authored reference catalog without replacing canonical codes", () => {
     const contact = entity("ContactMoment", "contact", [field("channel", { options: { type: "referentiedata", referentieGroep: "COMMUNICATIONCHANNEL" } })], coreView());
     const manifest = buildWebManifest([contact], {}, { catalogs: [], operations: [] }, { COMMUNICATIONCHANNEL: [{ value: "phone", label: { en: "Phone", nl: "Telefoon" } }] });

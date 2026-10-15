@@ -19,6 +19,18 @@ const ajv = createOperationAjv();
 
 /** What Postgres hands the runtime for a column of this type, and what a handler might. */
 function storedValues(column: GeneratedCrudColumn): unknown[] {
+  // The bindings map has a shape of its own, which the schemas state exactly:
+  // a bound field's reference, or its authored template, and nothing else.
+  if (column.fieldBindings) {
+    const [first, second] = column.fieldBindings.fields;
+    return [
+      null,
+      {
+        ...(first ? { [first.field]: { kind: "whole", ref: "chips.company.phone" } } : {}),
+        ...(second ? { [second.field]: { kind: "template", source: "Call {{chips.company.phone}}" } } : {}),
+      },
+    ];
+  }
   switch (column.type) {
     case "uuid":
       return ["11111111-1111-4111-8111-111111111111"];

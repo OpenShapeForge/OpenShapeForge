@@ -30,6 +30,7 @@ jobs:
         ports:
           - 5434:5432
         options: >-
+          --init
           --health-cmd "pg_isready -U openshapeforge -d openshapeforge_dev"
           --health-interval 5s
           --health-timeout 3s

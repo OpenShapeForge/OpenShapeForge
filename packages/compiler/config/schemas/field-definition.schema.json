@@ -4,6 +4,10 @@
   "title": "Field Definition Schema",
   "$ref": "#/$defs/fieldDefinition",
   "$defs": {
+    "typedValue": {
+      "description": "Any JSON value. The FieldDefinition stored in the sibling a destination names with `typedBy` is the value contract; this position only says the column carries JSON. Referenced as the value schema of the `typedValue` osf type.",
+      "$comment": "Deliberately unconstrained: a constraint here would duplicate, and could contradict, the stored definition that actually types the value. null, 0, false and [] are real values."
+    },
     "localizedText": {
       "type": "object",
       "additionalProperties": false,
@@ -38,11 +42,12 @@
         "minItems": {
           "oneOf": [{ "type": "integer", "minimum": 0 }, { "$ref": "#/$defs/validationRule" }]
         },
+        "uniqueBy": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$", "not": { "enum": ["constructor", "prototype", "__proto__"] } },
         "min": {
-          "oneOf": [{ "type": "number" }, { "$ref": "#/$defs/validationRule" }]
+          "oneOf": [{ "type": "number" }, { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$", "maxLength": 1024 }, { "$ref": "#/$defs/validationRule" }]
         },
         "max": {
-          "oneOf": [{ "type": "number" }, { "$ref": "#/$defs/validationRule" }]
+          "oneOf": [{ "type": "number" }, { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$", "maxLength": 1024 }, { "$ref": "#/$defs/validationRule" }]
         },
         "pattern": {
           "oneOf": [{ "type": "string" }, { "$ref": "#/$defs/validationRule" }]
@@ -228,6 +233,7 @@
         "profile": { "type": "string", "minLength": 1 },
         "pinned": { "type": "boolean" },
         "locked": { "type": "boolean" },
+        "lockedKeys": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1, "not": { "enum": ["__proto__", "prototype", "constructor"] } } },
         "singleton": { "type": "boolean" },
         "visibleProperties": {
           "type": "array",
@@ -247,7 +253,7 @@
           "x-osf-i18n": { "title": { "en": "Component", "nl": "Component" } },
           "x-osf-choice": "component"
         },
-        "props": { "type": "object", "x-osf-i18n": { "title": { "en": "Properties", "nl": "Eigenschappen" } } }
+        "props": { "type": "object", "properties": { "decimalPlaces": { "type": "integer", "minimum": 0, "maximum": 20 }, "scale": { "type": "string", "enum": ["units", "thousands", "millions"] } }, "x-osf-i18n": { "title": { "en": "Properties", "nl": "Eigenschappen" } } }
       }
     },
     "fieldDefinition": {
@@ -261,7 +267,7 @@
       "type": "object",
       "required": ["key", "osfType"],
       "properties": {
-        "key": { "type": "string", "minLength": 1 },
+        "key": { "type": "string", "minLength": 1, "not": { "enum": ["__proto__", "prototype", "constructor"] } },
         "osfType": {
           "type": "string",
           "minLength": 1,
@@ -276,6 +282,11 @@
         "entityValue": {
           "type": "object", "additionalProperties": false, "required": ["definitionField"],
           "properties": { "definitionField": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" }, "parameterBindings": { "type": "boolean" } }
+        },
+        "typedBy": {
+          "type": "object", "additionalProperties": false, "required": ["definitionField"],
+          "description": "This field's value contract is the FieldDefinition stored in the named sibling field, compiled through the field-schema service. Requires osfType: typedValue, a single value, and a required single fieldDefinition sibling; both persist as jsonb. The shared entity write path validates the value against the stored definition on every create and update.",
+          "properties": { "definitionField": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" } }
         },
         "allowedDefinitions": {
           "type": "array", "minItems": 1, "uniqueItems": true,
@@ -665,7 +676,6 @@
           "then": {
             "not": {
               "anyOf": [
-                { "properties": { "required": {} }, "required": ["required"] },
                 { "properties": { "children": {} }, "required": ["children"] },
                 { "properties": { "item": {} }, "required": ["item"] }
               ]

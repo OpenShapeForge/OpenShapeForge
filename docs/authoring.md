@@ -418,6 +418,14 @@ Catalog files under `catalogs/` merge across authoring layers automatically
   entities, and the seven base types are not catalog entries. Resolution
   priority for render/validation: explicit field config → semantic type →
   base-type default → fallback.
+  An entry may also declare `children`, which is how a typed object value
+  (`measurement`, `numericRange`, `dateRange`, `coordinates`, `recurrence`)
+  carries its own shape instead of every field restating it. Add an entry when
+  the *meaning* carries validation or an identity a base type does not — so
+  that, for instance, an arbitrary `number` cannot fill a `percentage` and a
+  bound value cannot lose the unit it was measured in.
+  [field-acceptance-fixture.md](field-acceptance-fixture.md) walks the whole
+  catalogue of field value contracts, one authored field per entry.
 - **`components.yaml`** — the render-component catalog: default component per
   base type (string → `Input`, boolean → `Switch`, …), view defaults, and
   component definitions with their allowed props.
@@ -690,6 +698,122 @@ fields, keeping the customer record's identity, relationships and other fields.
 This initial contract supports scalar configuration records, not workflow graphs
 or other aggregates. Existing plugin-backed mutations cannot silently opt in.
 
+## Typed variables: a value typed at runtime, and a field bound to one
+
+Two halves of one contract. A **typed value** is a stored value whose type is
+not fixed by the catalog but by a FieldDefinition stored beside it; a **bound
+field** is an ordinary persisted field whose value comes from a variable
+instead of a literal. `Chip` is the authored example of the first (the tenant's
+global variables) and any field with `variables:` is the second.
+
+### `typedBy` — the value's contract is the definition stored beside it
+
+```yaml
+  - key: definition
+    osfType: fieldDefinition
+    required: true
+    persisted: { column: definition, storageClass: core }
+  - key: value
+    osfType: typedValue
+    required: true
+    typedBy: { definitionField: definition }
+    persisted: { column: value, storageClass: core }
+```
+
+The compiler checks that the named sibling is a **required, persisted, single
+`fieldDefinition`** field and that both halves persist as `jsonb`, and stamps
+the pair onto the manifest column. The shared entity write path then validates
+the value against that stored definition on every create and update, through
+the same field-schema service every stored definition goes through — a new
+value against the stored definition, a new definition against the stored
+value. `baseType: object` on `typedValue` is the storage and transport axis
+only: `null`, `0`, `false` and `[]` are real values, and the definition decides
+which of them are permitted. A NOT NULL column holds no `null` whatever the
+definition says.
+
+**The supported boundary.** A definition that arrives at runtime types a value
+inside one json column, so the protections the runtime enforces on *columns*
+cannot reach it: a classified column is redacted on read, an `immutable` one is
+owned by the protected-field writer, a reference column is authorized against
+the real target row. A typed value therefore **fails closed** on exactly what
+the entity-value runtime fails closed on, through the same shared guard: no
+`classification`, `authorization`, `permissions`, `secureInput`, `writtenBy` or
+`immutable` at any depth — authored on the field or inherited from its
+osf-type, which is why `email` and `phone` (pii in the catalog) are refused —
+no relationship, entity-typed value or nested deferred `typedValue`/`typedBy`, and no osf-type the registry does not
+know. On a write that is a `BAD_USER_INPUT` refusal naming the field; on a read
+of an already-stored definition it is refused as well, so a value this runtime
+cannot protect is never handed over. A variable that must carry a guarded or
+referencing value needs a field of its own, with the column the runtime can
+protect.
+
+A single definition editor may use `authoring.lockedKeys: [key]` to preserve
+the key from its carrier's `defaultValue`, while its type and other properties
+remain editable. Chip uses the default `{key: value, osfType: string, required:
+false}`; the API independently requires that paired definition key to be
+`value`. An authoring profile does not change whether the carrier itself is
+required.
+
+### `variables:` — the field that accepts a variable
+
+A persisted field that authors `variables: whole | template | both` is
+*bindable*. An entity with at least one bindable field gets one
+compiler-generated, server-owned `field_bindings` jsonb column: one map per
+record, keyed by authored field name, with a database CHECK that admits only
+that entity's bindable fields. It is not caller-writable — a body that carries
+it is refused rather than dropped — and create and update gain two controls
+beside `values`, on every interface:
+
+```jsonc
+"bindings": { "<bindableField>": "chips.<key>" | { "template": "… {{chips.<key>}} …" } },
+"unbind":   ["<bindableField>"]
+```
+
+`whole` takes the reference (the variable's own typed value becomes the field's
+value), `template` takes authored text whose `{{namespace.key}}` tokens are
+filled with each variable's formatted value, and a Markdown destination escapes
+every filled value as data. Two namespaces, always written out: `chips.<key>`
+is the tenant's Chip catalogue, each Chip typed by the definition stored beside
+its value, and `local.<key>` is another field of the same record, typed by that
+record's own compiled definition. Nothing is ever evaluated: a `{{…}}` sequence
+inside a *resolved value* stays text, and token-like text in a field that
+authors no mode stays literal.
+
+What the runtime guarantees:
+
+- **The binding and the value are stored separately.** The map is the author's
+  intent and survives; each value column holds what that binding resolved to at
+  the last write.
+- **Every live read resolves again**, under the reading actor and tenant,
+  through the source entity's own read Operation. A source that is gone, not
+  available to this reader, or no longer fitting the destination is a refusal
+  (`DEPENDENCY_UNRESOLVED` / `DEPENDENCY_INVALID`) — never a stale or widened
+  value.
+- **A literal clears that field's binding**; `unbind` resolves the source once
+  more and writes that value as a literal, so unbinding freezes what the source
+  says *now* rather than the column's possibly stale content.
+- **A bindable field is not a filter or a sort.** Its column holds the value of
+  the last write, which a later source change makes stale, so a query naming it
+  is refused instead of answered wrongly.
+- **Bounded.** A chain of local bindings has a maximum depth and refuses a
+  cycle; one template carries at most 64 variables; one request resolves at
+  most 100 source records, each distinct variable read once per request.
+
 ### Creation defaults from field templates
 
 A persisted string field may declare `defaultTemplate: "Budget {{fiscalYear.code}}"`. This creation-only default interpolates submitted scalar fields (`{{name}}`) or one belongs-to relationship (`{{fiscalYear.code}}`, where the reference field is `fiscalYearId`). Explicit caller values take precedence, including when copying a Blueprint. Missing or unreadable sources reject creation; references use the same tenant, read authorization and field projection as ordinary reads. No expressions, collections, chaining or executable code are accepted. Updates never recompute the value. Use `defaultValue` for literals; it cannot coexist with `defaultTemplate`.
+
+Live variable values are held to the destination's complete value schema on
+reads as well as writes. A later source update that exceeds its length or
+numeric bounds refuses the dependent read. Template expansion is limited to
+200,000 characters in addition to the token and source-read limits above.
+A field cannot receive both a literal and a binding in the same request.
+Required fields may arrive through a binding at transport input; after
+resolution the canonical value is required again.
+
+Local variable sources must be readable under the actor's column policy,
+including nested protection. Elicited secrets and reference-valued sources
+are refused. The runtime currently does not authorize referenced target
+records as variable sources; references therefore need ordinary reference
+fields instead. A hidden destination also withholds its authored binding,
+so resolving a live value cannot undo the field's normal redaction.

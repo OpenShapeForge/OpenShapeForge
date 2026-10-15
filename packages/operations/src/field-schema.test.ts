@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
-import { cardinalityOf, operationFieldObjectSchema, resolveFieldBaseType } from "./field-schema.js";
+import { cardinalityOf, operationFieldObjectSchema, resolveFieldBaseType, type OperationFieldDefinition } from "./field-schema.js";
+
+test("stored field definitions cannot reach object prototypes or unbounded recursive schemas", () => {
+  for (const key of ["__proto__", "prototype", "constructor"]) {
+    expect(() => operationFieldObjectSchema([{key,osfType:"string"}])).toThrow(/reserved/);
+    expect(() => operationFieldObjectSchema([{key:"parent",osfType:"object",children:[{key,osfType:"string"}]}])).toThrow(/reserved/);
+  }
+  const cyclic: OperationFieldDefinition = {key:"parent",osfType:"object"};
+  cyclic.children = [cyclic];
+  expect(() => operationFieldObjectSchema([cyclic])).toThrow(/nesting depth/);
+});
 
 test("entity semantic types retain their inferred target in parameter schemas", () => {
   const schema = operationFieldObjectSchema([{ key: "record", osfType: "ExampleRecord", required: true }], {
@@ -114,7 +124,9 @@ test("compiler-authored fields resolve their base from the single osfType axis",
   expect(schema).toMatchObject({
     required: ["count"],
     properties: {
-      count: { type: "integer" },
+      // A numeric property publishes both of its forms: the JSON number a
+      // form sends and the exact decimal text every transport projects.
+      count: { type: ["integer", "string"], pattern: "^-?(?:0|[1-9][0-9]*)$", "x-osf-exact": { integer: true } },
       note: { type: "string", maxLength: 80 },
       record: { type: "string", format: "uuid", "x-osf-reference": { entity: "ExampleRecord" } },
       address: { type: "object", properties: { street: { type: "string" } }, required: ["street"] },
@@ -130,19 +142,32 @@ test("an enumeration on a typed field carries its values in that type", () => {
     { key: "code", osfType: "string", options: { type: "static", items: [{ value: "1", label: "One" }] } },
   ], {});
   const properties = schema.properties as Record<string, Record<string, unknown>>;
-  expect(properties.priority).toMatchObject({ type: "integer", enum: [1, 2] });
-  expect(properties.ratio).toMatchObject({ type: "number", enum: [0.5] });
+  // A numeric domain is carried by the exact comparison, in both of the forms
+  // its value is projected in, so it is not in `enum` — see field-schema-metadata.
+  expect(properties.priority).toMatchObject({
+    type: ["integer", "string"], "x-osf-exact": { integer: true, enum: ["1", "2"] },
+  });
+  expect(properties.priority!.enum).toBeUndefined();
+  expect(properties.ratio).toMatchObject({ type: ["number", "string"], "x-osf-exact": { enum: ["0.5"] } });
   expect(properties.flag).toMatchObject({ type: "boolean", enum: [true, false] });
   expect(properties.code).toMatchObject({ type: "string", enum: ["1"] });
+  // The authored values stay readable beside the domain.
+  expect(properties.priority!.description).toContain("1 (Low), 2 (High)");
 });
 
-test("an enumeration value that does not convert exactly to the field's type is refused", () => {
+test("an enumeration value that is not of the field's type is refused", () => {
   const withOptions = (osfType: string, value: string) => () => operationFieldObjectSchema([{ key: "v", osfType, options: { type: "static", items: [{ value, label: "x" }] } }], {});
   expect(withOptions("boolean", "yes")).toThrow("is not a boolean");
-  expect(withOptions("integer", "1.5")).toThrow("is not a safe integer");
-  expect(withOptions("integer", "9007199254740993")).toThrow("is not a safe integer");
-  expect(withOptions("number", "abc")).toThrow("is not a finite number");
+  expect(withOptions("integer", "1.5")).toThrow("is not an integer");
+  expect(withOptions("number", "abc")).toThrow("is not a number");
   expect(withOptions("integer", " 7 ")).not.toThrow();
+  // An integer beyond IEEE range is exact as text and keeps every digit: the
+  // domain is compared decimally, never through a double.
+  const big = operationFieldObjectSchema([{
+    key: "v", osfType: "integer", options: { type: "static", items: [{ value: "9007199254740993", label: "x" }] },
+  }], {});
+  expect(((big.properties as Record<string, Record<string, unknown>>).v!["x-osf-exact"] as Record<string, unknown>).enum)
+    .toEqual(["9007199254740993"]);
 });
 
 test("an empty English label does not hide the Dutch one", () => {
@@ -237,4 +262,23 @@ test("a catalog type's optionSource is the default choice source; authored optio
   expect(properties.state!["x-osf-reference"]).toBeUndefined();
   expect(properties.authored!.enum).toEqual(["x"]);
   expect(properties.authored!["x-osf-reference"]).toBeUndefined();
+});
+
+
+test("canonical presentation merges type defaults with authored props without touching exact value schemas", () => {
+  const registry = {osfTypes: {currency: {baseType: "number" as const, render:{component:"MoneyInput",props:{currency:"EUR",decimalPlaces:2,scale:"units"}}}}};
+  const definitions = [{key:"amount",osfType:"currency",render:{props:{decimalPlaces:0,scale:"millions"}}}];
+  const schema = operationFieldObjectSchema(definitions, registry);
+  expect(schema).toMatchObject({properties:{amount:{type:["number","string"],"x-osf-presentation":{component:"MoneyInput",props:{currency:"EUR",decimalPlaces:0,scale:"millions"}}}}});
+  expect(registry.osfTypes.currency.render.props.scale).toBe("units");
+  expect(definitions[0]!.render.props).toEqual({decimalPlaces:0,scale:"millions"});
+  const collection = operationFieldObjectSchema([{...definitions[0]!,cardinality:"collection"}],registry);
+  expect(collection).toMatchObject({properties:{amount:{type:"array","x-osf-presentation":{component:"MoneyInput"},items:{"x-osf-presentation":{component:"MoneyInput"}}}}});
+});
+
+
+test("raw authoring catalogue render input/display and sibling props project into one presentation", () => {
+  const registry = {osfTypes:{currency:{baseType:"number" as const,render:{input:"MoneyInput",display:"MoneyInput"},props:{currency:"EUR",decimalPlaces:2,scale:"units"}}}};
+  expect(operationFieldObjectSchema([{key:"amount",osfType:"currency",render:{props:{decimalPlaces:0}}}],registry))
+    .toMatchObject({properties:{amount:{"x-osf-presentation":{component:"MoneyInput",props:{currency:"EUR",decimalPlaces:0,scale:"units"}}}}});
 });

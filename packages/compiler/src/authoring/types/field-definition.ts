@@ -237,6 +237,8 @@ export interface FieldDefinitionAuthoringMetadata {
   profile?: string;
   pinned?: boolean;
   locked?: boolean;
+  /** Properties fixed to the carrier's authored default while other definition properties remain editable. */
+  lockedKeys?: string[];
   singleton?: boolean;
   visibleProperties?: string[];
 }
@@ -263,6 +265,8 @@ export interface FieldDefinition {
   sortable?: boolean;
   /** A typed embedded entity value; relational leaves are lowered to real foreign keys. */
   entityValue?: { definitionField: string; parameterBindings?: boolean };
+  /** This value's contract is the FieldDefinition stored in the named sibling field. */
+  typedBy?: { definitionField: string };
   /** Allowed entity-value definitions on this relationship collection. */
   allowedDefinitions?: string[];
   /**
@@ -366,7 +370,7 @@ export interface FieldDefinitionOsfType {
   cardinality?: FieldDefinitionCardinality;
   validation?: FieldDefinitionValidation;
   options?: FieldOptions;
-  schema?: { $ref: string };
+  schema?: Record<string, unknown>;
   render?: {
     display?: string;
     input?: string;

@@ -49,6 +49,7 @@ export function resolveModelFields(
       render: resolveRender(field, componentCatalog, semType),
       osfType: field.osfType,
     };
+    if (field.authoring) compiled.authoring = structuredClone(field.authoring);
     if (field.transform) compiled.transform = field.transform.map(step => ({ ...step }));
     if (field.readOnly) compiled.readOnly = true;
     if (field.writeSource) compiled.writeSource = field.writeSource;
@@ -77,6 +78,7 @@ export function resolveModelFields(
     if (field.variables) compiled.variables = field.variables;
     if (field.sortable) compiled.sortable = field.sortable;
     if (field.entityValue) compiled.entityValue = { ...field.entityValue };
+    if (field.typedBy) compiled.typedBy = { ...field.typedBy };
     if (field.allowedDefinitions) compiled.allowedDefinitions = [...field.allowedDefinitions].sort();
     if (field.childAuthorization) compiled.childAuthorization = field.childAuthorization;
     if (field.childLock) compiled.childLock = field.childLock;

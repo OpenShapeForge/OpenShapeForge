@@ -20,7 +20,7 @@ import { toHttpError } from "../../rest/http-error.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { createCollectionMutationExecutor, type CollectionMutationBinding } from "./collection-mutations.js";
 import { assertPublishableRelatedMutationInTransaction } from "./derived-execution-guards.js";
-import { updateGeneratedEntityForTable } from "./mutations.js";
+import { mergeGeneratedEntityObjectForTable, updateGeneratedEntityForTable } from "./mutations.js";
 import type { EntityOperationContract, GeneratedCrudColumn, GeneratedCrudTable } from "./types.js";
 
 const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -166,7 +166,7 @@ function fixture() {
       column("owner_user_id", "uuid", { sourceField: "ownerUserId", required: false }),
       column("values", "jsonb", { sourceField: "values" }),
     ],
-    source: { authoringEntityName: "Connection", graphql: { typeName: "Connection", relationships: [] } },
+    source: { authoringEntityName: "Connection", graphql: { typeName: "Connection", singleQueryName: "svcConnection", relationships: [] } },
   } as unknown as GeneratedCrudTable;
   const operations = structuredClone(
     (rawCatalog as unknown as { entityOperations: EntityOperationContract[] }).entityOperations
@@ -378,6 +378,21 @@ const fails = (promise: Promise<unknown>, code: string) =>
       ),
       "NOT_PUBLISHABLE",
     );
+  });
+
+  test("OAuth token merge preserves configuration through published-owner validation", async () => {
+    const seeded = await seed(1);
+    const context = { tables: seeded.f.catalogTables, derivedTools: [ENTRY] };
+    await mergeGeneratedEntityObjectForTable(restricted!.db, { ...session, roles: [] }, seeded.f.connection,
+      seeded.connectionId, "values", { accessToken: "synthetic-oauth-token" }, context);
+    const saved = (await sql<{ values: Record<string, unknown> }>`select values from public.svc_connections
+      where id = ${seeded.connectionId}::uuid`.execute(privileged!.db)).rows[0]!.values;
+    expect(saved).toEqual({ token: "t", accessToken: "synthetic-oauth-token" });
+    // The same boundary still rejects removing a required provider credential.
+    await fails(mergeGeneratedEntityObjectForTable(restricted!.db, session, seeded.f.connection,
+      seeded.connectionId, "values", { token: null }, context), "NOT_PUBLISHABLE");
+    expect((await sql<{ values: Record<string, unknown> }>`select values from public.svc_connections
+      where id = ${seeded.connectionId}::uuid`.execute(privileged!.db)).rows[0]!.values).toEqual(saved);
   });
 
   test("retargeting a connection off a published owner's provider is NOT_PUBLISHABLE", async () => {

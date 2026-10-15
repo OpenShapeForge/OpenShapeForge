@@ -69,6 +69,18 @@ export const ENTITY_RUNTIME_ERRORS = {
     row(409, "LEASE_INVALID", "The edit lease is invalid, expired, or belongs to another identity."),
     row(409, "LEASE_EXPIRED", "The edit lease expired before the write."),
   ],
+  /**
+   * The entity has a field that accepts a variable. Every live read resolves
+   * the bindings a record carries, under the reading actor and tenant, so a
+   * source that is gone, withheld from this reader or no longer fitting the
+   * field it fills is refused there — a stale or widened value is never
+   * returned. A write refuses the same situations as a VALIDATION of the
+   * binding it was asked to store.
+   */
+  fieldBindings: [
+    row(409, "DEPENDENCY_UNRESOLVED", "A variable a field is bound to is not available to this caller."),
+    row(409, "DEPENDENCY_INVALID", "A variable a field is bound to no longer fits the field it fills."),
+  ],
   /** confirmation.mode other than none. */
   confirmation: [
     row(428, "CONFIRMATION_REQUIRED", "This Operation requires confirmation controls."),

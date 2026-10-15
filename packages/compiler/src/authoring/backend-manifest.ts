@@ -40,7 +40,8 @@ import { ensureDerivedIdentifierIndexes, resolveDerivedOnCreateBindings } from "
 import { compileFieldValuePolicy, fieldValuePolicySchema } from "./field-value-policy.js";
 import { compiledFieldSchema } from "../field-json-schema.js";
 import type { CoreReferentiedataSnapshot } from "../core-referentiedata-artifacts.js";
-import { assertDefaultSatisfiesContract, fieldValueCheckConstraints } from "./field-value-checks.js";
+import { assertDefaultSatisfiesContract, fieldBindingsCheckConstraint, fieldValueCheckConstraints } from "./field-value-checks.js";
+import { FIELD_BINDINGS_COLUMN } from "@openshapeforge/operations";
 import { TENANT_IDENTITY_CHECK_EXPRESSION, hasTenantIdentityCheck, tenantIdentityCheckName } from "../tenant-bound-references.js";
 
 /**
@@ -1398,6 +1399,40 @@ export function compileAuthoringBackendManifest(
       columnsByField.set(storageColumn.field, column);
     }
 
+    // The typed-value pair, resolved to columns: the runtime reads the stored
+    // definition out of its own column and validates the value against it.
+    // Both halves are JSON by construction (`typedValue` and `fieldDefinition`
+    // are object types); the manifest asserts it rather than assuming it.
+    for (const field of candidate.contract.model.fields) {
+      if (!field.typedBy) continue;
+      const value = columnsByField.get(field.key);
+      const definition = columnsByField.get(field.typedBy.definitionField);
+      if (!value || !definition || value.type !== "jsonb" || definition.type !== "jsonb") {
+        throw new Error(
+          `[${candidate.contract.entity.name}] ${field.key}: typedBy requires a jsonb value column and a jsonb definition column.`,
+        );
+      }
+      value.typedBy = { definitionField: field.typedBy.definitionField, definitionColumn: definition.name };
+    }
+
+    // One server-owned bindings map per bindable entity: the fields that
+    // author a variable mode, with the mode each one authored. A field is
+    // bindable only where it is persisted, because a binding is stored
+    // beside the value it resolved to.
+    const bindableFields = candidate.contract.model.fields
+      .filter((field): field is typeof field & { variables: "whole" | "template" | "both" } =>
+        field.variables !== undefined && field.variables !== "none" && columnsByField.has(field.key))
+      .map((field) => ({ field: field.key, column: columnsByField.get(field.key)!.name, variables: field.variables }))
+      .sort((left, right) => left.field.localeCompare(right.field));
+    if (bindableFields.length > 0) {
+      if (columns.some((column) => column.name === FIELD_BINDINGS_COLUMN)) {
+        throw new Error(
+          `[${candidate.contract.entity.name}] the ${FIELD_BINDINGS_COLUMN} column is owned by the field-binding runtime and cannot be authored.`,
+        );
+      }
+      columns.push({ name: FIELD_BINDINGS_COLUMN, type: "jsonb", fieldBindings: { fields: bindableFields } });
+    }
+
     const idIndex = columns.findIndex((column) => column.name === "id");
     const existingTenantColumn = columns.find((column) => column.name === "tenant_id");
     if (tenantScoped && existingTenantColumn) {
@@ -1489,6 +1524,9 @@ export function compileAuthoringBackendManifest(
       field: candidate.fieldsByKey.get(storageColumn.field),
       column: columnsByField.get(storageColumn.field)!,
     })));
+    if (bindableFields.length > 0) {
+      valueChecks.push(fieldBindingsCheckConstraint(schema, name, FIELD_BINDINGS_COLUMN, bindableFields.map(({ field }) => field)));
+    }
 
     return {
       schema,

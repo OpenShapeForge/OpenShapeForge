@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { operationFailure } from "@openshapeforge/operations";
+import { operationFailure, blueprintPresentation } from "@openshapeforge/operations";
 import { sql } from "kysely";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
@@ -38,11 +38,14 @@ function text(input: Record<string, unknown>, key: string): string {
 function allowedValues(table: GeneratedCrudTable, values: Record<string, unknown>) {
   return Object.fromEntries(policy(table).fields.map(field => [field, values[field] ?? null]));
 }
-async function readPublished(db: OpenShapeForgeDatabase, session: DbSessionInput, table: GeneratedCrudTable, blueprintId: string | null, search = "", limit = 51, offset = 0): Promise<Published[]> {
+function isRetired(source: Published): boolean {
+  return (source.values_json.$presentation as { retired?: boolean } | undefined)?.retired === true;
+}
+async function readPublished(db: OpenShapeForgeDatabase, session: DbSessionInput, table: GeneratedCrudTable, blueprintId: string | null, search = "", limit = 51, offset = 0, includeRetiredForCopy = false): Promise<Published[]> {
   policy(table);
   requireWriter(table, session);
   return withDbSession(db, session, async trx => (await sql<Published>`
-    select * from app.read_blueprints(${nameOf(table)}, ${blueprintId}, ${search}, ${limit}, ${offset})
+    select * from app.read_blueprints(${nameOf(table)}, ${blueprintId}, ${search}, ${limit}, ${offset}, ${includeRetiredForCopy})
   `.execute(trx)).rows);
 }
 function graphTable(entity: string): GeneratedCrudTable {
@@ -159,9 +162,9 @@ async function status(db: OpenShapeForgeDatabase, session: DbSessionInput, table
   return withDbSession(db, session, async trx => {
     const copy = (await sql<{ blueprint_tenant_id: string; blueprint_id: string; source_version: number }>`select blueprint_tenant_id, blueprint_id, source_version from platform.blueprint_copies where tenant_id = ${session.tenantId}::uuid and entity_name = ${nameOf(table)} and record_id = ${id}::uuid`.execute(trx)).rows[0];
     if (!copy) return { source: null, updateAvailable: false };
-    const source = (await readPublished(db, session, table, copy.blueprint_id))[0];
+    const source = (await readPublished(db, session, table, copy.blueprint_id, "", 1, 0, true))[0];
     if (!source || source.tenant_id !== copy.blueprint_tenant_id) return { source: null, updateAvailable: false };
-    return { source: { blueprintId: copy.blueprint_id, version: copy.source_version, latestVersion: source.version, label: source.label }, updateAvailable: policy(table).mode !== "copy" && source.version > copy.source_version };
+    return { source: { blueprintId: copy.blueprint_id, version: copy.source_version, latestVersion: source.version, label: source.label }, updateAvailable: policy(table).mode !== "copy" && source.version > copy.source_version && !isRetired(source) };
   });
 }
 async function reset(db: OpenShapeForgeDatabase, session: DbSessionInput, table: GeneratedCrudTable, input: Record<string, unknown>) {
@@ -171,8 +174,9 @@ async function reset(db: OpenShapeForgeDatabase, session: DbSessionInput, table:
   return withDbSession(db, session, async trx => {
     const copy = (await sql<{ blueprint_tenant_id: string; blueprint_id: string }>`select blueprint_tenant_id, blueprint_id from platform.blueprint_copies where tenant_id = ${session.tenantId}::uuid and entity_name = ${nameOf(table)} and record_id = ${id}::uuid for update`.execute(trx)).rows[0];
     if (!copy) throw generatedCrudError("Record has no blueprint source.", "NOT_FOUND");
-    const source = (await readPublished(db, session, table, copy.blueprint_id))[0];
+    const source = (await readPublished(db, session, table, copy.blueprint_id, "", 1, 0, true))[0];
     if (!source || source.tenant_id !== copy.blueprint_tenant_id) throw generatedCrudError("Blueprint is unavailable.", "NOT_FOUND");
+    if (isRetired(source)) throw generatedCrudError("The blueprint is retired and cannot be reset.", "BAD_USER_INPUT");
     if (source.version !== input.blueprintVersion) throw generatedCrudError("The blueprint has changed. Review its newest version first.", "VERSION_CONFLICT");
     // The canonical static executor checks the record version, edit lease and
     // confirmation in this same transaction before entering the handler.
@@ -202,6 +206,12 @@ async function publish(db: OpenShapeForgeDatabase, session: DbSessionInput, tabl
     const last = (await sql<{ version: number; values_json: Record<string, unknown>; source_record_id: string }>`select version, values_json, source_record_id from platform.blueprint_versions where tenant_id = ${session.tenantId}::uuid and entity_name = ${nameOf(table)} and blueprint_id = ${blueprintId} order by version desc limit 1`.execute(trx)).rows[0];
     if (last && last.source_record_id !== input.id) throw generatedCrudError("This blueprint identifier belongs to another record.", "BAD_USER_INPUT");
     const values = allowedValues(table, fields);
+    try {
+      const presentation=blueprintPresentation(input,last?.values_json.$presentation);
+      if(Object.keys(presentation).length)values.$presentation=presentation;
+    } catch(error) {
+      throw generatedCrudError(error instanceof Error?error.message:'Invalid blueprint presentation.', 'BAD_USER_INPUT');
+    }
     if (blueprint.include?.length) {
       const records: BlueprintGraphRecord[] = [];
       await snapshotChildren(db, session, table, text(input, "id"), blueprint.include, records);
@@ -249,7 +259,7 @@ export function blueprintOperationHandler(handler: string): ModuleOperationHandl
       const offset = input.cursor ? Number(input.cursor) : 0;
       if (!Number.isInteger(offset) || offset < 0 || offset > 10000) throw generatedCrudError("Invalid blueprint cursor.", "BAD_USER_INPUT");
       const rows = await readPublished(context.db, context.session, table, null, typeof input.search === "string" ? input.search : "", limit + 1, offset);
-      value = { items: rows.slice(0, limit).map(row => ({ blueprintId: row.blueprint_id, label: row.label, version: row.version, description: typeof row.values_json.description === "string" ? row.values_json.description : "", preview: (Array.isArray(row.values_json.$graph) ? row.values_json.$graph as BlueprintGraphRecord[] : []).filter(record => record.references[policy(table).include?.[0]?.via ?? ""]?.entity === nameOf(table)).slice(0, 20).map(record => record.values[policy(table).include?.find(include => include.entity === record.entity)?.fields[0] ?? ""] ?? "").filter((value): value is string => typeof value === "string") })), nextCursor: rows.length > limit ? String(offset + limit) : null };
+      value = { items: rows.slice(0, limit).map(row => ({ blueprintId: row.blueprint_id, label: row.label, version: row.version, ...((row.values_json.$presentation as {thumbnail?:string}|undefined)?.thumbnail ? {thumbnail:(row.values_json.$presentation as {thumbnail:string}).thumbnail} : {}), description: typeof row.values_json.description === "string" ? row.values_json.description : "", preview: (Array.isArray(row.values_json.$graph) ? row.values_json.$graph as BlueprintGraphRecord[] : []).filter(record => record.references[policy(table).include?.[0]?.via ?? ""]?.entity === nameOf(table)).slice(0, 20).map(record => record.values[policy(table).include?.find(include => include.entity === record.entity)?.fields[0] ?? ""] ?? "").filter((value): value is string => typeof value === "string") })), nextCursor: rows.length > limit ? String(offset + limit) : null };
     } else if (action === "status") value = await status(context.db, context.session, table, text(input, "id"));
     else if (action === "reset") value = await reset(context.db, context.session, table, input);
     else value = await publish(context.db, context.session, table, input);

@@ -305,3 +305,9 @@ describe("provider failure hints", () => {
     expect(boundary.providerFailureHint(error)).toBeUndefined();
   });
 });
+
+it("enforces exact numeric bounds for text and number values", () => {
+  const v = new ConnectorContractBoundary({ slug: "bounded", checksum: "test", implementation: { contractVersion: 1 }, operations: [{ key: "bounded", schemas: { input: { type: "object", properties: { amount: { type: ["integer", "string"], minimum: 1, maximum: 10, "x-osf-exact": { minimum: "1", maximum: "10" } } }, required: ["amount"] }, output: { type: "object", properties: { amount: { type: ["integer", "string"], minimum: 1, maximum: 10, "x-osf-exact": { minimum: "1", maximum: "10" } } }, required: ["amount"] } } }] });
+  for (const amount of [1, 10, "1", "10"]) expect(() => v.assertValidInput("bounded", { amount })).not.toThrow();
+  for (const amount of [0, 11, "0", "11", "999999"]) expect(() => v.assertValidInput("bounded", { amount })).toThrow();
+});

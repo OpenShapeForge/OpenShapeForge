@@ -91,22 +91,6 @@ export function findExistingConfiguration(
 }
 
 /**
- * Merge a submission into the values a row already holds: every submitted
- * key replaces the stored value under that key (a secret submitted again is
- * the new secret, once), keys the form did not carry stay as they were.
- */
-export function mergeConfigurationValues(
-  existing: unknown,
-  submitted: JsonRecord,
-): JsonRecord {
-  const base =
-    existing && typeof existing === "object" && !Array.isArray(existing)
-      ? (existing as JsonRecord)
-      : {};
-  return { ...base, ...submitted };
-}
-
-/**
  * Why a browser handoff failed, as a bounded name for the server log. The
  * request logger redacts every error to its class, which is right for
  * messages (a provider's or the database's text can carry personal data)

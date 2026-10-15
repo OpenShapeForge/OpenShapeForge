@@ -7,5 +7,6 @@ export type { WebRestOperation, WebOperationOpenApi } from "./rest-operation-map
 
 export * from "./localization.js";
 export * from "./ui-messages.js";
+export * from "./session-recovery.js";
 
 export { missingLocalizedMetadata } from "./localization.js";

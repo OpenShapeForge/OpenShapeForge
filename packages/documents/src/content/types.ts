@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import type { FieldVariableMode } from "@openshapeforge/operations";
 import type { JsonObject, JsonValue } from "./json.js";
 
 export type ContentCardinality =
@@ -9,12 +10,20 @@ export type ContentCardinality =
 /** Resolved metadata, supplied by the compiler; semantic types are not re-registered here. */
 export type ContentValueShape = {
   readonly osfType?: string;
+  readonly unit?: string;
+  readonly currency?: string;
   readonly baseType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   readonly cardinality?: ContentCardinality;
   readonly required?: boolean;
   readonly nullable?: boolean;
   readonly enum?: readonly JsonValue[];
   readonly fields?: Readonly<Record<string, ContentValueShape>>;
+  /**
+   * Whether this value accepts a variable instead of a literal, as the field
+   * authored it. Absent is `none`: a `{{…}}` sequence in such a value is
+   * text, not a binding (see ./variables.ts).
+   */
+  readonly variables?: FieldVariableMode;
 };
 
 export type ContentField = ContentValueShape & {
@@ -89,6 +98,14 @@ export type ContentResolvedVariable = {
   readonly tenantId: string;
   readonly sourceId: string;
   readonly sourceVersionId: string;
+  /**
+   * The contract the global's own source declares for its value, read with
+   * the value itself under the adapter's authorization. A global is typed by
+   * its stored definition rather than by the namespace it lives in, so the
+   * shape travels with every resolution and is frozen into the snapshot
+   * beside the source identity it came from.
+   */
+  readonly shape: ContentValueShape;
   readonly value: JsonValue;
 };
 

@@ -21,13 +21,15 @@ const carrier: RuntimeEntityValueCarrier = {
   valuesColumn: "values", definitionColumn: "definition_key",
   definitions: {
     TextBlock: {
-      entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true }],
+      // As authored: a text body holds a template, an inclusion binds its
+      // version and parameters whole.
+      entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true, variables: "template" }],
       valueSchema: { type: "object", properties: { markdown: { type: "string", minLength: 1 } }, required: ["markdown"], additionalProperties: false },
       references: [], materializeOperationId: "TextBlock.materialize",
     },
     IncludeBlock: {
       entityName: "IncludeBlock", schemaVersion: 1, definitionHash: "b".repeat(64),
-      fields: [{ key: "version", osfType: "TemplateVersion", baseType: "string", required: true, relationship: { target: "TemplateVersion" } }, { key: "parameters", osfType: "object", baseType: "object" }],
+      fields: [{ key: "version", osfType: "TemplateVersion", baseType: "string", required: true, variables: "whole", relationship: { target: "TemplateVersion" } }, { key: "parameters", osfType: "object", baseType: "object", variables: "both" }],
       valueSchema: { type: "object", properties: { parameters: { type: "object" } }, additionalProperties: false },
       references: [{ fieldKey: "version", targetEntity: "TemplateVersion", schema: "erp", table: "template_versions", column: "include_version_id", required: true }],
       materializeOperationId: "IncludeBlock.compose",
@@ -105,7 +107,12 @@ function fixture(options: {
       schemas: {
         entityValues: { get: () => carrier, collection: (entity: string) => ({ targetEntity: "Block", allowedDefinitions: entity === "DocumentVariant" ? ["TextBlock", "IncludeBlock"] : ["TextBlock", "IncludeBlock"] }) },
         fields: {
-          object: () => ({ type: "object", properties: { name: { type: "string", default: "Reader" } } }),
+          // One field-schema service: template parameters, and the stored
+          // FieldDefinition a Chip carries for its own value.
+          object: (fields: readonly Record<string, unknown>[]) =>
+            fields.length === 1 && fields[0]!.key === "value"
+              ? { type: "object", required: ["value"], properties: { value: { type: "string", "x-osf-type": "multilineText" } } }
+              : { type: "object", properties: { name: { type: "string", default: "Reader" } } },
           validateObject(_fields: unknown, values: unknown) { validated.push(values); return { valid: true }; },
         },
         json: { validate: () => ({ valid: true }) },
@@ -140,7 +147,9 @@ function fixture(options: {
           if (request.operation.intent === "get") {
             reads.push(`${request.operation.entityName}:${request.input.id}`);
             const base = { id: request.input.id, tenantId: ids.tenant, updatedAt: "2026-01-01T00:00:00Z" };
-            if (request.operation.entityName === "Chip") return { data: { ...base, key: "brand", value: data.chip }, operations: [] };
+            if (request.operation.entityName === "Chip") {
+              return { data: { ...base, key: "brand", definition: { key: "value", osfType: "multilineText", required: true, label: { en: "Value" } }, value: data.chip }, operations: [] };
+            }
             if (request.input.id === ids.version) {
               const frozenBlock = { id: ids.templateBlock, tenant_id: ids.tenant, variant_id: ids.templateVariant, variant_id_position: 0, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.frozenText } };
               return { data: { ...base, template: ids.template, versionNumber: 3, snapshot: templateSnapshot(ids.template, ids.templateVariant, [frozenBlock]) }, operations: [] };

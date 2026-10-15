@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { cardinalityOf, type ResolvedCardinality } from "@openshapeforge/operations";
+import { cardinalityOf, matchesBaseType, type ResolvedCardinality } from "@openshapeforge/operations";
 import { contentError } from "./errors.js";
 import {
   canonicalJson,
@@ -94,28 +94,11 @@ function validateShape(shape: ContentValueShape) {
 }
 
 function validateScalar(value: JsonValue, shape: ContentValueShape, field: string) {
-  const validDate = (value: string) =>
-    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
-    Number.isFinite(Date.parse(value)) &&
-    new Date(value).toISOString().slice(0, 10) === value;
-  const valid =
-    shape.baseType === "object"
-      ? typeof value === "object" && value !== null && !Array.isArray(value)
-      : shape.baseType === "integer"
-        ? Number.isSafeInteger(value)
-        : shape.baseType === "number"
-          ? typeof value === "number" && Number.isFinite(value)
-          : shape.baseType === "date"
-            ? typeof value === "string" && validDate(value)
-            : shape.baseType === "datetime"
-              ? typeof value === "string" &&
-                validDate(value.slice(0, 10)) &&
-                /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
-                  value,
-                ) &&
-                Number.isFinite(Date.parse(value))
-              : typeof value === shape.baseType;
-  if (!valid) contentError("INVALID_VALUE", `${field} must have base type ${shape.baseType}.`);
+  // The one reading of a base type, shared with the typed-variable contract:
+  // a template refuses exactly the value an entity write would refuse.
+  if (!matchesBaseType(shape.baseType, value)) {
+    contentError("INVALID_VALUE", `${field} must have base type ${shape.baseType}.`);
+  }
   if (shape.enum && !shape.enum.some((item) => canonicalJson(item) === canonicalJson(value))) {
     contentError("INVALID_VALUE", `${field} is not an allowed value.`);
   }

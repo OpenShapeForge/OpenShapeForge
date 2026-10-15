@@ -1,6 +1,69 @@
 // SPDX-License-Identifier: BUSL-1.1
 export { FIELD_ITEM_ID, type FieldValuePolicy } from "./field-value-policy.js";
-export { operationChoiceKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword, operationTypeKeyword } from "./schema-annotations.js";
+export { operationChoiceKeyword, operationExactNumericKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword, operationTypeKeyword, operationVariablesKeyword } from "./schema-annotations.js";
+export type { ExactDecimal, ExactNumericBounds, ExactNumericViolation } from "./exact-numeric.js";
+export {
+  compareExactNumeric, exactNumericRule,
+  exactDecimal,
+  exactNumericEquals,
+  exactNumericViolation,
+  isExactDecimalText,
+  isExactIntegerText,
+  isExactWholeNumber,
+  MAX_EXACT_NUMERIC_LENGTH,
+} from "./exact-numeric.js";
+export type {
+  FieldVariableMode,
+  VariableCatalogue,
+  VariableCompatibility,
+  VariableNamespace,
+  VariableNamespaceSource,
+  VariableOffer,
+  VariableReference,
+  VariableRefusalCode,
+  VariableScope,
+  VariableSlot,
+  VariableUsage,
+  VariableValueShape,
+} from "./field-variables.js";
+export {
+  assertVariableCompatible,
+  assertVariableSourceValue,
+  assertVariableUsagePermitted,
+  compatibleVariableOffers,
+  FIELD_VARIABLE_MODES,
+  fieldVariableSlot,
+  isFieldVariableMode,
+  matchesBaseType,
+  parseVariableReference,
+  permitsVariableUsage,
+  MAX_VARIABLE_REFERENCE_LENGTH,
+  VARIABLE_NAMESPACE_SCOPES,
+  VARIABLE_NAMESPACES,
+  VARIABLE_REFERENCE_PATTERN,
+  VARIABLE_TOKEN,
+  VariableError,
+  variableCompatibility,
+  variableOffer,
+  variableOffers,
+  variableText,
+  variableTokens,
+  wholeVariableExpression,
+  declaredVariableOffer,
+  escapeMarkdownVariableText,
+  isDeclaredVariableNamespace,
+} from "./field-variables.js";
+export type { FieldBinding, FieldBindingMap } from "./field-bindings.js";
+export {
+  bindingKindPermitted,
+  fieldBindingMap,
+  FIELD_BINDINGS_COLUMN,
+  FIELD_BINDINGS_FIELD,
+  isFieldBinding,
+  MAX_BINDING_TEMPLATE_LENGTH,
+} from "./field-bindings.js";
+export type { SchemaVariableShapeOptions } from "./variable-schema.js";
+export { schemaVariableMode, schemaVariableShape, schemaVariableSlot } from "./variable-schema.js";
 
 export type {
   OperationEnvelope,
@@ -114,3 +177,9 @@ export { DECIMAL_PATTERN, decimalText, INTEGER_TEXT_PATTERN, isScalarType, SCALA
 export type { EntityRuntimeError, EntityRuntimeErrorSituation } from "./entity-runtime-errors.js";
 export { ENTITY_RUNTIME_ERRORS, ENTITY_RUNTIME_ERROR_STATUS } from "./entity-runtime-errors.js";
 export { defaultTemplatePaths, renderDefaultTemplate } from './default-template.js';
+
+export { formatMoneyDisplay, formatNumericDisplay, type MoneyDisplay, type NumericDisplay } from "./money-display.js";
+export { operationFieldMetadataKeywords } from "./schema-annotations.js";
+
+export { valueInvariantKeywords, orderedFieldsKeyword, uniqueByKeyword, timeZoneKeyword, isIanaTimeZone } from "./value-invariants.js";
+export { BLUEPRINT_THUMBNAIL_MAX_BYTES, BLUEPRINT_THUMBNAIL_MAX_LENGTH, BLUEPRINT_THUMBNAIL_PATTERN, isBlueprintThumbnail, blueprintPresentation, type BlueprintPresentationSnapshot } from './blueprint-presentation.js';

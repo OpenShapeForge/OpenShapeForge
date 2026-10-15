@@ -2043,16 +2043,36 @@
               "x-osf-choice": "field"
             },
             "render": {
-              "type": "string",
-              "minLength": 1,
+              "oneOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Component",
+                      "nl": "Component"
+                    },
+                    "description": {
+                      "en": "The component that draws this field here, instead of the field's default.",
+                      "nl": "Het component dat dit veld hier tekent, in plaats van de standaard van het veld."
+                    }
+                  },
+                  "x-osf-choice": "component"
+                },
+                {
+                  "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/render"
+                }
+              ],
               "x-osf-i18n": {
-                "title": { "en": "Component", "nl": "Component" },
+                "title": {
+                  "en": "Component",
+                  "nl": "Component"
+                },
                 "description": {
                   "en": "The component that draws this field here, instead of the field's default.",
                   "nl": "Het component dat dit veld hier tekent, in plaats van de standaard van het veld."
                 }
-              },
-              "x-osf-choice": "component"
+              }
             },
             "fieldDisplayMode": {
               "enum": ["hidden"],

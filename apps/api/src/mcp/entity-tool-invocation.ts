@@ -135,9 +135,12 @@ export async function invokeTool(
         if (!result.data) throw new Error("Create operation returned no record.");
         return ok({ data: serializeRowForEntity(entity, table, result.data), operations: result.operations });
       }
+      // A create tool takes its fields flat, so the mutation controls are
+      // taken out by name — the field bindings among them, which are
+      // controls and not values (see entityMutationControls).
       const values = Object.fromEntries(
         Object.entries(requireArguments(args)).filter(
-          ([key]) => key !== "confirmed" && key !== "blueprintId",
+          ([key]) => !["confirmed", "blueprintId", "bindings", "unbind"].includes(key),
         ),
       );
       // The elicited target field is server-set (collected from the person at
@@ -166,6 +169,13 @@ export async function invokeTool(
       });
       await assertPublishableWrite(db, session, tables, table, values);
       if (elicitationCompleted && elicitField) {
+        // The elicitation write does not pass through executeEntityOperation,
+        // so it is not the path that resolves a binding. Refuse rather than
+        // store a create whose bindings were never resolved.
+        if (args.bindings !== undefined || args.unbind !== undefined) {
+          throw new HttpError(400, "BAD_USER_INPUT",
+            "A create that collects a value securely does not take field bindings; bind the field afterwards.");
+        }
         const row = await createGeneratedEntityAfterElicitation(db, session, {
               table: table.name,
               values,
@@ -201,6 +211,8 @@ export async function invokeTool(
           ...(typeof args.confirmed === "boolean"
             ? { confirmed: args.confirmed }
             : {}),
+          ...(args.bindings !== undefined ? { bindings: args.bindings } : {}),
+          ...(args.unbind !== undefined ? { unbind: args.unbind } : {}),
         },
       });
       if (result.intent !== "create") throw new Error("Unexpected entity result.");

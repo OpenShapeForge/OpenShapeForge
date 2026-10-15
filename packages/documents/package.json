@@ -1,6 +1,6 @@
 {
   "name": "@openshapeforge/documents",
-  "version": "0.2.7",
+  "version": "0.2.9",
   "description": "Canonical Document and DocumentVersion runtime commands for OpenShapeForge.",
   "repository": {
     "type": "git",
@@ -30,8 +30,8 @@
     "@openshapeforge/plugin-runtime": ">=0.1.0 <0.2.0"
   },
   "dependencies": {
-    "@openshapeforge/operations": "workspace:*",
-    "@openshapeforge/versioning": "workspace:*",
+    "@openshapeforge/operations": "0.2.7",
+    "@openshapeforge/versioning": "0.1.6",
     "yaml": "^2.8.3"
   },
   "devDependencies": {

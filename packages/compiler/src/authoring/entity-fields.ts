@@ -213,6 +213,9 @@ export function withBaseTypes(
     const cardinality = field.cardinality ?? semantic?.cardinality;
     if (cardinality) result.cardinality = cardinality;
     if (cardinalityOf(cardinality, origin).required) result.required = true;
+    if (field.variables === "template" && (baseType !== "string" || fieldCardinality(result) === "collection")) {
+      throw new Error(`${origin}: variables: template requires a single string field.`);
+    }
     return result;
   });
 }
@@ -257,6 +260,9 @@ export function normalizeEntityFields(
     if (cardinality) result.cardinality = cardinality;
     if (cardinalityOf(cardinality, path).required) result.required = true;
     const collection = fieldCardinality(result) === "collection";
+    if (field.variables === "template" && (baseType !== "string" || collection)) {
+      throw new Error(`${path}: variables: template requires a single string field.`);
+    }
     if ((field.entityValue || field.allowedDefinitions) && nested) {
       throw new Error(`${path}: entityValue and allowedDefinitions require a top-level field.`);
     }
@@ -272,6 +278,27 @@ export function normalizeEntityFields(
       if (!field.persisted) throw new Error(`${path}: entityValue requires a persisted values column.`);
     } else if (field.osfType === "entityValue") {
       throw new Error(`${path}: entityValue requires definitionField metadata.`);
+    }
+    // A typed value is typed by the FieldDefinition stored beside it, so both
+    // halves have to exist, be persisted, and be what the write path reads:
+    // one JSON value, and one required single definition it is checked
+    // against. Without the pair the value would have no contract at all.
+    if (field.typedBy) {
+      if (field.osfType !== "typedValue" || baseType !== "object" || collection || field.relationship || inlineShape || item) {
+        throw new Error(`${path}: typedBy requires a single typedValue without inline fields or a relationship.`);
+      }
+      if (!field.persisted) throw new Error(`${path}: typedBy requires a persisted value column.`);
+      const definition = entity.fields.find((candidate) => candidate.key === field.typedBy!.definitionField);
+      const definitionSemantic = osfTypeDefinitionOf(definition?.osfType, catalog);
+      if (
+        !definition || definition === field || definition.osfType !== "fieldDefinition" || !definition.required ||
+        !definition.persisted || definition.relationship ||
+        fieldCardinality({ cardinality: definition.cardinality ?? definitionSemantic?.cardinality ?? "single" }) !== "single"
+      ) {
+        throw new Error(`${path}: definitionField must name a required persisted single fieldDefinition field.`);
+      }
+    } else if (field.osfType === "typedValue") {
+      throw new Error(`${path}: typedValue requires typedBy definitionField metadata.`);
     }
     if (field.allowedDefinitions) {
       if (!collection || semantic?.kind !== "entity" || !Array.isArray(field.allowedDefinitions) || !field.allowedDefinitions.length || new Set(field.allowedDefinitions).size !== field.allowedDefinitions.length) {

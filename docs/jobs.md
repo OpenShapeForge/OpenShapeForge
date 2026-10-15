@@ -62,6 +62,25 @@ uses to show the jobs of one record. The session is replayed when the job
 runs (below). The sequence is a bigint identity, the `jobs.list` cursor:
 `created_at` is not one, because jobs enqueued in one transaction share it.
 
+`actor_session` is a **verified session snapshot**, not a bag of hints: the
+roles, groups, RelationGroup memberships, acting Relation and scope the
+request had, plus the `credential` that authenticated it and the OAuth scopes
+and display facts that came with it. The credential is there because the
+worker replays this as the session the job runs under, and a host execution
+policy decides on it ([execution-policies.md](execution-policies.md)) — a rule
+that refuses API-key writes has to see an API key here too. So:
+
+- only `bearer`, `api-key` and `trusted-context` may be carried; the database
+  refuses a row whose snapshot names anything else, and the parser refuses it
+  again at claim;
+- a capability grant session **cannot enqueue**: its expiry and remaining uses
+  are verified per request and a worker can re-verify neither;
+- `loginSessionBinding` is not replayed — it binds to a login session the
+  worker cannot vouch for.
+
+Nothing a caller sends chooses any of it: `platform.jobs.enqueue` takes the
+snapshot from the verified session it is handed, and the payload stays payload.
+
 The table is tenant-scoped and RLS'd. It declares `workerAccess: job-worker`,
 so the worker claims across every tenant on the worker axis
 ([api.md](api.md#the-worker-axis)); an ordinary session sees its own

@@ -15,9 +15,15 @@
  *    immutable declared effects. It is a frozen copy; a policy cannot change
  *    what core then admits, and nothing from the request body, a header, a
  *    claimed role or a client clock reaches it.
- *  - `context.session` is the host's verified live session capability, and
- *    `context.db` a transaction core opened (or joined) and initialized under
- *    exactly that session, so row-level security applies to the policy's
+ *  - `context.session` is the host's verified live session capability —
+ *    complete, `credential` included, so a rule may branch on which carrier
+ *    authenticated the work. For queued work it is the verified session the
+ *    enqueue persisted, replayed whole: the credential is part of that
+ *    snapshot, a capability grant cannot enqueue at all, and a binding to a
+ *    live login session is absent rather than replayed. A session the host
+ *    cannot present as verified is refused without asking a policy.
+ *  - `context.db` is a transaction core opened (or joined) and initialized
+ *    under exactly that session, so row-level security applies to the policy's
  *    reads as it does to any other read of that tenant's data. Core supplies
  *    no second connection, no privileged or cross-tenant session and no
  *    database URL alongside it, and no caller can select, supply or reorder a

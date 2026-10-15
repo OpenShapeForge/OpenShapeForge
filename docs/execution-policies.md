@@ -123,10 +123,13 @@ that accepts the fail-soft load for the ones it has, is unaffected.
 | `effects.external` | `none`, `read` or `write`. |
 
 `context.session` is a frozen copy of the verified live session core
-authorized this invocation with, and `context.db` is a transaction core opened
+authorized this invocation with — complete, including the `credential` the
+contract declares required — and `context.db` is a transaction core opened
 — or joined — and initialized under exactly that session, so row-level
 security applies to the policy's reads as it does to any other read of that
-tenant's data.
+tenant's data. For a queued run it is the verified session the enqueue
+persisted, replayed whole (below). A governed change whose session core cannot
+present as verified is refused instead of being decided on a gap.
 
 Deliberately absent: the request input, HTTP headers, a client clock, claimed
 roles, a database URL, a second or privileged connection, and any mutable
@@ -207,7 +210,8 @@ A governed Operation is decided twice, deliberately:
    | `entity/mutations.ts` generated create, update and delete | the `for update` row lock, record permissions, consumed lease and challenge, entity-value, relationship and related-state preparation | the insert, update or delete statement |
    | `entity/collection-mutations.ts` native collections | the parent lock, every sibling lock, each sibling's own authorization, the cardinality and related-state guards — and the child's OWN preparation, which the child owner above decides after | the first child, sibling or parent write |
    | `jobs/worker.ts` queued runs | the claim lock | the contributed handler |
-   | `modules/platform.ts` record-derived providers | the committed receipt claim | `markEffectsAdmitted` and the provider |
+   | `modules/platform.ts` record-derived providers, `keyed` | the committed receipt claim | `markEffectsAdmitted` and the provider |
+   | `modules/platform.ts` record-derived providers, `none` and `natural` | every core-owned refusal that needs no policy — the cycle check, the contract preconditions | the provider, with nothing core-owned in between |
 
 The second one is the decisive one, and WHERE it sits is the whole point. A
 mutation owner's work waits: on another transaction holding the row, on the
@@ -222,6 +226,15 @@ A collection mutation is several writes in one transaction, so it is decided
 once, at whichever of its paths reaches a write first — and never before the
 work that path still has to prepare. A write path that ever reached a commit
 without a decision fails as a core defect rather than proceeding ungoverned.
+
+A record-derived provider with `none` or `natural` idempotency is the one
+governed path that is decided ONCE, and that is not a gap: there is no receipt
+to claim, and core orders every refusal that does not need a policy — the
+recursion check, the contract preconditions — before the decision, so nothing
+core-owned runs between it and `provider.execute`. Whatever the provider does
+after that — a slow HTTP call, its own retry, a sleep — happens inside trusted
+provider code, which core neither sees nor claims to; a provider that defers
+its own effects is responsible for them (see the limits).
 
 Ordering follows from that: a refusal precedes every data change and every
 external effect; a refused keyed Operation leaves no receipt a later retry
@@ -253,6 +266,28 @@ write externally (`data: write`, `external: write`), identified by its
 registered kind. A job handler is a function: nothing in the compiler declares
 what it writes, and the payload that would claim to is the caller's, so the
 governed reading is the only safe one.
+
+**The session a queued run is decided on is the verified session the enqueue
+persisted, replayed whole.** `credential` is part of the public contract and
+hosts branch on it, so it is part of the snapshot: a run enqueued by an API
+key is decided as an API-key session, and a rule that refuses API-key writes
+refuses it here too rather than reading a missing field as permission. Core
+adds nothing to the snapshot:
+
+- a credential a job may not carry is refused at enqueue, and a row whose
+  snapshot names none is refused by the database (`jobs.md`), so a session no
+  policy could judge never reaches a worker;
+- a capability grant cannot enqueue at all. Its expiry and remaining uses are
+  verified per request, and the contract has the grant present exactly when
+  the credential is `grant`; replaying either would forge an authority nobody
+  checked;
+- `loginSessionBinding` is deliberately absent from a queued run: it binds to
+  a login session the worker cannot vouch for.
+
+The same rule holds everywhere, not only on the queue: a governed change whose
+session core cannot present as verified — no credential, or a `grant` session
+without its grant — is refused without asking a policy at all. Core never
+guesses the field a policy decides on.
 
 A refusal there is a **known** settlement, never `outcome_unknown` — nothing
 ran:

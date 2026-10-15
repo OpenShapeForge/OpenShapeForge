@@ -23,10 +23,12 @@ import org.keycloak.models.UserSessionModel;
 import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.util.JsonSerialization;
+import jakarta.ws.rs.core.Response;
 
 /** Opt-in, separately built local provider. Never changes credentials or memberships. */
 public final class LocalAccountAuthenticator implements Authenticator, AuthenticatorFactory {
     public static final String ID = "osf-local-account-login";
+    private static final String REPLACEMENT_USER = "osf.local-replacement-user";
 
     static boolean localUri(String value) {
         try {
@@ -80,6 +82,19 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
 
     @Override public void authenticate(AuthenticationFlowContext context) {
         if (!allowed(context)) { context.attempted(); return; }
+        String replacement = context.getAuthenticationSession().getAuthNote(REPLACEMENT_USER);
+        if (replacement != null) {
+            context.getAuthenticationSession().removeAuthNote(REPLACEMENT_USER);
+            var user = context.getSession().users().getUserById(context.getRealm(), replacement);
+            if (user == null || !eligible(user.isEnabled(), user.getServiceAccountClientLink(), user.getUsername())
+                    || browserSessionToReplace(context, user) != null) {
+                challenge(context, "osfLocalAccountUnavailable"); return;
+            }
+            context.setUser(user);
+            context.getEvent().detail("auth_method", ID);
+            context.success();
+            return;
+        }
         challenge(context, null);
     }
 
@@ -121,6 +136,12 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
             // otherwise attachSession rejects the two different identities.
             AuthenticationManager.backchannelLogout(context.getSession(), old, true);
             AuthenticationManager.expireIdentityCookie(context.getSession());
+            // Commit deletion before Keycloak creates the replacement session.
+            // Its persistent session store cannot delete and recreate the same
+            // browser-session id with a different user in one transaction.
+            context.getAuthenticationSession().setAuthNote(REPLACEMENT_USER, user.getId());
+            context.forceChallenge(Response.seeOther(context.getRefreshUrl(true)).build());
+            return;
         }
         context.setUser(user);
         context.getEvent().detail("auth_method", ID);

@@ -174,7 +174,7 @@ describe("web manifest projection", () => {
     expect(projected.views.record?.formGroups?.create?.[0]?.fields).toContain("value");
     expect(projected.fields.value!.typedBy).toEqual({definitionField:"definition"});
     expect(projected.fields.definition!.authoring).toEqual({profile:"fullFieldDefinition",lockedKeys:["key"]});
-    expect(projected.fields.definition!.defaultValue).toEqual({key:"value",osfType:"string",required:false});
+    expect(projected.fields.definition!.defaultValue).toEqual({key:"value",osfType:"string",required:false,validation:{minLength:1,maxLength:8000}});
   });
   test("projects canonical field-authoring profile and lock metadata without mutation",()=>{
     const authoring={profile:"templateParameter",locked:true,visibleProperties:["moneyDisplay"]};

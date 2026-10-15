@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** The OIDC client owns logout, token hints and callback-state validation. */
 export type SessionRecoveryManager = {
+  getUser(): Promise<{ id_token?: string } | null>;
   removeUser(): Promise<void>;
   signoutRedirect(args: { state: { kind: string; returnTo: string } }): Promise<void>;
-  signoutRedirectCallback(url?: string): Promise<{ state?: unknown }>;
+  signoutRedirectCallback(url?: string): Promise<{ state?: unknown; userState?: unknown }>;
   signinRedirect(args: { prompt: string; state: { returnTo: string } }): Promise<void>;
 };
 type RecoveryStore = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -39,6 +40,12 @@ export async function restartRejectedWebSession(
   }
   store.setItem(KEY, JSON.stringify({ returnTo, phase: "logout" }));
   try {
+    if (!(await manager.getUser())?.id_token) {
+      store.setItem(KEY, JSON.stringify({ returnTo, phase: "login" }));
+      await manager.removeUser();
+      await manager.signinRedirect({ prompt: "login", state: { returnTo } });
+      return true;
+    }
     await manager.signoutRedirect({ state: { kind: KIND, returnTo } });
     return true;
   } catch (error) {
@@ -56,13 +63,21 @@ export async function completeRejectedWebSessionLogout(
 ): Promise<boolean> {
   const saved = store.getItem(KEY);
   if (!saved) return false;
-  const pending = JSON.parse(saved) as { returnTo: string; phase: string };
+  let pending: { returnTo: string; phase: string };
+  try { pending = JSON.parse(saved); localPath(pending.returnTo); }
+  catch { store.removeItem(KEY); return false; }
   const query = new URL(url).searchParams;
   if (pending.phase !== "logout" || !query.has("state") || query.has("code")) return false;
-  const result = await manager.signoutRedirectCallback(url);
-  const state = result.state as { kind?: string; returnTo?: string } | undefined;
-  if (state?.kind !== KIND || state.returnTo !== pending.returnTo) throw new Error("Unexpected logout recovery state.");
   const returnTo = localPath(pending.returnTo);
+  try {
+    const result = await manager.signoutRedirectCallback(url);
+    const state = result.userState as { kind?: string; returnTo?: string } | undefined;
+    if (state?.kind !== KIND || state.returnTo !== returnTo) throw new Error("Unexpected logout recovery state.");
+  } catch {
+    // Expired, consumed and foreign callback state cannot authorize a return
+    // route. Use only the locally saved route and keep the single-retry guard.
+    await manager.removeUser();
+  }
   store.setItem(KEY, JSON.stringify({ returnTo, phase: "login" }));
   replace(returnTo);
   await manager.signinRedirect({ prompt: "login", state: { returnTo } });

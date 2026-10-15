@@ -10,9 +10,10 @@ function fixture() {
   const actions: unknown[] = [];
   let callbackState: unknown;
   const manager: SessionRecoveryManager = {
+    getUser: async () => ({ id_token: "test-id-token" }),
     removeUser: async () => { actions.push("remove"); },
     signoutRedirect: async args => { callbackState = args.state; actions.push(["logout", args.state.returnTo]); },
-    signoutRedirectCallback: async () => { actions.push("validated-callback"); return { state: callbackState }; },
+    signoutRedirectCallback: async () => { actions.push("validated-callback"); return { state: "opaque-id", userState: callbackState }; },
     signinRedirect: async args => { actions.push(["login", args.state.returnTo]); },
   };
   return { store, manager, actions };
@@ -40,14 +41,29 @@ test("invalid and foreign return routes never start logout", async () => {
   }
 });
 
-test("a failed or mismatched logout callback never signs in", async () => {
-  const { manager, store, actions } = fixture();
-  await restartRejectedWebSession(manager, "/relations", store);
-  manager.signoutRedirectCallback = async () => { throw new Error("state rejected"); };
-  await expect(completeRejectedWebSessionLogout(manager, "https://app.invalid/?state=forged", store)).rejects.toThrow("state rejected");
-  manager.signoutRedirectCallback = async () => ({ state: { kind: "rejected-web-session", returnTo: "/other" } });
-  await expect(completeRejectedWebSessionLogout(manager, "https://app.invalid/?state=other", store)).rejects.toThrow("Unexpected logout");
-  expect(actions).toEqual([["logout", "/relations"]]);
+test("failed, missing and foreign callback data cannot choose the return route or create a loop", async () => {
+  for (const callback of [async () => { throw new Error("state rejected"); }, async () => ({ state: "opaque-id" }),
+    async () => ({ state: "opaque-id", userState: { kind: "rejected-web-session", returnTo: "https://evil.invalid" } })]) {
+    const { manager, store, actions } = fixture();
+    await restartRejectedWebSession(manager, "/relations", store);
+    manager.signoutRedirectCallback = callback;
+    expect(await completeRejectedWebSessionLogout(manager, "https://app.invalid/?state=forged", store,
+      path => { actions.push(["replace", path]); })).toBe(true);
+    expect(actions).toEqual([["logout", "/relations"], "remove", ["replace", "/relations"], ["login", "/relations"]]);
+    expect(await restartRejectedWebSession(manager, "/relations", store)).toBe(false);
+  }
+});
+
+test("an absent ID token restarts login without a provider logout confirmation", async () => {
+  const { manager, store, actions } = fixture(); manager.getUser = async () => null;
+  expect(await restartRejectedWebSession(manager, "/relations", store)).toBe(true);
+  expect(actions).toEqual(["remove", ["login", "/relations"]]);
+});
+
+test("a corrupt local marker is discarded without trapping application startup", async () => {
+  const { manager, store } = fixture(); store.setItem("osf.web-session-recovery.v1", "broken");
+  expect(await completeRejectedWebSessionLogout(manager, "https://app.invalid/?state=x", store)).toBe(false);
+  expect(store.getItem("osf.web-session-recovery.v1")).toBeNull();
 });
 
 test("ordinary sign-in callbacks and logout outages never create redirect loops", async () => {

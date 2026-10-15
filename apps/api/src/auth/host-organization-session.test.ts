@@ -138,8 +138,15 @@ describe("host organization binding through real bearer verification and resolve
     expect(lookups).toHaveLength(0);
   });
 
-  test.each(["openid", "organization:alpha", "organization:*"])("requires generic scope, rejects %s", async (scope) => {
+  test.each(["openid", "organization:beta", "organization:*", "organization:alpha organization:beta", "organization organization:beta"])("rejects absent, wildcard or mismatched selection scope %s", async (scope) => {
     expect((await resolveSessionContext(await headers({ scope }))).credential).toBe("none");
+  });
+
+  test("an exact alias scope admits only the sole verified membership", async () => {
+    const session = await resolveSessionContext(await headers({ scope: "openid organization:alpha" }));
+    expect(session.credential).toBe("bearer");
+    expect(session.tenantId).toBe(TENANT_A);
+    expect(lookups).toEqual([["host", "org-a"]]);
   });
 
   test("tid must match the registry; malformed tid is also refused", async () => {

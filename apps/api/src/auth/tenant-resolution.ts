@@ -151,7 +151,7 @@ export async function resolveTenantFromOrganization(
 }
 
 /** A human host session has exactly one selected, verified membership. Neither
- * tid, organization-specific scopes nor transport input may select another one.
+ * tid, a scope alias or transport input may not override that sole membership.
  */
 export async function resolveHostOrganizationTenant(
   identity: AuthIdentity,
@@ -160,10 +160,16 @@ export async function resolveHostOrganizationTenant(
 ): Promise<string | null> {
   const raw = claims.organization;
   if (!raw || typeof raw !== "object" || Array.isArray(raw) ||
-      Object.keys(raw).length !== 1 || !identity.scopes?.includes("organization")) return null;
+      Object.keys(raw).length !== 1) return null;
   const memberships = Object.entries(identity.organizations ?? {});
   if (memberships.length !== 1) return null;
-  const membership = memberships[0]![1];
+  const [alias, membership] = memberships[0]!;
+  const organizationScopes = (identity.scopes ?? []).filter(scope => scope === "organization" || scope.startsWith("organization:"));
+  // Keycloak emits the dynamic scope instead of the generic scope when a
+  // multi-organization person explicitly selects one eligible membership.
+  // The signed claim must still contain exactly that single membership.
+  if (organizationScopes.length !== 1 ||
+      !["organization", `organization:${alias}`].includes(organizationScopes[0]!)) return null;
   if (!membership.id?.trim()) return null;
   const realm = realmFromIssuer(claims.iss);
   if (!realm) return null;

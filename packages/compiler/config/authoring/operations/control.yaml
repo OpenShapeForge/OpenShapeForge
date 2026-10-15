@@ -627,14 +627,12 @@ operations:
         properties:
           delivery:
             type: string
-            enum: [email_sent, no_email_existing_account, already_pending, already_accepted]
+            enum: [email_sent, already_pending]
             x-osf-i18n:
               title: { en: Delivery, nl: Bezorging }
               enum:
                 email_sent: { en: Invitation e-mail requested, nl: Uitnodigingsmail aangevraagd }
-                no_email_existing_account: { en: 'No e-mail, existing account', nl: 'Geen mail, bestaand account' }
                 already_pending: { en: Earlier invitation outstanding, nl: Eerdere uitnodiging staat open }
-                already_accepted: { en: Already a member, nl: Al lid }
           signInUrl: { type: [string, 'null'], x-osf-i18n: { title: { en: Sign-in URL, nl: Aanmeld-URL } } }
           nextStep: { type: string, x-osf-i18n: { title: { en: Next step, nl: Volgende stap } } }
         required: [delivery, signInUrl, nextStep]
@@ -648,7 +646,7 @@ operations:
     effects: *id007
     reliability:
       idempotency:
-        mode: natural
+        mode: none
     confirmation:
       mode: acknowledgement
     errors: *id002
@@ -795,7 +793,7 @@ operations:
     auth: { mode: control, roles: [platform-operator] }
     tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
     effects: { data: write, external: write }
-    reliability: { idempotency: { mode: natural } }
+    reliability: { idempotency: { mode: none } }
     confirmation: { mode: acknowledgement }
     errors: *id002
   revokeTenantInvitation:

@@ -95,7 +95,7 @@ export async function inviteFirstTenantAdministrator(
       `.execute(trx)).rows.length > 0;
       // Historical acceptance and provider membership do not establish current
       // application admission. Re-record the authorized role for the next login.
-      const delivery = await deliverInvitation(clients.members, organization.id, { email });
+      const delivery = await deliverInvitation(clients.members, organization.id, { email }, { knownNonMember: !member });
       if (previous?.status === "accepted" && linked) return result(toInvitation(previous), delivery);
       if (delivery === "already_pending" && previous?.status === "pending") return result(toInvitation(previous), delivery);
       // Also repairs a confirmed Keycloak invite whose earlier DB commit failed.

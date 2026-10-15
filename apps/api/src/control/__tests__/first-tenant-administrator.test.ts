@@ -61,6 +61,7 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
   let runtime: DatabaseRuntime;
   let clients: FirstAdministratorClients;
   let sends: string[];
+  let existingSends: string[];
   let pending: Set<string>;
   let admins: { email: string | null }[];
   let members: string[];
@@ -103,7 +104,7 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     await sql`truncate platform.identity_relations, platform.identities, platform.employee_invitations, platform.tenants, platform.system_bypass_audit;
       insert into platform.tenants (slug, status, keycloak_realm, keycloak_organization_id)
       values ('acme', 'active', 'tenant', 'org-acme'), ('other', 'active', 'tenant', 'org-other')`.execute(owner.db);
-    sends = []; pending = new Set(); admins = []; members = []; smtp = true; deliveryFails = false; conflictMessage = null;
+    sends = []; existingSends = []; pending = new Set(); admins = []; members = []; smtp = true; deliveryFails = false; conflictMessage = null;
     process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = 'https://example.example';
     clients = {
       tenantRealm: 'tenant',
@@ -120,7 +121,7 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
           : null,
         inviteExistingMember: async (id, email) => {
           if (deliveryFails) throw new KeycloakAdminError('KEYCLOAK_ADMIN_UNAVAILABLE', 'SMTP rejected the message');
-          sends.push(`${id}:${email}`); return true;
+          existingSends.push(`${id}:${email}`); sends.push(`${id}:${email}`); return true;
         },
         inviteUser: async (id, input) => {
           if (deliveryFails) throw new KeycloakAdminError('KEYCLOAK_ADMIN_UNAVAILABLE', 'SMTP rejected the message');
@@ -241,6 +242,9 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
       select i.id,t.id,'linked' from platform.identities i, platform.tenants t where t.slug='acme';
       update platform.employee_invitations set status='accepted', accepted_at=now() where status='pending';`.execute(owner.db);
     expect(await create()).toMatchObject({ status: 'accepted', delivery: 'email_sent' });
+    await expect(manageTenantInvitations({ db: runtime.db, administrator, firstAdministrator: clients }, 'create',
+      { slug: 'acme', email: 'member@example.com', role: 'org_employee' })).rejects.toMatchObject({code:'INVITATION_ROLE_CONFLICT'});
+    expect(existingSends).toHaveLength(3);
     members = [];
     expect(await create()).toMatchObject({ status: 'pending', delivery: 'email_sent' });
     expect(sends).toEqual(Array(4).fill('org-acme:member@example.com'));
@@ -329,11 +333,18 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     await invite();
     await sql`update platform.employee_invitations set status='accepted', accepted_at=now()`.execute(owner.db);
     members = ['admin@example.com'];
-    expect((await manage('list') as any).invitations[0].canResend).toBe(true);
+    expect((await manage('list') as any).invitations[0]).toMatchObject({canResend:false,canRevoke:false});
+    await expect(manage('resend', 'org-acme-invite')).rejects.toMatchObject({code:'INVITATION_ADMISSION_MISSING'});
+    expect(existingSends).toHaveLength(0);
+    await sql`insert into platform.identities (email) values ('admin@example.com');
+      insert into platform.identity_relations (identity_id,tenant_id,status)
+      select i.id,t.id,'linked' from platform.identities i,platform.tenants t where t.slug='acme'`.execute(owner.db);
+    expect((await manage('list') as any).invitations[0]).toMatchObject({canResend:true,canRevoke:false});
     expect(await manage('resend', 'org-acme-invite')).toMatchObject({ status: 'resent', role: 'org_admin', delivery: 'email_sent' });
     expect((await sql<any>`select status,role from platform.employee_invitations`.execute(owner.db)).rows)
       .toEqual([{status:'accepted',role:'org_admin'}]);
     expect(sends).toEqual(['org-acme:admin@example.com', 'org-acme:admin@example.com']);
+    expect(existingSends).toEqual(['org-acme:admin@example.com']);
   });
 
   it('refuses foreign, stale, accepted and untracked invitations before mutation', async () => {

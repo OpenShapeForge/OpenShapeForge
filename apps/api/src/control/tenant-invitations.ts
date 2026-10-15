@@ -120,6 +120,11 @@ export async function manageTenantInvitations(
           );
         }
 
+        const linkedEmails = new Set((await sql<{email:string}>`
+          select lower(i.email) as email from platform.identity_relations ir
+          join platform.identities i on i.id = ir.identity_id
+          where ir.tenant_id = ${tenant.id} and ir.status = 'linked' and i.email is not null
+        `.execute(trx)).rows.map(row => row.email));
         const pending = await clients.members.listInvitations(organization.id);
         const localFor = (email: string) => rows.find((row) => row.email.toLowerCase() === email.toLowerCase());
         if (action === "list") {
@@ -153,9 +158,9 @@ export async function manageTenantInvitations(
                 role: local?.role ?? null,
                 registrationStatus: local?.status ?? "untracked",
                 canResend: Boolean(
-                  (local?.status === "pending" || local?.status === "accepted") && tenant.status === "active" && organization.enabled,
+                  (local?.status === "pending" || (local?.status === "accepted" && linkedEmails.has(local.email.toLowerCase()))) && tenant.status === "active" && organization.enabled,
                 ),
-                canRevoke: invitationCanBeRevoked(invitation.status),
+                canRevoke: local?.status !== "accepted" && invitationCanBeRevoked(invitation.status),
               };
             }),
             unresolved,
@@ -178,12 +183,13 @@ export async function manageTenantInvitations(
               and lower(i.email) = lower(${email})
           `.execute(trx)).rows.length > 0 : false;
           if (member && accepted && linked) {
-            const delivery = await deliverInvitation(clients.members, organization.id, { email, ...names });
+            if (input.role !== accepted.role) throw new FirstAdministratorError("INVITATION_ROLE_CONFLICT", "This member is already admitted with another role. Use assign_tenant_member_roles; no email was sent and no role was changed.");
+            const delivery = await deliverInvitation(clients.members, organization.id, { email, ...names }, { knownNonMember: !member });
             return { tenantSlug: input.slug, invitationId: accepted.id, ...toInvitation(accepted), ...invitationOutcome(input.slug, delivery) };
           }
           // Every explicit admission records current intent, including re-admission
           // after acceptance. Existing members receive the native sign-in notice.
-          const delivery = await deliverInvitation(clients.members, organization.id, { email, ...names });
+          const delivery = await deliverInvitation(clients.members, organization.id, { email, ...names }, { knownNonMember: !member });
           const invitation = await recordEmployeeInvitation(trx, tenant.id, `${deps.administrator.issuer}#${deps.administrator.subject}`,
             { email, role: input.role, ...names });
           const keycloakInvitation = delivery === "already_pending"
@@ -201,8 +207,8 @@ export async function manageTenantInvitations(
             lastName: invitation.lastName, status: invitation.status,
             sentAt: invitationTimestamp(invitation.sentDate), expiresAt: invitationTimestamp(invitation.expiresAt),
             role: local?.role ?? null, registrationStatus: local?.status ?? "untracked",
-            canResend: Boolean((local?.status === "pending" || local?.status === "accepted") && tenant.status === "active" && organization.enabled),
-            canRevoke: invitationCanBeRevoked(invitation.status) };
+            canResend: Boolean((local?.status === "pending" || (local?.status === "accepted" && linkedEmails.has(local.email.toLowerCase()))) && tenant.status === "active" && organization.enabled),
+            canRevoke: local?.status !== "accepted" && invitationCanBeRevoked(invitation.status) };
         }
         if (!invitation && action === "revoke") {
           const unresolved = rows.find((row) => row.id === input.invitationId && row.status === "pending");
@@ -280,6 +286,9 @@ export async function manageTenantInvitations(
             "INVITATION_ROLE_MISSING",
             "No authorized invitation exists. Revoke this invitation and create a new authorized invitation.",
           );
+        }
+        if (local.status === "accepted" && !linkedEmails.has(local.email.toLowerCase())) {
+          throw new FirstAdministratorError("INVITATION_ADMISSION_MISSING", "This historical invitation has no current application admission. Create a new authorized invitation to restore access; no mail was sent.");
         }
         if (!clients.members.resendInvitation) {
           throw new FirstAdministratorError("INVITATIONS_NOT_CONFIGURED", "Invitation resend is not configured.");

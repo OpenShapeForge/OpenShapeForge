@@ -44,7 +44,6 @@ describe("invitation outcome", () => {
     expect(outcome.nextStep).toContain("No e-mail was sent");
     expect(outcome.nextStep).toContain("https://example.example/acme");
     expect(invitationOutcome("acme", "email_sent").nextStep).toContain("resend_tenant_invitation");
-    expect(invitationOutcome("acme", "already_accepted").nextStep).toContain("assign_tenant_member_roles");
   });
 });
 

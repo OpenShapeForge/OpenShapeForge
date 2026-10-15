@@ -21,6 +21,15 @@ export type SettleJobInput = {
   | { outcome: "outcome_unknown"; error: RuntimeJobError }
   /** Worker-internal: a kind no module handles is closed at once, not retried. */
   | { outcome: "dead"; error: RuntimeJobError }
+  /**
+   * Worker-internal: a host execution policy refused this run before the
+   * handler started, so nothing was attempted. The job returns to the queue
+   * for the moment the refusal names, and the attempt it did not make is
+   * given back — a tenant frozen for a week must not consume its attempt
+   * budget being refused. An open-ended refusal is settled `failed` by the
+   * caller instead, because nothing says when it would stop being refused.
+   */
+  | { outcome: "not_admitted"; error: RuntimeJobError; retryAt: Date }
 );
 
 export type SettleJobResult =
@@ -73,6 +82,9 @@ export async function lockClaimedJob(trx: Transaction<DB>, input: { id: string; 
  * the predicate checks the token hash and `running`, so a settle after the
  * lease was reclaimed matches nothing and reports `settled: false` — the
  * later claimer's outcome is the one that stands.
+ *
+ * `not_admitted` is the one outcome that gives an attempt back, because it is
+ * the one outcome that proves the work was never attempted.
  */
 export async function settleJob(trx: Transaction<DB>, input: SettleJobInput): Promise<SettleJobResult> {
   const current = await trx
@@ -91,6 +103,18 @@ export async function settleJob(trx: Transaction<DB>, input: SettleJobInput): Pr
     result: result ? JSON.stringify(result) : null,
     completed_at: sql<Date>`now()`,
   });
+  const requeued = (
+    error: RuntimeJobError,
+    availableAt: Date | ReturnType<typeof sql<Date>>,
+    attempts?: number,
+  ) => ({
+    status: "queued" as JobStatus,
+    last_error: JSON.stringify(boundedError(error)),
+    result: null,
+    completed_at: null,
+    available_at: availableAt,
+    ...(attempts === undefined ? {} : { attempts }),
+  });
   const exhausted = input.outcome === "retry" && current.attempts >= current.max_attempts;
   const next = input.outcome === "done"
     ? terminal("done", null, input.result ?? null)
@@ -100,15 +124,15 @@ export async function settleJob(trx: Transaction<DB>, input: SettleJobInput): Pr
         ? terminal("outcome_unknown", input.error, null)
         : input.outcome === "dead"
           ? terminal("dead", input.error, null)
-        : exhausted
-          ? terminal("dead", input.error, null)
-          : {
-              status: "queued" as JobStatus,
-              last_error: JSON.stringify(boundedError(input.error)),
-              result: null,
-              completed_at: null,
-              available_at: input.retryAt ?? sql<Date>`now() + (${retryDelayMs(current.attempts)} || ' milliseconds')::interval`,
-            };
+          : input.outcome === "not_admitted"
+            // The claim is released and the attempt returned: nothing ran.
+            ? requeued(input.error, input.retryAt, Math.max(0, current.attempts - 1))
+            : exhausted
+              ? terminal("dead", input.error, null)
+              : requeued(
+                  input.error,
+                  input.retryAt ?? sql<Date>`now() + (${retryDelayMs(current.attempts)} || ' milliseconds')::interval`,
+                );
 
   await trx
     .updateTable("platform.jobs")

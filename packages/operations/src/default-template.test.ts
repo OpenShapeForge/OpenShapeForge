@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import {test,expect} from 'bun:test';
 import {defaultTemplatePaths,renderDefaultTemplate} from './default-template.js';
 test('templates interpolate related and local scalar fields without evaluating expressions',()=>{

@@ -154,8 +154,11 @@ async function seed(db: Kysely<DB>): Promise<Fixture> {
         values (${tenant}::uuid, ${slug}, ${slug}, 'active')
       `.execute(conn);
       await sql`
-        insert into platform.jobs (tenant_id, kind, actor_id, payload)
-        values (${tenant}::uuid, ${"probe.job"}, ${randomUUID()}::uuid, '{}'::jsonb)
+        insert into platform.jobs (tenant_id, kind, actor_id, payload, actor_session)
+        values (${tenant}::uuid, ${"probe.job"}, ${randomUUID()}::uuid, '{}'::jsonb,
+          -- The queue's own invariant: a job carries the credential that
+          -- enqueued it (jobs/actor-session.ts).
+          '{"credential":"trusted-context","roles":[],"groups":[],"relationGroupIds":[],"scope":"self"}'::jsonb)
       `.execute(conn);
     }
 

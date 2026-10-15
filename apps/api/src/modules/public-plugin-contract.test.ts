@@ -17,3 +17,18 @@ test("the public runtime plugin contract loads as a core runtime module", () => 
 
   expect(acceptsRuntimeModule(plugin)).toBe("example");
 });
+
+test("a public execution policy loads as a core runtime module policy", () => {
+  const plugin = {
+    name: "example-policy",
+    executionPolicies: [{
+      name: "example-freeze",
+      evaluate: (request) =>
+        request.operation.effects.data === "read"
+          ? { admitted: true }
+          : { admitted: false, refusal: { message: "Changes are paused." } },
+    }],
+  } satisfies PublicRuntimeModule;
+
+  expect(acceptsRuntimeModule(plugin)).toBe("example-policy");
+});

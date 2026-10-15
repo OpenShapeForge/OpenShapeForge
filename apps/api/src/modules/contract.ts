@@ -34,6 +34,7 @@ import type {
   ModuleOperationContextContract,
   ModuleOperationHandlerContract,
   ModuleOperationAvailabilityHandlerContract,
+  RuntimeExecutionPolicyContract,
   ModuleOperationResult as PublicModuleOperationResult,
   ModuleOperationSuccessResult as PublicModuleOperationSuccessResult,
   ModuleReadinessCheck as PublicModuleReadinessCheck,
@@ -557,6 +558,14 @@ export type ModuleOperationAvailabilityHandler = ModuleOperationAvailabilityHand
   Transaction<DB>, TrustedSessionContext
 >;
 
+/**
+ * A host-wide admission policy as core calls it: the tenant-scoped
+ * transaction and the verified session this invocation already runs under.
+ */
+export type ModuleExecutionPolicy = RuntimeExecutionPolicyContract<
+  Transaction<DB>, TrustedSessionContext
+>;
+
 export type RuntimeModule = RuntimeModuleContract<
   ModuleRuntimeContext,
   ModuleOperationHandler,
@@ -566,7 +575,8 @@ export type RuntimeModule = RuntimeModuleContract<
   ModuleWorker,
   ModuleOperationAvailabilityHandler,
   RuntimeArtifactStorageContribution<TrustedSessionContext, Transaction<DB>>,
-  ModuleJobHandler
+  ModuleJobHandler,
+  ModuleExecutionPolicy
 > & {
   graphql?(context: ModuleRuntimeContext): ModuleGraphqlContribution;
   /** Dynamic MCP projection and invocation hooks, evaluated per request. */

@@ -31,7 +31,9 @@ queued ──claim──▶ running ──settle──▶ done
 
 - **`queued`** — due once `available_at` has passed. A retry puts the job back
   here with an exponential, jittered `available_at` (30 s doubling, capped at
-  an hour).
+  an hour). A run a host execution policy refused before it started comes back
+  here too, for the moment the refusal names and without having spent an
+  attempt (below).
 - **`running`** — claimed. The row holds `lease_until` and the SHA-256 of a
   one-time claim token. Only the holder of that token can settle the run; a
   lease that expires is reclaimed by the next claim, and one that expires at
@@ -59,6 +61,25 @@ returns the first job, whatever state it is in. The subject is what a screen
 uses to show the jobs of one record. The session is replayed when the job
 runs (below). The sequence is a bigint identity, the `jobs.list` cursor:
 `created_at` is not one, because jobs enqueued in one transaction share it.
+
+`actor_session` is a **verified session snapshot**, not a bag of hints: the
+roles, groups, RelationGroup memberships, acting Relation and scope the
+request had, plus the `credential` that authenticated it and the OAuth scopes
+and display facts that came with it. The credential is there because the
+worker replays this as the session the job runs under, and a host execution
+policy decides on it ([execution-policies.md](execution-policies.md)) — a rule
+that refuses API-key writes has to see an API key here too. So:
+
+- only `bearer`, `api-key` and `trusted-context` may be carried; the database
+  refuses a row whose snapshot names anything else, and the parser refuses it
+  again at claim;
+- a capability grant session **cannot enqueue**: its expiry and remaining uses
+  are verified per request and a worker can re-verify neither;
+- `loginSessionBinding` is not replayed — it binds to a login session the
+  worker cannot vouch for.
+
+Nothing a caller sends chooses any of it: `platform.jobs.enqueue` takes the
+snapshot from the verified session it is handed, and the payload stays payload.
 
 The table is tenant-scoped and RLS'd. It declares `workerAccess: job-worker`,
 so the worker claims across every tenant on the worker axis
@@ -160,6 +181,19 @@ Composition fails closed: a kind two active modules both register stops the
 API and the worker at boot, and a queued job whose kind no module handles ends
 `dead` with `NO_HANDLER` on its first claim rather than spending the retry
 budget on a configuration problem.
+
+Between that lock and the handler sits host execution admission
+([execution-policies.md](execution-policies.md)), on a host that contributes a
+policy. A job's authorization is older than its effects — it was admitted when
+it was enqueued and it runs whenever a worker reaches it — so the policies are
+asked again here, with the run classified conservatively as a data change that
+may also write externally. A refusal is settled without starting the handler
+and is a **known** outcome, never `outcome_unknown`: queued again for the
+moment the refusal names (with the attempt it never made given back), or
+`failed` with `EXECUTION_NOT_PERMITTED` when the refusal names no end. The
+claim and the settle themselves are the queue's own bookkeeping and are never
+refused, so a frozen tenant's queue keeps being managed. A host that
+contributes no policy is unaffected.
 
 ## The worker
 

@@ -526,6 +526,10 @@ export const HTTP_STATUS_BY_CODE = {
   INTERACTION_REQUIRED: 409,
   // A generic write that would change a collection.
   RELATION_COLLECTION_MUTATION_UNSUPPORTED: 409,
+  // A host execution policy refused a governed change (operations/execution-policy.ts).
+  // 403, like CONNECTOR_NOT_LICENSED: the caller authenticated and is
+  // authorized for the action; the tenant's own policy forbids it right now.
+  EXECUTION_NOT_PERMITTED: 403,
   TOO_MANY_REQUESTS: 429,
   INTERNAL_SERVER_ERROR: 500,
   GENERATED_CRUD_NOT_ENABLED: 404,

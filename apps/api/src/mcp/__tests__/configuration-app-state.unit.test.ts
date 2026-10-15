@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { expect, test, beforeEach, afterEach } from "bun:test";
 import { retainConfigurationAppResult } from "../configuration-app-state.js";
 import { mintConfiguration, consumeConfiguration } from "../configuration-handoff.js";

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 // A bounded server-authored return after native required-action completion.
 window.addEventListener("DOMContentLoaded", () => {
   const link = document.querySelector("#kc-info-message a[href]");

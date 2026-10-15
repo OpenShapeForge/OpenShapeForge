@@ -284,6 +284,49 @@ export async function withDbSession<TDatabase, TResult>(
   return result;
 }
 
+let savepoints = 0;
+
+/**
+ * Run work inside its own savepoint, so that its failure discards exactly
+ * what it did and nothing of the transaction it is part of.
+ *
+ * This is what makes one invocation's failure its own. A canonical Operation
+ * invoked from inside another one JOINS the caller's transaction
+ * ({@link withDbSession} above), consumes this request's mutation controls —
+ * an edit lease, a single-use confirmation challenge — writes its rows, and
+ * may then be refused or fail. Callers that turn such a failure into an
+ * ordinary error result (the entity runtime, the Operations API) would
+ * otherwise leave those consumed controls and partial writes in the caller's
+ * transaction, to be committed with work that has nothing to do with them.
+ *
+ * On success the savepoint is released and the work commits with its caller,
+ * exactly as before. On failure the rollback also recovers a transaction the
+ * database itself aborted, so the caller's earlier work survives a nested
+ * failure and its later work can still commit.
+ */
+export async function withInvocationSavepoint<TDatabase, TResult>(
+  trx: Transaction<TDatabase>,
+  work: () => Promise<TResult>,
+): Promise<TResult> {
+  savepoints = (savepoints + 1) % Number.MAX_SAFE_INTEGER;
+  const savepoint = sql.raw(`osf_invocation_${savepoints}`);
+  await sql`savepoint ${savepoint}`.execute(trx);
+  try {
+    const result = await work();
+    await sql`release savepoint ${savepoint}`.execute(trx);
+    return result;
+  } catch (error) {
+    try {
+      await sql`rollback to savepoint ${savepoint}`.execute(trx);
+      await sql`release savepoint ${savepoint}`.execute(trx);
+    } catch {
+      // The connection or transaction is gone; the original failure is what
+      // the caller has to see, not this one.
+    }
+    throw error;
+  }
+}
+
 /**
  * A tenant-scoped transaction with NO user identity, for the one caller that
  * cannot have one yet: API key resolution.

@@ -37,8 +37,10 @@ Closes #
   - [ ] `bun run test:perf` (only if touching the API hot path)
 - [ ] New entity? Bumped `expectedGeneratedCrudEntityCount` and ran
       `bun run db:migrate`.
-- [ ] Greenfield replacement is complete: affected consumers, seeds and tests
-      are updated; obsolete code and compatibility layers are removed.
+- [ ] Replacement is complete: affected consumers, seeds and tests are
+      updated; obsolete code and compatibility layers are removed.
       Database bootstrap/invariant setup remains reproducible.
+- [ ] Schema change is additive, or ships a versioned migration
+      (`bun run db:migration:new`) that carries an existing database forward.
 - [ ] Nothing a generator/plugin emits depends on time or randomness
       (determinism gate).

@@ -330,9 +330,10 @@ helm template openshapeforge deploy/helm/openshapeforge-api \
 
 - Bring your own Postgres and Keycloak; point the chart at them.
 - The migration Job is a Helm hook — on `helm upgrade` it runs before the new
-  pods roll. Any schema change means rebuilding the database from the
-  manifest (`bun run db:reset`, see `../docs/migrations.md`); the Job
-  refuses a database built from another manifest rather than altering it.
+  pods roll. It runs the pending versioned migrations and rolls additive
+  schema changes forward (see `../docs/migrations.md`); drift that is neither
+  additive nor settled by a versioned migration fails the Job, so the upgrade
+  stops before any new pod serves. A deployed database is never reset.
 - **Upgrading past the worker role (#223) needs one new value.**
   `database.workerPassword` is required whenever the chart manages the Secret,
   even on an install that runs no worker: the emitted RLS policies name

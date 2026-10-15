@@ -9,10 +9,21 @@
  * without plugin schema contributions intentionally have no file to import.
  * The apply function requires a connection-bound Kysely instance because it
  * wraps each entry in its own transaction.
+ *
+ * A compiler-rendered constraint is guarded by name alone, which a database
+ * carried forward by the roll-forward cannot rely on: an options list that
+ * gains a value keeps its constraint name, and an entity-value check that
+ * changes is renamed by its digest. So each rendered block is recognised
+ * (`parseCompilerConstraint`): a CHECK is reconciled by definition
+ * (`ensureCheckConstraint`), every recognised constraint is marked as owned
+ * with a comment, and an owned constraint the registry no longer renders is
+ * dropped — after the new ones are in place, so a failed add leaves the old
+ * guard standing.
  */
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { sql, type Kysely } from "kysely";
+import { ensureCheckConstraint } from "./sql-invariants.js";
 
 export type GeneratedPluginMigration = {
   plugin: string;
@@ -28,7 +39,48 @@ type GeneratedPluginMigrationRegistry = {
 export type PluginMigrationsResult = {
   /** Every entry the run applied, as `plugin:<name>:<version>`, in order. */
   applied: string[];
+  /** Owned constraints dropped because no entry renders them any more. */
+  removed: string[];
 };
+
+/** Comment that marks a constraint as rendered by a plugin registry entry. */
+const OWNED_CONSTRAINT_COMMENT_PREFIX = "osf:plugin-constraint:";
+
+/**
+ * The exact block packages/compiler/src/render-constraint-sql.ts renders for
+ * one table constraint. Anything else — free-form plugin SQL — is run as it
+ * is and never marked.
+ */
+const compilerConstraintBlock =
+  /^DO \$osf\$\nBEGIN\n  IF NOT EXISTS \(\n    SELECT 1 FROM pg_constraint\n    WHERE conrelid = '"([a-z_][a-z0-9_]*)"\."([a-z_][a-z0-9_]*)"'::regclass AND conname = '([a-z][a-z0-9_]*)'\n  \) THEN\n    ALTER TABLE "\1"\."\2"\n      ADD CONSTRAINT "\3" (.+);\n  END IF;\nEND\n\$osf\$;\n*$/s;
+
+export type CompilerConstraint = {
+  /** Qualified, unquoted: "erp.blocks". */
+  table: string;
+  name: string;
+  /** As rendered: `CHECK (...)`, `UNIQUE (...)`, `FOREIGN KEY ...`. */
+  definition: string;
+};
+
+export function parseCompilerConstraint(text: string): CompilerConstraint | undefined {
+  const match = compilerConstraintBlock.exec(text);
+  if (match === null) return undefined;
+  return {
+    table: `${match[1]}.${match[2]}`,
+    name: match[3]!,
+    definition: match[4]!,
+  };
+}
+
+function checkExpression(definition: string): string | undefined {
+  return definition.startsWith("CHECK (") && definition.endsWith(")")
+    ? definition.slice("CHECK (".length, -1)
+    : undefined;
+}
+
+function quotedTable(table: string): string {
+  return table.split(".").map((part) => `"${part}"`).join(".");
+}
 
 const registryPath = resolve(
   import.meta.dir,
@@ -107,11 +159,26 @@ export async function applyGeneratedPluginMigrations(
   migrations: readonly GeneratedPluginMigration[],
 ): Promise<PluginMigrationsResult> {
   const applied: string[] = [];
+  const rendered = new Set<string>();
   for (const migration of migrations) {
     const identity = pluginMigrationIdentity(migration);
+    const owned = parseCompilerConstraint(migration.sql);
     await sql`begin`.execute(db);
     try {
-      await sql.raw(migration.sql).execute(db);
+      const expression = owned && checkExpression(owned.definition);
+      if (owned && expression !== undefined) {
+        await ensureCheckConstraint(db, { table: owned.table, name: owned.name, expression });
+      } else {
+        await sql.raw(migration.sql).execute(db);
+      }
+      if (owned) {
+        await sql
+          .raw(
+            `COMMENT ON CONSTRAINT "${owned.name}" ON ${quotedTable(owned.table)} IS '${OWNED_CONSTRAINT_COMMENT_PREFIX}${migration.plugin}'`,
+          )
+          .execute(db);
+        rendered.add(`${owned.table}.${owned.name}`);
+      }
       await sql`commit`.execute(db);
     } catch (error) {
       await sql`rollback`.execute(db);
@@ -122,5 +189,39 @@ export async function applyGeneratedPluginMigrations(
     }
     applied.push(identity);
   }
-  return { applied };
+  return { applied, removed: await dropUnrenderedConstraints(db, rendered) };
+}
+
+/**
+ * Drop every constraint marked as plugin-owned that no registry entry renders
+ * any more: a retired options check, or an entity-value check whose digest
+ * changed with its definition.
+ */
+async function dropUnrenderedConstraints(
+  db: Kysely<any>,
+  rendered: ReadonlySet<string>,
+): Promise<string[]> {
+  const owned = await sql<{ table: string; name: string }>`
+    select n.nspname || '.' || t.relname as "table", c.conname as name
+    from pg_constraint c
+    join pg_class t on t.oid = c.conrelid
+    join pg_namespace n on n.oid = t.relnamespace
+    join pg_description d
+      on d.objoid = c.oid and d.classoid = 'pg_constraint'::regclass and d.objsubid = 0
+    where d.description like ${`${OWNED_CONSTRAINT_COMMENT_PREFIX}%`}
+    order by 1, 2
+  `.execute(db);
+  const stale = owned.rows.filter((row) => !rendered.has(`${row.table}.${row.name}`));
+  if (stale.length === 0) return [];
+  await sql`begin`.execute(db);
+  try {
+    for (const row of stale) {
+      await sql`alter table ${sql.id(...(row.table.split(".") as [string, string]))} drop constraint ${sql.id(row.name)}`.execute(db);
+    }
+    await sql`commit`.execute(db);
+  } catch (error) {
+    await sql`rollback`.execute(db);
+    throw error;
+  }
+  return stale.map((row) => `${row.table}.${row.name}`);
 }

@@ -329,6 +329,16 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     expect(sends).toEqual(['org-acme:admin@example.com', 'resent:org-acme']);
   });
 
+  it('opens and resends the durable create id after the provider replaces its invitation id', async () => {
+    const created = await manageTenantInvitations({db:runtime.db,administrator,firstAdministrator:clients}, 'create',
+      {slug:'acme',email:'admin@example.com',role:'org_admin'}) as any;
+    const current = await manageTenantInvitations({db:runtime.db,administrator,firstAdministrator:clients}, 'get',
+      {slug:'acme',invitationId:created.invitationId}) as any;
+    expect(current).toMatchObject({invitationId:'org-acme-invite',canResend:true});
+    expect(await manage('resend',created.invitationId)).toMatchObject({status:'resent',role:'org_admin'});
+    await expect(manage('resend',created.invitationId,'other')).rejects.toMatchObject({code:'INVITATION_NOT_FOUND'});
+  });
+
   it('resends an accepted member notice without reopening admission or changing the role', async () => {
     await invite();
     await sql`update platform.employee_invitations set status='accepted', accepted_at=now()`.execute(owner.db);

@@ -199,7 +199,11 @@ export async function manageTenantInvitations(
             ...invitationOutcome(input.slug, delivery) };
         }
 
-        const invitation = pending.find((row) => row.id === input.invitationId);
+        // Create returns the durable local intent id; Keycloak can replace its id
+        // when a member is invited again. Resolve that local id within this tenant.
+        const intent = rows.find(row => row.id === input.invitationId && ["pending", "accepted"].includes(row.status));
+        const invitation = pending.find(row => row.id === input.invitationId) ??
+          (intent ? pending.find(row => row.email.toLowerCase() === intent.email.toLowerCase()) : undefined);
         if (action === "get") {
           if (!invitation) throw new FirstAdministratorError("INVITATION_NOT_FOUND", "This invitation is no longer outstanding in this organization.");
           const local = localFor(invitation.email);
@@ -290,9 +294,6 @@ export async function manageTenantInvitations(
         if (local.status === "accepted" && !linkedEmails.has(local.email.toLowerCase())) {
           throw new FirstAdministratorError("INVITATION_ADMISSION_MISSING", "This historical invitation has no current application admission. Create a new authorized invitation to restore access; no mail was sent.");
         }
-        if (!clients.members.resendInvitation) {
-          throw new FirstAdministratorError("INVITATIONS_NOT_CONFIGURED", "Invitation resend is not configured.");
-        }
         if (!(await clients.members.hasInvitationMailConfiguration())) {
           throw new FirstAdministratorError("SMTP_NOT_CONFIGURED", "Configure SMTP before resending invitations.");
         }
@@ -303,6 +304,7 @@ export async function manageTenantInvitations(
           const delivery = await deliverInvitation(clients.members, organization.id, { email: invitation.email });
           if (delivery !== "email_sent") throw new FirstAdministratorError("INVITATION_STATE_CHANGED", "The membership changed; no new mail was confirmed. Refresh before resending.");
         } else {
+          if (!clients.members.resendInvitation) throw new FirstAdministratorError("INVITATIONS_NOT_CONFIGURED", "Invitation resend is not configured.");
           await clients.members.resendInvitation(organization.id, invitation.id);
         }
         return {

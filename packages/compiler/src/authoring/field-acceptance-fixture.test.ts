@@ -17,6 +17,10 @@
  * no generated artifact, no migration and no deployed schema.
  */
 import { describe, expect, it } from "bun:test";
+import Ajv2020 from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
+import { compiledFieldSchema } from "../field-json-schema.js";
+import { operationExactNumericKeyword, valueInvariantKeywords } from "@openshapeforge/operations";
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -203,7 +207,7 @@ describe("the 48-field acceptance fixture", () => {
     expect(children("effectivePeriod")).toEqual(["from:date", "to:date"]);
     expect(children("location")).toEqual(["latitude:number", "longitude:number"]);
     expect(children("reviewSchedule"))
-      .toEqual(["frequency:string", "interval:integer", "dayOfMonth:integer", "occurrences:integer"]);
+      .toEqual(["frequency:string", "interval:integer", "dayOfMonth:integer", "occurrences:integer", "start:date", "end:date", "endCondition:string", "count:integer"]);
     // 36 and 37 are authored compositions, so their children come from the field.
     expect(children("commercialTotal")).toEqual(["net:number", "vatRate:number", "gross:number"]);
     expect(children("lineGroups"))
@@ -407,5 +411,49 @@ describe("the 48-field acceptance fixture", () => {
       props: { unit: "%", decimalPlaces: 2 },
     });
     expect(columns.get("amount")?.type).toBe("numeric");
+  });
+});
+
+
+describe("native recurrence persistence contract", () => {
+  const ajv = new Ajv2020.default({ strict: false });
+  addFormats.default(ajv);
+  ajv.addKeyword(operationExactNumericKeyword);
+  for (const keyword of valueInvariantKeywords) ajv.addKeyword(keyword);
+  const schema = compiledFieldSchema(field("reviewSchedule"));
+  const validate = ajv.compile(schema);
+  const base = { frequency: "weekly", interval: 2, start: "2026-10-15" };
+
+  it("retains every native ending mode through JSON storage without scheduling", () => {
+    for (const ending of [
+      { endCondition: "never" },
+      { endCondition: "onDate", end: "2027-01-15" },
+      { endCondition: "afterCount", count: 12 },
+    ]) {
+      const value = { ...base, ...ending };
+      expect(validate(value)).toBe(true);
+      expect(JSON.parse(JSON.stringify(value))).toEqual(value);
+      expect(validate(JSON.parse(JSON.stringify(value)))).toBe(true);
+    }
+  });
+
+  it("refuses missing ending values, invalid dates/counts, unknown modes and properties", () => {
+    for (const invalid of [
+      { ...base, endCondition: "onDate" },
+      { ...base, endCondition: "afterCount" },
+      { ...base, endCondition: "afterCount", count: 0 },
+      { ...base, endCondition: "afterCount", count: 1001 },
+      { ...base, endCondition: "afterCount", count: 1.5 },
+      { ...base, endCondition: "onDate", end: "2026-02-30" },
+      { ...base, endCondition: "onDate", end: "2026-10-14" },
+      { ...base, endCondition: "invalid" },
+      { ...base, startDate: "2026-10-15" },
+    ]) expect(validate(invalid)).toBe(false);
+  });
+
+  it("permits preserved inactive ending values emitted while switching modes", () => {
+    expect(validate({ ...base, endCondition: "never", end: "2026-01-15", count: 12 })).toBe(true);
+    expect(validate({ ...base, endCondition: "afterCount", end: "2026-01-15", count: 12 })).toBe(true);
+    expect(validate({ ...base, dayOfMonth: 15, occurrences: 10 })).toBe(true);
   });
 });

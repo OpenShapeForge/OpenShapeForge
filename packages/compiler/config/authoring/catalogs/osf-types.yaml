@@ -480,6 +480,19 @@ types:
   # parser. It is a VALUE contract: nothing in OSF expands a recurrence into
   # occurrences, and this type does not pretend otherwise.
   recurrence:
+    schema:
+      allOf:
+        - if: { required: [endCondition], properties: { endCondition: { const: onDate } } }
+          then: { required: [end] }
+        - if: { required: [endCondition], properties: { endCondition: { const: afterCount } } }
+          then: { required: [count] }
+        - if:
+            required: [start, end]
+            anyOf:
+              - not: { required: [endCondition] }
+              - properties: { endCondition: { const: onDate } }
+          then:
+            x-osf-ordered-fields: { lower: start, upper: end, kind: date }
     kind: object
     label: { en: Recurrence, nl: Herhaling }
     baseType: object
@@ -513,6 +526,29 @@ types:
       - key: occurrences
         osfType: integer
         label: { en: Number of occurrences, nl: Aantal herhalingen }
+        validation: { min: 1, max: 1000 }
+
+      # Calendar dates and the explicit ending mode emitted by the native field.
+      # Inactive ending values may remain while switching modes; no occurrences
+      # are expanded or scheduled by this stored value contract.
+      - key: start
+        osfType: date
+        label: { en: Starting from, nl: Vanaf }
+      - key: end
+        osfType: date
+        label: { en: Ending on, nl: Einddatum }
+      - key: endCondition
+        osfType: string
+        label: { en: Ends, nl: Eindigt }
+        options:
+          type: static
+          items:
+            - { value: never, label: { en: Never, nl: Nooit } }
+            - { value: onDate, label: { en: On date, nl: Op datum } }
+            - { value: afterCount, label: { en: After count, nl: Na aantal } }
+      - key: count
+        osfType: integer
+        label: { en: Occurrences, nl: Herhalingen }
         validation: { min: 1, max: 1000 }
 
   # A bounded score. The bounds are the type's, because a rating whose range

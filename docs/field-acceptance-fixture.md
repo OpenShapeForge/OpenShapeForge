@@ -100,7 +100,7 @@ invented to carry fixture metadata — see 43 and 47.
 | 23 | `submittedAt` | `datetime` | whole | its zone context is 48, and canonically `platform.tenants.time_zone` |
 | 24 | `effectivePeriod` | `dateRange` | | new type |
 | 25 | `reportingPeriod` | `calendarPeriod` | whole | new type; `2026`, `2026-H1`, `2026-Q3`, `2026-11`, `2026-W42` |
-| 26 | `reviewSchedule` | `recurrence` | | new type; a stored schedule, see [Open gaps](#open-gaps) |
+| 26 | `reviewSchedule` | `recurrence` | | stored schedule including start/end dates and explicit ending mode, see [Open gaps](#open-gaps) |
 | 48 | `displayTimeZone` | `timeZone` | whole | new type; IANA zone name |
 
 **13 is integer seconds, not ISO-8601.** `retention.duration` spells `P7Y`, but
@@ -284,3 +284,15 @@ percentage against a currency, a reference against a bare uuid or another
 entity's reference, a scalar against a collection, a date against a datetime, a
 narrowed option domain against an undeclared one, a template where none is
 permitted, and an object written into text.
+
+
+### Recurrence value persistence
+
+The recurrence contract retains the native field's `start` and `end` calendar
+dates, `endCondition` (`never`, `onDate`, `afterCount`) and bounded `count`
+(1–1000), alongside frequency, interval, dayOfMonth and occurrences. `onDate`
+requires an end date; `afterCount` requires count. When both dates are present and the ending is on-date (explicitly or inferred),
+end cannot precede start. Switching ending modes can retain inactive date/count
+values without losing the user's prior setting. This is stored schedule data;
+it does not create jobs or expand occurrences. Canonical schema validation
+applies equally to authored and dynamically projected values.

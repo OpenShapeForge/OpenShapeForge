@@ -20,7 +20,9 @@ The browser can initiate this interaction without an MCP session or tool call:
 4. Read the created entity through its canonical get/list Operation. Encrypted
    values appear only as `__set__`, never plaintext or ciphertext. Submitting
    again for the same stable key rotates the entered values. Omitted optional
-   values retain their encrypted storage values under a row lock.
+   values retain their encrypted storage values under a row lock. Rotation checks
+   the source and every supplied identity against that locked row; the same key
+   cannot rebind a credential to another source or parent.
 
 Initiation runs canonical create admission (roles, input schema, prerequisites,
 confirmation) and an authorized source get before minting anything. The compiled contract determines the source entity and definition field.
@@ -28,3 +30,8 @@ Tenant IDs and actors cannot be overridden by the request. Pending forms are
 scoped to the verified tenant and user; the ordinary pending endpoint cannot
 read or consume another user's form. No occurrence jobs, generic expression
 execution or fake connection/provider records are introduced by this interface.
+
+Both authenticated and bearer-token form submissions claim their single-use
+handoff and save its target in one database transaction. A parallel submission
+loses before a write. Validation or write failure rolls back the claim and leaves
+the same unexpired form retryable; success commits consumption with the write.

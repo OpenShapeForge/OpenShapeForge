@@ -7,6 +7,9 @@
  * Split out of generated-mcp-server.ts.
  */
 import { startConfigurationForSession } from "./configuration-start.js";
+import { sql } from "kysely";
+import { isDeepStrictEqual } from "node:util";
+import { withDbSession } from "../db/session.js";
 import { requireActingRelationId } from "./acting-relation-guard.js";
 import type { DbSessionInput } from "../db/session.js";
 import {
@@ -170,6 +173,26 @@ export async function registerConfigurationHandoffRoutes(
         : [];
     const existing = findExistingConfiguration(existingRows, pending);
     if (existing) {
+      // The stable key finds a candidate; it does not authorize rebinding its
+      // source or owner. Check the original create identities under the same
+      // row lock used by the following canonical merge.
+      await withDbSession(db, writeSession, async (trx) => {
+        const locked = (await sql<{ row: Record<string, unknown> }>`select to_jsonb(t.*) as row
+          from ${sql.id(tableDef.schema, tableDef.table)} t
+          where ${sql.id(tableDef.primaryKey!)}::text = ${String(existing.id)} for update`.execute(trx)).rows[0]?.row;
+        if (!locked) throw new HttpError(404, "NOT_FOUND", "The configured record is unavailable.");
+        for (const column of tableDef.columns) {
+          const field = fieldNameForColumn(column);
+          if (field === pending.elicit.into) continue;
+          if (!Object.hasOwn(pending.modelValues, field)) {
+            if (field === pending.elicit.sourceField || (column.immutable && locked[column.name] != null)) throw new HttpError(409, "CONFIGURATION_BINDING_MISMATCH", "The secure form does not match this record.");
+            continue;
+          }
+          if (!isDeepStrictEqual(locked[column.name], pending.modelValues[field])) {
+            throw new HttpError(409, "CONFIGURATION_BINDING_MISMATCH", "The secure form does not match this record.");
+          }
+        }
+      });
       // Public reads intentionally return secret set markers. Merge only the
       // submitted members against the locked storage row, so omitted encrypted
       // siblings are retained rather than replaced by those markers.
@@ -185,6 +208,24 @@ export async function registerConfigurationHandoffRoutes(
     }
     await createGeneratedEntityForTable(db, writeSession, tableDef, values);
     return { ok: true };
+  };
+
+  class SubmissionRejected extends Error {
+    constructor(readonly outcome: Extract<ConfigurationSubmission, { ok: false }>) { super("Configuration values were refused."); }
+  }
+  const submitAtomically = async (pending: PendingConfiguration, body: string, session: DbSessionInput, claim: () => Promise<boolean>): Promise<ConfigurationSubmission> => {
+    if (!options.db) throw new HttpError(503, "DATABASE_NOT_CONFIGURED", "Database is not configured.");
+    try {
+      return await withDbSession(options.db, session, async () => {
+        if (!await claim()) throw new HttpError(409, "CONFLICT", "This configuration form was already submitted or expired.");
+        const outcome = await savePendingConfiguration(pending, body, session);
+        if (!outcome.ok) throw new SubmissionRejected(outcome);
+        return outcome;
+      });
+    } catch (error) {
+      if (error instanceof SubmissionRejected) return error.outcome;
+      throw error;
+    }
   };
 
   instance.post(`${ENTITY_CONFIGURATION_PATH}/start`, async (request) => {
@@ -226,11 +267,8 @@ export async function registerConfigurationHandoffRoutes(
         );
       }
       const body = typeof request.body === "string" ? request.body : "";
-      const outcome = await savePendingConfiguration(
-        found.pending,
-        body,
-        session,
-      );
+      const outcome = await submitAtomically(found.pending, body, session,
+        () => consumeConfigurationForSession(id, session, db));
       if (!outcome.ok) {
         return reply.status(400).send({
           error: {
@@ -239,14 +277,6 @@ export async function registerConfigurationHandoffRoutes(
             fields: outcome.errors,
           },
         });
-      }
-      const consumed = await consumeConfigurationForSession(id, session, db);
-      if (!consumed) {
-        throw new HttpError(
-          409,
-          "CONFLICT",
-          "This configuration form was already submitted.",
-        );
       }
       return reply.send({ saved: true });
     },
@@ -298,11 +328,8 @@ export async function registerConfigurationHandoffRoutes(
           groups: [],
           scope: "self",
         };
-        const outcome = await savePendingConfiguration(
-          pending,
-          body,
-          writeSession,
-        );
+        const outcome = await submitAtomically(pending, body, writeSession,
+          () => consumeConfiguration(pending.token, options.db, writeSession));
         if (!outcome.ok) {
           return reply
             .status(400)
@@ -321,7 +348,6 @@ export async function registerConfigurationHandoffRoutes(
               ),
             );
         }
-        await consumeConfiguration(pending.token, options.db);
         return reply
           .type("text/html")
           .send(renderConfigurationSavedPage(pending.displayName));

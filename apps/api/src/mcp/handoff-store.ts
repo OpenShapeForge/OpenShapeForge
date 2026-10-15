@@ -207,23 +207,27 @@ export async function consumeHandoff(input: {
   db: OpenShapeForgeDatabase;
   kind: "entity_oauth" | "entity_configuration" | "artifact_upload";
   token: unknown;
-}): Promise<void> {
+  session?: DbSessionInput;
+}): Promise<boolean> {
   const parsed = parseToken(input.token);
-  if (!parsed) return;
-  const session: DbSessionInput = {
+  if (!parsed) return false;
+  if (input.session && (input.session.tenantId !== parsed.tenantId || input.session.userId !== parsed.userId)) return false;
+  const session: DbSessionInput = input.session ?? {
     tenantId: parsed.tenantId,
     userId: parsed.userId,
     roles: [],
     groups: [],
     scope: "self",
   };
-  await withDbSession(input.db, session, async (trx) => {
-    await sql`
+  return withDbSession(input.db, session, async (trx) => {
+    const result = await sql`
       update platform.mcp_handoffs
          set consumed_at = now()
        where token_hash = ${parsed.hash}
          and kind = ${input.kind}
          and consumed_at is null
+         and expires_at > now()
     `.execute(trx);
+    return Number(result.numAffectedRows) === 1;
   });
 }

@@ -33,7 +33,8 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
   const artifacts = generateArtifacts(compileProtectedFieldsFixture((candidate: { contract: typeof fixtureContract }) => { fixtureContract = candidate.contract; }, {
     configureFields: (fields: Array<{ key: string; children?: unknown[] }>) => {
       fields.push({ key: "key", osfType: "string", label: { en: "Configuration key" }, persisted: { column: "key", storageClass: "core" } } as never);
-      fields.push({ key: "definitionId", osfType: "string", label: { en: "Definition record" }, persisted: { column: "definition_id", storageClass: "core" } } as never);
+      fields.push({ key: "definitionId", osfType: "string", immutable: true, label: { en: "Definition record" }, persisted: { column: "definition_id", storageClass: "core" } } as never);
+      fields.push({ key: "acceptanceId", osfType: "string", immutable: true, label: { en: "Acceptance record" }, persisted: { column: "acceptance_id", storageClass: "core" } } as never);
       fields.push({ key: "definitions", osfType: "object", cardinality: "collection", label: { en: "Definitions" }, persisted: { column: "definitions", storageClass: "core" }, children: [
         { key: "key", osfType: "string", label: { en: "Key" } },
         { key: "osfType", osfType: "string", label: { en: "Type" } },
@@ -343,8 +344,10 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
     const token = storeElicitedValues(table.name,
       [{ key: "token", osfType: "string", classification: { sensitivity: "confidential" } }], { token: secret }, keyring).token;
     const key = `config-${randomUUID()}`;
+    const definitionId = randomUUID();
+    const acceptanceId = randomUUID();
     const created = await createGeneratedEntity(runtime.db, writer, { table: table.name, values: {
-      key, label: "Secure rotation", explicitSecret: "top secret", data: { visible: "old", restricted: "nested secret", fixed: "initial", token },
+      key, definitionId, acceptanceId, label: "Secure rotation", explicitSecret: "top secret", data: { visible: "old", restricted: "nested secret", fixed: "initial", token },
     } });
     const previousSecure = table.source!.secureInputOnCreate;
     const previousKeyring = process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;
@@ -354,23 +357,29 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       const routes = new Map<string, (...args: any[]) => Promise<unknown>>();
       await registerConfigurationHandoffRoutes({
         instance: { addContentTypeParser() {}, get() {}, post: (path: string, handler: (...args: any[]) => Promise<unknown>) => routes.set(path, handler) },
-        options: { db: runtime.db }, requireMcpSession: async () => { throw new Error("Unused token route"); },
+        options: { db: runtime.db }, requireMcpSession: async () => ({ db: runtime.db, session: writer, resource: "fixture" }),
       } as never);
       const post = routes.get("/api/entity-configuration/:token")!;
-      const submit = async (tenantId: string, body: string) => {
+      const mint = async (tenantId: string, overrides: Record<string, unknown> = {}) => {
         const pending = await mintConfiguration({ db: runtime.db, tenantId, userId: writer.userId, table: table.name,
           elicit: { sourceField: "definitionId", sourceEntity: "Fixture", sourceTable: table.name, definitionsField: "definitions", into: "data" },
-          modelValues: { key }, displayName: "Fixture", definitions: [
-            { key: "visible", osfType: "string", label: { en: "Public value" } },
+          modelValues: { key, definitionId, acceptanceId, ...overrides }, displayName: "Fixture", definitions: [
+            { key: "visible", osfType: "string", required: true, label: { en: "Public value" } },
             { key: "token", osfType: "string", label: { en: "Secret value" }, classification: { sensitivity: "confidential" } },
           ],
         });
+        return pending;
+      };
+      const submitPending = async (pending: { token: string }, body: string, authenticatedId?: string) => {
         let status = 200;
         let output: unknown;
         const reply = { status(code: number) { status = code; return this; }, type() { return this; }, send(value: unknown) { output = value; return this; } };
-        await post({ params: { token: pending.token }, body, log: { error() {} } }, reply);
+        const handler = authenticatedId ? routes.get("/api/entity-configuration/pending/:id")! : post;
+        try { await handler({ params: { token: pending.token, id: authenticatedId }, body, log: { error() {} } }, reply); }
+        catch (error) { status = (error as { status?: number }).status ?? 500; }
         return { status, output };
       };
+      const submit = async (tenantId: string, body: string, overrides: Record<string, unknown> = {}) => submitPending(await mint(tenantId, overrides), body);
       const before = (await stored(String(created.id))).data as Record<string, unknown>;
       expect((await submit(writer.tenantId, "visible=changed")).status).toBe(200);
       const saved = (await stored(String(created.id))).data as Record<string, unknown>;
@@ -385,6 +394,63 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       expect((await submit(randomUUID(), "visible=wrong-tenant")).status).toBe(400);
       expect(await stored(String(created.id))).toEqual(beforeDenied);
       expect(JSON.stringify(await events(String(created.id)))).not.toContain(secret);
+      for (const overrides of [{ definitionId: randomUUID() }, { acceptanceId: randomUUID() }, { definitionId: undefined }, { acceptanceId: undefined }]) {
+        const beforeMismatch = await stored(String(created.id));
+        const beforeMismatchEvents = await events(String(created.id));
+        expect((await submit(writer.tenantId, "visible=changed&token=must-not-rebind", overrides)).status).toBe(400);
+        expect(await stored(String(created.id))).toEqual(beforeMismatch);
+        expect(await events(String(created.id))).toEqual(beforeMismatchEvents);
+      }
+      // One pending form is one transaction: a second parallel authenticated
+      // POST must lose before it can change either storage or event history.
+      const { latestConfigurationForSession } = await import("../../mcp/configuration-handoff.js");
+      const parallelPending = await mint(writer.tenantId);
+      const parallelId = (await latestConfigurationForSession(writer, runtime.db))!.id;
+      const beforeParallelEvents = await events(String(created.id));
+      const parallel = await Promise.all([
+        submitPending(parallelPending, "visible=first", parallelId),
+        submitPending(parallelPending, "visible=second", parallelId),
+      ]);
+      expect(parallel.map(response => response.status).sort()).toEqual([200, 409]);
+      expect((await events(String(created.id))).length).toBe(beforeParallelEvents.length + 1);
+      const tokenPending = await mint(writer.tenantId);
+      const beforeTokenEvents = await events(String(created.id));
+      const tokenParallel = await Promise.all([
+        submitPending(tokenPending, "visible=token-first"), submitPending(tokenPending, "visible=token-second"),
+      ]);
+      expect(tokenParallel.map(response => response.status).sort()).toEqual([200, 400]);
+      expect((await events(String(created.id))).length).toBe(beforeTokenEvents.length + 1);
+      // A failed write rolls back consumption, leaving the same form retryable.
+      const retryPending = await mint(writer.tenantId, { label: "Different identity" });
+      expect((await submitPending(retryPending, "visible=must-not-save")).status).toBe(400);
+      const { peekConfiguration } = await import("../../mcp/configuration-handoff.js");
+      expect(await peekConfiguration(retryPending.token, runtime.db)).not.toBeNull();
+      const validationPending = await mint(writer.tenantId);
+      const validationId = (await latestConfigurationForSession(writer, runtime.db))!.id;
+      const beforeValidation = await stored(String(created.id));
+      expect((await submitPending(validationPending, "visible=", validationId)).status).not.toBe(200);
+      expect(await stored(String(created.id))).toEqual(beforeValidation);
+      expect(await peekConfiguration(validationPending.token, runtime.db)).not.toBeNull();
+      expect((await submitPending(validationPending, "visible=retry", validationId)).status).toBe(200);
+      // The same single-use rule protects a brand-new row even when its table
+      // does not have a key uniqueness constraint to mask duplicate creates.
+      const createKey = `create-${randomUUID()}`;
+      const createPending = await mintConfiguration({ db: runtime.db, tenantId: writer.tenantId, userId: writer.userId, table: table.name,
+        elicit: { sourceField: "definitionId", sourceEntity: "Fixture", sourceTable: table.name, definitionsField: "definitions", into: "data" },
+        modelValues: { key: createKey, definitionId, acceptanceId, label: "Created once", explicitSecret: "not a credential" }, displayName: "Fixture", definitions: [
+          { key: "visible", osfType: "string", required: true }, { key: "restricted", osfType: "string", required: true }, { key: "fixed", osfType: "string", required: true },
+          { key: "token", osfType: "string", classification: { sensitivity: "confidential" } },
+        ],
+      });
+      const createId = (await latestConfigurationForSession(writer, runtime.db))!.id;
+      const creations = await Promise.all([
+        submitPending(createPending, "visible=new&restricted=private&fixed=initial&token=first", createId),
+        submitPending(createPending, "visible=new&restricted=private&fixed=initial&token=second", createId),
+      ]);
+      expect(creations.map(response => response.status).sort()).toEqual([200, 409]);
+      const createdRows = await listGeneratedEntities(runtime.db, writer, { table: table.name, filter: { key: createKey } });
+      expect(createdRows.rows).toHaveLength(1);
+      expect(await events(String(createdRows.rows[0]!.id))).toHaveLength(1);
     } finally {
       if (previousSecure === undefined) delete table.source!.secureInputOnCreate; else table.source!.secureInputOnCreate = previousSecure;
       if (previousKeyring === undefined) delete process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS; else process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = previousKeyring;

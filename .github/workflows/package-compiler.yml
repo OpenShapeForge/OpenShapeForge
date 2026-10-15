@@ -44,7 +44,8 @@ permissions:
 jobs:
   pack:
     name: Pack and smoke-test the compiler tarball
-    runs-on: [self-hosted, macOS, ARM64, osf-package]
+    # Artifact and registry traffic must not depend on a local runner network.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       # The publish dry run below asks the registry which versions already
@@ -52,6 +53,13 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Keep package tar contents consistent with the reviewed release toolchain.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.21.0'
+      - name: Pin npm packaging version
+        run: npm install --global npm@11.19.0 --ignore-scripts
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -137,12 +145,20 @@ jobs:
     name: Publish to GitHub Packages
     needs: pack
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/hans/dev')
-    runs-on: [self-hosted, macOS, ARM64, osf-package]
+    # Artifact and registry traffic must not depend on a local runner network.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Keep package tar contents consistent with the reviewed release toolchain.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.21.0'
+      - name: Pin npm packaging version
+        run: npm install --global npm@11.19.0 --ignore-scripts
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:

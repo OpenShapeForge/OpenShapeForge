@@ -148,7 +148,7 @@ export async function manageTenantInvitations(
               const local = localFor(invitation.email);
               return {
                 tenantSlug: input.slug,
-                invitationId: invitation.id,
+                invitationId: local?.id ?? invitation.id,
                 email: invitation.email,
                 firstName: invitation.firstName,
                 lastName: invitation.lastName,
@@ -192,10 +192,7 @@ export async function manageTenantInvitations(
           const delivery = await deliverInvitation(clients.members, organization.id, { email, ...names }, { knownNonMember: !member });
           const invitation = await recordEmployeeInvitation(trx, tenant.id, `${deps.administrator.issuer}#${deps.administrator.subject}`,
             { email, role: input.role, ...names });
-          const keycloakInvitation = delivery === "already_pending"
-            ? await clients.members.findPendingInvitationByEmail(organization.id, email)
-            : null;
-          return { tenantSlug: input.slug, invitationId: keycloakInvitation?.id ?? invitation.id, ...invitation,
+          return { tenantSlug: input.slug, invitationId: invitation.id, ...invitation,
             ...invitationOutcome(input.slug, delivery) };
         }
 
@@ -207,7 +204,7 @@ export async function manageTenantInvitations(
         if (action === "get") {
           if (!invitation) throw new FirstAdministratorError("INVITATION_NOT_FOUND", "This invitation is no longer outstanding in this organization.");
           const local = localFor(invitation.email);
-          return { tenantSlug: input.slug, invitationId: invitation.id, email: invitation.email, firstName: invitation.firstName,
+          return { tenantSlug: input.slug, invitationId: local?.id ?? invitation.id, email: invitation.email, firstName: invitation.firstName,
             lastName: invitation.lastName, status: invitation.status,
             sentAt: invitationTimestamp(invitation.sentDate), expiresAt: invitationTimestamp(invitation.expiresAt),
             role: local?.role ?? null, registrationStatus: local?.status ?? "untracked",

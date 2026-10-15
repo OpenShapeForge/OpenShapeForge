@@ -332,9 +332,10 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
   it('opens and resends the durable create id after the provider replaces its invitation id', async () => {
     const created = await manageTenantInvitations({db:runtime.db,administrator,firstAdministrator:clients}, 'create',
       {slug:'acme',email:'admin@example.com',role:'org_admin'}) as any;
+    expect((await manage('list') as any).invitations[0].invitationId).toBe(created.invitationId);
     const current = await manageTenantInvitations({db:runtime.db,administrator,firstAdministrator:clients}, 'get',
       {slug:'acme',invitationId:created.invitationId}) as any;
-    expect(current).toMatchObject({invitationId:'org-acme-invite',canResend:true});
+    expect(current).toMatchObject({invitationId:created.invitationId,canResend:true});
     expect(await manage('resend',created.invitationId)).toMatchObject({status:'resent',role:'org_admin'});
     await expect(manage('resend',created.invitationId,'other')).rejects.toMatchObject({code:'INVITATION_NOT_FOUND'});
   });

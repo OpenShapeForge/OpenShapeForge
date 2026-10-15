@@ -38,7 +38,7 @@ export function invitationOutcome(slug: string, delivery: InvitationDelivery) {
   const nextStep: Record<InvitationDelivery, string> = {
     email_sent:
       "Keycloak accepted the invitation e-mail request; inbox delivery is not confirmed. Tell the person to open that " +
-      "e-mail and follow its link. If it does not arrive, call list_tenant_invitations first and use its provider invitationId for resend_tenant_invitation.",
+      "e-mail and follow its link. If it does not arrive, call list_tenant_invitations first and use its invitationId for resend_tenant_invitation.",
     no_email_existing_account:
       "No e-mail was sent and none will be: this person already has an account in this organization. Tell them to " +
       `${signInAt(signInUrl)}; the role is applied on that sign-in. Do not tell them to wait for mail.`,

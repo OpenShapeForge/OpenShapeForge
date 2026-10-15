@@ -38,6 +38,7 @@
 import { sql, type Transaction } from "kysely";
 import type { OperationError } from "@openshapeforge/operations";
 import type { RuntimeJobError, RuntimeJobOutcome } from "@openshapeforge/plugin-runtime";
+import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession } from "../db/session.js";
 import type { DB } from "../generated/db/types.js";
@@ -178,6 +179,36 @@ export type JobRunResult =
 const QUEUED_JOB_EFFECTS = { data: "write", external: "write" } as const;
 
 /**
+ * The session a claimed job runs under: the verified session snapshot the
+ * enqueue persisted, replayed whole.
+ *
+ * Whole, because this is both the database session the handler writes through
+ * AND the session a host execution policy decides on — and the public session
+ * contract declares `credential` required. A snapshot of roles and groups
+ * alone would hand a policy `credential: undefined`, so an API-key rule that
+ * refuses interactive writes would admit the same work here. Core adds
+ * nothing to the snapshot and infers nothing: `jobs/actor-session.ts` refuses
+ * a row whose credential is not one a job may carry.
+ */
+export function replayedJobSession(job: ClaimedJob): TrustedSessionContext {
+  const { credential, roles, groups, relationGroupIds, relationId, scope,
+    oauthScopes, locale, userDisplayName } = job.actorSession;
+  return {
+    tenantId: job.tenantId,
+    userId: job.actorId,
+    credential,
+    roles: [...roles],
+    groups: [...groups],
+    relationGroupIds,
+    scope,
+    ...(relationId ? { relationId } : {}),
+    ...(oauthScopes ? { oauthScopes: [...oauthScopes] } : {}),
+    ...(locale !== undefined ? { locale } : {}),
+    ...(userDisplayName !== undefined ? { userDisplayName } : {}),
+  } as TrustedSessionContext;
+}
+
+/**
  * The refusal settlement for a job a policy would not admit: requeued for
  * the moment the refusal names, attempt-neutral, or terminally `failed` when
  * the refusal names no end. Either way the queue records the structured
@@ -249,10 +280,11 @@ export async function runClaimedJob(
   }
   let handlerStarted = false;
   let handlerSettlement: SettleJobInput | undefined;
+  const replayed = replayedJobSession(job);
   try {
     return await withDbSession(
       db,
-      { tenantId: job.tenantId, userId: job.actorId, ...job.actorSession },
+      replayed,
       async (trx): Promise<JobRunResult> => {
         if (!(await lockClaimedJob(trx, job))) return { ran: false };
         // Admission inside the claim's own transaction, after the claim is
@@ -264,7 +296,7 @@ export async function runClaimedJob(
         // around it are the host's own queue bookkeeping and stay outside.
         const denial = await operationAdmissionRefusal(
           db,
-          { tenantId: job.tenantId, userId: job.actorId, ...job.actorSession },
+          replayed,
           { id: job.kind, intent: "job", effects: QUEUED_JOB_EFFECTS },
         );
         if (denial) {

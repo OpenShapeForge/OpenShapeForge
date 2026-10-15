@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { OpenShapeForgeDatabase } from "../connection.js";
+import { JOB_ACTOR_CREDENTIALS } from "../../jobs/actor-session.js";
 import { ensureCheckConstraint } from "./sql-invariants.js";
 
 /** The states a job moves through; `outcome_unknown` and `dead` need an operator. */
@@ -11,6 +12,7 @@ export type JobStatus = (typeof JOB_STATUSES)[number];
  * cannot express. The table is declared in
  * packages/compiler/config/platform-schema.yaml; this runs after the generated
  * step and adds, idempotently on every migrate, the status vocabulary, the
+ * credential its replayed session must name, the
  * hash shape of the stored claim token, and the shape every status must have:
  * only a running job holds a lease and a claim token, only a finished one has
  * `completed_at`, and a job can never be marked done or dead while still
@@ -23,6 +25,20 @@ export async function applyJobsMigration(db: OpenShapeForgeDatabase): Promise<vo
     table,
     name: "jobs_status_check",
     expression: `status in (${JOB_STATUSES.map((status) => `'${status}'`).join(", ")})`,
+  });
+  // The actor session is the verified session the worker replays, and a host
+  // execution policy decides on it — including which credential enqueued the
+  // work (jobs/actor-session.ts). A row whose snapshot names no admissible
+  // credential is a session nothing can judge, so the database refuses it
+  // rather than leaving the worker to find out at claim time.
+  await ensureCheckConstraint(db, {
+    table,
+    name: "jobs_actor_credential_check",
+    // `coalesce`, because a CHECK admits a NULL result: a snapshot with no
+    // credential at all is exactly the row this refuses.
+    expression: `coalesce(actor_session->>'credential', '') in (${
+      JOB_ACTOR_CREDENTIALS.map((credential) => `'${credential}'`).join(", ")
+    })`,
   });
   await ensureCheckConstraint(db, {
     table,

@@ -27,9 +27,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql } from "kysely";
+import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import type { ModuleExecutionPolicy, ModuleWorkerLogger, RuntimeModule } from "../../modules/contract.js";
+import { ModulePlatformRuntime, withModuleOperationSession } from "../../modules/platform.js";
 import { composeJobHandlers } from "../../jobs/handlers.js";
 import { createJobsRuntimeModule } from "../../jobs/module.js";
+import type { JobActorCredential } from "../../jobs/actor-session.js";
 import { enqueueJob } from "../../jobs/store.js";
 import { processJobBatch, refusedJobSettlement } from "../../jobs/worker.js";
 import type { MailMessage, MailProvider } from "../../jobs/mail/provider.js";
@@ -108,6 +111,27 @@ function deadlinePolicy(options: { retryAt?: string } = {}): ModuleExecutionPoli
   };
 }
 
+/** Every session a policy was handed, exactly as it saw it. */
+const policySessions: TrustedSessionContext[] = [];
+
+/**
+ * A host rule of the kind the public contract invites: it branches on the
+ * CREDENTIAL. An API key may not change anything; everything else may. A
+ * queued run that reached this with `credential: undefined` would be admitted
+ * by the `!==` and silently escape the rule.
+ */
+const apiKeyPolicy: ModuleExecutionPolicy = {
+  name: "no-writes-from-api-keys",
+  evaluate: (_request, context) => {
+    policySessions.push(context.session as TrustedSessionContext);
+    if (context.session.credential !== "api-key") return { admitted: true };
+    return {
+      admitted: false,
+      refusal: { message: "An API key may not change anything in this workspace." },
+    };
+  },
+};
+
 /** A module whose job handler both writes tenant data and dispatches outward. */
 function exampleModule(policies: readonly ModuleExecutionPolicy[]): RuntimeModule {
   return {
@@ -133,6 +157,7 @@ let created = false;
 let privileged: DatabaseRuntime | undefined;
 let app: DatabaseRuntime | undefined;
 let worker: DatabaseRuntime | undefined;
+let platform: ModulePlatformRuntime | undefined;
 
 type JobRow = {
   status: string;
@@ -155,17 +180,37 @@ async function jobRow(id: string): Promise<JobRow> {
   };
 }
 
-async function enqueue(kind: string, payload: Record<string, unknown>): Promise<string> {
+async function enqueue(
+  kind: string,
+  payload: Record<string, unknown>,
+  credential: JobActorCredential = "trusted-context",
+): Promise<string> {
   const session = { tenantId: TENANT, userId: ACTOR, roles: WRITE_ROLES, scope: "tenant" as const };
   const { id } = await withDbSession(app!.db, session, (trx) =>
     enqueueJob(trx, {
       tenantId: TENANT,
       actorId: ACTOR,
-      actorSession: { roles: WRITE_ROLES, groups: [], relationGroupIds: [], scope: "tenant" },
+      actorSession: {
+        credential,
+        roles: WRITE_ROLES,
+        groups: [],
+        relationGroupIds: [],
+        scope: "tenant",
+        ...(credential === "bearer" ? { oauthScopes: ["openid", "profile"] } : {}),
+      },
       kind,
       payload,
     }));
   return id;
+}
+
+/** The enqueue a module actually reaches: core takes the session from itself. */
+function enqueueAsModule(
+  actor: TrustedSessionContext,
+  input: { kind: string; payload: Record<string, unknown> },
+): Promise<{ id: string }> {
+  return withModuleOperationSession(platform!.services, actor, (live) =>
+    platform!.services.jobs.enqueue(live!, input));
 }
 
 async function writtenRowCount(): Promise<number> {
@@ -253,6 +298,7 @@ describe("host execution policies on the job worker", () => {
     }
     app = createDatabaseRuntime({ databaseUrl: databaseUrl("app"), maxConnections: 4 });
     worker = createDatabaseRuntime({ databaseUrl: databaseUrl("worker"), maxConnections: 4 });
+    platform = new ModulePlatformRuntime(app.db);
   }, TEST_TIMEOUT);
 
   afterAll(async () => {
@@ -267,6 +313,7 @@ describe("host execution policies on the job worker", () => {
     written.length = 0;
     dispatched.length = 0;
     sentMail.length = 0;
+    policySessions.length = 0;
     await sql`delete from platform.jobs`.execute(privileged!.db);
     await sql`delete from public.execution_policy_job_writes`.execute(privileged!.db);
     await writesUntil("2099-01-01T00:00:00Z");
@@ -423,6 +470,163 @@ describe("host execution policies on the job worker", () => {
     expect(await writtenRowCount()).toBe(0);
     registerOperationExecutionPolicies(worker!.db, []);
   }, TEST_TIMEOUT);
+
+  /**
+   * The session a queued run is decided on. The public contract declares
+   * `credential` required and hosts branch on it, so the snapshot the enqueue
+   * persisted has to arrive complete — a worker that replayed only roles and
+   * groups would hand an API-key rule `undefined` and admit exactly what it
+   * refuses in a request.
+   */
+  describe("the credential a queued job carries", () => {
+    const module = () => exampleModule([apiKeyPolicy]);
+    const drain = async (id: string) => {
+      const handlers = composeJobHandlers([module()]);
+      registerOperationExecutionPolicies(worker!.db, [module()]);
+      try {
+        expect(await processJobBatch(worker!.db, handlers, silent)).toEqual({ processed: 1 });
+      } finally {
+        registerOperationExecutionPolicies(worker!.db, []);
+      }
+      return jobRow(id);
+    };
+
+    test("an API-key rule refuses the queued run it refuses in a request", async () => {
+      const row = await drain(await enqueue(WRITING_KIND, { displayName: "From an API key" }, "api-key"));
+      expect(row).toMatchObject({
+        status: "failed",
+        last_error: { code: "EXECUTION_NOT_PERMITTED" },
+      });
+      expect(row.last_error?.message).toBe("An API key may not change anything in this workspace.");
+      expect(written).toEqual([]);
+      expect(dispatched).toEqual([]);
+      expect(await writtenRowCount()).toBe(0);
+      // The rule saw the credential, not an absence it would have admitted.
+      expect(policySessions).toHaveLength(1);
+      expect(policySessions[0]!.credential).toBe("api-key");
+    });
+
+    test("the same rule admits a bearer-enqueued run, which settles normally", async () => {
+      const row = await drain(await enqueue(WRITING_KIND, { displayName: "From a bearer" }, "bearer"));
+      expect(row).toMatchObject({ status: "done", attempts: 1 });
+      expect(written).toEqual(["From a bearer"]);
+      expect(await writtenRowCount()).toBe(1);
+    });
+
+    test("the policy sees the whole verified snapshot the enqueue persisted", async () => {
+      await drain(await enqueue(WRITING_KIND, { displayName: "Complete session" }, "bearer"));
+      const seen = policySessions[0]!;
+      expect(seen).toMatchObject({
+        tenantId: TENANT,
+        userId: ACTOR,
+        credential: "bearer",
+        roles: [...WRITE_ROLES].sort(),
+        groups: [],
+        scope: "tenant",
+        oauthScopes: ["openid", "profile"],
+      });
+      // Liveness-bound facts are absent rather than invented.
+      expect(seen.loginSessionBinding).toBeUndefined();
+      expect(seen.grant).toBeUndefined();
+    });
+
+    test("a trusted-context run is admitted, and a host with no policy is unchanged", async () => {
+      const admitted = await drain(await enqueue(WRITING_KIND, { displayName: "Trusted context" }, "trusted-context"));
+      expect(admitted).toMatchObject({ status: "done" });
+      policySessions.length = 0;
+      written.length = 0;
+      await sql`delete from platform.jobs`.execute(privileged!.db);
+      await sql`delete from public.execution_policy_job_writes`.execute(privileged!.db);
+      // No policy registered at all: the API-key run runs, as before.
+      const handlers = composeJobHandlers([exampleModule([])]);
+      const id = await enqueue(WRITING_KIND, { displayName: "Ungoverned API key" }, "api-key");
+      expect(await processJobBatch(worker!.db, handlers, silent)).toEqual({ processed: 1 });
+      expect(await jobRow(id)).toMatchObject({ status: "done" });
+      expect(policySessions).toEqual([]);
+      expect(written).toEqual(["Ungoverned API key"]);
+    });
+
+    test("nothing a caller sends chooses the credential of its job", async () => {
+      // The payload names another credential and other roles; core takes both
+      // from the verified session it was handed, and the payload stays payload.
+      const actor: TrustedSessionContext = {
+        tenantId: TENANT,
+        userId: ACTOR,
+        credential: "api-key",
+        roles: [...WRITE_ROLES],
+        groups: [],
+        relationGroupIds: [],
+        scope: "tenant",
+      };
+      const { id } = await enqueueAsModule(actor, {
+        kind: WRITING_KIND,
+        payload: {
+          displayName: "Payload claims a bearer",
+          credential: "bearer",
+          roles: ["Platform.SystemBypass"],
+          actorSession: { credential: "bearer" },
+        },
+      });
+      const stored = await sql<{ actor_session: string }>`
+        select actor_session::text as actor_session from platform.jobs where id = ${id}::uuid
+      `.execute(privileged!.db);
+      const snapshot = JSON.parse(stored.rows[0]!.actor_session) as Record<string, unknown>;
+      expect(snapshot.credential).toBe("api-key");
+      expect(snapshot.roles).toEqual([...WRITE_ROLES].sort());
+
+      const row = await drain(id);
+      expect(row).toMatchObject({ status: "failed", last_error: { code: "EXECUTION_NOT_PERMITTED" } });
+      expect(policySessions[0]!.credential).toBe("api-key");
+      expect(policySessions[0]!.roles).toEqual([...WRITE_ROLES].sort());
+    });
+
+    test("the database refuses a queued row whose snapshot names no admissible credential", async () => {
+      // The invariant belongs in the schema too: a row no policy could decide
+      // on must not be insertable, not merely unparseable at claim time.
+      await expect(sql`
+        insert into platform.jobs (tenant_id, actor_id, actor_session, kind, payload)
+        values (${TENANT}::uuid, ${ACTOR}::uuid,
+          ${sql.lit(JSON.stringify({ roles: [], groups: [], relationGroupIds: [], scope: "self" }))}::jsonb,
+          ${WRITING_KIND}, '{}'::jsonb)
+      `.execute(privileged!.db)).rejects.toThrow(/jobs_actor_credential_check/);
+      await expect(sql`
+        insert into platform.jobs (tenant_id, actor_id, actor_session, kind, payload)
+        values (${TENANT}::uuid, ${ACTOR}::uuid,
+          ${sql.lit(JSON.stringify({ credential: "grant", roles: [], groups: [], relationGroupIds: [], scope: "self" }))}::jsonb,
+          ${WRITING_KIND}, '{}'::jsonb)
+      `.execute(privileged!.db)).rejects.toThrow(/jobs_actor_credential_check/);
+    });
+
+    test("a capability grant session cannot enqueue a job at all", async () => {
+      // Its expiry and remaining uses are verified per request; a worker could
+      // not run the job as the grant it was issued for, so core refuses rather
+      // than replaying an authority nobody checked.
+      const granted = {
+        tenantId: TENANT,
+        userId: randomUUID(),
+        credential: "grant",
+        roles: [],
+        groups: [],
+        relationGroupIds: [],
+        scope: "self",
+        grant: {
+          id: randomUUID(),
+          subject: { entity: "Relation", id: randomUUID() },
+          recipient: { kind: "email" },
+          operations: ["example.sign"],
+          records: [],
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          maxUses: 1,
+        },
+      } as unknown as TrustedSessionContext;
+      await expect(enqueueAsModule(granted, { kind: WRITING_KIND, payload: {} }))
+        .rejects.toThrow(/capability grant session cannot enqueue a job/);
+      const jobs = await sql<{ count: string }>`
+        select count(*)::text as count from platform.jobs
+      `.execute(privileged!.db);
+      expect(jobs.rows[0]!.count).toBe("0");
+    });
+  });
 
   test("the worker refuses to start when a configured policy module fails to initialise", async () => {
     const broken: RuntimeModule = {

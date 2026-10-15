@@ -6,6 +6,7 @@ import { sql, type Transaction } from "kysely";
 import { assertSameDatabase, type OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, withInvocationSavepoint } from "../db/session.js";
 import { enqueueJob } from "../jobs/store.js";
+import { actorSessionOf, type JobActorCredential } from "../jobs/actor-session.js";
 import { appendEntityEventInTransaction } from "../platform/entity-events.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { DB, Json } from "../generated/db/types.js";
@@ -434,14 +435,33 @@ export class ModulePlatformRuntime {
           }
           const tenantId = session.tenantId;
           const actorId = session.userId;
-          // ENQUEUE-CREDENTIAL-SNAPSHOT
-          const actorSession = {
+          // A capability grant is verified per request against its expiry and
+          // its remaining uses, and the session contract has the grant present
+          // exactly when the credential is "grant". Neither can be re-verified
+          // when a worker runs the job later, so rather than replay a grant
+          // nobody checked — or hand an execution policy a session missing the
+          // grant it is supposed to judge — enqueue refuses it outright.
+          if (session.credential === "grant") {
+            throw new Error(
+              "A capability grant session cannot enqueue a job: its expiry and remaining uses " +
+                "are verified per request, so a worker could not run the job as the grant it was issued for.",
+            );
+          }
+          // The whole effective session goes on the row: the job runs later
+          // as this person, with what this request could reach — not more.
+          // `actorSessionOf` refuses a credential a job may not carry, so the
+          // snapshot is a session an execution policy can decide on.
+          const actorSession = actorSessionOf({
+            credential: session.credential as JobActorCredential,
             roles: session.roles,
             groups: session.groups,
             relationGroupIds: session.relationGroupIds ?? [],
             ...(actingRelationId(session) ? { relationId: actingRelationId(session)! } : {}),
             scope: session.scope,
-          };
+            ...(session.oauthScopes ? { oauthScopes: session.oauthScopes } : {}),
+            ...(session.locale ? { locale: session.locale } : {}),
+            ...(session.userDisplayName ? { userDisplayName: session.userDisplayName } : {}),
+          });
           // One path in: the module session join (or open) is what fences the tenant.
           return this.services.db.withSession(session, (trx) =>
             enqueueJob(trx, { ...input, tenantId, actorId, actorSession }),

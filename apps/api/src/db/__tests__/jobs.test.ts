@@ -61,7 +61,17 @@ function appSession<T>(session: typeof sessionA, fn: (trx: Transaction<DB>) => P
 }
 
 async function enqueue(session: typeof sessionA, kind: string, extra: Partial<Parameters<typeof enqueueJob>[1]> = {}) {
-  return appSession(session, (trx) => enqueueJob(trx, { tenantId: session.tenantId, actorId: session.userId, kind, payload: { n: 1 }, ...extra }));
+  const { actorSession, ...rest } = extra;
+  // Every job carries the credential of the request that enqueued it, as
+  // `platform.jobs.enqueue` takes it from the verified session.
+  return appSession(session, (trx) => enqueueJob(trx, {
+    tenantId: session.tenantId,
+    actorId: session.userId,
+    kind,
+    payload: { n: 1 },
+    actorSession: { credential: "trusted-context", ...(actorSession ?? {}) },
+    ...rest,
+  }));
 }
 
 async function claim(limit = 10, kinds?: string[], leaseSeconds = 60) {
@@ -310,7 +320,7 @@ describe("platform.jobs", () => {
     ]);
     const finished = (await appSession(sessionA, (trx) => getJob(trx, ok.id)))!;
     expect(finished.result).toEqual({ echoed: { hello: "world" } });
-    expect(finished.actorSession).toEqual({ roles: ["Alpha.Role", "Zebra.Role"], groups: [], relationGroupIds: [relationGroup], scope: "tenant" });
+    expect(finished.actorSession).toEqual({ credential: "trusted-context", roles: ["Alpha.Role", "Zebra.Role"], groups: [], relationGroupIds: [relationGroup], scope: "tenant" });
     const unclassified = await rawStatus(throws.id);
     expect(unclassified.status).toBe("outcome_unknown");
     expect(unclassified.attempts).toBe(1);
@@ -323,8 +333,13 @@ describe("platform.jobs", () => {
     expect(invalid!.lastError?.code).toBe("INVALID_OUTCOME");
     expect((await rawStatus(after.id)).status).toBe("done");
     // The enqueuing session is stored as it was, and the least session is the default.
-    expect((await appSession(sessionA, (trx) => getJob(trx, after.id)))!.actorSession).toEqual({ roles: [], groups: [], relationGroupIds: [], scope: "self" });
+    expect((await appSession(sessionA, (trx) => getJob(trx, after.id)))!.actorSession).toEqual({ credential: "trusted-context", roles: [], groups: [], relationGroupIds: [], scope: "self" });
     await expect(enqueue(sessionA, "probe.ok", { actorSession: { scope: "everything" as "self" } })).rejects.toThrow(/scope/);
+    // A credential a queued job may not carry is refused at enqueue, not
+    // defaulted: a policy decides on this field.
+    await expect(enqueue(sessionA, "probe.ok", {
+      actorSession: { credential: "grant" as never },
+    })).rejects.toThrow(/credential "grant" is not one a queued job may carry/);
   });
 
   test("a completed handler is never changed to an automatic retry when its transaction fails", async () => {
@@ -471,7 +486,15 @@ describe("platform.jobs", () => {
   test("jobs.list pages on the insertion sequence, so jobs of one transaction never straddle a page", async () => {
     const ids = await appSession(sessionA, async (trx) => {
       const created: string[] = [];
-      for (let i = 0; i < 5; i += 1) created.push((await enqueueJob(trx, { tenantId: tenantA, actorId: actor, kind: "test.page", payload: { i } })).id);
+      for (let i = 0; i < 5; i += 1) {
+        created.push((await enqueueJob(trx, {
+          tenantId: tenantA,
+          actorId: actor,
+          actorSession: { credential: "trusted-context" },
+          kind: "test.page",
+          payload: { i },
+        })).id);
+      }
       return created;
     });
     const seen: string[] = [];

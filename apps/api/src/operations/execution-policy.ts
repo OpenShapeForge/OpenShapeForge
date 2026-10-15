@@ -55,7 +55,7 @@ import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
-import type { TrustedSessionContext } from "../auth/trusted-context.js";
+import type { SessionCredential, TrustedSessionContext } from "../auth/trusted-context.js";
 import type { ModuleExecutionPolicy, RuntimeModule } from "../modules/contract.js";
 import type { ModuleLoadFailure } from "../modules/registry.js";
 
@@ -293,6 +293,32 @@ const opaqueRefusal = (policy: string): OperationError => ({
 });
 
 /**
+ * The credentials core can present to a policy. Closed on purpose: the public
+ * contract declares `credential` required, so a policy may branch on it — and
+ * an API-key or grant rule that silently reads `undefined` would admit exactly
+ * the execution it exists to refuse. Core never guesses one.
+ */
+const SESSION_CREDENTIALS: readonly SessionCredential[] = [
+  "none",
+  "bearer",
+  "api-key",
+  "trusted-context",
+  "control-bearer",
+  "grant",
+];
+
+/** Whether this session can be presented to a policy as core verified it. */
+export function isCompletePolicySession(
+  session: DbSessionInput | TrustedSessionContext | undefined,
+): boolean {
+  const credential = (session as TrustedSessionContext | undefined)?.credential;
+  if (!credential || !SESSION_CREDENTIALS.includes(credential)) return false;
+  // "Present exactly when credential is grant" is part of the contract; a
+  // grant session without its grant is not a session a policy can judge.
+  return credential !== "grant" || Boolean((session as TrustedSessionContext).grant);
+}
+
+/**
  * A shallow frozen copy of the live session. A policy can read exactly what
  * core authorized this invocation with and cannot mutate or widen it.
  */
@@ -428,6 +454,22 @@ export async function operationAdmissionRefusal(
   // No tenant, no tenant policy: a control-realm operator acts for the
   // platform, and an unauthenticated call never reaches a governed handler.
   if (!session?.tenantId || !session.userId) return undefined;
+  // A policy decides on the session core verified, and the public contract
+  // promises that session complete. Core will not fill a gap in it — an
+  // invented or missing `credential` is what makes an API-key or grant rule
+  // admit what it would refuse — so a governed change whose session cannot be
+  // presented as verified is refused instead.
+  if (!isCompletePolicySession(session)) {
+    console.error(
+      `[execution-policy] ${operation.id} was reached with an incomplete verified session; refusing.`,
+    );
+    return {
+      code: EXECUTION_NOT_PERMITTED,
+      message: "This change is not permitted right now.",
+      detail: "The server could not establish the session its execution policies decide on.",
+      retryable: false,
+    };
+  }
   const request = governedRequest(operation);
   const capability = policySession(session as TrustedSessionContext);
   try {

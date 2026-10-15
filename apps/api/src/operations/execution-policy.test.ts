@@ -361,10 +361,51 @@ describe("admission", () => {
     ]);
     await assertOperationAdmitted(
       db,
-      { tenantId: randomUUID(), userId: randomUUID(), roles: null, groups: null },
+      {
+        tenantId: randomUUID(),
+        userId: randomUUID(),
+        roles: null,
+        groups: null,
+        credential: "bearer",
+      } as never,
       WRITE,
     );
     expect(roles).toEqual([]);
+  });
+
+  test("a session core cannot present as verified is refused, not guessed at", async () => {
+    // The public contract declares `credential` required and hosts branch on
+    // it. Core will not invent one: a governed change whose session is
+    // incomplete is refused, and the policy is not asked at all.
+    const db = offlineDatabase();
+    const calls: string[] = [];
+    registerOperationExecutionPolicies(db, [
+      module("host", fixedPolicy("deadline", { admitted: true }, calls)),
+    ]);
+    const error = await refusalOf(assertOperationAdmitted(
+      db,
+      { tenantId: randomUUID(), userId: randomUUID(), roles: [], groups: [] },
+      WRITE,
+    ));
+    expect(error).toMatchObject({ code: EXECUTION_NOT_PERMITTED, retryable: false });
+    expect(calls).toEqual([]);
+    // A grant session without its grant is incomplete in the same way.
+    expect(await refusalOf(assertOperationAdmitted(
+      db,
+      { ...tenantSession({ credential: "grant" }) },
+      WRITE,
+    ))).toMatchObject({ code: EXECUTION_NOT_PERMITTED });
+    expect(calls).toEqual([]);
+    // With the grant present it is a session a policy can judge.
+    await assertOperationAdmitted(
+      db,
+      {
+        ...tenantSession({ credential: "grant" }),
+        grant: { id: randomUUID() },
+      } as never,
+      WRITE,
+    );
+    expect(calls).toEqual(["deadline"]);
   });
 });
 

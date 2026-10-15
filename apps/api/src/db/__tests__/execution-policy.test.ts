@@ -165,6 +165,59 @@ let betweenDecisions:
   | undefined;
 /** What a nested invocation answered the outer handler that kept going. */
 const nestedResults: unknown[] = [];
+/** Which record-derived provider Operations actually reached the provider. */
+const providerDispatches: string[] = [];
+
+/**
+ * A record-derived provider Operation per idempotency mode. `none` and
+ * `natural` have no receipt, so core's decision is the last thing that happens
+ * before dispatch; `keyed` claims a receipt in between and is decided again.
+ */
+function providerDefinition(
+  mode: "none" | "natural" | "keyed",
+  effects: { data: "read" | "write" | "delete"; external: "none" | "read" | "write" },
+) {
+  return {
+    id: `example.record.${mode}`,
+    intent: "invoke",
+    name: `Record ${mode}`,
+    description: `A record-derived Operation with ${mode} idempotency.`,
+    input: { kind: "json-schema" as const, schema: { type: "object" } },
+    output: { kind: "json-schema" as const, schema: {} },
+    effects,
+    reliability: { idempotency: { mode } },
+  };
+}
+
+const PROVIDER_DEFINITIONS = [
+  providerDefinition("none", { data: "write", external: "none" }),
+  // Governed by its external write while declaring a data read.
+  providerDefinition("natural", { data: "read", external: "write" }),
+  providerDefinition("keyed", { data: "write", external: "none" }),
+];
+
+/**
+ * The provider itself: it records every dispatch, and on request re-enters
+ * core with its own Operation id so the cycle refusal can be observed.
+ */
+const exampleProvider = {
+  id: "execution-policy-records",
+  list: async () => PROVIDER_DEFINITIONS,
+  get: async (_session: unknown, operationId: string) =>
+    PROVIDER_DEFINITIONS.find((definition) => definition.id === operationId),
+  execute: async (
+    context: { execute: (request: unknown) => Promise<unknown> },
+    request: { operation: { id: string; intent: string }; input?: Record<string, unknown> },
+  ) => {
+    providerDispatches.push(request.operation.id);
+    if (request.input?.nest === true) {
+      nestedResults.push(await context.execute({
+        operation: { id: request.operation.id, intent: request.operation.intent },
+      }));
+    }
+    return { data: { ran: true }, operations: [] };
+  },
+};
 
 const exampleModule: RuntimeModule = {
   name: "execution-policy-example",
@@ -401,6 +454,9 @@ describe("host execution policies against PostgreSQL", () => {
         listOperationContracts().find((operation) => operation.key === "DocumentVariant.insertBlock")!,
       ],
     ));
+    platform.registerOperationProviders([
+      { ...exampleModule, operationProviders: [exampleProvider] } as never,
+    ]);
     registerOperationExecutionPolicies(app.db, [
       { ...exampleModule, executionPolicies: [deadlinePolicy] },
     ]);
@@ -418,6 +474,7 @@ describe("host execution policies against PostgreSQL", () => {
     delivered.length = 0;
     policyCalls.length = 0;
     nestedResults.length = 0;
+    providerDispatches.length = 0;
     betweenDecisions = undefined;
     serverNow = new Date("2026-10-14T09:00:00.000Z");
     tenantA = randomUUID();
@@ -1117,6 +1174,63 @@ describe("host execution policies against PostgreSQL", () => {
     expect(await execute(actor, "example.keyed", "invoke", {}, "nested-receipt-1"))
       .toMatchObject({ data: { ran: true } });
   }, 60_000);
+
+  /**
+   * Record-derived provider Operations, one per idempotency mode. For `none`
+   * and `natural` there is no receipt and no core-owned step between the
+   * decision and the dispatch, so that decision IS the pre-effect decision —
+   * which these prove by the only thing observable from outside: a refusal
+   * never reaches the provider, and an admission reaches it exactly once.
+   */
+  for (const mode of ["none", "natural", "keyed"] as const) {
+    test(`refuses a ${mode} provider Operation without dispatching it`, async () => {
+      const id = `example.record.${mode}`;
+      serverNow = new Date("2026-10-14T11:00:00.000Z");
+      expect(await execute(session(tenantA), id, "invoke", {}, mode === "keyed" ? "key-1" : undefined))
+        .toMatchObject({ error: { code: EXECUTION_NOT_PERMITTED } });
+      expect(providerDispatches).toEqual([]);
+      const receipts = await sql<{ count: string }>`
+        select count(*)::text as count from platform.operation_execution_receipts
+      `.execute(privileged!.db);
+      expect(receipts.rows[0]!.count).toBe("0");
+    });
+
+    test(`admits a ${mode} provider Operation while the tenant may write`, async () => {
+      const id = `example.record.${mode}`;
+      expect(await execute(session(tenantA), id, "invoke", {}, mode === "keyed" ? "key-2" : undefined))
+        .toMatchObject({ data: { ran: true } });
+      expect(providerDispatches).toEqual([id]);
+    });
+  }
+
+  test("spends no decision on a provider Operation refused for a cycle", async () => {
+    // The cycle refusal is core's own and needs no policy; with the decision
+    // taken last, the nested attempt costs none.
+    const outer = await execute(session(tenantA), "example.record.none", "invoke", { nest: true });
+    expect(outer).toMatchObject({ data: { ran: true } });
+    expect(nestedResults[0]).toMatchObject({ error: { code: "OPERATION_CYCLE" } });
+    // One dispatch, and exactly one decision: the outer invocation's.
+    expect(providerDispatches).toEqual(["example.record.none"]);
+    expect(policyCalls).toHaveLength(1);
+  });
+
+  test("decides a keyed provider Operation again after its receipt is claimed", async () => {
+    // The freeze lands while this request is claiming its receipt — the one
+    // core-owned wait a keyed provider path has.
+    betweenDecisions = async (_count, operationId) => {
+      if (operationId !== "example.record.keyed") return;
+      betweenDecisions = undefined;
+      await freezeTenantA();
+    };
+    expect(await execute(session(tenantA), "example.record.keyed", "invoke", {}, "key-3"))
+      .toMatchObject({ error: { code: EXECUTION_NOT_PERMITTED } });
+    expect(providerDispatches).toEqual([]);
+    expect(policyCalls).toHaveLength(2);
+    const receipts = await sql<{ count: string }>`
+      select count(*)::text as count from platform.operation_execution_receipts
+    `.execute(privileged!.db);
+    expect(receipts.rows[0]!.count).toBe("0");
+  });
 
   test("a policy cannot write: its decision transaction is read-only", async () => {
     const attempts: string[] = [];

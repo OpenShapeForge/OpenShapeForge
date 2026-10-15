@@ -434,8 +434,7 @@ export class ModulePlatformRuntime {
           }
           const tenantId = session.tenantId;
           const actorId = session.userId;
-          // The whole effective session goes on the row: the job runs later
-          // as this person, with what this request could reach — not more.
+          // ENQUEUE-CREDENTIAL-SNAPSHOT
           const actorSession = {
             roles: session.roles,
             groups: session.groups,
@@ -914,21 +913,9 @@ export class ModulePlatformRuntime {
     }
     const contractFailure = contractPreconditionFailure(match.definition, request);
     if (contractFailure) return contractFailure;
-    // Record-derived provider Operations do not pass through the canonical
-    // runtime, so the host execution policies are evaluated here on the
-    // definition's own declared effects, before the provider is reached.
-    const admit = () => assertOperationAdmitted(this.#db, session, {
-      id: match.definition.id,
-      intent: match.definition.intent,
-      effects: match.definition.effects,
-    });
-    try {
-      await admit();
-    } catch (error) {
-      const operationError = operationErrorOf(error);
-      if (operationError) return { error: operationError };
-      throw error;
-    }
+    // Every core-owned refusal that does not depend on a policy comes first,
+    // so no decision is spent on an Operation this process will not run — and
+    // so the admission below is the LAST core step before the provider.
     const stack = this.#operationCallStack.getStore() ?? [];
     if (stack.includes(request.operation.id)) {
       return {
@@ -939,6 +926,25 @@ export class ModulePlatformRuntime {
         },
       };
     }
+    const keyed = match.definition.reliability.idempotency.mode === "keyed";
+    const idempotencyKey = request.idempotencyKey;
+    if (keyed && !idempotencyKey) {
+      return {
+        error: {
+          code: "IDEMPOTENCY_KEY_REQUIRED",
+          message: "This Operation requires an idempotency key.",
+          retryable: false,
+        },
+      };
+    }
+    // Record-derived provider Operations do not pass through the canonical
+    // runtime, so the host execution policies are evaluated here on the
+    // definition's own declared effects, before the provider is reached.
+    const admit = () => assertOperationAdmitted(this.#db, session, {
+      id: match.definition.id,
+      intent: match.definition.intent,
+      effects: match.definition.effects,
+    });
     const execute = () => this.#operationCallStack.run(
       [...stack, request.operation.id],
       () => match.provider.execute({
@@ -969,20 +975,35 @@ export class ModulePlatformRuntime {
           ),
       }, request),
     );
-    if (match.definition.reliability.idempotency.mode !== "keyed") return execute();
-    if (!request.idempotencyKey) {
-      return {
-        error: {
-          code: "IDEMPOTENCY_KEY_REQUIRED",
-          message: "This Operation requires an idempotency key.",
-          retryable: false,
-        },
-      };
+    if (!keyed) {
+      // `none` and `natural`: this decision is the pre-effect decision. There
+      // is no receipt to claim and nothing core-owned between here and the
+      // dispatch below — no lock, no round trip — so the provider is reached
+      // on the state the policy just read. What happens INSIDE the provider
+      // after dispatch is the provider's own, and core says so rather than
+      // pretending to see it (docs/execution-policies.md).
+      try {
+        await admit();
+      } catch (error) {
+        const operationError = operationErrorOf(error);
+        if (operationError) return { error: operationError };
+        throw error;
+      }
+      return execute();
+    }
+    // Keyed: decide early for a friendly refusal before the receipt work,
+    // and again below once the claim is committed.
+    try {
+      await admit();
+    } catch (error) {
+      const operationError = operationErrorOf(error);
+      if (operationError) return { error: operationError };
+      throw error;
     }
     try {
       return await executeKeyedOperation(this.#db, session, {
         operation: request.operation,
-        idempotencyKey: request.idempotencyKey,
+        idempotencyKey: idempotencyKey!,
         input: request.input ?? {},
         contractFingerprint: operationContractFingerprint(match.definition),
         externalWrite: match.definition.effects.external === "write",

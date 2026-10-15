@@ -11,8 +11,8 @@ import type { DbSessionInput } from "../db/session.js";
 import {
   createGeneratedEntityForTable,
   listGeneratedEntitiesForTable,
-  updateGeneratedEntityForTable,
 } from "../operations/entity/index.js";
+import { mergeGeneratedEntityObjectForTable } from "../operations/entity/mutations.js";
 import {
   consumeConfiguration,
   consumeConfigurationForSession,
@@ -32,7 +32,6 @@ import {
   storeSubmission,
   findExistingConfiguration,
   handoffFailureCode,
-  mergeConfigurationValues,
 } from "./configuration-submission.js";
 import { failedCheckSummary, testElicitedRow } from "./connection-test.js";
 import { HttpError } from "../rest/http-error.js";
@@ -170,17 +169,16 @@ export async function registerConfigurationHandoffRoutes(
         : [];
     const existing = findExistingConfiguration(existingRows, pending);
     if (existing) {
-      await updateGeneratedEntityForTable(
+      // Public reads intentionally return secret set markers. Merge only the
+      // submitted members against the locked storage row, so omitted encrypted
+      // siblings are retained rather than replaced by those markers.
+      await mergeGeneratedEntityObjectForTable(
         db,
         writeSession,
         tableDef,
         String(existing.id),
-        {
-          [pending.elicit.into]: mergeConfigurationValues(
-            existing[pending.elicit.into],
-            values[pending.elicit.into] as Record<string, unknown>,
-          ),
-        },
+        pending.elicit.into,
+        values[pending.elicit.into] as Record<string, unknown>,
       );
       return { ok: true };
     }

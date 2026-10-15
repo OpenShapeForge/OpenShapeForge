@@ -31,6 +31,7 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
   const { generateArtifacts } = await import(generatorPath);
   const artifacts = generateArtifacts(compileProtectedFieldsFixture(undefined, {
     configureFields: (fields: Array<{ key: string; children?: unknown[] }>) => {
+      fields.push({ key: "key", osfType: "string", label: { en: "Configuration key" }, persisted: { column: "key", storageClass: "core" } } as never);
       fields.find(field => field.key === "data")?.children?.push(
         { key: "otherVisible", osfType: "string", label: { en: "Other visible" } },
         { key: "token", osfType: "object", label: { en: "Token" }, classification: { sensitivity: "confidential" } },
@@ -316,6 +317,63 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
     expect((merged!.data as Record<string, unknown>).token).toBeNull();
     expect(JSON.stringify(merged)).not.toContain("ciphertext");
   });
+
+  test("actual secure form POST preserves omitted encrypted siblings and denies cross-tenant access", async () => {
+    const { registerConfigurationHandoffRoutes } = await import("../../mcp/configuration-handoff-routes.js");
+    const { mintConfiguration } = await import("../../mcp/configuration-handoff.js");
+    const keyringText = `handoff:${Buffer.alloc(32, 11).toString("base64")}`;
+    const keyring = keyringFromEnv(keyringText)!;
+    const secret = "synthetic secure form regression token";
+    const token = storeElicitedValues(table.name,
+      [{ key: "token", osfType: "string", classification: { sensitivity: "confidential" } }], { token: secret }, keyring).token;
+    const key = `config-${randomUUID()}`;
+    const created = await createGeneratedEntity(runtime.db, writer, { table: table.name, values: {
+      key, label: "Secure rotation", explicitSecret: "top secret", data: { visible: "old", restricted: "nested secret", fixed: "initial", token },
+    } });
+    const previousSecure = table.source!.secureInputOnCreate;
+    const previousKeyring = process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;
+    table.source!.secureInputOnCreate = { sourceField: "definitionId", sourceEntity: "Fixture", definitionsField: "definitions", into: "data" };
+    process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = keyringText;
+    try {
+      const routes = new Map<string, (...args: any[]) => Promise<unknown>>();
+      await registerConfigurationHandoffRoutes({
+        instance: { addContentTypeParser() {}, get() {}, post: (path: string, handler: (...args: any[]) => Promise<unknown>) => routes.set(path, handler) },
+        options: { db: runtime.db }, requireMcpSession: async () => { throw new Error("Unused token route"); },
+      } as never);
+      const post = routes.get("/api/entity-configuration/:token")!;
+      const submit = async (tenantId: string, body: string) => {
+        const pending = await mintConfiguration({ db: runtime.db, tenantId, userId: writer.userId, table: table.name,
+          elicit: { sourceField: "definitionId", sourceEntity: "Fixture", sourceTable: table.name, definitionsField: "definitions", into: "data" },
+          modelValues: { key }, displayName: "Fixture", definitions: [
+            { key: "visible", osfType: "string", label: { en: "Public value" } },
+            { key: "token", osfType: "string", label: { en: "Secret value" }, classification: { sensitivity: "confidential" } },
+          ],
+        });
+        let status = 200;
+        let output: unknown;
+        const reply = { status(code: number) { status = code; return this; }, type() { return this; }, send(value: unknown) { output = value; return this; } };
+        await post({ params: { token: pending.token }, body, log: { error() {} } }, reply);
+        return { status, output };
+      };
+      const before = (await stored(String(created.id))).data as Record<string, unknown>;
+      expect((await submit(writer.tenantId, "visible=changed")).status).toBe(200);
+      const saved = (await stored(String(created.id))).data as Record<string, unknown>;
+      expect(saved.token).toEqual(before.token);
+      expect(saved.visible).toBe("changed");
+      expect(decryptSecret(keyring, table.name, "token", saved.token as import("../../connectors/secrets.js").StoredSecret)).toBe(secret);
+      const read = await getGeneratedEntity(runtime.db, writer, { table: table.name, id: String(created.id) });
+      expect(JSON.stringify(read)).not.toContain(secret);
+      expect(JSON.stringify(read)).not.toContain("ciphertext");
+      expect((read!.data as Record<string, unknown>).token).toBe("__set__");
+      const beforeDenied = await stored(String(created.id));
+      expect((await submit(randomUUID(), "visible=wrong-tenant")).status).toBe(400);
+      expect(await stored(String(created.id))).toEqual(beforeDenied);
+      expect(JSON.stringify(await events(String(created.id)))).not.toContain(secret);
+    } finally {
+      if (previousSecure === undefined) delete table.source!.secureInputOnCreate; else table.source!.secureInputOnCreate = previousSecure;
+      if (previousKeyring === undefined) delete process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS; else process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = previousKeyring;
+    }
+  }, 30_000);
 
   test("trusted object merge ignores undefined members without changing storage, version or events", async () => {
     const created = await record();

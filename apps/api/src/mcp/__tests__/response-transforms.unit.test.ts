@@ -601,3 +601,22 @@ describe("Gmail threads.get end to end", () => {
     expect(typeof GMAIL_THREAD.messages[1]!.payload.body.data).toBe("string");
   });
 });
+
+// Source pages commonly repeat parent identities on each child row.
+describe("unique response rows", () => {
+  it("keeps one stable parent per scalar identity without changing the source page", () => {
+    const records = [{ EntryID: "a", line: 1 }, { EntryID: "a", line: 2 }, { EntryID: "b", line: 1 }];
+    const result = applyResponseTransforms({ records }, [{ op: "unique", from: "records", to: "parents", by: "EntryID" }]);
+    expect(result.parents).toEqual([records[0], records[2]]);
+    expect(records).toHaveLength(3);
+    // The same primitive can extract companies from a page of contacts.
+    expect(applyResponseTransforms({ contacts: [{ company: { id: 1 } }, { company: { id: 1 } }] },
+      [{ op: "unique", from: "contacts", by: "company.id" }]).contacts).toHaveLength(1);
+  });
+  it("refuses missing, empty or compound keys instead of dropping source records", () => {
+    for (const key of [undefined, null, "", {}, []]) {
+      expect(() => applyResponseTransforms({ rows: [{ id: key }] }, [{ op: "unique", from: "rows", by: "id" }])).toThrow();
+    }
+    expect(() => applyResponseTransforms({ rows: [] }, [{ op: "unique", from: "rows" }])).toThrow();
+  });
+});

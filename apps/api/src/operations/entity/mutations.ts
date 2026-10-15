@@ -129,6 +129,7 @@ export async function mergeGeneratedEntityObjectForTable(
   id: string,
   field: string,
   patch: Record<string, unknown>,
+  entityValues: EntityValueIOContext = {},
 ): Promise<GeneratedEntityRow | null> {
   if (entityValueCarriers(table).some((carrier) => carrier.fieldKey === field)) throw generatedCrudError("Entity values require a canonical whole-value update.", "BAD_USER_INPUT");
   const column = writableColumnMap(table, "update").get(field);
@@ -138,20 +139,12 @@ export async function mergeGeneratedEntityObjectForTable(
       "INTERNAL_SERVER_ERROR",
     );
   }
-  if (column.fieldPolicy) {
-    const supplied = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
-    return applyGeneratedRowUpdate(db, session, table, id, new Map([[column, supplied]]),
-      undefined, {}, false, [], column);
-  }
-  const values = new Map<GeneratedCrudColumn, unknown>([
-    [
-      column,
-      sql`coalesce(${sql.id(column.name)}, '{}'::jsonb) || ${jsonbLiteral(
-        patch,
-      )}`,
-    ],
-  ]);
-  return applyGeneratedRowUpdate(db, session, table, id, values);
+  // Materialize the complete value under the row lock before relationship and
+  // publication validation. A SQL merge expression is not a connection value
+  // and would make required credentials appear absent to those guards.
+  const supplied = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
+  return applyGeneratedRowUpdate(db, session, table, id, new Map([[column, supplied]]),
+    undefined, entityValues, false, [], column);
 }
 
 /**

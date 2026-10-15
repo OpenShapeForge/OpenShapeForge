@@ -483,13 +483,14 @@ types:
     schema:
       allOf:
         - if: { required: [endCondition], properties: { endCondition: { const: onDate } } }
-          then: { required: [end] }
+          then: { properties: { end: true }, required: [end] }
         - if: { required: [endCondition], properties: { endCondition: { const: afterCount } } }
-          then: { required: [count] }
+          then: { properties: { count: true }, required: [count] }
         - if:
+            properties: { start: true, end: true, endCondition: true }
             required: [start, end]
             anyOf:
-              - not: { required: [endCondition] }
+              - not: { properties: { endCondition: true }, required: [endCondition] }
               - properties: { endCondition: { const: onDate } }
           then:
             x-osf-ordered-fields: { lower: start, upper: end, kind: date }

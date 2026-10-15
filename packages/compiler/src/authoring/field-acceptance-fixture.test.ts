@@ -416,7 +416,7 @@ describe("the 48-field acceptance fixture", () => {
 
 
 describe("native recurrence persistence contract", () => {
-  const ajv = new Ajv2020.default({ strict: false });
+  const ajv = new Ajv2020.default({ strict: false, strictRequired: true });
   addFormats.default(ajv);
   ajv.addKeyword(operationExactNumericKeyword);
   for (const keyword of valueInvariantKeywords) ajv.addKeyword(keyword);

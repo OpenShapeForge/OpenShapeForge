@@ -2,7 +2,8 @@
 import { sql } from "kysely";
 import type { VersionedMigration } from "../versioned-runner.js";
 
-/** Carry the previous generated Chip default forward without rewriting rows.
+/** Carry legacy text Chips and the previous typed default forward.
+ * Text is JSON-encoded as a string, never parsed as a different value.
  * Custom host defaults remain untouched; the normal manifest drift check
  * decides whether they match that host's compiled contract.
  */
@@ -11,6 +12,17 @@ const migration: VersionedMigration = {
   fileUrl: import.meta.url,
   async up(db) {
     await sql`do $$ begin
+      if exists (
+        select 1 from pg_attribute where attrelid = to_regclass('erp.chips')
+          and attname = 'value' and atttypid = 'text'::regtype and not attisdropped
+      ) and not exists (
+        select 1 from pg_attribute where attrelid = to_regclass('erp.chips')
+          and attname = 'definition' and not attisdropped
+      ) then
+        alter table erp.chips add column if not exists definition jsonb not null default
+          '{"key":"value","osfType":"string","required":false,"validation":{"minLength":1,"maxLength":8000}}'::jsonb;
+        alter table erp.chips alter column value type jsonb using to_jsonb(value);
+      end if;
       if exists (
         select 1 from pg_attrdef d
         join pg_attribute a on a.attrelid = d.adrelid and a.attnum = d.adnum

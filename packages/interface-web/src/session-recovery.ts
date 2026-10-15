@@ -9,6 +9,12 @@ export type SessionRecoveryManager = {
 type RecoveryStore = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 const KEY = "osf.web-session-recovery.v1";
 const KIND = "rejected-web-session";
+function browser() {
+  return (globalThis as unknown as { window: {
+    sessionStorage: RecoveryStore; location: { href: string };
+    history: { replaceState(data: unknown, title: string, path: string): void };
+  } }).window;
+}
 
 function localPath(path: string): string {
   if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\") || /[\u0000-\u0020\u007f]/u.test(path)
@@ -18,13 +24,13 @@ function localPath(path: string): string {
   return path;
 }
 
-export function clearRejectedWebSessionRestart(store: RecoveryStore = window.sessionStorage): void {
+export function clearRejectedWebSessionRestart(store: RecoveryStore = browser().sessionStorage): void {
   store.removeItem(KEY);
 }
 
 /** Keep the saved ID token until the OIDC client has constructed native logout. */
 export async function restartRejectedWebSession(
-  manager: SessionRecoveryManager, returnTo: string, store: RecoveryStore = window.sessionStorage,
+  manager: SessionRecoveryManager, returnTo: string, store: RecoveryStore = browser().sessionStorage,
 ): Promise<boolean> {
   localPath(returnTo);
   if (store.getItem(KEY)) {
@@ -44,9 +50,9 @@ export async function restartRejectedWebSession(
 /** Resume only the server/client-validated logout callback belonging to this attempt. */
 export async function completeRejectedWebSessionLogout(
   manager: SessionRecoveryManager,
-  url: string = window.location.href,
-  store: RecoveryStore = window.sessionStorage,
-  replace: (path: string) => void = path => window.history.replaceState(null, "", path),
+  url: string = browser().location.href,
+  store: RecoveryStore = browser().sessionStorage,
+  replace: (path: string) => void = path => browser().history.replaceState(null, "", path),
 ): Promise<boolean> {
   const saved = store.getItem(KEY);
   if (!saved) return false;

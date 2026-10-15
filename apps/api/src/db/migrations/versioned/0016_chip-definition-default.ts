@@ -4,8 +4,9 @@ import type { VersionedMigration } from "../versioned-runner.js";
 
 /** Carry legacy text Chips and the previous typed default forward.
  * Text is JSON-encoded as a string, never parsed as a different value.
- * Custom host defaults remain untouched; the normal manifest drift check
- * decides whether they match that host's compiled contract.
+ * Already-typed custom host defaults remain untouched. The legacy text path
+ * installs the core default; a host with a different newly authored default
+ * needs its own migration before the normal manifest drift check can succeed.
  */
 const migration: VersionedMigration = {
   version: "0016_chip-definition-default",
@@ -20,6 +21,10 @@ const migration: VersionedMigration = {
           and attname = 'definition' and not attisdropped
       ) then
         alter table erp.chips add column if not exists definition jsonb not null default
+          '{"key":"value","osfType":"multilineText","required":true,"validation":{"minLength":1,"maxLength":8000}}'::jsonb;
+        -- Existing text keeps its released semantic type and line breaks.
+        -- Only future rows use the current core authoring default.
+        alter table erp.chips alter column definition set default
           '{"key":"value","osfType":"string","required":false,"validation":{"minLength":1,"maxLength":8000}}'::jsonb;
         alter table erp.chips alter column value type jsonb using to_jsonb(value);
       end if;

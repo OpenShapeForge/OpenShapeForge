@@ -502,7 +502,7 @@ describe("generated schema migration", () => {
     TEST_TIMEOUT,
   );
 
-  test("the Chip migration leaves an absent entity and custom host default unchanged", async () => {
+  test("the Chip migration leaves an absent entity and already-typed custom default unchanged", async () => {
     await withScratchDb(async url => {
       await withDb(url, async db => {
         await chipMigration.up(db);
@@ -548,8 +548,22 @@ describe("generated schema migration", () => {
         expect(result.versioned.applied).toContain(chipMigration.version);
         expect(result.checksum).toBe(manifest.checksum);
         await withDb(url, async db => {
-          const rows = await sql<{value: string}>`select value from erp.chips where key='migration.example'`.execute(db);
-          expect(rows.rows).toEqual([{value}]);
+          const rows = await sql<{ value: string; definition: unknown }>`
+            select value, definition from erp.chips where key='migration.example'
+          `.execute(db);
+          const definition = legacy === "text"
+            ? { key: "value", osfType: "multilineText", required: true, validation: { minLength: 1, maxLength: 8000 } }
+            : { key: "value", osfType: "string", required: false };
+          expect(rows.rows).toEqual([{ value, definition }]);
+          await sql`insert into erp.chips (tenant_id,key,name,value)
+            values (gen_random_uuid(),'migration.future','Future',to_jsonb('future'::text))`.execute(db);
+          const future = await sql<{ definition: unknown }>`
+            select definition from erp.chips where key='migration.future'
+          `.execute(db);
+          expect(future.rows[0]?.definition).toEqual({
+            key: "value", osfType: "string", required: false,
+            validation: { minLength: 1, maxLength: 8000 },
+          });
           expect(await recordedChecksum(db, chipMigration.version)).toBe(fileChecksum(await readFile(new URL(chipMigration.fileUrl))));
           expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(manifest.checksum);
           expect((await diffManifestAgainstDatabase(db)).nonAdditive).toEqual([]);

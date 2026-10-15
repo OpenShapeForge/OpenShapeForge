@@ -51,3 +51,35 @@ theme follows the bounded `account_changed=1` return. Consuming applications mus
 remove their saved OIDC user on this marker and start normal OIDC/PKCE login;
 the newly registered passkey authenticates the new account. The marker carries
 no identity, token, role or permission. This does not bypass admission checks.
+
+## Re-invitations of existing members
+
+Keycloak's native `invite-existing-user` endpoint sends a signed `ORGIVT` mail,
+including for someone who is already a member. Its stock handler displays an
+expired-action heading for that valid already-member case. The OSF handler
+inherits native signature, expiry, invitation, organization and email validation.
+For an enabled, verified current member only, it consumes the invitation and
+returns to the organization's configured app URL, bounded by the same account
+client origin above. It does not create an SSO session, complete required actions,
+add membership or grant roles. The app still performs normal login and admission.
+New members and realms without this opt-in retain native handling. The shared
+origin is intentionally one host app-return policy for both enrollment and
+existing-member invitations; deploying this provider enables both continuations
+in realms already configured with that origin. Audit events distinguish this
+return with `osf.invitation_outcome=existing_member_return`.
+
+The browser proof uses a separately started disposable image on port 8183 and
+Mailpit on port 8025 (SMTP reachable from the container on host port 1025). Set
+`INVITATION_PROOF_KEYCLOAK=http://127.0.0.1:8183` and
+`INVITATION_PROOF_ADMIN_PASSWORD` for that disposable server's `proof-admin`, then
+run from the repository root:
+
+```sh
+node apps/web/node_modules/@playwright/test/cli.js test --config apps/web/keycloak-invitations.config.ts
+```
+
+The proof creates and removes its own realm, opens the actual SMTP mail in
+Chromium, checks the app return and absence of an identity cookie, and refuses
+consumed, revoked, tampered, disabled-organization and foreign-return cases.
+The app return in this proof is a login-entry fixture, not an authenticated host
+journey. Reports, screenshots and video are retained under `.runtime/`.

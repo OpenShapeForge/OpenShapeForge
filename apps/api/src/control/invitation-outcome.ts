@@ -9,7 +9,7 @@
  * whether mail is sent is the shared one in auth/keycloak-invitation-delivery.ts.
  */
 import { organizationMcpPath } from "../mcp/organization-resource.js";
-import { deliverOrganizationInvitation, type InvitationDeliveryDecision } from "../auth/keycloak-invitation-delivery.js";
+import { deliverOrganizationInvitation } from "../auth/keycloak-invitation-delivery.js";
 import { FirstAdministratorError } from "./first-administrator-error.js";
 import type { FirstAdministratorClients } from "./first-tenant-administrator.js";
 import { KeycloakAdminError } from "./keycloak-organization-admin.js";
@@ -17,8 +17,7 @@ import { KeycloakAdminError } from "./keycloak-organization-admin.js";
 export type InvitationDelivery =
   | "email_sent"
   | "no_email_existing_account"
-  | "already_pending"
-  | "already_accepted";
+  | "already_pending";
 
 /**
  * `<public origin>/<slug>`: the address that serves the tenant's app to a
@@ -39,7 +38,7 @@ export function invitationOutcome(slug: string, delivery: InvitationDelivery) {
   const nextStep: Record<InvitationDelivery, string> = {
     email_sent:
       "Keycloak accepted the invitation e-mail request; inbox delivery is not confirmed. Tell the person to open that " +
-      "e-mail and follow its link. If it does not arrive, offer resend_tenant_invitation.",
+      "e-mail and follow its link. If it does not arrive, call list_tenant_invitations first and use its invitationId for resend_tenant_invitation.",
     no_email_existing_account:
       "No e-mail was sent and none will be: this person already has an account in this organization. Tell them to " +
       `${signInAt(signInUrl)}; the role is applied on that sign-in. Do not tell them to wait for mail.`,
@@ -47,9 +46,6 @@ export function invitationOutcome(slug: string, delivery: InvitationDelivery) {
       "No new e-mail was sent: Keycloak already holds an invitation for this address (its delivery was never " +
       "confirmed). Ask whether the person received it; if not, offer resend_tenant_invitation and call it only once " +
       "they confirm.",
-    already_accepted:
-      `Nothing was sent: this person already accepted and is a member. Tell them to ${signInAt(signInUrl)}. ` +
-      "Change their roles with assign_tenant_member_roles.",
   };
   return { delivery, signInUrl, nextStep: nextStep[delivery] };
 }
@@ -90,7 +86,7 @@ export async function deliverInvitation(
   organizationId: string,
   input: { email: string; firstName?: string; lastName?: string },
   options: { knownNonMember?: boolean } = {},
-): Promise<Exclude<InvitationDelivery, "already_accepted">> {
+): Promise<"email_sent" | "already_pending"> {
   try {
     const decision = await deliverOrganizationInvitation(members, organizationId, input, {
       ...options,
@@ -103,15 +99,15 @@ export async function deliverInvitation(
         }
       },
     });
-    return PLATFORM_DELIVERY[decision];
+    if (decision === "not_required") {
+      if (!members.inviteExistingMember) throw new FirstAdministratorError("INVITATIONS_NOT_CONFIGURED", "Existing-member invitation delivery is not configured.");
+      if (!(await members.hasInvitationMailConfiguration())) throw new FirstAdministratorError("SMTP_NOT_CONFIGURED", "Configure SMTP before sending invitations.");
+      if (!(await members.inviteExistingMember(organizationId, input.email))) throw new FirstAdministratorError("INVITATION_STATE_CHANGED", "The organization membership changed. Refresh before inviting again.");
+      return "email_sent";
+    }
+    return decision === "sent" ? "email_sent" : "already_pending";
   } catch (error) {
     if (error instanceof KeycloakAdminError && error.status === 409) throw invitationConflict(error);
     throw error;
   }
 }
-
-const PLATFORM_DELIVERY = {
-  sent: "email_sent",
-  not_required: "no_email_existing_account",
-  already_pending: "already_pending",
-} as const satisfies Record<InvitationDeliveryDecision, InvitationDelivery>;

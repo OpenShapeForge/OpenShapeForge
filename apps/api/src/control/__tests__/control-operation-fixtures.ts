@@ -139,8 +139,8 @@ const AUTHORED: readonly Authored[] = [
   },
   {
     id: "control.invite-first-tenant-admin", handler: "inviteFirstTenantAdmin", title: "Invite first tenant administrator",
-    description: "Invites the first org_admin by email for ONE existing active tenant, through the Keycloak organization invitation flow. Repeating the same request reuses the invitation without resending. Refuses a different first administrator once one exists or is pending.",
-    roles: [CONTROL_ROLE], effects: WRITE_EXTERNAL, idempotency: "natural", acknowledgement: true,
+    description: "Invites the first org_admin by email for ONE existing active tenant, through the Keycloak organization invitation flow. Pending invitations are reused; explicit existing-member requests send a new notice. Refuses a different first administrator once one exists or is pending.",
+    roles: [CONTROL_ROLE], effects: WRITE_EXTERNAL, idempotency: "none", acknowledgement: true,
     input: { properties: { slug, email: { type: "string", format: "email" } }, required: ["slug", "email"] },
     rest: { method: "POST", path: "/api/control/v1/tenants/:slug/first-administrator", status: 200 }, mcp: "invite_first_tenant_admin",
   },
@@ -159,7 +159,7 @@ const AUTHORED: readonly Authored[] = [
   },
   {
     id: "control.create-tenant-invitation", handler: "createTenantInvitation", title: "Create tenant invitation",
-    description: "Invites one tenant member and records the selected allowlisted role.", roles: [CONTROL_ROLE], effects: WRITE_EXTERNAL, idempotency: "natural",
+    description: "Invites a tenant member or explicitly sends an existing member a fresh sign-in notice without changing accepted roles.", roles: [CONTROL_ROLE], effects: WRITE_EXTERNAL, idempotency: "none",
     input: { properties: { slug, email: { type: "string", format: "email" }, role: { type: "string", enum: ["org_admin", "org_employee"] }, firstName: { type: "string" }, lastName: { type: "string" } }, required: ["slug", "email", "role"] },
     rest: { method: "POST", path: "/api/control/v1/tenants/:slug/invitations", status: 201 }, mcp: "create_tenant_invitation",
   },

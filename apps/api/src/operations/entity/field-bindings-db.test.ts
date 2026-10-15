@@ -20,6 +20,7 @@ import { sql } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
 import { runMigrationChain } from "../../db/migration-chain.js";
 import { withDbSession } from "../../db/session.js";
+import { getGeneratedCrudTables } from "./catalog.js";
 import { resolveComputedEntityRows } from "./computed-fields.js";
 import { executeEntityOperation } from "./runtime.js";
 import type { EntityOperationInput, EntityOperationResult, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
@@ -284,6 +285,27 @@ describe("a binding, stored apart from the value it resolved to", () => {
       resolveComputedEntityRows(trx, session, table, [{ display_name: "private" }]));
     const labels = rows[0]!.labels as { items: { id: string; description: string }[] };
     expect(labels.items.find(item => item.id === rule.id)?.description).toBe("Message: New {{displayName}}");
+    const chipValue = getGeneratedCrudTables().find(t => t.table === "chips")!.columns.find(c => c.name === "value")!;
+    const priorClassification = chipValue.classification;
+    try {
+      chipValue.classification = "confidential";
+      const withheld = await withDbSession(runtime.db, viewer, (trx, session) =>
+        resolveComputedEntityRows(trx, session, table, [{ display_name: "kept" }]));
+      expect(withheld[0]!.display_name).toBe("kept");
+      expect((withheld[0]!.labels as typeof labels).items.some(item => item.id === rule.id)).toBe(false);
+      expect(JSON.stringify(withheld)).not.toContain("New {{displayName}}");
+    } finally {
+      if (priorClassification === undefined) delete chipValue.classification;
+      else chipValue.classification = priorClassification;
+    }
+    await run(editor, "Chip.delete", { id: String(chip.id), expectedVersion: await version("chips", String(chip.id)), confirmed: true });
+    const removed = await withDbSession(runtime.db, editor, (trx, session) =>
+      resolveComputedEntityRows(trx, session, table, [{ display_name: "kept" }]));
+    expect(removed[0]!.display_name).toBe("kept");
+    expect((removed[0]!.labels as typeof labels).items.some(item => item.id === rule.id)).toBe(false);
+    expect(failure(await read(editor, String(rule.id)))).toMatchObject({ code: "DEPENDENCY_UNRESOLVED" });
+    // Keep the intentionally broken source isolated from the following list tests.
+    await sql`delete from erp.label_rules where id = ${String(rule.id)}::uuid`.execute(privileged.db);
   });
 
   test("a local binding reads another field of the same record", async () => {

@@ -188,7 +188,7 @@ export async function registerConfigurationHandoffRoutes(
         if (!locked) throw new HttpError(404, "NOT_FOUND", "The configured record is unavailable.");
         for (const column of tableDef.columns) {
           const field = fieldNameForColumn(column);
-          if (field === "ownerUserId") assertConfigurationOwner(pending, locked[column.name]);
+          if (field === "ownerUserId") assertConfigurationOwner(pending, locked[column.name], values.ownerUserId);
           if (field === pending.elicit.into) continue;
           if (!Object.hasOwn(pending.modelValues, field)) {
             if (field === pending.elicit.sourceField || (column.immutable && locked[column.name] != null)) throw new HttpError(409, "CONFIGURATION_BINDING_MISMATCH", "The secure form does not match this record.");

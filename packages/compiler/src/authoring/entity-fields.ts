@@ -213,6 +213,9 @@ export function withBaseTypes(
     const cardinality = field.cardinality ?? semantic?.cardinality;
     if (cardinality) result.cardinality = cardinality;
     if (cardinalityOf(cardinality, origin).required) result.required = true;
+    if (field.variables === "template" && (baseType !== "string" || fieldCardinality(result) === "collection")) {
+      throw new Error(`${origin}: variables: template requires a single string field.`);
+    }
     return result;
   });
 }

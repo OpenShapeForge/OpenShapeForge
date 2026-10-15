@@ -4,9 +4,9 @@ import { evaluateExpression } from "../../generated/compiler/expression-evaluato
 import type { CompilerExpressionInput } from "../../generated/compiler/canonical-condition.js";
 import type { DB } from "../../generated/db/types.js";
 import type { DbSessionContext } from "../../db/session.js";
-import { getGeneratedCrudTables, projectGeneratedEntityRow } from "./catalog.js";
-import { resolveBoundEntityRows } from "./field-bindings.js";
-import { fieldBindingMap } from "@openshapeforge/operations";
+import { generatedCrudError, getGeneratedCrudTables, projectGeneratedEntityRow } from "./catalog.js";
+import { fieldBindingsColumn, resolveBoundEntityRows } from "./field-bindings.js";
+import { fieldBindingMap, operationErrorOf } from "@openshapeforge/operations";
 import { fieldNameForColumn } from "./columns.js";
 import type { GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
 
@@ -112,11 +112,24 @@ async function activeLabelRules(
   `.execute(trx);
   const table = getGeneratedCrudTables().find((candidate) => candidate.schema === "erp" && candidate.table === "label_rules");
   if (!table) throw new Error("LabelRule table is missing from the generated manifest.");
-  const rows = result.rows.map((row) => projectGeneratedEntityRow(table, session, row));
-  const resolved = await resolveBoundEntityRows(trx, session, table, rows);
-  return resolved.map((row) => ({ ...row,
-    description_bound: Object.hasOwn(fieldBindingMap(row.field_bindings) ?? {}, "descriptionTemplate"),
-  })) as unknown as LabelRuleRow[];
+  const rules: LabelRuleRow[] = [];
+  const column = fieldBindingsColumn(table);
+  for (const stored of result.rows) {
+    try {
+      const projected = projectGeneratedEntityRow(table, session, stored);
+      const bindings = fieldBindingMap(column ? projected[column.name] : undefined);
+      if (bindings === undefined) throw generatedCrudError("The stored field bindings are not valid.", "INVALID_DEFINITION");
+      const [row] = await resolveBoundEntityRows(trx, session, table, [projected]);
+      rules.push({ ...row, description_bound: Object.hasOwn(bindings, "descriptionTemplate") } as unknown as LabelRuleRow);
+    } catch (error) {
+      // Labels are optional annotations on another entity's read. Omit only
+      // the refused rule; never serve its stale value or block unrelated rows.
+      // Its own canonical LabelRule read retains the actionable refusal.
+      const failure = operationErrorOf(error);
+      if (!failure || !["DEPENDENCY_UNRESOLVED", "DEPENDENCY_INVALID", "INVALID_DEFINITION", "FORBIDDEN"].includes(failure.code)) throw error;
+    }
+  }
+  return rules;
 }
 
 export async function resolveComputedEntityRows(

@@ -309,6 +309,9 @@ test("template bindings require a single string slot", () => {
   for (const field of [
     { key: "condition", osfType: "object", variables: "template" },
     { key: "titles", osfType: "string", cardinality: "collection", variables: "template" },
-  ] as Field[]) expect(() => normalizeEntityFields(entity("Article", [field]), {})).toThrow("requires a single string");
+  ] as Field[]) {
+    expect(() => normalizeEntityFields(entity("Article", [field]), {})).toThrow("requires a single string");
+    expect(() => withBaseTypes([field], {}, "Profile")).toThrow("requires a single string");
+  }
   expect(() => normalizeEntityFields(entity("Article", [{ key: "title", osfType: "string", variables: "template" }]), {})).not.toThrow();
 });

@@ -231,13 +231,6 @@ function requireContractValues(
   assertEntityValuesValid(operation, table, values, options);
 }
 
-/**
- * The binding half of a write, before the contract is checked: every binding
- * this record will have is resolved under the caller's own identity and
- * tenant, and the resolved values join the caller's literals — so the
- * Operation's compiled contract validates a bound value exactly as it
- * validates a literal one, and the stored map agrees with the stored values.
- */
 function projectBindingWriteRow(table: GeneratedCrudTable, session: DbSessionInput, row: GeneratedEntityRow | null): GeneratedEntityRow | undefined {
   if (!row) return undefined;
   const projected = projectGeneratedEntityRow(table, session, row);
@@ -247,6 +240,13 @@ function projectBindingWriteRow(table: GeneratedCrudTable, session: DbSessionInp
   return column ? { ...projected, [column.name]: row[column.name] } : projected;
 }
 
+/**
+ * The binding half of a write, before the contract is checked: every binding
+ * this record will have is resolved under the caller's own identity and
+ * tenant, and the resolved values join the caller's literals — so the
+ * Operation's compiled contract validates a bound value exactly as it
+ * validates a literal one, and the stored map agrees with the stored values.
+ */
 async function prepareWriteBindings(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,

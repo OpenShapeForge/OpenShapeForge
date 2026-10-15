@@ -4,8 +4,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Server } from "@modelcontextprotocol/server";
 import { sql, type Transaction } from "kysely";
 import { assertSameDatabase, type OpenShapeForgeDatabase } from "../db/connection.js";
-import { withDbSession } from "../db/session.js";
+import { withDbSession, withInvocationSavepoint } from "../db/session.js";
 import { enqueueJob } from "../jobs/store.js";
+import { actorSessionOf, type JobActorCredential } from "../jobs/actor-session.js";
 import { appendEntityEventInTransaction } from "../platform/entity-events.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { DB, Json } from "../generated/db/types.js";
@@ -47,6 +48,7 @@ import { generatedVersioning } from "./versioning-registry.js";
 import { organizationServiceIdentities } from "../auth/organization-service-identities.js";
 import { operationContractFingerprint } from "../operations/contract-fingerprint.js";
 import { executeKeyedOperation } from "../operations/execution-receipts.js";
+import { assertOperationAdmitted } from "../operations/execution-policy.js";
 import { operationErrorOf } from "@openshapeforge/operations";
 import { ArtifactStorageRuntime } from "./artifact-storage.js";
 import { runtimeSettings } from "./settings.js";
@@ -433,15 +435,33 @@ export class ModulePlatformRuntime {
           }
           const tenantId = session.tenantId;
           const actorId = session.userId;
+          // A capability grant is verified per request against its expiry and
+          // its remaining uses, and the session contract has the grant present
+          // exactly when the credential is "grant". Neither can be re-verified
+          // when a worker runs the job later, so rather than replay a grant
+          // nobody checked — or hand an execution policy a session missing the
+          // grant it is supposed to judge — enqueue refuses it outright.
+          if (session.credential === "grant") {
+            throw new Error(
+              "A capability grant session cannot enqueue a job: its expiry and remaining uses " +
+                "are verified per request, so a worker could not run the job as the grant it was issued for.",
+            );
+          }
           // The whole effective session goes on the row: the job runs later
           // as this person, with what this request could reach — not more.
-          const actorSession = {
+          // `actorSessionOf` refuses a credential a job may not carry, so the
+          // snapshot is a session an execution policy can decide on.
+          const actorSession = actorSessionOf({
+            credential: session.credential as JobActorCredential,
             roles: session.roles,
             groups: session.groups,
             relationGroupIds: session.relationGroupIds ?? [],
             ...(actingRelationId(session) ? { relationId: actingRelationId(session)! } : {}),
             scope: session.scope,
-          };
+            ...(session.oauthScopes ? { oauthScopes: session.oauthScopes } : {}),
+            ...(session.locale ? { locale: session.locale } : {}),
+            ...(session.userDisplayName ? { userDisplayName: session.userDisplayName } : {}),
+          });
           // One path in: the module session join (or open) is what fences the tenant.
           return this.services.db.withSession(session, (trx) =>
             enqueueJob(trx, { ...input, tenantId, actorId, actorSession }),
@@ -913,6 +933,9 @@ export class ModulePlatformRuntime {
     }
     const contractFailure = contractPreconditionFailure(match.definition, request);
     if (contractFailure) return contractFailure;
+    // Every core-owned refusal that does not depend on a policy comes first,
+    // so no decision is spent on an Operation this process will not run — and
+    // so the admission below is the LAST core step before the provider.
     const stack = this.#operationCallStack.getStore() ?? [];
     if (stack.includes(request.operation.id)) {
       return {
@@ -923,6 +946,25 @@ export class ModulePlatformRuntime {
         },
       };
     }
+    const keyed = match.definition.reliability.idempotency.mode === "keyed";
+    const idempotencyKey = request.idempotencyKey;
+    if (keyed && !idempotencyKey) {
+      return {
+        error: {
+          code: "IDEMPOTENCY_KEY_REQUIRED",
+          message: "This Operation requires an idempotency key.",
+          retryable: false,
+        },
+      };
+    }
+    // Record-derived provider Operations do not pass through the canonical
+    // runtime, so the host execution policies are evaluated here on the
+    // definition's own declared effects, before the provider is reached.
+    const admit = () => assertOperationAdmitted(this.#db, session, {
+      id: match.definition.id,
+      intent: match.definition.intent,
+      effects: match.definition.effects,
+    });
     const execute = () => this.#operationCallStack.run(
       [...stack, request.operation.id],
       () => match.provider.execute({
@@ -953,24 +995,44 @@ export class ModulePlatformRuntime {
           ),
       }, request),
     );
-    if (match.definition.reliability.idempotency.mode !== "keyed") return execute();
-    if (!request.idempotencyKey) {
-      return {
-        error: {
-          code: "IDEMPOTENCY_KEY_REQUIRED",
-          message: "This Operation requires an idempotency key.",
-          retryable: false,
-        },
-      };
+    if (!keyed) {
+      // `none` and `natural`: this decision is the pre-effect decision. There
+      // is no receipt to claim and nothing core-owned between here and the
+      // dispatch below — no lock, no round trip — so the provider is reached
+      // on the state the policy just read. What happens INSIDE the provider
+      // after dispatch is the provider's own, and core says so rather than
+      // pretending to see it (docs/execution-policies.md).
+      try {
+        await admit();
+      } catch (error) {
+        const operationError = operationErrorOf(error);
+        if (operationError) return { error: operationError };
+        throw error;
+      }
+      return execute();
+    }
+    // Keyed: decide early for a friendly refusal before the receipt work,
+    // and again below once the claim is committed.
+    try {
+      await admit();
+    } catch (error) {
+      const operationError = operationErrorOf(error);
+      if (operationError) return { error: operationError };
+      throw error;
     }
     try {
       return await executeKeyedOperation(this.#db, session, {
         operation: request.operation,
-        idempotencyKey: request.idempotencyKey,
+        idempotencyKey: idempotencyKey!,
         input: request.input ?? {},
         contractFingerprint: operationContractFingerprint(match.definition),
         externalWrite: match.definition.effects.external === "write",
         execute: async (markEffectsAdmitted) => {
+          // Decided again on live state, after the receipt claim was locked
+          // and committed and before effects are admitted: a refusal that
+          // arrives while this request waited for its claim must delete that
+          // claim, not report an uncertain external delivery.
+          await admit();
           markEffectsAdmitted();
           return execute();
         },
@@ -1008,6 +1070,22 @@ export class ModulePlatformRuntime {
           retryable: false,
         },
       };
+    }
+    // The bridge runs a core implementation behind a canonical Operation key,
+    // so the host execution policies apply to it as well. A key this process
+    // has no registered definition for is treated as a governed change: the
+    // conservative reading, never looser than the Operation it stands in for.
+    try {
+      const definition = this.#staticOperations.get(request.operation)?.definition;
+      await assertOperationAdmitted(this.#db, session, {
+        id: request.operation,
+        intent: definition?.intent ?? "invoke",
+        effects: definition?.effects ?? { data: "write", external: "write" },
+      });
+    } catch (error) {
+      const operationError = operationErrorOf(error);
+      if (operationError) return { error: operationError };
+      throw error;
     }
     return this.#hostOperationExecutor(session, request, options);
   }
@@ -1289,7 +1367,16 @@ export async function withModuleOperationSession<T>(
   return runtime.withActiveOperationSession(verifiedSession, work);
 }
 
-/** Core-only transaction wrapper used by canonical custom write Operations. */
+/**
+ * Core-only transaction wrapper used by canonical custom write Operations.
+ *
+ * The guarded work runs inside its own savepoint. This transaction is often
+ * somebody else's — a nested `execute`, a host bridge call or an artifact
+ * stage reaches here on the transaction that is already open — and a failure
+ * after this invocation consumed its mutation controls must take those
+ * controls with it rather than leave them for the caller to commit
+ * (db/session.ts `withInvocationSavepoint`).
+ */
 export async function withModuleOperationTransaction<T>(
   platform: ModulePlatformServices | undefined,
   session: TrustedSessionContext | undefined,
@@ -1303,7 +1390,10 @@ export async function withModuleOperationTransaction<T>(
   if (!runtime || runtime !== current.runtime || session !== current.session) {
     throw new Error("Protected Operation requires the live verified session.");
   }
-  return runtime.withOperationTransaction(session, work);
+  return runtime.withOperationTransaction(
+    session,
+    (trx) => withInvocationSavepoint(trx, () => work(trx)),
+  );
 }
 
 /**

@@ -45,6 +45,11 @@ Status transitions declared on a field ([operations.md](operations.md#transition
 use this seam from core: the rule's `from` states and preconditions are the
 availability policy, evaluated once for the offer and again inside the write.
 
+Availability is per authored Operation and per record. The orthogonal question
+— whether this tenant may change anything at all right now — belongs to a host
+execution policy ([execution-policies.md](execution-policies.md)), which core
+evaluates for every governed Operation rather than for one handler key.
+
 Web and MCP receive the same canonical `available: false` and friendly error.
 Actions lacking role or record authorization are omitted instead of disclosed
 as disabled. OAuth scopes are also checked before an action is offered.

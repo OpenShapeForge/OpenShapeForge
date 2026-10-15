@@ -12,6 +12,9 @@ import type { RuntimeWebhookSecretServices } from "./webhook-secrets.js";
 export type { RuntimeWebhookSecretServices, RuntimeWebhookSignatureInput } from "./webhook-secrets.js";
 import type { RuntimeRecordAccessServices } from "./record-access.js";
 export type { RuntimeRecordAccessServices, RuntimeRecordAccessRequest, RuntimeRecordAccessIntent, RuntimeStoredFieldProjectionRequest } from "./record-access.js";
+import type { RuntimeExecutionPolicy } from "./execution-policy.js";
+export type { RuntimeExecutionPolicy, RuntimeExecutionPolicyContract, RuntimeExecutionPolicyRequest,
+  RuntimeExecutionOperation, RuntimeExecutionAdmission, RuntimeExecutionRefusal } from "./execution-policy.js";
 export type { RuntimeSettingValue, RuntimeSettingsService } from "./settings.js";
 export type { RuntimeArtifactDescriptor, RuntimeArtifactStageInput, RuntimeArtifactOwner, RuntimeArtifactOwnerInput, RuntimeArtifactBindInput,
   RuntimeArtifactContents, RuntimeArtifactSessionContext, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
@@ -800,6 +803,7 @@ export type RuntimeModuleContract<
   AvailabilityHandler = ModuleOperationAvailabilityHandler,
   ArtifactStorage = RuntimeArtifactStorageContribution<PluginSessionContext, Transaction<PluginDatabaseSchema>>,
   JobHandler = RuntimeJobHandler,
+  ExecutionPolicy = RuntimeExecutionPolicy,
 > = {
   /** Must match the compiler plugin name. */
   name: string;
@@ -814,6 +818,13 @@ export type RuntimeModuleContract<
   operationHandlers?: Record<string, OperationHandler>;
   /** Same compiler-owned handler keys; core rechecks these policies before execution. */
   operationAvailabilityHandlers?: Record<string, AvailabilityHandler>;
+  /**
+   * Host-wide admission policies, consulted for EVERY governed canonical
+   * Operation rather than for one authored handler. See
+   * `./execution-policy.js` and docs/execution-policies.md: a host without
+   * contributions keeps its current behaviour exactly.
+   */
+  executionPolicies?: readonly ExecutionPolicy[];
   /** At most one configured module supplies the internal provider-neutral storage port. */
   artifactStorage?: ArtifactStorage;
   operationProviders?: readonly OperationProvider[];

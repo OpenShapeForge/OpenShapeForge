@@ -70,9 +70,37 @@ async function post(identity: Identity, url: string, payload: unknown): Promise<
   return { status: response.statusCode, body: response.body ? JSON.parse(response.body) : undefined };
 }
 
+/**
+ * The snapshot `platform.jobs.enqueue` would persist for the session this
+ * suite acts as: the trusted-context carrier its requests authenticate with
+ * (`applyTrustedContextHeaders` above), that operator's own role, no groups,
+ * and the scope those resolve to — `self`, since this deployment declares no
+ * tenant-bypass role (auth/session-scope.ts `resolveScope`).
+ *
+ * Spelled out because this fixture writes the row itself instead of going
+ * through a module's enqueue. Nothing defaults it: a job carries the verified
+ * credential that enqueued it (jobs/actor-session.ts), and a synthetic fixture
+ * owes the same honest snapshot a real session would leave.
+ */
+const operatorSnapshot = {
+  credential: "trusted-context",
+  roles: operator.roles,
+  groups: [],
+  relationGroupIds: [],
+  scope: "self",
+} as const;
+
 function enqueue(payload: Record<string, unknown>, deliveryKey?: string) {
   return withDbSession(getRuntime().db, operator, (trx) =>
-    enqueueJob(trx, { tenantId: operator.tenantId, actorId: operator.userId, kind, payload, subject, ...(deliveryKey ? { deliveryKey } : {}) }));
+    enqueueJob(trx, {
+      tenantId: operator.tenantId,
+      actorId: operator.userId,
+      actorSession: operatorSnapshot,
+      kind,
+      payload,
+      subject,
+      ...(deliveryKey ? { deliveryKey } : {}),
+    }));
 }
 
 describe("durable jobs end to end", () => {

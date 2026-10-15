@@ -56,6 +56,7 @@ import {
 import { assertRelationshipConstraintsInTransaction } from "./relationship-constraints.js";
 import { assertPublishableRelatedMutationInTransaction } from "./derived-execution-guards.js";
 import { assertHardDeleteAllowedInTransaction } from "./deletion-guards.js";
+import { assertAdmittedBeforeEffects } from "../execution-policy.js";
 import { assertCallerTopLevelFields, prepareProtectedFieldWrites } from "./field-policy.js";
 import { assertTypedValuesValid } from "./typed-values.js";
 import { isDeepStrictEqual } from "node:util";
@@ -287,6 +288,9 @@ async function insertGeneratedRowInTransaction(
     ...(entityValues.tables ? { tables: entityValues.tables } : {}),
     ...(entityValues.derivedTools ? { entries: entityValues.derivedTools } : {}),
   });
+  // Everything above reads, validates and may wait on another transaction's
+  // locks; the insert below is the first thing that cannot be taken back.
+  await assertAdmittedBeforeEffects(trx, session);
   const derivedColumn = derivedOnCreateColumn(table);
   const derivation = derivedColumn?.deriveOnCreate;
   const tenantColumn = table.columns.find((column) => column.name === "tenant_id");
@@ -530,6 +534,11 @@ async function applyGeneratedRowUpdate(
       return null;
     };
     if (changes.length === 0) return unchangedRow();
+    // The row is locked, this request's controls are consumed and every value
+    // is prepared: the last point before a change that cannot be taken back,
+    // and the first one at which no further wait stands between the decision
+    // and the write.
+    await assertAdmittedBeforeEffects(trx, session);
     const result = await sql<{ row: GeneratedEntityRow }>`
       update ${sql.id(table.schema, table.table)}
       set ${sql.join(assignments)}
@@ -662,6 +671,10 @@ export async function deleteGeneratedEntity(
     const expectedVersionWhere = input.guard && versionColumn
       ? sql`and ${sql.id(versionColumn.name)} = ${normalizeTimestampToken(input.guard.expectedVersion)}::timestamptz`
       : sql``;
+    // The row is locked, its owned children, hard-delete and related-state
+    // guards have passed and this request's controls are consumed: the last
+    // point before the delete itself.
+    await assertAdmittedBeforeEffects(trx, session);
     const result = await sql<{ row: GeneratedEntityRow }>`
       delete from ${sql.id(table.schema, table.table)}
       where ${sql.id(table.primaryKey!)}::text = ${input.id}

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import {test,expect} from 'bun:test';
 import {randomUUID} from 'node:crypto';
 import {SQL} from 'bun';

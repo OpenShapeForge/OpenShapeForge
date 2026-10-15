@@ -29,12 +29,16 @@ public final class ExistingMemberInvitationHandler extends InviteOrgActionTokenH
         var account = context.getRealm().getClientByClientId(Constants.ACCOUNT_MANAGEMENT_CLIENT_ID);
         String origin = account == null ? null : account.getAttribute(EnrollmentContinuation.RETURN_ORIGIN);
         String target = existingMemberTarget(origin, organization, user);
+        if (target == null) return super.handleToken(token, context);
+        // Native continuation may tolerate a missing record when an auth note
+        // exists; a direct app return always requires a currently live record.
         var invitation = provider.getInvitationManager().getById(token.getId());
-        if (target == null || invitation == null || invitation.isExpired()) return super.handleToken(token, context);
+        if (invitation == null || invitation.isExpired()) return super.handleToken(token, context);
 
-        provider.getInvitationManager().remove(token.getId());
+        if (!provider.getInvitationManager().remove(token.getId())) return super.handleToken(token, context);
         context.getEvent().event(EventType.INVITE_ORG).detail(Details.ORG_ID, organization.getId())
-                .detail(Details.USERNAME, user.getUsername()).success();
+                .detail(Details.USERNAME, user.getUsername())
+                .detail("osf.invitation_outcome", "existing_member_return").success();
         // No membership, role, required action or SSO session is created here.
         // The destination starts its normal login and checks current admission.
         return Response.seeOther(URI.create(target)).build();

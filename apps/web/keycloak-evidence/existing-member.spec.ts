@@ -12,7 +12,7 @@ const appOrigin = 'http://127.0.0.1:8193';
 
 test('Native mail returns an existing member to normal app login; consumed and revoked mail fails closed', async ({ page, context }, info) => {
   const server = createServer((_req, res) => { res.setHeader('content-type','text/html'); res.end('<h1>Normal application login entry</h1>'); });
-  await new Promise<void>(resolve => server.listen(8193, '127.0.0.1', resolve));
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(8193, '127.0.0.1', resolve); });
   let token = '';
   async function admin(path: string, method = 'GET', body?: unknown, form = false) {
     const response = await fetch(`${origin}/admin/${path}`, {method, headers:{authorization:`Bearer ${token}`,
@@ -69,6 +69,23 @@ test('Native mail returns an existing member to normal app login; consumed and r
     await expect(page.getByText(/no longer valid|expired|already been used/i).first()).toBeVisible();
     expect(new URL(page.url()).origin).toBe(origin);
     await info.attach('revoked-invitation-refused',{body:await page.screenshot(),contentType:'image/png'});
+    const third = await invite();
+    await admin(`${base}/organizations/${org.id}`,'PUT',{...org,enabled:false});
+    await context.clearCookies(); await page.goto(third.link);
+    expect(new URL(page.url()).origin).toBe(origin);
+    await expect(page.getByText(/organization is not available/i).first()).toBeVisible();
+    await admin(`${base}/organizations/${org.id}`,'PUT',{...org,enabled:true,redirectUrl:'https://foreign.example.invalid/'});
+    await context.clearCookies(); await page.goto(third.link);
+    expect(new URL(page.url()).origin).toBe(origin);
+    await expect(page.getByText(/already a member/i)).toBeVisible();
+    await admin(`${base}/organizations/${org.id}`,'PUT',{...org,enabled:true});
+    const tampered = new URL(third.link); const parts=tampered.searchParams.get('key')!.split('.');
+    parts[2]=(parts[2]![0]==='A'?'B':'A')+parts[2]!.slice(1); tampered.searchParams.set('key',parts.join('.'));
+    await context.clearCookies(); await page.goto(tampered.href);
+    expect(new URL(page.url()).origin).toBe(origin);
+    await expect(page.getByRole('heading').first()).toBeVisible();
+    expect((await context.cookies(origin)).filter(c=>c.name==='KEYCLOAK_IDENTITY')).toEqual([]);
+
   } finally {
     if(token) await admin(`realms/${realm}`,'DELETE');
     await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));

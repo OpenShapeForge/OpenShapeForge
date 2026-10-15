@@ -11,7 +11,8 @@
     "build": "bun run deps && next build",
     "start": "next start",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "test:browser:invitations": "playwright test --config keycloak-invitations.config.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

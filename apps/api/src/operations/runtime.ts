@@ -16,7 +16,6 @@ import type { Transaction } from "kysely";
 import rawCatalog from "../generated/operations/catalog.json" with { type: "json" };
 import { resolveSessionContext } from "../auth/identity.js";
 import { SessionAuthenticationUnavailableError } from "../auth/session-unavailable.js";
-import { usesHostOrganizationContext } from "../config/host-organization.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { GraphqlContext } from "../graphql/context.js";
 import { headersFromFastify } from "../http/headers.js";
@@ -387,8 +386,12 @@ function operationIntent(
   return operation.intent ?? "invoke";
 }
 
+// Server-only provenance: an arbitrary available definition cannot become a
+// control Operation by being returned under an operator session.
+const runtimeDefinitionAuthModes = new WeakMap<RuntimeOperationDefinition, OperationContract["auth"]["mode"]>();
+
 function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
-  return {
+  const definition: RuntimeOperationDefinition = {
     id: entry.operation.key,
     key: entry.operation.key,
     intent: operationIntent(entry.operation),
@@ -428,6 +431,8 @@ function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
       confirmation: entry.operation.confirmation ?? { mode: "none" },
     },
   };
+  runtimeDefinitionAuthModes.set(definition, entry.operation.auth.mode);
+  return definition;
 }
 
 export function runtimeOperationError(error: unknown) {
@@ -1838,47 +1843,54 @@ export function registerRuntimeOperationRestRoutes(
   const withSession = async <T>(
     request: FastifyRequest,
     work: (session: TrustedSessionContext) => Promise<T>,
+    operationId?: string,
   ): Promise<T> => {
     const headers = headersFromFastify(request.headers);
-    // A control-realm token is routed by its issuer to the control verifier
-    // and lists only the control Operations its roles allow; every other
-    // credential stays on the tenant path. A control token that does not
-    // verify gets the same 401 as any other stranger.
+    const active = <R>(session: TrustedSessionContext, action: (session: TrustedSessionContext) => Promise<R>) =>
+      withModuleOperationSession(runtime.platform!, session, (verified) => action(verified!));
+    const available = (session: TrustedSessionContext) => active(
+      session, (verified) => runtime.platform!.operations.get(verified, operationId!),
+    );
+    // A person may be both an organization member and a platform operator.
+    // Choose the Operation's available canonical context before execution;
+    // never merge the two sessions or retry a business refusal under another.
+    let tenant: TrustedSessionContext | undefined;
+    let tenantError: unknown;
+    try {
+      const resolved = await resolveSessionContext(headers, { db: runtime.db, mcpAppResource: true });
+      if (resolved.userId && resolved.credential !== "none") tenant = resolved;
+    } catch (error) {
+      tenantError = error;
+    }
+    // Discovery has one catalog: an admitted tenant wins deterministically.
+    if (tenant && (operationId === undefined || await available(tenant))) {
+      return active(tenant, work);
+    }
     const control = runtime.control?.config.ok ? runtime.control.config.config : undefined;
-    let controlSession: TrustedSessionContext | undefined;
+    let operator: TrustedSessionContext | undefined;
+    let controlError: unknown;
     if (control && bearerIssuerOf(headers) === control.operator.issuer) {
       try {
-        controlSession = await resolveControlSession(headers, control, { mcpAppResource: true });
+        operator = await resolveControlSession(headers, control, { mcpAppResource: true });
       } catch (error) {
-        // A deployment can share an issuer between control and tenant clients
-        // before enabling host-organization mode. Only retry when the tenant
-        // verifier is configured for that same issuer; it still checks the
-        // signature, audience and admitted client independently.
-        if (!usesHostOrganizationContext() &&
-          control.operator.issuer !== process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER) {
-          throw controlSessionHttpError(error);
-        }
+        controlError = controlSessionHttpError(error);
       }
     }
-    // Host-organization deployments intentionally use one issuer for both
-    // control and tenant tokens. A same-issuer token that is not a control
-    // credential must therefore still get the ordinary tenant verifier; the
-    // resulting tenant session cannot invoke control Operations because their
-    // credential mode remains `control`.
-    const session = controlSession ?? await resolveSessionContext(headers, { db: runtime.db, mcpAppResource: true });
-    if (!session || !session.userId || session.credential === "none") {
-      throw new HttpError(
-        401,
-        "UNAUTHENTICATED",
-        "Operation discovery requires an authenticated session.",
-      );
+    if (operator) {
+      const definition = operationId === undefined ? undefined : await available(operator);
+      if (operationId === undefined || (definition && runtimeDefinitionAuthModes.get(definition) === "control")) {
+        return active(operator, work);
+      }
     }
-    return withModuleOperationSession(
-      runtime.platform,
-      session,
-      (active) => work(active!),
-    );
+    // Preserve normal unavailable-Operation results without widening authority.
+    // An admission failure remains a failure for a tenant/provider Operation.
+    if (tenant) return active(tenant, work);
+    if (tenantError) throw tenantError;
+    if (operator) throw new HttpError(404, "NOT_FOUND", "Operation is not available.");
+    if (controlError) throw controlError;
+    throw new HttpError(401, "UNAUTHENTICATED", "Operation discovery requires an authenticated session.");
   };
+
   const failed = (reply: FastifyReply, error: unknown) => {
     const response = toHttpError(error);
     return reply.status(response.status).send(response.body);
@@ -1923,6 +1935,7 @@ export function registerRuntimeOperationRestRoutes(
         const definition = await withSession(
           request,
           (session) => runtime.platform!.operations.get(session, id),
+          id,
         );
         if (!definition) {
           throw new HttpError(404, "NOT_FOUND", "Operation is not available.");
@@ -1963,15 +1976,17 @@ export function registerRuntimeOperationRestRoutes(
             "Idempotency-Key must have exactly one value.",
           );
         }
-        return await withSession(request, (session) =>
-          runtime.platform!.operations.execute(session, {
+        return await withSession(
+          request,
+          (session) => runtime.platform!.operations.execute(session, {
             operation: { id, intent: body.intent as string },
             ...(operationInput ? { input: operationInput } : {}),
             ...(idempotencyKey ? { idempotencyKey } : {}),
             ...(expectedContractFingerprint
               ? { expectedContractFingerprint }
               : {}),
-          })
+          }),
+          id,
         );
       } catch (error) {
         return failed(reply, error);

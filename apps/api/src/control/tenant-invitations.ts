@@ -125,8 +125,8 @@ export async function manageTenantInvitations(
         if (action === "list") {
           const withoutProvider = rows.filter((row) => row.status === "pending" &&
             !pending.some((invitation) => invitation.email.toLowerCase() === row.email.toLowerCase()));
-          // A pending intent for an existing account is the intended no-mail
-          // state (it waits for their sign-in); only an intent with neither an
+          // A pending intent for an existing account waits for sign-in;
+          // only an intent with neither an
           // account nor a provider invitation is drift. One member read, not one per row.
           const accounts = withoutProvider.length === 0 ? new Set<string>() : new Set(
             (await clients.members.listMembers(organization.id)).flatMap((member) => member.email ? [member.email.trim().toLowerCase()] : []),
@@ -153,7 +153,7 @@ export async function manageTenantInvitations(
                 role: local?.role ?? null,
                 registrationStatus: local?.status ?? "untracked",
                 canResend: Boolean(
-                  local?.status === "pending" && tenant.status === "active" && organization.enabled,
+                  (local?.status === "pending" || local?.status === "accepted") && tenant.status === "active" && organization.enabled,
                 ),
                 canRevoke: invitationCanBeRevoked(invitation.status),
               };
@@ -169,12 +169,8 @@ export async function manageTenantInvitations(
           if (!input.role || !isEmployeeInvitationRole(input.role)) throw new FirstAdministratorError("INVALID_INPUT", "role must be org_admin or org_employee.");
           if (tenant.status !== "active" || !organization.enabled) throw new FirstAdministratorError("TENANT_NOT_READY", "Inviting requires an active tenant and organization.");
           const names = { ...(input.firstName ? { firstName: input.firstName } : {}), ...(input.lastName ? { lastName: input.lastName } : {}) };
-          // An existing account gets no mail: Keycloak would refuse invite-user
-          // for a member, and the local intent is what their sign-in consumes.
           const member = await clients.members.hasMemberByEmail(organization.id, email);
           const accepted = rows.find((row) => row.status === "accepted" && row.email.toLowerCase() === email);
-          // Historical acceptance is not current admission. A missing/pending
-          // membership needs a new intent; linked members use role administration.
           const linked = member && accepted ? (await sql`
             select ir.identity_id from platform.identity_relations ir
             join platform.identities i on i.id = ir.identity_id
@@ -182,11 +178,12 @@ export async function manageTenantInvitations(
               and lower(i.email) = lower(${email})
           `.execute(trx)).rows.length > 0 : false;
           if (member && accepted && linked) {
-            return { tenantSlug: input.slug, invitationId: accepted.id, ...toInvitation(accepted), ...invitationOutcome(input.slug, "already_accepted") };
+            const delivery = await deliverInvitation(clients.members, organization.id, { email, ...names });
+            return { tenantSlug: input.slug, invitationId: accepted.id, ...toInvitation(accepted), ...invitationOutcome(input.slug, delivery) };
           }
-          const delivery = member
-            ? "no_email_existing_account" as const
-            : await deliverInvitation(clients.members, organization.id, { email, ...names }, { knownNonMember: true });
+          // Every explicit admission records current intent, including re-admission
+          // after acceptance. Existing members receive the native sign-in notice.
+          const delivery = await deliverInvitation(clients.members, organization.id, { email, ...names });
           const invitation = await recordEmployeeInvitation(trx, tenant.id, `${deps.administrator.issuer}#${deps.administrator.subject}`,
             { email, role: input.role, ...names });
           const keycloakInvitation = delivery === "already_pending"
@@ -204,7 +201,7 @@ export async function manageTenantInvitations(
             lastName: invitation.lastName, status: invitation.status,
             sentAt: invitationTimestamp(invitation.sentDate), expiresAt: invitationTimestamp(invitation.expiresAt),
             role: local?.role ?? null, registrationStatus: local?.status ?? "untracked",
-            canResend: Boolean(local?.status === "pending" && tenant.status === "active" && organization.enabled),
+            canResend: Boolean((local?.status === "pending" || local?.status === "accepted") && tenant.status === "active" && organization.enabled),
             canRevoke: invitationCanBeRevoked(invitation.status) };
         }
         if (!invitation && action === "revoke") {
@@ -242,7 +239,7 @@ export async function manageTenantInvitations(
         }
 
         const local = localFor(invitation.email);
-        if (local?.status === "accepted") {
+        if (local?.status === "accepted" && action === "revoke") {
           throw new FirstAdministratorError(
             "INVITATION_ALREADY_ACCEPTED",
             "This invitation has already been accepted; use member administration.",
@@ -278,10 +275,10 @@ export async function manageTenantInvitations(
             "Resending requires an active tenant and organization.",
           );
         }
-        if (!local || local.status !== "pending") {
+        if (!local || !["pending", "accepted"].includes(local.status)) {
           throw new FirstAdministratorError(
             "INVITATION_ROLE_MISSING",
-            "No pending role assignment exists. Revoke this invitation and create a new authorized invitation.",
+            "No authorized invitation exists. Revoke this invitation and create a new authorized invitation.",
           );
         }
         if (!clients.members.resendInvitation) {

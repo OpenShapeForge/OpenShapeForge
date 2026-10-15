@@ -17,6 +17,7 @@ function members(overrides: Partial<FirstAdministratorClients["members"]> = {}) 
     listInvitations: async () => [],
     deleteInvitation: async () => true,
     inviteUser: async (_id: string, input: { email: string }) => { sent.push(input.email); },
+    inviteExistingMember: async (_id: string, email: string) => { sent.push(email); return true; },
     ...overrides,
   } as FirstAdministratorClients["members"];
   return { client, sent };
@@ -61,10 +62,18 @@ describe("deliverInvitation", () => {
     expect(await deliverInvitation(expired.client, "org", { email: "a@example.com" })).toBe("email_sent");
     expect(expired.sent).toEqual(["a@example.com"]);
     const member = members({ hasMemberByEmail: async () => true });
-    expect(await deliverInvitation(member.client, "org", { email: "a@example.com" })).toBe("no_email_existing_account");
+    expect(await deliverInvitation(member.client, "org", { email: "a@example.com" })).toBe("email_sent");
     expect(await deliverInvitation(member.client, "org", { email: "a@example.com" }, { knownNonMember: true })).toBe("email_sent");
     const noSmtp = members({ hasInvitationMailConfiguration: async () => false });
     await expect(deliverInvitation(noSmtp.client, "org", { email: "a@example.com" })).rejects.toMatchObject({ code: "SMTP_NOT_CONFIGURED" });
+  });
+
+  it("fails closed when an existing-member notice cannot be delivered", async () => {
+    const noSmtp = members({ hasMemberByEmail: async () => true, hasInvitationMailConfiguration: async () => false });
+    await expect(deliverInvitation(noSmtp.client, "org", {email: "a@example.com"})).rejects.toMatchObject({code: "SMTP_NOT_CONFIGURED"});
+    expect(noSmtp.sent).toEqual([]);
+    const disappeared = members({ hasMemberByEmail: async () => true, inviteExistingMember: async () => false });
+    await expect(deliverInvitation(disappeared.client, "org", {email: "a@example.com"})).rejects.toMatchObject({code: "INVITATION_STATE_CHANGED"});
   });
 
   it("resolves a 409 by re-reading, and otherwise names the conflict instead of blaming SMTP", async () => {
@@ -73,7 +82,7 @@ describe("deliverInvitation", () => {
       hasMemberByEmail: async () => member,
       inviteUser: async () => { member = true; throw conflict("User already a member of the organization"); },
     });
-    expect(await deliverInvitation(raced.client, "org", { email: "a@example.com" })).toBe("no_email_existing_account");
+    expect(await deliverInvitation(raced.client, "org", { email: "a@example.com" })).toBe("email_sent");
 
     const stale = (message: string) => members({ inviteUser: async () => { throw conflict(message); } }).client;
     await expect(deliverInvitation(stale("User already a member of the organization"), "org", { email: "a@example.com" }))

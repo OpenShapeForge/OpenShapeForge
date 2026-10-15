@@ -594,13 +594,12 @@ operations:
       en: Invite first tenant administrator
       nl: Eerste tenantbeheerder uitnodigen
     description:
-      en: Invites the first organization administrator for ONE existing active tenant. Sends an invitation e-mail only to an
-        address without an account in the organization; an existing account gets no e-mail and just signs in. Repeating the
-        same request never resends. Refuses a different first administrator once one exists or is pending. The result's
-        delivery, signInUrl and nextStep say whether mail went out and what to tell the person.
-      nl: Nodigt de eerste org_admin uit voor ÉÉN bestaande actieve tenant. Alleen een adres zonder account in de organisatie
-        krijgt een uitnodigingsmail; een bestaand account meldt zich gewoon aan. Herhalen verstuurt nooit opnieuw. Weigert een andere eerste beheerder zodra
-        er één bestaat of in afwachting is.
+      en: Invites the first organization administrator for ONE existing active tenant. Sends an invitation or a fresh
+        sign-in link for an existing member. A reusable pending invitation is not automatically resent. Preserves existing
+        roles and refuses a different first administrator once one exists or is pending. The result's delivery says what happened.
+      nl: Nodigt de eerste org_admin uit voor ÉÉN bestaande actieve tenant. Verstuurt een uitnodiging of een nieuwe aanmeldlink
+        voor een bestaand lid. Een nog geldige openstaande uitnodiging wordt niet automatisch opnieuw verstuurd.
+        Bestaande rollen blijven behouden. Weigert een andere eerste beheerder zodra er één bestaat of in afwachting is.
     implementation:
       type: plugin
       plugin: osf-control
@@ -659,7 +658,7 @@ operations:
       en: List tenant invitations
       nl: Tenantuitnodigingen bekijken
     description:
-      en: Lists the outstanding Keycloak invitations for one tenant together with their stored roles, delivery dates, expiry, plus unresolved pending role assignments without a provider invitation, either an existing account awaiting sign-in (no e-mail by design; see signInUrl) or drift. Never returns invitation links.
+      en: Lists the outstanding Keycloak invitations for one tenant together with their stored roles, delivery dates, expiry, plus unresolved pending role assignments without a provider invitation, either an existing account awaiting sign-in (see signInUrl) or drift. Never returns invitation links.
       nl: Toont de openstaande Keycloak-uitnodigingen voor één tenant met hun opgeslagen rollen, verzenddata, vervaldatum en lokale roltoekenningen die bij de provider ontbreken. Geeft nooit uitnodigingslinks terug.
     implementation:
       type: plugin
@@ -771,12 +770,12 @@ operations:
     id: control.create-tenant-invitation
     name: { en: Invite tenant member, nl: Tenantlid uitnodigen }
     description:
-      en: Admits one person with an allowlisted role, applied at their next sign-in. Sends an invitation e-mail only to an
-        address without an account in the organization; an existing account (including one assign_tenant_member_roles
-        refused because they never signed in) gets no e-mail. The result's delivery, signInUrl and nextStep say what to
-        tell the person.
-      nl: Laat één persoon toe met een toegestane rol, toegepast bij de volgende aanmelding. Stuurt alleen een
-        uitnodigingsmail naar een adres zonder account in de organisatie; een bestaand account krijgt geen mail.
+      en: Admits one person with an allowlisted role, applied at their next sign-in. Sends an invitation or a fresh sign-in
+        link for an existing member. Existing admitted members keep their roles. A reusable pending invitation is not
+        automatically resent; use Resend. The delivery outcome reports whether the mail request was accepted.
+      nl: Laat één persoon toe met een toegestane rol, toegepast bij de volgende aanmelding. Verstuurt een uitnodiging of
+        een nieuwe aanmeldlink voor een bestaand lid. Bestaande rollen blijven behouden. Een nog geldige openstaande
+        uitnodiging wordt niet automatisch opnieuw verstuurd; gebruik Opnieuw versturen. De uitkomst meldt of de mailaanvraag is geaccepteerd.
     implementation: { type: plugin, plugin: osf-control, handler: createTenantInvitation }
     input:
       schema:

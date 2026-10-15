@@ -103,6 +103,12 @@ export async function deliverInvitation(
         }
       },
     });
+    if (decision === "not_required") {
+      if (!members.inviteExistingMember) throw new FirstAdministratorError("INVITATIONS_NOT_CONFIGURED", "Existing-member invitation delivery is not configured.");
+      if (!(await members.hasInvitationMailConfiguration())) throw new FirstAdministratorError("SMTP_NOT_CONFIGURED", "Configure SMTP before sending invitations.");
+      if (!(await members.inviteExistingMember(organizationId, input.email))) throw new FirstAdministratorError("INVITATION_STATE_CHANGED", "The organization membership changed. Refresh before inviting again.");
+      return "email_sent";
+    }
     return PLATFORM_DELIVERY[decision];
   } catch (error) {
     if (error instanceof KeycloakAdminError && error.status === 409) throw invitationConflict(error);

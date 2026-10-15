@@ -87,19 +87,16 @@ export async function inviteFirstTenantAdministrator(
       const previous = prior.find(p => p.email.toLowerCase() === email);
       const result = (invitation: EmployeeInvitation, delivery: InvitationDelivery) =>
         ({ tenant: input.slug, ...invitation, ...invitationOutcome(input.slug, delivery) });
-      const existingAccount = admins.length > 0 || await clients.members.hasMemberByEmail(organization.id, email);
-      // An accepted admission whose membership was since removed is re-invited below.
-      if (previous?.status === "accepted" && existingAccount) return result(toInvitation(previous), "already_accepted");
-      if (existingAccount) {
-        // Keycloak membership and its role do not create the OSF Relation or
-        // identity link required by tenant admission. Record the same local
-        // intent as an e-mailed invitation, without sending redundant mail;
-        // first sign-in will consume it and converge both identity stores.
-        if (previous) return result(toInvitation(previous), "no_email_existing_account"); // pending here
-        const invitation = await recordEmployeeInvitation(trx, tenant.id, actor, { email, role: "org_admin" });
-        return result(invitation, "no_email_existing_account");
-      }
-      const delivery = await deliverInvitation(clients.members, organization.id, { email }, { knownNonMember: true });
+      const member = await clients.members.hasMemberByEmail(organization.id, email);
+      const linked = member && previous?.status === "accepted" && (await sql`
+        select ir.identity_id from platform.identity_relations ir
+        join platform.identities i on i.id = ir.identity_id
+        where ir.tenant_id = ${tenant.id} and ir.status = 'linked' and lower(i.email) = ${email}
+      `.execute(trx)).rows.length > 0;
+      // Historical acceptance and provider membership do not establish current
+      // application admission. Re-record the authorized role for the next login.
+      const delivery = await deliverInvitation(clients.members, organization.id, { email });
+      if (previous?.status === "accepted" && linked) return result(toInvitation(previous), delivery);
       if (delivery === "already_pending" && previous?.status === "pending") return result(toInvitation(previous), delivery);
       // Also repairs a confirmed Keycloak invite whose earlier DB commit failed.
       const invitation = await recordEmployeeInvitation(trx, tenant.id, actor, { email, role: "org_admin" });

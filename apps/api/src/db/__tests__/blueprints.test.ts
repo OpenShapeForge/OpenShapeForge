@@ -109,6 +109,13 @@ test("published blueprint lookup is scoped, authorized and read-only across tena
     `.execute(db));
     expect((await asApp(customer, 'Example.All.ReadWrite', read)).rows).toEqual([]);
     expect((await asApp(customer, 'Other.All.ReadWrite', read)).rows.map((r) => r.version)).toEqual([3]);
+    await asApp(bp,'platform-operator',db=>sql`insert into platform.blueprint_versions
+      (tenant_id,entity_name,blueprint_id,version,source_record_id,label,reader_roles,values_json)
+      values (${bp},'Example','standard',4,${randomUUID()},'Retired',array['Other.All.ReadWrite'],'{"$presentation":{"retired":true}}'::jsonb)`.execute(db));
+    expect((await asApp(customer,'Other.All.ReadWrite',read)).rows).toEqual([]);
+    expect((await asApp(customer,'Other.All.ReadWrite',db=>sql`select * from app.read_blueprints('Example','standard',null,20,0)`.execute(db))).rows).toEqual([]);
+    expect((await sql<{count:number}>`select count(*)::int as count from platform.blueprint_copies where tenant_id=${customer}`.execute(runtime.db)).rows[0]!.count).toBe(1);
+    expect((await sql<{count:number}>`select count(*)::int as count from platform.blueprint_versions where tenant_id=${bp} and version=2`.execute(runtime.db)).rows[0]!.count).toBe(1);
     const owner = await sql<{ owner: string; bypass: boolean; public_execute: boolean }>`
       select r.rolname as owner, r.rolbypassrls as bypass,
         exists(select 1 from aclexplode(p.proacl) a where a.grantee = 0 and a.privilege_type = 'EXECUTE') as public_execute

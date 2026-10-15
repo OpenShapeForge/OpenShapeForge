@@ -140,7 +140,8 @@ export async function applyBlueprintsMigration(db: OpenShapeForgeDatabase) {
           and ($2 is null or v.blueprint_id = $2)
         order by v.blueprint_id, v.version desc
       ) latest
-      where latest.reader_roles && string_to_array(current_setting('app.roles', true), ',')
+      where not (latest.values_json @> '{"$presentation":{"retired":true}}'::jsonb)
+        and latest.reader_roles && string_to_array(current_setting('app.roles', true), ',')
         and ($3 is null or latest.label ilike '%' || $3 || '%'
           or latest.blueprint_id ilike '%' || $3 || '%')
       order by latest.label, latest.blueprint_id

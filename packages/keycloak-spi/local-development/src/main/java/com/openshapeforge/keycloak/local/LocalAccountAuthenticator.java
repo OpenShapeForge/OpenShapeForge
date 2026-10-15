@@ -14,6 +14,7 @@ import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.authentication.Authenticator;
 import org.keycloak.authentication.AuthenticatorFactory;
+import org.keycloak.authentication.AuthenticationProcessor;
 import org.keycloak.models.AuthenticationExecutionModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
@@ -21,6 +22,7 @@ import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.UserSessionModel;
 import org.keycloak.services.managers.AuthenticationManager;
+import org.keycloak.services.util.AuthenticationFlowURLHelper;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.util.JsonSerialization;
 import jakarta.ws.rs.core.Response;
@@ -136,11 +138,15 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
             // otherwise attachSession rejects the two different identities.
             AuthenticationManager.backchannelLogout(context.getSession(), old, true);
             AuthenticationManager.expireIdentityCookie(context.getSession());
-            // Commit deletion before Keycloak creates the replacement session.
-            // Its persistent session store cannot delete and recreate the same
-            // browser-session id with a different user in one transaction.
-            context.getAuthenticationSession().setAuthNote(REPLACEMENT_USER, user.getId());
-            context.forceChallenge(Response.seeOther(context.getRefreshUrl(true)).build());
+            // Rotate the root authentication session too. Persistent Keycloak
+            // sessions cannot change user under the previous browser-session id.
+            // Native recreation preserves the client's PKCE, nonce and state.
+            var next = AuthenticationProcessor.recreate(context.getSession(), context.getAuthenticationSession());
+            AuthenticationProcessor.resetFlow(next, context.getFlowPath());
+            next.setAuthNote(REPLACEMENT_USER, user.getId());
+            var target = new AuthenticationFlowURLHelper(context.getSession(), context.getRealm(), context.getUriInfo())
+                .getLastExecutionUrl(next);
+            context.forceChallenge(Response.seeOther(target).build());
             return;
         }
         context.setUser(user);

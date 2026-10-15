@@ -103,18 +103,22 @@ authorization:
     read:
       - Finance.All.Read
       - Finance.All.ReadWrite
+      - Finance.Budget.ReadWrite
       - Finance.BudgetLine.ReadWrite
       - Finance.BudgetLine.Embedded.ReadWrite
     create:
       - Finance.All.ReadWrite
+      - Finance.Budget.ReadWrite
       - Finance.BudgetLine.ReadWrite
       - Finance.BudgetLine.Embedded.ReadWrite
     update:
       - Finance.All.ReadWrite
+      - Finance.Budget.ReadWrite
       - Finance.BudgetLine.ReadWrite
       - Finance.BudgetLine.Embedded.ReadWrite
     delete:
       - Finance.All.ReadWrite
+      - Finance.Budget.ReadWrite
       - Finance.BudgetLine.ReadWrite
       - Finance.BudgetLine.Embedded.ReadWrite
   rowAccess:

@@ -132,6 +132,8 @@ describe("tenant invitation administration", () => {
         status: "PENDING", sentDate: null, expiresAt: null }]; },
       async listMembers() { return []; },
       async hasMemberByEmail() { return true; },
+      async hasInvitationMailConfiguration() { return true; },
+      async inviteExistingMember() { return true; },
     },
   }) as never;
 

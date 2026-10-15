@@ -21,9 +21,7 @@ Every invite result (`invite_first_tenant_admin`, `create_tenant_invitation`,
 | `delivery` | mail | what the person does |
 | --- | --- | --- |
 | `email_sent` | Keycloak accepted an invitation e-mail request | follows the link in that e-mail |
-| `no_email_existing_account` | none, ever | signs in at `signInUrl`; the role applies then |
 | `already_pending` | none new; Keycloak holds an unexpired invitation (delivery unconfirmed) | uses the earlier e-mail, or asks for an explicit resend |
-| `already_accepted` | none; already a member | signs in; roles change via `assign_tenant_member_roles` |
 
 `signInUrl` is `OPENSHAPEFORGE_PUBLIC_ORIGIN` + `/<slug>` (the same address as
 the tenant's MCP resource), or null without a public origin. `nextStep` is
@@ -31,8 +29,11 @@ written for the assistant relaying the result.
 
 An address that already belongs to the Keycloak organization is detected
 before `invite-user` is called: Keycloak would refuse it, and membership alone
-does not create the OSF Relation or identity link. The local intent is recorded
-without mail and consumed on first sign-in. `list_tenant_invitations` shows such
+does not create the OSF Relation or identity link. The native invite-existing-user route sends a fresh sign-in link. Missing application
+admission is recorded as pending and consumed on sign-in. A linked accepted member
+keeps existing roles; a different requested role is refused and must use explicit
+member-role administration. Accepted-but-unlinked invitations cannot be resent;
+create a new authorized invitation to repair admission. `list_tenant_invitations` shows such
 an intent under `unresolved` with status `awaiting_sign_in`; `provider_missing`
 is reserved for an intent with neither an account nor a provider invitation.
 A Keycloak `409` on `invite-user` is re-read first (a concurrent sign-up or
@@ -46,7 +47,9 @@ A tenant-row lock serializes bootstrap decisions. A repeated pending invitation
 is reused without another mail; a confirmed remote invitation can recover a lost
 local commit. A different existing administrator or administrator invitation
 blocks bootstrap. A pending employee invitation is never upgraded implicitly.
-Normal member management stays on the tenant-admin surface.
+An explicit invitation for an existing member can send a new notice each time, so
+create/first-admin are not declared naturally idempotent. Never retry uncertain
+mail requests automatically. Normal member management stays on the tenant-admin surface.
 
 ## Deployment prerequisites and truthful mail results
 
@@ -61,7 +64,10 @@ any required authentication/TLS configuration. Host/sender presence is only a
 preflight, not proof of delivery. Missing configuration returns
 `SMTP_NOT_CONFIGURED`. Keycloak/API/SMTP failure returns
 `INVITATION_DELIVERY_UNCONFIRMED`, without recording a new pending intent or
-claiming email success. A successful API response means Keycloak accepted the
+claiming email success. This platform mail operation fails closed, including for
+existing members. Existing admission remains intact. The tenant-side admission
+operation separately reports its best-effort access notice and does not claim
+mail success when that notice fails. A successful API response means Keycloak accepted the
 invitation operation, not that a message reached the inbox. No email was sent by
 the local automated proof; its provider is stubbed.
 
@@ -86,3 +92,5 @@ It refuses an already populated fixture; discard the disposable database before
 rerunning. Without the explicit proof URL, those database tests are skipped.
 Unit tests require no database. Live recipient acceptance and actual SMTP inbox
 delivery remain deployment acceptance checks, not claims of this test suite.
+
+A notice for an accepted member cannot be revoked through invitation administration; use member administration to change admission. Reinviting never revokes or changes an accepted membership.

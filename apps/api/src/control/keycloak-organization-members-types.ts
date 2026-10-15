@@ -13,9 +13,9 @@
  * and mails an action-token link the person accepts (their Keycloak account is
  * created only when they click it — see below). There is a second endpoint,
  * `invite-existing-user`, for a person who already has an account in the
- * realm; this module only calls `invite-user` because the runtime invites by
- * e-mail address alone and has no reason to know in advance whether the
- * person already signed in elsewhere.
+ * realm. Explicit re-invitations of current members use that endpoint after
+ * resolving membership by e-mail. The OSF Keycloak handler returns a valid
+ * existing-member invitation to normal app login, without granting a session.
  *
  * `invite-user` genuinely REQUIRES a working realm SMTP configuration: with
  * `smtpServer` empty (the out-of-the-box local realm), the call answers

@@ -14,7 +14,9 @@
  */
 import type { VersionedMigration } from "../versioned-runner.js";
 // migration-registry:imports — `bun run db:migration:new` inserts imports below this line.
+import m0016ChipDefinitionDefault from "./0016_chip-definition-default.js";
 
 export const versionedMigrations: VersionedMigration[] = [
+  m0016ChipDefinitionDefault,
   // migration-registry:entries — `bun run db:migration:new` inserts entries above this line.
 ];

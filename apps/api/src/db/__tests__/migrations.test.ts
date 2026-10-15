@@ -42,6 +42,8 @@ import {
   type VersionedMigration,
 } from "../migrations/versioned-runner.js";
 import { ensureCheckConstraint } from "../migrations/sql-invariants.js";
+import { versionedMigrations } from "../migrations/versioned/index.js";
+import chipMigration from "../migrations/versioned/0016_chip-definition-default.js";
 import { findUndeclaredDatabaseSchema } from "../schema-drift.js";
 
 // The migration chain now provisions the cluster-wide openshapeforge_app role and
@@ -186,13 +188,14 @@ describe("generated schema migration", () => {
         expect(first.pluginMigrationsApplied.length).toBeGreaterThan(0);
 
         await withDb(url, async (db) => {
-          // The ledger holds the generated-schema record and nothing else:
-          // plugin DDL is applied on every run, not remembered.
+          // Fresh builds record the generated schema and every versioned baseline.
+          // Plugin DDL is applied on every run, not remembered.
           const ledger = await sql<{ version: string }>`
             select version from platform.schema_migrations order by version
           `.execute(db);
           expect(ledger.rows.map((row) => row.version)).toEqual([
             generatedSchemaMigrationVersion,
+            ...versionedMigrations.map(entry => entry.version),
           ]);
           expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(
             manifest.checksum,
@@ -498,6 +501,77 @@ describe("generated schema migration", () => {
     },
     TEST_TIMEOUT,
   );
+
+  test("the Chip migration leaves an absent entity and already-typed custom default unchanged", async () => {
+    await withScratchDb(async url => {
+      await withDb(url, async db => {
+        await chipMigration.up(db);
+        expect(await tableExists(db, "erp", "chips")).toBe(false);
+      });
+      await runChain(url, []);
+      await withDb(url, async db => {
+        await sql`alter table erp.chips alter column definition set default
+          '{"key":"custom","osfType":"string"}'::jsonb`.execute(db);
+        const expression = async () => (await sql<{expression:string}>`
+          select pg_get_expr(d.adbin,d.adrelid) as expression from pg_attrdef d
+          join pg_attribute a on a.attrelid=d.adrelid and a.attnum=d.adnum
+          where d.adrelid='erp.chips'::regclass and a.attname='definition'`.execute(db)).rows[0]!.expression;
+        const before = await expression();
+        await chipMigration.up(db);
+        expect(await expression()).toBe(before);
+      });
+    });
+  }, TEST_TIMEOUT);
+
+  for (const legacy of ["text", "typed-default"] as const) {
+    test(`the registered Chip migration carries ${legacy} forward and preserves values`, async () => {
+      await withScratchDb(async url => {
+        await runChain(url, []);
+        const value = '{"keep":"literal JSON-looking text"}\nSecond line';
+        await withDb(url, async db => {
+          if (legacy === "text") {
+            await sql`alter table erp.chips drop column definition`.execute(db);
+            await sql`alter table erp.chips alter column value type text using value #>> '{}'`.execute(db);
+            await sql`insert into erp.chips (tenant_id,key,name,value)
+              values (gen_random_uuid(),'migration.example','Kept',${value})`.execute(db);
+          } else {
+            await sql`alter table erp.chips alter column definition set default
+              '{"key":"value","osfType":"string","required":false}'::jsonb`.execute(db);
+            await sql`insert into erp.chips (tenant_id,key,name,value)
+              values (gen_random_uuid(),'migration.example','Kept',to_jsonb(${value}::text))`.execute(db);
+          }
+          await staleChecksum(db);
+        });
+        const refused = await expectRejects(runChain(url, []));
+        expect(refused).toContain(legacy === "text" ? "erp.chips.value" : "erp.chips.definition");
+        const result = await runChain(url);
+        expect(result.versioned.applied).toContain(chipMigration.version);
+        expect(result.checksum).toBe(manifest.checksum);
+        await withDb(url, async db => {
+          const rows = await sql<{ value: string; definition: unknown }>`
+            select value, definition from erp.chips where key='migration.example'
+          `.execute(db);
+          const definition = legacy === "text"
+            ? { key: "value", osfType: "multilineText", required: true, validation: { minLength: 1, maxLength: 8000 } }
+            : { key: "value", osfType: "string", required: false };
+          expect(rows.rows).toEqual([{ value, definition }]);
+          await sql`insert into erp.chips (tenant_id,key,name,value)
+            values (gen_random_uuid(),'migration.future','Future',to_jsonb('future'::text))`.execute(db);
+          const future = await sql<{ definition: unknown }>`
+            select definition from erp.chips where key='migration.future'
+          `.execute(db);
+          expect(future.rows[0]?.definition).toEqual({
+            key: "value", osfType: "string", required: false,
+            validation: { minLength: 1, maxLength: 8000 },
+          });
+          expect(await recordedChecksum(db, chipMigration.version)).toBe(fileChecksum(await readFile(new URL(chipMigration.fileUrl))));
+          expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(manifest.checksum);
+          expect((await diffManifestAgainstDatabase(db)).nonAdditive).toEqual([]);
+        });
+        expect((await runChain(url)).versioned.skipped).toContain(chipMigration.version);
+      });
+    }, TEST_TIMEOUT);
+  }
 
   test(
     "a versioned migration settles a rename the roll-forward refuses, keeping the rows",

@@ -13,6 +13,7 @@ import {
   assertBearerCredential,
   assertJsonRpcContentType,
   withoutCookieIdentity,
+  mediaType,
 } from "./address.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { headersFromFastify } from "../http/headers.js";
@@ -36,7 +37,7 @@ export function createMcpSessionAdmission(
    * (auth/organization-binding.ts). A refusal there is a 403 with the same
    * body for every cause, so the path cannot enumerate organizations.
    */
-  return async function requireMcpSession(request: FastifyRequest): Promise<{
+  return async function requireMcpSession(request: FastifyRequest, transport?: "configuration-form"): Promise<{
     db: OpenShapeForgeDatabase;
     session: TrustedSessionContext;
     resource: string;
@@ -70,7 +71,16 @@ export function createMcpSessionAdmission(
     // BOLT 2 (mcp/address.ts): a JSON-RPC body only under `application/json`.
     // Checked before anything reads the body or verifies the credential, so a
     // refused media type never becomes an authenticated request.
-    assertJsonRpcContentType(request.method, request.headers["content-type"]);
+    if (transport === "configuration-form") {
+      // Only the secure form route opts in. Cookie-only cross-origin forms
+      // cannot carry this bearer credential; ordinary MCP remains JSON-only.
+      assertBearerCredential(request.headers);
+      if (request.method !== "POST" || mediaType(request.headers["content-type"]) !== "application/x-www-form-urlencoded") {
+        throw new HttpError(415, "UNSUPPORTED_MEDIA_TYPE", "Secure configuration requires a form-urlencoded POST.");
+      }
+    } else {
+      assertJsonRpcContentType(request.method, request.headers["content-type"]);
+    }
     const mcpHeaders = withoutCookieIdentity(request.headers);
 
     let resolved: TrustedSessionContext;

@@ -256,7 +256,7 @@ export async function registerConfigurationHandoffRoutes(
   instance.post(
     `${ENTITY_CONFIGURATION_PATH}/pending/:id`,
     async (request, reply) => {
-      const { db, session } = await requireMcpSession(request);
+      const { db, session } = await requireMcpSession(request, "configuration-form");
       const found = await latestConfigurationForSession(session, db);
       const id = (request.params as { id?: string }).id;
       if (!found || found.id !== id) {

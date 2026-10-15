@@ -945,6 +945,9 @@
               }
             },
             "then": {
+              "properties": {
+                "end": true
+              },
               "required": [
                 "end"
               ]
@@ -962,6 +965,9 @@
               }
             },
             "then": {
+              "properties": {
+                "count": true
+              },
               "required": [
                 "count"
               ]
@@ -969,6 +975,11 @@
           },
           {
             "if": {
+              "properties": {
+                "start": true,
+                "end": true,
+                "endCondition": true
+              },
               "required": [
                 "start",
                 "end"
@@ -976,6 +987,9 @@
               "anyOf": [
                 {
                   "not": {
+                    "properties": {
+                      "endCondition": true
+                    },
                     "required": [
                       "endCondition"
                     ]

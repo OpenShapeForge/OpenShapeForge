@@ -21,7 +21,7 @@ export type McpRegistrationOptions = {
 export type McpRouteContext = {
   instance: FastifyInstance;
   options: McpRegistrationOptions;
-  requireMcpSession: (request: FastifyRequest) => Promise<{
+  requireMcpSession: (request: FastifyRequest, transport?: "configuration-form") => Promise<{
     db: OpenShapeForgeDatabase;
     session: TrustedSessionContext;
     resource: string;

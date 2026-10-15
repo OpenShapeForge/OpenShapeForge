@@ -80,7 +80,7 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
       keycloak_realm text, keycloak_organization_id text
     )`.execute(owner.db);
     await sql`create table platform.identities (id uuid primary key default gen_random_uuid(), email text);
-      create table platform.identity_relations (identity_id uuid references platform.identities, tenant_id uuid, status text);`.execute(owner.db);
+      create table platform.identity_relations (identity_id uuid references platform.identities, tenant_id uuid, status text, roles text[]);`.execute(owner.db);
     await applyAppHelpersMigration(owner.db);
     // Both tables come from the manifest; the invitations migration file owns
     // only the checks, the pending-address index and the policy.
@@ -238,8 +238,8 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     await sql`update platform.employee_invitations set status='accepted', accepted_at=now()`.execute(owner.db);
     expect(await create()).toMatchObject({ status: 'pending', delivery: 'email_sent', role: 'org_admin' });
     await sql`insert into platform.identities (email) values ('member@example.com');
-      insert into platform.identity_relations (identity_id, tenant_id, status)
-      select i.id,t.id,'linked' from platform.identities i, platform.tenants t where t.slug='acme';
+      insert into platform.identity_relations (identity_id, tenant_id, status, roles)
+      select i.id,t.id,'linked',array['org_admin'] from platform.identities i, platform.tenants t where t.slug='acme';
       update platform.employee_invitations set status='accepted', accepted_at=now() where status='pending';`.execute(owner.db);
     expect(await create()).toMatchObject({ status: 'accepted', delivery: 'email_sent' });
     await expect(manageTenantInvitations({ db: runtime.db, administrator, firstAdministrator: clients }, 'create',
@@ -251,6 +251,27 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     if (previousClient === undefined) delete process.env.OPENSHAPEFORGE_API_KEY_ROLE_CLIENT_ID;
     else process.env.OPENSHAPEFORGE_API_KEY_ROLE_CLIENT_ID = previousClient;
   });
+  it('uses current admission roles rather than the historical invitation role', async () => {
+    await invite(); members = ['admin@example.com'];
+    await sql`update platform.employee_invitations set status='accepted', accepted_at=now(),role='org_employee';
+      insert into platform.identities(email) values('admin@example.com');
+      insert into platform.identity_relations(identity_id,tenant_id,status,roles)
+      select i.id,t.id,'linked',array['org_admin'] from platform.identities i,platform.tenants t where t.slug='acme'`.execute(owner.db);
+    const create = (role:'org_admin'|'org_employee') => manageTenantInvitations({db:runtime.db,administrator,firstAdministrator:clients},'create',{slug:'acme',email:'admin@example.com',role});
+    expect(await create('org_admin')).toMatchObject({role:'org_admin',delivery:'email_sent'});
+    await expect(create('org_employee')).rejects.toMatchObject({code:'INVITATION_ROLE_CONFLICT'});
+    expect(existingSends).toHaveLength(1);
+  });
+
+  it('keeps a provider notice addressable after local intent was revoked', async () => {
+    await invite();
+    await sql`update platform.employee_invitations set status='revoked',revoked_at=now(),revoked_by='operator'`.execute(owner.db);
+    const listed = (await manage('list') as any).invitations[0];
+    expect(listed).toMatchObject({canResend:false,canRevoke:true});
+    await expect(manage('resend',listed.invitationId)).rejects.toMatchObject({code:'INVITATION_ROLE_MISSING'});
+    expect(await manage('revoke',listed.invitationId)).toMatchObject({status:'revoked'});
+  });
+
   it('does not elevate a pending employee invitation', async () => {
     await sql`insert into platform.employee_invitations (tenant_id,email,role,invited_by)
       select id,'admin@example.com','org_employee','tenant-admin' from platform.tenants where slug='acme'`.execute(owner.db);

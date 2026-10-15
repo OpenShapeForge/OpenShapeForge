@@ -92,3 +92,5 @@ It refuses an already populated fixture; discard the disposable database before
 rerunning. Without the explicit proof URL, those database tests are skipped.
 Unit tests require no database. Live recipient acceptance and actual SMTP inbox
 delivery remain deployment acceptance checks, not claims of this test suite.
+
+A notice for an accepted member cannot be revoked through invitation administration; use member administration to change admission. Reinviting never revokes or changes an accepted membership.

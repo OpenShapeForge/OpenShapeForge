@@ -120,11 +120,12 @@ export async function manageTenantInvitations(
           );
         }
 
-        const linkedEmails = new Set((await sql<{email:string}>`
+        const linkedEmails = new Set((!["list", "get", "resend"].includes(action) || rows.length === 0 ? [] : (await sql<{email:string}>`
           select lower(i.email) as email from platform.identity_relations ir
           join platform.identities i on i.id = ir.identity_id
-          where ir.tenant_id = ${tenant.id} and ir.status = 'linked' and i.email is not null
-        `.execute(trx)).rows.map(row => row.email));
+          where ir.tenant_id = ${tenant.id} and ir.status = 'linked'
+            and lower(i.email) in (${sql.join(rows.map(row => row.email.toLowerCase()))})
+        `.execute(trx)).rows).map(row => row.email));
         const pending = await clients.members.listInvitations(organization.id);
         const localFor = (email: string) => rows.find((row) => row.email.toLowerCase() === email.toLowerCase());
         if (action === "list") {
@@ -176,16 +177,16 @@ export async function manageTenantInvitations(
           const names = { ...(input.firstName ? { firstName: input.firstName } : {}), ...(input.lastName ? { lastName: input.lastName } : {}) };
           const member = await clients.members.hasMemberByEmail(organization.id, email);
           const accepted = rows.find((row) => row.status === "accepted" && row.email.toLowerCase() === email);
-          const linked = member && accepted ? (await sql`
-            select ir.identity_id from platform.identity_relations ir
+          const admission = member && accepted ? (await sql<{roles: string[] | null}>`
+            select ir.roles from platform.identity_relations ir
             join platform.identities i on i.id = ir.identity_id
             where ir.tenant_id = ${tenant.id} and ir.status = 'linked'
               and lower(i.email) = lower(${email})
-          `.execute(trx)).rows.length > 0 : false;
-          if (member && accepted && linked) {
-            if (input.role !== accepted.role) throw new FirstAdministratorError("INVITATION_ROLE_CONFLICT", "This member is already admitted with another role. Use assign_tenant_member_roles; no email was sent and no role was changed.");
+          `.execute(trx)).rows : [];
+          if (member && accepted && admission.length) {
+            if (admission.length !== 1 || !(admission[0]!.roles ?? []).includes(input.role)) throw new FirstAdministratorError("INVITATION_ROLE_CONFLICT", "This member is already admitted with another role. Use assign_tenant_member_roles; no email was sent and no role was changed.");
             const delivery = await deliverInvitation(clients.members, organization.id, { email, ...names }, { knownNonMember: !member });
-            return { tenantSlug: input.slug, invitationId: accepted.id, ...toInvitation(accepted), ...invitationOutcome(input.slug, delivery) };
+            return { tenantSlug: input.slug, invitationId: accepted.id, ...toInvitation(accepted), role: input.role, ...invitationOutcome(input.slug, delivery) };
           }
           // Every explicit admission records current intent, including re-admission
           // after acceptance. Existing members receive the native sign-in notice.
@@ -198,7 +199,7 @@ export async function manageTenantInvitations(
 
         // Create returns the durable local intent id; Keycloak can replace its id
         // when a member is invited again. Resolve that local id within this tenant.
-        const intent = rows.find(row => row.id === input.invitationId && ["pending", "accepted"].includes(row.status));
+        const intent = rows.find(row => row.id === input.invitationId);
         const invitation = pending.find(row => row.id === input.invitationId) ??
           (intent ? pending.find(row => row.email.toLowerCase() === intent.email.toLowerCase()) : undefined);
         if (action === "get") {

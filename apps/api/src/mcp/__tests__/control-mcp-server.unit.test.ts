@@ -114,6 +114,9 @@ describe("the control MCP tool list", () => {
         "resend_tenant_invitation",
       ]));
       expect(listed.tools.find((tool) => tool.name === "list_tenants")!.inputSchema.properties).not.toHaveProperty("confirmed");
+      for (const name of ["invite_first_tenant_admin", "create_tenant_invitation", "resend_tenant_invitation"]) {
+        expect(listed.tools.find(tool => tool.name === name)!.annotations).toMatchObject({idempotentHint:false});
+      }
       expect(listed.tools.find((tool) => tool.name === "retire_catalog_entry")!.annotations).toMatchObject({
         readOnlyHint: false, idempotentHint: false,
       });

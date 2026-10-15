@@ -46,7 +46,6 @@ export function invitationOutcome(slug: string, delivery: InvitationDelivery) {
       "No new e-mail was sent: Keycloak already holds an invitation for this address (its delivery was never " +
       "confirmed). Ask whether the person received it; if not, offer resend_tenant_invitation and call it only once " +
       "they confirm.",
-
   };
   return { delivery, signInUrl, nextStep: nextStep[delivery] };
 }

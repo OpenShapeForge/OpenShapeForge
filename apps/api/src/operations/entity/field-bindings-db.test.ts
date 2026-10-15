@@ -19,8 +19,10 @@ import { SQL } from "bun";
 import { sql } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
 import { runMigrationChain } from "../../db/migration-chain.js";
+import { withDbSession } from "../../db/session.js";
+import { resolveComputedEntityRows } from "./computed-fields.js";
 import { executeEntityOperation } from "./runtime.js";
-import type { EntityOperationInput, EntityOperationResult, GeneratedEntityRow } from "./types.js";
+import type { EntityOperationInput, EntityOperationResult, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
 
 const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ??
   "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
@@ -268,6 +270,20 @@ describe("a binding, stored apart from the value it resolved to", () => {
     const listed = await run(editor, "LabelRule.list", { filter: { key: String(created.key) } });
     if (listed.intent !== "list" || "error" in listed) throw new Error("list failed");
     expect(listed.data.items[0]!.data.description_template).toBe("Bel 020-7654321 voor uitleg");
+  });
+
+  test("computed labels resolve current variables without reinterpreting source text", async () => {
+    const chip = await tenantGlobal(editor, "live.label", text(), "Old");
+    const rule = record(await memo(editor, {
+      values: { expression: { kind: "literal", value: "visible" } },
+      bindings: { descriptionTemplate: { template: "Message: {{chips.live.label}}" } },
+    }));
+    await run(editor, "Chip.update", { id: String(chip.id), values: { value: "New {{displayName}}" } });
+    const table = { source: { authoringEntityName: "Relation", computedFields: [{ field: "labels", resolver: "labelRules" }] }, columns: [] } as unknown as GeneratedCrudTable;
+    const rows = await withDbSession(runtime.db, editor, (trx, session) =>
+      resolveComputedEntityRows(trx, session, table, [{ display_name: "private" }]));
+    const labels = rows[0]!.labels as { items: { id: string; description: string }[] };
+    expect(labels.items.find(item => item.id === rule.id)?.description).toBe("Message: New {{displayName}}");
   });
 
   test("a local binding reads another field of the same record", async () => {

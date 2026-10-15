@@ -257,6 +257,9 @@ export function normalizeEntityFields(
     if (cardinality) result.cardinality = cardinality;
     if (cardinalityOf(cardinality, path).required) result.required = true;
     const collection = fieldCardinality(result) === "collection";
+    if (field.variables === "template" && (baseType !== "string" || collection)) {
+      throw new Error(`${path}: variables: template requires a single string field.`);
+    }
     if ((field.entityValue || field.allowedDefinitions) && nested) {
       throw new Error(`${path}: entityValue and allowedDefinitions require a top-level field.`);
     }

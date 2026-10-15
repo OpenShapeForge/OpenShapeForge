@@ -10,7 +10,7 @@ import { startConfigurationForSession } from "./configuration-start.js";
 import { sql } from "kysely";
 import { isDeepStrictEqual } from "node:util";
 import { withDbSession } from "../db/session.js";
-import { requireActingRelationId } from "./acting-relation-guard.js";
+import { assertConfigurationOwner, requireActingRelationId } from "./acting-relation-guard.js";
 import type { DbSessionInput } from "../db/session.js";
 import {
   createGeneratedEntityForTable,
@@ -119,7 +119,12 @@ export async function registerConfigurationHandoffRoutes(
         ? serializeRow(sourceTable, sourceResult.rows[0])
         : null;
       if (sourceRow) {
+        // The atomic claim holds a pooled connection during this probe. Bound
+        // the whole HTTP chain, in addition to the per-request timeout.
+        const probeDeadline = AbortSignal.timeout(20_000);
         const report = await testElicitedRow({
+          fetchImpl: Object.assign((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => fetch(input, { ...init, signal: init?.signal
+            ? AbortSignal.any([probeDeadline, init.signal]) : probeDeadline }), { preconnect: fetch.preconnect }),
           row: { [pending.elicit.into]: values[pending.elicit.into] },
           sourceRow,
           elicit: pending.elicit,
@@ -183,6 +188,7 @@ export async function registerConfigurationHandoffRoutes(
         if (!locked) throw new HttpError(404, "NOT_FOUND", "The configured record is unavailable.");
         for (const column of tableDef.columns) {
           const field = fieldNameForColumn(column);
+          if (field === "ownerUserId") assertConfigurationOwner(pending, locked[column.name]);
           if (field === pending.elicit.into) continue;
           if (!Object.hasOwn(pending.modelValues, field)) {
             if (field === pending.elicit.sourceField || (column.immutable && locked[column.name] != null)) throw new HttpError(409, "CONFIGURATION_BINDING_MISMATCH", "The secure form does not match this record.");

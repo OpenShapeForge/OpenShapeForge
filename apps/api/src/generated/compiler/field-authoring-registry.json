@@ -12934,7 +12934,11 @@
           "defaultValue": {
             "key": "value",
             "osfType": "string",
-            "required": false
+            "required": false,
+            "validation": {
+              "minLength": 1,
+              "maxLength": 8000
+            }
           },
           "authoring": {
             "profile": "fullFieldDefinition",
@@ -22055,7 +22059,6 @@
               }
             ]
           },
-          "variables": "template",
           "suggestions": {
             "sourceKey": "entityFields"
           }
@@ -22072,6 +22075,7 @@
             "nl": "Template met dynamische variabelen dat een gepersonaliseerde uitleg produceert wanneer op het label wordt geklikt."
           },
           "osfType": "variableTemplate",
+          "variables": "template",
           "validation": {
             "maxLength": 2000
           },
@@ -22087,7 +22091,6 @@
               }
             ]
           },
-          "variables": "template",
           "suggestions": {
             "sourceKey": "entityFields"
           }

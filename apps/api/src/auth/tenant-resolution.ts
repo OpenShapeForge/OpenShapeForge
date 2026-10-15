@@ -151,7 +151,7 @@ export async function resolveTenantFromOrganization(
 }
 
 /** A human host session has exactly one selected, verified membership. Neither
- * tid, a scope alias or transport input may not override that sole membership.
+ * tid, a scope alias or transport input may override that sole membership.
  */
 export async function resolveHostOrganizationTenant(
   identity: AuthIdentity,

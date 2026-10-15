@@ -24,6 +24,7 @@
 import { Ajv, type ValidateFunction } from "ajv";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
+import { operationExactNumericKeyword, valueInvariantKeywords } from "@openshapeforge/operations";
 import {
   PROVIDER_FAILURE_HINT_PROPERTY,
   PROVIDER_FAILURE_HINT_SCHEMA,
@@ -92,6 +93,8 @@ function createAjv(): Ajv {
   // ajv-formats is CJS; under NodeNext the default import is typed as the
   // module namespace rather than the callable it is at runtime.
   (addFormats as unknown as (instance: Ajv) => unknown)(ajv);
+  ajv.addKeyword(operationExactNumericKeyword);
+  for (const keyword of valueInvariantKeywords) ajv.addKeyword(keyword);
   return ajv;
 }
 

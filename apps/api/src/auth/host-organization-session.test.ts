@@ -142,8 +142,8 @@ describe("host organization binding through real bearer verification and resolve
     expect((await resolveSessionContext(await headers({ scope }))).credential).toBe("none");
   });
 
-  test("an exact alias scope admits only the sole verified membership", async () => {
-    const session = await resolveSessionContext(await headers({ scope: "openid organization:alpha" }));
+  test.each(["openid organization:alpha", "openid organization:alpha organization:alpha", "openid organization profile organization"])("a selected single membership accepts semantically duplicate scopes: %s", async (scope) => {
+    const session = await resolveSessionContext(await headers({ scope }));
     expect(session.credential).toBe("bearer");
     expect(session.tenantId).toBe(TENANT_A);
     expect(lookups).toEqual([["host", "org-a"]]);

@@ -164,7 +164,7 @@ export async function resolveHostOrganizationTenant(
   const memberships = Object.entries(identity.organizations ?? {});
   if (memberships.length !== 1) return null;
   const [alias, membership] = memberships[0]!;
-  const organizationScopes = (identity.scopes ?? []).filter(scope => scope === "organization" || scope.startsWith("organization:"));
+  const organizationScopes = [...new Set((identity.scopes ?? []).filter(scope => scope === "organization" || scope.startsWith("organization:")))];
   // Keycloak emits the dynamic scope instead of the generic scope when a
   // multi-organization person explicitly selects one eligible membership.
   // The signed claim must still contain exactly that single membership.

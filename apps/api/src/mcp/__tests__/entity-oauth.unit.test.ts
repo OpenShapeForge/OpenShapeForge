@@ -132,7 +132,7 @@ describe("exchangeCodeForTokens", () => {
     const before = Date.now();
     const { values } = await exchangeCodeForTokens(pending, "code", (async () => Response.json({
       access_token: "synthetic-access", refresh_token: "synthetic-refresh", expires_in: "600",
-    })) as typeof fetch, KEYRING);
+    })) as unknown as typeof fetch, KEYRING);
     expect(Date.parse(String(values.accessTokenExpiresAt))).toBeGreaterThanOrEqual(before + 600_000);
     expect(Date.parse(String(values.accessTokenExpiresAt))).toBeLessThanOrEqual(Date.now() + 600_000);
   });

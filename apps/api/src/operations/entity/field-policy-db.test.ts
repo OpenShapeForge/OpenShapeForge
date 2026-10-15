@@ -29,9 +29,16 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
   const generatorPath = new URL("../../../../../packages/compiler/src/generate.ts", import.meta.url).pathname;
   const { compileProtectedFieldsFixture } = await import(fixturePath);
   const { generateArtifacts } = await import(generatorPath);
-  const artifacts = generateArtifacts(compileProtectedFieldsFixture(undefined, {
+  let fixtureContract: any;
+  const artifacts = generateArtifacts(compileProtectedFieldsFixture((candidate: { contract: typeof fixtureContract }) => { fixtureContract = candidate.contract; }, {
     configureFields: (fields: Array<{ key: string; children?: unknown[] }>) => {
       fields.push({ key: "key", osfType: "string", label: { en: "Configuration key" }, persisted: { column: "key", storageClass: "core" } } as never);
+      fields.push({ key: "definitionId", osfType: "string", label: { en: "Definition record" }, persisted: { column: "definition_id", storageClass: "core" } } as never);
+      fields.push({ key: "definitions", osfType: "object", cardinality: "collection", label: { en: "Definitions" }, persisted: { column: "definitions", storageClass: "core" }, children: [
+        { key: "key", osfType: "string", label: { en: "Key" } },
+        { key: "osfType", osfType: "string", label: { en: "Type" } },
+        { key: "classification", osfType: "object", label: { en: "Classification" }, children: [{ key: "sensitivity", osfType: "string", label: { en: "Sensitivity" } }] },
+      ] } as never);
       fields.find(field => field.key === "data")?.children?.push(
         { key: "otherVisible", osfType: "string", label: { en: "Other visible" } },
         { key: "token", osfType: "object", label: { en: "Token" }, classification: { sensitivity: "confidential" } },
@@ -42,6 +49,15 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
   table.name = `field-policy-regression-${randomUUID()}`;
   const { default: runtimeManifest } = await import("../../generated/db/manifest.json", { with: { type: "json" } });
   (runtimeManifest.tables as unknown as GeneratedCrudTable[]).push(table);
+  const { default: operationCatalog } = await import("../../generated/operations/catalog.json", { with: { type: "json" } });
+  const schemaProjectorPath = new URL("../../../../../packages/compiler/src/entity-operation-json-schema.js", import.meta.url).pathname;
+  const { entityOperationJsonSchemas } = await import(schemaProjectorPath);
+  const fixtureOperations: any[] = Object.values(fixtureContract!.entityOperations);
+  const secureCreate = fixtureOperations.find((operation: { intent: string }) => operation.intent === "create");
+  secureCreate!.interaction.secureInput = { type: "secureInput", sourceField: "definitionId", sourceEntity: "ProtectedFieldsFixture", definitionsField: "definitions", into: "data" };
+  for (const operation of fixtureOperations) (operationCatalog.entityOperations as unknown[]).push({ ...operation,
+    ...entityOperationJsonSchemas(fixtureContract!, operation!, [fixtureContract!], {}),
+  });
   const { runMigrationChain } = await import("../../db/migration-chain.js");
   const { createGeneratedEntity, updateGeneratedEntity, mergeGeneratedEntityObjectForTable } = await import("./mutations.js");
   const { getGeneratedEntity, listGeneratedEntities } = await import("./queries.js");
@@ -372,6 +388,37 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
     } finally {
       if (previousSecure === undefined) delete table.source!.secureInputOnCreate; else table.source!.secureInputOnCreate = previousSecure;
       if (previousKeyring === undefined) delete process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS; else process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = previousKeyring;
+    }
+  }, 30_000);
+
+  test("browser secure initiation uses canonical admission and tenant-bound definitions", async () => {
+    const { startConfigurationForSession } = await import("../../mcp/configuration-start.js");
+    const { latestConfigurationForSession, consumeConfigurationForSession } = await import("../../mcp/configuration-handoff.js");
+    const previous = process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;
+    process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = `browser:${Buffer.alloc(32, 12).toString("base64")}`;
+    try {
+      const definition = await createGeneratedEntity(runtime.db, writer, { table: table.name, values: {
+        key: `definition-${randomUUID()}`, label: "Secure definition", explicitSecret: "not a credential",
+        data: { visible: "source", restricted: "private", fixed: "initial" },
+        definitions: [{ key: "token", osfType: "string", classification: { sensitivity: "confidential" } }],
+      } });
+      const body = { entity: "ProtectedFieldsFixture", values: { key: `browser-${randomUUID()}`, label: "Browser configuration", explicitSecret: "not a credential", definitionId: definition.id } };
+      const admitted = await startConfigurationForSession(runtime.db, writer, body);
+      expect(admitted).toEqual({ expiresInSeconds: 1800 });
+      expect(JSON.stringify(admitted)).not.toContain("token");
+      const pending = await latestConfigurationForSession(writer, runtime.db);
+      expect(pending!.pending.modelValues).toEqual(body.values);
+      expect(pending!.pending.definitions).toMatchObject([{ key: "token", osfType: "string" }]);
+      expect(await latestConfigurationForSession({ ...writer, userId: randomUUID() }, runtime.db)).toBeNull();
+      expect(await latestConfigurationForSession({ ...writer, tenantId: randomUUID() }, runtime.db)).toBeNull();
+      expect(await consumeConfigurationForSession(pending!.id, { ...writer, tenantId: randomUUID() }, runtime.db)).toBe(false);
+      expect(await consumeConfigurationForSession(pending!.id, writer, runtime.db)).toBe(true);
+      await expect(startConfigurationForSession(runtime.db, viewer, body)).rejects.toBeDefined();
+      await expect(startConfigurationForSession(runtime.db, { ...writer, tenantId: randomUUID() }, body)).rejects.toMatchObject({ code: "NOT_FOUND" });
+      await expect(startConfigurationForSession(runtime.db, writer, { ...body, values: { ...body.values, data: { token: "must not be accepted" } } })).rejects.toBeDefined();
+      await expect(startConfigurationForSession(runtime.db, writer, { ...body, tenantId: writer.tenantId })).rejects.toMatchObject({ code: "BAD_USER_INPUT" });
+    } finally {
+      if (previous === undefined) delete process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS; else process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = previous;
     }
   }, 30_000);
 

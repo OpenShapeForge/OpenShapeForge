@@ -6,6 +6,7 @@
  *
  * Split out of generated-mcp-server.ts.
  */
+import { startConfigurationForSession } from "./configuration-start.js";
 import { requireActingRelationId } from "./acting-relation-guard.js";
 import type { DbSessionInput } from "../db/session.js";
 import {
@@ -185,6 +186,11 @@ export async function registerConfigurationHandoffRoutes(
     await createGeneratedEntityForTable(db, writeSession, tableDef, values);
     return { ok: true };
   };
+
+  instance.post(`${ENTITY_CONFIGURATION_PATH}/start`, async (request) => {
+    const { db, session } = await requireMcpSession(request);
+    return startConfigurationForSession(db, session, request.body);
+  });
 
   // Stable, authenticated configuration form API. The web client sends its
   // normal Keycloak bearer; RLS resolves the pending handoff by tenant/user.

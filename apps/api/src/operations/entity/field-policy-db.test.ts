@@ -470,9 +470,16 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       } });
       const body = { entity: "ProtectedFieldsFixture", values: { key: `browser-${randomUUID()}`, label: "Browser configuration", explicitSecret: "not a credential", definitionId: definition.id } };
       const admitted = await startConfigurationForSession(runtime.db, writer, body);
-      expect(admitted).toEqual({ expiresInSeconds: 1800 });
+      expect(admitted).toEqual({ id: expect.any(String), expiresInSeconds: 1800 });
       expect(JSON.stringify(admitted)).not.toContain("token");
-      const pending = await latestConfigurationForSession(writer, runtime.db);
+      // A newer form in another tab must not replace this browser's target.
+      await startConfigurationForSession(runtime.db, writer, { ...body, values: { ...body.values, key: `second-${randomUUID()}` } });
+      const pending = await latestConfigurationForSession(writer, runtime.db, admitted.id);
+      expect(pending!.id).toBe(admitted.id);
+      expect(await latestConfigurationForSession({ ...writer, userId: randomUUID() }, runtime.db, admitted.id)).toBeNull();
+      expect(await latestConfigurationForSession({ ...writer, tenantId: randomUUID() }, runtime.db, admitted.id)).toBeNull();
+      const { configurationFormDefinitions } = await import("../../mcp/configuration-submission.js");
+      expect(configurationFormDefinitions(pending!.pending)).toMatchObject([{ key: "token", secret: true, schema: { type: "string" } }]);
       expect(pending!.pending.modelValues).toEqual(body.values);
       expect(pending!.pending.definitions).toMatchObject([{ key: "token", osfType: "string" }]);
       expect(await latestConfigurationForSession({ ...writer, userId: randomUUID() }, runtime.db)).toBeNull();

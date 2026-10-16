@@ -44,7 +44,7 @@ export async function createHandoff(input: {
 }): Promise<string> {
   const secret = base64url(randomBytes(32));
   const token = `${input.tenantId}.${input.userId}.${secret}`;
-  const id = randomUUID();
+  const id = input.id ?? randomUUID();
   const encrypted = encryptSecret(
     input.keyring,
     id,
@@ -147,6 +147,7 @@ export async function readLatestHandoffForSession<
   keyring: SecretKeyring;
   kind: "entity_oauth" | "entity_configuration" | "artifact_upload";
   session: DbSessionInput;
+  id?: string;
 }): Promise<{ id: string; payload: T } | null> {
   const row = await withDbSession(input.db, input.session, async (trx) => {
     const result = await sql<{
@@ -158,6 +159,7 @@ export async function readLatestHandoffForSession<
       select id, payload_ciphertext, payload_key_id, payload_algorithm
         from platform.mcp_handoffs
        where kind = ${input.kind}
+         and (${input.id ?? null}::uuid is null or id = ${input.id ?? null}::uuid)
          and consumed_at is null
          and expires_at > now()
        order by created_at desc

@@ -20,7 +20,7 @@ export async function startConfigurationForSession(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   body: unknown,
-): Promise<{ expiresInSeconds: number }> {
+): Promise<{ id: string; expiresInSeconds: number }> {
   if (!session.tenantId || !session.userId) throw new HttpError(401, "UNAUTHENTICATED", "Sign in to configure this record.");
   if (!object(body) || Object.keys(body).some(key => key !== "entity" && key !== "values") || typeof body.entity !== "string" || !object(body.values)) {
     throw new HttpError(400, "BAD_USER_INPUT", "Provide the entity name and ordinary create values.");
@@ -59,5 +59,5 @@ export async function startConfigurationForSession(
   });
   // Resolve and submit through /pending with the normal session; the bearer
   // handoff token never enters the browser response, URL or application state.
-  return { expiresInSeconds: minted.expiresInSeconds };
+  return { id: minted.id, expiresInSeconds: minted.expiresInSeconds };
 }

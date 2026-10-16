@@ -34,7 +34,8 @@ public class McpResourceScopeExecutorTest {
     }
     final McpResourceScopeExecutor.Binding control = binding("admin/mcp", "mcp-resource:control", false);
     final McpResourceScopeExecutor.Binding tenant = binding("acme/mcp", "mcp-resource:acme", true);
-    boolean scopeAvailable=true, defaultAttached=false;
+    boolean scopeAvailable=true, supportingAvailable=true, defaultAttached=false;
+    int scopeAdds;
     int scopeReads;
     final Map<String,String> notes=new HashMap<>(), clientNotes=new HashMap<>();
     final Set<String> attached = new LinkedHashSet<>();
@@ -44,7 +45,7 @@ public class McpResourceScopeExecutorTest {
     final RealmModel realm = mock(RealmModel.class, (m,a) -> m.equals("getClientScopesStream") ? realmScopes() : m.equals("isEventsEnabled") ? false : m.equals("getEventsListenersStream") ? Stream.empty() : null);
     final ClientModel client = mock(ClientModel.class, (m,a) -> switch(m) {
         case "getClientScopes" -> Boolean.TRUE.equals(a[0]) ? defaultAttached ? Map.of(control.scope,scope) : Map.of() : attached.stream().collect(java.util.stream.Collectors.toMap(name -> name, name -> namedScope(name)));
-        case "addClientScope" -> { assertEquals(false,a[1]); attached.add(((ClientScopeModel)a[0]).getName()); yield null; }
+        case "addClientScope" -> { assertEquals(false,a[1]); attached.add(((ClientScopeModel)a[0]).getName()); scopeAdds++; yield null; }
         default -> throw new AssertionError("Unexpected client mutation/read " + m);
     });
     final ClientProvider clients = mock(ClientProvider.class, (m,a) -> m.equals("getClientByClientId") ? client : null);
@@ -54,7 +55,7 @@ public class McpResourceScopeExecutorTest {
         case "getContext" -> kcContext; case "clients" -> clients; case "getKeycloakSessionFactory" -> factory; default -> null;
     });
     ClientScopeModel namedScope(String name) { return mock(ClientScopeModel.class,(m,a)->m.equals("getName")?name:m.equals("getProtocol")?"openid-connect":null); }
-    Stream<ClientScopeModel> realmScopes() { scopeReads++;return scopeAvailable?Stream.of(scope,namedScope("profile"),namedScope("roles")):Stream.empty(); }
+    Stream<ClientScopeModel> realmScopes() { scopeReads++;return scopeAvailable?(supportingAvailable?Stream.of(scope,namedScope("profile"),namedScope("roles")):Stream.of(scope)):Stream.empty(); }
     McpResourceScopeExecutor executor() {
         var configuration = new McpResourceScopeExecutor.Configuration(); configuration.resources = List.of(control);
         var executor = new McpResourceScopeExecutor(session); executor.setupConfiguration(configuration); return executor;
@@ -85,7 +86,7 @@ public class McpResourceScopeExecutorTest {
         var event = new DynamicClientRegisteredContext(registration, client, null, realm);
         control.registrationScopes=List.of("profile","roles");
         var executor = executor(); executor.executeOnEvent(event); executor.executeOnEvent(event);
-        assertEquals(Set.of(control.scope,"profile","roles"),attached);
+        assertEquals(Set.of(control.scope,"profile","roles"),attached);assertEquals(3,scopeAdds);
     }
     @Test public void authorizationBindsTheResourceWithoutClientWrites() throws Exception {
         attached.add(control.scope); var params = new MultivaluedHashMap<String,String>();
@@ -134,6 +135,10 @@ public class McpResourceScopeExecutorTest {
         assertThrows(ClientPolicyException.class,()->executor.executeOnEvent(event(params)));
     }
     @Test public void missingScopeDoesNotBreakUnrelatedDcrAndUnboundClientsRemainDenied() throws Exception {
+        control.registrationScopes=List.of("profile");supportingAvailable=false;
+        var partial=mock(ClientRegistrationContext.class,(m,a)->m.equals("getSession")?session:null);
+        executor().executeOnEvent(new DynamicClientRegisteredContext(partial,client,null,realm));
+        assertEquals(Set.of(control.scope),attached);attached.clear();
         scopeAvailable=false;var registration=mock(ClientRegistrationContext.class,(m,a)->m.equals("getSession")?session:null);
         executor().executeOnEvent(new DynamicClientRegisteredContext(registration,client,null,realm));
         assertTrue(attached.isEmpty());
@@ -150,8 +155,17 @@ public class McpResourceScopeExecutorTest {
         executor().executeOnEvent(new DynamicClientRegisteredContext(registration,client,null,realm));
         assertTrue(attached.isEmpty());assertEquals(0,scopeReads);
     }
-    @Test public void configurationRejectsAmbiguousAndUnsafeResources() {
-        var config = new McpResourceScopeExecutor.Configuration(); config.resources = List.of(control,control);
+    @Test public void configurationRejectsAmbiguousAndUnsafeResources() throws Exception {
+        var config = new McpResourceScopeExecutor.Configuration();
+        for (String name : java.util.Arrays.asList(null,"openid","Profile","mcp-resource:other","organization")) {
+            var bad=binding("invalid",control.scope,false);bad.registrationScopes=java.util.Arrays.asList(name);config.resources=List.of(bad);assertInvalid(config);
+        }
+        var disabled=binding("disabled",control.scope,false);disabled.registration=false;disabled.registrationScopes=List.of("profile");config.resources=List.of(disabled);assertInvalid(config);
+        var compatible=binding("alias",control.scope,false);compatible.registrationScopes=List.of("roles","profile","roles");control.registrationScopes=List.of("profile","roles");
+        config.resources=List.of(control,compatible);var valid=new McpResourceScopeExecutor(session);valid.setupConfiguration(config);
+        var registration=mock(ClientRegistrationContext.class,(m,a)->m.equals("getSession")?session:null);
+        valid.executeOnEvent(new DynamicClientRegisteredContext(registration,client,null,realm));assertEquals(Set.of(control.scope,"profile","roles"),attached);
+        config.resources = List.of(control,control);
         assertInvalid(config);
         for (String resource : List.of("http://app.example.test/admin/mcp","https://u@app.example.test/admin/mcp","https://app.example.test/admin/mcp?x=1","https://app.example.test/admin/mcp#frag")) {
             var bad = binding("x",control.scope,false); bad.resource=resource; config.resources=List.of(bad);

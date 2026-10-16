@@ -89,7 +89,10 @@ journey. Reports, screenshots and video are retained under `.runtime/`.
 The opt-in `osf-mcp-resource-scopes` client-policy executor runs at two native
 Keycloak boundaries. `REGISTERED` attaches explicitly registration-enabled resource scopes as
 **optional** scopes in the DCR transaction, before its response. Explicit `registration-scopes` can also make supporting OpenID scopes available when a client registers a smaller scope set than it later requests. It changes no
-roles, default scopes, callbacks or user grants. `AUTHORIZATION_REQUEST`
+user role grants, default scopes or callbacks. Supporting scopes use lowercase
+names (`[a-z][a-z0-9_-]*`), excluding `openid`; they require registration opt-in.
+An organization-free binding cannot attach `organization`. The scopes may expose
+claims for roles already held by the user, but do not grant those roles. `AUTHORIZATION_REQUEST`
 validates one exact RFC 8707 `resource` and records its configured scope in a server-owned client note after native scope, redirect and PKCE validation, before login and consent. The required `osf-mcp-resource-scope-binding` authenticator must be the first browser-flow execution; it projects that note idempotently into native scope state before cookie or scope conditions run. No client mutation occurs at login.
 A conflicting resource scope or repeated resource/scope parameter fails closed.
 Requests without a resource, and resources outside this policy, retain native
@@ -108,7 +111,7 @@ profile from an enabled `any-client` client policy. The executor configuration i
 }
 ```
 
-Registration attachment is opt-in per binding (`registration` defaults to false); do not enable it for a tenant audience unless that audience is deliberately available to every registering client. Membership and resource-server role checks still enforce access. A missing realm scope is skipped during registration, with a warning, and authorization remains denied until the scope is present and assigned. Resource URLs are exact HTTPS
+Registration attachment is opt-in per binding (`registration` defaults to false); do not enable it for a tenant audience unless that audience is deliberately available to every registering client. Membership and resource-server role checks still enforce access. A missing realm scope is skipped during registration with a warning naming the scope and its role. Requests requiring that missing scope remain denied by native validation; other supported scope requests can proceed. Resource URLs are exact HTTPS
 addresses without userinfo, query or fragment; no wildcard or prefix matching
 is performed. The host owns the scopes, audience mappers, registration callback
 policy and authentication flows. An organization-free binding removes requested

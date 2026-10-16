@@ -68,12 +68,15 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
                     || checked.putIfAbsent(binding.resource, binding) != null)
                 throw new IllegalArgumentException("Invalid or duplicate MCP resource binding");
             if (binding.registrationScopes == null || binding.registrationScopes.stream().anyMatch(name ->
-                    name == null || !name.matches("[a-z][a-z0-9_-]*") || name.equals("openid")))
+                    name == null || !name.matches("[a-z][a-z0-9_-]*") || name.equals("openid") || (!binding.organization && name.equals("organization"))))
                 throw new IllegalArgumentException("Invalid optional registration scope");
+            if (!binding.registration && !binding.registrationScopes.isEmpty())
+                throw new IllegalArgumentException("Supporting scopes require registration opt-in");
+            binding.registrationScopes = List.copyOf(new java.util.TreeSet<>(binding.registrationScopes));
             String mode = binding.organization + ":" + binding.registration + ":" + binding.registrationScopes;
             String previous = scopeModes.putIfAbsent(binding.scope, mode);
             if (previous != null && !previous.equals(mode))
-                throw new IllegalArgumentException("Resource aliases must use the same organization policy");
+                throw new IllegalArgumentException("Resource aliases must use the same registration and organization policy");
         }
         if (checked.isEmpty()) throw new IllegalArgumentException("MCP resource policy needs explicit resource bindings");
         resources = Map.copyOf(checked);
@@ -94,7 +97,7 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
                     if (client.getClientScopes(true).containsKey(name) || client.getClientScopes(false).containsKey(name)) continue;
                     ClientScopeModel scope = realmScope(name);
                     if (scope == null) {
-                        LOG.warn("Configured MCP scope unavailable during dynamic registration; authorization remains denied");
+                        LOG.warnf("Configured %s scope %s is unavailable during dynamic registration; requests requiring it remain denied", name.equals(binding.scope) ? "resource" : "supporting", name);
                         continue;
                     }
                     client.addClientScope(scope, false);

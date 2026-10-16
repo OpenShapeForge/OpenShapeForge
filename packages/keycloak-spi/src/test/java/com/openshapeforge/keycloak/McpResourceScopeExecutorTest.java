@@ -30,26 +30,30 @@ public class McpResourceScopeExecutorTest {
     static McpResourceScopeExecutor.Binding binding(String path, String scope, boolean organization) {
         var binding = new McpResourceScopeExecutor.Binding();
         binding.resource = "https://app.example.test/" + path;
-        binding.scope = scope; binding.organization = organization; return binding;
+        binding.scope = scope; binding.organization = organization; binding.registration = !organization; return binding;
     }
     final McpResourceScopeExecutor.Binding control = binding("admin/mcp", "mcp-resource:control", false);
     final McpResourceScopeExecutor.Binding tenant = binding("acme/mcp", "mcp-resource:acme", true);
+    boolean scopeAvailable=true, defaultAttached=false;
+    int scopeReads;
     final Map<String,String> notes=new HashMap<>(), clientNotes=new HashMap<>();
     final Set<String> attached = new LinkedHashSet<>();
     final ClientScopeModel scope = mock(ClientScopeModel.class, (m,a) -> switch(m) {
         case "getName" -> control.scope; case "getProtocol" -> "openid-connect"; default -> null;
     });
-    final RealmModel realm = mock(RealmModel.class, (m,a) -> m.equals("getClientScopesStream") ? Stream.of(scope) : null);
+    final RealmModel realm = mock(RealmModel.class, (m,a) -> m.equals("getClientScopesStream") ? realmScopes() : m.equals("isEventsEnabled") ? false : m.equals("getEventsListenersStream") ? Stream.empty() : null);
     final ClientModel client = mock(ClientModel.class, (m,a) -> switch(m) {
-        case "getClientScopes" -> Boolean.TRUE.equals(a[0]) ? Map.of() : attached.contains(control.scope) ? Map.of(control.scope,scope) : Map.of();
+        case "getClientScopes" -> Boolean.TRUE.equals(a[0]) ? defaultAttached ? Map.of(control.scope,scope) : Map.of() : attached.contains(control.scope) ? Map.of(control.scope,scope) : Map.of();
         case "addClientScope" -> { assertEquals(false,a[1]); attached.add(((ClientScopeModel)a[0]).getName()); yield null; }
         default -> throw new AssertionError("Unexpected client mutation/read " + m);
     });
     final ClientProvider clients = mock(ClientProvider.class, (m,a) -> m.equals("getClientByClientId") ? client : null);
     final KeycloakContext kcContext = mock(KeycloakContext.class, (m,a) -> m.equals("getRealm") ? realm : null);
+    final KeycloakSessionFactory factory=mock(KeycloakSessionFactory.class,(m,a)->m.equals("getProviderFactoriesStream")?Stream.empty():null);
     final KeycloakSession session = mock(KeycloakSession.class, (m,a) -> switch(m) {
-        case "getContext" -> kcContext; case "clients" -> clients; default -> null;
+        case "getContext" -> kcContext; case "clients" -> clients; case "getKeycloakSessionFactory" -> factory; default -> null;
     });
+    Stream<ClientScopeModel> realmScopes() { scopeReads++;return scopeAvailable?Stream.of(scope):Stream.empty(); }
     McpResourceScopeExecutor executor() {
         var configuration = new McpResourceScopeExecutor.Configuration(); configuration.resources = List.of(control);
         var executor = new McpResourceScopeExecutor(session); executor.setupConfiguration(configuration); return executor;
@@ -70,6 +74,7 @@ public class McpResourceScopeExecutorTest {
             case "getAuthNote" -> notes.get(a[0]);
             case "removeAuthNote" -> {notes.remove(a[0]);yield null;}
             case "setClientNote" -> {clientNotes.put((String)a[0],(String)a[1]);yield null;}
+            case "getClientNote" -> clientNotes.get(a[0]);
             default -> null;
         });
         return new AuthorizationRequestContext(null,request,null,params,auth);
@@ -84,8 +89,15 @@ public class McpResourceScopeExecutorTest {
         attached.add(control.scope); var params = new MultivaluedHashMap<String,String>();
         params.putSingle("resource",control.resource); params.putSingle("scope","openid email organization:*");
         var authorization=event(params); executor().executeOnEvent(authorization);
-        assertEquals("openid email mcp-resource:control",notes.get(McpResourceScopeExecutor.BOUND_SCOPE));
-        var flow=mock(AuthenticationFlowContext.class,(m,a)->m.equals("getAuthenticationSession")?authorization.getAuthenticationSession():null);
+        assertEquals("openid email mcp-resource:control",clientNotes.get(McpResourceScopeExecutor.BOUND_SCOPE));
+        // KC_RESTART snapshots client notes before the first authenticator.
+        clientNotes.put("scope","openid email organization:*");
+        var snapshot=new HashMap<>(clientNotes); clientNotes.clear(); clientNotes.putAll(snapshot);
+        var event=new org.keycloak.events.EventBuilder(realm,session);
+        var flow=mock(AuthenticationFlowContext.class,(m,a)->switch(m) {
+            case "getAuthenticationSession" -> authorization.getAuthenticationSession(); case "getEvent" -> event; default -> null;
+        });
+        new McpResourceScopeAuthenticator().authenticate(flow);
         new McpResourceScopeAuthenticator().authenticate(flow);
         assertEquals("openid email mcp-resource:control",clientNotes.get("scope"));
         assertTrue(notes.isEmpty());
@@ -114,14 +126,36 @@ public class McpResourceScopeExecutorTest {
         assertThrows(ClientPolicyException.class, () -> McpResourceScopeExecutor.bindScopes("openid mcp-resource:control",tenant));
         assertThrows(ClientPolicyException.class, () -> McpResourceScopeExecutor.bindScopes("openid mcp-resource:acme",control));
     }
+    void assertInvalid(McpResourceScopeExecutor.Configuration config) {
+        var executor=new McpResourceScopeExecutor(session);executor.setupConfiguration(config);
+        var params=new MultivaluedHashMap<String,String>();params.putSingle("resource",control.resource);
+        assertThrows(ClientPolicyException.class,()->executor.executeOnEvent(event(params)));
+    }
+    @Test public void missingScopeDoesNotBreakUnrelatedDcrAndUnboundClientsRemainDenied() throws Exception {
+        scopeAvailable=false;var registration=mock(ClientRegistrationContext.class,(m,a)->m.equals("getSession")?session:null);
+        executor().executeOnEvent(new DynamicClientRegisteredContext(registration,client,null,realm));
+        assertTrue(attached.isEmpty());
+        var params=new MultivaluedHashMap<String,String>();params.putSingle("resource",control.resource);
+        assertThrows(ClientPolicyException.class,()->executor().executeOnEvent(event(params)));
+    }
+    @Test public void alreadyDefaultScopeNeedsNoRealmLookupOrClientWrite() throws Exception {
+        defaultAttached=true;var registration=mock(ClientRegistrationContext.class,(m,a)->m.equals("getSession")?session:null);
+        executor().executeOnEvent(new DynamicClientRegisteredContext(registration,client,null,realm));
+        assertTrue(attached.isEmpty());assertEquals(0,scopeReads);
+    }
+    @Test public void bindingsNotOptedIntoRegistrationDoNotBroadenClients() throws Exception {
+        control.registration=false;var registration=mock(ClientRegistrationContext.class,(m,a)->m.equals("getSession")?session:null);
+        executor().executeOnEvent(new DynamicClientRegisteredContext(registration,client,null,realm));
+        assertTrue(attached.isEmpty());assertEquals(0,scopeReads);
+    }
     @Test public void configurationRejectsAmbiguousAndUnsafeResources() {
         var config = new McpResourceScopeExecutor.Configuration(); config.resources = List.of(control,control);
-        assertThrows(IllegalArgumentException.class, () -> new McpResourceScopeExecutor(session).setupConfiguration(config));
+        assertInvalid(config);
         for (String resource : List.of("http://app.example.test/admin/mcp","https://u@app.example.test/admin/mcp","https://app.example.test/admin/mcp?x=1","https://app.example.test/admin/mcp#frag")) {
             var bad = binding("x",control.scope,false); bad.resource=resource; config.resources=List.of(bad);
-            assertThrows(IllegalArgumentException.class, () -> new McpResourceScopeExecutor(session).setupConfiguration(config));
+            assertInvalid(config);
         }
         var alias = binding("admin",control.scope,true); config.resources=List.of(control,alias);
-        assertThrows(IllegalArgumentException.class, () -> new McpResourceScopeExecutor(session).setupConfiguration(config));
+        assertInvalid(config);
     }
 }

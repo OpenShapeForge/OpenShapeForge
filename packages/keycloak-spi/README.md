@@ -87,10 +87,10 @@ journey. Reports, screenshots and video are retained under `.runtime/`.
 ## MCP resource scopes for dynamically registered clients
 
 The opt-in `osf-mcp-resource-scopes` client-policy executor runs at two native
-Keycloak boundaries. `REGISTERED` attaches configured resource scopes as
+Keycloak boundaries. `REGISTERED` attaches explicitly registration-enabled resource scopes as
 **optional** scopes in the DCR transaction, before its response. It changes no
 roles, default scopes, callbacks or user grants. `AUTHORIZATION_REQUEST`
-validates one exact RFC 8707 `resource` and records its configured scope in a server-only authentication note after native scope, redirect and PKCE validation, before login and consent. The required `osf-mcp-resource-scope-binding` authenticator must be the first browser-flow execution; it consumes that note into native scope state before cookie or scope conditions run. No client mutation occurs at login.
+validates one exact RFC 8707 `resource` and records its configured scope in a server-owned client note after native scope, redirect and PKCE validation, before login and consent. The required `osf-mcp-resource-scope-binding` authenticator must be the first browser-flow execution; it projects that note idempotently into native scope state before cookie or scope conditions run. No client mutation occurs at login.
 A conflicting resource scope or repeated resource/scope parameter fails closed.
 Requests without a resource, and resources outside this policy, retain native
 behavior. Existing clients must already have the optional scope; the executor
@@ -102,16 +102,18 @@ profile from an enabled `any-client` client policy. The executor configuration i
 ```json
 {
   "resources": [
-    {"resource": "https://app.example.test/admin/mcp", "scope": "mcp-resource:control", "organization": false},
-    {"resource": "https://app.example.test/acme/mcp", "scope": "mcp-resource:acme", "organization": true}
+    {"resource": "https://app.example.test/admin/mcp", "scope": "mcp-resource:control", "organization": false, "registration": true},
+    {"resource": "https://app.example.test/acme/mcp", "scope": "mcp-resource:acme", "organization": true, "registration": false}
   ]
 }
 ```
 
-Each scope must already exist in the realm. Resource URLs are exact HTTPS
+Registration attachment is opt-in per binding (`registration` defaults to false); do not enable it for a tenant audience unless that audience is deliberately available to every registering client. Membership and resource-server role checks still enforce access. A missing realm scope is skipped during registration, with a warning, and authorization remains denied until the scope is present and assigned. Resource URLs are exact HTTPS
 addresses without userinfo, query or fragment; no wildcard or prefix matching
 is performed. The host owns the scopes, audience mappers, registration callback
 policy and authentication flows. An organization-free binding removes requested
 `organization`/`organization:<alias>` scopes for that request only. The resulting
 scope can select a host's platform login flow; it grants no platform role.
 Native consent, token issuance and resource-server authorization still apply.
+
+The binding survives native KC_RESTART reconstruction because it is a dedicated client note, written by the policy (not a request parameter). The authenticator records the effective scope in the native audit event. Matching is deliberately exact, including host case and trailing slash; aliases must be listed explicitly. Invalid configuration produces a bounded OAuth policy error, not a server stack trace.

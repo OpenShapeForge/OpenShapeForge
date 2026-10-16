@@ -8,14 +8,14 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 
-/** First browser execution: project the validated server-only binding into native scope state. */
+/** First browser execution: project the validated server-owned binding into native scope state. */
 public final class McpResourceScopeAuthenticator implements Authenticator {
     @Override public void authenticate(AuthenticationFlowContext context) {
         var session = context.getAuthenticationSession();
-        String bound = session.getAuthNote(McpResourceScopeExecutor.BOUND_SCOPE);
+        String bound = session.getClientNote(McpResourceScopeExecutor.BOUND_SCOPE);
         if (bound != null) {
             session.setClientNote(OAuth2Constants.SCOPE, bound);
-            session.removeAuthNote(McpResourceScopeExecutor.BOUND_SCOPE);
+            context.getEvent().detail("osf.mcp_resource_scope", bound);
         }
         context.success();
     }

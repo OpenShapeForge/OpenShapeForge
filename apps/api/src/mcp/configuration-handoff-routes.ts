@@ -10,7 +10,7 @@ import { startConfigurationForSession } from "./configuration-start.js";
 import { sql } from "kysely";
 import { isDeepStrictEqual } from "node:util";
 import { withDbSession } from "../db/session.js";
-import { requireActingRelationId } from "./acting-relation-guard.js";
+import { configurationOwnerPatch } from "./configuration-ownership.js";
 import type { DbSessionInput } from "../db/session.js";
 import {
   createGeneratedEntityForTable,
@@ -40,7 +40,7 @@ import {
 import { failedCheckSummary, testElicitedRow } from "./connection-test.js";
 import { HttpError } from "../rest/http-error.js";
 import { tablesByName } from "./catalog.js";
-import { connectionScopeOf, fieldNameForColumn, serializeRow } from "./catalog-rows.js";
+import { fieldNameForColumn, serializeRow } from "./catalog-rows.js";
 import { ENTITY_CONFIGURATION_PATH, elicitedKeyring } from "./handoff-config.js";
 import { type McpRouteContext } from "./route-context.js";
 import { ok } from "./tool-results.js";
@@ -144,18 +144,16 @@ export async function registerConfigurationHandoffRoutes(
             prefill: content,
           };
         }
-        // Same rule as the in-band elicitation path: a Connection to a
-        // personal provider belongs to the person who filled the form in.
+        // Use the same ownership boundary as in-band MCP elicitation.
         if (
-          connectionScopeOf(
-            sourceRow.auth as Record<string, unknown> | null | undefined,
-          ) === "user" &&
           tableDef.columns.some(
             (column) => fieldNameForColumn(column) === "ownerUserId",
           )
         ) {
-          // Owned by the Relation the person acts as; an unlinked sign-in owns nothing.
-          values.ownerUserId = requireActingRelationId(pending, "A personal connection");
+          Object.assign(values, configurationOwnerPatch(
+            sourceRow.auth as Record<string, unknown> | null | undefined,
+            pending,
+          ));
         }
       }
     }

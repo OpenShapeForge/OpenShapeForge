@@ -43,7 +43,7 @@ public class McpResourceScopeExecutorTest {
     });
     final RealmModel realm = mock(RealmModel.class, (m,a) -> m.equals("getClientScopesStream") ? realmScopes() : m.equals("isEventsEnabled") ? false : m.equals("getEventsListenersStream") ? Stream.empty() : null);
     final ClientModel client = mock(ClientModel.class, (m,a) -> switch(m) {
-        case "getClientScopes" -> Boolean.TRUE.equals(a[0]) ? defaultAttached ? Map.of(control.scope,scope) : Map.of() : attached.contains(control.scope) ? Map.of(control.scope,scope) : Map.of();
+        case "getClientScopes" -> Boolean.TRUE.equals(a[0]) ? defaultAttached ? Map.of(control.scope,scope) : Map.of() : attached.stream().collect(java.util.stream.Collectors.toMap(name -> name, name -> namedScope(name)));
         case "addClientScope" -> { assertEquals(false,a[1]); attached.add(((ClientScopeModel)a[0]).getName()); yield null; }
         default -> throw new AssertionError("Unexpected client mutation/read " + m);
     });
@@ -53,7 +53,8 @@ public class McpResourceScopeExecutorTest {
     final KeycloakSession session = mock(KeycloakSession.class, (m,a) -> switch(m) {
         case "getContext" -> kcContext; case "clients" -> clients; case "getKeycloakSessionFactory" -> factory; default -> null;
     });
-    Stream<ClientScopeModel> realmScopes() { scopeReads++;return scopeAvailable?Stream.of(scope):Stream.empty(); }
+    ClientScopeModel namedScope(String name) { return mock(ClientScopeModel.class,(m,a)->m.equals("getName")?name:m.equals("getProtocol")?"openid-connect":null); }
+    Stream<ClientScopeModel> realmScopes() { scopeReads++;return scopeAvailable?Stream.of(scope,namedScope("profile"),namedScope("roles")):Stream.empty(); }
     McpResourceScopeExecutor executor() {
         var configuration = new McpResourceScopeExecutor.Configuration(); configuration.resources = List.of(control);
         var executor = new McpResourceScopeExecutor(session); executor.setupConfiguration(configuration); return executor;
@@ -82,8 +83,9 @@ public class McpResourceScopeExecutorTest {
     @Test public void nativeDcrGetsOptionalScopeBeforeResponseAndReplayDoesNotDuplicate() throws Exception {
         var registration = mock(ClientRegistrationContext.class, (m,a) -> m.equals("getSession") ? session : null);
         var event = new DynamicClientRegisteredContext(registration, client, null, realm);
+        control.registrationScopes=List.of("profile","roles");
         var executor = executor(); executor.executeOnEvent(event); executor.executeOnEvent(event);
-        assertEquals(Set.of(control.scope),attached);
+        assertEquals(Set.of(control.scope,"profile","roles"),attached);
     }
     @Test public void authorizationBindsTheResourceWithoutClientWrites() throws Exception {
         attached.add(control.scope); var params = new MultivaluedHashMap<String,String>();

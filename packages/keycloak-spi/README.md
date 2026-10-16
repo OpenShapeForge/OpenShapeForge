@@ -88,7 +88,7 @@ journey. Reports, screenshots and video are retained under `.runtime/`.
 
 The opt-in `osf-mcp-resource-scopes` client-policy executor runs at two native
 Keycloak boundaries. `REGISTERED` attaches explicitly registration-enabled resource scopes as
-**optional** scopes in the DCR transaction, before its response. It changes no
+**optional** scopes in the DCR transaction, before its response. Explicit `registration-scopes` can also make supporting OpenID scopes available when a client registers a smaller scope set than it later requests. It changes no
 roles, default scopes, callbacks or user grants. `AUTHORIZATION_REQUEST`
 validates one exact RFC 8707 `resource` and records its configured scope in a server-owned client note after native scope, redirect and PKCE validation, before login and consent. The required `osf-mcp-resource-scope-binding` authenticator must be the first browser-flow execution; it projects that note idempotently into native scope state before cookie or scope conditions run. No client mutation occurs at login.
 A conflicting resource scope or repeated resource/scope parameter fails closed.
@@ -102,7 +102,7 @@ profile from an enabled `any-client` client policy. The executor configuration i
 ```json
 {
   "resources": [
-    {"resource": "https://app.example.test/admin/mcp", "scope": "mcp-resource:control", "organization": false, "registration": true},
+    {"resource": "https://app.example.test/admin/mcp", "scope": "mcp-resource:control", "organization": false, "registration": true, "registration-scopes": ["profile", "roles"]},
     {"resource": "https://app.example.test/acme/mcp", "scope": "mcp-resource:acme", "organization": true, "registration": false}
   ]
 }

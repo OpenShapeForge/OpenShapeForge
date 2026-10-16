@@ -35,6 +35,7 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
         @JsonProperty public String scope;
         @JsonProperty public boolean organization = true;
         @JsonProperty public boolean registration;
+        @JsonProperty("registration-scopes") public List<String> registrationScopes = List.of();
     }
 
     public static final class Configuration extends ClientPolicyExecutorConfigurationRepresentation {
@@ -66,7 +67,10 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
                     || binding.scope == null || !binding.scope.matches("mcp-resource:[a-z0-9][a-z0-9-]*")
                     || checked.putIfAbsent(binding.resource, binding) != null)
                 throw new IllegalArgumentException("Invalid or duplicate MCP resource binding");
-            String mode = binding.organization + ":" + binding.registration;
+            if (binding.registrationScopes == null || binding.registrationScopes.stream().anyMatch(name ->
+                    name == null || !name.matches("[a-z][a-z0-9_-]*") || name.equals("openid")))
+                throw new IllegalArgumentException("Invalid optional registration scope");
+            String mode = binding.organization + ":" + binding.registration + ":" + binding.registrationScopes;
             String previous = scopeModes.putIfAbsent(binding.scope, mode);
             if (previous != null && !previous.equals(mode))
                 throw new IllegalArgumentException("Resource aliases must use the same organization policy");
@@ -83,14 +87,18 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
             if (configurationError != null) throw denied("invalid_client_metadata", configurationError);
             ClientModel client = registered.getTargetClient();
             for (Binding binding : resources.values()) {
-                if (!binding.registration || client.getClientScopes(true).containsKey(binding.scope)
-                        || client.getClientScopes(false).containsKey(binding.scope)) continue;
-                ClientScopeModel scope = realmScope(binding.scope);
-                if (scope == null) {
-                    LOG.warn("Configured MCP scope unavailable during dynamic registration; authorization remains denied");
-                    continue;
+                if (!binding.registration) continue;
+                Set<String> capabilities = new LinkedHashSet<>(binding.registrationScopes);
+                capabilities.add(binding.scope);
+                for (String name : capabilities) {
+                    if (client.getClientScopes(true).containsKey(name) || client.getClientScopes(false).containsKey(name)) continue;
+                    ClientScopeModel scope = realmScope(name);
+                    if (scope == null) {
+                        LOG.warn("Configured MCP scope unavailable during dynamic registration; authorization remains denied");
+                        continue;
+                    }
+                    client.addClientScope(scope, false);
                 }
-                client.addClientScope(scope, false);
             }
         } else if (context instanceof AuthorizationRequestContext authorization) {
             MultivaluedMap<String, String> params = authorization.getRequestParameters();

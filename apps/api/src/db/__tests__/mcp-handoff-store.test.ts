@@ -10,6 +10,7 @@ import { sql, type Kysely } from "kysely";
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
+import { withDbSession } from "../session.js";
 import {
   consumeHandoffForSession,
   createHandoff,
@@ -72,6 +73,33 @@ async function withScratchDb<T>(fn: (name: string) => Promise<T>): Promise<T> {
 }
 
 describe("MCP browser handoff persistence", () => {
+  test("OAuth handoff joins its canonical Operation transaction without replacing identity or authority", async () => {
+    await withScratchDb(async name => {
+      await withDb(databaseUrl(name), db => db.connection().execute(conn => runMigrationChain(conn)));
+      await withDb(databaseUrl(name, true), async db => {
+        const session = { tenantId: randomUUID(), userId: randomUUID(), relationId: randomUUID(),
+          roles: ["integration_user"], groups: [], scope: "tenant" as const };
+        const input = { db, keyring: KEYRING, kind: "entity_oauth" as const,
+          tenantId: session.tenantId, userId: session.userId,
+          payload: { marker: "canonical-oauth" }, expiresAtMs: Date.now() + 60_000, session };
+        const token = await withDbSession(db, session, () => createHandoff(input));
+        expect(await readHandoff({ db, keyring: KEYRING, kind: "entity_oauth", token, consume: false }))
+          .toEqual(input.payload);
+        for (const changed of [{ tenantId: randomUUID() }, { userId: randomUUID() }]) {
+          await expect(createHandoff({ ...input, session: { ...session, ...changed } }))
+            .rejects.toThrow("Handoff identity must match");
+        }
+        let rolledBack = "";
+        await expect(withDbSession(db, session, async () => {
+          rolledBack = await createHandoff(input);
+          throw new Error("Abort operation");
+        })).rejects.toThrow("Abort operation");
+        expect(await readHandoff({ db, keyring: KEYRING, kind: "entity_oauth", token: rolledBack, consume: false }))
+          .toBeNull();
+      });
+    });
+  }, TEST_TIMEOUT);
+
   test(
     "encrypts the payload, isolates it by user, and consumes it exactly once",
     async () => {

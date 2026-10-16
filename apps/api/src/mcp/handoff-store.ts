@@ -41,7 +41,12 @@ export async function createHandoff(input: {
   userId: string;
   payload: Record<string, unknown>;
   expiresAtMs: number;
+  /** Preserve a canonical Operation's verified session and transaction. */
+  session?: DbSessionInput;
 }): Promise<string> {
+  if (input.session && (input.session.tenantId !== input.tenantId || input.session.userId !== input.userId)) {
+    throw new Error("Handoff identity must match the verified database session.");
+  }
   const secret = base64url(randomBytes(32));
   const token = `${input.tenantId}.${input.userId}.${secret}`;
   const id = randomUUID();
@@ -51,7 +56,7 @@ export async function createHandoff(input: {
     "payload",
     JSON.stringify(input.payload),
   );
-  const session: DbSessionInput = {
+  const session: DbSessionInput = input.session ?? {
     tenantId: input.tenantId,
     userId: input.userId,
     roles: [],

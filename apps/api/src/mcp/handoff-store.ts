@@ -34,6 +34,8 @@ function parseToken(
 }
 
 export async function createHandoff(input: {
+  /** Opaque identity supplied only by a trusted server caller. */
+  id?: string;
   db: OpenShapeForgeDatabase;
   keyring: SecretKeyring;
   kind: "entity_oauth" | "entity_configuration" | "artifact_upload";

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: BUSL-1.1
-import type { DbSessionInput } from "../db/session.js";
 import {
   createGeneratedEntityForTable,
   listGeneratedEntitiesForTable,
@@ -67,7 +66,7 @@ export async function personalizationToolCall(
       if (typeof args.tool === "string" && args.tool.length > 0) {
         const wanted = deriveToolName(args.tool) ?? args.tool;
         const projected = (
-          await derivedToolsForSession(db, session, tables, locale)
+          await derivedToolsForSession(db, session, tables, locale, { includeOperationRecords: true })
         ).find(
           (tool) =>
             tool.name === wanted && tool.table === personalizationEntry.table,
@@ -102,14 +101,7 @@ export async function personalizationToolCall(
       const existing = mine.find(
         (row) => (row[personalization.serviceRef] ?? null) === serviceRowId,
       );
-      const writeSession: DbSessionInput = {
-        tenantId: session.tenantId as string,
-        userId: session.userId as string,
-        roles: [],
-        groups: [],
-        relationId: ownerRelationId,
-        scope: "self",
-      };
+      const writeSession = session;
       if (existing) {
         await updateGeneratedEntityForTable(
           db,

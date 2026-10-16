@@ -66,11 +66,13 @@ export async function derivedToolsForSession(
   tables: Map<string, GeneratedTable>,
   /** The language the projected titles and field labels are shown in. */
   locale?: ResolvedLocale,
+  options: { includeOperationRecords?: boolean } = {},
 ): Promise<DerivedTool[]> {
   const reserved = new Set(catalog.tools.map((tool) => tool.name));
   const tools: DerivedTool[] = [];
   for (const entry of catalogDerivedTools) {
-    if (entry.compatibility) continue;
+    // Canonical Operation executors may resolve records without advertising legacy tools.
+    if (entry.compatibility && !options.includeOperationRecords) continue;
     if (!sessionInAudience(entry, session.roles)) continue;
     const table = tables.get(entry.table);
     if (!table) continue;

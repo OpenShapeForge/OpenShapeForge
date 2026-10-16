@@ -1,0 +1,117 @@
+// SPDX-License-Identifier: BUSL-1.1
+package com.openshapeforge.keycloak;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.ws.rs.core.MultivaluedMap;
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.keycloak.models.ClientModel;
+import org.keycloak.models.ClientScopeModel;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.representations.idm.ClientPolicyExecutorConfigurationRepresentation;
+import org.keycloak.services.clientpolicy.ClientPolicyContext;
+import org.keycloak.services.clientpolicy.ClientPolicyException;
+import org.keycloak.services.clientpolicy.context.DynamicClientRegisteredContext;
+import org.keycloak.services.clientpolicy.context.AuthorizationRequestContext;
+import org.keycloak.services.clientpolicy.executor.ClientPolicyExecutorProvider;
+
+/** Binds validated RFC 8707 requests before native login and consent. */
+public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvider<McpResourceScopeExecutor.Configuration> {
+    static final String BOUND_SCOPE = "osf.mcp-resource.bound-scope";
+    private final KeycloakSession session;
+    private Map<String, Binding> resources = Map.of();
+
+    public static final class Binding {
+        @JsonProperty public String resource;
+        @JsonProperty public String scope;
+        @JsonProperty public boolean organization = true;
+    }
+
+    public static final class Configuration extends ClientPolicyExecutorConfigurationRepresentation {
+        @JsonProperty public List<Binding> resources = new ArrayList<>();
+    }
+
+    public McpResourceScopeExecutor(KeycloakSession session) { this.session = session; }
+    @Override public String getProviderId() { return McpResourceScopeExecutorFactory.ID; }
+    @Override public Class<Configuration> getExecutorConfigurationClass() { return Configuration.class; }
+    @Override public void close() { }
+
+    @Override public void setupConfiguration(Configuration config) {
+        Map<String, Binding> checked = new LinkedHashMap<>();
+        Map<String, Boolean> scopeModes = new LinkedHashMap<>();
+        for (Binding binding : config.resources) {
+            URI uri = URI.create(binding.resource);
+            if (!"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getRawUserInfo() != null
+                    || uri.getRawQuery() != null || uri.getRawFragment() != null || uri.getRawPath().isEmpty()
+                    || binding.scope == null || !binding.scope.matches("mcp-resource:[a-z0-9][a-z0-9-]*")
+                    || checked.putIfAbsent(binding.resource, binding) != null)
+                throw new IllegalArgumentException("Invalid or duplicate MCP resource binding");
+            Boolean previous = scopeModes.putIfAbsent(binding.scope, binding.organization);
+            if (previous != null && previous != binding.organization)
+                throw new IllegalArgumentException("Resource aliases must use the same organization policy");
+        }
+        if (checked.isEmpty()) throw new IllegalArgumentException("MCP resource policy needs explicit resource bindings");
+        resources = Map.copyOf(checked);
+    }
+
+    @Override public void executeOnEvent(ClientPolicyContext context) throws ClientPolicyException {
+        if (context instanceof DynamicClientRegisteredContext registered) {
+            // Runs in the DCR transaction, before its response. No roles, default
+            // scopes, callbacks or user grants are changed. Native DCR policies
+            // still validate the registration and roll back a rejected request.
+            ClientModel client = registered.getTargetClient();
+            for (Binding binding : resources.values()) {
+                ClientScopeModel scope = realmScope(binding.scope);
+                if (!client.getClientScopes(true).containsKey(binding.scope)
+                        && !client.getClientScopes(false).containsKey(binding.scope))
+                    client.addClientScope(scope, false);
+            }
+        } else if (context instanceof AuthorizationRequestContext authorization) {
+            MultivaluedMap<String, String> params = authorization.getRequestParameters();
+            List<String> requested = params.get("resource");
+            if (requested != null && requested.size() != 1)
+                throw denied("invalid_target", "Exactly one configured MCP resource is required");
+            String resource = authorization.getAuthorizationEndpointRequest().getResource();
+            if (resource == null) return;
+            Binding binding = resources.get(resource);
+            if (binding == null) return; // Other resources keep their native scope policy.
+            ClientModel client = authorization.getClient();
+            if (client == null) return; // Native client validation owns this error.
+            if (!client.getClientScopes(true).containsKey(binding.scope)
+                    && !client.getClientScopes(false).containsKey(binding.scope))
+                throw denied("invalid_scope", "The client is not registered for this MCP resource");
+            List<String> scopes = params.get("scope");
+            if (scopes != null && scopes.size() != 1)
+                throw denied("invalid_scope", "Exactly one scope parameter is required");
+            authorization.getAuthenticationSession().setAuthNote(BOUND_SCOPE,
+                    bindScopes(authorization.getAuthorizationEndpointRequest().getScope(), binding));
+        }
+    }
+
+    private ClientScopeModel realmScope(String name) throws ClientPolicyException {
+        List<ClientScopeModel> matches = session.getContext().getRealm().getClientScopesStream()
+                .filter(scope -> name.equals(scope.getName()) && "openid-connect".equals(scope.getProtocol())).toList();
+        if (matches.size() != 1) throw denied("invalid_scope", "Configured MCP resource scope is unavailable");
+        return matches.get(0);
+    }
+
+    static String bindScopes(String value, Binding binding) throws ClientPolicyException {
+        Set<String> scopes = new LinkedHashSet<>(Arrays.asList((value == null ? "" : value).trim().split("\\s+")));
+        scopes.remove("");
+        if (scopes.stream().anyMatch(scope -> scope.startsWith("mcp-resource:") && !scope.equals(binding.scope)))
+            throw denied("invalid_scope", "The requested scopes conflict with the MCP resource");
+        if (!binding.organization) scopes.removeIf(scope -> scope.equals("organization") || scope.startsWith("organization:"));
+        scopes.add(binding.scope);
+        return String.join(" ", scopes);
+    }
+
+    private static ClientPolicyException denied(String error, String detail) {
+        return new ClientPolicyException(error, detail);
+    }
+}

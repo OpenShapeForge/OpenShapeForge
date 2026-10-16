@@ -35,3 +35,8 @@ Both authenticated and bearer-token form submissions claim their single-use
 handoff and save its target in one database transaction. A parallel submission
 loses before a write. Validation or write failure rolls back the claim and leaves
 the same unexpired form retryable; success commits consumption with the write.
+
+The unscoped `GET /pending` remains the discovery entry point for an MCP-started
+configuration when the authenticated fallback page does not yet know its form ID.
+A browser that calls `/start` must use the returned ID and never discover its form
+through that latest-form endpoint.

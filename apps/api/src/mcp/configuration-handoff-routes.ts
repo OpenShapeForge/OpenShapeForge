@@ -275,7 +275,7 @@ export async function registerConfigurationHandoffRoutes(
       const id = (request.params as { id?: string }).id;
       if (!id || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id)) throw new HttpError(404, "NOT_FOUND", "This configuration form is unavailable.");
       const found = await latestConfigurationForSession(session, db, id);
-      if (!found || found.id !== id) {
+      if (!found) {
         throw new HttpError(
           404,
           "NOT_FOUND",

@@ -230,6 +230,7 @@ export async function connectProviderStep(
 
   const handoff = await mintAuthorization({
     db,
+    session,
     tenantId: session.tenantId as string,
     userId: session.userId as string,
     relationId: scope_ === "user"

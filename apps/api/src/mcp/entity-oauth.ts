@@ -97,6 +97,7 @@ export async function mintAuthorization(
   > & {
     authorizationUrl: string;
     db?: OpenShapeForgeDatabase;
+    session?: import("../db/session.js").DbSessionInput;
   },
 ): Promise<{
   authorizationUrl: string;
@@ -109,7 +110,7 @@ export async function mintAuthorization(
     createHash("sha256").update(codeVerifier).digest(),
   );
   const expiresAtMs = Date.now() + STATE_TTL_MS;
-  const { db, authorizationUrl, ...pendingInput } = input;
+  const { db, session, authorizationUrl, ...pendingInput } = input;
   let state: string;
   if (db) {
     const keyring = keyringFromEnv(process.env[KEYRING_ENV]);
@@ -123,6 +124,7 @@ export async function mintAuthorization(
       userId: input.userId,
       payload: { ...pendingInput, codeVerifier, expiresAtMs },
       expiresAtMs,
+      ...(session ? { session } : {}),
     });
   } else {
     state = base64url(randomBytes(24));

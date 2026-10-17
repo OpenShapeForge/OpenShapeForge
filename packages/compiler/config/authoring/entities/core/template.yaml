@@ -5,8 +5,7 @@ entity: Template
 title: Template
 description: An editable template head whose channel and language variants hold the content blocks a document or
   message is composed from. Template.publish freezes the head with its variants and blocks into an immutable
-  TemplateVersion and re-seeds the documents tracking this template; the head itself stays editable. See
-  docs/document-content.md.
+  TemplateVersion and re-seeds the documents tracking this template; the head itself stays editable.
 language: en
 labels: { en: Template, nl: Template }
 pluralLabels: { en: Templates, nl: Templates }

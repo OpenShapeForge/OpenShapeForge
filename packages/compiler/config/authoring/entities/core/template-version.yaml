@@ -5,7 +5,7 @@ entity: TemplateVersion
 title: Template version
 description: An immutable snapshot of one template, frozen by Template.publish with the template's variants and
   blocks. Documents pin a published version and materialize from the frozen content; a version is never edited
-  afterwards. See docs/document-content.md.
+  afterwards.
 language: en
 labels: { en: Template version, nl: Template version }
 pluralLabels: { en: Template versions, nl: Templateversies }

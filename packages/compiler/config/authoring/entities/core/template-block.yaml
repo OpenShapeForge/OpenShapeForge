@@ -5,7 +5,7 @@ entity: TemplateBlock
 title: Template block
 description: A block definition that includes another published template version in the content being composed,
   resolved from that version's frozen snapshot. It carries no identity of its own; the Block placement selecting this
-  definition does. See docs/block-content.md.
+  definition does.
 language: en
 labels: { en: Template block, nl: Templateblok }
 pluralLabels: { en: Template blocks, nl: Templateblokken }

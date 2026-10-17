@@ -5,7 +5,7 @@ entity: TemplateVariant
 title: Template variant
 description: One channel and content language of a template's editable content, holding the ordered blocks for that
   combination. Materialization matches the channel exactly and serves the language by closest match, falling back to
-  the variant marked default for the channel. See docs/document-content.md.
+  the variant marked default for the channel.
 language: en
 labels: { en: Template variant, nl: Template variant }
 pluralLabels: { en: Template variants, nl: Templatevarianten }

@@ -41,9 +41,14 @@ export async function createHandoff(input: {
   kind: "entity_oauth" | "entity_configuration" | "artifact_upload";
   tenantId: string;
   userId: string;
+  /** Preserve a canonical caller's live database context; never replace it. */
+  session?: DbSessionInput;
   payload: Record<string, unknown>;
   expiresAtMs: number;
 }): Promise<string> {
+  if (input.session && (input.session.tenantId !== input.tenantId || input.session.userId !== input.userId)) {
+    throw new Error("The handoff owner must match its database session.");
+  }
   const secret = base64url(randomBytes(32));
   const token = `${input.tenantId}.${input.userId}.${secret}`;
   const id = input.id ?? randomUUID();
@@ -53,7 +58,7 @@ export async function createHandoff(input: {
     "payload",
     JSON.stringify(input.payload),
   );
-  const session: DbSessionInput = {
+  const session: DbSessionInput = input.session ?? {
     tenantId: input.tenantId,
     userId: input.userId,
     roles: [],

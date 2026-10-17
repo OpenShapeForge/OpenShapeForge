@@ -215,6 +215,7 @@ export async function organizationConnectionProblem(input: {
           : undefined;
       const minted = await mintConfiguration({
         db: input.db,
+        session,
         tenantId: session.tenantId,
         userId: session.userId,
         relationId: actingRelationId(session),

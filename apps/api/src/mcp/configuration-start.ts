@@ -51,7 +51,7 @@ export async function startConfigurationForSession(
   if (!source || !row || !Array.isArray(row[secure.definitionsField])) throw new HttpError(404, "NOT_FOUND", "The secure field definitions are unavailable.");
   const elicit = { ...secure, sourceTable: source.name };
   const minted = await mintConfiguration({
-    db, tenantId: session.tenantId, userId: session.userId, relationId: session.relationId ?? null,
+    db, session, tenantId: session.tenantId, userId: session.userId, relationId: session.relationId ?? null,
     table: table.name, elicit,
     modelValues: handoffModelValues({ required: [], elicit, modelValues: body.values, sourceRow: row }),
     definitions: row[secure.definitionsField] as Record<string, unknown>[],

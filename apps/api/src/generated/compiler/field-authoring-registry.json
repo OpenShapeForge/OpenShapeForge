@@ -8656,6 +8656,10 @@
             "en": "Template variant",
             "nl": "Templatevariant"
           },
+          "description": {
+            "en": "Set when this block belongs to a template variant. Exactly one of the two owners is set and a block never moves between them.",
+            "nl": "Gezet wanneer dit blok bij een templatevariant hoort. Precies één van de twee eigenaren is gezet en een blok verhuist nooit van de een naar de ander."
+          },
           "osfType": "TemplateVariant",
           "required": false,
           "immutable": true,
@@ -8680,6 +8684,10 @@
           "label": {
             "en": "Document variant",
             "nl": "Documentvariant"
+          },
+          "description": {
+            "en": "Set when this block belongs to a document variant. Exactly one of the two owners is set; a document's blocks are written through that variant's own block Operations.",
+            "nl": "Gezet wanneer dit blok bij een documentvariant hoort. Precies één van de twee eigenaren is gezet; de blokken van een document worden via de blok-Operations van die variant geschreven."
           },
           "osfType": "DocumentVariant",
           "required": false,
@@ -8711,6 +8719,10 @@
             "en": "Block type",
             "nl": "Bloktype"
           },
+          "description": {
+            "en": "Which block definition this placement uses, fixed at creation. It must be one of the definitions the owning collection allows and it selects the shape the values are validated against.",
+            "nl": "Welke blokdefinitie deze plaatsing gebruikt, vastgesteld bij aanmaken. Het moet een definitie zijn die de bezittende collectie toestaat en het bepaalt de vorm waartegen de waarden worden gevalideerd."
+          },
           "persisted": {
             "column": "definition_key",
             "storageClass": "core"
@@ -8721,6 +8733,10 @@
           "label": {
             "en": "Definition version",
             "nl": "Definitieversie"
+          },
+          "description": {
+            "en": "Schema version of the block definition the stored values were written against, recorded with the block and never changed afterwards.",
+            "nl": "Schemaversie van de blokdefinitie waartegen de opgeslagen waarden zijn geschreven, vastgelegd bij het blok en daarna nooit gewijzigd."
           },
           "osfType": "integer",
           "required": true,
@@ -8742,6 +8758,10 @@
           "label": {
             "en": "Values",
             "nl": "Waarden"
+          },
+          "description": {
+            "en": "The placement's own content, in the shape the selected block definition declares, including any typed reference that definition requires.",
+            "nl": "De eigen inhoud van de plaatsing, in de vorm die de gekozen blokdefinitie vastlegt, inclusief een getypeerde verwijzing die die definitie vereist."
           },
           "persisted": {
             "column": "values",
@@ -39159,6 +39179,10 @@
             "en": "Local variables",
             "nl": "Lokale variabelen"
           },
+          "description": {
+            "en": "Local variables the blocks of this template may bind to, declared as field definitions. A document linked to a published version supplies their values; materialization validates supplied values against these declarations.",
+            "nl": "Lokale variabelen waaraan de blokken van deze template zich kunnen binden, vastgelegd als velddefinities. Een document dat aan een gepubliceerde versie is gekoppeld levert de waarden; materialisatie valideert aangeleverde waarden tegen deze declaraties."
+          },
           "persisted": {
             "column": "parameters",
             "storageClass": "core"
@@ -39245,6 +39269,10 @@
           "label": {
             "en": "Template version",
             "nl": "Templateversie"
+          },
+          "description": {
+            "en": "The published template version this block includes. The inclusion resolves from that version's frozen snapshot, so republishing the included template does not change it.",
+            "nl": "De gepubliceerde templateversie die dit blok opneemt. De opname wordt opgelost uit de vastgelegde snapshot van die versie, dus opnieuw publiceren van de opgenomen template verandert hem niet."
           }
         },
         {
@@ -39254,6 +39282,10 @@
           "label": {
             "en": "Local values",
             "nl": "Lokale waarden"
+          },
+          "description": {
+            "en": "Values for the local variables of the included template version, used for this inclusion only.",
+            "nl": "Waarden voor de lokale variabelen van de opgenomen templateversie, alleen voor deze opname."
           }
         }
       ],
@@ -39301,6 +39333,10 @@
             "en": "Channel",
             "nl": "Kanaal"
           },
+          "description": {
+            "en": "Delivery channel this variant's content is for. Materialization matches the channel exactly; a variant of another channel is never substituted.",
+            "nl": "Afleverkanaal waarvoor de inhoud van deze variant bedoeld is. Materialisatie matcht het kanaal exact; een variant van een ander kanaal komt nooit in de plaats."
+          },
           "osfType": "string",
           "required": true,
           "options": {
@@ -39345,6 +39381,10 @@
           "label": {
             "en": "Content language",
             "nl": "Inhoudstaal"
+          },
+          "description": {
+            "en": "Content language of this variant. A request is served by the exact language tag, else by a variant of the same language, else by the variant marked default for this channel.",
+            "nl": "Inhoudstaal van deze variant. Een aanvraag wordt bediend door de exacte taalcode, anders door een variant met dezelfde taal, anders door de variant die als standaard voor dit kanaal is gemarkeerd."
           },
           "persisted": {
             "column": "locale",
@@ -39474,6 +39514,10 @@
           "required": true,
           "immutable": true,
           "defaultValue": "published",
+          "description": {
+            "en": "A template version exists only as a published snapshot, so this is always published. The editable draft state lives on the template itself.",
+            "nl": "Een templateversie bestaat alleen als gepubliceerde snapshot, dus dit is altijd gepubliceerd. De bewerkbare conceptstatus staat op de template zelf."
+          },
           "options": {
             "type": "static",
             "items": [
@@ -39500,6 +39544,10 @@
             "en": "Frozen content",
             "nl": "Vastgelegde inhoud"
           },
+          "description": {
+            "en": "The template with its variants and blocks exactly as publication froze them. Every materialization of this version resolves from this content, which is never updated afterwards.",
+            "nl": "De template met zijn varianten en blokken precies zoals de publicatie ze heeft vastgelegd. Iedere materialisatie van deze versie wordt hieruit opgelost; deze inhoud wordt daarna nooit gewijzigd."
+          },
           "persisted": {
             "column": "snapshot",
             "storageClass": "core"
@@ -39516,6 +39564,10 @@
           "label": {
             "en": "Content checksum",
             "nl": "Inhoudschecksum"
+          },
+          "description": {
+            "en": "Checksum over the frozen content, so identical content stays recognisable across versions. It proves consistency, not approval or permission to deliver.",
+            "nl": "Controlesom over de vastgelegde inhoud, zodat identieke inhoud over versies herkenbaar blijft. Die bewijst consistentie, geen goedkeuring of toestemming voor verzending."
           },
           "persisted": {
             "column": "content_hash",
@@ -40086,6 +40138,10 @@
           "label": {
             "en": "Text",
             "nl": "Tekst"
+          },
+          "description": {
+            "en": "Markdown text of this block. A `{{…}}` token may be bound to the organization's variable catalogue or to another field of the same record; every read resolves the binding again under the reader's own access and inserts the result as data, not as markup.",
+            "nl": "Markdown-tekst van dit blok. Een `{{…}}`-token kan worden gebonden aan de variabelencatalogus van de organisatie of aan een ander veld van hetzelfde record; iedere leesactie lost die binding opnieuw op onder de toegang van de lezer en voegt het resultaat als data toe, niet als opmaak."
           },
           "validation": {
             "minLength": 1,
@@ -42005,6 +42061,10 @@
           "label": {
             "en": "Video URL",
             "nl": "Video-URL"
+          },
+          "description": {
+            "en": "Watch or short link to the video, stored and validated as content. Nothing fetches the video server-side; the address is passed through as content.",
+            "nl": "Watch- of korte link naar de video, opgeslagen en gevalideerd als inhoud. De server haalt de video niet op; het adres wordt als inhoud doorgegeven."
           },
           "validation": {
             "pattern": "^https://(?:www\\.)?(?:youtube\\.com/watch\\?v=[A-Za-z0-9_-]{11}|youtu\\.be/[A-Za-z0-9_-]{11})(?:[?&][A-Za-z0-9_=&%-]*)?$",

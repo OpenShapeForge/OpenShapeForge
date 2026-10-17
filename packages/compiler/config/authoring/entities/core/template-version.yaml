@@ -3,6 +3,9 @@ kind: coreEntity
 module: core
 entity: TemplateVersion
 title: Template version
+description: An immutable snapshot of one template, frozen by Template.publish with the template's variants and
+  blocks. Documents pin a published version and materialize from the frozen content; a version is never edited
+  afterwards. See docs/document-content.md.
 language: en
 labels: { en: Template version, nl: Template version }
 pluralLabels: { en: Template versions, nl: Templateversies }
@@ -40,6 +43,11 @@ fields:
     required: true
     immutable: true
     defaultValue: published
+    description:
+      en: A template version exists only as a published snapshot, so this is always published. The editable draft
+        state lives on the template itself.
+      nl: Een templateversie bestaat alleen als gepubliceerde snapshot, dus dit is altijd gepubliceerd. De bewerkbare
+        conceptstatus staat op de template zelf.
     options: { type: static, items: [{ value: published, label: { en: Published, nl: Gepubliceerd } }] }
     persisted: { column: status, storageClass: core }
   - key: snapshot
@@ -47,6 +55,11 @@ fields:
     required: true
     immutable: true
     label: { en: Frozen content, nl: Vastgelegde inhoud }
+    description:
+      en: The template with its variants and blocks exactly as publication froze them. Every materialization of this
+        version resolves from this content, which is never updated afterwards.
+      nl: De template met zijn varianten en blokken precies zoals de publicatie ze heeft vastgelegd. Iedere
+        materialisatie van deze versie wordt hieruit opgelost; deze inhoud wordt daarna nooit gewijzigd.
     persisted: { column: snapshot, storageClass: core }
   - key: contentHash
     osfType: string
@@ -54,6 +67,11 @@ fields:
     immutable: true
     validation: { pattern: "^[a-f0-9]{64}$" }
     label: { en: Content checksum, nl: Inhoudschecksum }
+    description:
+      en: Checksum over the frozen content, so identical content stays recognisable across versions. It proves
+        consistency, not approval or permission to deliver.
+      nl: Controlesom over de vastgelegde inhoud, zodat identieke inhoud over versies herkenbaar blijft. Die bewijst
+        consistentie, geen goedkeuring of toestemming voor verzending.
     persisted: { column: content_hash, storageClass: core }
   - key: publishedBy
     osfType: string
@@ -129,6 +147,12 @@ operations:
   materialize:
     name: { en: Preview template, nl: Template bekijken }
     description: Resolve one channel and locale, preserving exact values and source versions without changing any stored content.
+    guidance:
+      assistant:
+        en: A read-only preview of one channel and language; nothing is stored. Use createDocument only when the
+          resolved content has to be kept.
+        nl: Een alleen-lezen voorbeeld van één kanaal en taal; er wordt niets opgeslagen. Gebruik createDocument alleen
+          wanneer de opgeloste inhoud bewaard moet blijven.
     implementation: { type: plugin, plugin: documents, handler: materializeTemplate }
     target: { scope: record, inputField: templateVersionId }
     input:
@@ -171,6 +195,12 @@ operations:
     description:
       en: Save exact resolved template content as an immutable JSON artifact on a new or existing document version.
       nl: Bewaar exact ingevulde template-inhoud als onveranderlijk JSON-bestand bij een nieuwe of bestaande documentversie.
+    guidance:
+      assistant:
+        en: Reuse the same request reference when retrying after a failure or an unclear outcome; it returns the
+          document version the first call created, while a new reference creates a second one.
+        nl: Hergebruik dezelfde aanvraagreferentie bij een nieuwe poging na een fout of een onduidelijke uitkomst; die
+          geeft de documentversie van de eerste aanroep terug, terwijl een nieuwe referentie een tweede aanmaakt.
     implementation: { type: plugin, plugin: documents, handler: createDocumentFromTemplate }
     target: { scope: record, inputField: templateVersionId }
     input:

@@ -3,6 +3,8 @@ kind: coreEntity
 module: core
 entity: YouTubeEmbed
 title: YouTube embed
+description: A block definition referencing one YouTube video. It carries no identity of its own; the Block placement
+  selecting this definition does. See docs/block-content.md.
 language: en
 labels: { en: YouTube video, nl: YouTube-video }
 pluralLabels: { en: YouTube videos, nl: "YouTube-video's" }
@@ -22,6 +24,11 @@ fields:
     osfType: url
     required: true
     label: { en: Video URL, nl: Video-URL }
+    description:
+      en: Watch or short link to the video, stored and validated as content. Nothing fetches the video server-side;
+        the address is passed through as content.
+      nl: Watch- of korte link naar de video, opgeslagen en gevalideerd als inhoud. De server haalt de video niet op;
+        het adres wordt als inhoud doorgegeven.
     # An external URL is content, not a server-side instruction to fetch it.
     validation:
       pattern: "^https://(?:www\\.)?(?:youtube\\.com/watch\\?v=[A-Za-z0-9_-]{11}|youtu\\.be/[A-Za-z0-9_-]{11})(?:[?&][A-Za-z0\

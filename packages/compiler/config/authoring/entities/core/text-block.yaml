@@ -3,6 +3,8 @@ kind: coreEntity
 module: core
 entity: TextBlock
 title: Text block
+description: A block definition holding markdown text. It carries no identity of its own; the Block placement
+  selecting this definition does. See docs/block-content.md.
 language: en
 labels: { en: Text, nl: Tekst }
 pluralLabels: { en: Texts, nl: Teksten }
@@ -19,6 +21,13 @@ fields:
     required: true
     variables: template
     label: { en: Text, nl: Tekst }
+    description:
+      en: Markdown text of this block. A `{{…}}` token may be bound to the organization's variable catalogue or to
+        another field of the same record; every read resolves the binding again under the reader's own access and
+        inserts the result as data, not as markup.
+      nl: Markdown-tekst van dit blok. Een `{{…}}`-token kan worden gebonden aan de variabelencatalogus van de
+        organisatie of aan een ander veld van hetzelfde record; iedere leesactie lost die binding opnieuw op onder de
+        toegang van de lezer en voegt het resultaat als data toe, niet als opmaak.
     validation: { minLength: 1, maxLength: 20000 }
 operations:
   materialize:

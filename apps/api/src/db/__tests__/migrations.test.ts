@@ -1333,6 +1333,8 @@ describe("tenant registry identity default (0017)", () => {
           expect(await identityDefault(db)).toBe("gen_random_uuid()");
           await sql`alter policy tenants_tenant_isolation on erp.tenants to public`.execute(db);
           await sql.raw(`drop role ${group}`).execute(db);
+          // Row security ignores a policy for a role the migration role does not have, so it neither blocks nor hides.
+          await sql`create policy other_role_probe on erp.tenants as restrictive for select to pg_monitor using (false)`.execute(db);
         });
         await withDb(roleUrl.toString(), async (db) => {
           const message = await expectRejects(db.transaction().execute((trx) =>
@@ -1341,6 +1343,16 @@ describe("tenant registry identity default (0017)", () => {
         });
         await withDb(url, async (db) => {
           expect(await identityDefault(db)).toBe("gen_random_uuid()");
+          await sql`delete from erp.tenants where id is distinct from tenant_id`.execute(db);
+        });
+        await withDb(roleUrl.toString(), async (db) => {
+          const outcome = await db.transaction().execute((trx) =>
+            upgradeTenantIdentityDefaults(trx, manifest.tables as unknown as RegistryTable[]));
+          expect(outcome.upgraded).toEqual([TENANTS]);
+        });
+        await withDb(url, async (db) => {
+          expect(await identityDefault(db)).toBe("app.current_tenant()");
+          await sql`drop policy other_role_probe on erp.tenants`.execute(db);
           await sql.raw(`reassign owned by ${role} to current_user`).execute(db);
           await sql.raw(`drop owned by ${role}`).execute(db);
         });

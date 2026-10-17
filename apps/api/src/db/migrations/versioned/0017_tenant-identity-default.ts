@@ -30,8 +30,8 @@ import type { VersionedMigration } from "../versioned-runner.js";
  * The rows are read under a SHARE ROW EXCLUSIVE lock in the platform's trusted
  * system context (`app.bypass_rls`, transaction-local). The migration role is
  * neither superuser nor BYPASSRLS and the registry forces row level security,
- * so that context only shows every row when every policy that applies to
- * SELECT has the generated shape `app.bypass_rls() OR …` (or is exactly
+ * so that context only shows every row when every policy row security applies
+ * to SELECT for the migration role has the generated shape `app.bypass_rls() OR …` (or is exactly
  * `app.bypass_rls()`). The shape is checked on the stored expression tree, not
  * its text: the top-level node must be that function call, or an OR whose
  * first argument is that call. Any other policy (`app.bypass_rls() AND …`, a
@@ -78,10 +78,11 @@ export function tenantIdentityRegistries(tables: readonly RegistryTable[]): Regi
 /**
  * Enter the trusted system context for this transaction and prove that it
  * shows every row: row level security is off for the table, or the context is
- * on, every policy that applies to SELECT is a trusted bypass disjunct (see the
- * file comment) and at least one permissive one applies to the current role —
- * to PUBLIC or a role whose privileges it currently has (USAGE; a NOINHERIT
- * membership does not make a policy apply).
+ * on, every SELECT policy that applies to the current role is a trusted bypass
+ * disjunct (see the file comment) and at least one of them is permissive. A
+ * policy applies to PUBLIC or to a role whose privileges the current role has
+ * (USAGE; a NOINHERIT membership does not count); row security ignores the
+ * others, so they neither help nor block.
  */
 async function assertAllRowsVisible(db: Kysely<any>, name: string, relation: string): Promise<void> {
   await sql`select set_config('app.bypass_rls', 'true', true)`.execute(db);
@@ -97,7 +98,7 @@ async function assertAllRowsVisible(db: Kysely<any>, name: string, relation: str
                  or p.polqual::text like '{BOOLEXPR :boolop or :args ({FUNCEXPR :funcid ' || f.oid || ' %', false) as trusted
       from pg_policy p cross join (select to_regprocedure('app.bypass_rls()')::oid as oid) f
      where p.polrelid = to_regclass(${relation}) and p.polcmd in ('r', '*')`.execute(db);
-  const untrusted = policies.rows.filter((policy) => !policy.trusted);
+  const untrusted = policies.rows.filter((policy) => policy.applies && !policy.trusted);
   const reason =
     context.rows[0]?.on !== true ? "app.bypass_rls() is not on in the trusted context"
     : untrusted.length > 0 ? `policies that are not a trusted app.bypass_rls() disjunct: ${untrusted.map((policy) => policy.name).join(", ")}`

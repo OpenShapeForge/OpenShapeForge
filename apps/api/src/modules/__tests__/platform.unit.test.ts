@@ -14,6 +14,7 @@ import type { DB } from "../../generated/db/types.js";
 import type { McpInvocationContext, RuntimeModule } from "../contract.js";
 import { authorizeMcpRequest } from "../mcp-hooks.js";
 import { getEntityOperationContracts } from "../../operations/entity/index.js";
+import { generatedCrudTools } from "../../mcp/native-crud-tool.js";
 import { operationContractFingerprint } from "../../operations/contract-fingerprint.js";
 import { __setOperationExecutionReceiptExecutorForTests } from "../../operations/execution-receipts.js";
 import type { ModuleMcpServerBinding } from "../platform.js";
@@ -147,6 +148,46 @@ describe("runtime module platform session authority", () => {
       })).resolves.toMatchObject({
         error: { code: "OPERATION_CONTRACT_CHANGED", retryable: false },
       });
+    });
+  });
+
+  it("answers a generated entity tool name with its canonical contract under the same checks", async () => {
+    const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
+    const contracts = getEntityOperationContracts();
+    // Real generated aliases: a dedicated tool name only one entity carries.
+    const dedicated = (operation: string) => {
+      const tool = generatedCrudTools.find((candidate) =>
+        (candidate as { operation?: string }).operation === operation &&
+        generatedCrudTools.filter((other) => other.name === candidate.name).length === 1
+      );
+      expect(tool).toBeDefined();
+      const contract = contracts.find((candidate) => candidate.id === tool!.operationId);
+      expect(contract).toBeDefined();
+      return { alias: tool!.name, contract: contract! };
+    };
+    const read = dedicated("list");
+    const write = dedicated("create");
+    expect(read.alias).not.toBe(read.contract.id);
+    expect(read.contract.effects.data).toBe("read");
+    expect(write.contract.effects.data).toBe("write");
+    const shared = generatedCrudTools.find((candidate) =>
+      generatedCrudTools.filter((other) => other.name === candidate.name).length > 1
+    );
+    expect(shared).toBeDefined();
+
+    const held = { ...operationClaims(), roles: [read.contract.authorization.roles[0]!, write.contract.authorization.roles[0]!] };
+    await runtime.withActiveOperationSession(held, async (session) => {
+      await expect(runtime.services.operations.get(session, read.alias)).resolves.toBe(read.contract);
+      await expect(runtime.services.operations.get(session, write.alias)).resolves.toBe(write.contract);
+      // A name several entities share carries no entity here: no guess.
+      await expect(runtime.services.operations.get(session, shared!.name)).resolves.toBeUndefined();
+      await expect(runtime.services.operations.get(session, "no_such_generated_tool")).resolves.toBeUndefined();
+    });
+    // The canonical authorization still decides: an alias widens nothing.
+    const denied = { ...operationClaims(), roles: ["no-such-role"] };
+    await runtime.withActiveOperationSession(denied, async (session) => {
+      await expect(runtime.services.operations.get(session, read.alias)).resolves.toBeUndefined();
+      await expect(runtime.services.operations.get(session, read.contract.id)).resolves.toBeUndefined();
     });
   });
 

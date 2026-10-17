@@ -3,6 +3,9 @@ kind: coreEntity
 module: core
 entity: Block
 title: Block
+description: One ordered content placement in a template variant or in a document variant. The placement's own content
+  lives in values, in the shape of the block definition named in definitionKey and limited to the definitions the
+  owning collection allows.
 language: en
 labels: { en: Block, nl: Block }
 pluralLabels: { en: Blocks, nl: Blocks }
@@ -39,6 +42,11 @@ fields:
   # Exactly one owner is set; the compiler emits num_nonnulls(document_variant_id, variant_id) = 1.
   - key: variant
     label: { en: Template variant, nl: Templatevariant }
+    description:
+      en: Set when this block belongs to a template variant. Exactly one of the two owners is set and a block never
+        moves between them.
+      nl: Gezet wanneer dit blok bij een templatevariant hoort. Precies één van de twee eigenaren is gezet en een blok
+        verhuist nooit van de een naar de ander.
     osfType: TemplateVariant
     required: false
     immutable: true
@@ -55,6 +63,11 @@ fields:
           - TemplateBlock
   - key: documentVariant
     label: { en: Document variant, nl: Documentvariant }
+    description:
+      en: Set when this block belongs to a document variant. Exactly one of the two owners is set; a document's blocks
+        are written through that variant's own block Operations.
+      nl: Gezet wanneer dit blok bij een documentvariant hoort. Precies één van de twee eigenaren is gezet; de blokken
+        van een document worden via de blok-Operations van die variant geschreven.
     osfType: DocumentVariant
     required: false
     immutable: true
@@ -83,9 +96,19 @@ fields:
     required: true
     immutable: true
     label: { en: Block type, nl: Bloktype }
+    description:
+      en: Which block definition this placement uses, fixed at creation. It must be one of the definitions the owning
+        collection allows and it selects the shape the values are validated against.
+      nl: Welke blokdefinitie deze plaatsing gebruikt, vastgesteld bij aanmaken. Het moet een definitie zijn die de
+        bezittende collectie toestaat en het bepaalt de vorm waartegen de waarden worden gevalideerd.
     persisted: { column: definition_key, storageClass: core }
   - key: definitionVersion
     label: { en: Definition version, nl: Definitieversie }
+    description:
+      en: Schema version of the block definition the stored values were written against, recorded with the block and
+        never changed afterwards.
+      nl: Schemaversie van de blokdefinitie waartegen de opgeslagen waarden zijn geschreven, vastgelegd bij het blok en
+        daarna nooit gewijzigd.
     osfType: integer
     required: true
     defaultValue: 1
@@ -96,6 +119,11 @@ fields:
     entityValue: { definitionField: definitionKey, parameterBindings: true }
     required: true
     label: { en: Values, nl: Waarden }
+    description:
+      en: The placement's own content, in the shape the selected block definition declares, including any typed
+        reference that definition requires.
+      nl: De eigen inhoud van de plaatsing, in de vorm die de gekozen blokdefinitie vastlegt, inclusief een
+        getypeerde verwijzing die die definitie vereist.
     persisted: { column: values, storageClass: core }
   - key: origin
     label: { en: Origin, nl: Herkomst }
@@ -169,6 +197,13 @@ operations:
   update:
     name: Update block
     description: Update a block draft.
+    guidance:
+      assistant:
+        en: This generic update checks Block's own roles only; it does not apply the owning document variant's version,
+          authorization or lock checks. Edit a document's blocks through that variant's own block Operations instead.
+        nl: Deze generieke wijziging controleert alleen de eigen rollen van Block; de versie-, autorisatie- en
+          vergrendelingscontroles van de bezittende documentvariant worden niet toegepast. Bewerk de blokken van een
+          document via de blok-Operations van die variant.
     implementation: { type: entity, action: update }
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: none } }

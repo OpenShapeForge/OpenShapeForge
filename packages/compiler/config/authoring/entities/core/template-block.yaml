@@ -3,6 +3,9 @@ kind: coreEntity
 module: core
 entity: TemplateBlock
 title: Template block
+description: A block definition that includes another published template version in the content being composed,
+  resolved from that version's frozen snapshot. It carries no identity of its own; the Block placement selecting this
+  definition does.
 language: en
 labels: { en: Template block, nl: Templateblok }
 pluralLabels: { en: Template blocks, nl: Templateblokken }
@@ -17,10 +20,18 @@ fields:
     osfType: TemplateVersion
     required: true
     label: { en: Template version, nl: Templateversie }
+    description:
+      en: The published template version this block includes. The inclusion resolves from that version's frozen
+        snapshot, so republishing the included template does not change it.
+      nl: De gepubliceerde templateversie die dit blok opneemt. De opname wordt opgelost uit de vastgelegde snapshot
+        van die versie, dus opnieuw publiceren van de opgenomen template verandert hem niet.
   - key: parameters
     osfType: object
     defaultValue: {}
     label: { en: Local values, nl: Lokale waarden }
+    description:
+      en: Values for the local variables of the included template version, used for this inclusion only.
+      nl: Waarden voor de lokale variabelen van de opgenomen templateversie, alleen voor deze opname.
 operations:
   materialize:
     name: Materialize included template

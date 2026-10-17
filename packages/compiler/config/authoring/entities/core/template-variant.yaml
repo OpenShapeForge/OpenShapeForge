@@ -3,6 +3,9 @@ kind: coreEntity
 module: core
 entity: TemplateVariant
 title: Template variant
+description: One channel and content language of a template's editable content, holding the ordered blocks for that
+  combination. Materialization matches the channel exactly and serves the language by closest match, falling back to
+  the variant marked default for the channel.
 language: en
 labels: { en: Template variant, nl: Template variant }
 pluralLabels: { en: Template variants, nl: Templatevarianten }
@@ -30,6 +33,11 @@ fields:
         ownership: owned
   - key: channel
     label: { en: Channel, nl: Kanaal }
+    description:
+      en: Delivery channel this variant's content is for. Materialization matches the channel exactly; a variant of
+        another channel is never substituted.
+      nl: Afleverkanaal waarvoor de inhoud van deze variant bedoeld is. Materialisatie matcht het kanaal exact; een
+        variant van een ander kanaal komt nooit in de plaats.
     osfType: string
     required: true
     options:
@@ -45,6 +53,11 @@ fields:
     defaultValue: nl
     validation: { pattern: "^[a-z]{2}(-[A-Z]{2})?$" }
     label: { en: Content language, nl: Inhoudstaal }
+    description:
+      en: Content language of this variant. A request is served by the exact language tag, else by a variant of the
+        same language, else by the variant marked default for this channel.
+      nl: Inhoudstaal van deze variant. Een aanvraag wordt bediend door de exacte taalcode, anders door een variant met
+        dezelfde taal, anders door de variant die als standaard voor dit kanaal is gemarkeerd.
     persisted: { column: locale, storageClass: core }
   - key: isDefault
     label: { en: Default for channel, nl: Standaard voor kanaal }

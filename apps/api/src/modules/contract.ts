@@ -342,6 +342,7 @@ export type ModulePlatformServices = {
     list(
       session: TrustedSessionContext,
     ): Promise<readonly RuntimeOperationDefinition[]>;
+    /** See `@openshapeforge/plugin-runtime`: canonical id or included generated entity tool name. */
     get(
       session: TrustedSessionContext,
       operationId: string,

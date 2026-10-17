@@ -440,7 +440,13 @@ export type PluginPlatformServices = {
     list(
       session: PluginSessionContext,
     ): Promise<readonly RuntimeOperationDefinition[]>;
-    /** Returns only a definition available to this live verified session. */
+    /**
+     * Returns only a definition available to this live verified session.
+     * `operationId` is a canonical Operation id, or a generated entity tool
+     * name this deployment includes (what a native Capability may name);
+     * the latter answers with that canonical definition, whose `id` is the
+     * canonical one. A name several entities share resolves to nothing.
+     */
     get(
       session: PluginSessionContext,
       operationId: string,

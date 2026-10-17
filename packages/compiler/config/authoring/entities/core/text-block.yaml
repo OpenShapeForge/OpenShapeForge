@@ -3,6 +3,8 @@ kind: coreEntity
 module: core
 entity: TextBlock
 title: Text block
+description: A block definition holding markdown text. It carries no identity of its own; the Block placement
+  selecting this definition does.
 language: en
 labels: { en: Text, nl: Tekst }
 pluralLabels: { en: Texts, nl: Teksten }
@@ -19,6 +21,15 @@ fields:
     required: true
     variables: template
     label: { en: Text, nl: Tekst }
+    description:
+      en: Markdown text of this block. A `{{…}}` token names either a parameter of the template version as
+        `local.<key>` or an organization Chip as `chips.<key>`. Materializing the template or document resolves it
+        under the caller's own access and inserts the value as escaped text, not as markup; reading the block
+        returns the stored token text unchanged.
+      nl: Markdown-tekst van dit blok. Een `{{…}}`-token noemt een parameter van de sjabloonversie als
+        `local.<sleutel>` of een Chip van de organisatie als `chips.<sleutel>`. Materialiseren van het sjabloon of
+        document lost het op onder de eigen toegang van de aanroeper en voegt de waarde in als geëscapete tekst, niet
+        als opmaak; het blok lezen geeft de opgeslagen tokentekst ongewijzigd terug.
     validation: { minLength: 1, maxLength: 20000 }
 operations:
   materialize:

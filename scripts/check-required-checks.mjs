@@ -20,6 +20,10 @@
 // it is how stacked pull requests (#240 slices the designer work into a stack)
 // went entirely ungated. A required check must therefore run on EVERY pull
 // request.
+//
+// And it checks that a required job which only reports the result of others
+// (`needs:`) cannot be skipped into passing: GitHub counts a skipped required
+// check as satisfied, so such a job must run `if: always()` and fail itself.
 
 import { readFile, readdir } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
@@ -41,14 +45,14 @@ const SECURITY_CRITICAL_REQUIRED_CONTEXTS = [
  * that trigger is restricted to particular base branches.
  *
  * Deliberately dependency-free rather than a YAML parser: this runs in the
- * gates job, and the shapes it reads (a `name:` two levels in, a top-level
+ * checks job, and the shapes it reads (a `name:` two levels in, a top-level
  * `on:` block) are stable and already linted by GitHub itself. Line-scanned
  * rather than regex-matched across the whole file because the base filter is
  * only meaningful in its position — a `branches:` under `push:` says nothing
  * about pull requests.
  *
  * @returns {{ runsOnPullRequest: boolean, pullRequestBaseFilter: string | null,
- *             jobNames: string[] }}
+ *             jobs: { name: string, needs: boolean, condition: string | null }[] }}
  */
 function parseWorkflow(source) {
   let runsOnPullRequest = false;
@@ -78,15 +82,32 @@ function parseWorkflow(source) {
     }
   }
 
-  const jobNames = [];
+  // A job is a two-space key under `jobs:`; its name, needs and condition are
+  // keys four spaces in.
+  const jobs = [];
   const jobsIndex = source.search(/^jobs:\s*$/m);
   if (jobsIndex !== -1) {
-    const jobsBlock = source.slice(jobsIndex);
-    for (const match of jobsBlock.matchAll(/^ {4}name:\s*(.+?)\s*$/gm)) {
-      jobNames.push(match[1].replace(/^["']|["']$/g, ""));
+    let job = null;
+    for (const line of source.slice(jobsIndex).split("\n").slice(1)) {
+      if (/^\s*#/.test(line)) continue;
+      if (/^\S/.test(line)) break;
+      if (/^ {2}[\w-]+:\s*$/.test(line)) {
+        job = { name: null, needs: false, condition: null };
+        jobs.push(job);
+        continue;
+      }
+      const key = line.match(/^ {4}(name|needs|if):\s*(.*?)\s*$/);
+      if (!job || !key) continue;
+      if (key[1] === "name") job.name = key[2].replace(/^["']|["']$/g, "");
+      else if (key[1] === "needs") job.needs = true;
+      else job.condition = key[2];
     }
   }
-  return { runsOnPullRequest, pullRequestBaseFilter, jobNames };
+  return {
+    runsOnPullRequest,
+    pullRequestBaseFilter,
+    jobs: jobs.filter((job) => job.name !== null),
+  };
 }
 
 async function main() {
@@ -106,7 +127,8 @@ async function main() {
   }
 
   /**
-   * @type {Map<string, { path: string, baseFilter: string | null }[]>}
+   * @type {Map<string, { path: string, baseFilter: string | null,
+   *                      needs: boolean, condition: string | null }[]>}
    * job name -> the pull-request workflows declaring it
    */
   const jobs = new Map();
@@ -116,13 +138,13 @@ async function main() {
 
   for (const file of files) {
     const path = join(WORKFLOW_DIR, file);
-    const { runsOnPullRequest, pullRequestBaseFilter, jobNames } =
+    const { runsOnPullRequest, pullRequestBaseFilter, jobs: declared } =
       parseWorkflow(await readFile(join(REPO_ROOT, path), "utf8"));
     if (!runsOnPullRequest) continue; // never reports a check on a PR
-    for (const name of jobNames) {
+    for (const { name, needs, condition } of declared) {
       jobs.set(name, [
         ...(jobs.get(name) ?? []),
-        { path, baseFilter: pullRequestBaseFilter },
+        { path, baseFilter: pullRequestBaseFilter, needs, condition },
       ]);
     }
   }
@@ -149,11 +171,20 @@ async function main() {
       );
       continue;
     }
-    const [{ path, baseFilter }] = declaredIn;
+    const [{ path, baseFilter, needs, condition }] = declaredIn;
     if (baseFilter) {
       problems.push(
         `required check "${context}" lives in ${path}, whose pull_request trigger carries a "${baseFilter}:" filter —` +
           ` it would report nothing on a pull request whose base is excluded, which reads as pending rather than as never running (#269)`,
+      );
+    }
+    // A job with `needs:` is skipped when a dependency fails, and GitHub counts
+    // a skipped required check as passed. Only `always()` makes it run — and
+    // so fail — whatever its dependencies did.
+    if (needs && !condition?.includes("always()")) {
+      problems.push(
+        `required check "${context}" in ${path} has needs: but no \`if: always()\` —` +
+          ` a failed dependency would skip it, and a skipped required check passes`,
       );
     }
   }
@@ -168,7 +199,7 @@ async function main() {
     console.error(
       `${RULESET_PATH} is out of sync with ${WORKFLOW_DIR}:\n` +
         problems.map((p) => `  - ${p}`).join("\n") +
-        `\n\nRestore the job name, drop the pull_request base filter, or update` +
+        `\n\nRestore the job name, drop the pull_request base filter, add \`if: always()\`, or update` +
         ` the ruleset and re-run scripts/github/apply-branch-protection.sh.`,
     );
     process.exit(1);

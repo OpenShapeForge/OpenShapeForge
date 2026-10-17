@@ -118,6 +118,13 @@ describe("MCP browser handoff persistence", () => {
               db, session: { ...session, roles: ["different-authority"] }, keyring: KEYRING, kind: "entity_oauth",
               tenantId: session.tenantId, userId: session.userId, payload: {}, expiresAtMs: Date.now() + 60_000,
             })).rejects.toThrow("Nested database work cannot replace the active session.");
+            // A caught SQL insert error must not poison the owning transaction.
+            await expect(createHandoff({
+              id: "not-a-uuid", db, session, keyring: KEYRING, kind: "entity_oauth",
+              tenantId: session.tenantId, userId: session.userId, payload: {}, expiresAtMs: Date.now() + 60_000,
+            })).rejects.toThrow();
+            expect(await context(trx)).toEqual(before);
+            expect((await sql<{count:number}>`select count(*)::int as count from platform.mcp_handoffs`.execute(trx)).rows[0]?.count).toBe(3);
             return { oauth: oauth.state, configuration: configuration.token, artifact };
           });
           for (const [kind, token] of [["entity_oauth", tokens.oauth], ["entity_configuration", tokens.configuration], ["artifact_upload", tokens.artifact]] as const) {

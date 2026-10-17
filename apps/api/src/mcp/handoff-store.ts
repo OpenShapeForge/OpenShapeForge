@@ -2,7 +2,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
-import { withDbSession, type DbSessionInput } from "../db/session.js";
+import { withDbSession, withInvocationSavepoint, type DbSessionInput } from "../db/session.js";
 import {
   decryptSecret,
   encryptSecret,
@@ -65,7 +65,7 @@ export async function createHandoff(input: {
     groups: [],
     scope: "self",
   };
-  await withDbSession(input.db, session, async (trx) => {
+  await withDbSession(input.db, session, (trx) => withInvocationSavepoint(trx, async () => {
     await sql`
       insert into platform.mcp_handoffs
         (id, tenant_id, user_id, kind, token_hash, payload_ciphertext,
@@ -75,7 +75,7 @@ export async function createHandoff(input: {
          ${sha256(secret)}, ${encrypted.ciphertext}, ${encrypted.keyId},
          ${encrypted.algorithm}, ${new Date(input.expiresAtMs)})
     `.execute(trx);
-  });
+  }));
   return token;
 }
 

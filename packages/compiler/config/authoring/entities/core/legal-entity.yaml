@@ -182,6 +182,8 @@ operations:
     reliability:
       idempotency:
         mode: none
+    concurrency:
+      version: { mode: required, field: updatedAt }
     confirmation:
       mode: none
   delete:

@@ -1272,16 +1272,49 @@ describe("tenant registry identity default (0017)", () => {
           expect(await identityDefault(db)).toBe("app.current_tenant()");
           await sql`alter table erp.tenants alter column id set default gen_random_uuid()`.execute(db);
           await sql`insert into erp.tenants (id, tenant_id, slug, name) values (gen_random_uuid(), gen_random_uuid(), 'mismatch', 'Mismatch')`.execute(db);
-          // A policy that ignores the trusted context could hide rows: refuse instead of checking a subset.
-          await sql`create policy blind_probe on erp.tenants as restrictive for select using (tenant_id = app.current_tenant())`.execute(db);
+        });
+        // Policies that hide the mismatched row even in the trusted context — some mention
+        // app.bypass_rls() — are refused before any DDL instead of checking a filtered subset.
+        const hostile = [
+          "as restrictive for select using (tenant_id = app.current_tenant())",
+          "as restrictive for select using (app.bypass_rls() and false)",
+          "as restrictive using (not app.bypass_rls() or false)",
+          "as restrictive for select using ((app.bypass_rls() or tenant_id = app.current_tenant()) and false)",
+          "as permissive for select using (app.bypass_rls() and false)",
+        ];
+        for (const policy of hostile) {
+          await withDb(url, async (db) => {
+            await sql.raw(`create policy hostile_probe on erp.tenants ${policy}`).execute(db);
+          });
+          await withDb(roleUrl.toString(), async (db) => {
+            if (policy.startsWith("as restrictive")) {
+              const visible = await db.transaction().execute(async (trx) => {
+                await sql`select set_config('app.bypass_rls', 'true', true)`.execute(trx);
+                return (await sql<{ count: number }>`select count(*)::int as count from erp.tenants where id is distinct from tenant_id`.execute(trx)).rows[0]!.count;
+              });
+              expect(visible).toBe(0);
+            }
+            const message = await expectRejects(db.transaction().execute((trx) =>
+              upgradeTenantIdentityDefaults(trx, manifest.tables as unknown as RegistryTable[])));
+            expect(message).toContain("policies that are not a trusted app.bypass_rls() disjunct: hostile_probe");
+          });
+          await withDb(url, async (db) => {
+            expect(await identityDefault(db)).toBe("gen_random_uuid()");
+            await sql`drop policy hostile_probe on erp.tenants`.execute(db);
+          });
+        }
+        // The generated policy proves nothing for a role it does not apply to.
+        await withDb(url, async (db) => {
+          await sql`alter policy tenants_tenant_isolation on erp.tenants to pg_monitor`.execute(db);
         });
         await withDb(roleUrl.toString(), async (db) => {
           const message = await expectRejects(db.transaction().execute((trx) =>
             upgradeTenantIdentityDefaults(trx, manifest.tables as unknown as RegistryTable[])));
-          expect(message).toContain("policies not honouring app.bypass_rls(): blind_probe");
+          expect(message).toContain("no permissive SELECT policy applies to the migration role");
         });
         await withDb(url, async (db) => {
-          await sql`drop policy blind_probe on erp.tenants`.execute(db);
+          expect(await identityDefault(db)).toBe("gen_random_uuid()");
+          await sql`alter policy tenants_tenant_isolation on erp.tenants to public`.execute(db);
         });
         await withDb(roleUrl.toString(), async (db) => {
           const message = await expectRejects(db.transaction().execute((trx) =>

@@ -28,11 +28,15 @@ import type { VersionedMigration } from "../versioned-runner.js";
  * ledger row, is written.
  *
  * The rows are read under a SHARE ROW EXCLUSIVE lock in the platform's trusted
- * system context (`app.bypass_rls`, transaction-local), which every generated
- * policy honours. The migration role is neither superuser nor BYPASSRLS and the
- * registry forces row level security, so a policy that did NOT honour that
- * context would silently hide rows: the migration refuses when any policy that
- * applies to SELECT does not, rather than checking a filtered subset.
+ * system context (`app.bypass_rls`, transaction-local). The migration role is
+ * neither superuser nor BYPASSRLS and the registry forces row level security,
+ * so that context only shows every row when every policy that applies to
+ * SELECT has the generated shape `app.bypass_rls() OR …` (or is exactly
+ * `app.bypass_rls()`). The shape is checked on the stored expression tree, not
+ * its text: the top-level node must be that function call, or an OR whose
+ * first argument is that call. Any other policy (`app.bypass_rls() AND …`, a
+ * negation, a nested bypass, a missing USING) could hide rows, so the
+ * migration refuses rather than checking a filtered subset.
  *
  * Applied migrations are immutable: the sha256 of THIS FILE is recorded in
  * platform.schema_migrations and re-verified on every migrate run. Once
@@ -73,25 +77,32 @@ export function tenantIdentityRegistries(tables: readonly RegistryTable[]): Regi
 
 /**
  * Enter the trusted system context for this transaction and prove that it
- * shows every row: row level security is off for the table, or every policy
- * that applies to SELECT honours `app.bypass_rls()` and at least one of them is
- * permissive.
+ * shows every row: row level security is off for the table, or the context is
+ * on, every policy that applies to SELECT is a trusted bypass disjunct (see the
+ * file comment) and at least one permissive one applies to the current role.
  */
 async function assertAllRowsVisible(db: Kysely<any>, name: string, relation: string): Promise<void> {
   await sql`select set_config('app.bypass_rls', 'true', true)`.execute(db);
   const rls = await sql<{ enabled: boolean }>`
     select relrowsecurity as enabled from pg_class where oid = to_regclass(${relation})`.execute(db);
   if (!rls.rows[0]?.enabled) return;
-  const policies = await sql<{ name: string; permissive: boolean; using: string | null }>`
-    select polname as name, polpermissive as permissive, pg_get_expr(polqual, polrelid) as using
-      from pg_policy where polrelid = to_regclass(${relation}) and polcmd in ('r', '*')`.execute(db);
-  const blind = policies.rows.filter((policy) => !(policy.using ?? "").includes("app.bypass_rls()"));
-  if (blind.length > 0 || !policies.rows.some((policy) => policy.permissive)) {
-    throw new Error(
-      `${name}: cannot prove every row is visible to the migration (` +
-        (blind.length > 0 ? `policies not honouring app.bypass_rls(): ${blind.map((policy) => policy.name).join(", ")}` : "no permissive SELECT policy") +
-        `); the tenant identity default was not changed.`,
-    );
+  const context = await sql<{ on: boolean }>`select app.bypass_rls() as on`.execute(db);
+  const policies = await sql<{ name: string; permissive: boolean; applies: boolean; trusted: boolean }>`
+    select p.polname as name, p.polpermissive as permissive,
+           exists (select 1 from unnest(p.polroles) as r(oid)
+                    where r.oid = 0 or pg_has_role(current_user, r.oid, 'member')) as applies,
+           coalesce(p.polqual::text like '{FUNCEXPR :funcid ' || f.oid || ' %'
+                 or p.polqual::text like '{BOOLEXPR :boolop or :args ({FUNCEXPR :funcid ' || f.oid || ' %', false) as trusted
+      from pg_policy p cross join (select to_regprocedure('app.bypass_rls()')::oid as oid) f
+     where p.polrelid = to_regclass(${relation}) and p.polcmd in ('r', '*')`.execute(db);
+  const untrusted = policies.rows.filter((policy) => !policy.trusted);
+  const reason =
+    context.rows[0]?.on !== true ? "app.bypass_rls() is not on in the trusted context"
+    : untrusted.length > 0 ? `policies that are not a trusted app.bypass_rls() disjunct: ${untrusted.map((policy) => policy.name).join(", ")}`
+    : !policies.rows.some((policy) => policy.permissive && policy.applies) ? "no permissive SELECT policy applies to the migration role"
+    : null;
+  if (reason) {
+    throw new Error(`${name}: cannot prove every row is visible to the migration (${reason}); the tenant identity default was not changed.`);
   }
 }
 

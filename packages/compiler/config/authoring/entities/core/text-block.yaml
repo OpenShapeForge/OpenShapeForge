@@ -4,7 +4,7 @@ module: core
 entity: TextBlock
 title: Text block
 description: A block definition holding markdown text. It carries no identity of its own; the Block placement
-  selecting this definition does. See docs/block-content.md.
+  selecting this definition does.
 language: en
 labels: { en: Text, nl: Tekst }
 pluralLabels: { en: Texts, nl: Teksten }

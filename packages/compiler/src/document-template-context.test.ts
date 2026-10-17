@@ -82,6 +82,10 @@ test("the document/template family carries authored meaning into every generated
     const english = text(authored);
     expect(english).not.toInclude("entity.");
     expect(english.length).toBeGreaterThan(80);
+    // Self-contained: these descriptions reach MCP clients and GraphQL
+    // consumers that cannot fetch a path in this repository, so a
+    // `docs/…` pointer would be a reference the reader cannot follow.
+    expect(english).not.toMatch(/\bdocs\/[A-Za-z0-9_-]+\.md\b/);
 
     // Every definition reaches the GraphQL type documentation, including the
     // three identity-less ones that have no table and no MCP catalog entry.

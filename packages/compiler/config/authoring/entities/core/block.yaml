@@ -5,7 +5,7 @@ entity: Block
 title: Block
 description: One ordered content placement in a template variant or in a document variant. The placement's own content
   lives in values, in the shape of the block definition named in definitionKey and limited to the definitions the
-  owning collection allows. See docs/block-content.md.
+  owning collection allows.
 language: en
 labels: { en: Block, nl: Block }
 pluralLabels: { en: Blocks, nl: Blocks }

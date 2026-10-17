@@ -29,6 +29,9 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
     private String configurationError;
     private final KeycloakSession session;
     private Map<String, Binding> resources = Map.of();
+    private Set<String> resourceScopes = Set.of();
+    private static final Set<String> IDENTITY_SCOPES = Set.of("openid","profile","email","roles",
+            "organization","offline_access","address","phone","basic","acr","web-origins","microprofile-jwt");
 
     public static final class Binding {
         @JsonProperty public String resource;
@@ -50,7 +53,7 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
     @Override public void setupConfiguration(Configuration config) {
         configurationError = null;
         try { configure(config); } catch (RuntimeException error) {
-            resources = Map.of(); configurationError = "Invalid MCP resource policy configuration";
+            resources = Map.of(); resourceScopes = Set.of(); configurationError = "Invalid MCP resource policy configuration";
             LOG.warn(configurationError);
         }
     }
@@ -65,7 +68,7 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
             if (!"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getRawUserInfo() != null
                     || uri.getRawQuery() != null || uri.getRawFragment() != null || uri.getRawPath().isEmpty()
                     || binding.scope == null || (!binding.scope.matches("[a-z][a-z0-9:_-]{0,149}")
-                        || Set.of("openid","profile","email","roles","organization","offline_access","address","phone").contains(binding.scope))
+                        || IDENTITY_SCOPES.contains(binding.scope) || binding.scope.startsWith("organization:") || binding.scope.startsWith("org:"))
                     || checked.putIfAbsent(binding.resource, binding) != null)
                 throw new IllegalArgumentException("Invalid or duplicate MCP resource binding");
             if (binding.registrationScopes == null || binding.registrationScopes.stream().anyMatch(name ->
@@ -81,6 +84,7 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
         }
         if (checked.isEmpty()) throw new IllegalArgumentException("MCP resource policy needs explicit resource bindings");
         resources = Map.copyOf(checked);
+        resourceScopes = Set.copyOf(scopeModes.keySet());
     }
 
     @Override public void executeOnEvent(ClientPolicyContext context) throws ClientPolicyException {
@@ -124,7 +128,7 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
                 throw denied("invalid_scope", "Exactly one scope parameter is required");
             authorization.getAuthenticationSession().setClientNote(BOUND_SCOPE,
                     bindScopes(authorization.getAuthorizationEndpointRequest().getScope(), binding,
-                        resources.values().stream().map(item -> item.scope).collect(java.util.stream.Collectors.toSet())));
+                        resourceScopes));
         }
     }
 
@@ -133,10 +137,6 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
                 .filter(scope -> name.equals(scope.getName()) && "openid-connect".equals(scope.getProtocol())).toList();
         if (matches.size() > 1) throw denied("invalid_scope", "Configured MCP resource scope is ambiguous");
         return matches.isEmpty() ? null : matches.get(0);
-    }
-
-    static String bindScopes(String value, Binding binding) throws ClientPolicyException {
-        return bindScopes(value, binding, Set.of(binding.scope));
     }
 
     static String bindScopes(String value, Binding binding, Set<String> resourceScopes) throws ClientPolicyException {

@@ -125,9 +125,9 @@ public class McpResourceScopeExecutorTest {
         assertEquals("openid organization",params.getFirst("scope")); assertTrue(attached.isEmpty());
     }
     @Test public void tenantBindingKeepsOrganizationAndRejectsControlScope() throws Exception {
-        assertEquals("openid organization mcp-resource:acme",McpResourceScopeExecutor.bindScopes("openid organization",tenant));
-        assertThrows(ClientPolicyException.class, () -> McpResourceScopeExecutor.bindScopes("openid mcp-resource:control",tenant));
-        assertThrows(ClientPolicyException.class, () -> McpResourceScopeExecutor.bindScopes("openid mcp-resource:acme",control));
+        assertEquals("openid organization mcp-resource:acme",McpResourceScopeExecutor.bindScopes("openid organization",tenant,Set.of(control.scope,tenant.scope)));
+        assertThrows(ClientPolicyException.class, () -> McpResourceScopeExecutor.bindScopes("openid mcp-resource:control",tenant,Set.of(control.scope,tenant.scope)));
+        assertThrows(ClientPolicyException.class, () -> McpResourceScopeExecutor.bindScopes("openid mcp-resource:acme",control,Set.of(control.scope,tenant.scope)));
     }
     void assertInvalid(McpResourceScopeExecutor.Configuration config) {
         var executor=new McpResourceScopeExecutor(session);executor.setupConfiguration(config);
@@ -169,8 +169,20 @@ public class McpResourceScopeExecutorTest {
         assertThrows(ClientPolicyException.class,()->McpResourceScopeExecutor.bindScopes("product-shared-mcp",tenant,configured));
         assertEquals("openid organization mcp-resource:acme",McpResourceScopeExecutor.bindScopes("openid organization",tenant,configured));
     }
+    @Test public void authorizationRejectsAnotherConfiguredProductScopeInEitherDirection() throws Exception {
+        control.scope="product-shared-mcp";
+        var other=binding("other/mcp","product-other-mcp",true);
+        var config=new McpResourceScopeExecutor.Configuration();config.resources=List.of(control,other);
+        var executor=new McpResourceScopeExecutor(session);executor.setupConfiguration(config);
+        attached.add(control.scope);attached.add(other.scope);
+        var params=new MultivaluedHashMap<String,String>();
+        params.putSingle("resource",control.resource);params.putSingle("scope","openid product-other-mcp");
+        assertThrows(ClientPolicyException.class,()->executor.executeOnEvent(event(params)));
+        params.putSingle("resource",other.resource);params.putSingle("scope","openid product-shared-mcp");
+        assertThrows(ClientPolicyException.class,()->executor.executeOnEvent(event(params)));
+    }
     @Test public void resourceScopesRejectIdentityScopesAndUnsafeTokens() throws Exception {
-        for(String name:List.of("openid","profile","email","roles","organization","offline_access","address","phone", "has space", "scope/other", "A-scope", "a".repeat(151))) {
+        for(String name:List.of("openid","profile","email","roles","organization","offline_access","address","phone","basic","acr","web-origins","microprofile-jwt","organization:acme","org:acme", "has space", "scope/other", "A-scope", "a".repeat(151))) {
             var bad=binding("api/mcp",name,true);
             var config=new McpResourceScopeExecutor.Configuration();config.resources=List.of(bad);assertInvalid(config);
         }

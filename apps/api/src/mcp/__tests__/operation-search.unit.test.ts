@@ -191,6 +191,30 @@ describe("searchable MCP Operations", () => {
     expect(search("osf_list").operations).toEqual([]);
   });
 
+  test("an identity is looked up, never searched: an unavailable one answers nothing, not its neighbour", () => {
+    const definitions = ["Template.get", "TemplateVersion.get", "TemplateVersion.list", "workflow.instance.start"].map((id) =>
+      definition(id, { name: { en: `Read ${id}` } }));
+    // Template.get exists in the catalogue but this session may not use it.
+    const allowedIds = new Set(["TemplateVersion.get", "TemplateVersion.list", "workflow.instance.start"]);
+    const names = new Map([["template_get", "Template.get"], ["template_version_get", "TemplateVersion.get"]]);
+    const search = (query: string, extra: Record<string, unknown> = {}) => searchOperationDefinitions({
+      definitions, allowedIds, arguments: { query, ...extra }, locale, resolveName: (name) => names.get(name),
+    });
+    const ids = (query: string) => search(query).operations.map((entry) => (entry.operation as { id: string }).id);
+    expect(search("Template.get")).toEqual({ operations: [] });
+    expect(search("template_get")).toEqual({ operations: [] });
+    expect(search("Template.missing")).toEqual({ operations: [] });
+    expect(search("no_such_tool")).toEqual({ operations: [] });
+    expect(search("workflow.instance")).toEqual({ operations: [] });
+    expect(ids("template_version_get")).toEqual(["TemplateVersion.get"]);
+    expect(ids("templateversion.get")).toEqual(["TemplateVersion.get"]);
+    expect(search("TemplateVersion.get").operations[0]).toHaveProperty("inputSchema");
+    expect(() => search("TemplateVersion.get", { cursor: "x" })).toThrow(/cursor is invalid/i);
+    // Words remain words: a space or a trailing separator searches.
+    expect(ids("template get")).toEqual(["TemplateVersion.get"]);
+    expect(ids("workflow.instance.")).toEqual(["workflow.instance.start"]);
+  });
+
   test("ranks naming over description and splits camel case", () => {
     const definitions = [
       definition("Adapter.publish", { name: { en: "Publish adapter" }, description: { en: "Publishes article content of an adapter." } }),
@@ -209,7 +233,7 @@ describe("searchable MCP Operations", () => {
 
   test("a query that is exactly an entity's name ranks that entity first", () => {
     const definitions = ["CaseStepTemplate.get", "CaseTemplate.get", "Template.get", "Template.list", "TemplateVariant.get"].map((id) =>
-      definition(id, { entityName: id.split(".")[0], name: { en: id.split(".")[1]! } }));
+      definition(id, { entityName: id.split(".")[0]!, name: { en: id.split(".")[1]! } }));
     const ids = (query: string) => searchOperationDefinitions({
       definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query }, locale,
     }).operations.map((entry) => (entry.operation as { id: string }).id);

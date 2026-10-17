@@ -243,6 +243,36 @@ export type OperationSearchContext = {
   resolveName?: (name: string) => string | undefined;
 };
 
+/**
+ * A query that is an identity rather than words: a qualified canonical id
+ * (`Template.get`, `workflow.instance.start`, `osf-integration.service.invoke:key`)
+ * or a generated tool name (`template_get`). A trailing separator
+ * (`example.service.`) or a space makes it words again.
+ */
+const CANONICAL_ID_SHAPE = /^[A-Za-z][\w-]*(?:\.[\w-]+)+(?::[\w.-]*[\w-])?$/u;
+const TOOL_NAME_SHAPE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/u;
+function isIdentityQuery(query: string): boolean {
+  return CANONICAL_ID_SHAPE.test(query) || TOOL_NAME_SHAPE.test(query);
+}
+
+/**
+ * The available Operation an identity names: the canonical id itself, the
+ * one available id equal to it but for letter case, or the canonical id a
+ * generated tool name resolves to — only when that id is available here.
+ */
+function identityMatch(
+  available: readonly RuntimeOperationDefinition[],
+  query: string,
+  resolveName: ((name: string) => string | undefined) | undefined,
+): RuntimeOperationDefinition | undefined {
+  const exact = available.find((definition) => definition.id === query);
+  if (exact) return exact;
+  const folded = available.filter((definition) => definition.id.toLowerCase() === query.toLowerCase());
+  if (folded.length === 1) return folded[0];
+  const resolved = resolveName?.(query);
+  return resolved === undefined ? undefined : available.find((definition) => definition.id === resolved);
+}
+
 type SearchCursor = { v: 1; q: string; s: number; id: string };
 
 /** The query a cursor belongs to: its normalized words. */
@@ -317,8 +347,9 @@ function operationSummary(definition: RuntimeOperationDefinition, name: string, 
 /**
  * Search the session's available Operations.
  *
- * An exact canonical id, or a name `resolveName` maps to one, answers with
- * that Operation's full contract alone. Otherwise every query word must match
+ * A query shaped like an identity (isIdentityQuery) is looked up exactly: the
+ * available Operation it names answers alone with its full contract, and
+ * anything else answers nothing. Otherwise every query word must match
  * (any one non-generic word when none matches them all); the matches are
  * ranked by how well the naming text fits, then by id, and paged by a cursor
  * that carries that position. A result set of exactly one Operation is its
@@ -337,15 +368,16 @@ export function searchOperationDefinitions(input: {
     const name = localizedText(definition.name, input.locale) ?? definition.id;
     return { name, description: localizedText(definition.description, input.locale) ?? name };
   };
-  if (args.query && !args.cursor) {
-    const exactId = available.some((definition) => definition.id === args.query)
-      ? args.query
-      : input.resolveName?.(args.query);
-    const exact = exactId === undefined ? undefined : available.find((definition) => definition.id === exactId);
-    if (exact) {
-      const { name, description } = shown(exact);
-      return { operations: [operationContract(exact, name, description)] };
-    }
+  if (args.query && isIdentityQuery(args.query)) {
+    // An identity is looked up, never searched: what it names is available
+    // here and answers alone with its contract, or the answer is empty. A
+    // near neighbour ("Template.get" → TemplateVersion.get) is never
+    // substituted, and whether the name exists elsewhere is not revealed.
+    if (args.cursor) throw new HttpError(400, "BAD_USER_INPUT", "Operation search cursor is invalid.");
+    const exact = identityMatch(available, args.query, input.resolveName);
+    if (!exact) return { operations: [] };
+    const { name, description } = shown(exact);
+    return { operations: [operationContract(exact, name, description)] };
   }
   const query = queryWords(args.query);
   const candidates = available.map((definition) => {

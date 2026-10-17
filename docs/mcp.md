@@ -295,12 +295,14 @@ entity CRUD and runtime provider Operations. Search ranks its matches: the words
 that name an Operation (id, key, entity, the entity's authored labels in every
 language, the Operation name) count more than its description. A result set of
 several Operations pages short summaries — identity, name, description, target,
-effects and reliability — with a `nextCursor` bound to that query. A query that
-is one exact available Operation id or generated tool name, or that only one
-Operation matches, returns that Operation alone with its full contract: the
-exact MCP input schema including field withholding and concurrency controls,
-the output schema, errors, and canonical interaction and prerequisite metadata.
-An exact-looking id or name the session cannot use returns nothing. Covered
+effects and reliability — with a `nextCursor` bound to that query. A query
+shaped like a qualified Operation id (`Template.get`) or a generated tool name
+(`template_get`) is an identity lookup, not a search: the available Operation it
+names returns alone with its full contract — the exact MCP input schema
+including field withholding and concurrency controls, the output schema, errors,
+and canonical interaction and prerequisite metadata — and an identity this
+session cannot use returns nothing, never a similarly named neighbour. A word
+query that only one Operation matches also returns that contract. Covered
 CRUD, authored operation and provider tools no longer consume individual slots
 in `tools/list`; tools without a canonical replacement remain advertised.
 The dedicated projection continues to offer its authored tool names.

@@ -20,9 +20,11 @@ export function searchableOperationToolDefinitions(
       description:
         "Search the canonical Operations currently available to this signed-in person. " +
         "Matches are ranked by how well they fit the query. When several match, the results are " +
-        "short summaries (id, name, description, effects) paged with nextCursor. An exact Operation " +
-        "id or generated tool name, or a query only one Operation matches, returns that one with its " +
-        "full contract: the exact input and output schema, errors and controls the executor validates.",
+        "short summaries (id, name, description, effects) paged with nextCursor. A query that is an " +
+        "Operation id or a generated tool name is looked up exactly: it returns that Operation alone with " +
+        "its full contract (the exact input and output schema, errors and controls the executor " +
+        "validates), or nothing when this session cannot use it. A word query that only one Operation " +
+        "matches returns that contract too.",
       inputSchema: {
         type: "object",
         properties: {

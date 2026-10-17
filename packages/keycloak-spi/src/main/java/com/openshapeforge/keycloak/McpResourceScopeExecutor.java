@@ -29,6 +29,9 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
     private String configurationError;
     private final KeycloakSession session;
     private Map<String, Binding> resources = Map.of();
+    private Set<String> resourceScopes = Set.of();
+    private static final Set<String> IDENTITY_SCOPES = Set.of("openid","profile","email","roles",
+            "organization","offline_access","address","phone","basic","acr","web-origins","microprofile-jwt");
 
     public static final class Binding {
         @JsonProperty public String resource;
@@ -50,7 +53,7 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
     @Override public void setupConfiguration(Configuration config) {
         configurationError = null;
         try { configure(config); } catch (RuntimeException error) {
-            resources = Map.of(); configurationError = "Invalid MCP resource policy configuration";
+            resources = Map.of(); resourceScopes = Set.of(); configurationError = "Invalid MCP resource policy configuration";
             LOG.warn(configurationError);
         }
     }
@@ -64,7 +67,8 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
             URI uri = URI.create(binding.resource);
             if (!"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getRawUserInfo() != null
                     || uri.getRawQuery() != null || uri.getRawFragment() != null || uri.getRawPath().isEmpty()
-                    || binding.scope == null || !binding.scope.matches("mcp-resource:[a-z0-9][a-z0-9-]*")
+                    || binding.scope == null || (!binding.scope.matches("[a-z][a-z0-9:_-]{0,149}")
+                        || IDENTITY_SCOPES.contains(binding.scope) || binding.scope.startsWith("organization:") || binding.scope.startsWith("org:"))
                     || checked.putIfAbsent(binding.resource, binding) != null)
                 throw new IllegalArgumentException("Invalid or duplicate MCP resource binding");
             if (binding.registrationScopes == null || binding.registrationScopes.stream().anyMatch(name ->
@@ -79,7 +83,12 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
                 throw new IllegalArgumentException("Resource aliases must use the same registration and organization policy");
         }
         if (checked.isEmpty()) throw new IllegalArgumentException("MCP resource policy needs explicit resource bindings");
+        Set<String> configuredScopes = Set.copyOf(scopeModes.keySet());
+        if (checked.values().stream().anyMatch(binding ->
+                binding.registrationScopes.stream().anyMatch(configuredScopes::contains)))
+            throw new IllegalArgumentException("Supporting scopes cannot be configured resource scopes");
         resources = Map.copyOf(checked);
+        resourceScopes = configuredScopes;
     }
 
     @Override public void executeOnEvent(ClientPolicyContext context) throws ClientPolicyException {
@@ -122,7 +131,8 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
             if (scopes != null && scopes.size() != 1)
                 throw denied("invalid_scope", "Exactly one scope parameter is required");
             authorization.getAuthenticationSession().setClientNote(BOUND_SCOPE,
-                    bindScopes(authorization.getAuthorizationEndpointRequest().getScope(), binding));
+                    bindScopes(authorization.getAuthorizationEndpointRequest().getScope(), binding,
+                        resourceScopes));
         }
     }
 
@@ -133,10 +143,10 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
         return matches.isEmpty() ? null : matches.get(0);
     }
 
-    static String bindScopes(String value, Binding binding) throws ClientPolicyException {
+    static String bindScopes(String value, Binding binding, Set<String> resourceScopes) throws ClientPolicyException {
         Set<String> scopes = new LinkedHashSet<>(Arrays.asList((value == null ? "" : value).trim().split("\\s+")));
         scopes.remove("");
-        if (scopes.stream().anyMatch(scope -> scope.startsWith("mcp-resource:") && !scope.equals(binding.scope)))
+        if (scopes.stream().anyMatch(scope -> (scope.startsWith("mcp-resource:") || resourceScopes.contains(scope)) && !scope.equals(binding.scope)))
             throw denied("invalid_scope", "The requested scopes conflict with the MCP resource");
         if (!binding.organization) scopes.removeIf(scope -> scope.equals("organization") || scope.startsWith("organization:"));
         scopes.add(binding.scope);

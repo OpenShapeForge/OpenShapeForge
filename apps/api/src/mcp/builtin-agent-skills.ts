@@ -72,9 +72,10 @@ for everything else and never overrides it.
 
 ## 1. Find what exists before planning around it
 
-- The tools this session lists and ${ENTITY_CATALOG_URI} are the surface you
-  have. A search that finds nothing is not a negative result: try different
-  words, and the person's language as well as English.
+- The tools, resources and resource templates this session lists, including
+  ${ENTITY_CATALOG_URI}, are the surface you have. A search that finds nothing
+  is not a negative result: try different words, and the person's language as
+  well as English.
 - Not finding something is an observation about this session, never a fact
   about the product. Say "I do not see a way to do that here", not "this
   cannot be done" — what you cannot see may exist and be out of this person's

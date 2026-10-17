@@ -40140,8 +40140,8 @@
             "nl": "Tekst"
           },
           "description": {
-            "en": "Markdown text of this block. A `{{…}}` token may be bound to the organization's variable catalogue or to another field of the same record; every read resolves the binding again under the reader's own access and inserts the result as data, not as markup.",
-            "nl": "Markdown-tekst van dit blok. Een `{{…}}`-token kan worden gebonden aan de variabelencatalogus van de organisatie of aan een ander veld van hetzelfde record; iedere leesactie lost die binding opnieuw op onder de toegang van de lezer en voegt het resultaat als data toe, niet als opmaak."
+            "en": "Markdown text of this block. A `{{…}}` token names either a parameter of the template version as `local.<key>` or an organization Chip as `chips.<key>`. Materializing the template or document resolves it under the caller's own access and inserts the value as escaped text, not as markup; reading the block returns the stored token text unchanged.",
+            "nl": "Markdown-tekst van dit blok. Een `{{…}}`-token noemt een parameter van de sjabloonversie als `local.<sleutel>` of een Chip van de organisatie als `chips.<sleutel>`. Materialiseren van het sjabloon of document lost het op onder de eigen toegang van de aanroeper en voegt de waarde in als geëscapete tekst, niet als opmaak; het blok lezen geeft de opgeslagen tokentekst ongewijzigd terug."
           },
           "validation": {
             "minLength": 1,

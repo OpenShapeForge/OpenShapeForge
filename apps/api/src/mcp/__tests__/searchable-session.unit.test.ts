@@ -11,6 +11,8 @@ import { catalog } from "../catalog.js";
 import { getEntityOperationContracts } from "../../operations/entity/index.js";
 
 const tenant = "11111111-1111-4111-8111-111111111111";
+/** How often a provider was asked for its Operations since the last reset. */
+let providerListings = 0;
 function providerDefinition(index: number): RuntimeOperationDefinition {
   return {
     id: `example.service.${String(index).padStart(4, "0")}`, intent: "invoke",
@@ -27,7 +29,7 @@ async function fixture(count: number, roles: string[], run: (client: Client) => 
   const visible = (session: { tenantId?: string | null; roles: readonly string[] }) => session.tenantId === tenant && session.roles.includes("Organization.All.ReadWrite");
   platform.registerOperationProviders([{ name: "example", operationProviders: [{
     id: "example.services",
-    list: async (session) => visible(session) ? definitions : [],
+    list: async (session) => { providerListings += 1; return visible(session) ? definitions : []; },
     get: async (session, id) => visible(session) ? definitions.find((definition) => definition.id === id) : undefined,
     execute: async (context, request) => ({ data: { tenantId: context.session.tenantId, value: request.input?.value }, operations: [] }),
   }] }]);
@@ -60,15 +62,48 @@ describe("complete searchable MCP session", () => {
       expect(result.isError).toBeFalsy(); expect(result.structuredContent).toMatchObject({ data: { tenantId: tenant, value: "last service" } });
     });
   });
+  test("a search or an execution enumerates the providers once for its catalog", async () => {
+    // Resolving the called tool name lists the session's tools, providers
+    // included, for every tool call; that is one enumeration. The search or
+    // execution itself takes one snapshot of the Operations and their
+    // provider ids, never a second provider listing beside it.
+    await fixture(3, ["Organization.All.ReadWrite"], async (client) => {
+      providerListings = 0;
+      const page = data(await client.callTool({ name: "osf_search_operations", arguments: { query: "example.service.", limit: 2 } }));
+      expect(page.operations).toHaveLength(2);
+      expect(providerListings).toBe(2);
+      providerListings = 0;
+      const result = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: providerDefinition(2).id, input: { value: "x" } } });
+      expect(result.isError).toBeFalsy();
+      expect(providerListings).toBe(2);
+    });
+  });
   test("entity CRUD is discoverable with its exact schema and uses the existing MCP validator", async () => {
     const operation = getEntityOperationContracts().find((candidate) => candidate.intent === "get" && catalog.tools.some((tool) => tool.operationId === candidate.id))!;
     expect(operation).toBeDefined();
     await fixture(0, [...operation.authorization.roles], async (client) => {
       const page = data(await client.callTool({ name: "osf_search_operations", arguments: { query: operation.id } }));
-      expect(page.operations.map((candidate) => candidate.operation.id)).toContain(operation.id);
+      // The exact id answers that Operation alone, with the schema the executor validates.
+      expect(page.operations.map((candidate) => candidate.operation.id)).toEqual([operation.id]);
+      expect(page.operations[0]!.inputSchema).toMatchObject({ type: "object" });
       const result = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: operation.id, input: { id: "invalid-uuid" } } });
       expect(result.isError).toBe(true); expect(JSON.stringify(result.structuredContent)).not.toContain("NOT_FOUND");
       expect(JSON.stringify(result.structuredContent)).toMatch(/VALIDATION|BAD_USER_INPUT/);
+    });
+  });
+  test("a dedicated generated tool name answers its canonical Operation's contract", async () => {
+    const tool = catalog.tools.find((candidate) => !candidate.name.startsWith("osf_") &&
+      catalog.tools.filter((other) => other.name === candidate.name).length === 1 &&
+      getEntityOperationContracts().some((contract) => contract.id === candidate.operationId))!;
+    expect(tool).toBeDefined();
+    const contract = getEntityOperationContracts().find((candidate) => candidate.id === tool.operationId)!;
+    await fixture(0, [...contract.authorization.roles], async (client) => {
+      const page = data(await client.callTool({ name: "osf_search_operations", arguments: { query: tool.name } }));
+      expect(page.operations.map((candidate) => candidate.operation.id)).toEqual([tool.operationId]);
+      expect(page.operations[0]!.inputSchema).toMatchObject({ type: "object" });
+    });
+    await fixture(0, [], async (client) => {
+      expect(data(await client.callTool({ name: "osf_search_operations", arguments: { query: tool.name } })).operations).toEqual([]);
     });
   });
   test("a CRUD Operation is found by its canonical name in another language", async () => {

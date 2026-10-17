@@ -107,7 +107,7 @@ describe("searchable MCP Operations", () => {
     expect(ids("x")).toEqual([]);
   });
 
-  test("never falls back on a shared action verb alone, and pages the fallback by id", () => {
+  test("never falls back on a shared action verb alone, and pages the fallback by rank then id", () => {
     const definitions = ["a.create", "b.create", "c.create", "payroll.run"].map((id) =>
       definition(id, { name: { en: id.endsWith("create") ? "Create record" : "Run payroll" }, description: { en: "Does it." } }));
     const allowedIds = new Set(definitions.map((d) => d.id));
@@ -122,7 +122,7 @@ describe("searchable MCP Operations", () => {
       .toEqual(["a.create", "b.create", "c.create", "payroll.run"]);
   });
 
-  test("filters before paging and returns exact canonical schemas", () => {
+  test("filters before paging; a multi-hit set pages summaries even at limit 1, an exact id answers its contract", () => {
     const definitions = [
       definition("demo.alpha", {
         concurrency: {
@@ -130,38 +130,140 @@ describe("searchable MCP Operations", () => {
           editLease: { mode: "required", expiresAfterInactivity: "PT7M" },
         },
         errors: [{ status: 409, code: "CONFLICT", description: "Already running." }],
+        effects: { data: "write", external: "none" },
       }),
       definition("demo.bravo"),
       definition("secret.hidden"),
     ];
     const allowedIds = new Set(["demo.alpha", "demo.bravo"]);
-    const first = searchOperationDefinitions({
-      definitions,
-      allowedIds,
-      arguments: { query: "demo", limit: 1 },
-      locale,
-    });
+    const search = (args: Record<string, unknown>) =>
+      searchOperationDefinitions({ definitions, allowedIds, arguments: args, locale });
+    const first = search({ query: "demo", limit: 1 });
     expect(first.operations).toHaveLength(1);
-    expect(first.operations[0]).toEqual(expect.objectContaining({
+    expect(first.operations[0]).toEqual({
+      operation: { id: "demo.alpha", intent: "invoke" },
+      key: "alpha",
+      name: "Operation demo.alpha",
+      description: "Description for demo.alpha",
+      effects: { data: "write", external: "none" },
+      reliability: { idempotency: { mode: "natural" } },
+    });
+    expect(first.nextCursor).toEqual(expect.any(String));
+    const second = search({ query: "demo", cursor: first.nextCursor, limit: 20 });
+    expect(second.operations.map((entry) => entry.operation)).toEqual([{ id: "demo.bravo", intent: "invoke" }]);
+    expect(second.nextCursor).toBeUndefined();
+    expect(JSON.stringify([...first.operations, ...second.operations])).not.toContain("secret.hidden");
+
+    const exact = search({ query: "demo.alpha" });
+    expect(exact).toEqual({ operations: [expect.objectContaining({
       operation: { id: "demo.alpha", intent: "invoke" },
       inputSchema: definitions[0]!.input.schema,
       outputSchema: definitions[0]!.output.schema,
       concurrency: definitions[0]!.concurrency,
       errors: [{ status: 409, code: "CONFLICT", description: "Already running." }],
-    }));
-    expect(first.nextCursor).toBe("demo.alpha");
+      effects: { data: "write", external: "none" },
+    })] });
+    // An exact-looking id this session cannot use answers nothing about it.
+    expect(search({ query: "secret.hidden" })).toEqual({ operations: [] });
+  });
 
-    const second = searchOperationDefinitions({
-      definitions,
-      allowedIds,
-      arguments: { query: "demo", cursor: first.nextCursor, limit: 20 },
-      locale,
+  test("an exact id wins over everything it resembles", () => {
+    const definitions = ["Block.update", "Template.get", "Template.list", "TemplateVersion.get"].map((id) =>
+      definition(id, { name: { en: `Template ${id}` } }));
+    const found = searchOperationDefinitions({
+      definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query: "Template.get" }, locale,
+    }).operations;
+    expect(found.map((entry) => (entry.operation as { id: string }).id)).toEqual(["Template.get"]);
+    expect(found[0]).toHaveProperty("inputSchema");
+  });
+
+  test("a generated name resolves only to an available id, and a shared or unknown name to none", () => {
+    const definitions = [definition("Relation.list", { name: { en: "List relations" } }), definition("Relation.get"), definition("Hidden.list")];
+    const allowedIds = new Set(["Relation.list", "Relation.get"]);
+    const names = new Map([["relation_list", "Relation.list"], ["hidden_list", "Hidden.list"]]);
+    const search = (query: string) => searchOperationDefinitions({
+      definitions, allowedIds, arguments: { query }, locale, resolveName: (name) => names.get(name),
     });
-    expect(second.operations.map((entry) => entry.operation)).toEqual([
-      { id: "demo.bravo", intent: "invoke" },
-    ]);
-    expect(JSON.stringify([...first.operations, ...second.operations]))
-      .not.toContain("secret.hidden");
+    const generated = search("relation_list").operations;
+    expect(generated.map((entry) => (entry.operation as { id: string }).id)).toEqual(["Relation.list"]);
+    expect(generated[0]).toHaveProperty("inputSchema");
+    expect(JSON.stringify(search("hidden_list"))).not.toContain("Hidden");
+    expect(search("osf_list").operations).toEqual([]);
+  });
+
+  test("ranks naming over description and splits camel case", () => {
+    const definitions = [
+      definition("Adapter.publish", { name: { en: "Publish adapter" }, description: { en: "Publishes article content of an adapter." } }),
+      definition("KnowledgeItem.list", { name: { en: "List knowledge items" }, description: { en: "Returns article subjects; content lives in documents." } }),
+      definition("Template.list", { name: { en: "List templates" } }),
+      definition("TemplateVariant.list", { name: { en: "List template variants" } }),
+    ];
+    const ids = (query: string) => searchOperationDefinitions({
+      definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query }, locale,
+    }).operations.map((entry) => (entry.operation as { id: string }).id);
+    expect(ids("knowledge article content")[0]).toBe("KnowledgeItem.list");
+    expect(ids("TemplateVariant")).toEqual(["TemplateVariant.list"]);
+    expect(ids("template variant")).toEqual(["TemplateVariant.list"]);
+    expect(ids("template")).toEqual(["Template.list", "TemplateVariant.list"]);
+  });
+
+  test("a query that is exactly an entity's name ranks that entity first", () => {
+    const definitions = ["CaseStepTemplate.get", "CaseTemplate.get", "Template.get", "Template.list", "TemplateVariant.get"].map((id) =>
+      definition(id, { entityName: id.split(".")[0], name: { en: id.split(".")[1]! } }));
+    const ids = (query: string) => searchOperationDefinitions({
+      definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query }, locale,
+    }).operations.map((entry) => (entry.operation as { id: string }).id);
+    expect(ids("Template")).toEqual(["Template.get", "Template.list", "CaseStepTemplate.get", "CaseTemplate.get", "TemplateVariant.get"]);
+    expect(ids("TemplateVariant")[0]).toBe("TemplateVariant.get");
+  });
+
+  test("an entity's authored label in any language finds its Operations", () => {
+    const definitions = [definition("KnowledgeItem.list", { entityName: "KnowledgeItem", name: { en: "list", nl: "Tonen" } }), definition("Relation.list", { entityName: "Relation" })];
+    const search = (query: string, labels?: Map<string, Record<string, string>>) => searchOperationDefinitions({
+      definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query }, locale,
+      ...(labels ? { entityLabels: labels } : {}),
+    }).operations.map((entry) => (entry.operation as { id: string }).id);
+    expect(search("kennis")).toEqual([]);
+    expect(search("kennis", new Map([["KnowledgeItem", { en: "Knowledge item", nl: "Kennisitem" }]]))).toEqual(["KnowledgeItem.list"]);
+  });
+
+  test("cursors are bound to their query and refuse tampering", () => {
+    const definitions = ["demo.a", "demo.b", "demo.c"].map((id) => definition(id));
+    const search = (args: Record<string, unknown>) => searchOperationDefinitions({
+      definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: args, locale,
+    });
+    const first = search({ query: "demo", limit: 1 });
+    expect(() => search({ query: "operation", cursor: first.nextCursor })).toThrow(/different query/i);
+    expect(() => search({ query: "demo", cursor: "demo.a" })).toThrow(/cursor is invalid/i);
+    const forged = Buffer.from(JSON.stringify({ v: 1, q: "x", s: -1, id: "demo.a" })).toString("base64url");
+    expect(() => search({ query: "demo", cursor: forged })).toThrow(/cursor is invalid/i);
+    // The same words in another spelling are the same query.
+    expect(search({ query: "Demo", cursor: first.nextCursor }).operations).toHaveLength(2);
+  });
+
+  test("a ranked walk with ties reaches every match once, in rank then id order", () => {
+    const definitions = Array.from({ length: 37 }, (_, index) => definition(`area${index % 3}.op${String(index).padStart(2, "0")}`, {
+      name: { en: index % 4 === 0 ? "Invoice reminder" : "Send reminder" },
+      description: { en: index % 5 === 0 ? "About an invoice." : "Something else." },
+    }));
+    const allowedIds = new Set(definitions.map((d) => d.id));
+    for (const limit of [1, 4, 20]) {
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = searchOperationDefinitions({ definitions, allowedIds, arguments: { query: "invoice reminder", limit, ...(cursor ? { cursor } : {}) }, locale });
+        seen.push(...page.operations.map((entry) => (entry.operation as { id: string }).id));
+        cursor = page.nextCursor;
+      } while (cursor);
+      // "reminder" names all 37; "invoice" names some and describes others, so
+      // the any-word tier is not used and nothing without invoice is listed.
+      const expected = definitions
+        .map((d, index) => ({ id: d.id, score: 4 + (index % 4 === 0 ? 4 : index % 5 === 0 ? 2 : 0) }))
+        .filter(({ score }) => score > 4)
+        .sort((left, right) => right.score - left.score || (left.id < right.id ? -1 : 1))
+        .map(({ id }) => id);
+      expect(seen).toEqual(expected);
+    }
   });
 
   test("validates generic arguments without accepting identity metadata", () => {
@@ -268,7 +370,7 @@ describe("operation search matches the model's own words", () => {
     expect(ids("uitnodiging")).toEqual(["accounts.invite-member"]);
   });
 
-  test("without a full match, any longer word still finds candidates, in id order", () => {
+  test("without a full match, any longer word still finds candidates, best fit first", () => {
     expect(ids("invite user with finance viewer role")).toEqual(["accounts.invite-member", "accounts.list-roles"]);
   });
 

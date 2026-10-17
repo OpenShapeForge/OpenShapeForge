@@ -175,14 +175,20 @@ fields:
 operations:
   list:
     name: List block
-    description: Read accessible block records.
+    description: >-
+      Returns a page of the block placements this session may read. To read one document variant's content in
+      order, filter on documentVariant, sort on documentVariantIdPosition ascending and continue through every
+      page; a template variant's blocks filter on variant and sort on variantIdPosition. values holds each
+      placement's stored content in the shape its definitionKey names: a TextBlock's markdown comes back as
+      stored, with any {{…}} variable token unresolved, and a TemplateBlock names an included template version
+      rather than carrying its text.
     implementation: { type: entity, action: list }
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: none }
   get:
     name: Read block
-    description: Read one accessible block record.
+    description: Returns one block placement by id, with its stored values exactly as written.
     implementation: { type: entity, action: get }
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }

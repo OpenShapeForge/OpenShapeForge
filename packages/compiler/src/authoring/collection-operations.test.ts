@@ -16,6 +16,8 @@ import { collectAuthoredEntityPluginOperations, collectPluginOperations, assertO
 import type { CoreEntity, Field } from "./types.js";
 import type { FieldDefinitionInverseCollection } from "./types/field-definition.js";
 import type { CompiledEntityInfo, PluginOperationContract } from "../plugins.js";
+import { buildMcpCatalog } from "../generate-mcp.js";
+import { entityOperationJsonSchemas } from "../entity-operation-json-schema.js";
 
 const context = { repoRoot: "/repo", authoringDir: "/repo/authoring", webPresent: true };
 const native = (action: "insert" | "move") => ({
@@ -292,4 +294,29 @@ test("authoring schema accepts identityless baseEntity false and object semantic
   const document = entity("Example", [{ key: "label", osfType: "string" }]);
   expect(() => authoringValidator().validate(document, "/authoring/entities/core/example.yaml")).not.toThrow();
   expect(() => authoringValidator().validate({ kind: "osfTypeCatalog", schemaVersion: 1, types: { entityValue: { kind: "object", baseType: "object", label: { en: "Entity value" } } } }, "/authoring/catalogs/osf-types.yaml")).not.toThrow();
+});
+
+test("list contracts sort a sortable collection's children by their authored position", () => {
+  const entries = fixture();
+  const contracts = entries.map((entry) => entry.contract);
+  const catalog = buildMcpCatalog(entries.map(({ slug, contract }) => ({ slug, contract, table: `core.${slug}s` })), "test");
+  const sortKeys = (entity: string) => (catalog.tools.find((tool) => tool.entity === entity && tool.operation === "list")!
+    .inputSchema.properties as Record<string, { enum: string[] }>).sortField!;
+  // The column the backend manifest adds beside the owning key, spelled as
+  // the runtime serializes it; the owner itself gains no position.
+  expect(sortKeys("Child").enum).toContain("ownerIdPosition");
+  expect(sortKeys("Owner").enum).not.toContain("ownerIdPosition");
+  expect(sortKeys("Child").enum.filter((key) => key.endsWith("Position"))).toEqual(["ownerIdPosition"]);
+  const child = contracts.find((contract) => contract.entity.name === "Child")!;
+  const canonical = entityOperationJsonSchemas(child, child.entityOperations.list!, contracts, {}).inputSchema as {
+    properties: { sort: { properties: { field: { enum: string[] } } } };
+  };
+  expect(canonical.properties.sort.properties.field.enum).toEqual(sortKeys("Child").enum);
+});
+
+test("a non-sortable collection offers no position sort key", () => {
+  const entries = fixture((_owner, child) => { delete children(child).sortable; });
+  const catalog = buildMcpCatalog(entries.map(({ slug, contract }) => ({ slug, contract, table: `core.${slug}s` })), "test");
+  const list = catalog.tools.find((tool) => tool.entity === "Child" && tool.operation === "list")!;
+  expect(JSON.stringify(list.inputSchema)).not.toContain("Position");
 });

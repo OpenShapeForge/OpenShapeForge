@@ -636,6 +636,18 @@ export class ModulePlatformRuntime {
   async #listOperations(
     session: TrustedSessionContext,
   ): Promise<readonly RuntimeOperationDefinition[]> {
+    return (await this.listOperationSnapshot(session)).definitions;
+  }
+
+  /**
+   * One enumeration of the session's Operations, with the ids among them that
+   * a runtime provider listed. A caller that needs both reads them from this
+   * single snapshot instead of asking the providers a second time, which could
+   * also answer differently in between.
+   */
+  async listOperationSnapshot(
+    session: TrustedSessionContext,
+  ): Promise<{ definitions: readonly RuntimeOperationDefinition[]; providerIds: ReadonlySet<string> }> {
     if (!this.#acceptsScopedSession(session)) {
       throw new Error("Module Operation listing requires a live verified session.");
     }
@@ -665,7 +677,10 @@ export class ModulePlatformRuntime {
       }
       byId.set(definition.id, definition);
     }
-    return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
+    return {
+      definitions: [...byId.values()].sort((left, right) => left.id.localeCompare(right.id)),
+      providerIds: new Set(provided.map((definition) => definition.id)),
+    };
   }
 
   /**

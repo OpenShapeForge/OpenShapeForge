@@ -19,20 +19,23 @@ export function searchableOperationToolDefinitions(
       title: "Search available Operations",
       description:
         "Search the canonical Operations currently available to this signed-in person. " +
-        "Results include the exact input schema needed by the generic executor.",
+        "Matches are ranked by how well they fit the query. When several match, the results are " +
+        "short summaries (id, name, description, effects) paged with nextCursor. An exact Operation " +
+        "id or generated tool name, or a query only one Operation matches, returns that one with its " +
+        "full contract: the exact input and output schema, errors and controls the executor validates.",
       inputSchema: {
         type: "object",
         properties: {
           query: {
             type: "string",
             maxLength: 200,
-            description: "Optional text matched against Operation id, key, name and description.",
+            description: "Words in any language matched against Operation id, key, name, description and entity label; or one exact Operation id or tool name.",
           },
           cursor: {
             type: "string",
             minLength: 1,
             maxLength: 512,
-            description: "Continuation value returned by the preceding search page.",
+            description: "nextCursor of the preceding page of the same query.",
           },
           limit: {
             type: "integer",
@@ -63,19 +66,20 @@ export function searchableOperationToolDefinitions(
       name: names.execute,
       title: "Execute an available Operation",
       description:
-        "Execute one canonical Operation returned by the search tool. For a keyed Operation, " +
-        "reuse the same idempotencyKey only when retrying the exact same input.",
+        "Execute one canonical Operation found with the search tool, with input matching the contract " +
+        "a search for its exact id returns. For a keyed Operation, reuse the same idempotencyKey only " +
+        "when retrying the exact same input.",
       inputSchema: {
         type: "object",
         properties: {
           operationId: {
             type: "string",
             minLength: 1,
-            description: "Exact canonical Operation id returned by the search tool.",
+            description: "Exact canonical Operation id from the search tool.",
           },
           input: {
             type: "object",
-            description: "Business input and platform controls matching the returned inputSchema.",
+            description: "Business input and platform controls matching that Operation's inputSchema.",
           },
           idempotencyKey: {
             type: "string",

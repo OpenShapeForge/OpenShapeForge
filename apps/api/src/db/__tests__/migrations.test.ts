@@ -44,6 +44,11 @@ import {
 import { ensureCheckConstraint } from "../migrations/sql-invariants.js";
 import { versionedMigrations } from "../migrations/versioned/index.js";
 import chipMigration from "../migrations/versioned/0016_chip-definition-default.js";
+import tenantIdentityMigration, {
+  tenantIdentityRegistries,
+  upgradeTenantIdentityDefaults,
+  type RegistryTable,
+} from "../migrations/versioned/0017_tenant-identity-default.js";
 import { findUndeclaredDatabaseSchema } from "../schema-drift.js";
 
 // The migration chain now provisions the cluster-wide openshapeforge_app role and
@@ -1129,4 +1134,255 @@ describe("hand-written check invariants", () => {
     },
     TEST_TIMEOUT,
   );
+});
+
+describe("tenant registry identity default (0017)", () => {
+  const TENANTS = "erp.tenants";
+  const identityDefault = async (db: Kysely<DB>, relation = TENANTS) => (await sql<{ expression: string | null }>`
+    select pg_get_expr(d.adbin, d.adrelid) as expression from pg_attribute a
+    left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
+    where a.attrelid = to_regclass(${relation}) and a.attname = 'id'`.execute(db)).rows[0]?.expression ?? null;
+  const identityCheck = async (db: Kysely<DB>) => (await sql<{ count: number }>`
+    select count(*)::int as count from pg_constraint
+    where conrelid = 'erp.tenants'::regclass and conname = 'tenants_tenant_identity_check'`.execute(db)).rows[0]!.count;
+  const fingerprint = async (db: Kysely<DB>) => (await sql<{ digest: string; rows: number }>`
+    select md5(coalesce(string_agg(to_jsonb(t)::text, '|' order by t.id), '')) as digest, count(*)::int as rows
+    from erp.tenants t`.execute(db)).rows[0]!;
+  const ledger = async (db: Kysely<DB>) => (await sql<{ count: number }>`
+    select count(*)::int as count from platform.schema_migrations where version = ${tenantIdentityMigration.version}`.execute(db)).rows[0]!.count;
+  /** A database built before the registry's identity default existed: legacy default, no check, 0017 not applied. */
+  async function legacy(db: Kysely<DB>, rows: { id: string; tenant: string }[]) {
+    await sql`alter table erp.tenants drop constraint if exists tenants_tenant_identity_check`.execute(db);
+    await sql`alter table erp.tenants alter column id set default gen_random_uuid()`.execute(db);
+    for (const [index, row] of rows.entries()) {
+      await sql`insert into erp.tenants (id, tenant_id, slug, name) values (${row.id}::uuid, ${row.tenant}::uuid, ${`tenant-${index}`}, ${`Tenant ${index}`})`.execute(db);
+    }
+    await sql`delete from platform.schema_migrations where version = ${tenantIdentityMigration.version}`.execute(db);
+    await staleChecksum(db);
+  }
+
+  test("selects registries by their compiler-owned identity metadata, not by name", () => {
+    const registry = (overrides: Partial<RegistryTable> = {}): RegistryTable => ({
+      name: "custom.orgs", schema: "custom", table: "orgs", tenantScoped: true, primaryKey: "id",
+      columns: [{ name: "id", type: "uuid", primaryKey: true, default: "app.current_tenant()" }, { name: "tenant_id", type: "uuid" }],
+      constraints: [{ compilerOwned: true, kind: "check", expression: "id = tenant_id" }], ...overrides,
+    });
+    expect(tenantIdentityRegistries([registry()]).map((table) => table.name)).toEqual(["custom.orgs"]);
+    expect(tenantIdentityRegistries([registry({ constraints: [{ compilerOwned: false, kind: "check", expression: "id = tenant_id" }] })])).toEqual([]);
+    expect(tenantIdentityRegistries([registry({ tenantScoped: false })])).toEqual([]);
+    expect(tenantIdentityRegistries([registry({ columns: [{ name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" }, { name: "tenant_id", type: "uuid" }] })])).toEqual([]);
+    expect(tenantIdentityRegistries([registry({ schema: "Bad-Name" })])).toEqual([]);
+    expect(tenantIdentityRegistries(manifest.tables as unknown as RegistryTable[]).map((table) => table.name)).toContain(TENANTS);
+  });
+
+  test("a built database records 0017 as its baseline without running it", async () => {
+    await withScratchDb(async (url) => {
+      await runChain(url);
+      await withDb(url, async (db) => {
+        expect(await ledger(db)).toBe(1);
+        expect(await identityDefault(db)).toBe("app.current_tenant()");
+        expect(await upgradeTenantIdentityDefaults(db, manifest.tables as unknown as RegistryTable[])).toMatchObject({ upgraded: [], current: [TENANTS] });
+      });
+    });
+  }, TEST_TIMEOUT);
+
+  test("the legacy default is carried forward, rows are kept and the chain then adds the identity check", async () => {
+    await withScratchDb(async (url) => {
+      await runChain(url);
+      const tenants = [randomUUID(), randomUUID()];
+      let before!: { digest: string; rows: number };
+      await withDb(url, async (db) => {
+        await legacy(db, tenants.map((id) => ({ id, tenant: id })));
+        expect(await identityCheck(db)).toBe(0);
+        before = await fingerprint(db);
+      });
+      const result = await runChain(url);
+      expect(result.versioned.applied).toContain(tenantIdentityMigration.version);
+      await withDb(url, async (db) => {
+        expect(await identityDefault(db)).toBe("app.current_tenant()");
+        expect(await identityCheck(db)).toBe(1);
+        expect(await fingerprint(db)).toEqual(before);
+        expect(await ledger(db)).toBe(1);
+        expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).not.toBe("simulated-old");
+      });
+      // A second run is a no-op.
+      expect((await runChain(url)).versioned.applied).toEqual([]);
+    });
+  }, TEST_TIMEOUT);
+
+  test("a row whose id differs from its tenant_id refuses atomically: no default, row or ledger change", async () => {
+    await withScratchDb(async (url) => {
+      await runChain(url);
+      let before!: { digest: string; rows: number };
+      await withDb(url, async (db) => {
+        const same = randomUUID();
+        await legacy(db, [{ id: same, tenant: same }, { id: randomUUID(), tenant: randomUUID() }]);
+        before = await fingerprint(db);
+      });
+      const message = await expectRejects(runChain(url));
+      expect(message).toContain("erp.tenants: 1 row(s) have an id different from their tenant_id");
+      await withDb(url, async (db) => {
+        expect(await identityDefault(db)).toBe("gen_random_uuid()");
+        expect(await ledger(db)).toBe(0);
+        expect(await fingerprint(db)).toEqual(before);
+        expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe("simulated-old");
+      });
+    });
+  }, TEST_TIMEOUT);
+
+  test("an unknown custom default is left unchanged and remains non-additive drift", async () => {
+    await withScratchDb(async (url) => {
+      await runChain(url);
+      await withDb(url, async (db) => {
+        await legacy(db, []);
+        await sql`alter table erp.tenants alter column id set default '00000000-0000-4000-8000-000000000000'::uuid`.execute(db);
+      });
+      const message = await expectRejects(runChain(url));
+      expect(message).toContain("erp.tenants.id: default mismatch");
+      await withDb(url, async (db) => {
+        expect(await identityDefault(db)).toBe("'00000000-0000-4000-8000-000000000000'::uuid");
+        expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe("simulated-old");
+      });
+    });
+  }, TEST_TIMEOUT);
+
+  test("a non-superuser, non-BYPASSRLS owner under forced row security still checks every row", async () => {
+    const role = `mig0017_${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+    const admin = new SQL(ADMIN_URL, { max: 1 });
+    try {
+      await admin.unsafe(`create role ${role} login password '${role}' nosuperuser nobypassrls`);
+      await withScratchDb(async (url) => {
+        await runChain(url);
+        const tenants = [randomUUID(), randomUUID()];
+        await withDb(url, async (db) => {
+          await legacy(db, tenants.map((id) => ({ id, tenant: id })));
+          await sql.raw(`alter table erp.tenants owner to ${role}`).execute(db);
+          await sql.raw(`grant usage on schema erp, app to ${role}`).execute(db);
+          await sql.raw(`grant execute on all functions in schema app to ${role}`).execute(db);
+        });
+        const roleUrl = new URL(url); roleUrl.username = role; roleUrl.password = role;
+        await withDb(roleUrl.toString(), async (db) => {
+          // Without the trusted context this owner sees no row at all (FORCE ROW LEVEL SECURITY).
+          expect((await sql<{ count: number }>`select count(*)::int as count from erp.tenants`.execute(db)).rows[0]!.count).toBe(0);
+          const outcome = await db.transaction().execute((trx) =>
+            upgradeTenantIdentityDefaults(trx, manifest.tables as unknown as RegistryTable[]));
+          expect(outcome.upgraded).toEqual([TENANTS]);
+        });
+        await withDb(url, async (db) => {
+          expect(await identityDefault(db)).toBe("app.current_tenant()");
+          await sql`alter table erp.tenants alter column id set default gen_random_uuid()`.execute(db);
+          await sql`insert into erp.tenants (id, tenant_id, slug, name) values (gen_random_uuid(), gen_random_uuid(), 'mismatch', 'Mismatch')`.execute(db);
+        });
+        // Policies that hide the mismatched row even in the trusted context — some mention
+        // app.bypass_rls() — are refused before any DDL instead of checking a filtered subset.
+        const hostile = [
+          "as restrictive for select using (tenant_id = app.current_tenant())",
+          "as restrictive for select using (app.bypass_rls() and false)",
+          "as restrictive using (not app.bypass_rls() or false)",
+          "as restrictive for select using ((app.bypass_rls() or tenant_id = app.current_tenant()) and false)",
+          "as permissive for select using (app.bypass_rls() and false)",
+        ];
+        for (const policy of hostile) {
+          await withDb(url, async (db) => {
+            await sql.raw(`create policy hostile_probe on erp.tenants ${policy}`).execute(db);
+          });
+          await withDb(roleUrl.toString(), async (db) => {
+            if (policy.startsWith("as restrictive")) {
+              const visible = await db.transaction().execute(async (trx) => {
+                await sql`select set_config('app.bypass_rls', 'true', true)`.execute(trx);
+                return (await sql<{ count: number }>`select count(*)::int as count from erp.tenants where id is distinct from tenant_id`.execute(trx)).rows[0]!.count;
+              });
+              expect(visible).toBe(0);
+            }
+            const message = await expectRejects(db.transaction().execute((trx) =>
+              upgradeTenantIdentityDefaults(trx, manifest.tables as unknown as RegistryTable[])));
+            expect(message).toContain("policies that are not a trusted app.bypass_rls() disjunct: hostile_probe");
+          });
+          await withDb(url, async (db) => {
+            expect(await identityDefault(db)).toBe("gen_random_uuid()");
+            await sql`drop policy hostile_probe on erp.tenants`.execute(db);
+          });
+        }
+        // The generated policy proves nothing for a role it does not apply to.
+        await withDb(url, async (db) => {
+          await sql`alter policy tenants_tenant_isolation on erp.tenants to pg_monitor`.execute(db);
+        });
+        await withDb(roleUrl.toString(), async (db) => {
+          const message = await expectRejects(db.transaction().execute((trx) =>
+            upgradeTenantIdentityDefaults(trx, manifest.tables as unknown as RegistryTable[])));
+          expect(message).toContain("no permissive SELECT policy applies to the migration role");
+        });
+        // Nor for a group the role is only a NOINHERIT member of: row security does not apply that policy.
+        const group = `${role}_g`;
+        await withDb(url, async (db) => {
+          expect(await identityDefault(db)).toBe("gen_random_uuid()");
+          await sql.raw(`create role ${group} nologin; grant ${group} to ${role} with inherit false`).execute(db);
+          await sql.raw(`alter policy tenants_tenant_isolation on erp.tenants to ${group}`).execute(db);
+        });
+        await withDb(roleUrl.toString(), async (db) => {
+          const visible = await db.transaction().execute(async (trx) => {
+            await sql`select set_config('app.bypass_rls', 'true', true)`.execute(trx);
+            return (await sql<{ count: number }>`select count(*)::int as count from erp.tenants`.execute(trx)).rows[0]!.count;
+          });
+          expect(visible).toBe(0);
+          const message = await expectRejects(db.transaction().execute((trx) =>
+            upgradeTenantIdentityDefaults(trx, manifest.tables as unknown as RegistryTable[])));
+          expect(message).toContain("no permissive SELECT policy applies to the migration role");
+        });
+        await withDb(url, async (db) => {
+          expect(await identityDefault(db)).toBe("gen_random_uuid()");
+          await sql`alter policy tenants_tenant_isolation on erp.tenants to public`.execute(db);
+          await sql.raw(`drop role ${group}`).execute(db);
+          // Row security ignores a policy for a role the migration role does not have, so it neither blocks nor hides.
+          await sql`create policy other_role_probe on erp.tenants as restrictive for select to pg_monitor using (false)`.execute(db);
+        });
+        await withDb(roleUrl.toString(), async (db) => {
+          const message = await expectRejects(db.transaction().execute((trx) =>
+            upgradeTenantIdentityDefaults(trx, manifest.tables as unknown as RegistryTable[])));
+          expect(message).toContain("erp.tenants: 1 row(s) have an id different from their tenant_id");
+        });
+        await withDb(url, async (db) => {
+          expect(await identityDefault(db)).toBe("gen_random_uuid()");
+          await sql`delete from erp.tenants where id is distinct from tenant_id`.execute(db);
+        });
+        await withDb(roleUrl.toString(), async (db) => {
+          const outcome = await db.transaction().execute((trx) =>
+            upgradeTenantIdentityDefaults(trx, manifest.tables as unknown as RegistryTable[]));
+          expect(outcome.upgraded).toEqual([TENANTS]);
+        });
+        await withDb(url, async (db) => {
+          expect(await identityDefault(db)).toBe("app.current_tenant()");
+          await sql`drop policy other_role_probe on erp.tenants`.execute(db);
+          await sql.raw(`reassign owned by ${role} to current_user`).execute(db);
+          await sql.raw(`drop owned by ${role}`).execute(db);
+        });
+      });
+    } finally {
+      await admin.unsafe(`drop role if exists ${role}_g`);
+      await admin.unsafe(`drop role if exists ${role}`);
+      await admin.close();
+    }
+  }, TEST_TIMEOUT);
+
+  test("a second registry under another schema and name is handled; an absent one is skipped", async () => {
+    await withScratchDb(async (url) => {
+      await runChain(url);
+      await withDb(url, async (db) => {
+        await sql`create schema drift_registry`.execute(db);
+        await sql`create table drift_registry.workspaces (id uuid primary key default gen_random_uuid(), tenant_id uuid not null)`.execute(db);
+        const id = randomUUID();
+        await sql`insert into drift_registry.workspaces (id, tenant_id) values (${id}::uuid, ${id}::uuid)`.execute(db);
+        const table = (schema: string, name: string): RegistryTable => ({
+          name: `${schema}.${name}`, schema, table: name, tenantScoped: true, primaryKey: "id",
+          columns: [{ name: "id", type: "uuid", primaryKey: true, default: "app.current_tenant()" }, { name: "tenant_id", type: "uuid" }],
+          constraints: [{ compilerOwned: true, kind: "check", expression: "id = tenant_id" }],
+        });
+        const outcome = await db.transaction().execute((trx) =>
+          upgradeTenantIdentityDefaults(trx, [table("drift_registry", "workspaces"), table("drift_registry", "missing")]));
+        expect(outcome).toEqual({ upgraded: ["drift_registry.workspaces"], current: [], absent: ["drift_registry.missing"], untouched: [] });
+        expect(await identityDefault(db, "drift_registry.workspaces")).toBe("app.current_tenant()");
+        expect((await sql<{ id: string }>`select id::text from drift_registry.workspaces`.execute(db)).rows).toEqual([{ id }]);
+      });
+    });
+  }, TEST_TIMEOUT);
 });

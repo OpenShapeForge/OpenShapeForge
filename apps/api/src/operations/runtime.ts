@@ -80,6 +80,7 @@ import { evaluateOperationAvailability } from "./availability.js";
 import { nativeEntityTypeListHandler } from "./entity-type-list.js";
 import { GRANTS_PLUGIN, grantsOperationHandler } from "./grants-operations.js";
 import { SOURCE_SYNC_PLUGIN, sourceSyncOperationHandler } from "./source-sync-operations.js";
+import { EDIT_LEASES_PLUGIN, editLeaseOperationHandler } from "./edit-lease-operations.js";
 import { BILLING_PLUGIN, billingOperationHandler } from "./billing/module.js";
 import {
   capabilityGrantRefusal,
@@ -634,6 +635,14 @@ export function bindOperationHandlers(
     if (operation.plugin === SOURCE_SYNC_PLUGIN) {
       if (modulesByName.has(SOURCE_SYNC_PLUGIN)) throw new Error("The core source-sync runtime cannot be replaced by a plugin.");
       bound.set(operation.key, { operation, handler: sourceSyncOperationHandler(operation) });
+      continue;
+    }
+    // The central edit-lease service is core too: it is the same service the
+    // generated entity Operations and every interface adapter already use
+    // (operations/edit-lease-operations.ts), so it binds wherever they do.
+    if (operation.plugin === EDIT_LEASES_PLUGIN) {
+      if (modulesByName.has(EDIT_LEASES_PLUGIN)) throw new Error("The core edit-lease runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: editLeaseOperationHandler(operation) });
       continue;
     }
     // Billing is core as well: the milestone run and the milestone create

@@ -530,10 +530,33 @@ export function restEditLeaseOperationIdsForSession(
   ];
 }
 
+/**
+ * Lease-protected Operations this identity may reach as canonical Operations
+ * (operations/edit-lease-operations.ts). What an interface happens to project
+ * narrows that interface, not the contract: the authorization of the
+ * Operation the lease is taken for is the whole policy here.
+ */
+export function canonicalEditLeaseOperationIdsForSession(
+  session: OperationAuthorizationSession,
+): string[] {
+  const heldRoles = new Set(session.roles ?? []);
+  const generatedIds = entityOperations
+    .filter((operation) =>
+      (operation.intent === "update" || operation.intent === "delete") &&
+      operation.concurrency?.editLease?.mode === "required" &&
+      operation.authorization.roles.some((role) => heldRoles.has(role))
+    )
+    .map(({ id }) => id);
+  return [
+    ...generatedIds,
+    ...pluginEditLeaseOperationIdsForSession(session, "canonical"),
+  ];
+}
+
 /** Lease-protected YAML plugin Operations available on one interface. */
 export function pluginEditLeaseOperationIdsForSession(
   session: OperationAuthorizationSession,
-  transport: "rest" | "mcp",
+  transport: "rest" | "mcp" | "canonical",
 ): string[] {
   return pluginOperations
     .filter((operation) =>
@@ -542,7 +565,7 @@ export function pluginEditLeaseOperationIdsForSession(
       operation.concurrency.editLease?.mode === "required" &&
       operation.auth.mode === "session" &&
       pluginOperationAuthAllowsOffer(operation.auth, session) &&
-      (transport === "rest" || operation.transports.mcp.enabled)
+      (transport !== "mcp" || operation.transports.mcp.enabled)
     )
     .map(({ key }) => key);
 }

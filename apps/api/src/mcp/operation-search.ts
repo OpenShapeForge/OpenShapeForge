@@ -401,12 +401,18 @@ export function searchOperationDefinitions(input: {
     .sort((left, right) => right.score - left.score || compareCodeUnits(left.definition.id, right.definition.id));
   const fingerprint = queryFingerprint(query);
   const after = args.cursor ? decodeCursor(args.cursor, fingerprint) : undefined;
-  const start = after
-    ? matched.findIndex(({ score, definition }) =>
-        score < after.s || (score === after.s && compareCodeUnits(definition.id, after.id) > 0))
-    : 0;
-  const page = start < 0 ? [] : matched.slice(start, start + args.limit);
-  const end = start < 0 ? matched.length : start + page.length;
+  // A cursor names the last entry of the previous page. One that names no
+  // entry of this result (an edited cursor, or an Operation no longer here)
+  // is refused rather than silently skipping or repeating matches.
+  const anchor = after
+    ? matched.findIndex(({ score, definition }) => score === after.s && definition.id === after.id)
+    : -1;
+  if (after && anchor < 0) {
+    throw new HttpError(400, "BAD_USER_INPUT", "Operation search cursor no longer matches this result; search again.");
+  }
+  const start = after ? anchor + 1 : 0;
+  const page = matched.slice(start, start + args.limit);
+  const end = start + page.length;
   const last = page.at(-1);
   return {
     operations: page.map(({ definition }) => {

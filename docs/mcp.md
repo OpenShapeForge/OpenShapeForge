@@ -296,7 +296,7 @@ the words that name an Operation (id, key, entity, the entity's authored labels
 in every language, the Operation name) count more than its description, and a
 query that is exactly an entity's name ranks that entity first. It pages short
 summaries — identity, name, description, target, effects and reliability —
-with a `nextCursor` bound to that query, and never returns a schema. The same
+with a `nextCursor` bound to that query and to an entry of its result (a cursor that no longer names one is refused), and never returns a schema. The same
 tool called with only `operationId` looks one Operation up: the exact canonical
 id, or a generated tool name the existing exact matcher resolves without
 ambiguity, returns that available Operation alone with its full contract — the

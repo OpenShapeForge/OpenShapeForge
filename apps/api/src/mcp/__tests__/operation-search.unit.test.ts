@@ -269,6 +269,12 @@ describe("searchable MCP Operations", () => {
     expect(() => search({ query: "demo", cursor: "demo.a" })).toThrow(/cursor is invalid/i);
     const forged = Buffer.from(JSON.stringify({ v: 1, q: "x", s: -1, id: "demo.a" })).toString("base64url");
     expect(() => search({ query: "demo", cursor: forged })).toThrow(/cursor is invalid/i);
+    // A well-formed cursor edited to another position is refused too.
+    const decoded = JSON.parse(Buffer.from(first.nextCursor!, "base64url").toString("utf8"));
+    for (const edit of [{ s: decoded.s + 1 }, { id: "demo.missing" }]) {
+      const edited = Buffer.from(JSON.stringify({ ...decoded, ...edit })).toString("base64url");
+      expect(() => search({ query: "demo", cursor: edited })).toThrow(/no longer matches/i);
+    }
     // The same words in another spelling are the same query.
     expect(search({ query: "Demo", cursor: first.nextCursor }).operations).toHaveLength(2);
   });

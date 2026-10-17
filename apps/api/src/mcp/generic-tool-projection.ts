@@ -35,6 +35,7 @@ import {
 import { describeTool, entityDescription, entityTitle } from "./entity-tool-projection.js";
 import { publicOriginIsHttps } from "./handoff-config.js";
 import { toolsForSession } from "./session-projection.js";
+import { matchNativeCrudTool } from "./native-crud-tool.js";
 export function entityIsGeneric(entity: CatalogEntity | undefined): boolean {
   return entity?.tools === "generic";
 }
@@ -312,27 +313,21 @@ export function resolveNativeCrudTool(
   operationKey: string,
   inputs: Record<string, unknown>,
 ): CatalogTool | undefined {
-  const canonical = catalog.tools.filter(
-    (tool) => tool.operationId === operationKey,
-  );
-  if (canonical.length > 1) {
+  const match = matchNativeCrudTool(catalog.tools, operationKey, inputs.entity);
+  if (match.kind === "tool") return match.tool;
+  if (match.kind === "none") return undefined;
+  if (match.kind === "duplicate-id") {
     throw new HttpError(
       400,
       "OPERATION_MISCONFIGURED",
       `Canonical native operation "${operationKey}" resolves to more than one generated operation.`,
     );
   }
-  if (canonical.length === 1) return canonical[0];
-  const candidates = crudToolsNamed(operationKey);
-  if (candidates.length <= 1) return candidates[0];
-  const wanted = inputs.entity;
-  const match = candidates.find((tool) => tool.entity === wanted);
-  if (match) return match;
   throw new HttpError(
     400,
     "OPERATION_MISCONFIGURED",
     `Native operation "${operationKey}" is shared by the entities ` +
-      `${candidates.map((tool) => tool.entity).join(", ")}. The binding must ` +
+      `${match.candidates.map((tool) => tool.entity).join(", ")}. The binding must ` +
       `supply an "entity" input naming the one it means, exactly as a direct ` +
       `"${operationKey}" call does.`,
   );

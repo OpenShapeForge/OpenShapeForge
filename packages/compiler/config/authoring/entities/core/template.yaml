@@ -3,6 +3,9 @@ kind: coreEntity
 module: core
 entity: Template
 title: Template
+description: An editable template head whose channel and language variants hold the content blocks a document or
+  message is composed from. Template.publish freezes the head with its variants and blocks into an immutable
+  TemplateVersion and re-seeds the documents tracking this template; the head itself stays editable.
 language: en
 labels: { en: Template, nl: Template }
 pluralLabels: { en: Templates, nl: Templates }
@@ -57,6 +60,12 @@ fields:
     osfType: fieldDefinition
     cardinality: collection
     label: { en: Local variables, nl: Lokale variabelen }
+    description:
+      en: Local variables the blocks of this template may bind to, declared as field definitions. A document linked to
+        a published version supplies their values; materialization validates supplied values against these declarations.
+      nl: Lokale variabelen waaraan de blokken van deze template zich kunnen binden, vastgelegd als velddefinities. Een
+        document dat aan een gepubliceerde versie is gekoppeld levert de waarden; materialisatie valideert aangeleverde
+        waarden tegen deze declaraties.
     persisted: { column: parameters, storageClass: core }
 operations:
   insertVariant:
@@ -91,6 +100,12 @@ operations:
   update:
     name: Update template
     description: Update a template draft.
+    guidance:
+      assistant:
+        en: Editing the head returns the template to draft and leaves published versions untouched; publish again to
+          let the documents tracking this template pick the change up.
+        nl: Een wijziging aan de kop zet de template terug op concept en laat gepubliceerde versies ongemoeid;
+          publiceer opnieuw om de documenten die deze template volgen de wijziging te laten overnemen.
     implementation: { type: entity, action: update }
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: none } }

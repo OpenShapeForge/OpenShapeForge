@@ -40,7 +40,11 @@
  *      where `default` composes one source per binding), and only an
  *      Operation that declares a retry mechanism may be retried at all
  *      (`operations/runtime.ts` — the key is an input field on some, a
- *      request header on others). Guidance that overstates any of those
+ *      request header on others). Nor may the text treat a resembling record
+ *      as proof of what one call did: what settles an uncertain write is the
+ *      receipt recorded against that request, which this server tracks as its
+ *      own third state (`operations/execution-receipts.ts` — `completed`
+ *      versus `outcome_unknown`). Guidance that overstates any of those
  *      produces a confident duplicate or a false "cannot be done".
  */
 import type { RuntimeModule } from "../modules/contract.js";
@@ -122,9 +126,11 @@ for everything else and never overrides it.
 ## 6. An unknown outcome stays unknown
 
 When a write times out, is interrupted or answers unclearly, you do not know
-whether it landed. Reading and finding nothing does not settle it, and calling
-again is not free: only a contract that declares a retry mechanism can be
-retried safely. Read [what to do with an unknown outcome](references/retrying.md).
+whether it landed. A read rarely settles that: a record that merely looks right
+is no proof your call made it, and finding nothing is no proof it failed. And
+calling again is not free — only a contract that declares a retry mechanism can
+be retried safely. Read
+[what to do with an unknown outcome](references/retrying.md).
 
 ## 7. Now, or kept
 
@@ -141,19 +147,31 @@ not reach you. It tells you nothing about whether the write happened. Treat
 that as a third state — not success, not failure — and keep it that way until
 something actually settles it.
 
-## Reading does not settle it
+## What actually settles it
 
-A read is worth doing: finding the record ends the question, and it is cheaper
-than a duplicate. Finding nothing does not.
+A read is worth doing, but be careful what it proves. A record that merely
+matches by name, code or title is not evidence that YOUR call produced it:
+someone else may have made it, an earlier attempt may have, or it may have
+been there all along. Resemblance is not causation.
 
-A read can miss a write that landed. The record may not be the shape you are
-searching by, the work may still be in flight, the effect may be outside this
-deployment where no read of yours reaches it, or your own access may not cover
-the row that now exists. So:
+Settled — report it as done, and do not call again to be sure:
 
-- Record found: it landed. Report it as done, and do not call again to be sure.
-- Record not found: the outcome is still unknown. Do not convert that into
-  "it failed".
+- The server's own answer for that request. A keyed call replayed with the same
+  key answers with the outcome the first attempt recorded; a server that has
+  lost track of an effect says so and refuses to start a new request, rather
+  than implying either outcome.
+- An effect uniquely attributable to this invocation: the identifier the call
+  itself would have returned, a reference the call stamped on the record, or a
+  receipt naming this request.
+
+Still unknown — do not convert either of these into "it failed" or "it worked":
+
+- Finding nothing. A read can miss a write that landed: the row may not match
+  what you are searching by, the work may still be in flight, the effect may be
+  outside this deployment where no read of yours reaches it, or your own access
+  may not cover the row that now exists.
+- Finding something that only looks right. Say what you found and that you
+  cannot tell whether your call is what made it.
 
 ## Only retry what the contract says may be retried
 
@@ -174,10 +192,15 @@ declares otherwise, so look at what it declares before calling again:
 
 ## A sequence that fails halfway
 
-Nothing rolls back the steps that already succeeded. Re-read what exists,
-continue from there, and tell the person what now stands recorded and what is
-missing. Do not restart the sequence from the beginning, and do not repeat a
-step whose outcome you already know.
+Separately executed steps do not unwind each other. Unless the Operation you
+called declares that it is atomic — one call, all of it or none — a step that
+succeeded before a later one failed stays done, and nothing rolls it back for
+you.
+
+So re-read what exists, continue from there, and tell the person what now
+stands recorded and what is missing. Do not restart the sequence from the
+beginning, and do not repeat a step whose outcome you know. A step whose
+outcome you do NOT know is the case above, not a step to redo.
 `;
 
 /**

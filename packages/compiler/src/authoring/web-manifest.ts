@@ -24,6 +24,7 @@ import { materializeCollectionOperations } from "./collection-operations.js";
 import { constrainedReferenceCreateOperationId, withOperationControls } from "../generate-operations.js";
 import { fieldOptionSource } from "./web-field-options.js";
 import { compileFieldValuePolicy } from "./field-value-policy.js";
+import { sortablePositionColumn } from "./sortable-position.js";
 import type {
   CompiledEntityContract,
   CompiledEntityOperation,
@@ -881,7 +882,7 @@ function projectEntity(
       ...(relationship.version ? { version: relationship.version } : {}),
       ...(relationship.childLock ? { childLock: relationship.childLock } : {}),
       ...(relationship.cardinality ? { cardinality: relationship.cardinality } : {}),
-      ...(relationship.sortable ? { sortable: true, positionColumn: `${relationship.foreignKey}_position` } : {}),
+      ...(relationship.sortable ? { sortable: true, positionColumn: sortablePositionColumn(relationship.foreignKey!) } : {}),
       ...(relationship.via ? { via: relationship.via } : {}),
       ...(relationship.through ? { through: relationship.through } : {}),
       ...(relationship.fieldKey && relationship.kind !== "belongsTo" ? { mutationSupport: Object.keys(nativeOperations).length ? "atomic" as const : "unsupported" as const } : {}),

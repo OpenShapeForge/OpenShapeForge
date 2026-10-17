@@ -89,7 +89,9 @@ operations:
     confirmation: { mode: none }
   list:
     name: List document variants
-    description: Read accessible document variant records.
+    description: >-
+      Returns a page of the document variants this session may read. Filter on document to see which channels
+      and languages one document has; a variant's text is in its blocks, not in this record.
     implementation: { type: entity, action: list }
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }

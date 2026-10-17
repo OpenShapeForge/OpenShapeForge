@@ -27,6 +27,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { HttpError } from "../rest/http-error.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
+import type { DbSessionInput } from "../db/session.js";
 import { createHandoff, readHandoff } from "./handoff-store.js";
 import { keyringFromEnv } from "../connectors/secrets.js";
 
@@ -97,6 +98,7 @@ export async function mintAuthorization(
   > & {
     authorizationUrl: string;
     db?: OpenShapeForgeDatabase;
+    session?: DbSessionInput;
   },
 ): Promise<{
   authorizationUrl: string;
@@ -109,7 +111,7 @@ export async function mintAuthorization(
     createHash("sha256").update(codeVerifier).digest(),
   );
   const expiresAtMs = Date.now() + STATE_TTL_MS;
-  const { db, authorizationUrl, ...pendingInput } = input;
+  const { db, session, authorizationUrl, ...pendingInput } = input;
   let state: string;
   if (db) {
     const keyring = keyringFromEnv(process.env[KEYRING_ENV]);
@@ -117,6 +119,7 @@ export async function mintAuthorization(
       throw new HttpError(500, "SECRET_KEYRING_MISSING", `Set ${KEYRING_ENV}.`);
     state = await createHandoff({
       db,
+      ...(session ? { session } : {}),
       keyring,
       kind: "entity_oauth",
       tenantId: input.tenantId,

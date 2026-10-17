@@ -102,11 +102,12 @@ function base64url(buffer: Buffer): string {
 export async function mintConfiguration(
   input: Omit<PendingConfiguration, "token" | "expiresAtMs"> & {
     db?: OpenShapeForgeDatabase;
+    session?: DbSessionInput;
   },
 ): Promise<{ id: string; token: string; expiresInSeconds: number }> {
   sweep();
   const expiresAtMs = Date.now() + TOKEN_TTL_MS;
-  const { db, ...payload } = input;
+  const { db, session, ...payload } = input;
   const id = randomUUID();
   let token: string;
   if (db) {
@@ -115,6 +116,7 @@ export async function mintConfiguration(
     token = await createHandoff({
       id,
       db,
+      ...(session ? { session } : {}),
       keyring,
       kind: "entity_configuration",
       tenantId: input.tenantId,

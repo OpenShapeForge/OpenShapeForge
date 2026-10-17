@@ -39,6 +39,7 @@ export async function mintArtifactUpload(input: {
   const expiresAtMs = nowMs + ARTIFACT_UPLOAD_TTL_SECONDS * 1000;
   const token = await createHandoff({
     db: input.db,
+    session: input.session,
     keyring: input.keyring,
     kind: "artifact_upload",
     tenantId: input.session.tenantId,

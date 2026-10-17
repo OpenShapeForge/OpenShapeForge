@@ -123,22 +123,25 @@ describe("the server's built-in Agent Skill", () => {
     await withClient([], async (client) => {
       const [builtin] = await listSkills(client);
       const published = new Set(builtin!.resources.map((file) => file.uri));
-      const bodies = await Promise.all([...published].map(async (uri) => {
+      const read = async (uri: string) => {
         const content = (await client.readResource({ uri })).contents[0]!;
         return "text" in content ? content.text : "";
-      }));
-      const text = bodies.join("\n");
+      };
+      const entry = await read(`skill://${BUILTIN_AGENT_SKILL_PATH}/SKILL.md`);
+      const text = (await Promise.all([...published].map(read))).join("\n");
 
-      // Every `references/<file>` the skill mentions is a file it published.
-      const referenced = [...text.matchAll(/references\/[A-Za-z0-9_-]+\.[A-Za-z0-9]+/g)].map((match) => match[0]);
-      expect(referenced.length).toBeGreaterThan(0);
-      for (const reference of referenced) {
-        expect(published).toContain(`skill://${BUILTIN_AGENT_SKILL_PATH}/${reference}`);
-      }
-      // No published file is dead weight the entry never reaches.
+      // Each supporting file is reachable as an ordinary Markdown link from
+      // the entry, so a reader follows it without knowing a manifest exists.
+      const linked = [...entry.matchAll(/\[[^\]]+\]\((references\/[A-Za-z0-9_-]+\.[A-Za-z0-9]+)\)/g)]
+        .map((match) => match[1]!);
+      expect(linked.length).toBeGreaterThan(0);
       for (const uri of published) {
         const relative = uri.slice(`skill://${BUILTIN_AGENT_SKILL_PATH}/`.length);
-        if (relative !== "SKILL.md") expect(referenced).toContain(relative);
+        if (relative !== "SKILL.md") expect(linked).toContain(relative);
+      }
+      // And nothing it mentions, linked or in prose, is unpublished.
+      for (const reference of text.matchAll(/references\/[A-Za-z0-9_-]+\.[A-Za-z0-9]+/g)) {
+        expect(published).toContain(`skill://${BUILTIN_AGENT_SKILL_PATH}/${reference[0]}`);
       }
 
       // Every resource URI it names is a core resource every session is
@@ -148,8 +151,11 @@ describe("the server's built-in Agent Skill", () => {
       expect(named.length).toBeGreaterThan(0);
       for (const uri of named) expect(always).toContain(uri);
 
-      // And no other skill's URI: a cross-reference could dangle per session.
+      // No other skill's URI: a cross-reference could dangle per session.
       expect([...text.matchAll(/skill:\/\/[A-Za-z0-9/_.-]+/g)]).toHaveLength(0);
+      // No repository path either: a client reads these over MCP and cannot
+      // fetch this tree, so `docs/…` would be an instruction it cannot follow.
+      expect([...text.matchAll(/\bdocs\/[A-Za-z0-9_-]+\.md\b/g)]).toHaveLength(0);
     });
   });
 

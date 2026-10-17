@@ -14,7 +14,7 @@
  * act, so it is fetched on demand through the same `skills/get` and
  * `resources/read` path a plugin skill uses.
  *
- * Three constraints shape the text, and a change here must keep all three:
+ * Four constraints shape the text, and a change here must keep all four:
  *
  *   1. It names no entity, operation, tool, provider, plugin or host. A
  *      deployment composes its own catalog, so anything named here could be
@@ -27,9 +27,21 @@
  *      session, a guest and a server-to-server session see the same words.
  *      That is only safe because of (1) — role-aware filtering still decides
  *      every skill with an audience (`visibleAgentSkills`).
- *   3. The entry stays short. The one part that is longer than a line of
- *      guidance — what to do after a call whose outcome is unknown — lives in
- *      the reference file beside it rather than in the entry.
+ *   3. The entry stays short, and every pointer it carries resolves. The one
+ *      part longer than a line of guidance — what to do with a write whose
+ *      outcome is unknown — lives in the reference file beside it, linked as
+ *      ordinary Markdown so a reader finds it without being told the manifest
+ *      exists. Nothing here points at a repository path: a client reads these
+ *      files over MCP and cannot fetch this tree.
+ *   4. It states no capability as universal. What this transport actually
+ *      guarantees is narrower than it is tempting to write: a session's
+ *      surface is a projection, several authorized sources may serve one call
+ *      (`modules/invocation-sources.ts` — `all-authorized` fans a read out
+ *      where `default` composes one source per binding), and only an
+ *      Operation that declares a retry mechanism may be retried at all
+ *      (`operations/runtime.ts` — the key is an input field on some, a
+ *      request header on others). Guidance that overstates any of those
+ *      produces a confident duplicate or a false "cannot be done".
  */
 import type { RuntimeModule } from "../modules/contract.js";
 import { ENTITY_CATALOG_URI } from "./server-instructions.js";
@@ -49,17 +61,20 @@ metadata:
 
 # Coordinating this deployment's capabilities
 
-What this deployment can do is what this session lists, and nothing else. When
-a skill is listed for the subject in front of you, read that one first; this
-entry is the fallback for everything else, and it never overrides it.
+You can only act through what this session lists, so start from that rather
+than from what a deployment like this usually has. When a skill is listed for
+the subject in front of you, read that one first; this entry is the fallback
+for everything else and never overrides it.
 
 ## 1. Find what exists before planning around it
 
-- The tools this session lists and ${ENTITY_CATALOG_URI} are the whole surface.
-  If a search for an operation finds nothing, try once more in the person's
-  language, then say what this deployment does not offer.
-- What you cannot see is what this person may not reach here, not what the
-  product lacks. Never tell them a kind of record or an action does not exist.
+- The tools this session lists and ${ENTITY_CATALOG_URI} are the surface you
+  have. A search that finds nothing is not a negative result: try different
+  words, and the person's language as well as English.
+- Not finding something is an observation about this session, never a fact
+  about the product. Say "I do not see a way to do that here", not "this
+  cannot be done" — what you cannot see may exist and be out of this person's
+  reach, or be served by a capability this session was not given.
 - Never invent a name. Entity names, operation ids, role keys and allowed
   values come from a listing or a read, never from another deployment.
 
@@ -76,12 +91,19 @@ entry is the fallback for everything else, and it never overrides it.
 ## 3. Identity is part of the call
 
 - ${SESSION_RESOURCE_URI} says who this person is, what they may do and which
-  record they act as. Read it when the answer depends on them, not as a warm-up.
-- A call that reaches outside this deployment runs under one named source: this
-  person's own authorization, or the organization's. Where both are available
-  the server refuses rather than choosing for you — ask which one they mean,
-  and say afterwards which one acted. Never carry one person's source into work
-  for someone else.
+  record they act as. Read it when the answer depends on them, not as a
+  warm-up.
+- A call that reaches outside this deployment acts under a named source — this
+  person's own authorization, or the organization's. Do not assume there is one
+  of them: a call may offer a source per authorized connection, and a read may
+  be meant to cover all of them. Take the sources from what the call itself
+  advertises; never infer one from the subject.
+- Where a write could act under either this person's authorization or the
+  organization's, the server may refuse rather than choose for you. Say which
+  one you mean, and afterwards say which one acted: whether something was done
+  as this person or on the organization's behalf is a different fact to them,
+  and to whoever sees the result at the other end.
+- Never carry a source resolved for one person into work for someone else.
 
 ## 4. Scope every read
 
@@ -97,11 +119,12 @@ entry is the fallback for everything else, and it never overrides it.
 - When part of the request cannot be done here, do the rest and name plainly
   what you left undone and why.
 
-## 6. After a call whose outcome you do not know, look before calling again
+## 6. An unknown outcome stays unknown
 
-A write that failed may have landed in part. Read it back before retrying, and
-reuse the request reference where the contract has one — a fresh one is a
-second write, not a retry. See references/retrying.md.
+When a write times out, is interrupted or answers unclearly, you do not know
+whether it landed. Reading and finding nothing does not settle it, and calling
+again is not free: only a contract that declares a retry mechanism can be
+retried safely. Read [what to do with an unknown outcome](references/retrying.md).
 
 ## 7. Now, or kept
 
@@ -111,31 +134,50 @@ someone else, and then only through an operation this deployment already offers
 for it. A plan nobody asked you to keep is not a record.
 `;
 
-const RETRYING_MD = `# Retrying a call whose outcome you do not know
+const RETRYING_MD = `# What to do with an unknown outcome
 
 A transport error, a timeout or an interrupted turn tells you the answer did
-not arrive. It does not tell you the write did not happen.
+not reach you. It tells you nothing about whether the write happened. Treat
+that as a third state — not success, not failure — and keep it that way until
+something actually settles it.
 
-Before calling again:
+## Reading does not settle it
 
-1. Read the record back by its id, or list by whatever identifies it — a code,
-   a reference, a name together with its owner. One read costs less than a
-   duplicate record.
-2. If the write landed, report it as done. Do not call again to be sure.
-3. If it did not land, repeat the same call with the same input.
+A read is worth doing: finding the record ends the question, and it is cheaper
+than a duplicate. Finding nothing does not.
 
-Where the input contract declares a request reference — an idempotency key, by
-whatever name that schema gives it — reuse exactly the value of the first
-attempt. The server then answers with the result the first call produced
-instead of performing a second one. A fresh value is a second write.
+A read can miss a write that landed. The record may not be the shape you are
+searching by, the work may still be in flight, the effect may be outside this
+deployment where no read of yours reaches it, or your own access may not cover
+the row that now exists. So:
 
-Where the contract declares no such field, a second call is a second write.
-Read first.
+- Record found: it landed. Report it as done, and do not call again to be sure.
+- Record not found: the outcome is still unknown. Do not convert that into
+  "it failed".
 
-A sequence of calls is not rolled back for you when it fails halfway. Re-read
-what already exists, continue from there, and tell the person what now stands
-recorded and what is still missing — do not start the sequence again from the
-beginning, and do not repeat the steps that already succeeded.
+## Only retry what the contract says may be retried
+
+A second call to the same write is a second write unless the Operation itself
+declares otherwise, so look at what it declares before calling again:
+
+- **A declared retry key.** The contract names where the key goes — an input
+  field on some Operations, a request header on others — so use the mechanism
+  that contract declares rather than guessing a field name, and send exactly
+  the value of the first attempt. The server then answers with the result the
+  first call produced instead of performing a second one. A fresh value is a
+  new write, not a retry.
+- **A naturally repeatable call.** A read, or a write the contract states is
+  safe to repeat, may be repeated as it stands.
+- **Anything else.** Do not call again. Say plainly that you do not know
+  whether it went through, say what you did check, and let the person decide —
+  a duplicate they did not ask for is worse than a question.
+
+## A sequence that fails halfway
+
+Nothing rolls back the steps that already succeeded. Re-read what exists,
+continue from there, and tell the person what now stands recorded and what is
+missing. Do not restart the sequence from the beginning, and do not repeat a
+step whose outcome you already know.
 `;
 
 /**

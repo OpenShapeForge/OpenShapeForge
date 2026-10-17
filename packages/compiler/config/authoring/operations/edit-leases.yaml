@@ -1,0 +1,226 @@
+# The central edit-lease service as canonical Operations, so a caller that is
+# not one of the interface adapters — a workflow step, a native Service
+# binding — can take, keep and give back the same lease a lease-protected
+# entity Operation requires, and then pass that token and the record version
+# to the ordinary entity update. Bound to the core `osf-edit-leases` runtime
+# (operations/edit-lease-operations.ts).
+#
+# No policy is restated here. Acquiring authorizes the REFERENCED Operation
+# against the canonical contracts — its own roles and record permissions —
+# exactly as the REST, MCP and Web adapters do, and renewing or releasing
+# reaches the caller's own leases only: the service matches tenant, owner and
+# token hash itself. The session gate is deliberately open for the same reason
+# source-sync's is: the referenced Operation decides, per call. The lease the
+# caller receives is its own, so an automatic step holds a lease for its
+# service identity rather than for the person who started the workflow.
+schemaVersion: 1
+kind: operationCatalog
+plugin: osf-edit-leases
+operations:
+  acquire:
+    id: entity.edit-lease.acquire
+    name:
+      en: Acquire an edit lease
+      nl: Een bewerkingslease nemen
+    description:
+      en: >-
+        Takes the central edit lease on one record for a lease-protected Operation the caller is authorized to invoke,
+        and returns the opaque leaseToken together with the record version the lease was taken at. Hand both to that
+        Operation; a successful protected write consumes the lease. Another identity's live lease refuses this call.
+        Taking the same lease again issues a new token and retires the previous one, so a retry replaces what an
+        earlier call returned.
+      nl: >-
+        Neemt de centrale bewerkingslease op één record voor een lease-beschermde Operation die de aanroeper mag
+        uitvoeren, en geeft het leaseToken met de versie waarop de lease is genomen terug. Opnieuw nemen geeft een
+        nieuw token en laat het vorige vervallen.
+    implementation:
+      type: plugin
+      plugin: osf-edit-leases
+      handler: acquireEditLease
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [operationId, targetId]
+        properties:
+          operationId:
+            description: >-
+              The canonical lease-protected Operation this lease is taken for. Its own authorization decides; naming it
+              here never widens what the caller may do.
+            type: string
+            minLength: 1
+            maxLength: 200
+          targetId: { type: string, format: uuid }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [leaseToken, operationId, entityId, targetId, targetVersion, expiresAt]
+        properties:
+          leaseToken: { type: string, minLength: 20 }
+          operationId: { type: string }
+          entityId: { type: string }
+          targetId: { type: string, format: uuid }
+          targetVersion: { type: string, format: date-time }
+          expiresAt: { type: string, format: date-time }
+    auth:
+      mode: session
+      anyAuthenticatedSession: true
+    tenancy:
+      mode: required
+    effects:
+      data: write
+      external: none
+    reliability:
+      # Not idempotent, and the lease-protected entity Operations say the same:
+      # a repeated acquire on a lease the caller already holds mints a fresh
+      # opaque token and replaces the stored hash (entity/edit-leases.ts), so
+      # the token the earlier call returned stops working. Retrying is safe for
+      # the record but not for a token already in flight, which is exactly what
+      # the MCP acquire tool reports with idempotentHint false. Renewing and
+      # releasing keep their natural idempotency: they carry the token.
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+    errors:
+      - status: 400
+        code: BAD_USER_INPUT
+        description: The Operation id or the record id is blank.
+      - status: 400
+        code: LEASE_NOT_SUPPORTED
+        description: The named Operation does not take an edit lease.
+      - status: 401
+        code: UNAUTHENTICATED
+        description: The call carries no authenticated tenant session.
+      - status: 403
+        code: FORBIDDEN
+        description: The caller lacks the named Operation's role or record permission.
+      - status: 404
+        code: NOT_FOUND
+        description: The record does not exist in this tenant.
+      - status: 404
+        code: GENERATED_CRUD_NOT_ENABLED
+        description: The named Operation is not part of this deployment's compiled catalog.
+      - status: 409
+        code: LEASE_ACQUIRE_FAILED
+        description: The lease could not be taken; try again.
+      - status: 423
+        code: LOCKED
+        description: Another identity currently holds this record's edit lease.
+  renew:
+    id: entity.edit-lease.renew
+    name:
+      en: Renew an edit lease
+      nl: Een bewerkingslease verlengen
+    description:
+      en: >-
+        Extends the caller's own active lease by its inactivity timeout after genuine progress, and returns the record
+        version the lease was taken at. A lease of another tenant or another identity is never renewed, nor is one for
+        an Operation the caller may no longer invoke.
+      nl: >-
+        Verlengt de eigen actieve lease van de aanroeper met de inactiviteitstermijn. Een lease van een andere
+        organisatie of identiteit wordt nooit verlengd.
+    implementation:
+      type: plugin
+      plugin: osf-edit-leases
+      handler: renewEditLease
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [leaseToken]
+        properties:
+          leaseToken: { type: string, minLength: 20, maxLength: 200 }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [operationId, entityId, targetId, targetVersion, expiresAt]
+        properties:
+          operationId: { type: string }
+          entityId: { type: string }
+          targetId: { type: string, format: uuid }
+          targetVersion: { type: string, format: date-time }
+          expiresAt: { type: string, format: date-time }
+    auth:
+      mode: session
+      anyAuthenticatedSession: true
+    tenancy:
+      mode: required
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: &leaseHolderErrors
+      - status: 400
+        code: BAD_USER_INPUT
+        description: The lease token is blank.
+      - status: 401
+        code: UNAUTHENTICATED
+        description: The call carries no authenticated tenant session.
+      - status: 409
+        code: LEASE_EXPIRED
+        description: The lease has expired, belongs to another identity, or its Operation is no longer available.
+  release:
+    id: entity.edit-lease.release
+    name:
+      en: Release an edit lease
+      nl: Een bewerkingslease teruggeven
+    description:
+      en: >-
+        Gives the caller's own lease back, so the record is editable again before its inactivity timeout runs out.
+        A lease that is already gone counts as released. A successful protected write consumes its lease by itself.
+      nl: >-
+        Geeft de eigen lease terug, zodat het record weer bewerkbaar is voordat de inactiviteitstermijn verstrijkt.
+    implementation:
+      type: plugin
+      plugin: osf-edit-leases
+      handler: releaseEditLease
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [leaseToken]
+        properties:
+          leaseToken: { type: string, minLength: 20, maxLength: 200 }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [released]
+        properties:
+          released: { type: boolean }
+    auth:
+      mode: session
+      anyAuthenticatedSession: true
+    tenancy:
+      mode: required
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *leaseHolderErrors
+interfaces:
+  rest:
+    operations:
+      acquire:
+        method: POST
+        path: /api/entity-edit-leases/acquire
+        response: { status: 200, kind: json }
+      renew:
+        method: POST
+        path: /api/entity-edit-leases/renew
+        response: { status: 200, kind: json }
+      release:
+        method: POST
+        path: /api/entity-edit-leases/release
+        response: { status: 200, kind: json }

@@ -47,10 +47,12 @@ export type { CompiledPluginOperation } from "./plugins.js";
  * `osf-grants` the operator side of capability grants, `osf-jobs` the
  * durable job queue, `osf-transitions` the status transitions declared on
  * entity fields, `osf-source-sync` the import of records from an external
- * source system by their base source fields, and `osf-billing` the milestone
- * billing run and the milestone create that freezes a computed amount.
+ * source system by their base source fields, `osf-edit-leases` the central
+ * edit-lease service a non-interface caller takes a record lease with, and
+ * `osf-billing` the milestone billing run and the milestone create that
+ * freezes a computed amount.
  */
-export const CORE_OPERATION_MODULES: readonly string[] = ["accounts", "osf-billing", "osf-blueprints", "osf-control", "osf-grants", "osf-jobs", "osf-source-sync", "osf-transitions"];
+export const CORE_OPERATION_MODULES: readonly string[] = ["accounts", "osf-billing", "osf-blueprints", "osf-control", "osf-edit-leases", "osf-grants", "osf-jobs", "osf-source-sync", "osf-transitions"];
 
 /**
  * The one OpenAPI security scheme every `auth.mode: capability` Operation is

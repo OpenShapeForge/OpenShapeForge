@@ -69,7 +69,7 @@ export async function registerConfigurationHandoffRoutes(
   );
 
   type ConfigurationSubmission =
-    | { ok: true }
+    | { ok: true; id: string }
     | {
         ok: false;
         errors: Record<string, string>;
@@ -210,10 +210,10 @@ export async function registerConfigurationHandoffRoutes(
         pending.elicit.into,
         values[pending.elicit.into] as Record<string, unknown>,
       );
-      return { ok: true };
+      return { ok: true, id: String(existing.id) };
     }
-    await createGeneratedEntityForTable(db, writeSession, tableDef, values);
-    return { ok: true };
+    const created = await createGeneratedEntityForTable(db, writeSession, tableDef, values);
+    return { ok: true, id: String(created.id) };
   };
 
   class SubmissionRejected extends Error {
@@ -259,13 +259,23 @@ export async function registerConfigurationHandoffRoutes(
       definitions: configurationFormDefinitions(found.pending),
     };
   });
+  instance.get(`${ENTITY_CONFIGURATION_PATH}/pending/:id`, async (request) => {
+    const { db, session } = await requireMcpSession(request);
+    const id = (request.params as { id: string }).id;
+    if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id)) throw new HttpError(404, "NOT_FOUND", "This configuration form is unavailable.");
+    const found = await latestConfigurationForSession(session, db, id);
+    if (!found) throw new HttpError(404, "NOT_FOUND", "This configuration form is unavailable or expired.");
+    return { id: found.id, displayName: found.pending.displayName, messagePrefix: found.pending.messagePrefix,
+      definitions: configurationFormDefinitions(found.pending) };
+  });
   instance.post(
     `${ENTITY_CONFIGURATION_PATH}/pending/:id`,
     async (request, reply) => {
       const { db, session } = await requireMcpSession(request, "configuration-form");
-      const found = await latestConfigurationForSession(session, db);
       const id = (request.params as { id?: string }).id;
-      if (!found || found.id !== id) {
+      if (!id || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id)) throw new HttpError(404, "NOT_FOUND", "This configuration form is unavailable.");
+      const found = await latestConfigurationForSession(session, db, id);
+      if (!found) {
         throw new HttpError(
           404,
           "NOT_FOUND",
@@ -284,7 +294,7 @@ export async function registerConfigurationHandoffRoutes(
           },
         });
       }
-      return reply.send({ saved: true });
+      return reply.send({ saved: true, id: outcome.id });
     },
   );
 

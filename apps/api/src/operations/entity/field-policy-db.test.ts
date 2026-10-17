@@ -406,6 +406,8 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       const { latestConfigurationForSession } = await import("../../mcp/configuration-handoff.js");
       const parallelPending = await mint(writer.tenantId);
       const parallelId = (await latestConfigurationForSession(writer, runtime.db))!.id;
+      // Opening a newer form must not steal the older tab's submission target.
+      await mint(writer.tenantId);
       const beforeParallelEvents = await events(String(created.id));
       const parallel = await Promise.all([
         submitPending(parallelPending, "visible=first", parallelId),
@@ -459,6 +461,7 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
 
   test("browser secure initiation uses canonical admission and tenant-bound definitions", async () => {
     const { startConfigurationForSession } = await import("../../mcp/configuration-start.js");
+    const { registerConfigurationHandoffRoutes } = await import("../../mcp/configuration-handoff-routes.js");
     const { latestConfigurationForSession, consumeConfigurationForSession } = await import("../../mcp/configuration-handoff.js");
     const previous = process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;
     process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = `browser:${Buffer.alloc(32, 12).toString("base64")}`;
@@ -470,11 +473,31 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       } });
       const body = { entity: "ProtectedFieldsFixture", values: { key: `browser-${randomUUID()}`, label: "Browser configuration", explicitSecret: "not a credential", definitionId: definition.id } };
       const admitted = await startConfigurationForSession(runtime.db, writer, body);
-      expect(admitted).toEqual({ expiresInSeconds: 1800 });
+      expect(admitted).toEqual({ id: expect.any(String), expiresInSeconds: 1800 });
       expect(JSON.stringify(admitted)).not.toContain("token");
-      const pending = await latestConfigurationForSession(writer, runtime.db);
+      // A newer form in another tab must not replace this browser's target.
+      await startConfigurationForSession(runtime.db, writer, { ...body, values: { ...body.values, key: `second-${randomUUID()}` } });
+      const pending = await latestConfigurationForSession(writer, runtime.db, admitted.id);
+      expect(pending!.id).toBe(admitted.id);
+      expect(await latestConfigurationForSession({ ...writer, userId: randomUUID() }, runtime.db, admitted.id)).toBeNull();
+      expect(await latestConfigurationForSession({ ...writer, tenantId: randomUUID() }, runtime.db, admitted.id)).toBeNull();
+      const { configurationFormDefinitions } = await import("../../mcp/configuration-submission.js");
+      expect(configurationFormDefinitions(pending!.pending)).toMatchObject([{ key: "token", secret: true, schema: { type: "string" } }]);
       expect(pending!.pending.modelValues).toEqual(body.values);
       expect(pending!.pending.definitions).toMatchObject([{ key: "token", osfType: "string" }]);
+      const gets = new Map<string, (...args: any[]) => Promise<unknown>>();
+      let browserSession = writer;
+      await registerConfigurationHandoffRoutes({ instance: { addContentTypeParser() {}, post() {}, get(path: string, handler: (...args: any[]) => Promise<unknown>) { gets.set(path, handler); } },
+        options: { db: runtime.db }, requireMcpSession: async () => ({ db: runtime.db, session: browserSession, resource: "fixture" }) } as never);
+      const getForm = gets.get("/api/entity-configuration/pending/:id")!;
+      const presented = await getForm({params:{id:admitted.id}});
+      expect(presented).toMatchObject({id: admitted.id, definitions:[{key:"token",secret:true,schema:{type:"string"}}]});
+      expect(presented).not.toHaveProperty("token");
+      await expect(getForm({params:{id:"------------------------------------"}})).rejects.toMatchObject({code:"NOT_FOUND"});
+      browserSession = { ...writer, userId: randomUUID() };
+      await expect(getForm({params:{id:admitted.id}})).rejects.toMatchObject({code:"NOT_FOUND"});
+      browserSession = { ...writer, tenantId: randomUUID() };
+      await expect(getForm({params:{id:admitted.id}})).rejects.toMatchObject({code:"NOT_FOUND"});
       expect(await latestConfigurationForSession({ ...writer, userId: randomUUID() }, runtime.db)).toBeNull();
       expect(await latestConfigurationForSession({ ...writer, tenantId: randomUUID() }, runtime.db)).toBeNull();
       expect(await consumeConfigurationForSession(pending!.id, { ...writer, tenantId: randomUUID() }, runtime.db)).toBe(false);

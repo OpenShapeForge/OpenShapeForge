@@ -181,6 +181,15 @@ public class McpResourceScopeExecutorTest {
         params.putSingle("resource",other.resource);params.putSingle("scope","openid product-shared-mcp");
         assertThrows(ClientPolicyException.class,()->executor.executeOnEvent(event(params)));
     }
+    @Test public void supportingScopesCannotBypassAnotherResourcesRegistrationOptOut() throws Exception {
+        control.scope="product-a";control.registrationScopes=List.of("product-b");
+        var other=binding("other/mcp","product-b",true);other.registration=false;
+        var config=new McpResourceScopeExecutor.Configuration();config.resources=List.of(control,other);
+        assertInvalid(config);
+        // Listing the binding's own resource as supporting scope is invalid too.
+        control.registrationScopes=List.of("product-a");assertInvalid(config);
+        assertTrue(attached.isEmpty());assertEquals(0,scopeAdds);
+    }
     @Test public void resourceScopesRejectIdentityScopesAndUnsafeTokens() throws Exception {
         for(String name:List.of("openid","profile","email","roles","organization","offline_access","address","phone","basic","acr","web-origins","microprofile-jwt","organization:acme","org:acme", "has space", "scope/other", "A-scope", "a".repeat(151))) {
             var bad=binding("api/mcp",name,true);

@@ -83,8 +83,12 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
                 throw new IllegalArgumentException("Resource aliases must use the same registration and organization policy");
         }
         if (checked.isEmpty()) throw new IllegalArgumentException("MCP resource policy needs explicit resource bindings");
+        Set<String> configuredScopes = Set.copyOf(scopeModes.keySet());
+        if (checked.values().stream().anyMatch(binding ->
+                binding.registrationScopes.stream().anyMatch(configuredScopes::contains)))
+            throw new IllegalArgumentException("Supporting scopes cannot be configured resource scopes");
         resources = Map.copyOf(checked);
-        resourceScopes = Set.copyOf(scopeModes.keySet());
+        resourceScopes = configuredScopes;
     }
 
     @Override public void executeOnEvent(ClientPolicyContext context) throws ClientPolicyException {

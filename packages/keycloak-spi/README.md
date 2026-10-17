@@ -89,7 +89,7 @@ journey. Reports, screenshots and video are retained under `.runtime/`.
 The opt-in `osf-mcp-resource-scopes` client-policy executor runs at two native
 Keycloak boundaries. `REGISTERED` attaches explicitly registration-enabled resource scopes as
 **optional** scopes in the DCR transaction, before its response. Explicit `registration-scopes` can also make supporting OpenID scopes available when a client registers a smaller scope set than it later requests. It changes no
-user role grants, default scopes or callbacks. Supporting scopes use lowercase
+user role grants, default scopes or callbacks. Supporting scopes cannot also be the resource scope of any configured binding. They use lowercase
 names (`[a-z][a-z0-9_-]*`), excluding `openid`; they require registration opt-in.
 An organization-free binding cannot attach `organization`. The scopes may expose
 claims for roles already held by the user, but do not grant those roles. `AUTHORIZATION_REQUEST`

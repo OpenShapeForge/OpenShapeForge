@@ -1312,9 +1312,27 @@ describe("tenant registry identity default (0017)", () => {
             upgradeTenantIdentityDefaults(trx, manifest.tables as unknown as RegistryTable[])));
           expect(message).toContain("no permissive SELECT policy applies to the migration role");
         });
+        // Nor for a group the role is only a NOINHERIT member of: row security does not apply that policy.
+        const group = `${role}_g`;
+        await withDb(url, async (db) => {
+          expect(await identityDefault(db)).toBe("gen_random_uuid()");
+          await sql.raw(`create role ${group} nologin; grant ${group} to ${role} with inherit false`).execute(db);
+          await sql.raw(`alter policy tenants_tenant_isolation on erp.tenants to ${group}`).execute(db);
+        });
+        await withDb(roleUrl.toString(), async (db) => {
+          const visible = await db.transaction().execute(async (trx) => {
+            await sql`select set_config('app.bypass_rls', 'true', true)`.execute(trx);
+            return (await sql<{ count: number }>`select count(*)::int as count from erp.tenants`.execute(trx)).rows[0]!.count;
+          });
+          expect(visible).toBe(0);
+          const message = await expectRejects(db.transaction().execute((trx) =>
+            upgradeTenantIdentityDefaults(trx, manifest.tables as unknown as RegistryTable[])));
+          expect(message).toContain("no permissive SELECT policy applies to the migration role");
+        });
         await withDb(url, async (db) => {
           expect(await identityDefault(db)).toBe("gen_random_uuid()");
           await sql`alter policy tenants_tenant_isolation on erp.tenants to public`.execute(db);
+          await sql.raw(`drop role ${group}`).execute(db);
         });
         await withDb(roleUrl.toString(), async (db) => {
           const message = await expectRejects(db.transaction().execute((trx) =>
@@ -1328,6 +1346,7 @@ describe("tenant registry identity default (0017)", () => {
         });
       });
     } finally {
+      await admin.unsafe(`drop role if exists ${role}_g`);
       await admin.unsafe(`drop role if exists ${role}`);
       await admin.close();
     }

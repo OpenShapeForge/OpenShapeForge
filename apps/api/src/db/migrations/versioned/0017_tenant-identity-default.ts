@@ -79,7 +79,9 @@ export function tenantIdentityRegistries(tables: readonly RegistryTable[]): Regi
  * Enter the trusted system context for this transaction and prove that it
  * shows every row: row level security is off for the table, or the context is
  * on, every policy that applies to SELECT is a trusted bypass disjunct (see the
- * file comment) and at least one permissive one applies to the current role.
+ * file comment) and at least one permissive one applies to the current role —
+ * to PUBLIC or a role whose privileges it currently has (USAGE; a NOINHERIT
+ * membership does not make a policy apply).
  */
 async function assertAllRowsVisible(db: Kysely<any>, name: string, relation: string): Promise<void> {
   await sql`select set_config('app.bypass_rls', 'true', true)`.execute(db);
@@ -90,7 +92,7 @@ async function assertAllRowsVisible(db: Kysely<any>, name: string, relation: str
   const policies = await sql<{ name: string; permissive: boolean; applies: boolean; trusted: boolean }>`
     select p.polname as name, p.polpermissive as permissive,
            exists (select 1 from unnest(p.polroles) as r(oid)
-                    where r.oid = 0 or pg_has_role(current_user, r.oid, 'member')) as applies,
+                    where r.oid = 0 or pg_has_role(current_user, r.oid, 'usage')) as applies,
            coalesce(p.polqual::text like '{FUNCEXPR :funcid ' || f.oid || ' %'
                  or p.polqual::text like '{BOOLEXPR :boolop or :args ({FUNCEXPR :funcid ' || f.oid || ' %', false) as trusted
       from pg_policy p cross join (select to_regprocedure('app.bypass_rls()')::oid as oid) f

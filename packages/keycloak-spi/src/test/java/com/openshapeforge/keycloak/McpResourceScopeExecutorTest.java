@@ -155,6 +155,26 @@ public class McpResourceScopeExecutorTest {
         executor().executeOnEvent(new DynamicClientRegisteredContext(registration,client,null,realm));
         assertTrue(attached.isEmpty());assertEquals(0,scopeReads);
     }
+    @Test public void productResourceScopeBindsWithoutUsingTheOrganizationScopeNamespace() throws Exception {
+        control.scope="product-shared-mcp";
+        var registration=mock(ClientRegistrationContext.class,(m,a)->m.equals("getSession")?session:null);
+        executor().executeOnEvent(new DynamicClientRegisteredContext(registration,client,null,realm));
+        assertEquals(Set.of("product-shared-mcp"),attached);
+        var params=new MultivaluedHashMap<String,String>();
+        params.putSingle("resource",control.resource);params.putSingle("scope","openid profile");
+        executor().executeOnEvent(event(params));
+        assertEquals("openid profile product-shared-mcp",clientNotes.get(McpResourceScopeExecutor.BOUND_SCOPE));
+        var configured=Set.of("product-shared-mcp","mcp-resource:acme");
+        assertThrows(ClientPolicyException.class,()->McpResourceScopeExecutor.bindScopes("mcp-resource:acme",control,configured));
+        assertThrows(ClientPolicyException.class,()->McpResourceScopeExecutor.bindScopes("product-shared-mcp",tenant,configured));
+        assertEquals("openid organization mcp-resource:acme",McpResourceScopeExecutor.bindScopes("openid organization",tenant,configured));
+    }
+    @Test public void resourceScopesRejectIdentityScopesAndUnsafeTokens() throws Exception {
+        for(String name:List.of("openid","profile","email","roles","organization","offline_access","address","phone", "has space", "scope/other", "A-scope", "a".repeat(151))) {
+            var bad=binding("api/mcp",name,true);
+            var config=new McpResourceScopeExecutor.Configuration();config.resources=List.of(bad);assertInvalid(config);
+        }
+    }
     @Test public void configurationRejectsAmbiguousAndUnsafeResources() throws Exception {
         var config = new McpResourceScopeExecutor.Configuration();
         for (String name : java.util.Arrays.asList(null,"openid","Profile","mcp-resource:other","organization")) {

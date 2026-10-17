@@ -64,7 +64,8 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
             URI uri = URI.create(binding.resource);
             if (!"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getRawUserInfo() != null
                     || uri.getRawQuery() != null || uri.getRawFragment() != null || uri.getRawPath().isEmpty()
-                    || binding.scope == null || !binding.scope.matches("mcp-resource:[a-z0-9][a-z0-9-]*")
+                    || binding.scope == null || (!binding.scope.matches("[a-z][a-z0-9:_-]{0,149}")
+                        || Set.of("openid","profile","email","roles","organization","offline_access","address","phone").contains(binding.scope))
                     || checked.putIfAbsent(binding.resource, binding) != null)
                 throw new IllegalArgumentException("Invalid or duplicate MCP resource binding");
             if (binding.registrationScopes == null || binding.registrationScopes.stream().anyMatch(name ->
@@ -122,7 +123,8 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
             if (scopes != null && scopes.size() != 1)
                 throw denied("invalid_scope", "Exactly one scope parameter is required");
             authorization.getAuthenticationSession().setClientNote(BOUND_SCOPE,
-                    bindScopes(authorization.getAuthorizationEndpointRequest().getScope(), binding));
+                    bindScopes(authorization.getAuthorizationEndpointRequest().getScope(), binding,
+                        resources.values().stream().map(item -> item.scope).collect(java.util.stream.Collectors.toSet())));
         }
     }
 
@@ -134,9 +136,13 @@ public final class McpResourceScopeExecutor implements ClientPolicyExecutorProvi
     }
 
     static String bindScopes(String value, Binding binding) throws ClientPolicyException {
+        return bindScopes(value, binding, Set.of(binding.scope));
+    }
+
+    static String bindScopes(String value, Binding binding, Set<String> resourceScopes) throws ClientPolicyException {
         Set<String> scopes = new LinkedHashSet<>(Arrays.asList((value == null ? "" : value).trim().split("\\s+")));
         scopes.remove("");
-        if (scopes.stream().anyMatch(scope -> scope.startsWith("mcp-resource:") && !scope.equals(binding.scope)))
+        if (scopes.stream().anyMatch(scope -> (scope.startsWith("mcp-resource:") || resourceScopes.contains(scope)) && !scope.equals(binding.scope)))
             throw denied("invalid_scope", "The requested scopes conflict with the MCP resource");
         if (!binding.organization) scopes.removeIf(scope -> scope.equals("organization") || scope.startsWith("organization:"));
         scopes.add(binding.scope);

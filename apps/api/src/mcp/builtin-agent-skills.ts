@@ -82,9 +82,11 @@ for everything else and never overrides it.
   reach, or be served by a capability this session was not given.
 - Never invent a name. Entity names, operation ids, role keys and allowed
   values come from a listing or a read, never from another deployment.
-- Where the session searches its operations, a search that matches several
-  lists them best fit first as short summaries; it is not the contract. Pick
-  one, then search its exact id: that answer is its full current contract.
+- Where the session searches its operations, a word search lists them best
+  fit first as short summaries; it is not the contract. Pick one by its id,
+  then look that id up through the same search tool's own lookup field: that
+  answer is its full current contract, and no answer means this session
+  cannot use it.
 
 ## 2. Read the live contract, then write
 

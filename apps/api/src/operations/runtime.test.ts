@@ -1682,6 +1682,13 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
     });
     expect(searched.isError).not.toBe(true);
     expect(searched.structuredContent).toMatchObject({
+      operations: [{ operation: { id: "notebook.import", intent: "invoke" } }],
+    });
+    const contract = await client.callTool({
+      name: "osf_search_operations",
+      arguments: { operationId: "notebook.import" },
+    });
+    expect(contract.structuredContent).toMatchObject({
       operations: [{
         operation: { id: "notebook.import", intent: "invoke" },
         inputSchema: expect.objectContaining({
@@ -1867,7 +1874,7 @@ test("MCP projects and dispatches live runtime provider Operations canonically",
     expect(listed.tools.map((tool) => tool.name)).toContain("osf_execute_operation");
     expect(listed.tools.map((tool) => tool.name)).not.toContain("find_tickets");
     const searched = await client.callTool({
-      name: "osf_search_operations", arguments: { query: definition.id, limit: 20 },
+      name: "osf_search_operations", arguments: { operationId: definition.id },
     });
     expect(searched.isError).not.toBe(true);
     expect(searched.structuredContent).toMatchObject({ operations: [{

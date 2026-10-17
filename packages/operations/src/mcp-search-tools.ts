@@ -18,20 +18,26 @@ export function searchableOperationToolDefinitions(
       name: names.search,
       title: "Search available Operations",
       description:
-        "Search the canonical Operations currently available to this signed-in person. " +
-        "Matches are ranked by how well they fit the query. When several match, the results are " +
-        "short summaries (id, name, description, effects) paged with nextCursor. A query that is an " +
-        "Operation id or a generated tool name is looked up exactly: it returns that Operation alone with " +
-        "its full contract (the exact input and output schema, errors and controls the executor " +
-        "validates), or nothing when this session cannot use it. A word query that only one Operation " +
-        "matches returns that contract too.",
+        "Search the canonical Operations currently available to this signed-in person, or look one up. " +
+        "A word query returns ranked short summaries (id, name, description, effects), paged with " +
+        "nextCursor; it never returns a schema. Choose an id from them and call this tool again with " +
+        "only operationId: that returns the Operation's full current contract (the exact input and " +
+        "output schema, errors and controls the executor validates), or nothing when this session " +
+        "cannot use it.",
       inputSchema: {
         type: "object",
         properties: {
+          operationId: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Exact canonical Operation id, or an unambiguous generated tool name this session lists. " +
+              "Returns its full current contract or no result. Use alone, without query, cursor or limit.",
+          },
           query: {
             type: "string",
             maxLength: 200,
-            description: "Words in any language matched against Operation id, key, name, description and entity label; or one exact Operation id or tool name.",
+            description: "Words in any language matched against Operation id, key, name, description and entity label.",
           },
           cursor: {
             type: "string",
@@ -47,6 +53,14 @@ export function searchableOperationToolDefinitions(
           },
         },
         additionalProperties: false,
+        // A lookup and a search are two requests: operationId stands alone.
+        not: {
+          anyOf: [
+            { required: ["operationId", "query"] },
+            { required: ["operationId", "cursor"] },
+            { required: ["operationId", "limit"] },
+          ],
+        },
       },
       outputSchema: {
         type: "object",
@@ -68,9 +82,9 @@ export function searchableOperationToolDefinitions(
       name: names.execute,
       title: "Execute an available Operation",
       description:
-        "Execute one canonical Operation found with the search tool, with input matching the contract " +
-        "a search for its exact id returns. For a keyed Operation, reuse the same idempotencyKey only " +
-        "when retrying the exact same input.",
+        "Execute one canonical Operation, with input matching the contract the search tool returns for " +
+        "its operationId. For a keyed Operation, reuse the same idempotencyKey only when retrying the " +
+        "exact same input.",
       inputSchema: {
         type: "object",
         properties: {

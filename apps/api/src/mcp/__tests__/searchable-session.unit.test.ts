@@ -82,8 +82,8 @@ describe("complete searchable MCP session", () => {
     const operation = getEntityOperationContracts().find((candidate) => candidate.intent === "get" && catalog.tools.some((tool) => tool.operationId === candidate.id))!;
     expect(operation).toBeDefined();
     await fixture(0, [...operation.authorization.roles], async (client) => {
-      const page = data(await client.callTool({ name: "osf_search_operations", arguments: { query: operation.id } }));
-      // The exact id answers that Operation alone, with the schema the executor validates.
+      const page = data(await client.callTool({ name: "osf_search_operations", arguments: { operationId: operation.id } }));
+      // The lookup answers that Operation alone, with the schema the executor validates.
       expect(page.operations.map((candidate) => candidate.operation.id)).toEqual([operation.id]);
       expect(page.operations[0]!.inputSchema).toMatchObject({ type: "object" });
       const result = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: operation.id, input: { id: "invalid-uuid" } } });
@@ -98,12 +98,12 @@ describe("complete searchable MCP session", () => {
     expect(tool).toBeDefined();
     const contract = getEntityOperationContracts().find((candidate) => candidate.id === tool.operationId)!;
     await fixture(0, [...contract.authorization.roles], async (client) => {
-      const page = data(await client.callTool({ name: "osf_search_operations", arguments: { query: tool.name } }));
+      const page = data(await client.callTool({ name: "osf_search_operations", arguments: { operationId: tool.name } }));
       expect(page.operations.map((candidate) => candidate.operation.id)).toEqual([tool.operationId]);
       expect(page.operations[0]!.inputSchema).toMatchObject({ type: "object" });
     });
     await fixture(0, [], async (client) => {
-      expect(data(await client.callTool({ name: "osf_search_operations", arguments: { query: tool.name } })).operations).toEqual([]);
+      expect(data(await client.callTool({ name: "osf_search_operations", arguments: { operationId: tool.name } })).operations).toEqual([]);
     });
   });
   test("a CRUD Operation is found by its canonical name in another language", async () => {
@@ -123,6 +123,7 @@ describe("complete searchable MCP session", () => {
     const operation = getEntityOperationContracts().find((candidate) => candidate.intent === "create" && catalog.tools.some((tool) => tool.operationId === candidate.id))!;
     await fixture(0, [], async (client) => {
       expect(data(await client.callTool({ name: "osf_search_operations", arguments: { query: operation.id } })).operations).toEqual([]);
+      expect(data(await client.callTool({ name: "osf_search_operations", arguments: { operationId: operation.id } })).operations).toEqual([]);
       expect((await client.callTool({ name: "osf_execute_operation", arguments: { operationId: operation.id, input: {} } })).structuredContent).toMatchObject({ error: { code: "NOT_FOUND" } });
     });
   });

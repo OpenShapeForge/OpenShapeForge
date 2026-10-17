@@ -122,7 +122,7 @@ describe("searchable MCP Operations", () => {
       .toEqual(["a.create", "b.create", "c.create", "payroll.run"]);
   });
 
-  test("filters before paging; a multi-hit set pages summaries even at limit 1, an exact id answers its contract", () => {
+  test("filters before paging; a multi-hit set pages summaries even at limit 1, an operationId lookup answers its contract", () => {
     const definitions = [
       definition("demo.alpha", {
         concurrency: {
@@ -154,7 +154,7 @@ describe("searchable MCP Operations", () => {
     expect(second.nextCursor).toBeUndefined();
     expect(JSON.stringify([...first.operations, ...second.operations])).not.toContain("secret.hidden");
 
-    const exact = search({ query: "demo.alpha" });
+    const exact = search({ operationId: "demo.alpha" });
     expect(exact).toEqual({ operations: [expect.objectContaining({
       operation: { id: "demo.alpha", intent: "invoke" },
       inputSchema: definitions[0]!.input.schema,
@@ -163,56 +163,64 @@ describe("searchable MCP Operations", () => {
       errors: [{ status: 409, code: "CONFLICT", description: "Already running." }],
       effects: { data: "write", external: "none" },
     })] });
-    // An exact-looking id this session cannot use answers nothing about it.
-    expect(search({ query: "secret.hidden" })).toEqual({ operations: [] });
+    // An id this session cannot use answers nothing about it.
+    expect(search({ operationId: "secret.hidden" })).toEqual({ operations: [] });
+    // A word query never returns a contract, even when it names one id.
+    expect(search({ query: "demo.alpha" }).operations.every((entry) => !("inputSchema" in entry))).toBe(true);
   });
 
-  test("an exact id wins over everything it resembles", () => {
+  test("a word query ranks an id it names first but stays a summary", () => {
     const definitions = ["Block.update", "Template.get", "Template.list", "TemplateVersion.get"].map((id) =>
       definition(id, { name: { en: `Template ${id}` } }));
     const found = searchOperationDefinitions({
       definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query: "Template.get" }, locale,
     }).operations;
-    expect(found.map((entry) => (entry.operation as { id: string }).id)).toEqual(["Template.get"]);
-    expect(found[0]).toHaveProperty("inputSchema");
+    expect((found[0]!.operation as { id: string }).id).toBe("Template.get");
+    expect(found.some((entry) => "inputSchema" in entry)).toBe(false);
   });
 
-  test("a generated name resolves only to an available id, and a shared or unknown name to none", () => {
-    const definitions = [definition("Relation.list", { name: { en: "List relations" } }), definition("Relation.get"), definition("Hidden.list")];
-    const allowedIds = new Set(["Relation.list", "Relation.get"]);
-    const names = new Map([["relation_list", "Relation.list"], ["hidden_list", "Hidden.list"]]);
-    const search = (query: string) => searchOperationDefinitions({
-      definitions, allowedIds, arguments: { query }, locale, resolveName: (name) => names.get(name),
-    });
-    const generated = search("relation_list").operations;
-    expect(generated.map((entry) => (entry.operation as { id: string }).id)).toEqual(["Relation.list"]);
-    expect(generated[0]).toHaveProperty("inputSchema");
-    expect(JSON.stringify(search("hidden_list"))).not.toContain("Hidden");
-    expect(search("osf_list").operations).toEqual([]);
+  test("operationId looks up exactly: the canonical id or an exact generated name, only when available", () => {
+    const definitions = ["Relation.list", "Relation.get", "Hidden.list", "Template.get", "TemplateVersion.get", "archive", "Records.archive", "example.Read", "example.read"]
+      .map((id) => definition(id, { name: { en: `Read ${id}` } }));
+    // Hidden.list, Template.get and example.Read exist but this session may not use them.
+    const allowedIds = new Set(["Relation.list", "Relation.get", "TemplateVersion.get", "archive", "Records.archive", "example.read"]);
+    const names = new Map([["relation_list", "Relation.list"], ["hidden_list", "Hidden.list"], ["template_get", "Template.get"]]);
+    const lookup = (operationId: string) => searchOperationDefinitions({
+      definitions, allowedIds, arguments: { operationId }, locale, resolveName: (name) => names.get(name),
+    }).operations;
+    const id = (operationId: string) => lookup(operationId).map((entry) => (entry.operation as { id: string }).id);
+    expect(id("Relation.list")).toEqual(["Relation.list"]);
+    expect(lookup("Relation.list")[0]).toHaveProperty("inputSchema");
+    expect(id("relation_list")).toEqual(["Relation.list"]);
+    // An unqualified id is an id like any other.
+    expect(id("archive")).toEqual(["archive"]);
+    expect(lookup("archive")[0]).toHaveProperty("inputSchema");
+    // Unavailable, unknown or only resembling: nothing, never a neighbour.
+    expect(lookup("Template.get")).toEqual([]);
+    expect(lookup("template_get")).toEqual([]);
+    expect(lookup("hidden_list")).toEqual([]);
+    expect(lookup("Template.missing")).toEqual([]);
+    expect(lookup("osf_list")).toEqual([]);
+    // Ids are compared exactly: a case variant is another Operation.
+    expect(lookup("example.Read")).toEqual([]);
+    expect(id("example.read")).toEqual(["example.read"]);
+    expect(lookup("relation.list")).toEqual([]);
+    expect(JSON.stringify(lookup("hidden_list"))).not.toContain("Hidden");
   });
 
-  test("an identity is looked up, never searched: an unavailable one answers nothing, not its neighbour", () => {
-    const definitions = ["Template.get", "TemplateVersion.get", "TemplateVersion.list", "workflow.instance.start"].map((id) =>
-      definition(id, { name: { en: `Read ${id}` } }));
-    // Template.get exists in the catalogue but this session may not use it.
-    const allowedIds = new Set(["TemplateVersion.get", "TemplateVersion.list", "workflow.instance.start"]);
-    const names = new Map([["template_get", "Template.get"], ["template_version_get", "TemplateVersion.get"]]);
-    const search = (query: string, extra: Record<string, unknown> = {}) => searchOperationDefinitions({
-      definitions, allowedIds, arguments: { query, ...extra }, locale, resolveName: (name) => names.get(name),
+  test("an operationId lookup stands alone", () => {
+    for (const extra of [{ query: "relation" }, { cursor: "x" }, { limit: 5 }]) {
+      expect(() => parseOperationSearchArguments({ operationId: "Relation.list", ...extra })).toThrow(/no query, cursor or limit/i);
+    }
+    for (const operationId of ["", "   ", 7]) {
+      expect(() => parseOperationSearchArguments({ operationId })).toThrow(/canonical Operation id/i);
+    }
+    expect(parseOperationSearchArguments({ operationId: " archive " })).toEqual({ operationId: "archive" });
+    const [search] = searchableOperationTools({ search: "osf_search_operations", execute: "osf_execute_operation" });
+    expect(search?.inputSchema).toMatchObject({
+      properties: { operationId: { type: "string", minLength: 1 } },
+      not: { anyOf: [{ required: ["operationId", "query"] }, { required: ["operationId", "cursor"] }, { required: ["operationId", "limit"] }] },
     });
-    const ids = (query: string) => search(query).operations.map((entry) => (entry.operation as { id: string }).id);
-    expect(search("Template.get")).toEqual({ operations: [] });
-    expect(search("template_get")).toEqual({ operations: [] });
-    expect(search("Template.missing")).toEqual({ operations: [] });
-    expect(search("no_such_tool")).toEqual({ operations: [] });
-    expect(search("workflow.instance")).toEqual({ operations: [] });
-    expect(ids("template_version_get")).toEqual(["TemplateVersion.get"]);
-    expect(ids("templateversion.get")).toEqual(["TemplateVersion.get"]);
-    expect(search("TemplateVersion.get").operations[0]).toHaveProperty("inputSchema");
-    expect(() => search("TemplateVersion.get", { cursor: "x" })).toThrow(/cursor is invalid/i);
-    // Words remain words: a space or a trailing separator searches.
-    expect(ids("template get")).toEqual(["TemplateVersion.get"]);
-    expect(ids("workflow.instance.")).toEqual(["workflow.instance.start"]);
   });
 
   test("ranks naming over description and splits camel case", () => {

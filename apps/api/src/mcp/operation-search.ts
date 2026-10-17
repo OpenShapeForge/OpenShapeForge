@@ -14,11 +14,9 @@ import { localizedText, type ResolvedLocale } from "./locale.js";
 
 export type { SearchableOperationToolNames } from "@openshapeforge/operations";
 
-export type OperationSearchArguments = {
-  query?: string;
-  cursor?: string;
-  limit: number;
-};
+export type OperationSearchArguments =
+  | { operationId: string }
+  | { query?: string; cursor?: string; limit: number };
 
 function objectInput(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -99,7 +97,17 @@ export function searchableOperationTools(
 
 export function parseOperationSearchArguments(value: unknown): OperationSearchArguments {
   const input = objectInput(value ?? {}, "Operation search input");
-  rejectUnknownKeys(input, ["query", "cursor", "limit"], "Operation search input");
+  rejectUnknownKeys(input, ["operationId", "query", "cursor", "limit"], "Operation search input");
+  if (input.operationId !== undefined) {
+    // The same identity rule the executor applies to its operationId.
+    if (typeof input.operationId !== "string" || input.operationId.trim().length === 0) {
+      throw new HttpError(400, "BAD_USER_INPUT", "A canonical Operation id is required.");
+    }
+    if (["query", "cursor", "limit"].some((key) => input[key] !== undefined)) {
+      throw new HttpError(400, "BAD_USER_INPUT", "An operationId lookup takes no query, cursor or limit.");
+    }
+    return { operationId: input.operationId.trim() };
+  }
   const query = input.query;
   const cursor = input.cursor;
   const limit = input.limit ?? DEFAULT_OPERATION_SEARCH_RESULTS;
@@ -244,32 +252,19 @@ export type OperationSearchContext = {
 };
 
 /**
- * A query that is an identity rather than words: a qualified canonical id
- * (`Template.get`, `workflow.instance.start`, `osf-integration.service.invoke:key`)
- * or a generated tool name (`template_get`). A trailing separator
- * (`example.service.`) or a space makes it words again.
+ * The available Operation an explicit lookup names: the canonical id itself,
+ * or the id the existing exact generated-name matcher resolves the name to.
+ * Ids compare exactly (two ids differing only in case are two Operations),
+ * and only an available id answers; nothing says whether it exists elsewhere.
  */
-const CANONICAL_ID_SHAPE = /^[A-Za-z][\w-]*(?:\.[\w-]+)+(?::[\w.-]*[\w-])?$/u;
-const TOOL_NAME_SHAPE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/u;
-function isIdentityQuery(query: string): boolean {
-  return CANONICAL_ID_SHAPE.test(query) || TOOL_NAME_SHAPE.test(query);
-}
-
-/**
- * The available Operation an identity names: the canonical id itself, the
- * one available id equal to it but for letter case, or the canonical id a
- * generated tool name resolves to — only when that id is available here.
- */
-function identityMatch(
+function lookup(
   available: readonly RuntimeOperationDefinition[],
-  query: string,
+  operationId: string,
   resolveName: ((name: string) => string | undefined) | undefined,
 ): RuntimeOperationDefinition | undefined {
-  const exact = available.find((definition) => definition.id === query);
+  const exact = available.find((definition) => definition.id === operationId);
   if (exact) return exact;
-  const folded = available.filter((definition) => definition.id.toLowerCase() === query.toLowerCase());
-  if (folded.length === 1) return folded[0];
-  const resolved = resolveName?.(query);
+  const resolved = resolveName?.(operationId);
   return resolved === undefined ? undefined : available.find((definition) => definition.id === resolved);
 }
 
@@ -345,16 +340,14 @@ function operationSummary(definition: RuntimeOperationDefinition, name: string, 
 }
 
 /**
- * Search the session's available Operations.
+ * Search the session's available Operations, or look one up.
  *
- * A query shaped like an identity (isIdentityQuery) is looked up exactly: the
- * available Operation it names answers alone with its full contract, and
- * anything else answers nothing. Otherwise every query word must match
- * (any one non-generic word when none matches them all); the matches are
- * ranked by how well the naming text fits, then by id, and paged by a cursor
- * that carries that position. A result set of exactly one Operation is its
- * full contract; a larger set pages compact summaries, however small the
- * page — the model reads the contract of the one it chose by its exact id.
+ * `operationId` answers that one available Operation with its full contract,
+ * or nothing. A word query never does: every query word must match (any one
+ * non-generic word when none matches them all), the matches are ranked by how
+ * well the naming text fits, then by id, and paged as compact summaries by a
+ * cursor that carries that position. The model reads the contract of the one
+ * it chose by looking up its id.
  */
 export function searchOperationDefinitions(input: {
   definitions: readonly RuntimeOperationDefinition[];
@@ -368,16 +361,11 @@ export function searchOperationDefinitions(input: {
     const name = localizedText(definition.name, input.locale) ?? definition.id;
     return { name, description: localizedText(definition.description, input.locale) ?? name };
   };
-  if (args.query && isIdentityQuery(args.query)) {
-    // An identity is looked up, never searched: what it names is available
-    // here and answers alone with its contract, or the answer is empty. A
-    // near neighbour ("Template.get" → TemplateVersion.get) is never
-    // substituted, and whether the name exists elsewhere is not revealed.
-    if (args.cursor) throw new HttpError(400, "BAD_USER_INPUT", "Operation search cursor is invalid.");
-    const exact = identityMatch(available, args.query, input.resolveName);
-    if (!exact) return { operations: [] };
-    const { name, description } = shown(exact);
-    return { operations: [operationContract(exact, name, description)] };
+  if ("operationId" in args) {
+    const found = lookup(available, args.operationId, input.resolveName);
+    if (!found) return { operations: [] };
+    const { name, description } = shown(found);
+    return { operations: [operationContract(found, name, description)] };
   }
   const query = queryWords(args.query);
   const candidates = available.map((definition) => {
@@ -411,10 +399,6 @@ export function searchOperationDefinitions(input: {
     // same total order, and ids compare by code unit (compareCodeUnits): a
     // collation-sorted list loops and skips.
     .sort((left, right) => right.score - left.score || compareCodeUnits(left.definition.id, right.definition.id));
-  if (matched.length === 1 && !args.cursor) {
-    const { name, description } = shown(matched[0]!.definition);
-    return { operations: [operationContract(matched[0]!.definition, name, description)] };
-  }
   const fingerprint = queryFingerprint(query);
   const after = args.cursor ? decodeCursor(args.cursor, fingerprint) : undefined;
   const start = after

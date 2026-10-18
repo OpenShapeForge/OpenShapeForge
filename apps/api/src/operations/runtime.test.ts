@@ -1681,9 +1681,17 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
       arguments: { query: "import a notebook body", limit: 20 },
     });
     expect(searched.isError).not.toBe(true);
-    expect(searched.structuredContent).toMatchObject({
-      operations: [{ operation: { id: "notebook.import", intent: "invoke" } }],
-    });
+    // The Operation matching every word first; Operations "notebook" names
+    // follow it. All of them compact summaries this session may use.
+    const hits = (searched.structuredContent as { operations: Record<string, unknown>[] }).operations;
+    expect(hits[0]).toMatchObject({ operation: { id: "notebook.import", intent: "invoke" } });
+    for (const hit of hits) {
+      expect(hit).not.toHaveProperty("inputSchema");
+      expect(hit).not.toHaveProperty("outputSchema");
+      const id = (hit.operation as { id: string }).id;
+      const available = await client.callTool({ name: "osf_search_operations", arguments: { operationId: id } });
+      expect((available.structuredContent as { operations: unknown[] }).operations).toHaveLength(1);
+    }
     const contract = await client.callTool({
       name: "osf_search_operations",
       arguments: { operationId: "notebook.import" },

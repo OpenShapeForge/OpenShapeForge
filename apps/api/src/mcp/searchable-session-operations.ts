@@ -2,7 +2,7 @@
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import { catalog } from "./catalog.js";
 import { generatedCrudTools, matchNativeCrudTool } from "./native-crud-tool.js";
-import { describeTool } from "./entity-tool-projection.js";
+import { describeTool, withheldClassifiedFields } from "./entity-tool-projection.js";
 import { toolsForSession } from "./session-projection.js";
 import type { ServerScope } from "./server-scope.js";
 
@@ -23,6 +23,8 @@ export async function searchableSessionOperations(scope: ServerScope) {
   // description in every authored language as well (operation-search.ts).
   const canonicalText = new Map<string, Pick<RuntimeOperationDefinition, "name" | "description">>();
   const entityLabels = new Map(catalog.entities.flatMap((entity) => entity.labels ? [[entity.entity, entity.labels] as const] : []));
+  const entityFields = entityFieldLabels(catalog.entities, (entity) =>
+    withheldClassifiedFields(entity, scope.tables.get(entity.table), scope.session));
   // An exact generated name answers like its canonical id, matched exactly as
   // native execution matches it (a name several entities share resolves to
   // nothing); the search answers it only when that id is available here.
@@ -37,6 +39,7 @@ export async function searchableSessionOperations(scope: ServerScope) {
     entities,
     canonicalText,
     entityLabels,
+    entityFields,
     resolveName,
     definitions: definitions.filter((definition) => allowedIds.has(definition.id)).map((definition): RuntimeOperationDefinition => {
       const entry = entities.get(definition.id);
@@ -54,6 +57,28 @@ export async function searchableSessionOperations(scope: ServerScope) {
       return { ...definition, name: tool.title ?? definition.name, description: tool.description, input: { kind: "json-schema", schema: tool.inputSchema }, output: { kind: "json-schema", schema: output } };
     }),
   };
+}
+
+/**
+ * Each entity's authored field labels in every language, of the fields a
+ * session's tool schemas show: the fields `withheld` names for an entity
+ * (withheldClassifiedFields, the projection's own decision) are not searched.
+ */
+export function entityFieldLabels(
+  entities: typeof catalog.entities,
+  withheld: (entity: (typeof catalog.entities)[number]) => readonly string[],
+): Map<string, string[]> {
+  return new Map(entities.map((entity) => [entity.entity, entity.fields
+    .filter((field) => !withheld(entity).includes(field.key))
+    .flatMap((field) => [field.label, ...Object.values(fieldTitles(field.schema))])
+    .filter((label): label is string => typeof label === "string" && label.length > 0)]));
+}
+
+/** A field schema's authored title per language (`x-osf-i18n`), when it has one. */
+function fieldTitles(schema: Record<string, unknown>): Record<string, unknown> {
+  const i18n = schema["x-osf-i18n"];
+  const title = i18n && typeof i18n === "object" ? (i18n as Record<string, unknown>).title : undefined;
+  return title && typeof title === "object" && !Array.isArray(title) ? title as Record<string, unknown> : {};
 }
 
 /** Hide only tools whose complete behavior remains available by canonical id. */

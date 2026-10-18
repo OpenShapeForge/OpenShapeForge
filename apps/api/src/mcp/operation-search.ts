@@ -193,47 +193,100 @@ function texts(value: unknown): string[] {
 }
 
 /**
- * The verbs every CRUD Operation shares. A query of only these and an
- * unmatched subject ("create payroll") must not fall back to every create.
+ * The verbs every CRUD Operation shares, by the intents they ask for. They
+ * say what to do, not what with: an Operation need not contain one to match
+ * ("find person" finds a relation list), a query of only these and an
+ * unmatched subject ("create payroll") must not fall back to every create,
+ * and among equal matches they prefer the Operations of that intent.
  */
-const GENERIC_ACTION_WORDS = new Set([
-  "create", "add", "list", "show", "get", "read", "find", "search", "update", "edit", "change", "delete", "remove",
-  "aanmaken", "maak", "toevoegen", "voeg", "tonen", "toon", "lijst", "ophalen", "lezen", "zoek", "zoeken",
-  "wijzigen", "wijzig", "bijwerken", "verwijderen", "verwijder",
+const ACTION_INTENTS: ReadonlyMap<string, readonly string[]> = new Map([
+  ...["list", "show", "get", "read", "find", "search", "tonen", "toon", "lijst", "ophalen", "lezen", "zoek", "zoeken", "vind", "vinden"]
+    .map((word): [string, readonly string[]] => [word, ["list", "get"]]),
+  ...["create", "add", "aanmaken", "maak", "toevoegen", "voeg"].map((word): [string, readonly string[]] => [word, ["create"]]),
+  ...["update", "edit", "change", "wijzigen", "wijzig", "bijwerken"].map((word): [string, readonly string[]] => [word, ["update"]]),
+  ...["delete", "remove", "verwijderen", "verwijder"].map((word): [string, readonly string[]] => [word, ["delete"]]),
 ]);
 
+/** Endings that only inflect a word ("persons", "roles", "personen", "relaties"). */
+const INFLECTIONS = ["s", "es", "en", "n"];
+
 /**
- * A query word matches a text word that starts with its first five letters
- * (all of a shorter word): "invite" finds "invitation", "uitnodigen" finds
- * "uitnodiging", "organization" finds "organisatie", "role" finds "roles".
- * A plural also finds its singular: a text word of at least four letters
- * that the query word starts with matches too, so "roles" finds "role" but
- * "users" does not find "use". A word under three letters only matches
- * itself.
+ * The same word, or the word inflected: a text word that is the query word
+ * plus an inflection, or the other way around ("person" and "persons", "roles"
+ * and "role"). A word under three letters only matches itself.
  */
-function wordMatches(word: string, words: readonly string[]): boolean {
-  if (word.length < 3) return words.includes(word);
-  const prefix = word.slice(0, Math.min(5, word.length));
-  return words.some((candidate) =>
-    candidate.startsWith(prefix) ||
-    (candidate.length >= 4 && candidate.length < word.length && word.startsWith(candidate)));
+function sameWord(word: string, candidate: string): boolean {
+  if (word === candidate) return true;
+  if (word.length < 3 || candidate.length < 3) return false;
+  const [short, long] = word.length < candidate.length ? [word, candidate] : [candidate, word];
+  return long.startsWith(short) && INFLECTIONS.includes(long.slice(short.length));
 }
 
 /**
- * What one query word is worth to one Operation: the words that name it (id,
- * key, entity, the entity's labels, the Operation name) count more than its
- * description, and the word itself more than a word it merely resembles.
- * Zero is no match.
+ * A word it merely resembles: a text word sharing its first five letters (all
+ * of a shorter word) — "invite" finds "invitation", "uitnodigen" finds
+ * "uitnodiging", "organization" finds "organisatie" — a text word of at least
+ * four letters the query word starts with ("users" does not find "use"), or a
+ * compound ending in a query word of at least four letters ("naam" in
+ * "weergavenaam"). Weaker than the word itself: "person" resembles
+ * "personal" but is not it.
  */
-function wordScore(word: string, naming: readonly string[], describing: readonly string[]): number {
-  if (naming.includes(word)) return 4;
-  if (wordMatches(word, naming)) return 3;
-  if (describing.includes(word)) return 2;
-  return wordMatches(word, describing) ? 1 : 0;
+function resembles(word: string, candidate: string): boolean {
+  if (word.length < 3) return false;
+  return candidate.startsWith(word.slice(0, Math.min(5, word.length))) ||
+    (candidate.length >= 4 && candidate.length < word.length && word.startsWith(candidate)) ||
+    (word.length >= 4 && candidate.length > word.length && candidate.endsWith(word));
 }
+
+/** What a query word earns by being a word that names the Operation (its best match). */
+const NAMED = 8;
+
+/** The text of one Operation a query word can match, from strongest to weakest. */
+type MatchText = { naming: readonly string[]; describing: readonly string[]; context: readonly string[] };
+
+/**
+ * What one query word is worth to one Operation. The word itself (sameWord)
+ * counts more than a word it merely resembles (resembles), wherever it
+ * occurs: the word in a description, even in a field label, outranks a name
+ * that only shares a prefix ("person" is not "personal"). The words that name
+ * the Operation (id, key, entity, the entity's labels, the Operation name)
+ * count more than its description, and the description more than its
+ * entity's field labels. Zero is no match.
+ */
+function wordScore(word: string, text: MatchText): number {
+  const same = (list: readonly string[]) => list.some((candidate) => sameWord(word, candidate));
+  const like = (list: readonly string[]) => list.some((candidate) => resembles(word, candidate));
+  if (same(text.naming)) return NAMED;
+  if (same(text.describing)) return 5;
+  if (same(text.context)) return 3;
+  if (like(text.naming)) return 2;
+  return like(text.describing) || like(text.context) ? 1 : 0;
+}
+
+/**
+ * How much a query word tells apart: a word few available Operations match
+ * ("person") weighs more than one nearly all of them match ("name"). Computed
+ * over this session's own Operations, so no word or entity is special.
+ */
+function wordWeight(matching: number, available: number): number {
+  return 1 + Math.log(available / Math.max(matching, 1));
+}
+
+/** The rank a match of every query word earns over any match of only some (more than any word sum). */
+const EVERY_WORD = 10_000;
+
+/** Ranks are compared as integers (the cursor carries one): this many steps per score point. */
+const RANK_STEPS = 1_000;
 
 /** The rank a query earns by being exactly an entity's name. */
-const ENTITY_NAMED = 2;
+const ENTITY_NAMED = 4;
+
+/**
+ * What a query verb is worth to an Operation of the intent it asks for ("find"
+ * asks to read): a verb is matched by the intent, as fully as a word that
+ * names the Operation, and weighted like any other word (wordWeight).
+ */
+const ASKED_INTENT = 8;
 
 /** The text that names one Operation: what a person or model would call it. */
 type SearchText = Pick<RuntimeOperationDefinition, "name" | "description">;
@@ -244,6 +297,12 @@ export type OperationSearchContext = {
   canonicalText?: ReadonlyMap<string, SearchText>;
   /** An entity's authored label per language, by entity name: "kennis" finds KnowledgeItem. */
   entityLabels?: ReadonlyMap<string, Readonly<Record<string, string>>>;
+  /**
+   * The labels, in every authored language, of the fields a session sees of
+   * an entity, by entity name: a relation's "Display name" and "Natural
+   * persons" make "find person by name" a relation lookup.
+   */
+  entityFields?: ReadonlyMap<string, readonly string[]>;
   /**
    * The canonical id another exact name stands for (a generated tool name),
    * or undefined. Only an id that is itself available is ever answered.
@@ -343,11 +402,14 @@ function operationSummary(definition: RuntimeOperationDefinition, name: string, 
  * Search the session's available Operations, or look one up.
  *
  * `operationId` answers that one available Operation with its full contract,
- * or nothing. A word query never does: every query word must match (any one
- * non-generic word when none matches them all), the matches are ranked by how
- * well the naming text fits, then by id, and paged as compact summaries by a
- * cursor that carries that position. The model reads the contract of the one
- * it chose by looking up its id.
+ * or nothing. A word query never does: the Operations matching every query
+ * word (a verb also by the intent it asks for) come first, then those a
+ * subject word names (any subject word when nothing matches them all); each
+ * group is ranked by how well each word
+ * matches (wordScore) weighted by how much that word tells apart
+ * (wordWeight), then by id, and paged as compact summaries by a cursor that
+ * carries that position. The model reads the contract of the one it
+ * chose by looking up its id.
  */
 export function searchOperationDefinitions(input: {
   definitions: readonly RuntimeOperationDefinition[];
@@ -368,33 +430,56 @@ export function searchOperationDefinitions(input: {
     return { operations: [operationContract(found, name, description)] };
   }
   const query = queryWords(args.query);
-  const candidates = available.map((definition) => {
+  // A verb ("find", "zoek") says what to do with the subject; a query of only
+  // verbs matches them as plain words.
+  const isSubject = query.map((word) => !ACTION_INTENTS.has(word));
+  const verbsOnly = !isSubject.includes(true);
+  const scored = available.map((definition) => {
     const canonical = input.canonicalText?.get(definition.id);
     const labels = definition.entityName ? input.entityLabels?.get(definition.entityName) : undefined;
-    const naming = [definition.id, definition.key ?? "", definition.entityName ?? "", ...texts(labels), ...texts(definition.name), ...texts(canonical?.name)]
-      .flatMap(words);
-    const describing = [...texts(definition.description), ...texts(canonical?.description)].flatMap(words);
-    const scores = query.map((word) => wordScore(word, naming, describing));
-    // A query that is exactly an entity's name ("Template", "TemplateVariant")
-    // ranks that entity's own Operations before others that merely contain it.
-    const entityWords = words(definition.entityName ?? "");
-    const namesEntity = query.length > 0 && entityWords.length === query.length && query.every((word) => entityWords.includes(word));
-    return { definition, scores, score: scores.reduce((total, score) => total + score, 0) + (namesEntity ? ENTITY_NAMED : 0) };
+    const text: MatchText = {
+      naming: [definition.id, definition.key ?? "", definition.entityName ?? "", ...texts(labels), ...texts(definition.name), ...texts(canonical?.name)]
+        .flatMap(words),
+      describing: [...texts(definition.description), ...texts(canonical?.description)].flatMap(words),
+      context: (definition.entityName ? input.entityFields?.get(definition.entityName) ?? [] : []).flatMap(words),
+    };
+    // A verb also matches an Operation of the intent it asks for, as fully
+    // as a word that names it.
+    return { definition, scores: query.map((word, index) => Math.max(wordScore(word, text),
+      !verbsOnly && !isSubject[index] && ACTION_INTENTS.get(word)!.includes(definition.intent) ? ASKED_INTENT : 0)) };
   });
+  const weights = query.map((_, index) =>
+    wordWeight(scored.filter(({ scores }) => scores[index]! > 0).length, available.length));
   // Every word, in any authored language, before any single word: a model
   // asks in its own words ("invite employee role"), not in one exact phrase
-  // of the person's locale.
-  const every = candidates.filter(({ scores }) => scores.every((score) => score > 0));
-  const tier = every.length > 0 || query.length < 2 ? "every" : "some";
-  const matched = (tier === "every"
-    ? every
-    : candidates
-        .map((candidate) => {
-          const scores = candidate.scores.map((score, index) =>
-            query[index]!.length >= 3 && !GENERIC_ACTION_WORDS.has(query[index]!) ? score : 0);
-          return { ...candidate, scores, score: scores.reduce((total, score) => total + score, 0) };
-        })
-        .filter(({ score }) => score > 0))
+  // of the person's locale. After those, an Operation a subject word of three
+  // or more letters names itself, so one word the model added ("contact
+  // details of a person") cannot hide the entity it names. When nothing
+  // matches every word, any subject word finds candidates — never a verb alone.
+  // A partial match counts its subject words of three or more letters, and
+  // still the verbs' intent (which alone never makes a candidate).
+  const subjectHit = (scores: number[], at: number) => isSubject[at] && query[at]!.length >= 3 ? scores[at]! : 0;
+  const partial = (scores: number[]) => scores.map((score, index) => isSubject[index] ? subjectHit(scores, index) : score);
+  const every = scored.filter(({ scores }) => scores.every((score) => score > 0));
+  const matched = (every.length > 0 || query.length < 2
+    ? [
+        ...every.map((entry) => ({ ...entry, every: query.length > 0 })),
+        ...scored
+          .filter(({ scores }) => query.length >= 2 && !scores.every((score) => score > 0) && scores.some((_, index) => subjectHit(scores, index) === NAMED))
+          .map(({ definition, scores }) => ({ definition, scores: partial(scores), every: false })),
+      ]
+    : scored
+        .filter(({ scores }) => scores.some((_, index) => subjectHit(scores, index) > 0))
+        .map(({ definition, scores }) => ({ definition, scores: partial(scores), every: false })))
+    .map(({ definition, every, scores }) => {
+      // A query that is exactly an entity's name ("Template", "TemplateVariant")
+      // ranks that entity's own Operations before others that merely contain it.
+      const entityWords = words(definition.entityName ?? "");
+      const namesEntity = query.length > 0 && entityWords.length === query.length && query.every((word) => entityWords.includes(word));
+      const rank = (every ? EVERY_WORD : 0) +
+        scores.reduce((total, score, index) => total + score * weights[index]!, 0) + (namesEntity ? ENTITY_NAMED : 0);
+      return { definition, score: Math.round(rank * RANK_STEPS) };
+    })
     // Rank, then id. The sort and the cursor comparison below must be the
     // same total order, and ids compare by code unit (compareCodeUnits): a
     // collation-sorted list loops and skips.

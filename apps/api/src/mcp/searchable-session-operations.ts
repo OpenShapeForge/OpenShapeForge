@@ -2,7 +2,7 @@
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import { catalog } from "./catalog.js";
 import { generatedCrudTools, matchNativeCrudTool } from "./native-crud-tool.js";
-import { describeTool } from "./entity-tool-projection.js";
+import { describeTool, withheldClassifiedFields } from "./entity-tool-projection.js";
 import { toolsForSession } from "./session-projection.js";
 import type { ServerScope } from "./server-scope.js";
 
@@ -23,7 +23,8 @@ export async function searchableSessionOperations(scope: ServerScope) {
   // description in every authored language as well (operation-search.ts).
   const canonicalText = new Map<string, Pick<RuntimeOperationDefinition, "name" | "description">>();
   const entityLabels = new Map(catalog.entities.flatMap((entity) => entity.labels ? [[entity.entity, entity.labels] as const] : []));
-  const entityFields = entityFieldLabels(catalog.entities);
+  const entityFields = entityFieldLabels(catalog.entities, (entity) =>
+    withheldClassifiedFields(entity, scope.tables.get(entity.table), scope.session));
   // An exact generated name answers like its canonical id, matched exactly as
   // native execution matches it (a name several entities share resolves to
   // nothing); the search answers it only when that id is available here.
@@ -60,12 +61,15 @@ export async function searchableSessionOperations(scope: ServerScope) {
 
 /**
  * Each entity's authored field labels in every language, of the fields a
- * session may see: classified fields are withheld from its schemas, so their
- * labels are not searched either.
+ * session's tool schemas show: the fields `withheld` names for an entity
+ * (withheldClassifiedFields, the projection's own decision) are not searched.
  */
-export function entityFieldLabels(entities: typeof catalog.entities): Map<string, string[]> {
+export function entityFieldLabels(
+  entities: typeof catalog.entities,
+  withheld: (entity: (typeof catalog.entities)[number]) => readonly string[],
+): Map<string, string[]> {
   return new Map(entities.map((entity) => [entity.entity, entity.fields
-    .filter((field) => !entity.classifiedFields.includes(field.key))
+    .filter((field) => !withheld(entity).includes(field.key))
     .flatMap((field) => [field.label, ...Object.values(fieldTitles(field.schema))])
     .filter((label): label is string => typeof label === "string" && label.length > 0)]));
 }

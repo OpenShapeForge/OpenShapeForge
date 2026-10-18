@@ -55,6 +55,22 @@ export function localizedToolText(
   return localizedEntityToolText(tool, canonicalOperationsById.get(tool.operationId), locale.tag);
 }
 
+/**
+ * The classified fields of an entity a session is not shown: all of them
+ * unless its roles may read classified columns of that table (a table
+ * without authorization shows none). Tool schemas and search use this one
+ * decision.
+ */
+export function withheldClassifiedFields(
+  entity: CatalogEntity | undefined,
+  table: GeneratedTable | undefined,
+  session: DbSessionInput,
+): readonly string[] {
+  return entity && !canReadClassifiedColumns(table?.source?.authorization, session)
+    ? entity.classifiedFields
+    : [];
+}
+
 export function describeTool(
   tool: CatalogTool,
   entity: CatalogEntity | undefined,
@@ -62,10 +78,7 @@ export function describeTool(
   session: DbSessionInput,
   locale?: ResolvedLocale,
 ) {
-  const classified =
-    entity && !canReadClassifiedColumns(table?.source?.authorization, session)
-      ? entity.classifiedFields
-      : [];
+  const classified = withheldClassifiedFields(entity, table, session);
   const text = localizedToolText(tool, locale);
   // The advertised shape (write reminder, mirrored title, app link) is the
   // package's, shared with the compiler's byte budget. The MCP App is only

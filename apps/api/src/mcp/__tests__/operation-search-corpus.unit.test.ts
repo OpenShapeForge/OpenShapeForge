@@ -2,7 +2,8 @@
 import { describe, expect, test } from "bun:test";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import operationCatalog from "../../generated/operations/catalog.json" with { type: "json" };
-import { catalog } from "../catalog.js";
+import { catalog, tablesByName } from "../catalog.js";
+import { describeTool, withheldClassifiedFields } from "../entity-tool-projection.js";
 import { searchOperationDefinitions } from "../operation-search.js";
 import { entityFieldLabels } from "../searchable-session-operations.js";
 
@@ -61,8 +62,11 @@ const entityLabels = new Map<string, Readonly<Record<string, string>>>([
   ...catalog.entities.flatMap((entity) => entity.labels ? [[entity.entity, entity.labels] as const] : []),
   ["PersonalInstruction", { en: "Personal instruction", nl: "Persoonlijke instructie" }],
 ]);
+// A session that may only read: classified fields stay withheld (as in its tool schemas).
+const reader = { roles: [] as string[] };
+const tables = tablesByName();
 const entityFields = new Map([
-  ...entityFieldLabels(catalog.entities),
+  ...entityFieldLabels(catalog.entities, (entity) => withheldClassifiedFields(entity, tables.get(entity.table), reader)),
   ["PersonalInstruction", ["ID", "Created at", "Updated at", "External ID", "Source authority", "Source organization", "Source administration", "Source version", "Key", "Name", "Service", "Owner", "Instruction", "Onboarding answers"]],
 ]);
 const definitions = [...compiled, ...composed];
@@ -132,3 +136,44 @@ describe("operation search over the compiled catalogue", () => {
     expect(seen.slice(0, 5).every((id) => id.startsWith("Relation."))).toBe(true);
   });
 });
+
+describe("a classified field's label is searched exactly where its tool schema shows the field", () => {
+  // The compiled PaymentDetail entity classifies "iban"; its label is the only "IBAN" in the catalogue.
+  const entity = catalog.entities.find((candidate) => candidate.classifiedFields.includes("iban"))!;
+  const table = tables.get(entity.table)!;
+  const roles = table.source!.authorization!.roles!;
+  const readOnly = { roles: (roles.read ?? []).filter((role) => !(roles.update ?? []).includes(role)) };
+  const writer = { roles: [(roles.update ?? [])[0]!] };
+  const tool = catalog.tools.find((candidate) => candidate.entity === entity.entity && candidate.operation === "get")!;
+  const ids = (session: { roles: string[] }, fromTable: typeof table | null = table) => {
+    const fields = entityFieldLabels(catalog.entities, (candidate) =>
+      withheldClassifiedFields(candidate, candidate.entity === entity.entity ? fromTable ?? undefined : tables.get(candidate.table), session));
+    return searchOperationDefinitions({
+      definitions, allowedIds: new Set(byId.keys()), arguments: { query: "iban" }, locale, canonicalText, entityLabels, entityFields: fields,
+    }).operations.map((entry) => (entry.operation as { id: string }).id);
+  };
+  const schemaShows = (session: { roles: string[] }) =>
+    JSON.stringify(describeTool(tool, entity, table, session).outputSchema).includes('"iban"');
+
+  test("the fixture is the compiled entity and its own roles", () => {
+    expect(entity.entity).toBe("PaymentDetail");
+    expect(readOnly.roles.length).toBeGreaterThan(0);
+    expect(entity.fields.filter((field) => field.label === "IBAN")).toHaveLength(1);
+  });
+
+  test("withheld from a read-only session: neither its schema nor its search shows it", () => {
+    expect(schemaShows(readOnly)).toBe(false);
+    expect(ids(readOnly).some((id) => id.startsWith(`${entity.entity}.`))).toBe(false);
+  });
+
+  test("shown to a writer: the same schema shows it and the search finds the entity", () => {
+    expect(schemaShows(writer)).toBe(true);
+    expect(ids(writer).slice(0, 2).every((id) => id.startsWith(`${entity.entity}.`))).toBe(true);
+  });
+
+  test("a table without authorization withholds it, as the projection does", () => {
+    expect(withheldClassifiedFields(entity, undefined, writer)).toEqual(entity.classifiedFields);
+    expect(ids(writer, null).some((id) => id.startsWith(`${entity.entity}.`))).toBe(false);
+  });
+});
+

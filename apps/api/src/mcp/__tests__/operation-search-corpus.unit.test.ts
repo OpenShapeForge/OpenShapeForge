@@ -100,6 +100,13 @@ describe("operation search over the compiled catalogue", () => {
     expect(search("contact detail email").slice(0, 5).every((id) => id.startsWith("ContactDetail."))).toBe(true);
   });
 
+  test("a word the model adds does not hide the entity the query names", () => {
+    // ContactDetail never says "person"; it is still listed, read first.
+    const found = search("find contact details of a person", 20);
+    expect(found).toEqual(expect.arrayContaining(["ContactDetail.get", "ContactDetail.list"]));
+    expect(found.indexOf("ContactDetail.list")).toBeLessThan(found.indexOf("ContactDetail.delete"));
+  });
+
   test("a second domain: a workflow's runs and its definitions are told apart", () => {
     expect(search("workflow run status").slice(0, 2)).toEqual(["workflow.instance.inspect", "workflow.instance.list"]);
     expect(search("list workflow definitions")[0]).toBe("workflow.definition.version.list");

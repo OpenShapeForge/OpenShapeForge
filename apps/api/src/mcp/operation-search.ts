@@ -238,6 +238,9 @@ function resembles(word: string, candidate: string): boolean {
     (word.length >= 4 && candidate.length > word.length && candidate.endsWith(word));
 }
 
+/** What a query word earns by being a word that names the Operation (its best match). */
+const NAMED = 8;
+
 /** The text of one Operation a query word can match, from strongest to weakest. */
 type MatchText = { naming: readonly string[]; describing: readonly string[]; context: readonly string[] };
 
@@ -253,7 +256,7 @@ type MatchText = { naming: readonly string[]; describing: readonly string[]; con
 function wordScore(word: string, text: MatchText): number {
   const same = (list: readonly string[]) => list.some((candidate) => sameWord(word, candidate));
   const like = (list: readonly string[]) => list.some((candidate) => resembles(word, candidate));
-  if (same(text.naming)) return 8;
+  if (same(text.naming)) return NAMED;
   if (same(text.describing)) return 5;
   if (same(text.context)) return 3;
   if (like(text.naming)) return 2;
@@ -268,6 +271,9 @@ function wordScore(word: string, text: MatchText): number {
 function wordWeight(matching: number, available: number): number {
   return 1 + Math.log(available / Math.max(matching, 1));
 }
+
+/** The rank a match of every query word earns over any match of only some (more than any word sum). */
+const EVERY_WORD = 10_000;
 
 /** Ranks are compared as integers (the cursor carries one): this many steps per score point. */
 const RANK_STEPS = 1_000;
@@ -396,11 +402,13 @@ function operationSummary(definition: RuntimeOperationDefinition, name: string, 
  * Search the session's available Operations, or look one up.
  *
  * `operationId` answers that one available Operation with its full contract,
- * or nothing. A word query never does: every query word must match (a verb
- * also by the intent it asks for; any one subject word when none matches them
- * all), the matches are ranked by how well each word matches (wordScore)
- * weighted by how much that word tells apart (wordWeight), then by id, and
- * paged as compact summaries by a cursor that carries that position. The model reads the contract of the one it
+ * or nothing. A word query never does: the Operations matching every query
+ * word (a verb also by the intent it asks for) come first, then those a
+ * subject word names (any subject word when nothing matches them all); each
+ * group is ranked by how well each word
+ * matches (wordScore) weighted by how much that word tells apart
+ * (wordWeight), then by id, and paged as compact summaries by a cursor that
+ * carries that position. The model reads the contract of the one it
  * chose by looking up its id.
  */
 export function searchOperationDefinitions(input: {
@@ -444,21 +452,32 @@ export function searchOperationDefinitions(input: {
     wordWeight(scored.filter(({ scores }) => scores[index]! > 0).length, available.length));
   // Every word, in any authored language, before any single word: a model
   // asks in its own words ("invite employee role"), not in one exact phrase
-  // of the person's locale. Without such a match, any subject word of three
-  // or more letters finds candidates — never a verb alone.
+  // of the person's locale. After those, an Operation a subject word of three
+  // or more letters names itself, so one word the model added ("contact
+  // details of a person") cannot hide the entity it names. When nothing
+  // matches every word, any subject word finds candidates — never a verb alone.
+  // A partial match counts its subject words of three or more letters, and
+  // still the verbs' intent (which alone never makes a candidate).
+  const subjectHit = (scores: number[], at: number) => isSubject[at] && query[at]!.length >= 3 ? scores[at]! : 0;
+  const partial = (scores: number[]) => scores.map((score, index) => isSubject[index] ? subjectHit(scores, index) : score);
   const every = scored.filter(({ scores }) => scores.every((score) => score > 0));
   const matched = (every.length > 0 || query.length < 2
-    ? every
+    ? [
+        ...every.map((entry) => ({ ...entry, every: query.length > 0 })),
+        ...scored
+          .filter(({ scores }) => query.length >= 2 && !scores.every((score) => score > 0) && scores.some((_, index) => subjectHit(scores, index) === NAMED))
+          .map(({ definition, scores }) => ({ definition, scores: partial(scores), every: false })),
+      ]
     : scored
-        .map(({ definition, scores }) => ({ definition, scores: scores.map((score, index) =>
-          isSubject[index] && query[index]!.length >= 3 ? score : 0) }))
-        .filter(({ scores }) => scores.some((score) => score > 0)))
-    .map(({ definition, scores }) => {
+        .filter(({ scores }) => scores.some((_, index) => subjectHit(scores, index) > 0))
+        .map(({ definition, scores }) => ({ definition, scores: partial(scores), every: false })))
+    .map(({ definition, every, scores }) => {
       // A query that is exactly an entity's name ("Template", "TemplateVariant")
       // ranks that entity's own Operations before others that merely contain it.
       const entityWords = words(definition.entityName ?? "");
       const namesEntity = query.length > 0 && entityWords.length === query.length && query.every((word) => entityWords.includes(word));
-      const rank = scores.reduce((total, score, index) => total + score * weights[index]!, 0) + (namesEntity ? ENTITY_NAMED : 0);
+      const rank = (every ? EVERY_WORD : 0) +
+        scores.reduce((total, score, index) => total + score * weights[index]!, 0) + (namesEntity ? ENTITY_NAMED : 0);
       return { definition, score: Math.round(rank * RANK_STEPS) };
     })
     // Rank, then id. The sort and the cursor comparison below must be the

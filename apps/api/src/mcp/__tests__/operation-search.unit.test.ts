@@ -236,8 +236,9 @@ describe("searchable MCP Operations", () => {
       definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query }, locale,
     }).operations.map((entry) => (entry.operation as { id: string }).id);
     expect(ids("knowledge article content")[0]).toBe("KnowledgeItem.list");
-    expect(ids("TemplateVariant")).toEqual(["TemplateVariant.list"]);
-    expect(ids("template variant")).toEqual(["TemplateVariant.list"]);
+    // The full match first; an Operation a single word names follows it.
+    expect(ids("TemplateVariant")).toEqual(["TemplateVariant.list", "Template.list"]);
+    expect(ids("template variant")).toEqual(["TemplateVariant.list", "Template.list"]);
     expect(ids("template")).toEqual(["Template.list", "TemplateVariant.list"]);
   });
 
@@ -295,12 +296,13 @@ describe("searchable MCP Operations", () => {
         seen.push(...page.operations.map((entry) => (entry.operation as { id: string }).id));
         cursor = page.nextCursor;
       } while (cursor);
-      // "reminder" names all 37; "invoice" names some and describes others, so
-      // the any-word tier is not used and nothing without invoice is listed.
+      // "reminder" names all 37; "invoice" names some and describes others.
+      // Those matching both come first (invoice in the name before invoice in
+      // the description), then the rest "reminder" names; each group by id.
+      const group = (index: number) => index % 4 === 0 ? 0 : index % 5 === 0 ? 1 : 2;
       const expected = definitions
-        .map((d, index) => ({ id: d.id, score: 4 + (index % 4 === 0 ? 4 : index % 5 === 0 ? 2 : 0) }))
-        .filter(({ score }) => score > 4)
-        .sort((left, right) => right.score - left.score || (left.id < right.id ? -1 : 1))
+        .map((d, index) => ({ id: d.id, group: group(index) }))
+        .sort((left, right) => left.group - right.group || (left.id < right.id ? -1 : 1))
         .map(({ id }) => id);
       expect(seen).toEqual(expected);
     }

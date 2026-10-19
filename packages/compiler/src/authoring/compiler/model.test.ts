@@ -179,3 +179,8 @@ test('renderer changes drop irrelevant inherited options but retain monetary con
  const amount={key:'amount',baseType:'number',osfType:'currency',render:{component:'FieldIntegerDecimal'}} as Field;
  expect(resolveRender(amount,checked,{baseType:'number',label:{en:'Amount'},render:{input:'FieldMoney',display:'FieldMoney'},props:{currency:'EUR'}})).toMatchObject({props:{currency:'EUR'}});
 });
+
+test('shared authored layout survives a legacy component hint',()=>{
+ const checked={...catalog,defaults:{string:{component:'FieldSingleLine',props:{layout:'front'}}},components:{Input:{kind:'field',description:'Legacy text',props:[]}}} as ComponentCatalog;
+ expect(resolveRender({key:'email',baseType:'string',osfType:'email'} as Field,checked,{baseType:'string',label:{en:'Email'},render:{input:'Input',display:'TextDisplay'}})).toMatchObject({props:{layout:'front'}});
+});

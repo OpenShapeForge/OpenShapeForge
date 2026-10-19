@@ -156,10 +156,11 @@ export function resolveRender(
   const declared = catalog.components[component];
   if (component.startsWith("Field") && !declared && Object.keys(catalog.components).length) throw new Error(`${field.key}: unknown presentation component ${component}.`);
   // Currency also carries canonical numeric value context; changing the renderer must not erase it.
+  const shellProp = (key: string) => ["layout", "labelBand", "inputTone", "viewSurface", "spacing", "frontLabelWidth", "viewSizing"].includes(key);
   const contextProp = (key: string, value: unknown) => key === "currency" && (field.baseType === "number" || field.baseType === "integer") && typeof value === "string";
   const layer = (props: Record<string, unknown> | undefined, owner: string | undefined) =>
     declared && owner !== component
-      ? Object.fromEntries(Object.entries(props ?? {}).filter(([key, value]) => declared.props.includes(key) || contextProp(key, value)))
+      ? Object.fromEntries(Object.entries(props ?? {}).filter(([key, value]) => declared.props.includes(key) || shellProp(key) || contextProp(key, value)))
       : props;
   const props = {
     ...layer(defaultEntry?.props, defaultEntry?.component),
@@ -167,7 +168,7 @@ export function resolveRender(
     ...field.render?.props,
   };
   if (declared && (component.startsWith("Field") || component === "ChoiceTiles")) {
-    const unsupported = Object.keys(props).filter(key => !declared.props.includes(key) && !contextProp(key, props[key]));
+    const unsupported = Object.keys(props).filter(key => !declared.props.includes(key) && !shellProp(key) && !contextProp(key, props[key]));
     if (unsupported.length) throw new Error(`${field.key}: ${component} does not declare presentation props ${unsupported.join(", ")}.`);
   }
   return { component, ...(Object.keys(props).length ? {props: structuredClone(props)} : {}) };

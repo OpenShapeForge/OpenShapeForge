@@ -110,6 +110,18 @@ afterEach(() => {
 afterAll(() => server.stop(true));
 
 describe("host organization binding through real bearer verification and resolveSessionContext", () => {
+  test("only a verified human email is available for pending organization discovery", async () => {
+    const verified = await resolveSessionContext(await headers({ email: "member@example.test", email_verified: true }));
+    expect(verified.principalKind).toBe("person");
+    expect(verified.verifiedEmail).toBe("member@example.test");
+    for (const email_verified of [false, undefined, "true"]) {
+      const unverified = await resolveSessionContext(await headers({ email: "member@example.test", email_verified }));
+      expect(unverified).not.toHaveProperty("verifiedEmail");
+    }
+    const service = await resolveSessionContext(await headers({ preferred_username: "service-account-automation", azp: "automation", email: "member@example.test", email_verified: true }));
+    expect(service).not.toHaveProperty("verifiedEmail");
+  });
+
   test("binds shared sessions by the selected organization id and issuer realm", async () => {
     const session = await resolveSessionContext(await headers());
     expect(session.tenantId).toBe(TENANT_A);

@@ -109,6 +109,7 @@ types:
       rows: 4
 
   markdown:
+    props: {"variableListLabel": {"en": "Variables", "nl": "Variabelen"}}
     label: { en: Markdown, nl: Markdown }
     baseType: string
     render:
@@ -364,6 +365,7 @@ types:
   # number with the field's own `unit`; this type exists so a bound or copied
   # value can never lose which unit it was measured in.
   measurement:
+    props: {"unitLabel": {"en": "Unit", "nl": "Eenheid"}}
     kind: object
     label: { en: Measurement, nl: Meetwaarde }
     baseType: object
@@ -411,6 +413,7 @@ types:
   # A span is one value, not two fields that happen to sit next to each other.
   # The same ordering invariant runs at every canonical write boundary.
   numericRange:
+    props: {"minimumLabel": {"en": "From", "nl": "Van"}, "maximumLabel": {"en": "To", "nl": "Tot"}}
     schema:
       x-osf-ordered-fields: { lower: from, upper: to, kind: numeric }
     kind: object
@@ -445,6 +448,7 @@ types:
 
   # As numericRange, over valid, ordered calendar dates.
   dateRange:
+    props: {"startLabel": {"en": "From", "nl": "Van"}, "endLabel": {"en": "To", "nl": "Tot"}}
     schema:
       x-osf-ordered-fields: { lower: from, upper: to, kind: date }
     kind: object
@@ -468,6 +472,7 @@ types:
   # 2026-W42. Distinct from FiscalPeriod, which is a record with its own
   # lifecycle: a reporting label is not a bookkeeping period.
   calendarPeriod:
+    props: {"typeLabel": {"en": "Period type", "nl": "Soort periode"}, "valueLabel": {"en": "Period value", "nl": "Periode"}, "kindLabels": {"month": {"en": "Month", "nl": "Maand"}, "quarter": {"en": "Quarter", "nl": "Kwartaal"}, "year": {"en": "Year", "nl": "Jaar"}, "halfYear": {"en": "Half-year", "nl": "Halfjaar"}, "week": {"en": "Week", "nl": "Week"}}}
     label: { en: Calendar period, nl: Kalenderperiode }
     baseType: string
     icon: CalendarDays

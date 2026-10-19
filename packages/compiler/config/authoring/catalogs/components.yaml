@@ -27,7 +27,7 @@ defaults:
       nl: Ja/nee
       en: Yes/no
     component: Switch
-    props: { layout: above }
+    props: { layout: above, trueLabel: { en: Yes, nl: Ja }, falseLabel: { en: No, nl: Nee }, nullLabel: { en: Not set, nl: Onbekend } }
   object:
     label:
       nl: JSON-object
@@ -352,12 +352,12 @@ components:
   FieldSingleLine:
     kind: field
     description: Battery FieldSingleLine field.
-    props: [layout, emptyText, saveLabel, cancelLabel]
+    props: [layout, emptyText, saveLabel, cancelLabel, placeholder]
 
   FieldMultiline:
     kind: field
     description: Battery FieldMultiline field.
-    props: [layout, emptyText, saveLabel, cancelLabel, rows]
+    props: [layout, emptyText, saveLabel, cancelLabel, rows, placeholder]
 
   FieldMarkdown:
     kind: field
@@ -367,22 +367,22 @@ components:
   FieldEmail:
     kind: field
     description: Battery FieldEmail field.
-    props: [layout, emptyText, saveLabel, cancelLabel, emailAction]
+    props: [layout, emptyText, saveLabel, cancelLabel, emailAction, placeholder]
 
   FieldUrl:
     kind: field
     description: Battery FieldUrl field.
-    props: [layout, emptyText, saveLabel, cancelLabel]
+    props: [layout, emptyText, saveLabel, cancelLabel, placeholder]
 
   FieldIdentifierCode:
     kind: field
     description: Battery FieldIdentifierCode field.
-    props: [layout, emptyText, saveLabel, cancelLabel, prefix]
+    props: [layout, emptyText, saveLabel, cancelLabel, prefix, placeholder]
 
   FieldSecret:
     kind: field
     description: Battery FieldSecret field.
-    props: [layout, emptyText, saveLabel, cancelLabel, maskLabel]
+    props: [layout, emptyText, saveLabel, cancelLabel, maskLabel, placeholder]
 
   FieldIntegerDecimal:
     kind: field
@@ -482,17 +482,17 @@ components:
   FieldSingleRelatedRecord:
     kind: field
     description: Battery FieldSingleRelatedRecord field.
-    props: [layout, emptyText, saveLabel, cancelLabel, searchPlaceholder, clearLabel, noResultsText, retryLabel]
+    props: [layout, emptyText, saveLabel, cancelLabel, searchPlaceholder, clearLabel, noResultsText, retryLabel, loadingText]
 
   FieldMultipleRelatedRecords:
     kind: field
     description: Battery FieldMultipleRelatedRecords field.
-    props: [layout, emptyText, saveLabel, cancelLabel, searchPlaceholder, clearLabel, noResultsText, retryLabel]
+    props: [layout, emptyText, saveLabel, cancelLabel, searchPlaceholder, clearLabel, noResultsText, retryLabel, loadingText]
 
   FieldHierarchicalRelation:
     kind: field
     description: Battery FieldHierarchicalRelation field.
-    props: [layout, emptyText, saveLabel, cancelLabel, searchPlaceholder, clearLabel, noResultsText, retryLabel]
+    props: [layout, emptyText, saveLabel, cancelLabel, searchPlaceholder, clearLabel, noResultsText, retryLabel, loadingText]
 
   FieldFileAttachment:
     kind: field
@@ -527,12 +527,12 @@ components:
   FieldRepeatedFieldGroup:
     kind: field
     description: Battery FieldRepeatedFieldGroup field.
-    props: [layout, emptyText, saveLabel, cancelLabel, addLabel, removeLabel, moveUpLabel]
+    props: [layout, emptyText, saveLabel, cancelLabel, fieldLayout, addLabel, removeLabel, moveUpLabel]
 
   FieldChildRecords:
     kind: field
     description: Battery FieldChildRecords field.
-    props: [layout, emptyText, saveLabel, cancelLabel, addLabel, removeLabel, editLabel]
+    props: [layout, emptyText, saveLabel, cancelLabel, fieldLayout, addLabel, removeLabel, editLabel]
 
   FieldKeyValuePairs:
     kind: field
@@ -547,7 +547,7 @@ components:
   FieldComputedValue:
     kind: field
     description: Battery FieldComputedValue field.
-    props: [layout, emptyText, saveLabel, cancelLabel, overrideLabel]
+    props: [layout, emptyText, saveLabel, cancelLabel, overrideLabel, loadingText, details]
 
   FieldFormula:
     kind: field
@@ -557,7 +557,7 @@ components:
   FieldSystemMetadata:
     kind: field
     description: Battery FieldSystemMetadata field.
-    props: [layout, emptyText, saveLabel, cancelLabel, retryLabel, propertyLabel, valueLabel]
+    props: [layout, emptyText, saveLabel, cancelLabel, loadingText, retryLabel, propertyLabel, valueLabel]
 
   FieldCode:
     kind: field
@@ -577,4 +577,4 @@ components:
   FieldSignature:
     kind: field
     description: Battery FieldSignature field.
-    props: [layout, emptyText, saveLabel, cancelLabel, signerLabel, requestLabel, clearLabel, pendingLabel, signedLabel, expiredLabel, declinedLabel, uploadTitle, uploadDescription, uploadHint, chooseLabel, retryLabel]
+    props: [layout, emptyText, saveLabel, cancelLabel, signerLayout, downloadLabel, signedByLabel, evidenceLabel, immutableLabel, signerLabel, requestLabel, clearLabel, pendingLabel, signedLabel, expiredLabel, declinedLabel, uploadTitle, uploadDescription, uploadHint, chooseLabel, retryLabel]

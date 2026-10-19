@@ -308,6 +308,9 @@ function assertVisibilityFields(
       if (!field?.supports.read || field.cardinality === "many" || field.baseType !== "string" || field.optionSource || field.options?.length || field.typedBy) throw new Error(`${entityName} ${scope} "${owner.id}" binding "${key}" must be a readable scalar text field.`);
     }
     if (owner.control.component !== "FieldPersonName" || Object.keys(owner.control.bindings).some(key => !["givenName", "prefix", "familyName"].includes(key)) || !owner.control.bindings.givenName || !owner.control.bindings.familyName) throw new Error(`${entityName} ${scope} "${owner.id}" requires valid FieldPersonName bindings.`);
+    if (owner.control.props?.allowSingleName !== false) throw new Error(`${entityName} ${scope} "${owner.id}" name-part bindings require explicit allowSingleName: false; single-name persistence is not bound.`);
+    const layout = owner.control.props?.layout;
+    if (layout !== undefined && layout !== "front" && layout !== "above" && layout !== "none") throw new Error(`${entityName} ${scope} "${owner.id}" FieldPersonName layout must be front, above or none.`);
   }
   for (const owner of owners) for (const condition of owner.visibleWhen?.conditions ?? []) {
     if (!fields[condition.field]?.supports.read) {

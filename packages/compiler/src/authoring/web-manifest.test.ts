@@ -177,6 +177,13 @@ describe("web manifest projection", () => {
     expect(group.fields).toEqual(keys);
     expect(group.control).toEqual({component:"FieldPersonName",props:{layout:"none",allowSingleName:false},bindings:{givenName:"firstName",prefix:"namePrefix",familyName:"lastName"}});
     const nameGroup=contract.views.core!.form!.variants.create!.groups.find(group=>group.id==="person-name")!;
+    for (const allowSingleName of [undefined, true]) {
+      nameGroup.render!.props = { layout: "none", ...(allowSingleName === undefined ? {} : { allowSingleName }) };
+      expect(()=>buildWebManifest([{slug:"natural-person",contract}])).toThrow(/require explicit allowSingleName: false/);
+    }
+    nameGroup.render!.props = { layout: "sideways", allowSingleName: false };
+    expect(()=>buildWebManifest([{slug:"natural-person",contract}])).toThrow(/layout must be front, above or none/);
+    nameGroup.render!.props = { layout: "none", allowSingleName: false };
     nameGroup.bindings={givenName:"firstName",singleName:"namePrefix",familyName:"lastName"};
     expect(()=>buildWebManifest([{slug:"natural-person",contract}])).toThrow(/requires valid FieldPersonName bindings/);
     nameGroup.bindings={givenName:"firstName",prefix:"namePrefix",familyName:"unknown"};

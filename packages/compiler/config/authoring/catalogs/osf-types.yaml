@@ -131,14 +131,15 @@ types:
     audit: true
 
   phone:
+    props: { country: netherlands }
     label: { en: Phone number, nl: Telefoonnummer }
     baseType: string
     icon: Phone
     validation:
       pattern: "^\\+?[0-9\\s\\-()]{7,20}$"
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldPhone
+      input: FieldPhone
     classification:
       sensitivity: pii
       category: contactgegevens
@@ -432,6 +433,7 @@ types:
   # A time of day with no date and no zone: opening hours, a cut-off. The
   # pattern rejects 25:00 and 12:70 rather than merely shaping the text.
   localTime:
+    props: { precision: second }
     label: { en: Time of day, nl: Tijdstip }
     baseType: string
     icon: Clock

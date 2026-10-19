@@ -26,7 +26,7 @@ defaults:
     label:
       nl: Ja/nee
       en: Yes/no
-    component: FieldBoolean
+    component: Switch
     props: { layout: above, trueLabel: { en: Yes, nl: Ja }, falseLabel: { en: No, nl: Nee } }
   object:
     label:
@@ -211,7 +211,7 @@ components:
   Switch:
     kind: field
     description: Boolean toggle switch.
-    props: []
+    props: [layout, trueLabel, falseLabel, nullLabel]
 
   ReferenceSelect:
     kind: field

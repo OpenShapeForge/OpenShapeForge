@@ -51,7 +51,7 @@ fields:
     description:
       en: Amount due to the tax authority for the period.
       nl: Aan de Belastingdienst verschuldigd bedrag voor de periode.
-    osfType: money
+    osfType: currency
     persisted:
       column: payable_amount
       storageClass: core
@@ -63,7 +63,7 @@ fields:
     description:
       en: Amount to be received from the tax authority for the period.
       nl: Van de Belastingdienst te ontvangen bedrag voor de periode.
-    osfType: money
+    osfType: currency
     persisted:
       column: receivable_amount
       storageClass: core

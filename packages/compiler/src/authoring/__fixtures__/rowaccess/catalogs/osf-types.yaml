@@ -185,7 +185,7 @@ types:
       display: TextDisplay
       input: Input
 
-  money:
+  currency:
     label: { en: Currency amount, nl: Geldbedrag }
     baseType: number
     icon: Banknote

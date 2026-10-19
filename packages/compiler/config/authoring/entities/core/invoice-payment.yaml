@@ -37,7 +37,7 @@ fields:
     description:
       en: Amount of the payment applied to the invoice.
       nl: Bedrag van de betaling dat op de factuur is verwerkt.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount
       storageClass: core

@@ -501,11 +501,11 @@ describe("template variants and local/global variables", () => {
     const money = fixture([{ id: "amount", definitionKey: "RecordSummary", schemaVersion: 3, values: { heading: "Fee" }, references: {} }]);
     money.registry.RecordSummary = {
       ...money.registry.RecordSummary!,
-      fields: { heading: { osfType: "money", baseType: "number", required: true, variables: "whole" } },
+      fields: { heading: { osfType: "currency", baseType: "number", required: true, variables: "whole" } },
     };
     const currencyGlobal = {
       tenantId, sourceId: "fee", sourceVersionId: "v1",
-      shape: { osfType: "money", baseType: "number", required: true } as const,
+      shape: { osfType: "currency", baseType: "number", required: true } as const,
       value: "12.50",
     };
     money.versions.root!.variants.forEach((variant) => {
@@ -518,7 +518,7 @@ describe("template variants and local/global variables", () => {
     // Exact decimal text, carried through as the value it is.
     expect(snapshot.blocks[0]!.values.heading).toBe("12.50");
     // The declared shape and the source it was read from are both frozen in.
-    expect(snapshot.globals["default.fee"]).toMatchObject({ sourceId: "fee", sourceVersionId: "v1", shape: { osfType: "money" } });
+    expect(snapshot.globals["default.fee"]).toMatchObject({ sourceId: "fee", sourceVersionId: "v1", shape: { osfType: "currency" } });
 
     // The same global is refused as the value of a text field: a currency
     // amount is not a text value because the destination would like one. It

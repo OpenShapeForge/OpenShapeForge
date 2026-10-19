@@ -36,7 +36,7 @@ fields:
     description:
       en: Amount of the movement (always positive; sign is determined by direction).
       nl: Bedrag van de mutatie (altijd positief; teken volgt uit richting).
-    osfType: money
+    osfType: currency
     persisted:
       column: amount
       storageClass: core

@@ -267,7 +267,7 @@ test("a catalog type's optionSource is the default choice source; authored optio
 
 test("canonical presentation merges type defaults with authored props without touching exact value schemas", () => {
   const registry = {osfTypes: {money: {baseType: "number" as const, render:{component:"FieldMoney",props:{currency:"EUR",decimalPlaces:2,scale:"units"}}}}};
-  const definitions = [{key:"amount",osfType:"money",render:{props:{decimalPlaces:0,scale:"millions"}}}];
+  const definitions = [{key:"amount",osfType:"currency",render:{props:{decimalPlaces:0,scale:"millions"}}}];
   const schema = operationFieldObjectSchema(definitions, registry);
   expect(schema).toMatchObject({properties:{amount:{type:["number","string"],"x-osf-presentation":{component:"FieldMoney",props:{currency:"EUR",decimalPlaces:0,scale:"millions"}}}}});
   expect(registry.osfTypes.money.render.props.scale).toBe("units");
@@ -279,6 +279,6 @@ test("canonical presentation merges type defaults with authored props without to
 
 test("raw authoring catalogue render input/display and sibling props project into one presentation", () => {
   const registry = {osfTypes:{money:{baseType:"number" as const,render:{input:"FieldMoney",display:"FieldMoney"},props:{currency:"EUR",decimalPlaces:2,scale:"units"}}}};
-  expect(operationFieldObjectSchema([{key:"amount",osfType:"money",render:{props:{decimalPlaces:0}}}],registry))
+  expect(operationFieldObjectSchema([{key:"amount",osfType:"currency",render:{props:{decimalPlaces:0}}}],registry))
     .toMatchObject({properties:{amount:{"x-osf-presentation":{component:"FieldMoney",props:{currency:"EUR",decimalPlaces:0,scale:"units"}}}}});
 });

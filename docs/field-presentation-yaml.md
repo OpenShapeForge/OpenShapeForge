@@ -32,3 +32,11 @@ A renderer can use its component's normal default when an option is absent;
 application-specific presentation choices must be authored in the catalogue,
 type or field. Runtime-derived formatting and semantic value conversion remain
 in the adapter.
+
+Compiled entity fields see all three authoring tiers. Runtime field definitions
+only see the semantic registry and their explicit render metadata; they do not
+load a host's component catalogue. Hosts without the named native component may
+use a documented scalar fallback. Battery adapters retain a declarative baseline
+for unprojected fields and localize it before applying authored overrides.
+The catalogue validates supported props for registered native Field components.
+The stored monetary type remains currency; this PR does not rename stored data.

@@ -64,7 +64,7 @@ only the entity's read role never receives the value.
 | 13 | `processingTime` | `durationSeconds` | whole | new type; canonical integer seconds |
 | 14 | `budgetRange` | `numericRange` | | new type; `from`/`to` |
 | 35 | `payoutIban` | `iban` | whole | type carries pattern, classification, retention, audit |
-| 36 | `commercialTotal` | `object` + children | | `net: currency`, `vatRate: percentage`, `gross: currency` |
+| 36 | `commercialTotal` | `object` + children | | `net: money`, `vatRate: percentage`, `gross: money` |
 
 **Why `measurement` is structured.** A variable-unit measurement keeps both
 amount and unit inside its value. A fixed-unit field instead declares `unit:`.
@@ -204,7 +204,7 @@ refused; `writtenBy` already keeps it out of generic create and update.
 
 ## Money
 
-`currency` keeps `baseType: number` as its **logical** type.
+`money` keeps `baseType: number` as its **logical** type.
 `packages/operations/src/scalar-projection.ts` stores a PostgreSQL `numeric` and
 returns exact decimal text, so no amount passes through a float and no
 cents-integer migration is needed.

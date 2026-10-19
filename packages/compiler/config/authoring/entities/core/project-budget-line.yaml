@@ -52,7 +52,7 @@ fields:
     description:
       en: Budgeted amount for this line.
       nl: Begroot bedrag voor deze regel.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount
       storageClass: core

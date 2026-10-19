@@ -50,7 +50,7 @@ fields:
     description:
       en: Spent amount.
       nl: Besteed bedrag.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount
       storageClass: core

@@ -38,7 +38,7 @@ fields:
     description:
       en: Amount to collect under this direct debit order.
       nl: Te incasseren bedrag voor deze incasso-opdracht.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount
       storageClass: core

@@ -63,7 +63,7 @@ fields:
     description:
       en: Sum of all instructions in this payment order.
       nl: Som van alle instructies in deze betaalopdracht.
-    osfType: money
+    osfType: currency
     persisted:
       column: total_amount
       storageClass: core

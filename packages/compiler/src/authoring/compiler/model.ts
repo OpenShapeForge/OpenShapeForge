@@ -136,7 +136,8 @@ export function resolveFieldOptions(
 
 /**
  * Resolution order:
- * 1. field.render (explicit override — highest priority)
+ * Components use the first match; props merge defaults < semantic type < explicit field.
+ * 1. field.render (component override — highest priority)
  * 2. field.osfType → semantic type registry render
  * 3. field.baseType/cardinality → component catalog defaults (lowest)
  */
@@ -148,9 +149,16 @@ export function resolveRender(
   const defaultKey = fieldCardinality(field) === "collection" ? "collection" : field.baseType;
   const defaultEntry = catalog.defaults[defaultKey] ?? catalog.defaults[field.baseType];
   const props = { ...defaultEntry?.props, ...semType?.props, ...field.render?.props };
+  const configuredComponent = field.render?.component ?? (field.readOnly ? semType?.render?.display : semType?.render?.input) ?? defaultEntry?.component;
+  const declared = configuredComponent ? catalog.components[configuredComponent] : undefined;
+  if (configuredComponent?.startsWith("Field") && declared) {
+    const unsupported = Object.keys(props).filter(key => !declared.props.includes(key));
+    if (unsupported.length) throw new Error(`${field.key}: ${configuredComponent} does not declare presentation props ${unsupported.join(", ")}.`);
+  }
   const presentation = Object.keys(props).length ? { props: structuredClone(props) } : {};
   // YAML defaults < semantic-type options < explicitly authored field options.
   if (field.render) return { component: field.render.component, ...presentation };
+  if (field.options?.type === "static" && field.options.presentation === "tiles") return { component: "ChoiceTiles", ...presentation };
   if (semType?.render) return { component: field.readOnly ? semType.render.display : semType.render.input, ...presentation };
 
   if (semType?.kind === "entityId") {

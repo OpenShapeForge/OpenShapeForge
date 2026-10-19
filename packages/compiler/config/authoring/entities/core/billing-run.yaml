@@ -198,7 +198,7 @@ fields:
     description:
       en: Sum of invoice totals produced by this run.
       nl: Som van factuurtotalen die deze run heeft opgeleverd.
-    osfType: money
+    osfType: currency
     persisted:
       column: total_amount
       storageClass: core

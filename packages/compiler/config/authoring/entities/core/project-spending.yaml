@@ -50,7 +50,7 @@ fields:
     description:
       en: Actual amount spent on this line.
       nl: Werkelijk besteed bedrag voor deze regel.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount
       storageClass: core

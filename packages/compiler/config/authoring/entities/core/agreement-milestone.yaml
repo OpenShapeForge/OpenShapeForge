@@ -61,7 +61,7 @@ fields:
         amount instead of a percentage.
       nl: De waarde waartegen een percentage wordt berekend, eenmalig vastgelegd bij aanmaak. Leeg wanneer de mijlpaal een
         vast bedrag gebruikt in plaats van een percentage.
-    osfType: money
+    osfType: currency
     persisted:
       column: basis_amount
       storageClass: core
@@ -100,7 +100,7 @@ fields:
       nl: Het daadwerkelijk te factureren bedrag voor deze mijlpaal. Wanneer percentOfBasis is ingevuld, eenmalig bij aanmaak
         berekend als basisbedrag * percentage / 100 en daarna bevroren; anders rechtstreeks als vast bedrag opgegeven
         bij aanmaak.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount
       storageClass: core

@@ -80,7 +80,7 @@ fields:
     description:
       en: Total amount of the project order.
       nl: Totaalbedrag van de projectopdracht.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount
       storageClass: core

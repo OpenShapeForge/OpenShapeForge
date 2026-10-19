@@ -632,6 +632,6 @@ export function fieldVariableSlot(
       return [child.key,shape];
     })) } : {}),
     ...(field.unit ? { unit: field.unit } : {}),
-    ...(field.osfType === "money" && typeof field.render?.props?.currency === "string" ? { currency: field.render.props.currency } : {}),
+    ...(field.osfType === "currency" && typeof field.render?.props?.currency === "string" ? { currency: field.render.props.currency } : {}),
   });
 }

@@ -74,6 +74,10 @@ const COMPONENT_ALIASES: Record<string, string> = {
   TextInput: "Input",
   Toggle: "Switch",
   FieldMoney: "NumberInput",
+  FieldSingleLine: "Input", FieldIntegerDecimal: "NumberInput", FieldBoolean: "Switch",
+  FieldDate: "DatePicker", FieldDateAndTime: "DateTimePicker", FieldPhone: "Input",
+  FieldMarkdown: "MarkdownText", FieldMeasurement: "JsonFieldEditor", FieldNumericRange: "JsonFieldEditor",
+  FieldTime: "Input", FieldDateRange: "JsonFieldEditor", FieldPeriod: "Input",
 };
 
 function getOsfTypeKey(field: RendererAwareField) {
@@ -162,7 +166,7 @@ export function resolveFieldInputRender(field: RendererAwareField): ResolvedFiel
 
   const fieldTypeRender = buildResolvedRender(
     getDefaultFieldTypeRender(field)?.component,
-    undefined,
+    getDefaultFieldTypeRender(field)?.props,
     "fieldType",
   );
   if (fieldTypeRender) {
@@ -200,7 +204,7 @@ export function resolveFieldDisplayRender(field: RendererAwareField): ResolvedFi
     fieldTypeDefault.readOnly === true;
   const fieldTypeRender = buildResolvedRender(
     isReadOnlyFieldType ? fieldTypeDefault.component : "TextDisplay",
-    undefined,
+    getDefaultFieldTypeRender(field)?.props,
     "fieldType",
   );
   if (fieldTypeRender) {

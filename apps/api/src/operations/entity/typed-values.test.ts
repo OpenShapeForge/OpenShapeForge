@@ -31,7 +31,7 @@ const optional = {
 } as GeneratedCrudTable;
 
 const text = { key: "value", osfType: "multilineText", required: true, validation: { maxLength: 8000 } };
-const money = { key: "value", osfType: "money", required: true };
+const money = { key: "value", osfType: "currency", required: true };
 const flag = { key: "value", osfType: "boolean", required: true };
 const tags = { key: "value", osfType: "string", cardinality: { min: 0, max: 8 }, item: { key: "item", osfType: "string" } };
 

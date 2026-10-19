@@ -113,8 +113,8 @@ types:
     label: { en: Markdown, nl: Markdown }
     baseType: string
     render:
-      display: TextDisplay
-      input: MarkdownText
+      display: FieldMarkdown
+      input: FieldMarkdown
 
   email:
     label: { en: Email, nl: E-mail }
@@ -318,7 +318,7 @@ types:
   # field authors no render at all, and a web view may override the component
   # but not its props; a report that wants another scale has nowhere to say so
   # yet (docs/field-acceptance-fixture.md records that gap).
-  money:
+  currency:
     label: { en: Currency amount, nl: Geldbedrag }
     baseType: number
     icon: Banknote
@@ -371,8 +371,8 @@ types:
     baseType: object
     icon: Ruler
     render:
-      display: TextDisplay
-      input: JsonFieldEditor
+      display: FieldMeasurement
+      input: FieldMeasurement
     children:
       - key: value
         osfType: number
@@ -421,8 +421,8 @@ types:
     baseType: object
     icon: ArrowLeftRight
     render:
-      display: TextDisplay
-      input: JsonFieldEditor
+      display: FieldNumericRange
+      input: FieldNumericRange
     children:
       - key: from
         osfType: number
@@ -443,8 +443,8 @@ types:
     validation:
       pattern: "^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$"
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldTime
+      input: FieldTime
 
   # As numericRange, over valid, ordered calendar dates.
   dateRange:
@@ -456,8 +456,8 @@ types:
     baseType: object
     icon: CalendarRange
     render:
-      display: TextDisplay
-      input: JsonFieldEditor
+      display: FieldDateRange
+      input: FieldDateRange
     children:
       - key: from
         osfType: date
@@ -480,8 +480,8 @@ types:
       pattern: "^[0-9]{4}(-(Q[1-4]|H[12]|0[1-9]|1[0-2]|W(0[1-9]|[1-4][0-9]|5[0-3])))?$"
       maxLength: 8
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldPeriod
+      input: FieldPeriod
 
   # A bounded declarative schedule, so storing one needs no text grammar and no
   # parser. It is a VALUE contract: nothing in OSF expands a recurrence into

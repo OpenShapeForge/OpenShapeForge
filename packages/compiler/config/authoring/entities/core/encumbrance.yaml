@@ -68,7 +68,7 @@ fields:
     description:
       en: Optional principal amount associated with the encumbrance.
       nl: Optioneel hoofdbedrag dat aan de zekerheid is verbonden.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount
       storageClass: core

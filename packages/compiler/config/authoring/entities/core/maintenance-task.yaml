@@ -94,7 +94,7 @@ fields:
     description:
       en: Price per unit for this task.
       nl: Prijs per eenheid voor deze taak.
-    osfType: money
+    osfType: currency
     persisted:
       column: unit_price
       storageClass: core
@@ -106,7 +106,7 @@ fields:
     description:
       en: Total amount for this task.
       nl: Totaalbedrag voor deze taak.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount
       storageClass: core

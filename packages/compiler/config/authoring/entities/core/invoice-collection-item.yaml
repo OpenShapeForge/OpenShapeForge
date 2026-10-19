@@ -39,7 +39,7 @@ fields:
     description:
       en: Amount allocated to this payer under this collection item.
       nl: Bedrag dat onder deze incasso-regel aan deze betaler is toegewezen.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount
       storageClass: core

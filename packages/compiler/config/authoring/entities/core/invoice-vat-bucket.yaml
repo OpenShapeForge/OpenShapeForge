@@ -25,7 +25,7 @@ fields:
     description:
       en: Sum of net (excl. VAT) amounts for invoice lines at this VAT rate.
       nl: Som van de nettobedragen (excl. BTW) van de factuurregels op dit BTW-tarief.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount_base
       storageClass: core
@@ -37,7 +37,7 @@ fields:
     description:
       en: Sum of VAT amounts for invoice lines at this VAT rate.
       nl: Som van de BTW-bedragen van de factuurregels op dit BTW-tarief.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount_vat
       storageClass: core

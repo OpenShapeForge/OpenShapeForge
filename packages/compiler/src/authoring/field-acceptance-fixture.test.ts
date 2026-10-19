@@ -188,7 +188,7 @@ describe("the 48-field acceptance fixture", () => {
 
   it("keeps the one type axis on every field: osfType, base type and cardinality", () => {
     expect(field("title")).toMatchObject({ osfType: "string", baseType: "string", cardinality: "single" });
-    expect(field("amount")).toMatchObject({ osfType: "money", baseType: "number", cardinality: "single" });
+    expect(field("amount")).toMatchObject({ osfType: "currency", baseType: "number", cardinality: "single" });
     expect(field("completion")).toMatchObject({ osfType: "percentage", baseType: "number" });
     expect(field("processingTime")).toMatchObject({ osfType: "durationSeconds", baseType: "integer" });
     expect(field("score")).toMatchObject({ osfType: "rating", baseType: "integer" });
@@ -318,7 +318,7 @@ describe("the 48-field acceptance fixture", () => {
   it("admits only an exactly compatible variable as a whole value", () => {
     // Money is not an arbitrary number, in either direction of refinement.
     expect(refusal("amount", offer({ osfType: "number", baseType: "number" }))).toBe("INCOMPATIBLE_TYPE");
-    expect(refusal("amount", offer({ osfType: "money", baseType: "number" }))).toBeUndefined();
+    expect(refusal("amount", offer({ osfType: "currency", baseType: "number" }))).toBeUndefined();
     expect(refusal("completion", offer({ osfType: "number", baseType: "number" }))).toBe("INCOMPATIBLE_TYPE");
     expect(refusal("completion", offer({ osfType: "percentage", baseType: "number" }))).toBeUndefined();
     // A percentage is not a currency either, though both are numbers.
@@ -386,7 +386,7 @@ describe("the 48-field acceptance fixture", () => {
   it("writes only a formattable scalar into text", () => {
     expect(refusal("title", offer({ osfType: "coordinates", baseType: "object" }), "template"))
       .toBe("UNFORMATTABLE_VALUE");
-    expect(refusal("title", offer({ osfType: "money", baseType: "number" }), "template")).toBeUndefined();
+    expect(refusal("title", offer({ osfType: "currency", baseType: "number" }), "template")).toBeUndefined();
     expect(refusal("body", offer({ osfType: "Relation", baseType: "string", target: "Relation" }), "template"))
       .toBe("INCOMPATIBLE_REFERENCE");
     expect(refusal("body", offer({ osfType: "string", baseType: "string", cardinality: "collection" }), "template"))

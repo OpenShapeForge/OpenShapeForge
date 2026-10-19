@@ -68,7 +68,7 @@ fields:
     description:
       en: Total amount allocated to the budget.
       nl: Totaalbedrag dat is toegewezen aan het budget.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount
       storageClass: core

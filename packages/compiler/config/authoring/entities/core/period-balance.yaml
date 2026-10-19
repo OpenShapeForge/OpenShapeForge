@@ -40,7 +40,7 @@ fields:
     description:
       en: Sum of debit movements in the period for this account/dimensions tuple.
       nl: Som van debetmutaties in de periode voor deze rekening/dimensiecombinatie.
-    osfType: money
+    osfType: currency
     persisted:
       column: debit_total
       storageClass: core
@@ -52,7 +52,7 @@ fields:
     description:
       en: Sum of credit movements in the period for this account/dimensions tuple.
       nl: Som van creditmutaties in de periode voor deze rekening/dimensiecombinatie.
-    osfType: money
+    osfType: currency
     persisted:
       column: credit_total
       storageClass: core
@@ -64,7 +64,7 @@ fields:
     description:
       en: Closing balance for the period for this account/dimensions tuple.
       nl: Eindsaldo van de periode voor deze rekening/dimensiecombinatie.
-    osfType: money
+    osfType: currency
     persisted:
       column: closing_balance
       storageClass: core

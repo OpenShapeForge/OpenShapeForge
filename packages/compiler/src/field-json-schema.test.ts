@@ -140,10 +140,10 @@ describe("compiled field JSON Schema projection", () => {
     // A form renders a property through the renderer registered for its type
     // (#521); the JSON type beside it stays the only thing validated.
     expect(compiledFieldSchema(field({ key: "customer", osfType: "Relation", relationship: { kind: "belongsTo", target: "Relation" } }))["x-osf-type"]).toBe("Relation");
-    expect(compiledFieldSchema(field({ key: "amount", osfType: "money", baseType: "number" }))["x-osf-type"]).toBe("money");
+    expect(compiledFieldSchema(field({ key: "amount", osfType: "currency", baseType: "number" }))["x-osf-type"]).toBe("currency");
     const ajv = new Ajv2020.default({ strict: false });
     ajv.addKeyword(operationTypeKeyword);
-    expect(() => ajv.compile({ type: "object", properties: { amount: compiledFieldSchema(field({ key: "amount", osfType: "money", baseType: "number" })) } })).not.toThrow();
+    expect(() => ajv.compile({ type: "object", properties: { amount: compiledFieldSchema(field({ key: "amount", osfType: "currency", baseType: "number" })) } })).not.toThrow();
     for (const invalid of ["not a type", "field.definition", "field-definition", "field_definition", "9lives"]) {
       expect(() => ajv.compile({ type: "number", "x-osf-type": invalid })).toThrow(/x-osf-type/);
     }
@@ -586,7 +586,7 @@ describe("compiled field JSON Schema projection", () => {
       { component: "ObjectEditor" },
       { component: "CollectionEditor" },
       { component: "MoneyDisplay", props: { currency: "EUR" } },
-      { component: "NumberInput", props: { step: 5 } },
+      { component: "NumberInput", props: { currency: "EUR", step: 5 } },
     ]);
     expect(compiled[4]?.children?.[0]?.render).toEqual({ component: "NumberInput" });
     expect(compiled[5]?.item?.render).toEqual({ component: "Checkbox" });

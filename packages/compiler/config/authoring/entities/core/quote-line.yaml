@@ -79,7 +79,7 @@ fields:
     description:
       en: Price per unit, excluding VAT.
       nl: Prijs per eenheid, exclusief BTW.
-    osfType: money
+    osfType: currency
     persisted:
       column: unit_price
       storageClass: core
@@ -91,7 +91,7 @@ fields:
     description:
       en: Net amount excluding VAT for this line.
       nl: Nettobedrag excl. BTW voor deze regel.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount_base
       storageClass: core
@@ -103,7 +103,7 @@ fields:
     description:
       en: VAT amount for this line.
       nl: BTW-bedrag voor deze regel.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount_vat
       storageClass: core
@@ -115,7 +115,7 @@ fields:
     description:
       en: Total amount including VAT for this line.
       nl: Totaalbedrag incl. BTW voor deze regel.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount_total
       storageClass: core

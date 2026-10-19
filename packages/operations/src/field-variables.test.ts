@@ -27,12 +27,12 @@ import { resolveFields } from "./field-resolution.js";
 import { schemaVariableShape, schemaVariableSlot } from "./variable-schema.js";
 
 test("whole variables preserve unit and currency contexts from authoritative schemas", () => {
-  const money = slot({osfType:"money",baseType:"number",currency:"EUR"});
+  const money = slot({osfType:"currency",baseType:"number",currency:"EUR"});
   expect(variableCompatibility(money, {...money,currency:"USD"}, "whole").compatible).toBe(false);
   expect(variableCompatibility(money, money, "whole").compatible).toBe(true);
   const weight = slot({osfType:"number",baseType:"number",unit:"kg"});
   expect(variableCompatibility(weight, {...weight,unit:"g"}, "whole").compatible).toBe(false);
-  const resolved = resolveFields([{key:"amount",osfType:"money",variables:"whole",unit:"EUR"}], {
+  const resolved = resolveFields([{key:"amount",osfType:"currency",variables:"whole",unit:"EUR"}], {
     osfTypes:{money:{baseType:"number",render:{component:"FieldMoney",props:{currency:"EUR"}}}},
   })[0]!;
   expect(schemaVariableShape(fieldSchema(resolved))).toMatchObject({currency:"EUR",unit:"EUR"});
@@ -88,10 +88,10 @@ describe("variable references", () => {
 
   test("a key in one namespace never resolves through the other", () => {
     const catalogue: VariableCatalogue = {
-      local: { kind: "map", offers: { amount: offered({ osfType: "money", baseType: "number" }) } },
+      local: { kind: "map", offers: { amount: offered({ osfType: "currency", baseType: "number" }) } },
       chips: { kind: "uniform", offer: offered({ osfType: "multilineText" }) },
     };
-    expect(variableOffer(catalogue, parseVariableReference("local.amount")).osfType).toBe("money");
+    expect(variableOffer(catalogue, parseVariableReference("local.amount")).osfType).toBe("currency");
     // The same key in the global namespace is the globals' own contract, not the local one.
     expect(variableOffer(catalogue, parseVariableReference("chips.amount")).osfType).toBe("multilineText");
     expect(() => variableOffer({ chips: catalogue.chips! }, parseVariableReference("local.amount")))
@@ -145,12 +145,12 @@ describe("variable references", () => {
 describe("whole-value compatibility", () => {
   test("the exact osfType and cardinality are kept", () => {
     expect(variableCompatibility(
-      slot({ osfType: "money", baseType: "number", mode: "whole" }),
-      offered({ osfType: "money", baseType: "number" }),
+      slot({ osfType: "currency", baseType: "number", mode: "whole" }),
+      offered({ osfType: "currency", baseType: "number" }),
       "whole",
     )).toEqual({ compatible: true });
     // Money is not an arbitrary number.
-    expect(refusal(slot({ osfType: "money", baseType: "number", mode: "whole" }), offered({ osfType: "number", baseType: "number" })))
+    expect(refusal(slot({ osfType: "currency", baseType: "number", mode: "whole" }), offered({ osfType: "number", baseType: "number" })))
       .toBe("INCOMPATIBLE_TYPE");
     // A refined value does fill a destination that declares no refinement.
     expect(refusal(slot({ osfType: "string", mode: "whole" }), offered({ osfType: "multilineText" })))
@@ -247,7 +247,7 @@ describe("template compatibility", () => {
   });
 
   test("a formattable scalar is spliced in; an object, a collection or a reference is not", () => {
-    expect(refusal(slot(), offered({ osfType: "money", baseType: "number" }), "template")).toBeUndefined();
+    expect(refusal(slot(), offered({ osfType: "currency", baseType: "number" }), "template")).toBeUndefined();
     expect(refusal(slot(), offered({ osfType: "date", baseType: "date" }), "template")).toBeUndefined();
     expect(refusal(slot(), offered({ osfType: "boolean", baseType: "boolean" }), "template")).toBeUndefined();
     expect(refusal(slot(), offered({ osfType: "labelSet", baseType: "object" }), "template")).toBe("UNFORMATTABLE_VALUE");
@@ -259,11 +259,11 @@ describe("template compatibility", () => {
 describe("offered variables", () => {
   test("a picker list is the same comparison, applied to a list", () => {
     const offers: VariableOffer[] = [
-      { ...offered({ osfType: "money", baseType: "number" }), source: { namespace: "local", scope: "local", key: "amount" } },
+      { ...offered({ osfType: "currency", baseType: "number" }), source: { namespace: "local", scope: "local", key: "amount" } },
       { ...offered({ osfType: "number", baseType: "number" }), source: { namespace: "local", scope: "local", key: "count" } },
-      { ...offered({ osfType: "money", baseType: "number", cardinality: "collection" }), source: { namespace: "local", scope: "local", key: "amounts" } },
+      { ...offered({ osfType: "currency", baseType: "number", cardinality: "collection" }), source: { namespace: "local", scope: "local", key: "amounts" } },
     ];
-    expect(compatibleVariableOffers(slot({ osfType: "money", baseType: "number", mode: "whole" }), offers, "whole")
+    expect(compatibleVariableOffers(slot({ osfType: "currency", baseType: "number", mode: "whole" }), offers, "whole")
       .map((offer) => offer.source.key)).toEqual(["amount"]);
   });
 });
@@ -282,7 +282,7 @@ describe("resolved values", () => {
   test("false, zero, an empty string and an empty collection are values", () => {
     const flag: VariableOffer = { ...offered({ osfType: "boolean", baseType: "boolean" }), source: { namespace: "local", scope: "local", key: "flag" } };
     expect(() => assertVariableSourceValue(flag, false)).not.toThrow();
-    const amount: VariableOffer = { ...offered({ osfType: "money", baseType: "number" }), source: { namespace: "local", scope: "local", key: "amount" } };
+    const amount: VariableOffer = { ...offered({ osfType: "currency", baseType: "number" }), source: { namespace: "local", scope: "local", key: "amount" } };
     expect(() => assertVariableSourceValue(amount, 0)).not.toThrow();
     const text: VariableOffer = { ...offered(), source: { namespace: "local", scope: "local", key: "note" } };
     expect(() => assertVariableSourceValue(text, "")).not.toThrow();
@@ -335,7 +335,7 @@ describe("the authored field is the slot", () => {
     const [field] = resolveFields([
       {
         key: "money",
-        osfType: "money",
+        osfType: "currency",
         variables: "whole",
         required: true,
         validation: { min: 0 },
@@ -344,7 +344,7 @@ describe("the authored field is the slot", () => {
     expect(fieldVariableSlot(field!, { path: "FieldAcceptance.money" })).toEqual({
       path: "FieldAcceptance.money",
       mode: "whole",
-      osfType: "money",
+      osfType: "currency",
       baseType: "number",
       cardinality: "single",
       nullable: false,
@@ -400,9 +400,9 @@ describe("a namespace whose keys declare their own type", () => {
 
   test("the resolved contract is compared like any other offer", () => {
     const reference = parseVariableReference("chips.fee");
-    const offer = declaredVariableOffer(reference, offered({ osfType: "money", baseType: "number" }));
+    const offer = declaredVariableOffer(reference, offered({ osfType: "currency", baseType: "number" }));
     expect(offer.source).toEqual(reference);
-    expect(variableCompatibility(slot({ osfType: "money", baseType: "number" }), offer, "whole").compatible).toBe(true);
+    expect(variableCompatibility(slot({ osfType: "currency", baseType: "number" }), offer, "whole").compatible).toBe(true);
     expect(variableCompatibility(slot({ osfType: "percentage", baseType: "number" }), offer, "whole"))
       .toMatchObject({ compatible: false, code: "INCOMPATIBLE_TYPE" });
   });
@@ -437,12 +437,12 @@ describe("a variable filled into Markdown is data", () => {
 describe("the slot a transport already publishes", () => {
   test("a compiled property is read back as its own contract", () => {
     const [field] = resolveFields([
-      { key: "amount", osfType: "money", required: true, variables: "whole", validation: { min: 0 } },
+      { key: "amount", osfType: "currency", required: true, variables: "whole", validation: { min: 0 } },
     ], { osfTypes: { money: { baseType: "number", label: { en: "Currency amount" } } } });
     expect(schemaVariableSlot("Invoice.amount", fieldSchema(field!), { required: true })).toEqual({
       path: "Invoice.amount",
       mode: "whole",
-      osfType: "money",
+      osfType: "currency",
       baseType: "number",
       cardinality: "single",
       nullable: false,

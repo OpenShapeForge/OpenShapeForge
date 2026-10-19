@@ -54,7 +54,7 @@ fields:
     description:
       en: Monetary amount of the line.
       nl: Geldbedrag van de regel.
-    osfType: money
+    osfType: currency
     persisted:
       column: amount
       storageClass: core

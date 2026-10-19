@@ -160,3 +160,13 @@ test("YAML presentation defaults compose with semantic and field options without
  expect(resolveRender(withoutRender,configured,semantic).props).toEqual({layout:"front",emailAction:false});
  expect(configured.defaults.string.props.layout).toBe("above");
 });
+
+test('an explicit renderer wins over a tile choice hint and native props are declared', () => {
+  const choices = {type:'static',presentation:'tiles',values:[{value:'a',label:{en:'A',nl:'A'}}]};
+  const field = {key:'kind',baseType:'string',osfType:'string',options:choices,render:{component:'FieldSingleLine',props:{layout:'above'}}} as Field;
+  const checked = {...catalog,components:{FieldSingleLine:{kind:'field',description:'Single line',props:['layout']}}} as ComponentCatalog;
+  expect(resolveRender(field,checked).component).toBe('FieldSingleLine');
+  expect(()=>resolveRender({...field,render:{component:'FieldSingleLine',props:{unsafe:'x'}}},checked)).toThrow(/does not declare/);
+  const {render: _explicit, ...implicit} = field;
+  expect(resolveRender(implicit,checked).component).toBe('ChoiceTiles');
+});

@@ -68,7 +68,7 @@ fields:
     description:
       en: Lower bound of the salary range for the position.
       nl: Ondergrens van de salarisrange voor de functie.
-    osfType: money
+    osfType: currency
     persisted:
       column: salary_range_min
       storageClass: core
@@ -80,7 +80,7 @@ fields:
     description:
       en: Upper bound of the salary range for the position.
       nl: Bovengrens van de salarisrange voor de functie.
-    osfType: money
+    osfType: currency
     persisted:
       column: salary_range_max
       storageClass: core

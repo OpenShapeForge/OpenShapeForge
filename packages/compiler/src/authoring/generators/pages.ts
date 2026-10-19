@@ -914,7 +914,8 @@ function mapGeneratedViewGroup(
     id: group.id,
     title: group.title,
     label: group.label,
-    render: group.render?.component,
+    // Bound controls belong to the Web manifest; this legacy host keeps the scalar fields.
+    render: group.bindings ? undefined : group.render?.component,
     fields: group.fields?.map((field) => mapGeneratedDetailFieldKey(contract, context, typeof field === "string" ? field : field.key)),
     relationships: group.relationships?.map(mapRelationshipConfig),
     relationship: group.relationship ? mapRelationshipConfig(group.relationship) : undefined,
@@ -1683,7 +1684,8 @@ function mapGeneratedFormGroup(
     id: group.id,
     title: group.title ?? group.label,
     label: group.label,
-    render: group.render?.component,
+    // Bound controls belong to the Web manifest; this legacy host keeps the scalar fields.
+    render: group.bindings ? undefined : group.render?.component,
     fields: group.fields?.map((field) => typeof field === "string" ? field : field.key),
     relationships: group.relationships?.map((relationship) => mapRelationshipConfig?.(relationship) ?? {
       name: relationship.name,

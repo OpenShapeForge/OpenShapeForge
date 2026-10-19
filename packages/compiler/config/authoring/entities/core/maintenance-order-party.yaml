@@ -130,7 +130,7 @@ fields:
     description:
       en: Hourly rate charged by this party.
       nl: Uurtarief dat door deze partij wordt gehanteerd.
-    osfType: money
+    osfType: currency
     persisted:
       column: hourly_rate
       storageClass: core

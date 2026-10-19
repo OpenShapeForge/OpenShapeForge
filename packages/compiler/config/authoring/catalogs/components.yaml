@@ -472,7 +472,7 @@ components:
   FieldRating:
     kind: field
     description: Battery FieldRating field.
-    props: [layout, emptyText, saveLabel, cancelLabel, min, max, step]
+    props: [layout, emptyText, saveLabel, cancelLabel, min, max, step, readDisplay]
 
   FieldRecurrence:
     kind: field

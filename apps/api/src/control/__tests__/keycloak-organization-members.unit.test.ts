@@ -572,3 +572,19 @@ describe("telling an existing member about new access", () => {
     await expect(createKeycloakOrganizationMembersClient(config, { fetch }).inviteExistingMember!("acme", "person@example.com")).rejects.toBeInstanceOf(KeycloakAdminError);
   });
 });
+
+
+describe("account organisation discovery", () => {
+  it("uses the exact encoded subject and returns no provider metadata", async () => {
+    const { fetch, calls } = stubFetch(() => Response.json([{ id: "org", enabled: true, name: "Name", secretAttribute: "private" }]));
+    const client = createKeycloakOrganizationMembersClient(config, { fetch });
+    expect(await client.listMemberOrganizations!("subject/id")).toEqual([{ id: "org", enabled: true }]);
+    expect(calls.at(-1)!.url).toBe("http://keycloak.test:8080/admin/realms/openshapeforge/organizations/members/subject%2Fid/organizations?briefRepresentation=false");
+  });
+  it("rejects malformed, unavailable or unbounded discovery responses", async () => {
+    for (const body of [{}, [{ id: "a" }], [{ id: "", enabled: true }], Array.from({ length: 101 }, () => ({ id: "a", enabled: true }))]) {
+      const { fetch } = stubFetch(() => Response.json(body));
+      await expect(createKeycloakOrganizationMembersClient(config, { fetch }).listMemberOrganizations!("subject")).rejects.toMatchObject({ code: "KEYCLOAK_ADMIN_UNAVAILABLE" });
+    }
+  });
+});

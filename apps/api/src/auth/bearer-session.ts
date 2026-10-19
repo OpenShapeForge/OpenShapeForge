@@ -226,6 +226,7 @@ export async function resolveVerifiedBearerSession(
       ...(typeof claims.iss === "string" ? { issuer: claims.iss } : {}),
       ...(loginSessionBinding ? { loginSessionBinding } : {}),
       userDisplayName: relation?.displayName ?? null,
+      ...(isPerson && claims.email_verified === true && personClaims?.email ? { verifiedEmail: personClaims.email } : {}),
       ...(typeof claims.locale === "string" && claims.locale.trim() ? { locale: claims.locale.trim() } : {}),
       roles: effectiveRoles,
       ...(isPerson ? { principalKind: "person" as const }

@@ -10,6 +10,7 @@ import {
   connectorQueryFields,
 } from "../../connectors/graphql-schema.js";
 import { declaredFieldNames } from "../../modules/graphql-composition.js";
+import { availableTenantQueryFields } from "../available-tenants.js";
 import { currentTenantQueryFields } from "../current-tenant.js";
 import {
   generatedEntityMutationFields,
@@ -24,7 +25,7 @@ function sortedFields(fields: string): string[] {
 function expectedRootOrder() {
   return {
     query: [
-      ...["health", "entityPageConfigs", ...declaredFieldNames(currentTenantQueryFields)].sort(),
+      ...["health", "entityPageConfigs", ...declaredFieldNames(currentTenantQueryFields), ...declaredFieldNames(availableTenantQueryFields)].sort(),
       ...sortedFields(generatedEntityQueryFields),
       ...sortedFields(`${connectorQueryFields}\n${connectorNamespaceQueryFields}`),
       ...sortedFields(apiKeyQueryFields),

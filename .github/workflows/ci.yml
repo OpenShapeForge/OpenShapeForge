@@ -157,6 +157,7 @@ jobs:
           src/graphql/__tests__/introspection.test.ts
           src/graphql/__tests__/observability-readiness.test.ts
           src/graphql/__tests__/root-ordering.test.ts
+          src/graphql/available-tenants.unit.test.ts
           src/graphql/__tests__/transport-hardening.test.ts
           src/graphql/generated-authz.test.ts
           src/graphql/__tests__/classified-query-guard.unit.test.ts
@@ -448,6 +449,7 @@ jobs:
           cd apps/api
           bun test src/db
           bun test src/operations
+          bun test src/graphql/available-tenants-db.test.ts
           bun test src/auth/relation-group-memberships-db.test.ts src/platform/entity-change-stream.test.ts src/graphql/context-db.test.ts
           bun test src/documents/__tests__/document-content-db.test.ts src/documents/__tests__/document-content-authorization-db.test.ts
           find src/modules -name '*.test.ts' ! -name 'platform-artifact-transaction.test.ts' -print0 | xargs -0 bun test

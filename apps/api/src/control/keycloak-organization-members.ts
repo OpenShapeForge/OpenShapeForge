@@ -224,6 +224,14 @@ export function createKeycloakOrganizationMembersClient(
   }
 
   return {
+    async listMemberOrganizations(memberId) {
+      if (!memberId.trim()) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Account subject is required.");
+      const { body } = await request(`${adminBase}/members/${encodeURIComponent(memberId)}/organizations?briefRepresentation=false`,
+        { method: "GET" }, "reading account organizations", "list_organization_members");
+      if (!Array.isArray(body) || body.length > 100 || body.some(row => !row || typeof row.id !== "string" || !row.id.trim() || typeof row.enabled !== "boolean"))
+        throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid or unbounded account organizations response.");
+      return body.map(row => ({ id: row.id as string, enabled: row.enabled as boolean }));
+    },
     async hasMemberByEmail(organizationId, email) {
       const wanted = normalizeEmail(email);
       if (wanted.length === 0) return false;

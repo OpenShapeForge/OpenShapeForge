@@ -105,6 +105,8 @@ export type KeycloakOrganizationInvitation = {
 };
 
 export type KeycloakOrganizationMembersClient = {
+  /** Native, live membership discovery for a server-verified account subject. */
+  listMemberOrganizations?(memberId: string): Promise<readonly { id: string; enabled: boolean }[]>;
   /** Whether this address already belongs to the organization, compared case-insensitively. */
   hasMemberByEmail(organizationId: string, email: string): Promise<boolean>;
   /**

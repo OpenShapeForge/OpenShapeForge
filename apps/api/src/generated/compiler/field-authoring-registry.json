@@ -332,6 +332,12 @@
       }
     },
     "markdown": {
+      "props": {
+        "variableListLabel": {
+          "en": "Variables",
+          "nl": "Variabelen"
+        }
+      },
       "label": {
         "en": "Markdown",
         "nl": "Markdown"
@@ -364,6 +370,9 @@
       "audit": true
     },
     "phone": {
+      "props": {
+        "country": "netherlands"
+      },
       "label": {
         "en": "Phone number",
         "nl": "Telefoonnummer"
@@ -374,8 +383,8 @@
         "pattern": "^\\+?[0-9\\s\\-()]{7,20}$"
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldPhone",
+        "input": "FieldPhone"
       },
       "classification": {
         "sensitivity": "pii",
@@ -708,6 +717,12 @@
       }
     },
     "measurement": {
+      "props": {
+        "unitLabel": {
+          "en": "Unit",
+          "nl": "Eenheid"
+        }
+      },
       "kind": "object",
       "label": {
         "en": "Measurement",
@@ -820,6 +835,16 @@
       }
     },
     "numericRange": {
+      "props": {
+        "minimumLabel": {
+          "en": "From",
+          "nl": "Van"
+        },
+        "maximumLabel": {
+          "en": "To",
+          "nl": "Tot"
+        }
+      },
       "schema": {
         "x-osf-ordered-fields": {
           "lower": "from",
@@ -860,6 +885,9 @@
       ]
     },
     "localTime": {
+      "props": {
+        "precision": "second"
+      },
       "label": {
         "en": "Time of day",
         "nl": "Tijdstip"
@@ -875,6 +903,16 @@
       }
     },
     "dateRange": {
+      "props": {
+        "startLabel": {
+          "en": "From",
+          "nl": "Van"
+        },
+        "endLabel": {
+          "en": "To",
+          "nl": "Tot"
+        }
+      },
       "schema": {
         "x-osf-ordered-fields": {
           "lower": "from",
@@ -915,6 +953,38 @@
       ]
     },
     "calendarPeriod": {
+      "props": {
+        "typeLabel": {
+          "en": "Period type",
+          "nl": "Soort periode"
+        },
+        "valueLabel": {
+          "en": "Period value",
+          "nl": "Periode"
+        },
+        "kindLabels": {
+          "month": {
+            "en": "Month",
+            "nl": "Maand"
+          },
+          "quarter": {
+            "en": "Quarter",
+            "nl": "Kwartaal"
+          },
+          "year": {
+            "en": "Year",
+            "nl": "Jaar"
+          },
+          "halfYear": {
+            "en": "Half-year",
+            "nl": "Halfjaar"
+          },
+          "week": {
+            "en": "Week",
+            "nl": "Week"
+          }
+        }
+      },
       "label": {
         "en": "Calendar period",
         "nl": "Kalenderperiode"

@@ -471,6 +471,12 @@ interfaces:
                     nl: Notities
                   fields:
                     - notes
+                - id: personal-details
+                  title: { en: Personal details, nl: Persoonsgegevens }
+                  visibleWhen:
+                    conditions:
+                      - { field: relationType, operator: eq, value: person }
+                  relationship: { name: naturalPersons, view: embedded }
             - id: source
               label:
                 en: Source

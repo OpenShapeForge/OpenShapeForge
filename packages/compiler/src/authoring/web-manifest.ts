@@ -343,7 +343,7 @@ function projectGroups(
     const group = withParentVisibility(authored, parentVisibility, scope);
     const keys = fieldKeys(group, excluded);
     // A form group projects fields only; a condition on a relationship-only group could not be honoured.
-    if (authored.visibleWhen && authored.relationship && keys.length === 0 && !group.groups?.length) {
+    if (authored.visibleWhen && authored.relationship && !authored.relationship.view && keys.length === 0 && !group.groups?.length) {
       throw new Error(`${scope} "${group.id}" has a visibleWhen but no fields to show or hide; place the condition on a group with fields.`);
     }
     if (group.bindings) {
@@ -352,8 +352,10 @@ function projectGroups(
       if (!targets.length || new Set(targets).size !== targets.length || keys.length !== targets.length || targets.some(key => !keys.includes(key))) throw new Error(`${scope} "${group.id}" bindings must map every group field exactly once.`);
     }
     const overrides = fieldOverrides(group, excluded);
-    const projected = keys.length > 0
-      ? [{ id: group.id, title: localized(group.title ?? group.label, group.id), fields: keys, ...groupPresentation(group), ...(overrides ? { fieldOverrides: overrides } : {}) }]
+    const placement = scope === "Detail group" && group.relationship?.view
+      ? { relationshipId: group.relationship.through ? `${group.relationship.name}__${group.relationship.through}` : group.relationship.name, targetView: group.relationship.view } : {};
+    const projected = keys.length > 0 || placement.relationshipId
+      ? [{ ...placement, id: group.id, title: localized(group.title ?? group.label, group.id), fields: keys, ...groupPresentation(group), ...(overrides ? { fieldOverrides: overrides } : {}) }]
       : [];
     return [...projected, ...projectGroups(group.groups, excluded, group.visibleWhen, scope)];
   });
@@ -909,7 +911,8 @@ function projectEntity(
     return [[relationship.key, projected]];
   }));
 
-  for (const tab of view?.detail?.groups.items ?? []) {
+  const placements = (groups: readonly CompiledViewGroup[]): CompiledViewGroup[] => groups.flatMap(group => [group, ...placements(group.groups ?? [])]);
+  for (const tab of placements(view?.detail?.groups.items ?? [])) {
     const usage = tab.relationship;
     if (!usage?.name || !relationships[usage.name]) continue;
     let relationship = relationships[usage.name]!;
@@ -965,6 +968,11 @@ function projectEntity(
       ...(requestedView ? { targetView: requestedView } : {}),
     }];
   };
+  for (const group of placements(view?.detail?.groups.items ?? []).filter(group => group.relationship?.view)) {
+    if (group.fields?.length || group.groups?.length) throw new Error(`${entityName}.${group.id}: a target view placement cannot also declare local fields or groups.`);
+    projectRecordTab(group);
+    
+  }
   const tabs: WebRecordTab[] = (view?.detail?.groups.items ?? []).flatMap(projectRecordTab);
   assertVisibilityFields(entityName, "detail tab", tabs, fields);
   assertVisibilityFields(entityName, "detail group", tabs.flatMap(({ groups }) => groups), fields);

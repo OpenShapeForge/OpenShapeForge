@@ -193,6 +193,9 @@ export type WebFieldProjection = {
 };
 
 export type WebFieldGroup = {
+  /** Target-owned view embedded beside the current record fields. */
+  relationshipId?: string;
+  targetView?: string;
   /** One compound control editing the named existing fields, without a stored object. */
   control?: { component: string; props?: Record<string, unknown>; bindings: Record<string, string> };
   id: string;

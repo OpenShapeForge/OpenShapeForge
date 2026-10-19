@@ -33,7 +33,7 @@ test("whole variables preserve unit and currency contexts from authoritative sch
   const weight = slot({osfType:"number",baseType:"number",unit:"kg"});
   expect(variableCompatibility(weight, {...weight,unit:"g"}, "whole").compatible).toBe(false);
   const resolved = resolveFields([{key:"amount",osfType:"currency",variables:"whole",unit:"EUR"}], {
-    osfTypes:{currency:{baseType:"number",render:{component:"MoneyInput",props:{currency:"EUR"}}}},
+    osfTypes:{currency:{baseType:"number",render:{component:"FieldMoney",props:{currency:"EUR"}}}},
   })[0]!;
   expect(schemaVariableShape(fieldSchema(resolved))).toMatchObject({currency:"EUR",unit:"EUR"});
   expect(fieldVariableSlot(resolved)).toMatchObject({currency:"EUR",unit:"EUR"});
@@ -41,9 +41,9 @@ test("whole variables preserve unit and currency contexts from authoritative sch
 
 test("whole object variables preserve nested monetary and measurement contexts", () => {
   const schemas = (currency: string) => fieldSchema(resolveFields([{key:"invoice",osfType:"object",variables:"whole",children:[
-    {key:"amount",osfType:"currency",render:{component:"MoneyInput",props:{currency}}},
+    {key:"amount",osfType:"currency",render:{component:"FieldMoney",props:{currency}}},
     {key:"weight",osfType:"number",unit:"kg"},
-  ]}], {osfTypes:{currency:{baseType:"number",render:{component:"MoneyInput",props:{currency:"EUR"}}}}})[0]!);
+  ]}], {osfTypes:{currency:{baseType:"number",render:{component:"FieldMoney",props:{currency:"EUR"}}}}})[0]!);
   const target = schemaVariableSlot("invoice", schemas("EUR"))!;
   expect(variableCompatibility(target, schemaVariableShape(schemas("USD"))!, "whole").compatible).toBe(false);
   expect(variableCompatibility(target, schemaVariableShape(schemas("EUR"))!, "whole").compatible).toBe(true);
@@ -468,4 +468,11 @@ describe("the slot a transport already publishes", () => {
     expect(schemaVariableSlot("E.plain", { type: "string", "x-osf-variables": "sometimes" })).toBeUndefined();
     expect(schemaVariableSlot("E.odd", { type: "null" })).toBeUndefined();
   });
+});
+
+test("monetary aliases keep currency context independent of their semantic name",()=>{
+ const shape=(currency:string)=>fieldSchema(resolveFields([{key:"amount",osfType:"customAmount",variables:"whole"}],{osfTypes:{customAmount:{baseType:"number",render:{component:"FieldMoney",props:{currency}}}}})[0]!);
+ const target=schemaVariableSlot("amount",shape("EUR"))!;
+ expect(target.currency).toBe("EUR");
+ expect(variableCompatibility(target,schemaVariableShape(shape("USD"))!,"whole").compatible).toBe(false);
 });

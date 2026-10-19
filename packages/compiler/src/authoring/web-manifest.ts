@@ -284,8 +284,9 @@ function fieldOverrides(
 }
 
 /** A group's icon and its visibility condition travel to the renderer unchanged. */
-function groupPresentation(group: CompiledViewGroup): Pick<WebFieldGroup, "icon" | "visibleWhen"> {
+function groupPresentation(group: CompiledViewGroup): Pick<WebFieldGroup, "icon" | "visibleWhen" | "control"> {
   return {
+    ...(group.bindings && group.render ? { control: { component: group.render.component, ...(group.render.props ? { props: structuredClone(group.render.props) } : {}), bindings: { ...group.bindings } } } : {}),
     ...(group.icon ? { icon: group.icon } : {}),
     ...(group.visibleWhen ? { visibleWhen: structuredClone(group.visibleWhen) } : {}),
   };
@@ -298,9 +299,19 @@ function groupPresentation(group: CompiledViewGroup): Pick<WebFieldGroup, "icon"
 function assertVisibilityFields(
   entityName: string,
   scope: string,
-  owners: readonly { id: string; visibleWhen?: WebVisibilityCondition }[],
+  owners: readonly { id: string; visibleWhen?: WebVisibilityCondition; control?: WebFieldGroup["control"] }[],
   fields: Readonly<Record<string, WebFieldProjection>>,
 ): void {
+  for (const owner of owners) if (owner.control) {
+    for (const key of Object.values(owner.control.bindings)) {
+      const field = fields[key];
+      if (!field?.supports.read || field.cardinality === "many" || field.baseType !== "string" || field.optionSource || field.options?.length || field.typedBy) throw new Error(`${entityName} ${scope} "${owner.id}" binding "${key}" must be a readable scalar text field.`);
+    }
+    if (owner.control.component !== "FieldPersonName" || Object.keys(owner.control.bindings).some(key => !["givenName", "prefix", "familyName"].includes(key)) || !owner.control.bindings.givenName || !owner.control.bindings.familyName) throw new Error(`${entityName} ${scope} "${owner.id}" requires valid FieldPersonName bindings.`);
+    if (owner.control.props?.allowSingleName !== false) throw new Error(`${entityName} ${scope} "${owner.id}" name-part bindings require explicit allowSingleName: false; single-name persistence is not bound.`);
+    const layout = owner.control.props?.layout;
+    if (layout !== undefined && layout !== "front" && layout !== "above" && layout !== "none") throw new Error(`${entityName} ${scope} "${owner.id}" FieldPersonName layout must be front, above or none.`);
+  }
   for (const owner of owners) for (const condition of owner.visibleWhen?.conditions ?? []) {
     if (!fields[condition.field]?.supports.read) {
       throw new Error(`${entityName} ${scope} "${owner.id}" visibleWhen field "${condition.field}" is not a readable field of ${entityName}.`);
@@ -335,6 +346,11 @@ function projectGroups(
     // A form group projects fields only; a condition on a relationship-only group could not be honoured.
     if (authored.visibleWhen && authored.relationship && keys.length === 0 && !group.groups?.length) {
       throw new Error(`${scope} "${group.id}" has a visibleWhen but no fields to show or hide; place the condition on a group with fields.`);
+    }
+    if (group.bindings) {
+      if (!group.render || group.groups?.length || group.relationship || group.relationships?.length) throw new Error(`${scope} "${group.id}" bindings require a field-only group and a renderer.`);
+      const targets = Object.values(group.bindings);
+      if (!targets.length || new Set(targets).size !== targets.length || keys.length !== targets.length || targets.some(key => !keys.includes(key))) throw new Error(`${scope} "${group.id}" bindings must map every group field exactly once.`);
     }
     const overrides = fieldOverrides(group, excluded);
     const projected = keys.length > 0
@@ -532,7 +548,7 @@ function projectField(
 ): WebFieldProjection {
   const nestedSupports = editNested ? supports : { read: true, create: false, update: false };
   const presentation = presentations[`${parent}.${field.key}`.split(".").slice(1).join(".")]?.render
-    ?? (field.render.props && Object.keys(field.render.props).length ? structuredClone(field.render) : undefined);
+    ?? (field.render.component === "ChoiceTiles" || field.render.props && Object.keys(field.render.props).length ? structuredClone(field.render) : undefined);
   if (field.options?.presentation && field.options.type !== "static") {
     throw new Error(`${parent}.${field.key}: options.presentation "${field.options.presentation}" requires static options.`);
   }

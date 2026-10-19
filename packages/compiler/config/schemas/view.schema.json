@@ -214,7 +214,8 @@
       "properties": {
         "title": { "type": "object" },
         "label": { "type": "object" },
-        "render": { "type": "string" },
+        "render": { "oneOf": [{ "type": "string" }, { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/render" }] },
+        "bindings": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "string", "minLength": 1 } },
         "relationship": {
           "oneOf": [
             { "type": "string" },
@@ -258,7 +259,8 @@
         "id": { "type": "string" },
         "title": { "type": "object" },
         "label": { "type": "object" },
-        "render": { "type": "string" },
+        "render": { "oneOf": [{ "type": "string" }, { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/render" }] },
+        "bindings": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "string", "minLength": 1 } },
         "relationship": {
           "oneOf": [
             { "type": "string" },

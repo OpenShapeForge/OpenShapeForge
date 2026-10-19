@@ -5,7 +5,7 @@ import type {
   Field,
   OsfTypeDefinition,
 } from "../types.js";
-import { resolveModelFields } from "./model.js";
+import { resolveModelFields, resolveRender } from "./model.js";
 
 const catalog: ComponentCatalog = {
   schemaVersion: 1,
@@ -148,4 +148,39 @@ test("model compilation retains the canonical field authoring profile",()=>{
  const fields=resolveModelFields([{key:"parameters",osfType:"string",authoring}],catalog,{});
  expect(fields[0]!.authoring).toEqual(authoring);
  expect(fields[0]!.authoring).not.toBe(authoring);
+});
+
+test("YAML presentation defaults compose with semantic and field options without losing false",()=>{
+ const configured={...catalog,defaults:{string:{component:"Input",props:{layout:"above",emailAction:true}}}};
+ const semantic={label:{en:"E-mail"},baseType:"string",render:{display:"TextDisplay",input:"Input"},props:{layout:"front",emailAction:false}} as OsfTypeDefinition;
+ const field={key:"email",osfType:"email",baseType:"string",render:{component:"FieldEmail",props:{layout:"none"}}} as Field;
+ const projected=resolveRender(field,configured,semantic);
+ expect(projected).toEqual({component:"FieldEmail",props:{layout:"none",emailAction:false}});
+ const {render:_,...withoutRender}=field;
+ expect(resolveRender(withoutRender,configured,semantic).props).toEqual({layout:"front",emailAction:false});
+ expect(configured.defaults.string.props.layout).toBe("above");
+});
+
+test('an explicit renderer wins over a tile choice hint and native props are declared', () => {
+  const choices = {type:'static',presentation:'tiles',values:[{value:'a',label:{en:'A',nl:'A'}}]};
+  const field = {key:'kind',baseType:'string',osfType:'string',options:choices,render:{component:'FieldSingleLine',props:{layout:'above'}}} as Field;
+  const checked = {...catalog,components:{FieldSingleLine:{kind:'field',description:'Single line',props:['layout']}}} as ComponentCatalog;
+  expect(resolveRender(field,checked).component).toBe('FieldSingleLine');
+  expect(()=>resolveRender({...field,render:{component:'FieldSingleLine',props:{unsafe:'x'}}},checked)).toThrow(/does not declare/);
+  const {render: _explicit, ...implicit} = field;
+  expect(resolveRender(implicit,checked).component).toBe('ChoiceTiles');
+});
+
+test('renderer changes drop irrelevant inherited options but retain monetary context',()=>{
+ const checked={...catalog,defaults:{datetime:{component:'FieldDateAndTime',props:{layout:'above',showTimezoneSelector:true}},number:{component:'FieldIntegerDecimal'}},components:{FieldDateAndTime:{kind:'field',description:'Date',props:['layout','showTimezoneSelector']},FieldDuration:{kind:'field',description:'Duration',props:['layout']},FieldIntegerDecimal:{kind:'field',description:'Number',props:['layout']}}} as ComponentCatalog;
+ const temporal={key:'time',baseType:'datetime',osfType:'datetime',render:{component:'FieldDuration'}} as Field;
+ expect(resolveRender(temporal,checked)).toEqual({component:'FieldDuration',props:{layout:'above'}});
+ expect(()=>resolveRender({...temporal,render:{component:'FieldTypo'}},checked)).toThrow(/unknown presentation/);
+ const amount={key:'amount',baseType:'number',osfType:'currency',render:{component:'FieldIntegerDecimal'}} as Field;
+ expect(resolveRender(amount,checked,{baseType:'number',label:{en:'Amount'},render:{input:'FieldMoney',display:'FieldMoney'},props:{currency:'EUR'}})).toMatchObject({props:{currency:'EUR'}});
+});
+
+test('shared authored layout survives a legacy component hint',()=>{
+ const checked={...catalog,defaults:{string:{component:'FieldSingleLine',props:{layout:'front'}}},components:{Input:{kind:'field',description:'Legacy text',props:[]}}} as ComponentCatalog;
+ expect(resolveRender({key:'email',baseType:'string',osfType:'email'} as Field,checked,{baseType:'string',label:{en:'Email'},render:{input:'Input',display:'TextDisplay'}})).toMatchObject({props:{layout:'front'}});
 });

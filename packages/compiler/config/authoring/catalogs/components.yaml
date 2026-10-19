@@ -8,42 +8,50 @@ defaults:
     label:
       nl: Tekst
       en: Text
-    component: Input
+    component: FieldSingleLine
+    props: { layout: above }
   integer:
     label:
       nl: Geheel getal
       en: Integer
-    component: NumberInput
+    component: FieldIntegerDecimal
+    props: { layout: above }
   number:
     label:
       nl: Getal
       en: Number
-    component: NumberInput
+    component: FieldIntegerDecimal
+    props: { layout: above }
   boolean:
     label:
       nl: Ja/nee
       en: Yes/no
     component: Switch
+    props: { layout: above, trueLabel: { en: Yes, nl: Ja }, falseLabel: { en: No, nl: Nee }, nullLabel: { en: Not set, nl: Onbekend } }
   object:
     label:
       nl: JSON-object
       en: JSON object
     component: JsonFieldEditor
+    props: { layout: above }
   collection:
     label:
       nl: JSON-lijst
       en: JSON array
     component: JsonFieldEditor
+    props: { layout: above }
   date:
     label:
       nl: Datum
       en: Date
-    component: DatePicker
+    component: FieldDate
+    props: { layout: above }
   datetime:
     label:
       nl: Datum en tijd
       en: Date and time
-    component: DateTimePicker
+    component: FieldDateAndTime
+    props: { layout: above, showTimezoneSelector: false }
 # ── Default component per view element ──
 # Used when a view does not specify a `render.component` for that element.
 viewDefaults:
@@ -203,7 +211,7 @@ components:
   Switch:
     kind: field
     description: Boolean toggle switch.
-    props: []
+    props: [layout, trueLabel, falseLabel, nullLabel]
 
   ReferenceSelect:
     kind: field
@@ -279,13 +287,15 @@ components:
       - toolbar
       - maxLength
 
-  MoneyInput:
+  FieldPersonName:
+    kind: field
+    description: Person-name presentation bound to separate scalar name fields.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, allowSingleName, labels, saveLabel, cancelLabel]
+
+  FieldMoney:
     kind: field
     description: Currency-aware numeric input with formatting.
-    props:
-      - currency
-      - decimalPlaces
-      - scale
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, currency, minorUnitPrecision, decimalPlaces, scale]
 
   AreaInput:
     kind: field
@@ -337,3 +347,239 @@ components:
     kind: custom
     description: Mock natural-person workspace baseline using the inbox layout and relations datascreen.
     props: []
+
+  # Public Battery/Figma field components; presentation is configured through render.props.
+  FieldSingleLine:
+    kind: field
+    description: Battery FieldSingleLine field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, placeholder, labelSpacing]
+
+  FieldMultiline:
+    kind: field
+    description: Battery FieldMultiline field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, rows, placeholder]
+
+  FieldMarkdown:
+    kind: field
+    description: Battery FieldMarkdown field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, variableListLabel, variableEmptyMessage]
+
+  FieldEmail:
+    kind: field
+    description: Battery FieldEmail field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, emailAction, placeholder]
+
+  FieldUrl:
+    kind: field
+    description: Battery FieldUrl field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, placeholder]
+
+  FieldIdentifierCode:
+    kind: field
+    description: Battery FieldIdentifierCode field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, prefix, placeholder]
+
+  FieldSecret:
+    kind: field
+    description: Battery FieldSecret field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, maskLabel, placeholder]
+
+  FieldIntegerDecimal:
+    kind: field
+    description: Battery FieldIntegerDecimal field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, unit, inputMode]
+
+  FieldPercentage:
+    kind: field
+    description: Battery FieldPercentage field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing]
+
+  FieldMeasurement:
+    kind: field
+    description: Battery FieldMeasurement field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, unit, unitOptions, unitLabel, inputMode]
+
+  FieldDuration:
+    kind: field
+    description: Battery FieldDuration field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing]
+
+  FieldNumericRange:
+    kind: field
+    description: Battery FieldNumericRange field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, minimumLabel, maximumLabel]
+
+  FieldBoolean:
+    kind: field
+    description: Battery FieldBoolean field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, trueLabel, falseLabel]
+
+  FieldNullableBoolean:
+    kind: field
+    description: Battery FieldNullableBoolean field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, trueLabel, falseLabel, nullLabel]
+
+  FieldSingleChoice:
+    kind: field
+    description: Battery FieldSingleChoice field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, emptyText]
+
+  FieldMultipleChoice:
+    kind: field
+    description: Battery FieldMultipleChoice field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, emptyText]
+
+  FieldDate:
+    kind: field
+    description: Battery FieldDate field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, emptyText]
+
+  FieldTime:
+    kind: field
+    description: Battery FieldTime field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, precision, emptyText]
+
+  FieldDateAndTime:
+    kind: field
+    description: Battery FieldDateAndTime field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, timezone, showTimezoneSelector, timezones, dateLabel, timeLabel, timezoneLabel, emptyText]
+
+  FieldDateRange:
+    kind: field
+    description: Battery FieldDateRange field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, openEnd, startLabel, endLabel, optionalText, fromText, untilText, emptyText]
+
+  FieldPeriod:
+    kind: field
+    description: Battery FieldPeriod field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, defaultKind, typeLabel, valueLabel, kindLabels, emptyText]
+
+  FieldTimezone:
+    kind: field
+    description: Battery FieldTimezone field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, timezones, placeholder, searchPlaceholder, noResultsText, emptyText]
+
+  FieldPhone:
+    kind: field
+    description: Battery FieldPhone field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, country, countries]
+
+  FieldStatus:
+    kind: field
+    description: Battery FieldStatus field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, presentation, saveLabel, cancelLabel, emptyText]
+
+  FieldRating:
+    kind: field
+    description: Battery FieldRating field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, min, max, step, readDisplay, emptyDisplay, saveLabel, cancelLabel, emptyText]
+
+  FieldRecurrence:
+    kind: field
+    description: Battery FieldRecurrence field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, labels, showEndCondition, saveLabel, cancelLabel, emptyText]
+
+  FieldSingleRelatedRecord:
+    kind: field
+    description: Battery FieldSingleRelatedRecord field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, searchPlaceholder, clearLabel, noResultsText, retryLabel, loadingText, saveLabel, cancelLabel, emptyText]
+
+  FieldMultipleRelatedRecords:
+    kind: field
+    description: Battery FieldMultipleRelatedRecords field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, searchPlaceholder, clearLabel, noResultsText, retryLabel, loadingText, saveLabel, cancelLabel, emptyText]
+
+  FieldHierarchicalRelation:
+    kind: field
+    description: Battery FieldHierarchicalRelation field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, searchPlaceholder, clearLabel, noResultsText, retryLabel, loadingText, saveLabel, cancelLabel, emptyText]
+
+  FieldFileAttachment:
+    kind: field
+    description: Battery FieldFileAttachment field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, accept, uploadTitle, uploadDescription, chooseLabel, addLabel, replaceLabel, removeLabel, downloadLabel, previewLabel, imagePreviewLabel, showReplace, uploadingText, retryLabel, saveLabel, cancelLabel, emptyText]
+
+  FieldMultipleFiles:
+    kind: field
+    description: Battery FieldMultipleFiles field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, accept, uploadTitle, uploadDescription, chooseLabel, addLabel, replaceLabel, removeLabel, downloadLabel, previewLabel, imagePreviewLabel, showReplace, uploadingText, retryLabel, saveLabel, cancelLabel, emptyText]
+
+  FieldImage:
+    kind: field
+    description: Battery FieldImage field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, accept, uploadTitle, uploadDescription, chooseLabel, addLabel, replaceLabel, removeLabel, downloadLabel, previewLabel, imagePreviewLabel, showReplace, uploadingText, retryLabel, saveLabel, cancelLabel, emptyText]
+
+  FieldAddress:
+    kind: field
+    description: Battery FieldAddress field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, countryPresets, showRegion, labels, saveLabel, cancelLabel]
+
+  FieldBankAccount:
+    kind: field
+    description: Battery FieldBankAccount field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, labels, saveLabel, cancelLabel]
+
+  FieldCommercialAmount:
+    kind: field
+    description: Battery FieldCommercialAmount field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, labels, cadenceOptions, saveLabel, cancelLabel]
+
+  FieldRepeatedFieldGroup:
+    kind: field
+    description: Battery FieldRepeatedFieldGroup field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, fieldLayout, addLabel, removeLabel, moveUpLabel, saveLabel, cancelLabel, emptyText]
+
+  FieldChildRecords:
+    kind: field
+    description: Battery FieldChildRecords field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, fieldLayout, addLabel, removeLabel, editLabel, saveLabel, cancelLabel, emptyText]
+
+  FieldKeyValuePairs:
+    kind: field
+    description: Battery FieldKeyValuePairs field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, labels, saveLabel, cancelLabel]
+
+  FieldLocalizedText:
+    kind: field
+    description: Battery FieldLocalizedText field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, locales, fallbackLocale, localeLabel, fallbackLabel, availabilityText, saveLabel, cancelLabel]
+
+  FieldComputedValue:
+    kind: field
+    description: Battery FieldComputedValue field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, overrideLabel, loadingText, details, saveLabel, cancelLabel, emptyText]
+
+  FieldFormula:
+    kind: field
+    description: Battery FieldFormula field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, showSuggestionsButton, suggestions, evaluateLabel, suggestionsLabel, emptySuggestionsLabel, saveLabel, cancelLabel, emptyText]
+
+  FieldSystemMetadata:
+    kind: field
+    description: Battery FieldSystemMetadata field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, loadingText, retryLabel, propertyLabel, valueLabel, saveLabel, cancelLabel, emptyText]
+
+  FieldCode:
+    kind: field
+    description: Battery FieldCode field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, schemaName, labels, saveLabel, cancelLabel]
+
+  FieldLocation:
+    kind: field
+    description: Battery FieldLocation field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, labels, coordinateContext, mapLabel, saveLabel, cancelLabel]
+
+  FieldColorIcon:
+    kind: field
+    description: Battery FieldColorIcon field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, colors, icons, labels, saveLabel, cancelLabel]
+
+  FieldSignature:
+    kind: field
+    description: Battery FieldSignature field.
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, signerLayout, downloadLabel, signedByLabel, evidenceLabel, immutableLabel, signerLabel, requestLabel, clearLabel, pendingLabel, signedLabel, expiredLabel, declinedLabel, uploadTitle, uploadDescription, uploadHint, chooseLabel, retryLabel, saveLabel, cancelLabel, emptyText]
+
+  ChoiceTiles:
+    kind: field
+    description: Static authored choices presented as tiles.
+    props: [layout]

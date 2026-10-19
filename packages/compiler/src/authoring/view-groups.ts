@@ -24,7 +24,9 @@ export interface ResolvedViewGroup {
   label?: LocalizedText;
   icon?: string;
   visibleWhen?: VisibilityConfig;
-  render?: string;
+  render?: string | { component: string; props?: Record<string, unknown> };
+  /** Widget value slots mapped to existing scalar fields; presentation only. */
+  bindings?: Record<string, string>;
   fields?: FieldEntry[];
   relationships?: RelationshipUsage[];
   relationship?: string | RelationshipUsage;
@@ -74,6 +76,7 @@ function mergeGroupOverride(
     icon: override.icon ?? group.icon,
     visibleWhen: override.visibleWhen ?? group.visibleWhen,
     render: override.render ?? group.render,
+    bindings: override.bindings ?? group.bindings,
     fields: override.fields ?? group.fields,
     relationships: override.relationships ?? group.relationships,
     relationship: override.relationship ?? group.relationship,
@@ -155,6 +158,7 @@ function resolveGroupDefinition(
     visibleWhen: group.visibleWhen,
     ...(group.showInReadNavigation !== undefined ? { showInReadNavigation: group.showInReadNavigation } : {}),
     render: group.render,
+    bindings: group.bindings,
     fields: group.fields,
     relationships: group.relationships,
     relationship: group.relationship,

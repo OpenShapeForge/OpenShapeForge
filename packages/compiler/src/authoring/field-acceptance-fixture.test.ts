@@ -403,7 +403,7 @@ describe("the 48-field acceptance fixture", () => {
     // schema-3 field may not author `render` at all. They are presentation, so
     // the stored column stays exact numeric.
     expect(field("amount").render).toMatchObject({
-      component: "MoneyInput",
+      component: "FieldMoney",
       props: { currency: "EUR", decimalPlaces: 2, scale: "units" },
     });
     expect(field("completion").render).toMatchObject({

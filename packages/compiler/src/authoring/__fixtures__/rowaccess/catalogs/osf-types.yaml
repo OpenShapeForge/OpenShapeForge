@@ -190,8 +190,8 @@ types:
     baseType: number
     icon: Banknote
     render:
-      display: MoneyInput
-      input: MoneyInput
+      display: FieldMoney
+      input: FieldMoney
     props:
       currency: EUR
 

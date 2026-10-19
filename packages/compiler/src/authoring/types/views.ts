@@ -108,7 +108,9 @@ export interface ViewGroupOverride {
   label?: LocalizedText;
   icon?: string;
   visibleWhen?: VisibilityConfig;
-  render?: string;
+  render?: string | { component: string; props?: Record<string, unknown> };
+  /** Widget value slots mapped to existing scalar fields; presentation only. */
+  bindings?: Record<string, string>;
   fields?: FieldEntry[];
   relationships?: RelationshipUsage[];
   relationship?: string | RelationshipUsage;
@@ -127,7 +129,9 @@ export interface ViewGroup {
   icon?: string;
   /** Show the group only while these conditions hold for the record being edited. */
   visibleWhen?: VisibilityConfig;
-  render?: string;
+  render?: string | { component: string; props?: Record<string, unknown> };
+  /** Widget value slots mapped to existing scalar fields; presentation only. */
+  bindings?: Record<string, string>;
   fields?: FieldEntry[];
   relationships?: RelationshipUsage[];
   relationship?: string | RelationshipUsage;

@@ -162,6 +162,34 @@ function entity(
 }
 
 describe("web manifest projection", () => {
+  test("a compound name control preserves separate canonical properties and columns", () => {
+    const artifacts=loadEntity(authoringDir,"natural-person");
+    const contract=compile(artifacts);
+    const projected=buildWebManifest([{slug:"natural-person",contract}]).entities.NaturalPerson!;
+    const keys=["firstName","namePrefix","lastName"];
+    for(const key of keys){
+      expect(contract.model.fields.find(field=>field.key===key)).toMatchObject({osfType:"string",baseType:"string"});
+      expect(contract.storage.columns.find(column=>column.field===key)).toMatchObject({type:"text",column:key==="firstName"?"first_name":key==="lastName"?"last_name":"name_prefix"});
+      expect(projected.fields[key]?.baseType).toBe("string");
+    }
+    expect(contract.model.fields.some(field=>field.key==="person-name")).toBe(false);
+    const group=projected.views.record!.formGroups!.create!.find(group=>group.id==="person-name")!;
+    expect(group.fields).toEqual(keys);
+    expect(group.control).toEqual({component:"FieldPersonName",props:{layout:"none",allowSingleName:false},bindings:{givenName:"firstName",prefix:"namePrefix",familyName:"lastName"}});
+    const nameGroup=contract.views.core!.form!.variants.create!.groups.find(group=>group.id==="person-name")!;
+    for (const allowSingleName of [undefined, true]) {
+      nameGroup.render!.props = { layout: "none", ...(allowSingleName === undefined ? {} : { allowSingleName }) };
+      expect(()=>buildWebManifest([{slug:"natural-person",contract}])).toThrow(/require explicit allowSingleName: false/);
+    }
+    nameGroup.render!.props = { layout: "sideways", allowSingleName: false };
+    expect(()=>buildWebManifest([{slug:"natural-person",contract}])).toThrow(/layout must be front, above or none/);
+    nameGroup.render!.props = { layout: "none", allowSingleName: false };
+    nameGroup.bindings={givenName:"firstName",singleName:"namePrefix",familyName:"lastName"};
+    expect(()=>buildWebManifest([{slug:"natural-person",contract}])).toThrow(/requires valid FieldPersonName bindings/);
+    nameGroup.bindings={givenName:"firstName",prefix:"namePrefix",familyName:"unknown"};
+    expect(()=>buildWebManifest([{slug:"natural-person",contract}])).toThrow(/bindings must map every group field exactly once/);
+  });
+
   test("the real Chip authoring exposes editable typed values through ordinary Battery views",()=>{
     const artifacts=loadEntity(authoringDir,"chip");
     const raw=parse(readFileSync(join(authoringDir,"entities/core/chip.yaml"),"utf8"));
@@ -187,11 +215,11 @@ describe("web manifest projection", () => {
     const variable = entity("Variable", "variable", [
       field("definition", {osfType:"fieldDefinition",baseType:"object"}),
       field("value", {osfType:"typedValue",baseType:"object",typedBy:{definitionField:"definition"}}),
-      field("amount", {osfType:"currency",baseType:"number",render:{component:"MoneyInput",props:{currency:"EUR",decimalPlaces:0,scale:"millions"}}}),
+      field("amount", {osfType:"money",baseType:"number",render:{component:"FieldMoney",props:{currency:"EUR",decimalPlaces:0,scale:"millions"}}}),
     ], coreView());
     const projected = buildWebManifest([variable]).entities.Variable!.fields;
     expect(projected.value!.typedBy).toEqual({definitionField:"definition"});
-    expect(projected.amount!.presentation).toEqual({component:"MoneyInput",props:{currency:"EUR",decimalPlaces:0,scale:"millions"}});
+    expect(projected.amount!.presentation).toEqual({component:"FieldMoney",props:{currency:"EUR",decimalPlaces:0,scale:"millions"}});
   });
   test("read labels use the authored reference catalog without replacing canonical codes", () => {
     const contact = entity("ContactMoment", "contact", [field("channel", { options: { type: "referentiedata", referentieGroep: "COMMUNICATIONCHANNEL" } })], coreView());

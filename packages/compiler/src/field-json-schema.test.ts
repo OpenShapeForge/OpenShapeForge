@@ -561,7 +561,7 @@ describe("compiled field JSON Schema projection", () => {
       amounts: { baseType: "number", label: { en: "Amounts" }, cardinality: { min: 2, max: 4 } },
       money: {
         baseType: "number", label: { en: "Money" },
-        render: { input: "MoneyInput", display: "MoneyDisplay" }, props: { currency: "EUR" },
+        render: { input: "FieldMoney", display: "MoneyDisplay" }, props: { currency: "EUR" },
       },
     });
     const definitions = freezeRecursively<FieldDefinition[]>([
@@ -586,7 +586,7 @@ describe("compiled field JSON Schema projection", () => {
       { component: "ObjectEditor" },
       { component: "CollectionEditor" },
       { component: "MoneyDisplay", props: { currency: "EUR" } },
-      { component: "NumberInput", props: { step: 5 } },
+      { component: "NumberInput", props: { currency: "EUR", step: 5 } },
     ]);
     expect(compiled[4]?.children?.[0]?.render).toEqual({ component: "NumberInput" });
     expect(compiled[5]?.item?.render).toEqual({ component: "Checkbox" });

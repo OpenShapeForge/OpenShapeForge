@@ -42,13 +42,13 @@ function contract(input: CoreEntity) {
 test("view money display settings survive compiler and host projection without changing value contracts", () => {
   const input = entity();
   input.interfaces!.web!.views!.record!.layout!.tabs![0]!.fields = [
-    { key: "label", render: { component: "MoneyInput", props: { decimalPlaces: 0, scale: "millions", currency: "EUR" } } },
+    { key: "label", render: { component: "FieldMoney", props: { decimalPlaces: 0, scale: "millions", currency: "EUR" } } },
   ];
   assertEntityAuthoring(input, "source.yaml");
   const compiled = contract(input);
   const web = buildWebManifest([{ slug: "account", contract: compiled }], { requireTranslations: true });
   expect(web.entities.Account!.views.record!.layout.tabs[0]!.groups[0]!.fieldOverrides!.label!.render).toEqual({
-    component: "MoneyInput", props: { decimalPlaces: 0, scale: "millions", currency: "EUR" },
+    component: "FieldMoney", props: { decimalPlaces: 0, scale: "millions", currency: "EUR" },
   });
   expect(compiled.model.fields.find(field => field.key === "label")!.osfType).toBe("string");
 });

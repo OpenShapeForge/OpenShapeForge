@@ -136,7 +136,8 @@ export function resolveFieldOptions(
 
 /**
  * Resolution order:
- * 1. field.render (explicit override — highest priority)
+ * Components use the first match; props merge defaults < semantic type < explicit field.
+ * 1. field.render (component override — highest priority)
  * 2. field.osfType → semantic type registry render
  * 3. field.baseType/cardinality → component catalog defaults (lowest)
  */
@@ -145,41 +146,31 @@ export function resolveRender(
   catalog: ComponentCatalog,
   semType?: OsfTypeDefinition
 ): CompiledRender {
-  // 1. Explicit field render override
-  if (field.render) {
-    const componentName = field.render.component;
-    return {
-      component: componentName,
-      ...(field.render.props && Object.keys(field.render.props).length > 0
-        ? { props: field.render.props }
-        : {}),
-    };
-  }
-
-  // 2. Semantic type render
-  if (semType?.render) {
-    const componentName = field.readOnly ? semType.render.display : semType.render.input;
-    return {
-      component: componentName,
-      ...(semType.props ? { props: semType.props } : {}),
-    };
-  }
-
-  if (semType?.kind === "entityId") {
-    return {
-      component: field.readOnly ? "EntityReferenceDisplay" : "EntityReferenceSelect",
-    };
-  }
-
-  // 3. Default for field value shape
   const defaultKey = fieldCardinality(field) === "collection" ? "collection" : field.baseType;
   const defaultEntry = catalog.defaults[defaultKey] ?? catalog.defaults[field.baseType];
-  if (defaultEntry) {
-    const componentName = defaultEntry.component;
-    return {
-      component: componentName,
-    };
+  const component = field.render?.component
+    ?? (field.options?.type === "static" && field.options.presentation === "tiles" ? "ChoiceTiles" : undefined)
+    ?? (field.readOnly ? semType?.render?.display : semType?.render?.input)
+    ?? (semType?.kind === "entityId" ? (field.readOnly ? "EntityReferenceDisplay" : "EntityReferenceSelect") : undefined)
+    ?? defaultEntry?.component ?? "Input";
+  const declared = catalog.components[component];
+  if (component.startsWith("Field") && !declared && Object.keys(catalog.components).length) throw new Error(`${field.key}: unknown presentation component ${component}.`);
+  // Currency also carries canonical numeric value context; changing the renderer must not erase it.
+  const shellProp = (key: string) => ["layout", "labelBand", "inputTone", "viewSurface", "spacing", "frontLabelWidth", "viewSizing"].includes(key);
+  const contextProp = (key: string, value: unknown) => key === "currency" && (field.baseType === "number" || field.baseType === "integer") && typeof value === "string";
+  const layer = (props: Record<string, unknown> | undefined, owner: string | undefined) =>
+    declared && owner !== component
+      ? Object.fromEntries(Object.entries(props ?? {}).filter(([key, value]) => declared.props.includes(key) || shellProp(key) || contextProp(key, value)))
+      : props;
+  const props = {
+    ...layer(defaultEntry?.props, defaultEntry?.component),
+    ...layer(semType?.props, field.readOnly ? semType?.render?.display : semType?.render?.input),
+    ...field.render?.props,
+  };
+  if (declared && (component.startsWith("Field") || component === "ChoiceTiles")) {
+    const unsupported = Object.keys(props).filter(key => !declared.props.includes(key) && !shellProp(key) && !contextProp(key, props[key]));
+    if (unsupported.length) throw new Error(`${field.key}: ${component} does not declare presentation props ${unsupported.join(", ")}.`);
   }
+  return { component, ...(Object.keys(props).length ? {props: structuredClone(props)} : {}) };
 
-  return { component: "Input" };
 }

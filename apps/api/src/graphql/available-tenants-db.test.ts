@@ -55,7 +55,8 @@ test("native membership intersects own admitted or invited access, with RLS reta
     let memberships=tenants.filter(t=>t.kind!=='not-native').map(t=>({id:t.org,enabled:t.kind!=='provider-disabled'}));
     const source=()=>({realm:'test',list:async(subject:string)=>{expect(subject).toBe(userId);return memberships;}});
     expect((await readAvailableTenants(context,source)).map(t=>t.name)).toEqual(['invited','own','second']);
-    expect((await readAvailableTenants({...context,session:{...session,verifiedEmail:undefined}},source)).map(t=>t.name)).toEqual(['own','second']);
+    const { verifiedEmail: _email, ...unverifiedSession } = session;
+    expect((await readAvailableTenants({...context,session:unverifiedSession},source)).map(t=>t.name)).toEqual(['own','second']);
     // Discovery does not admit an invitation or write roles.
     expect((await sql<{status:string}>`select status from platform.employee_invitations where tenant_id=${tenants.find(t=>t.kind==='invited')!.id}`.execute(privileged.db)).rows[0]!.status).toBe('pending');
     await withDbSession(restricted.db,session,async tx=>{

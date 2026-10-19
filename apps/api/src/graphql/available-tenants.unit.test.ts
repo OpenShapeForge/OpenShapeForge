@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { readAvailableTenants } from "./available-tenants.js";
 import type { GraphqlContext } from "./context.js";
 const session = { tenantId: crypto.randomUUID(), userId: crypto.randomUUID(), issuer: "https://identity.example/realms/test", credential: "bearer", principalKind: "person", roles: [], groups: [], scope: "self" };
-const context = { session, db: {} } as GraphqlContext;
+const context = { session, db: {} } as unknown as GraphqlContext;
 test("only a verified human bearer may discover their own organisations", async () => {
   for (const mutation of [{ credential: "none" }, { credential: "api-key" }, { credential: "trusted-context" }, { credential: "control-bearer" }, { principalKind: "service" }, { principalKind: undefined }, { userId: null }, { issuer: undefined }]) {
     await expect(readAvailableTenants({ ...context, session: { ...session, ...mutation } } as GraphqlContext,

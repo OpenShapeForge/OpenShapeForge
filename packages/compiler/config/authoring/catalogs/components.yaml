@@ -279,7 +279,11 @@ components:
       - toolbar
       - maxLength
 
-  MoneyInput:
+  FieldPersonName:
+    kind: field
+    description: Person-name presentation bound to separate scalar name fields.
+
+  FieldMoney:
     kind: field
     description: Currency-aware numeric input with formatting.
     props:

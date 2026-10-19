@@ -266,19 +266,19 @@ test("a catalog type's optionSource is the default choice source; authored optio
 
 
 test("canonical presentation merges type defaults with authored props without touching exact value schemas", () => {
-  const registry = {osfTypes: {currency: {baseType: "number" as const, render:{component:"MoneyInput",props:{currency:"EUR",decimalPlaces:2,scale:"units"}}}}};
-  const definitions = [{key:"amount",osfType:"currency",render:{props:{decimalPlaces:0,scale:"millions"}}}];
+  const registry = {osfTypes: {money: {baseType: "number" as const, render:{component:"FieldMoney",props:{currency:"EUR",decimalPlaces:2,scale:"units"}}}}};
+  const definitions = [{key:"amount",osfType:"money",render:{props:{decimalPlaces:0,scale:"millions"}}}];
   const schema = operationFieldObjectSchema(definitions, registry);
-  expect(schema).toMatchObject({properties:{amount:{type:["number","string"],"x-osf-presentation":{component:"MoneyInput",props:{currency:"EUR",decimalPlaces:0,scale:"millions"}}}}});
-  expect(registry.osfTypes.currency.render.props.scale).toBe("units");
+  expect(schema).toMatchObject({properties:{amount:{type:["number","string"],"x-osf-presentation":{component:"FieldMoney",props:{currency:"EUR",decimalPlaces:0,scale:"millions"}}}}});
+  expect(registry.osfTypes.money.render.props.scale).toBe("units");
   expect(definitions[0]!.render.props).toEqual({decimalPlaces:0,scale:"millions"});
   const collection = operationFieldObjectSchema([{...definitions[0]!,cardinality:"collection"}],registry);
-  expect(collection).toMatchObject({properties:{amount:{type:"array","x-osf-presentation":{component:"MoneyInput"},items:{"x-osf-presentation":{component:"MoneyInput"}}}}});
+  expect(collection).toMatchObject({properties:{amount:{type:"array","x-osf-presentation":{component:"FieldMoney"},items:{"x-osf-presentation":{component:"FieldMoney"}}}}});
 });
 
 
 test("raw authoring catalogue render input/display and sibling props project into one presentation", () => {
-  const registry = {osfTypes:{currency:{baseType:"number" as const,render:{input:"MoneyInput",display:"MoneyInput"},props:{currency:"EUR",decimalPlaces:2,scale:"units"}}}};
-  expect(operationFieldObjectSchema([{key:"amount",osfType:"currency",render:{props:{decimalPlaces:0}}}],registry))
-    .toMatchObject({properties:{amount:{"x-osf-presentation":{component:"MoneyInput",props:{currency:"EUR",decimalPlaces:0,scale:"units"}}}}});
+  const registry = {osfTypes:{money:{baseType:"number" as const,render:{input:"FieldMoney",display:"FieldMoney"},props:{currency:"EUR",decimalPlaces:2,scale:"units"}}}};
+  expect(operationFieldObjectSchema([{key:"amount",osfType:"money",render:{props:{decimalPlaces:0}}}],registry))
+    .toMatchObject({properties:{amount:{"x-osf-presentation":{component:"FieldMoney",props:{currency:"EUR",decimalPlaces:0,scale:"units"}}}}});
 });

@@ -112,7 +112,7 @@ fields:
     description:
       en: Maximum outstanding amount allowed for this creditor.
       nl: Maximaal toegestaan openstaand bedrag voor deze crediteur.
-    osfType: currency
+    osfType: money
     persisted:
       column: credit_limit
       storageClass: core
@@ -124,7 +124,7 @@ fields:
     description:
       en: Current outstanding balance — projection populated by the audit/timeline service.
       nl: Huidig openstaand saldo — projectie die door de audit/timeline-service wordt bijgewerkt.
-    osfType: currency
+    osfType: money
     persisted:
       column: current_balance
       storageClass: core

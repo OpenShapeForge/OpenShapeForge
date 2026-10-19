@@ -657,7 +657,7 @@
         "input": "Input"
       }
     },
-    "currency": {
+    "money": {
       "label": {
         "en": "Currency amount",
         "nl": "Geldbedrag"
@@ -665,8 +665,8 @@
       "baseType": "number",
       "icon": "Banknote",
       "render": {
-        "display": "MoneyInput",
-        "input": "MoneyInput"
+        "display": "FieldMoney",
+        "input": "FieldMoney"
       },
       "props": {
         "currency": "EUR",
@@ -3144,7 +3144,7 @@
             "en": "Amount per unit (excluding VAT).",
             "nl": "Bedrag per eenheid (excl. BTW)."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "unit_amount",
             "storageClass": "core"
@@ -3161,7 +3161,7 @@
             "en": "Net amount excluding VAT for this component line.",
             "nl": "Nettobedrag excl. BTW voor deze componentregel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_base",
             "storageClass": "core"
@@ -3178,7 +3178,7 @@
             "en": "VAT amount for this component line.",
             "nl": "BTW-bedrag voor deze componentregel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_vat",
             "storageClass": "core"
@@ -3195,7 +3195,7 @@
             "en": "Total amount including VAT for this component line.",
             "nl": "Totaalbedrag incl. BTW voor deze componentregel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_total",
             "storageClass": "core"
@@ -3413,7 +3413,7 @@
             "en": "Effective unit price reflected in the projection row.",
             "nl": "Effectieve eenheidsprijs die in de projectierij is vastgelegd."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "unit_price",
             "storageClass": "core"
@@ -3430,7 +3430,7 @@
             "en": "Cumulative net amount excluding VAT.",
             "nl": "Cumulatief nettobedrag exclusief BTW."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_base",
             "storageClass": "core"
@@ -3447,7 +3447,7 @@
             "en": "Cumulative VAT amount.",
             "nl": "Cumulatief BTW-bedrag."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_vat",
             "storageClass": "core"
@@ -3464,7 +3464,7 @@
             "en": "Cumulative total amount including VAT.",
             "nl": "Cumulatief totaalbedrag inclusief BTW."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_total",
             "storageClass": "core"
@@ -4106,7 +4106,7 @@
             "en": "The value a percentage is computed against, captured once at creation. Null when the milestone uses a plain fixed amount instead of a percentage.",
             "nl": "De waarde waartegen een percentage wordt berekend, eenmalig vastgelegd bij aanmaak. Leeg wanneer de mijlpaal een vast bedrag gebruikt in plaats van een percentage."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "basis_amount",
             "storageClass": "core"
@@ -4154,7 +4154,7 @@
             "en": "The actual amount to invoice for this milestone. When percentOfBasis is set, computed once at creation as basisAmount * percentOfBasis / 100 and frozen thereafter; otherwise supplied directly as a fixed figure at creation.",
             "nl": "Het daadwerkelijk te factureren bedrag voor deze mijlpaal. Wanneer percentOfBasis is ingevuld, eenmalig bij aanmaak berekend als basisbedrag * percentage / 100 en daarna bevroren; anders rechtstreeks als vast bedrag opgegeven bij aanmaak."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -7318,7 +7318,7 @@
             "en": "Opening balance of the account at the start of the statement period.",
             "nl": "Beginsaldo van de rekening aan het begin van de afschriftperiode."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "opening_balance",
             "storageClass": "core"
@@ -7335,7 +7335,7 @@
             "en": "Closing balance of the account at the end of the statement period.",
             "nl": "Eindsaldo van de rekening aan het einde van de afschriftperiode."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "closing_balance",
             "storageClass": "core"
@@ -7471,7 +7471,7 @@
             "en": "Amount of the movement (always positive; sign is determined by direction).",
             "nl": "Bedrag van de mutatie (altijd positief; teken volgt uit richting)."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -7940,7 +7940,7 @@
             "en": "Sum of invoice totals produced by this run.",
             "nl": "Som van factuurtotalen die deze run heeft opgeleverd."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "total_amount",
             "storageClass": "core"
@@ -8286,7 +8286,7 @@
             "en": "Total amount of the invoice produced for this item (or 0 when skipped/failed).",
             "nl": "Totaalbedrag van de factuur die voor dit item is geproduceerd (of 0 bij overgeslagen/mislukt)."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_total",
             "storageClass": "core"
@@ -9151,7 +9151,7 @@
             "en": "Budgeted amount for this line.",
             "nl": "Begroot bedrag voor deze regel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -14647,7 +14647,7 @@
             "en": "Maximum outstanding amount allowed for this creditor.",
             "nl": "Maximaal toegestaan openstaand bedrag voor deze crediteur."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "credit_limit",
             "storageClass": "core"
@@ -14664,7 +14664,7 @@
             "en": "Current outstanding balance — projection populated by the audit/timeline service.",
             "nl": "Huidig openstaand saldo — projectie die door de audit/timeline-service wordt bijgewerkt."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "current_balance",
             "storageClass": "core"
@@ -14971,7 +14971,7 @@
             "en": "Maximum outstanding amount allowed for this debtor.",
             "nl": "Maximaal toegestaan openstaand bedrag voor deze debiteur."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "credit_limit",
             "storageClass": "core"
@@ -14988,7 +14988,7 @@
             "en": "Current outstanding balance — projection populated by the audit/timeline service.",
             "nl": "Huidig openstaand saldo — projectie die door de audit/timeline-service wordt bijgewerkt."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "current_balance",
             "storageClass": "core"
@@ -15493,7 +15493,7 @@
             "en": "Amount to collect under this direct debit order.",
             "nl": "Te incasseren bedrag voor deze incasso-opdracht."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -18785,7 +18785,7 @@
             "en": "Total amount allocated to the budget.",
             "nl": "Totaalbedrag dat is toegewezen aan het budget."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -19284,7 +19284,7 @@
             "en": "Optional principal amount associated with the encumbrance.",
             "nl": "Optioneel hoofdbedrag dat aan de zekerheid is verbonden."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -20536,7 +20536,7 @@
             "en": "Sum of line base amounts, excluding VAT.",
             "nl": "Som van de basisbedragen van de regels, exclusief BTW."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_base",
             "storageClass": "core"
@@ -20553,7 +20553,7 @@
             "en": "Sum of VAT amounts on the invoice.",
             "nl": "Som van de BTW-bedragen op de factuur."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_vat",
             "storageClass": "core"
@@ -20570,7 +20570,7 @@
             "en": "Total invoice amount including VAT.",
             "nl": "Totaalbedrag van de factuur inclusief BTW."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_total",
             "storageClass": "core"
@@ -20587,7 +20587,7 @@
             "en": "Outstanding balance on this invoice (total minus payments applied).",
             "nl": "Openstaand saldo op deze factuur (totaal minus betalingen)."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "balance",
             "storageClass": "core"
@@ -21006,7 +21006,7 @@
             "en": "Amount allocated to this payer under this collection item.",
             "nl": "Bedrag dat onder deze incasso-regel aan deze betaler is toegewezen."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -21229,7 +21229,7 @@
             "en": "Price per unit, excluding VAT.",
             "nl": "Prijs per eenheid, exclusief BTW."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "unit_price",
             "storageClass": "core"
@@ -21246,7 +21246,7 @@
             "en": "Net amount excluding VAT for this line.",
             "nl": "Nettobedrag excl. BTW voor deze regel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_base",
             "storageClass": "core"
@@ -21263,7 +21263,7 @@
             "en": "VAT amount for this line.",
             "nl": "BTW-bedrag voor deze regel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_vat",
             "storageClass": "core"
@@ -21280,7 +21280,7 @@
             "en": "Total amount including VAT for this line.",
             "nl": "Totaalbedrag incl. BTW voor deze regel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_total",
             "storageClass": "core"
@@ -21485,7 +21485,7 @@
             "en": "Amount of the payment applied to the invoice.",
             "nl": "Bedrag van de betaling dat op de factuur is verwerkt."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -21826,7 +21826,7 @@
             "en": "Sum of net (excl. VAT) amounts for invoice lines at this VAT rate.",
             "nl": "Som van de nettobedragen (excl. BTW) van de factuurregels op dit BTW-tarief."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_base",
             "storageClass": "core"
@@ -21843,7 +21843,7 @@
             "en": "Sum of VAT amounts for invoice lines at this VAT rate.",
             "nl": "Som van de BTW-bedragen van de factuurregels op dit BTW-tarief."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_vat",
             "storageClass": "core"
@@ -22951,7 +22951,7 @@
             "en": "Monetary amount of the line.",
             "nl": "Geldbedrag van de regel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -23540,7 +23540,7 @@
             "en": "Estimated total amount for the order.",
             "nl": "Geraamd totaalbedrag voor de order."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "estimated_amount",
             "storageClass": "core"
@@ -23557,7 +23557,7 @@
             "en": "Actual total amount realized for the order.",
             "nl": "Werkelijk gerealiseerd totaalbedrag voor de order."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "actual_amount",
             "storageClass": "core"
@@ -23875,7 +23875,7 @@
             "en": "Hourly rate charged by this party.",
             "nl": "Uurtarief dat door deze partij wordt gehanteerd."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "hourly_rate",
             "storageClass": "core"
@@ -24271,7 +24271,7 @@
             "en": "Settled amount.",
             "nl": "Verrekend bedrag."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -24434,7 +24434,7 @@
             "en": "Spent amount.",
             "nl": "Besteed bedrag."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -24662,7 +24662,7 @@
             "en": "Price per unit for this task.",
             "nl": "Prijs per eenheid voor deze taak."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "unit_price",
             "storageClass": "core"
@@ -24679,7 +24679,7 @@
             "en": "Total amount for this task.",
             "nl": "Totaalbedrag voor deze taak."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -24828,7 +24828,7 @@
             "en": "Price per unit for this calculation line.",
             "nl": "Prijs per eenheid voor deze calculatieregel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "unit_price",
             "storageClass": "core"
@@ -24845,7 +24845,7 @@
             "en": "Total amount for this calculation line.",
             "nl": "Totaalbedrag voor deze calculatieregel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -27467,7 +27467,7 @@
             "en": "Sum of all instructions in this payment order.",
             "nl": "Som van alle instructies in deze betaalopdracht."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "total_amount",
             "storageClass": "core"
@@ -27675,7 +27675,7 @@
             "en": "Total amount covered by the payment plan.",
             "nl": "Totaalbedrag waarvoor de betalingsregeling is afgesloten."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "total_amount",
             "storageClass": "core"
@@ -27844,7 +27844,7 @@
             "en": "Amount due for this instalment.",
             "nl": "Verschuldigd bedrag voor deze termijn."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -27977,7 +27977,7 @@
             "en": "Sum of debit movements in the period for this account/dimensions tuple.",
             "nl": "Som van debetmutaties in de periode voor deze rekening/dimensiecombinatie."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "debit_total",
             "storageClass": "core"
@@ -27994,7 +27994,7 @@
             "en": "Sum of credit movements in the period for this account/dimensions tuple.",
             "nl": "Som van creditmutaties in de periode voor deze rekening/dimensiecombinatie."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "credit_total",
             "storageClass": "core"
@@ -28011,7 +28011,7 @@
             "en": "Closing balance for the period for this account/dimensions tuple.",
             "nl": "Eindsaldo van de periode voor deze rekening/dimensiecombinatie."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "closing_balance",
             "storageClass": "core"
@@ -28323,7 +28323,7 @@
             "en": "Lower bound of the salary range for the position.",
             "nl": "Ondergrens van de salarisrange voor de functie."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "salary_range_min",
             "storageClass": "core"
@@ -28340,7 +28340,7 @@
             "en": "Upper bound of the salary range for the position.",
             "nl": "Bovengrens van de salarisrange voor de functie."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "salary_range_max",
             "storageClass": "core"
@@ -29931,7 +29931,7 @@
             "en": "Total budgeted amount for the project.",
             "nl": "Totaal begroot bedrag voor het project."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "budget_total",
             "storageClass": "core"
@@ -30189,7 +30189,7 @@
             "en": "Budgeted amount for this line.",
             "nl": "Begroot bedrag voor deze regel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -30570,7 +30570,7 @@
             "en": "Total amount of the project order.",
             "nl": "Totaalbedrag van de projectopdracht."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -31217,7 +31217,7 @@
             "en": "Hourly rate for this role assignment, when timesheets feed billing.",
             "nl": "Uurtarief voor deze roltoewijzing, wanneer urenstaten doorlopen naar facturering."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "hourly_rate",
             "storageClass": "core"
@@ -31368,7 +31368,7 @@
             "en": "Actual amount spent on this line.",
             "nl": "Werkelijk besteed bedrag voor deze regel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -31867,7 +31867,7 @@
             "en": "Sum of line base amounts, excluding VAT.",
             "nl": "Som van de basisbedragen van de regels, exclusief BTW."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_base",
             "storageClass": "core"
@@ -31884,7 +31884,7 @@
             "en": "Sum of VAT amounts on the purchase order.",
             "nl": "Som van de BTW-bedragen op de inkoopopdracht."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_vat",
             "storageClass": "core"
@@ -31901,7 +31901,7 @@
             "en": "Total purchase order amount including VAT.",
             "nl": "Totaalbedrag van de inkoopopdracht inclusief BTW."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_total",
             "storageClass": "core"
@@ -32139,7 +32139,7 @@
             "en": "Price per unit, excluding VAT.",
             "nl": "Prijs per eenheid, exclusief BTW."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "unit_price",
             "storageClass": "core"
@@ -32156,7 +32156,7 @@
             "en": "Net amount excluding VAT for this line.",
             "nl": "Nettobedrag excl. BTW voor deze regel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_base",
             "storageClass": "core"
@@ -32173,7 +32173,7 @@
             "en": "VAT amount for this line.",
             "nl": "BTW-bedrag voor deze regel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_vat",
             "storageClass": "core"
@@ -32190,7 +32190,7 @@
             "en": "Total amount including VAT for this line.",
             "nl": "Totaalbedrag incl. BTW voor deze regel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_total",
             "storageClass": "core"
@@ -33009,7 +33009,7 @@
             "en": "Sum of line base amounts, excluding VAT.",
             "nl": "Som van de basisbedragen van de regels, exclusief BTW."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_base",
             "storageClass": "core"
@@ -33026,7 +33026,7 @@
             "en": "Sum of VAT amounts on the quote.",
             "nl": "Som van de BTW-bedragen op de offerte."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_vat",
             "storageClass": "core"
@@ -33043,7 +33043,7 @@
             "en": "Total quote amount including VAT.",
             "nl": "Totaalbedrag van de offerte inclusief BTW."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_total",
             "storageClass": "core"
@@ -33287,7 +33287,7 @@
             "en": "Price per unit, excluding VAT.",
             "nl": "Prijs per eenheid, exclusief BTW."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "unit_price",
             "storageClass": "core"
@@ -33304,7 +33304,7 @@
             "en": "Net amount excluding VAT for this line.",
             "nl": "Nettobedrag excl. BTW voor deze regel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_base",
             "storageClass": "core"
@@ -33321,7 +33321,7 @@
             "en": "VAT amount for this line.",
             "nl": "BTW-bedrag voor deze regel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_vat",
             "storageClass": "core"
@@ -33338,7 +33338,7 @@
             "en": "Total amount including VAT for this line.",
             "nl": "Totaalbedrag incl. BTW voor deze regel."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount_total",
             "storageClass": "core"
@@ -36540,7 +36540,7 @@
             "en": "Standard price amount.",
             "nl": "Standaardprijsbedrag."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -40806,7 +40806,7 @@
             "en": "Valuation amount.",
             "nl": "Waarderingsbedrag."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "amount",
             "storageClass": "core"
@@ -41292,7 +41292,7 @@
             "en": "Amount due to the tax authority for the period.",
             "nl": "Aan de Belastingdienst verschuldigd bedrag voor de periode."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "payable_amount",
             "storageClass": "core"
@@ -41309,7 +41309,7 @@
             "en": "Amount to be received from the tax authority for the period.",
             "nl": "Van de Belastingdienst te ontvangen bedrag voor de periode."
           },
-          "osfType": "currency",
+          "osfType": "money",
           "persisted": {
             "column": "receivable_amount",
             "storageClass": "core"

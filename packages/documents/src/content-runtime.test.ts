@@ -257,9 +257,9 @@ describe("template materialization runtime adapter", () => {
 });
 
  test("parameter projection preserves the semantic axis and variable mode for scalars and collections",()=>{
-   const scalar=parameterShape({type:"number","x-osf-type":"currency","x-osf-variables":"whole"},true);
-   expect(scalar).toMatchObject({osfType:"currency",baseType:"number",variables:"whole",required:true});
-   expect(parameterShape({type:["number","string"],"x-osf-type":"currency","x-osf-value-context":{currency:"EUR",unit:"EUR"}},true)).toMatchObject({baseType:"number",currency:"EUR",unit:"EUR"});
-   expect(contentFieldProjection({osfType:"currency",baseType:"number",unit:"EUR",render:{props:{currency:"EUR"}}})).toMatchObject({currency:"EUR",unit:"EUR"});
+   const scalar=parameterShape({type:"number","x-osf-type":"money","x-osf-variables":"whole"},true);
+   expect(scalar).toMatchObject({osfType:"money",baseType:"number",variables:"whole",required:true});
+   expect(parameterShape({type:["number","string"],"x-osf-type":"money","x-osf-value-context":{currency:"EUR",unit:"EUR"}},true)).toMatchObject({baseType:"number",currency:"EUR",unit:"EUR"});
+   expect(contentFieldProjection({osfType:"money",baseType:"number",unit:"EUR",render:{props:{currency:"EUR"}}})).toMatchObject({currency:"EUR",unit:"EUR"});
    expect(parameterShape({type:"array",items:{type:"string","x-osf-type":"Relation","x-osf-reference":{entity:"Relation"}},"x-osf-type":"Relation","x-osf-variables":"whole"},false)).toMatchObject({osfType:"Relation",variables:"whole",relationship:{target:"Relation"},cardinality:{min:0,max:"unbounded"}});
  });

@@ -64,7 +64,7 @@ fields:
     description:
       en: Price per unit for this calculation line.
       nl: Prijs per eenheid voor deze calculatieregel.
-    osfType: currency
+    osfType: money
     persisted:
       column: unit_price
       storageClass: core
@@ -76,7 +76,7 @@ fields:
     description:
       en: Total amount for this calculation line.
       nl: Totaalbedrag voor deze calculatieregel.
-    osfType: currency
+    osfType: money
     persisted:
       column: amount
       storageClass: core

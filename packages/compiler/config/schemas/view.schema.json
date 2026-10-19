@@ -215,6 +215,7 @@
         "title": { "type": "object" },
         "label": { "type": "object" },
         "render": { "type": "string" },
+        "bindings": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "string", "minLength": 1 } },
         "relationship": {
           "oneOf": [
             { "type": "string" },
@@ -259,6 +260,7 @@
         "title": { "type": "object" },
         "label": { "type": "object" },
         "render": { "type": "string" },
+        "bindings": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "string", "minLength": 1 } },
         "relationship": {
           "oneOf": [
             { "type": "string" },

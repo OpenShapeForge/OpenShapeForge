@@ -73,7 +73,7 @@ const COMPONENT_ALIASES: Record<string, string> = {
   Textarea: "InputMultiline",
   TextInput: "Input",
   Toggle: "Switch",
-  MoneyInput: "NumberInput",
+  FieldMoney: "NumberInput",
 };
 
 function getOsfTypeKey(field: RendererAwareField) {

@@ -426,6 +426,7 @@ export interface CompiledViewGroup {
   icon?: string;
   visibleWhen?: VisibilityConfig;
   render?: CompiledViewRender;
+  bindings?: Record<string, string>;
   fields?: (string | CompiledFieldEntry)[];
   relationships?: CompiledRelationshipUsage[];
   relationship?: CompiledRelationshipUsage;

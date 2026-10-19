@@ -185,13 +185,13 @@ types:
       display: TextDisplay
       input: Input
 
-  currency:
+  money:
     label: { en: Currency amount, nl: Geldbedrag }
     baseType: number
     icon: Banknote
     render:
-      display: MoneyInput
-      input: MoneyInput
+      display: FieldMoney
+      input: FieldMoney
     props:
       currency: EUR
 

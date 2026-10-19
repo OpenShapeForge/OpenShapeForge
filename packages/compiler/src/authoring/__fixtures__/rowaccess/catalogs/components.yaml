@@ -267,7 +267,7 @@ components:
       - toolbar
       - maxLength
 
-  MoneyInput:
+  FieldMoney:
     kind: field
     description: Currency-aware numeric input with formatting.
     props:

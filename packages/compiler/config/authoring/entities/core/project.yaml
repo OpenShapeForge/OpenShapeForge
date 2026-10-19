@@ -123,7 +123,7 @@ fields:
     description:
       en: Total budgeted amount for the project.
       nl: Totaal begroot bedrag voor het project.
-    osfType: currency
+    osfType: money
     persisted:
       column: budget_total
       storageClass: core

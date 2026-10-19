@@ -31,8 +31,8 @@ the named properties. That temporary object is never a persisted field.
 This first binding contract supports the name-parts presentation only. Every
 source must be a readable scalar string in the same field-only group, and each
 source may be bound once. The compiler rejects bindings that do not map every group field exactly once.
-The consuming renderer suppresses a control with hidden runtime sources and
-makes it read-only if any source cannot be written. The legacy reference host
+A consuming host must suppress a control with hidden runtime sources and
+make it read-only if any source cannot be written. The legacy reference host
 uses the original scalar inputs, without emitting an unsupported custom renderer. Canonical Operations
 remain responsible for authorization and input validation.
 

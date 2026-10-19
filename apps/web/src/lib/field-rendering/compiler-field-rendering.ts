@@ -66,9 +66,8 @@ export type ResolvedFieldRender = {
 };
 
 const COMPONENT_ALIASES: Record<string, string> = {
-  // Compatibility-only names accepted from older YAML, seeds, and external
-  // integrations. Source-authored renderer fields should use the canonical
-  // component names on the right-hand side.
+  // Map catalogue-native field names to this host's supported scalar controls.
+  // Rich Battery hosts can render the native components directly.
   TextArea: "InputMultiline",
   Textarea: "InputMultiline",
   TextInput: "Input",
@@ -204,7 +203,7 @@ export function resolveFieldDisplayRender(field: RendererAwareField): ResolvedFi
     fieldTypeDefault.readOnly === true;
   const fieldTypeRender = buildResolvedRender(
     isReadOnlyFieldType ? fieldTypeDefault.component : "TextDisplay",
-    getDefaultFieldTypeRender(field)?.props,
+    isReadOnlyFieldType ? fieldTypeDefault.props : undefined,
     "fieldType",
   );
   if (fieldTypeRender) {

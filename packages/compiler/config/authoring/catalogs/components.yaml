@@ -27,7 +27,7 @@ defaults:
       nl: Ja/nee
       en: Yes/no
     component: Switch
-    props: { layout: above, trueLabel: { en: Yes, nl: Ja }, falseLabel: { en: No, nl: Nee } }
+    props: { layout: above, trueLabel: { en: Yes, nl: Ja }, falseLabel: { en: No, nl: Nee }, nullLabel: { en: Not set, nl: Onbekend } }
   object:
     label:
       nl: JSON-object
@@ -290,7 +290,7 @@ components:
   FieldPersonName:
     kind: field
     description: Person-name presentation bound to separate scalar name fields.
-    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, emptyText, saveLabel, cancelLabel, allowSingleName, labels, layout]
+    props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, emptyText, saveLabel, cancelLabel, allowSingleName, labels]
 
   FieldMoney:
     kind: field
@@ -578,3 +578,8 @@ components:
     kind: field
     description: Battery FieldSignature field.
     props: [layout, labelBand, inputTone, viewSurface, spacing, frontLabelWidth, viewSizing, emptyText, saveLabel, cancelLabel, signerLayout, downloadLabel, signedByLabel, evidenceLabel, immutableLabel, signerLabel, requestLabel, clearLabel, pendingLabel, signedLabel, expiredLabel, declinedLabel, uploadTitle, uploadDescription, uploadHint, chooseLabel, retryLabel]
+
+  ChoiceTiles:
+    kind: field
+    description: Static authored choices presented as tiles.
+    props: [layout]

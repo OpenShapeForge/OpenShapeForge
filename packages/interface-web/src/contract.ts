@@ -148,8 +148,8 @@ export type WebFieldProjection = {
   authoring?: {profile?:string;pinned?:boolean;locked?:boolean;lockedKeys?:string[];singleton?:boolean;visibleProperties?:string[]};
   /** Canonical protection metadata; the server remains the enforcement boundary. */
   fieldPolicy?: FieldValuePolicy;
-  /** Configured Web presentation, composed from catalogue/type/field authoring. */
   /**
+   * Configured Web presentation, composed from catalogue/type/field authoring.
    * Renderer hint, e.g. `ChoiceTiles` for static options authored with `presentation: tiles`.
    * A host without that renderer uses its default input for the field.
    */

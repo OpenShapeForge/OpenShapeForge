@@ -42,7 +42,7 @@ export function contentFieldProjection(field: Readonly<Record<string, unknown>>)
     baseType: baseType as ContentField["baseType"],
     ...(typeof field.osfType === "string" ? { osfType: field.osfType } : {}),
     ...(typeof field.unit === "string" ? { unit: field.unit } : {}),
-    ...(field.osfType === "currency" && isObject(field.render) && isObject(field.render.props) && typeof field.render.props.currency === "string" ? { currency: field.render.props.currency } : {}),
+    ...((baseType === "number" || baseType === "integer") && isObject(field.render) && isObject(field.render.props) && typeof field.render.props.currency === "string" ? { currency: field.render.props.currency } : {}),
     ...(isFieldVariableMode(field.variables) && field.variables !== "none" ? { variables: field.variables } : {}),
     required: field.required === true,
     cardinality: (field.cardinalityBounds ?? field.cardinality ?? "single") as NonNullable<ContentField["cardinality"]>,

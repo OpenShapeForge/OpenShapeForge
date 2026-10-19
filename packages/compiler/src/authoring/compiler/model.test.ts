@@ -170,3 +170,12 @@ test('an explicit renderer wins over a tile choice hint and native props are dec
   const {render: _explicit, ...implicit} = field;
   expect(resolveRender(implicit,checked).component).toBe('ChoiceTiles');
 });
+
+test('renderer changes drop irrelevant inherited options but retain monetary context',()=>{
+ const checked={...catalog,defaults:{datetime:{component:'FieldDateAndTime',props:{layout:'above',showTimezoneSelector:true}},number:{component:'FieldIntegerDecimal'}},components:{FieldDateAndTime:{kind:'field',description:'Date',props:['layout','showTimezoneSelector']},FieldDuration:{kind:'field',description:'Duration',props:['layout']},FieldIntegerDecimal:{kind:'field',description:'Number',props:['layout']}}} as ComponentCatalog;
+ const temporal={key:'time',baseType:'datetime',osfType:'datetime',render:{component:'FieldDuration'}} as Field;
+ expect(resolveRender(temporal,checked)).toEqual({component:'FieldDuration',props:{layout:'above'}});
+ expect(()=>resolveRender({...temporal,render:{component:'FieldTypo'}},checked)).toThrow(/unknown presentation/);
+ const amount={key:'amount',baseType:'number',osfType:'currency',render:{component:'FieldIntegerDecimal'}} as Field;
+ expect(resolveRender(amount,checked,{baseType:'number',label:{en:'Amount'},render:{input:'FieldMoney',display:'FieldMoney'},props:{currency:'EUR'}})).toMatchObject({props:{currency:'EUR'}});
+});

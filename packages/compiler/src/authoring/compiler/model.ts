@@ -145,39 +145,27 @@ export function resolveRender(
   catalog: ComponentCatalog,
   semType?: OsfTypeDefinition
 ): CompiledRender {
-  // 1. Explicit field render override
-  if (field.render) {
-    const componentName = field.render.component;
-    return {
-      component: componentName,
-      ...(field.render.props && Object.keys(field.render.props).length > 0
-        ? { props: field.render.props }
-        : {}),
-    };
-  }
-
-  // 2. Semantic type render
-  if (semType?.render) {
-    const componentName = field.readOnly ? semType.render.display : semType.render.input;
-    return {
-      component: componentName,
-      ...(semType.props ? { props: semType.props } : {}),
-    };
-  }
+  const defaultKey = fieldCardinality(field) === "collection" ? "collection" : field.baseType;
+  const defaultEntry = catalog.defaults[defaultKey] ?? catalog.defaults[field.baseType];
+  const props = { ...defaultEntry?.props, ...semType?.props, ...field.render?.props };
+  const presentation = Object.keys(props).length ? { props: structuredClone(props) } : {};
+  // YAML defaults < semantic-type options < explicitly authored field options.
+  if (field.render) return { component: field.render.component, ...presentation };
+  if (semType?.render) return { component: field.readOnly ? semType.render.display : semType.render.input, ...presentation };
 
   if (semType?.kind === "entityId") {
     return {
       component: field.readOnly ? "EntityReferenceDisplay" : "EntityReferenceSelect",
+      ...presentation,
     };
   }
 
   // 3. Default for field value shape
-  const defaultKey = fieldCardinality(field) === "collection" ? "collection" : field.baseType;
-  const defaultEntry = catalog.defaults[defaultKey] ?? catalog.defaults[field.baseType];
   if (defaultEntry) {
     const componentName = defaultEntry.component;
     return {
       component: componentName,
+      ...presentation,
     };
   }
 

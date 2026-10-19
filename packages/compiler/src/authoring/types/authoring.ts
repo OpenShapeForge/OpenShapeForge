@@ -73,7 +73,7 @@ export interface ComponentCatalog {
   kind: "componentCatalog";
   defaults: Record<
     string,
-    { label?: LocalizedText; component: string; readOnly?: boolean }
+    { label?: LocalizedText; component: string; readOnly?: boolean; props?: Record<string, unknown> }
   >;
   viewDefaults: Record<string, { component: string }>;
   components: Record<string, ComponentDefinition>;

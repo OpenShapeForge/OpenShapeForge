@@ -5,7 +5,7 @@ import type {
   Field,
   OsfTypeDefinition,
 } from "../types.js";
-import { resolveModelFields } from "./model.js";
+import { resolveModelFields, resolveRender } from "./model.js";
 
 const catalog: ComponentCatalog = {
   schemaVersion: 1,
@@ -148,4 +148,15 @@ test("model compilation retains the canonical field authoring profile",()=>{
  const fields=resolveModelFields([{key:"parameters",osfType:"string",authoring}],catalog,{});
  expect(fields[0]!.authoring).toEqual(authoring);
  expect(fields[0]!.authoring).not.toBe(authoring);
+});
+
+test("YAML presentation defaults compose with semantic and field options without losing false",()=>{
+ const configured={...catalog,defaults:{string:{component:"Input",props:{layout:"above",emailAction:true}}}};
+ const semantic={label:{en:"E-mail"},baseType:"string",render:{display:"TextDisplay",input:"Input"},props:{layout:"front",emailAction:false}} as OsfTypeDefinition;
+ const field={key:"email",osfType:"email",baseType:"string",render:{component:"FieldEmail",props:{layout:"none"}}} as Field;
+ const projected=resolveRender(field,configured,semantic);
+ expect(projected).toEqual({component:"FieldEmail",props:{layout:"none",emailAction:false}});
+ const {render:_,...withoutRender}=field;
+ expect(resolveRender(withoutRender,configured,semantic).props).toEqual({layout:"front",emailAction:false});
+ expect(configured.defaults.string.props.layout).toBe("above");
 });

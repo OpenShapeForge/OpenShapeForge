@@ -229,7 +229,7 @@ function compileGroup(
     icon: group.icon,
     visibleWhen: group.visibleWhen,
     ...(group.showInReadNavigation !== undefined ? { showInReadNavigation: group.showInReadNavigation } : {}),
-    render: group.render ? vr(catalog, group.render) : undefined,
+    render: group.render ? typeof group.render === "string" ? vr(catalog, group.render) : { ...vr(catalog, group.render.component), ...(group.render.props ? { props: structuredClone(group.render.props) } : {}) } : undefined,
     ...(group.bindings ? { bindings: { ...group.bindings } } : {}),
     fields: group.fields ? compileFields(group.fields, catalog) : undefined,
     relationships: group.relationships?.map((relationship) => compileRelationshipUsage(relationship, catalog)!),

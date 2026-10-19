@@ -175,7 +175,7 @@ describe("web manifest projection", () => {
     expect(contract.model.fields.some(field=>field.key==="person-name")).toBe(false);
     const group=projected.views.record!.formGroups!.create!.find(group=>group.id==="person-name")!;
     expect(group.fields).toEqual(keys);
-    expect(group.control).toEqual({component:"FieldPersonName",bindings:{givenName:"firstName",prefix:"namePrefix",familyName:"lastName"}});
+    expect(group.control).toEqual({component:"FieldPersonName",props:{layout:"none",allowSingleName:false},bindings:{givenName:"firstName",prefix:"namePrefix",familyName:"lastName"}});
     const nameGroup=contract.views.core!.form!.variants.create!.groups.find(group=>group.id==="person-name")!;
     nameGroup.bindings={givenName:"firstName",singleName:"namePrefix",familyName:"lastName"};
     expect(()=>buildWebManifest([{slug:"natural-person",contract}])).toThrow(/requires valid FieldPersonName bindings/);

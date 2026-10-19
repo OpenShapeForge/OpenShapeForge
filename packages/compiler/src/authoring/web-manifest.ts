@@ -285,7 +285,7 @@ function fieldOverrides(
 /** A group's icon and its visibility condition travel to the renderer unchanged. */
 function groupPresentation(group: CompiledViewGroup): Pick<WebFieldGroup, "icon" | "visibleWhen" | "control"> {
   return {
-    ...(group.bindings && group.render ? { control: { component: group.render.component, bindings: { ...group.bindings } } } : {}),
+    ...(group.bindings && group.render ? { control: { component: group.render.component, ...(group.render.props ? { props: structuredClone(group.render.props) } : {}), bindings: { ...group.bindings } } } : {}),
     ...(group.icon ? { icon: group.icon } : {}),
     ...(group.visibleWhen ? { visibleWhen: structuredClone(group.visibleWhen) } : {}),
   };

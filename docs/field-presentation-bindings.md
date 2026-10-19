@@ -14,7 +14,11 @@ Its Web view binds those properties to one Battery control:
 ```yaml
 - id: person-name
   title: { en: Name, nl: Naam }
-  render: FieldPersonName
+  render:
+    component: FieldPersonName
+    props:
+      layout: none
+      allowSingleName: false
   bindings: { givenName: firstName, prefix: namePrefix, familyName: lastName }
   fields: [firstName, namePrefix, lastName]
 ```
@@ -33,3 +37,5 @@ remain responsible for authorization and input validation.
 Battery's `allowSingleName={false}` is used for these bindings. The ordinary
 component still supports single names for models that own that value contract.
 This does not redesign the separate synthetic 48-field persistence fixture.
+
+Group render accepts a component name or `{ component, props }`, as field render does. The compiler preserves these props through group overrides and the web projection; hosts must preserve them in authoring previews. Layout and component options belong to authoring. Runtime permissions and interaction state remain renderer responsibilities.

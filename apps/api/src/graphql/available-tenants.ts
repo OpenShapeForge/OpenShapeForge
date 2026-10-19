@@ -19,14 +19,14 @@ import type { GraphqlContext } from "./context.js";
 export type AvailableTenant = { id: string; slug: string; name: string };
 export const availableTenantTypeDefs = `type AvailableTenant { id: ID! slug: String! name: String! }`;
 export const availableTenantQueryFields = `availableTenants: [AvailableTenant!]!`;
-let provider: { realm: string; list(subject: string): Promise<readonly { id: string; enabled: boolean }[]> } | undefined;
+let provider: { realm: string; issuer: string; list(subject: string): Promise<readonly { id: string; enabled: boolean }[]> } | undefined;
 const reads = new WeakMap<GraphqlContext, Promise<AvailableTenant[]>>();
 function membershipProvider() {
   if (provider) return provider;
   const config = readControlPlaneConfig();
   if (!config.ok) throw new Error("Organization discovery is unavailable.");
   const client = createKeycloakOrganizationMembersClient(config.config.keycloak);
-  provider = { realm: config.config.keycloak.tenantRealm, list: subject => client.listMemberOrganizations!(subject) };
+  provider = { realm: config.config.keycloak.tenantRealm, issuer: `${config.config.keycloak.baseUrl}/realms/${encodeURIComponent(config.config.keycloak.tenantRealm)}`, list: subject => client.listMemberOrganizations!(subject) };
   return provider;
 }
 
@@ -40,7 +40,7 @@ export async function readAvailableTenants(context: GraphqlContext,
   if (!context.db) throw new GraphQLError("Organization discovery is unavailable.", { extensions: { code: "DATABASE_NOT_CONFIGURED", status: 503 } });
   try {
     const source = memberships();
-    if (realmFromIssuer(session.issuer) !== source.realm) throw new Error("Issuer realm mismatch.");
+    if (session.issuer !== source.issuer || realmFromIssuer(session.issuer) !== source.realm) throw new Error("Issuer realm mismatch.");
     const organizations = await source.list(session.userId);
     if (organizations.length > 100) throw new Error("Organization discovery exceeds its bound.");
     const result: AvailableTenant[] = [];

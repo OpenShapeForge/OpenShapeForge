@@ -124,7 +124,7 @@ Binary artifact routes are outside this JSON projection and retain their ordinar
 `Query.availableTenants` is an authenticated account-self projection for a human
 bearer session. It reads the verified subject's current enabled native
 organization memberships with the configured tenant-realm administration
-client, then intersects them with active provisioned tenants and that person's
+client only when its full configured issuer matches the verified session issuer, then intersects them with active provisioned tenants and that person's
 admitted, unblocked membership. An unclaimed pending invitation is also eligible
 when it matches the bearer's verified email; discovery does not claim it or
 create a Relation. Only tenant id, slug and display name are returned. No

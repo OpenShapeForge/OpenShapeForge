@@ -9,41 +9,49 @@ defaults:
       nl: Tekst
       en: Text
     component: Input
+    props: { layout: above }
   integer:
     label:
       nl: Geheel getal
       en: Integer
     component: NumberInput
+    props: { layout: above }
   number:
     label:
       nl: Getal
       en: Number
     component: NumberInput
+    props: { layout: above }
   boolean:
     label:
       nl: Ja/nee
       en: Yes/no
     component: Switch
+    props: { layout: above }
   object:
     label:
       nl: JSON-object
       en: JSON object
     component: JsonFieldEditor
+    props: { layout: above }
   collection:
     label:
       nl: JSON-lijst
       en: JSON array
     component: JsonFieldEditor
+    props: { layout: above }
   date:
     label:
       nl: Datum
       en: Date
     component: DatePicker
+    props: { layout: above }
   datetime:
     label:
       nl: Datum en tijd
       en: Date and time
     component: DateTimePicker
+    props: { layout: above, showTimezoneSelector: false }
 # ── Default component per view element ──
 # Used when a view does not specify a `render.component` for that element.
 viewDefaults:
@@ -282,14 +290,12 @@ components:
   FieldPersonName:
     kind: field
     description: Person-name presentation bound to separate scalar name fields.
+    props: [layout, emptyText, saveLabel, cancelLabel, allowSingleName, labels]
 
   FieldMoney:
     kind: field
     description: Currency-aware numeric input with formatting.
-    props:
-      - currency
-      - decimalPlaces
-      - scale
+    props: [layout, emptyText, saveLabel, cancelLabel, currency, minorUnitPrecision, decimalPlaces, scale]
 
   AreaInput:
     kind: field
@@ -341,3 +347,234 @@ components:
     kind: custom
     description: Mock natural-person workspace baseline using the inbox layout and relations datascreen.
     props: []
+
+  # Public Battery/Figma field components; presentation is configured through render.props.
+  FieldSingleLine:
+    kind: field
+    description: Battery FieldSingleLine field.
+    props: [layout, emptyText, saveLabel, cancelLabel]
+
+  FieldMultiline:
+    kind: field
+    description: Battery FieldMultiline field.
+    props: [layout, emptyText, saveLabel, cancelLabel, rows]
+
+  FieldMarkdown:
+    kind: field
+    description: Battery FieldMarkdown field.
+    props: [layout, emptyText, saveLabel, cancelLabel, variableListLabel, variableEmptyMessage]
+
+  FieldEmail:
+    kind: field
+    description: Battery FieldEmail field.
+    props: [layout, emptyText, saveLabel, cancelLabel, emailAction]
+
+  FieldUrl:
+    kind: field
+    description: Battery FieldUrl field.
+    props: [layout, emptyText, saveLabel, cancelLabel]
+
+  FieldIdentifierCode:
+    kind: field
+    description: Battery FieldIdentifierCode field.
+    props: [layout, emptyText, saveLabel, cancelLabel, prefix]
+
+  FieldSecret:
+    kind: field
+    description: Battery FieldSecret field.
+    props: [layout, emptyText, saveLabel, cancelLabel, maskLabel]
+
+  FieldIntegerDecimal:
+    kind: field
+    description: Battery FieldIntegerDecimal field.
+    props: [layout, emptyText, saveLabel, cancelLabel, unit, inputMode]
+
+  FieldPercentage:
+    kind: field
+    description: Battery FieldPercentage field.
+    props: [layout, emptyText, saveLabel, cancelLabel]
+
+  FieldMeasurement:
+    kind: field
+    description: Battery FieldMeasurement field.
+    props: [layout, emptyText, saveLabel, cancelLabel, unit, unitOptions, unitLabel, inputMode]
+
+  FieldDuration:
+    kind: field
+    description: Battery FieldDuration field.
+    props: [layout, emptyText, saveLabel, cancelLabel]
+
+  FieldNumericRange:
+    kind: field
+    description: Battery FieldNumericRange field.
+    props: [layout, emptyText, saveLabel, cancelLabel, minimumLabel, maximumLabel]
+
+  FieldBoolean:
+    kind: field
+    description: Battery FieldBoolean field.
+    props: [layout, emptyText, saveLabel, cancelLabel, trueLabel, falseLabel]
+
+  FieldNullableBoolean:
+    kind: field
+    description: Battery FieldNullableBoolean field.
+    props: [layout, emptyText, saveLabel, cancelLabel, trueLabel, falseLabel, nullLabel]
+
+  FieldSingleChoice:
+    kind: field
+    description: Battery FieldSingleChoice field.
+    props: [layout, emptyText, saveLabel, cancelLabel]
+
+  FieldMultipleChoice:
+    kind: field
+    description: Battery FieldMultipleChoice field.
+    props: [layout, emptyText, saveLabel, cancelLabel]
+
+  FieldDate:
+    kind: field
+    description: Battery FieldDate field.
+    props: [layout, emptyText, saveLabel, cancelLabel]
+
+  FieldTime:
+    kind: field
+    description: Battery FieldTime field.
+    props: [layout, emptyText, saveLabel, cancelLabel, precision]
+
+  FieldDateAndTime:
+    kind: field
+    description: Battery FieldDateAndTime field.
+    props: [layout, emptyText, saveLabel, cancelLabel, timezone, showTimezoneSelector, timezones, dateLabel, timeLabel, timezoneLabel]
+
+  FieldDateRange:
+    kind: field
+    description: Battery FieldDateRange field.
+    props: [layout, emptyText, saveLabel, cancelLabel, openEnd, startLabel, endLabel, optionalText, fromText, untilText]
+
+  FieldPeriod:
+    kind: field
+    description: Battery FieldPeriod field.
+    props: [layout, emptyText, saveLabel, cancelLabel, defaultKind, typeLabel, valueLabel, kindLabels]
+
+  FieldTimezone:
+    kind: field
+    description: Battery FieldTimezone field.
+    props: [layout, emptyText, saveLabel, cancelLabel, timezones, placeholder, searchPlaceholder, noResultsText]
+
+  FieldPhone:
+    kind: field
+    description: Battery FieldPhone field.
+    props: [layout, emptyText, saveLabel, cancelLabel, country, countries]
+
+  FieldStatus:
+    kind: field
+    description: Battery FieldStatus field.
+    props: [layout, emptyText, saveLabel, cancelLabel]
+
+  FieldRating:
+    kind: field
+    description: Battery FieldRating field.
+    props: [layout, emptyText, saveLabel, cancelLabel, min, max, step]
+
+  FieldRecurrence:
+    kind: field
+    description: Battery FieldRecurrence field.
+    props: [layout, emptyText, saveLabel, cancelLabel, labels]
+
+  FieldSingleRelatedRecord:
+    kind: field
+    description: Battery FieldSingleRelatedRecord field.
+    props: [layout, emptyText, saveLabel, cancelLabel, searchPlaceholder, clearLabel, noResultsText, retryLabel]
+
+  FieldMultipleRelatedRecords:
+    kind: field
+    description: Battery FieldMultipleRelatedRecords field.
+    props: [layout, emptyText, saveLabel, cancelLabel, searchPlaceholder, clearLabel, noResultsText, retryLabel]
+
+  FieldHierarchicalRelation:
+    kind: field
+    description: Battery FieldHierarchicalRelation field.
+    props: [layout, emptyText, saveLabel, cancelLabel, searchPlaceholder, clearLabel, noResultsText, retryLabel]
+
+  FieldFileAttachment:
+    kind: field
+    description: Battery FieldFileAttachment field.
+    props: [layout, emptyText, saveLabel, cancelLabel, accept, uploadTitle, uploadDescription, chooseLabel, addLabel, replaceLabel, removeLabel, downloadLabel, previewLabel, uploadingText, retryLabel]
+
+  FieldMultipleFiles:
+    kind: field
+    description: Battery FieldMultipleFiles field.
+    props: [layout, emptyText, saveLabel, cancelLabel, accept, uploadTitle, uploadDescription, chooseLabel, addLabel, replaceLabel, removeLabel, downloadLabel, previewLabel, uploadingText, retryLabel]
+
+  FieldImage:
+    kind: field
+    description: Battery FieldImage field.
+    props: [layout, emptyText, saveLabel, cancelLabel, accept, uploadTitle, uploadDescription, chooseLabel, addLabel, replaceLabel, removeLabel, downloadLabel, previewLabel, uploadingText, retryLabel]
+
+  FieldAddress:
+    kind: field
+    description: Battery FieldAddress field.
+    props: [layout, emptyText, saveLabel, cancelLabel, countryPresets, showRegion, labels]
+
+  FieldBankAccount:
+    kind: field
+    description: Battery FieldBankAccount field.
+    props: [layout, emptyText, saveLabel, cancelLabel, labels]
+
+  FieldCommercialAmount:
+    kind: field
+    description: Battery FieldCommercialAmount field.
+    props: [layout, emptyText, saveLabel, cancelLabel, labels]
+
+  FieldRepeatedFieldGroup:
+    kind: field
+    description: Battery FieldRepeatedFieldGroup field.
+    props: [layout, emptyText, saveLabel, cancelLabel, addLabel, removeLabel, moveUpLabel]
+
+  FieldChildRecords:
+    kind: field
+    description: Battery FieldChildRecords field.
+    props: [layout, emptyText, saveLabel, cancelLabel, addLabel, removeLabel, editLabel]
+
+  FieldKeyValuePairs:
+    kind: field
+    description: Battery FieldKeyValuePairs field.
+    props: [layout, emptyText, saveLabel, cancelLabel, labels]
+
+  FieldLocalizedText:
+    kind: field
+    description: Battery FieldLocalizedText field.
+    props: [layout, emptyText, saveLabel, cancelLabel, locales, fallbackLocale, localeLabel, fallbackLabel]
+
+  FieldComputedValue:
+    kind: field
+    description: Battery FieldComputedValue field.
+    props: [layout, emptyText, saveLabel, cancelLabel, overrideLabel]
+
+  FieldFormula:
+    kind: field
+    description: Battery FieldFormula field.
+    props: [layout, emptyText, saveLabel, cancelLabel, suggestions, evaluateLabel, suggestionsLabel, emptySuggestionsLabel]
+
+  FieldSystemMetadata:
+    kind: field
+    description: Battery FieldSystemMetadata field.
+    props: [layout, emptyText, saveLabel, cancelLabel, retryLabel, propertyLabel, valueLabel]
+
+  FieldCode:
+    kind: field
+    description: Battery FieldCode field.
+    props: [layout, emptyText, saveLabel, cancelLabel, schemaName, labels]
+
+  FieldLocation:
+    kind: field
+    description: Battery FieldLocation field.
+    props: [layout, emptyText, saveLabel, cancelLabel, labels, coordinateContext, mapLabel]
+
+  FieldColorIcon:
+    kind: field
+    description: Battery FieldColorIcon field.
+    props: [layout, emptyText, saveLabel, cancelLabel, colors, icons, labels]
+
+  FieldSignature:
+    kind: field
+    description: Battery FieldSignature field.
+    props: [layout, emptyText, saveLabel, cancelLabel, signerLabel, requestLabel, clearLabel, pendingLabel, signedLabel, expiredLabel, declinedLabel, uploadTitle, uploadDescription, uploadHint, chooseLabel, retryLabel]

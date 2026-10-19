@@ -109,6 +109,8 @@ export interface ViewGroupOverride {
   icon?: string;
   visibleWhen?: VisibilityConfig;
   render?: string;
+  /** Widget value slots mapped to existing scalar fields; presentation only. */
+  bindings?: Record<string, string>;
   fields?: FieldEntry[];
   relationships?: RelationshipUsage[];
   relationship?: string | RelationshipUsage;
@@ -128,6 +130,8 @@ export interface ViewGroup {
   /** Show the group only while these conditions hold for the record being edited. */
   visibleWhen?: VisibilityConfig;
   render?: string;
+  /** Widget value slots mapped to existing scalar fields; presentation only. */
+  bindings?: Record<string, string>;
   fields?: FieldEntry[];
   relationships?: RelationshipUsage[];
   relationship?: string | RelationshipUsage;

@@ -357,13 +357,15 @@ interfaces:
                 en: Overview
                 nl: Overzicht
               groups:
+                - id: person-name
+                  title: { en: Name, nl: Naam }
+                  render: FieldPersonName
+                  bindings: { givenName: firstName, prefix: namePrefix, familyName: lastName }
+                  fields: [firstName, namePrefix, lastName]
                 - title:
                     en: Personal details
                     nl: Persoonsgegevens
                   fields:
-                    - firstName
-                    - namePrefix
-                    - lastName
                     - initials
                     - birthName
                     - gender
@@ -388,13 +390,15 @@ interfaces:
               en: Create natural person
               nl: Natuurlijk persoon aanmaken
             groups:
+              - id: person-name
+                title: { en: Name, nl: Naam }
+                render: FieldPersonName
+                bindings: { givenName: firstName, prefix: namePrefix, familyName: lastName }
+                fields: [firstName, namePrefix, lastName]
               - title:
                   en: Personal details
                   nl: Persoonsgegevens
                 fields:
-                  - firstName
-                  - namePrefix
-                  - lastName
                   - initials
                   - birthName
                   - gender

@@ -51,7 +51,7 @@ fields:
     description:
       en: Valuation amount.
       nl: Waarderingsbedrag.
-    osfType: currency
+    osfType: money
     persisted:
       column: amount
       storageClass: core

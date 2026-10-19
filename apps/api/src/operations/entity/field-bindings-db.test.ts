@@ -164,11 +164,11 @@ describe("a typed global value, stored and read back", () => {
     };
     // Exact decimal text is the form every numeric value is projected in, and
     // it comes back with every digit.
-    expect(await stored("rate.exact", { key: "value", osfType: "currency", required: true }, "12.50")).toBe("12.50");
-    expect(await stored("rate.big", { key: "value", osfType: "currency", required: true }, "9007199254740993.01"))
+    expect(await stored("rate.exact", { key: "value", osfType: "money", required: true }, "12.50")).toBe("12.50");
+    expect(await stored("rate.big", { key: "value", osfType: "money", required: true }, "9007199254740993.01"))
       .toBe("9007199254740993.01");
     // The JSON number form of the same type is equally acceptable.
-    expect(await stored("rate.number", { key: "value", osfType: "currency", required: true }, 12.5)).toBe(12.5);
+    expect(await stored("rate.number", { key: "value", osfType: "money", required: true }, 12.5)).toBe(12.5);
     // false, zero, an empty text and an empty collection are values.
     expect(await stored("flag.off", { key: "value", osfType: "boolean", required: true }, false)).toBe(false);
     expect(await stored("count.zero", { key: "value", osfType: "integer", required: true }, 0)).toBe(0);
@@ -206,7 +206,7 @@ describe("a typed global value, stored and read back", () => {
   });
 
   test("an update of either half keeps the pair valid", async () => {
-    const chip = await tenantGlobal(editor, "hours.rate", { key: "value", osfType: "currency", required: true }, "80.00");
+    const chip = await tenantGlobal(editor, "hours.rate", { key: "value", osfType: "money", required: true }, "80.00");
     const id = String(chip.id);
     // The value alone, against the stored definition.
     expect(record(await run(editor, "Chip.update", { id, values: { value: "95.00" } })).value).toBe("95.00");

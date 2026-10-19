@@ -316,13 +316,13 @@ types:
   # field authors no render at all, and a web view may override the component
   # but not its props; a report that wants another scale has nowhere to say so
   # yet (docs/field-acceptance-fixture.md records that gap).
-  currency:
+  money:
     label: { en: Currency amount, nl: Geldbedrag }
     baseType: number
     icon: Banknote
     render:
-      display: MoneyInput
-      input: MoneyInput
+      display: FieldMoney
+      input: FieldMoney
     props:
       currency: EUR
       decimalPlaces: 2

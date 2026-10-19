@@ -51,7 +51,7 @@ fields:
     description:
       en: Amount due for this instalment.
       nl: Verschuldigd bedrag voor deze termijn.
-    osfType: currency
+    osfType: money
     persisted:
       column: amount
       storageClass: core

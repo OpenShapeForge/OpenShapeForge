@@ -222,7 +222,7 @@ contract, while a Web view's field entry can override presentation per view:
 ```yaml
 - key: amount
   render:
-    component: MoneyInput
+    component: FieldMoney
     props:
       decimalPlaces: 0
       scale: millions

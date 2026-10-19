@@ -62,7 +62,7 @@ fields:
     description:
       en: Opening balance of the account at the start of the statement period.
       nl: Beginsaldo van de rekening aan het begin van de afschriftperiode.
-    osfType: currency
+    osfType: money
     persisted:
       column: opening_balance
       storageClass: core
@@ -74,7 +74,7 @@ fields:
     description:
       en: Closing balance of the account at the end of the statement period.
       nl: Eindsaldo van de rekening aan het einde van de afschriftperiode.
-    osfType: currency
+    osfType: money
     persisted:
       column: closing_balance
       storageClass: core

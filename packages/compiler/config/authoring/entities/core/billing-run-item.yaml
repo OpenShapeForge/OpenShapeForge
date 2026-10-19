@@ -173,7 +173,7 @@ fields:
     description:
       en: Total amount of the invoice produced for this item (or 0 when skipped/failed).
       nl: Totaalbedrag van de factuur die voor dit item is geproduceerd (of 0 bij overgeslagen/mislukt).
-    osfType: currency
+    osfType: money
     persisted:
       column: amount_total
       storageClass: core

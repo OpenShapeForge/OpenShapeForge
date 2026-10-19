@@ -121,7 +121,7 @@ fields:
     description:
       en: Hourly rate for this role assignment, when timesheets feed billing.
       nl: Uurtarief voor deze roltoewijzing, wanneer urenstaten doorlopen naar facturering.
-    osfType: currency
+    osfType: money
     persisted:
       column: hourly_rate
       storageClass: core

@@ -499,13 +499,13 @@ describe("coreEntity properties the compiler implements", () => {
     const document = webViews([{ id: "main", fields: [
       "idempotencyKey",
       { key: "idempotencyKey", render: "TextDisplay" },
-      { key: "idempotencyKey", render: { component: "MoneyInput", props: { decimalPlaces: 0, scale: "millions" } } },
+      { key: "idempotencyKey", render: { component: "FieldMoney", props: { decimalPlaces: 0, scale: "millions" } } },
       { key: "idempotencyKey", fieldDisplayMode: "hidden" },
     ] }]);
     expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
     for (const props of [{ decimalPlaces: -1 }, { decimalPlaces: 21 }, { decimalPlaces: 1.5 }, { scale: "billion" }]) {
       expect(() => validator.validate(webViews([{ id: "main", fields: [
-        { key: "idempotencyKey", render: { component: "MoneyInput", props } },
+        { key: "idempotencyKey", render: { component: "FieldMoney", props } },
       ] }]), "billing-run.yaml")).toThrow();
     }
     expect(() => validator.validate(webViews([{ id: "main", fields: [{ key: "idempotencyKey", hidden: true }] }]), "billing-run.yaml"))

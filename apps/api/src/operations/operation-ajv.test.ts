@@ -27,7 +27,7 @@ describe("the x-osf-choice annotation", () => {
 
 test("presentation annotations never coerce or round an exact numeric input", () => {
   const amount = "9007199254740993.995";
-  const schema = {type:"object",properties:{amount:{type:["number","string"],"x-osf-exact":{},"x-osf-presentation":{component:"MoneyInput",props:{currency:"EUR",decimalPlaces:0,scale:"millions"}}}},additionalProperties:false};
+  const schema = {type:"object",properties:{amount:{type:["number","string"],"x-osf-exact":{},"x-osf-presentation":{component:"FieldMoney",props:{currency:"EUR",decimalPlaces:0,scale:"millions"}}}},additionalProperties:false};
   const value = {amount};
   const validate = createOperationAjv().compile(schema);
   expect(validate(value)).toBe(true);

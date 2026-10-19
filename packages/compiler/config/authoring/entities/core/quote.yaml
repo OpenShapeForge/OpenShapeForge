@@ -94,7 +94,7 @@ fields:
     description:
       en: Sum of line base amounts, excluding VAT.
       nl: Som van de basisbedragen van de regels, exclusief BTW.
-    osfType: currency
+    osfType: money
     persisted:
       column: amount_base
       storageClass: core
@@ -106,7 +106,7 @@ fields:
     description:
       en: Sum of VAT amounts on the quote.
       nl: Som van de BTW-bedragen op de offerte.
-    osfType: currency
+    osfType: money
     persisted:
       column: amount_vat
       storageClass: core
@@ -118,7 +118,7 @@ fields:
     description:
       en: Total quote amount including VAT.
       nl: Totaalbedrag van de offerte inclusief BTW.
-    osfType: currency
+    osfType: money
     persisted:
       column: amount_total
       storageClass: core

@@ -82,7 +82,7 @@ fields:
     description:
       en: Standard price amount.
       nl: Standaardprijsbedrag.
-    osfType: currency
+    osfType: money
     persisted:
       column: amount
       storageClass: core

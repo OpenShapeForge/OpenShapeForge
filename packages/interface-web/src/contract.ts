@@ -193,6 +193,8 @@ export type WebFieldProjection = {
 };
 
 export type WebFieldGroup = {
+  /** One compound control editing the named existing fields, without a stored object. */
+  control?: { component: string; bindings: Record<string, string> };
   id: string;
   title: LocalizedText;
   fields: string[];

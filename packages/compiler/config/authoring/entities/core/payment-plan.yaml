@@ -78,7 +78,7 @@ fields:
     description:
       en: Total amount covered by the payment plan.
       nl: Totaalbedrag waarvoor de betalingsregeling is afgesloten.
-    osfType: currency
+    osfType: money
     persisted:
       column: total_amount
       storageClass: core

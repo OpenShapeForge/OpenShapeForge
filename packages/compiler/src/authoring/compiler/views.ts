@@ -230,6 +230,7 @@ function compileGroup(
     visibleWhen: group.visibleWhen,
     ...(group.showInReadNavigation !== undefined ? { showInReadNavigation: group.showInReadNavigation } : {}),
     render: group.render ? vr(catalog, group.render) : undefined,
+    ...(group.bindings ? { bindings: { ...group.bindings } } : {}),
     fields: group.fields ? compileFields(group.fields, catalog) : undefined,
     relationships: group.relationships?.map((relationship) => compileRelationshipUsage(relationship, catalog)!),
     relationship: typeof group.relationship === "string"

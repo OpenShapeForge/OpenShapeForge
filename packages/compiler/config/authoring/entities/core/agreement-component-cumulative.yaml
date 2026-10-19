@@ -52,7 +52,7 @@ fields:
     description:
       en: Effective unit price reflected in the projection row.
       nl: Effectieve eenheidsprijs die in de projectierij is vastgelegd.
-    osfType: currency
+    osfType: money
     persisted:
       column: unit_price
       storageClass: core
@@ -64,7 +64,7 @@ fields:
     description:
       en: Cumulative net amount excluding VAT.
       nl: Cumulatief nettobedrag exclusief BTW.
-    osfType: currency
+    osfType: money
     persisted:
       column: amount_base
       storageClass: core
@@ -76,7 +76,7 @@ fields:
     description:
       en: Cumulative VAT amount.
       nl: Cumulatief BTW-bedrag.
-    osfType: currency
+    osfType: money
     persisted:
       column: amount_vat
       storageClass: core
@@ -88,7 +88,7 @@ fields:
     description:
       en: Cumulative total amount including VAT.
       nl: Cumulatief totaalbedrag inclusief BTW.
-    osfType: currency
+    osfType: money
     persisted:
       column: amount_total
       storageClass: core

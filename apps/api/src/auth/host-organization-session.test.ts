@@ -118,6 +118,7 @@ describe("host organization binding through real bearer verification and resolve
       const unverified = await resolveSessionContext(await headers({ email: "member@example.test", email_verified }));
       expect(unverified).not.toHaveProperty("verifiedEmail");
     }
+    expect(await resolveSessionContext(await headers({ email_verified: true }))).not.toHaveProperty("verifiedEmail");
     const service = await resolveSessionContext(await headers({ preferred_username: "service-account-automation", azp: "automation", email: "member@example.test", email_verified: true }));
     expect(service).not.toHaveProperty("verifiedEmail");
   });

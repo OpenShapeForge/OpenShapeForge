@@ -359,7 +359,9 @@ interfaces:
               groups:
                 - id: person-name
                   title: { en: Name, nl: Naam }
-                  render: FieldPersonName
+                  render:
+                    component: FieldPersonName
+                    props: { layout: none, allowSingleName: false }
                   bindings: { givenName: firstName, prefix: namePrefix, familyName: lastName }
                   fields: [firstName, namePrefix, lastName]
                 - title:
@@ -392,7 +394,9 @@ interfaces:
             groups:
               - id: person-name
                 title: { en: Name, nl: Naam }
-                render: FieldPersonName
+                render:
+                  component: FieldPersonName
+                  props: { layout: none, allowSingleName: false }
                 bindings: { givenName: firstName, prefix: namePrefix, familyName: lastName }
                 fields: [firstName, namePrefix, lastName]
               - title:

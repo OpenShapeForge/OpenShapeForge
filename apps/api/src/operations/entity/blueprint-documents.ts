@@ -18,7 +18,7 @@ export async function snapshotBlueprintDocuments(db: OpenShapeForgeDatabase, ses
    await services.records.assertAccess(live, {entityName:"Document", id:String(id), intent:"get"});
    snapshots[field] = await withDbSession(db, session, async trx => {
     const result = await sql<{ document: Record<string,unknown>; artifactId: string | null }>`select jsonb_build_object('title',d.title,'description',d.description,'documentType',d.document_type,'status',d.status,'isExternal',false) as document, v.artifact_id as "artifactId"
-      from erp.documents d left join erp.document_versions v on v.id=d.current_version_id and v.tenant_id=d.tenant_id where d.id=${String(id)}::uuid and d.tenant_id=${session.tenantId}::uuid`.execute(trx);
+      from erp.documents d left join erp.document_versions v on v.id=d.current_version_id and v.tenant_id=d.tenant_id where d.id=${String(id)}::uuid and d.tenant_id=${session.tenantId}::uuid for share of d`.execute(trx);
     const head = result.rows[0]; if (!head) throw new Error("Blueprint document is unavailable.");
     const variants = await sql<{id:string;channel:string;locale:string}>`select id,channel,locale from erp.document_variants where document_id=${String(id)}::uuid and tenant_id=${session.tenantId}::uuid order by channel,locale limit 101`.execute(trx);
     if (variants.rows.length>100) throw new Error("Too many blueprint document variants.");
@@ -62,6 +62,11 @@ export async function copyBlueprintDocuments(db: OpenShapeForgeDatabase, session
    let document=await execute("Document","create",{document:Object.fromEntries(Object.entries(snapshot.document).filter(([,value])=>value!=null)),version:{versionLabel:"1",status:"final",isMajorVersion:true},idempotencyKey:crypto.randomUUID(),...(artifact?{artifact}:{})});
    const id=String(document.id);
    for(const variant of snapshot.variants){
+    const documentGet=definitions.find(op=>op.entityName==="Document"&&op.intent==="get");
+    if(!documentGet)throw new Error("Canonical Document.get is unavailable.");
+    const current=await services.operations.execute(live,{operation:documentGet,input:{id}});
+    if("error" in current)throw operationFailure(current.error);
+    document=current.data as Record<string,unknown>;
     const added=await execute("Document","insertVariant",{id,values:{channel:variant.channel,locale:variant.locale}},String(document.updatedAt));
     const variantGet=definitions.find(op=>op.entityName==="DocumentVariant"&&op.intent==="get")!;
     const initial=await services.operations.execute(live,{operation:variantGet,input:{id:added.childId}});if("error" in initial)throw operationFailure(initial.error);

@@ -31,6 +31,9 @@ import type {
   ContentResolvedVariable,
   ContentResolvers,
   ContentTemplateVersion,
+  MaterializeDocumentContentInput,
+  MaterializedDocumentContent,
+  ContentTemplateVariant,
   MaterializedContentBlock,
   MaterializedTemplateContent,
   MaterializeTemplateContentInput,
@@ -43,6 +46,7 @@ import {
   selectContentTemplateVariant,
   validateContentBlockReferences,
   validateContentRegistry,
+  validateContentVariants,
   validateContentValues,
 } from "./validation.js";
 import {
@@ -62,14 +66,15 @@ import type { ContentValueShape } from "./types.js";
  * output surface. Resolvers are authorized adapters, not a new persistence runtime.
  * Every call creates a fresh snapshot; no existing document or queued message is modified.
  */
-export async function materializeTemplateContent(
-  input: MaterializeTemplateContentInput,
+async function materializeContent(
+  input: MaterializeTemplateContentInput | MaterializeDocumentContentInput,
   registryInput: CompiledContentBlockRegistry,
   resolvers: ContentResolvers,
-): Promise<MaterializedTemplateContent> {
+): Promise<MaterializedTemplateContent | MaterializedDocumentContent> {
   const request = immutableContent(input);
-  for (const key of ["tenantId", "templateVersionId", "channel", "locale"] as const)
-    assertContentName(request[key], key);
+  for (const key of ["tenantId", "channel", "locale"] as const) assertContentName(request[key], key);
+  if ("documentId" in request) { assertContentName(request.documentId, "documentId"); validateContentVariants(request.variants); }
+  else assertContentName(request.templateVersionId, "templateVersionId");
   const registry = validateContentRegistry(registryInput);
   const context = Object.freeze({ tenantId: request.tenantId });
   const versions = new Map<string, ContentTemplateVersion>();
@@ -373,6 +378,10 @@ export async function materializeTemplateContent(
       variantId: variant.id,
       parameters,
     });
+    return visitBlocks(variant, scope, parameters, path, [...ancestors, id]);
+  }
+
+  async function visitBlocks(variant: ContentTemplateVariant, scope: VariableScope, parameters: JsonObject, path: readonly string[], ancestors: readonly string[]) {
     for (const sourceBlock of variant.blocks) {
       let block = sourceBlock;
       if (++visitedBlocks > CONTENT_LIMITS.blocks)
@@ -495,7 +504,7 @@ export async function materializeTemplateContent(
           references,
           ...(materialization ? { materialization } : {}),
         });
-        await visit(reference.id, nestedParameters as JsonObject, blockPath, [...ancestors, id]);
+        await visit(reference.id, nestedParameters as JsonObject, blockPath, ancestors);
       } else {
         blocks.push({
           path: blockPath,
@@ -511,11 +520,19 @@ export async function materializeTemplateContent(
     }
   }
 
-  await visit(request.templateVersionId, request.parameters ?? {}, [], []);
+  let identity: {templateVersionId:string;compositionHashVersion:"osf-template-content-v1"} | {documentId:string;documentVariantId:string;compositionHashVersion:"osf-document-content-v1"};
+  if ("documentId" in request) {
+    const variant=selectContentTemplateVariant({variants:request.variants},request.channel,request.locale);
+    await visitBlocks(variant,{catalogue:contentVariableCatalogue({}),parameters:{}},{},[],[]);
+    identity={documentId:request.documentId,documentVariantId:variant.id,compositionHashVersion:"osf-document-content-v1"};
+  } else {
+    await visit(request.templateVersionId, request.parameters ?? {}, [], []);
+    identity={templateVersionId:request.templateVersionId,compositionHashVersion:"osf-template-content-v1"};
+  }
   const snapshot = immutableContent({
     schemaVersion: 1 as const,
     tenantId: request.tenantId,
-    templateVersionId: request.templateVersionId,
+    ...identity,
     channel: request.channel,
     locale: request.locale,
     blocks,
@@ -523,10 +540,18 @@ export async function materializeTemplateContent(
     templates,
     definitions,
     globals,
-    compositionHashVersion: "osf-template-content-v1" as const,
+
   });
   return immutableContent({
     ...snapshot,
     compositionHash: await hashCanonicalJson(snapshot, snapshot.compositionHashVersion),
   });
+}
+
+
+export function materializeTemplateContent(input: MaterializeTemplateContentInput, registry: CompiledContentBlockRegistry, resolvers: ContentResolvers): Promise<MaterializedTemplateContent> {
+  return materializeContent(input,registry,resolvers) as Promise<MaterializedTemplateContent>;
+}
+export function materializeDocumentContent(input: MaterializeDocumentContentInput, registry: CompiledContentBlockRegistry, resolvers: ContentResolvers): Promise<MaterializedDocumentContent> {
+  return materializeContent(input,registry,resolvers) as Promise<MaterializedDocumentContent>;
 }

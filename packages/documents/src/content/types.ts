@@ -204,3 +204,18 @@ export type MaterializedTemplateContent = {
   readonly compositionHashVersion: "osf-template-content-v1";
   readonly compositionHash: string;
 };
+
+
+/** A document's own content has an identity, without inventing a template version. */
+export type MaterializeDocumentContentInput = {
+  readonly tenantId: string;
+  readonly documentId: string;
+  readonly channel: string;
+  readonly locale: string;
+  readonly variants: readonly ContentTemplateVariant[];
+};
+export type MaterializedDocumentContent = Omit<MaterializedTemplateContent, "templateVersionId" | "compositionHashVersion"> & {
+  readonly documentId: string;
+  readonly documentVariantId: string;
+  readonly compositionHashVersion: "osf-document-content-v1";
+};

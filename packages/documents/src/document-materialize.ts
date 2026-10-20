@@ -4,7 +4,7 @@ import { contextServices, rows } from "./commands.js";
 import { blockCollection, canonicalReader, compiledContentRegistry, contentCarrier, contentFailure, contentResolvers, DEFINITION_VERSION_COLUMN } from "./content-runtime.js";
 import { contentBlockFromRow, type BlockRowSelection } from "./content-snapshot.js";
 import { immutableContent, type JsonObject } from "./content/json.js";
-import { materializeTemplateContent } from "./content/materialize.js";
+import { materializeTemplateContent, materializeDocumentContent } from "./content/materialize.js";
 import type { ContentResolvers, ContentTemplateVariant } from "./content/types.js";
 import { object, refuse, text, uuid } from "./validation.js";
 
@@ -66,7 +66,13 @@ export const materializeDocument: ModuleOperationHandler = async (input, context
       const document = (await rows<DocumentRow>(trx,
         "select id, template_version_id, parameters from erp.documents where tenant_id = $1 and id = $2 for share", [tenantId, documentId]))[0];
       if (!document) refuse("NOT_FOUND", "The document does not exist.");
-      if (!document!.template_version_id) refuse("INVALID_STATE", "The document has no linked template version.");
+      if (!document!.template_version_id) {
+        if (document.parameters != null && Object.keys(object(document.parameters,"parameters")).length) refuse("INVALID_STATE","Local document parameters require a linked template definition.");
+        const selection: BlockRowSelection = {tenantId,carrier,definitionVersionColumn:DEFINITION_VERSION_COLUMN};
+        const variants=await documentContentVariants(trx,{id:documentId,channel},selection,documentCollection.allowedDefinitions);
+        return materializeDocumentContent({tenantId,documentId,channel,locale,variants},registry,
+          contentResolvers(context,trx,{tenantId,channel,locale,carrier,allowedDefinitions:templateCollection.allowedDefinitions,read}));
+      }
       const templateVersionId = uuid(document!.template_version_id, "template version");
       const parameters = immutableContent(document!.parameters == null ? {} : object(document!.parameters, "parameters")) as JsonObject;
       // The pinned version is reached through the document's own read access,

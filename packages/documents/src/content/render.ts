@@ -70,13 +70,13 @@ export async function renderTemplateSnapshot(input: unknown, options: {
   tenantId: string;
 }): Promise<RenderedTemplateContent> {
   const snapshot = record(immutableContent(input));
-  if (snapshot.schemaVersion !== 1 || snapshot.compositionHashVersion !== "osf-template-content-v1" || snapshot.tenantId !== options.tenantId ||
+  if (snapshot.schemaVersion !== 1 || !["osf-template-content-v1", "osf-document-content-v1"].includes(String(snapshot.compositionHashVersion)) || snapshot.tenantId !== options.tenantId ||
     typeof snapshot.locale !== "string" || !/^[a-z]{2}(-[A-Z]{2})?$/.test(snapshot.locale) || !Array.isArray(snapshot.blocks) || snapshot.blocks.length > 500) {
     contentError("INVALID_VALUE", "The content snapshot is invalid for this session.");
   }
   if (!["document", "email", "whatsapp"].includes(String(snapshot.channel))) contentError("UNSUPPORTED_CHANNEL", "The snapshot channel has no registered output renderer.");
   const { compositionHash, ...content } = snapshot;
-  if (typeof compositionHash !== "string" || compositionHash !== await hashCanonicalJson(content)) contentError("DEPENDENCY_INVALID", "The content snapshot checksum does not match.");
+  if (typeof compositionHash !== "string" || compositionHash !== await hashCanonicalJson(content, String(snapshot.compositionHashVersion))) contentError("DEPENDENCY_INVALID", "The content snapshot checksum does not match.");
   const definitions = record(snapshot.definitions);
   const rendered: string[] = [];
   const budget = { characters: CONTENT_LIMITS.stringCharacters, fields: CONTENT_LIMITS.jsonValues };

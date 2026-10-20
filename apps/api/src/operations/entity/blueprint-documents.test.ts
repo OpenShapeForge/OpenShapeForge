@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { expect, mock, test } from "bun:test";
+import { expect, test } from "bun:test";
 let version = 1;
 const inserted: string[] = [];
 const definitions = [
@@ -24,9 +24,8 @@ const services = {operations:{
   throw Error("Unexpected canonical Operation");
  }
 }};
-mock.module("../../modules/platform.js",()=>({withBlueprintDocumentServices:async(_db:unknown,_session:unknown,work:(services:unknown,session:unknown)=>unknown)=>work(services,{})}));
-const {copyBlueprintDocuments}=await import("./blueprint-documents.js");
+const {copyPortableDocuments}=await import("./portable-document-copy.js");
 test("each copied locale uses the fresh Document version after preceding content writes",async()=>{
- const copied=await copyBlueprintDocuments({} as never,{}, {context:{document:{title:"Context"},variants:["nl","en"].map(locale=>({channel:"document",locale,blocks:[{definitionKey:"TextBlock",values:{markdown:locale}}]}))}},{});
+ const copied=await copyPortableDocuments(services as never,{} as never, {context:{document:{title:"Context"},variants:["nl","en"].map(locale=>({channel:"document",locale,blocks:[{definitionKey:"TextBlock",values:{markdown:locale}}]}))}},{});
  expect(copied).toEqual({context:"destination-document"});expect(inserted).toEqual(["nl","en"]);
 });

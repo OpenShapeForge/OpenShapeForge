@@ -747,6 +747,47 @@ cannot protect is never handed over. A variable that must carry a guarded or
 referencing value needs a field of its own, with the column the runtime can
 protect.
 
+Two explicit compiled adapters extend that boundary for tenant configuration:
+
+```yaml
+- key: value
+  osfType: typedValue
+  typedBy:
+    definitionField: definition
+    documentField: documentValue
+    encrypted: true
+  persisted: { column: value, storageClass: core }
+- key: documentValue
+  osfType: Document
+  readOnly: true
+  persisted: { column: document_value_id, storageClass: core }
+  relationship: { ownership: reference, inverse: false }
+```
+
+`definition` remains a required persisted `fieldDefinition`. `documentField`
+names an optional, read-only, real Document FK. A root Document definition must
+supply its normal `document` policy (`file` with MIME/size restrictions, or
+`blocks`). The public value is the Document identifier; the server owns the
+carrier and rejects callers writing it directly. Referenced content is checked
+under the same tenant and canonical read permissions, and SQL invariants retain
+the restrictions when the target changes. Embedded block drafts are applied
+through canonical variant/block Operations inside the parent write transaction.
+
+`encrypted: true` additionally admits a root `string` with an explicit
+`classification.sensitivity: confidential`. It does not admit nested classified
+fields or other unsupported policies. The existing platform AES-GCM keyring
+(`OPENSHAPEFORGE_ELICITED_SECRET_KEYS`) seals values before SQL and event writes,
+bound to the tenant, table, record and value column. Public reads return only
+`__set__`; an unchanged marker preserves an existing secret and cannot create
+one. Filtering/sorting the protected value is refused.
+
+TenantSetting uses this pair for every value type. Blueprint publication copies
+definitions and portable Document defaults, clones Documents into each target
+tenant and refuses populated secret defaults. Reset restores the value while
+preserving its immutable definition; a different immutable contract is refused
+rather than silently reinterpreting existing data. No additional column is needed
+for another scalar or structured setting type.
+
 A single definition editor may use `authoring.lockedKeys: [key]` to preserve
 the key from its carrier's `defaultValue`, while its type and other properties
 remain editable. Chip uses the default `{key: value, osfType: string, required:

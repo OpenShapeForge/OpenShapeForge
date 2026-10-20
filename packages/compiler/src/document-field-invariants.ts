@@ -1,0 +1,55 @@
+// SPDX-License-Identifier: BUSL-1.1
+import { createHash } from "node:crypto";
+import type { PlatformSchemaManifest } from "./schema.js";
+const id = (value: string) => '"' + value.replaceAll('"', '""') + '"';
+const literal = (value: string) => "'" + value.replaceAll("'", "''") + "'";
+/** Preserve a Document field's policy when its target is edited through another interface. */
+export function documentFieldInvariants(manifest: PlatformSchemaManifest): string | undefined {
+  const statements: string[] = [];
+  for (const table of manifest.tables) for (const column of table.columns) {
+    const policy = column.document;
+    if (!policy) continue;
+    const suffix = createHash("sha256").update(`${table.schema}.${table.name}.${column.name}`).digest("hex").slice(0, 16);
+    const check = `app.${id(`document_policy_${suffix}`)}`;
+    const trigger = `app.${id(`document_guard_${suffix}`)}`;
+    const name = id(`document_policy_${suffix}`);
+    const owner = `${id(table.schema)}.${id(table.name)}`;
+    const col = id(column.name);
+    const conditions = ["d.id is null"];
+    if (policy.documentType) conditions.push(`d.document_type <> ${literal(policy.documentType)}`);
+    if (policy.content === "blocks") conditions.push("v.artifact_id is not null");
+    else {
+      conditions.push("v.artifact_id is null", "exists(select 1 from erp.document_variants b where b.document_id=d.id and b.tenant_id=d.tenant_id)");
+      if (policy.mimeTypes) conditions.push(`v.mime_type is null or v.mime_type not in (${policy.mimeTypes.map(literal).join(",")})`);
+      if (policy.maxBytes) conditions.push(`v.byte_size is null or v.byte_size > ${policy.maxBytes}`);
+    }
+    statements.push(`
+create or replace function ${check}(policy_document_id uuid, policy_tenant_id uuid) returns void language plpgsql as $policy$
+begin
+ if policy_document_id is null then return; end if;
+ perform 1 from erp.documents d where d.id=policy_document_id and d.tenant_id=policy_tenant_id for update;
+ if not exists(select 1 from erp.documents d left join erp.document_versions v on v.id=d.current_version_id and v.tenant_id=d.tenant_id
+   where d.id=policy_document_id and d.tenant_id=policy_tenant_id and not (${conditions.join(" or ")})) then
+   raise exception 'Document does not satisfy the field content policy' using errcode='23514';
+ end if;
+end $policy$;
+create or replace function ${trigger}() returns trigger language plpgsql as $guard$
+begin
+ if TG_ARGV[0]='owner' then perform ${check}(NEW.${col},NEW.tenant_id);
+ elsif TG_ARGV[0]='document' then
+  if exists(select 1 from ${owner} r where r.${col}=NEW.id and r.tenant_id=NEW.tenant_id) then perform ${check}(NEW.id,NEW.tenant_id); end if;
+ else
+  if exists(select 1 from ${owner} r where r.${col}=NEW.document_id and r.tenant_id=NEW.tenant_id) then perform ${check}(NEW.document_id,NEW.tenant_id); end if;
+ end if;
+ return NEW;
+end $guard$;
+drop trigger if exists ${name} on ${owner};
+create trigger ${name} after insert or update of ${col} on ${owner} for each row execute function ${trigger}('owner');
+drop trigger if exists ${name} on erp.documents;
+create trigger ${name} after update of current_version_id on erp.documents for each row execute function ${trigger}('document');
+drop trigger if exists ${name} on erp.document_variants;
+create trigger ${name} after insert or update of document_id on erp.document_variants for each row execute function ${trigger}('variant');
+`);
+  }
+  return statements.length ? statements.join("\n") : undefined;
+}

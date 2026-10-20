@@ -50,6 +50,7 @@ export function resolveModelFields(
       osfType: field.osfType,
     };
     if (field.authoring) compiled.authoring = structuredClone(field.authoring);
+    if (field.document) compiled.document = structuredClone(field.document);
     if (field.transform) compiled.transform = field.transform.map(step => ({ ...step }));
     if (field.readOnly) compiled.readOnly = true;
     if (field.writeSource) compiled.writeSource = field.writeSource;

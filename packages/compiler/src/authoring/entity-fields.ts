@@ -257,6 +257,14 @@ export function normalizeEntityFields(
     if (cardinality) result.cardinality = cardinality;
     if (cardinalityOf(cardinality, path).required) result.required = true;
     const collection = fieldCardinality(result) === "collection";
+    if (field.document) {
+      const policy = field.document;
+      if (semantic?.entity !== "Document" || collection || nested) throw new Error(`${path}: document requires a single Document reference.`);
+      if (!["file", "blocks"].includes(policy.content)) throw new Error(`${path}: invalid document content policy.`);
+      if (policy.content === "blocks" && (policy.mimeTypes || policy.maxBytes)) throw new Error(`${path}: file restrictions require content: file.`);
+      if (policy.mimeTypes && (!policy.mimeTypes.length || policy.mimeTypes.some(type => !/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(type)))) throw new Error(`${path}: mimeTypes must contain explicit MIME types.`);
+      if (policy.maxBytes !== undefined && (!Number.isSafeInteger(policy.maxBytes) || policy.maxBytes < 1)) throw new Error(`${path}: maxBytes must be a positive integer.`);
+    }
     if ((field.entityValue || field.allowedDefinitions) && nested) {
       throw new Error(`${path}: entityValue and allowedDefinitions require a top-level field.`);
     }

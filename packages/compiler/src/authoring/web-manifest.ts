@@ -561,6 +561,7 @@ function projectField(
     id: `${parent}.${field.key}`, key: field.key,
     label: localized(field.label, field.key), description: localized(field.description, ""),
     osfType: field.osfType,
+    ...(field.document ? { document: structuredClone(field.document) } : {}),
     baseType: field.baseType,
     cardinality: field.cardinality === "collection" ? "many" : "one",
     required: field.required,

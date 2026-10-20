@@ -1390,6 +1390,7 @@ export function compileAuthoringBackendManifest(
           : {}),
       };
       if (field) assertDefaultSatisfiesContract(field);
+      if (field?.document) column.document = structuredClone(field.document);
       if (field?.defaultTemplate !== undefined) column.defaultTemplate = field.defaultTemplate;
       const defaultValue = defaultSql(field, column);
       if (defaultValue !== undefined) {

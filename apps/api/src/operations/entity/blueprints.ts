@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { copyBlueprintDocuments, snapshotBlueprintDocuments } from "./blueprint-documents.js";
 import { operationFailure } from "@openshapeforge/operations";
 import { sql } from "kysely";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
@@ -102,7 +103,8 @@ export async function createFromBlueprint(db: OpenShapeForgeDatabase, session: D
   return withDbSession(db, session, async trx => {
     const source = (await readPublished(db, session, table, blueprintId))[0];
     if (!source) throw generatedCrudError("Blueprint is unavailable.", "NOT_FOUND");
-    const merged = { ...allowedValues(table, source.values_json), ...values };
+    const documents = await copyBlueprintDocuments(db, session, (source.values_json.$documents ?? {}) as Parameters<typeof copyBlueprintDocuments>[2], values);
+    const merged = { ...allowedValues(table, source.values_json), ...documents, ...values };
     for (const column of table.columns) {
       const field = column.sourceField;
       if (column.defaultTemplate && field && !Object.hasOwn(values, field)) delete merged[field];
@@ -176,7 +178,7 @@ async function reset(db: OpenShapeForgeDatabase, session: DbSessionInput, table:
     if (source.version !== input.blueprintVersion) throw generatedCrudError("The blueprint has changed. Review its newest version first.", "VERSION_CONFLICT");
     // The canonical static executor checks the record version, edit lease and
     // confirmation in this same transaction before entering the handler.
-    const row = await updateGeneratedEntity(db, session, { table: table.name, id, values: allowedValues(table, source.values_json) });
+    const row = await updateGeneratedEntity(db, session, { table: table.name, id, values: { ...allowedValues(table, source.values_json), ...await copyBlueprintDocuments(db, session, (source.values_json.$documents ?? {}) as Parameters<typeof copyBlueprintDocuments>[2], {}) } });
     if (!row) throw generatedCrudError("Record not found.", "NOT_FOUND");
     await sql`update platform.blueprint_copies set source_version = ${source.version} where tenant_id = ${session.tenantId}::uuid and entity_name = ${nameOf(table)} and record_id = ${id}::uuid`.execute(trx);
     return serializeEntityRow(table, row);
@@ -202,6 +204,8 @@ async function publish(db: OpenShapeForgeDatabase, session: DbSessionInput, tabl
     const last = (await sql<{ version: number; values_json: Record<string, unknown>; source_record_id: string }>`select version, values_json, source_record_id from platform.blueprint_versions where tenant_id = ${session.tenantId}::uuid and entity_name = ${nameOf(table)} and blueprint_id = ${blueprintId} order by version desc limit 1`.execute(trx)).rows[0];
     if (last && last.source_record_id !== input.id) throw generatedCrudError("This blueprint identifier belongs to another record.", "BAD_USER_INPUT");
     const values = allowedValues(table, fields);
+    const documents = await snapshotBlueprintDocuments(db, session, table, fields);
+    if (Object.keys(documents).length) { values.$documents = documents; for (const field of Object.keys(documents)) values[field] = null; }
     if (blueprint.include?.length) {
       const records: BlueprintGraphRecord[] = [];
       await snapshotChildren(db, session, table, text(input, "id"), blueprint.include, records);

@@ -76,6 +76,7 @@ export interface CompiledRender {
 }
 
 export interface CompiledField {
+  document?: import("./field-definition.js").FieldDefinitionDocument;
   /** Canonical field-definition editor policy, projected unchanged to hosts. */
   authoring?: import("./field-definition.js").FieldDefinitionAuthoringMetadata;
   key: string;

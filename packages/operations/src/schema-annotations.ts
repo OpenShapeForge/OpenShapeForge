@@ -45,6 +45,14 @@ export const operationReferenceKeyword = {
     required: ["entity"],
     additionalProperties: false,
     properties: {
+      document: {
+        type: "object", required: ["content"], additionalProperties: false,
+        properties: {
+          content: { enum: ["file", "blocks"] },
+          mimeTypes: { type: "array", minItems: 1, items: { type: "string", pattern: "^[a-z0-9.+-]+/[a-z0-9.+-]+$" } },
+          maxBytes: { type: "integer", minimum: 1 }, documentType: { type: "string", minLength: 1 },
+        },
+      },
       entity: { type: "string", pattern: "^[A-Za-z][A-Za-z0-9._-]*$" },
       valueField: { type: "string", pattern: "^[A-Za-z_][A-Za-z0-9_]*$" },
       recordIdSourceField: { type: "string", pattern: "^[A-Za-z_][A-Za-z0-9_]*$" },

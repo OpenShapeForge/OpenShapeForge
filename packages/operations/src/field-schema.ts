@@ -135,6 +135,7 @@ function withFieldMetadata(
   if (field.relationship?.target) {
     schema["x-osf-reference"] = {
       entity: field.relationship.target,
+      ...(field.document ? { document: structuredClone(field.document) } : {}),
       valueField: "id",
       ...(field.relationship.constraints ? { constraints: structuredClone(field.relationship.constraints) } : {}),
     };

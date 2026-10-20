@@ -35,8 +35,101 @@ permissions:
   contents: read
 
 jobs:
-  gates:
-    name: Generate, typecheck, unit tests, notices
+  # The proof gates below used to run as the serial steps of one job, ~14
+  # minutes end to end. They are independent of each other, so they run as
+  # parallel jobs and the `gates` job further down reports their joint result
+  # under the name branch protection requires.
+  #
+  # Every job regenerates rather than downloading another job's output:
+  # `generate` takes ~30s, the output is ~60MB, and an upload/download pair
+  # would also make every job wait for a generate job to finish first.
+  typecheck:
+    name: Typecheck (${{ matrix.group }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Report every group, not only the first to fail.
+      fail-fast: false
+      matrix:
+        # Grouped so that each takes about as long as the others: api,
+        # examples and connectors are ~1 minute of tsc each, the rest seconds.
+        #
+        # typecheck:admin is the control-plane app (apps/admin). It is NOT
+        # covered by typecheck:web — separate Next project, separate tsconfig,
+        # separate source root — so without it the app would be built by the
+        # unit-tests job with no type gate of its own.
+        include:
+          - group: compiler, api, packages
+            run: >-
+              bun run typecheck:compiler && bun run typecheck:api &&
+              bun run --cwd packages/documents typecheck &&
+              bun run --cwd packages/versioning typecheck &&
+              bun run --cwd packages/operations typecheck &&
+              bun run --cwd packages/interface-web typecheck &&
+              bun run --cwd packages/plugin-runtime typecheck
+          - group: examples, apps
+            run: >-
+              bun run typecheck:examples && bun run typecheck:observability &&
+              bun run typecheck:web && bun run typecheck:admin &&
+              bun run typecheck:layout
+          - group: connectors
+            run: bun run typecheck:connectors
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.4
+
+      # --frozen-lockfile: fail if bun.lock is out of date rather than mutating it.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Every gate job reads what generate emits (apps/api/src/generated/**
+      # and the web contract), so each runs it first.
+      - name: Generate artifacts
+        run: bun run generate
+
+      - name: Typecheck
+        run: ${{ matrix.run }}
+
+  compiler-tests:
+    name: Compiler unit tests (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # See scripts/compiler-test-shard.mjs: together these are exactly
+        # `bun test packages/compiler`, and a new test file lands in `rest`.
+        shard: [index, plugins, rest]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.4
+
+      # --frozen-lockfile: fail if bun.lock is out of date rather than mutating it.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Every gate job reads what generate emits (apps/api/src/generated/**
+      # and the web contract), so each runs it first.
+      - name: Generate artifacts
+        run: bun run generate
+
+      # An assignment, so that a failing shard script fails the step; and never
+      # an empty list, on which bun test would run every test in the repository.
+      - name: Compiler unit tests
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          files=$(bun scripts/compiler-test-shard.mjs "$SHARD")
+          test -n "$files"
+          mapfile -t files <<<"$files"
+          bun test "${files[@]}"
+
+  unit-tests:
+    name: Build apps, unit tests
     runs-on: ubuntu-latest
     services:
       # Backs the shared rate-limit store tests (#161). Throwaway, no data, no
@@ -62,26 +155,10 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # generate is REQUIRED before the api typecheck/tests (produces
-      # apps/api/src/generated/**).
+      # Every gate job reads what generate emits (apps/api/src/generated/**
+      # and the web contract), so each runs it first.
       - name: Generate artifacts
         run: bun run generate
-
-      # typecheck:admin is the control-plane app (apps/admin). It is NOT covered
-      # by typecheck:web — separate Next project, separate tsconfig, separate
-      # source root — so without it the app would be built by the step below
-      # with no type gate of its own.
-      - name: Typecheck
-        run: >-
-          bun run typecheck:compiler && bun run typecheck:api &&
-          bun run typecheck:observability && bun run typecheck:web &&
-          bun run typecheck:admin && bun run typecheck:examples &&
-          bun run typecheck:connectors && bun run typecheck:layout &&
-          bun run --cwd packages/documents typecheck &&
-          bun run --cwd packages/versioning typecheck &&
-          bun run --cwd packages/operations typecheck &&
-          bun run --cwd packages/interface-web typecheck &&
-          bun run --cwd packages/plugin-runtime typecheck
 
       # The web app's CRUD pages are compiler output, so a compiler change can
       # break the build without touching a single file under apps/web. Building
@@ -100,9 +177,6 @@ jobs:
       # NEXT_PHASE=phase-production-build, and every page here is dynamic.
       - name: Build the admin app
         run: bun run build:admin
-
-      - name: Compiler unit tests
-        run: bun test packages/compiler
 
       - name: Foundation package unit tests
         run: >-
@@ -209,6 +283,25 @@ jobs:
           cd apps/api && bun test src/accounts/custom-roles-remove.test.ts
           && bun test src/accounts/custom-roles-unavailable.test.ts
 
+  checks:
+    name: Generated, authoring and notices checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.4
+
+      # --frozen-lockfile: fail if bun.lock is out of date rather than mutating it.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Every gate job reads what generate emits (apps/api/src/generated/**
+      # and the web contract), so each runs it first.
+      - name: Generate artifacts
+        run: bun run generate
+
       # Determinism + freshness gate: regenerates twice and fails on drift, so
       # it must run after (or independently of) the generate step above.
       - name: Check generated artifacts are fresh and deterministic
@@ -230,6 +323,30 @@ jobs:
       # enforce, so the two are checked against each other.
       - name: Check branch protection requires the jobs that exist
         run: bun run check:required-checks
+
+  # The required status check for every job above. Its name is the one the
+  # single serial job had, so the branch-protection ruleset is unchanged.
+  #
+  # `if: always()` is what makes this a gate: without it a failed dependency
+  # SKIPS this job, and GitHub counts a skipped required check as passed.
+  # check:required-checks refuses a required job with `needs:` and no
+  # `always()`. A cancelled or skipped dependency fails it too.
+  gates:
+    name: Generate, typecheck, unit tests, notices
+    if: always()
+    needs: [typecheck, compiler-tests, unit-tests, checks]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every gate job to have passed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          failed=$(jq -r '[to_entries[] | select(.value.result != "success")
+            | "\(.key): \(.value.result)"] | join(", ")' <<<"$RESULTS")
+          if [ -n "$failed" ]; then
+            echo "::error::gate jobs did not pass: $failed"
+            exit 1
+          fi
 
   keycloak-spi:
     name: Build Keycloak SPI (Maven)

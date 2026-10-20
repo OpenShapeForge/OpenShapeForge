@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 // SPDX-License-Identifier: BUSL-1.1
 import { copyBlueprintDocuments, snapshotBlueprintDocuments } from "./blueprint-documents.js";
 import { operationFailure } from "@openshapeforge/operations";
@@ -178,7 +179,16 @@ async function reset(db: OpenShapeForgeDatabase, session: DbSessionInput, table:
     if (source.version !== input.blueprintVersion) throw generatedCrudError("The blueprint has changed. Review its newest version first.", "VERSION_CONFLICT");
     // The canonical static executor checks the record version, edit lease and
     // confirmation in this same transaction before entering the handler.
-    const row = await updateGeneratedEntity(db, session, { table: table.name, id, values: { ...allowedValues(table, source.values_json), ...await copyBlueprintDocuments(db, session, (source.values_json.$documents ?? {}) as Parameters<typeof copyBlueprintDocuments>[2], {}, table) } });
+    const current = await getGeneratedEntity(db,session,{table:table.name,id});
+    if (!current) throw generatedCrudError("Record not found.", "NOT_FOUND");
+    const defaults = allowedValues(table,source.values_json);
+    for (const column of table.columns) {
+      if (!column.immutable || !Object.hasOwn(defaults,fieldNameForColumn(column))) continue;
+      const field=fieldNameForColumn(column);
+      if (!isDeepStrictEqual(defaults[field],current[column.name])) throw generatedCrudError("The blueprint changes an immutable definition; its value cannot be reset under a different contract.", "INVALID_DEFINITION");
+      delete defaults[field];
+    }
+    const row = await updateGeneratedEntity(db, session, { table: table.name, id, values: { ...defaults, ...await copyBlueprintDocuments(db, session, (source.values_json.$documents ?? {}) as Parameters<typeof copyBlueprintDocuments>[2], {}, table) } });
     if (!row) throw generatedCrudError("Record not found.", "NOT_FOUND");
     await sql`update platform.blueprint_copies set source_version = ${source.version} where tenant_id = ${session.tenantId}::uuid and entity_name = ${nameOf(table)} and record_id = ${id}::uuid`.execute(trx);
     return serializeEntityRow(table, row);

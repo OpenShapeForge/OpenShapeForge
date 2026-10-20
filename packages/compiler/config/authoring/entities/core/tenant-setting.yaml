@@ -56,74 +56,26 @@ fields:
     persisted:
       column: key
       storageClass: core
-  - key: valueType
+  - key: definition
+    osfType: fieldDefinition
     required: true
-    label:
-      en: Value type
-      nl: Waardetype
-    description:
-      en: Data shape used by the setting value.
-      nl: Datastructuur die door de instellingswaarde wordt gebruikt.
-    defaultValue: string
-    validation:
-      minLength: 1
-      maxLength: 20
-    options:
-      type: referentiedata
-      referentieGroep: TENANTSETTINGVALUETYPE
-    persisted:
-      column: value_type
-      storageClass: core
-    osfType: referenceDataCode
-  - key: valueText
-    osfType: string
-    required: false
-    label:
-      en: Text value
-      nl: Tekstwaarde
-    description:
-      en: Plain string value for text-based settings.
-      nl: Eenvoudige tekenreekswaarde voor tekstinstellingen.
-    validation:
-      maxLength: 4000
-    persisted:
-      column: value_text
-      storageClass: core
-    visibility:
-      conditions:
-        - field: valueType
-          operator: eq
-          value: string
-  - key: valueJson
-    osfType: object
-    required: false
-    label:
-      en: JSON value
-      nl: JSON-waarde
-    description:
-      en: Structured JSON value for object-based settings.
-      nl: Gestructureerde JSON-waarde voor objectgebaseerde instellingen.
-    persisted:
-      column: value_json
-      storageClass: core
-    visibility:
-      conditions:
-        - field: valueType
-          operator: eq
-          value: json
-  - key: isSecret
-    osfType: boolean
-    required: true
-    label:
-      en: Secret
-      nl: Geheim
-    description:
-      en: Whether the setting should be stored and handled as a secret.
-      nl: Of de instelling als geheim moet worden opgeslagen en verwerkt.
-    defaultValue: false
-    persisted:
-      column: is_secret
-      storageClass: core
+    immutable: true
+    label: { en: Definition, nl: Definitie }
+    persisted: { column: definition, storageClass: core }
+  - key: value
+    osfType: typedValue
+    typedBy:
+      definitionField: definition
+      documentField: documentValue
+      encrypted: true
+    label: { en: Value, nl: Waarde }
+    persisted: { column: value, storageClass: core }
+  - key: documentValue
+    osfType: Document
+    readOnly: true
+    label: { en: Document, nl: Document }
+    persisted: { column: document_value_id, storageClass: core }
+    relationship: { ownership: reference, inverse: false }
   - key: description
     required: false
     label:
@@ -151,91 +103,31 @@ interfaces:
   web:
     views:
       collection:
-        route:
-          en: /tenant-settings
-          nl: /tenant-settings
+        route: { en: /tenant-settings, nl: /tenant-settings }
         columns:
-          - key: namespace
-            sortable: true
-          - key: key
-            sortable: true
-          - key: valueType
-            sortable: true
-          - key: isSecret
-            sortable: true
-        title:
-          en: Tenant settings
-          nl: Tenantinstellingen
-        defaultSort:
-          key: namespace
-          direction: asc
+          - { key: key, sortable: true }
+          - { key: description }
+        title: { en: Tenant settings, nl: Tenantinstellingen }
+        defaultSort: { key: key, direction: asc }
       record:
         routes:
-          read:
-            en: /tenant-settings/:id
-            nl: /tenant-settings/:id
-          create:
-            en: /tenant-settings/create
-            nl: /tenant-settings/aanmaken
-        title: "{{namespace}}.{{key}}"
-        subtitle: "{{valueType}}"
-        badges:
-          - isSecret
-        actions: []
+          read: { en: /tenant-settings/:id, nl: /tenant-settings/:id }
+          create: { en: /tenant-settings/create, nl: /tenant-settings/aanmaken }
+        title: "{{key}}"
+        subtitle: ""
+        badges: []
         layout:
           tabs:
             - id: setting-details
-              title:
-                en: Setting details
-                nl: Instellingsgegevens
-              fields:
-                - namespace
-                - key
-                - valueType
-                - isSecret
-                - description
+              title: { en: Setting, nl: Instelling }
+              fields: [value]
         modes:
           create:
-            title:
-              en: Create tenant setting
-              nl: Tenantinstelling aanmaken
             groups:
-              - title:
-                  en: Setting details
-                  nl: Instellingsgegevens
-                fields:
-                  - namespace
-                  - key
-                  - valueType
-                  - valueText
-                  - valueJson
-                  - isSecret
-                  - description
+              - title: { en: Setting, nl: Instelling }
+                fields: [namespace, key, definition, value, description]
           update:
-            title:
-              en: Edit tenant setting
-              nl: Tenantinstelling bewerken
-    fields:
-      valueType:
-        render:
-          component: ReferenceSelect
-          props:
-            referentieGroep: TENANTSETTINGVALUETYPE
-            clearable: false
-      valueText:
-        render:
-          component: Input
-          props:
-            type: password
-            autoComplete: off
-      valueJson:
-        render:
-          component: JsonFieldEditor
-          props:
-            rows: 10
-      description:
-        render:
-          component: Textarea
-          props:
-            rows: 3
-            maxLength: 500
+            title: { en: Edit tenant setting, nl: Tenantinstelling bewerken }
+            groups:
+              - title: { en: Setting, nl: Instelling }
+                fields: [value]

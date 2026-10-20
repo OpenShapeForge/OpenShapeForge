@@ -16,7 +16,7 @@ import {
 import { fieldNameForColumn, tableColumnMap } from "./columns.js";
 import { normalizeEntityStorageRow } from "./serialize-result.js";
 import { entityValueCarriers, entityValuePhysicalColumns, projectEntityValueRow } from "./entity-value-io.js";
-import { assertStoredTypedValuesSupported } from "./typed-values.js";
+import { assertStoredTypedValuesSupported, projectTypedValues } from "./typed-values.js";
 import { projectVisibleFieldBindings } from "./field-binding-policy.js";
 import { generatedEntityValues } from "../../modules/entity-value-registry.js";
 import type {
@@ -198,7 +198,7 @@ export function projectGeneratedEntityRow(
   row: GeneratedEntityRow,
   entityValues = generatedEntityValues,
 ): GeneratedEntityRow {
-  const normalized = normalizeEntityStorageRow(table, projectEntityValueRow(table, row, entityValues));
+  const normalized = projectTypedValues(table, normalizeEntityStorageRow(table, projectEntityValueRow(table, row, entityValues)));
   const classified = redactRow(
     normalized,
     table.columns,
@@ -224,8 +224,8 @@ export function assertElicitedQueryAllowed(
   input: Pick<ListPageInput, "filter" | "sort">,
   exactFilterFields = false,
 ): void {
-  const column = elicitedOutputColumn(table);
-  if (!column) return;
+  const columns = [elicitedOutputColumn(table), ...table.columns.filter(column => column.typedBy?.encrypted)].filter((column): column is GeneratedCrudColumn => !!column);
+  for (const column of columns) {
   const field = fieldNameForColumn(column);
   const filtered = Object.keys(input.filter ?? {}).some(
     (candidate) => candidate === field || (!exactFilterFields && candidate === `${field}In`),
@@ -235,6 +235,7 @@ export function assertElicitedQueryAllowed(
       "Filtering or sorting by an elicited-output field is not permitted.",
       "FORBIDDEN",
     );
+  }
   }
 }
 

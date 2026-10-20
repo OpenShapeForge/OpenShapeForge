@@ -299,6 +299,12 @@ export function normalizeEntityFields(
       ) {
         throw new Error(`${path}: definitionField must name a required persisted single fieldDefinition field.`);
       }
+      if (field.typedBy.documentField) {
+        const carrier = entity.fields.find(candidate => candidate.key === field.typedBy!.documentField);
+        if (!carrier || carrier.osfType !== "Document" || !carrier.persisted || carrier.required || !carrier.readOnly) {
+          throw new Error(`${path}: documentField must name an optional read-only persisted Document reference.`);
+        }
+      }
     } else if (field.osfType === "typedValue") {
       throw new Error(`${path}: typedValue requires typedBy definitionField metadata.`);
     }

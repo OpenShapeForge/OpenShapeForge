@@ -51,5 +51,46 @@ drop trigger if exists ${name} on erp.document_variants;
 create trigger ${name} after insert or update of document_id on erp.document_variants for each row execute function ${trigger}('variant');
 `);
   }
+  for (const table of manifest.tables) for (const value of table.columns) {
+    const binding = value.typedBy;
+    if (!binding?.documentColumn) continue;
+    const suffix=createHash("sha256").update(`${table.schema}.${table.name}.${value.name}:typed`).digest("hex").slice(0,16);
+    const owner=`${id(table.schema)}.${id(table.name)}`, col=id(binding.documentColumn), def=id(binding.definitionColumn);
+    const fn=`app.${id(`typed_document_${suffix}`)}`, guard=`app.${id(`typed_document_guard_${suffix}`)}`, name=id(`typed_document_${suffix}`);
+    statements.push(`
+create or replace function ${fn}(doc uuid, tenant uuid, definition jsonb) returns void language plpgsql as $policy$
+declare p jsonb := definition->'document';
+begin
+ if doc is null then return; end if;
+ if definition->>'osfType' is distinct from 'Document' or p->>'content' not in ('file','blocks') then raise exception 'Invalid Document field definition' using errcode='23514'; end if;
+ perform 1 from erp.documents where id=doc and tenant_id=tenant for update;
+ if not exists(select 1 from erp.documents d left join erp.document_versions v on v.id=d.current_version_id and v.tenant_id=d.tenant_id
+ where d.id=doc and d.tenant_id=tenant
+ and (p->>'documentType' is null or d.document_type=p->>'documentType')
+ and case when p->>'content'='blocks' then v.artifact_id is null
+ else v.artifact_id is not null
+ and not exists(select 1 from erp.document_variants b where b.document_id=d.id and b.tenant_id=d.tenant_id)
+ and (p->'mimeTypes' is null or (p->'mimeTypes') ? v.mime_type)
+ and (p->>'maxBytes' is null or v.byte_size <= (p->>'maxBytes')::bigint) end) then
+ raise exception 'Document does not satisfy the field content policy' using errcode='23514'; end if;
+end $policy$;
+create or replace function ${guard}() returns trigger language plpgsql as $guard$
+declare r record;
+begin
+ if TG_ARGV[0]='owner' then perform ${fn}(NEW.${col},NEW.tenant_id,NEW.${def});
+ elsif TG_ARGV[0]='document' then
+  for r in select * from ${owner} where ${col}=NEW.id and tenant_id=NEW.tenant_id loop perform ${fn}(NEW.id,NEW.tenant_id,r.${def}); end loop;
+ else
+  for r in select * from ${owner} where ${col}=NEW.document_id and tenant_id=NEW.tenant_id loop perform ${fn}(NEW.document_id,NEW.tenant_id,r.${def}); end loop;
+ end if; return NEW;
+end $guard$;
+drop trigger if exists ${name} on ${owner};
+create trigger ${name} after insert or update of ${col},${def} on ${owner} for each row execute function ${guard}('owner');
+drop trigger if exists ${name} on erp.documents;
+create trigger ${name} after update of current_version_id on erp.documents for each row execute function ${guard}('document');
+drop trigger if exists ${name} on erp.document_variants;
+create trigger ${name} after insert or update of document_id on erp.document_variants for each row execute function ${guard}('variant');
+`);
+  }
   return statements.length ? statements.join("\n") : undefined;
 }

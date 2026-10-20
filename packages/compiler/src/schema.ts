@@ -333,6 +333,10 @@ export type ColumnDefinition = {
   typedBy?: {
     definitionField: string;
     definitionColumn: string;
+    encrypted?: boolean;
+    documentField?: string;
+    documentColumn?: string;
+
   };
   /**
    * The server-owned map of field bindings for this table (one per bindable

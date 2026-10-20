@@ -53,6 +53,10 @@ export type GeneratedCrudColumn = {
   typedBy?: {
     definitionField: string;
     definitionColumn: string;
+    encrypted?: boolean;
+    documentField?: string;
+    documentColumn?: string;
+
   };
   /** The server-owned bindings map of this table, and the fields it may carry a binding for. */
   fieldBindings?: {

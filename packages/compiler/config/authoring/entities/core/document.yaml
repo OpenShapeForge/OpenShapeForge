@@ -549,8 +549,8 @@ operations:
   materialize:
     name: { en: Preview document, nl: Document bekijken }
     description:
-      en: Resolve this document's editable content for one channel and language, from its own variants and blocks, its stored local values and the linked template version's variable definitions, without changing any stored content.
-      nl: Stel de bewerkbare inhoud van dit document samen voor één kanaal en taal, uit de eigen varianten en blokken, de opgeslagen lokale waarden en de variabeledefinities van de gekoppelde templateversie, zonder opgeslagen inhoud te wijzigen.
+      en: Resolve this document's editable content for one channel and language, from its own variants and blocks, its stored local values and, when linked, the template version's variable definitions, without changing any stored content.
+      nl: Stel de bewerkbare inhoud van dit document samen voor één kanaal en taal, uit de eigen varianten en blokken, de opgeslagen lokale waarden en, indien gekoppeld, de variabeledefinities van de templateversie, zonder opgeslagen inhoud te wijzigen.
     implementation: { type: plugin, plugin: documents, handler: materializeDocument }
     target: { scope: record, inputField: id }
     input:
@@ -583,7 +583,7 @@ operations:
     errors:
       - { status: 403, code: FORBIDDEN, description: The document or its template version is not accessible. }
       - { status: 404, code: NOT_FOUND, description: The document does not exist. }
-      - { status: 409, code: INVALID_STATE, description: The document has no linked template version. }
+      - { status: 409, code: INVALID_STATE, description: Local document parameters require a linked template definition. }
     auth: { mode: session, roles: [CaseFile.All.Read, CaseFile.All.ReadWrite, Organization.All.Read, Organization.All.ReadWrite] }
     tenancy: { mode: required }
     effects: { data: read, external: none }

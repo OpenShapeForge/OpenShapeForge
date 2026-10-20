@@ -86,3 +86,11 @@ test("rendering never executes patterns or remote schema references supplied in 
   const reference = await change(dangerous, value => { value.definitions.Notice.materializationSchema.properties.value.$ref = "https://example.invalid/schema"; });
   await expect(renderTemplateSnapshot(reference, { tenantId })).rejects.toThrow();
 });
+
+test("renders standalone document snapshots with their own checksum domain", async () => {
+  const {compositionHash: _, templateVersionId: __, ...content} = await snapshot("document");
+  const document = {...content, documentId: "document", documentVariantId: "variant", compositionHashVersion: "osf-document-content-v1"};
+  const sealed = {...document, compositionHash: await hashCanonicalJson(document, "osf-document-content-v1")};
+  expect((await renderTemplateSnapshot(sealed, {tenantId})).body).toBe("First\n\nSecond");
+  await expect(renderTemplateSnapshot({...sealed, documentId: "changed"}, {tenantId})).rejects.toThrow();
+});

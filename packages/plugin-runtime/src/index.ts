@@ -386,17 +386,25 @@ export type PluginDatabase = {
   ): Promise<T>;
 };
 
-/** One credential resolved by core under the live verified tenant session. */
+/** Core-minted opaque permission; never construct or widen this grant. */
+export type RuntimeConnectionGrant = { readonly __brand: unique symbol };
+/** Resolve by a known Connection or an Adapter's available Connection. */
 export type RuntimeConnectionSelector =
   | { connectionId: string; adapterKey?: never }
   | { adapterKey: string; connectionId?: never };
+/** Plaintext for trusted server code only. Never log or return these values. */
+export type RuntimeConnectionValues = {
+  connectionId: string; connectionKey: string; adapterKey: string;
+  transport: string; connectionScope: "tenant" | "user";
+  ownerUserId: string | null;
+  /** Includes decrypted configuration and any live OAuth access/refresh tokens. */
+  values: Readonly<Record<string, string>>;
+  /** Adapter-classified configuration keys; the complement is NOT safe to log. */
+  secretKeys: readonly string[];
+  egressGrant: RuntimeConnectionGrant;
+};
 export type RuntimeConnectionResolution =
-  | { ok: true; connection: {
-      connectionId: string; connectionKey: string; adapterKey: string;
-      transport: string; connectionScope: "tenant" | "user";
-      ownerUserId: string | null; values: Readonly<Record<string, string>>;
-      secretKeys: readonly string[];
-    } }
+  | { ok: true; connection: RuntimeConnectionValues }
   | { ok: false; code: "NOT_FOUND" | "FORBIDDEN" | "CONNECTION_REQUIRED" |
       "SECRET_KEYRING_MISSING" | "REAUTHORIZATION_REQUIRED" | "TOKEN_REFRESH_FAILED";
       message: string };

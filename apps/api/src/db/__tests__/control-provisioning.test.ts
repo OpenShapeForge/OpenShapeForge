@@ -141,6 +141,8 @@ async function migratedScratchDb<T>(fn: (db: Kysely<DB>, name: string) => Promis
   return withScratchDb(async (name) =>
     withDb(scratchUrl(name), async (db) => {
       await db.connection().execute((conn) => runMigrationChain(conn));
+      // These assertions concern provisioning, not the preceding core seed audit.
+      await sql`delete from platform.system_bypass_audit`.execute(db);
       return fn(db, name);
     }),
   );

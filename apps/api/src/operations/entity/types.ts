@@ -31,6 +31,7 @@ export type GeneratedCrudColumn = {
   primaryKey: boolean;
   generated: string | null;
   sourceField?: string;
+  document?: { content: "file" | "blocks"; mimeTypes?: string[]; maxBytes?: number; documentType?: string };
   fieldPolicy?: import("@openshapeforge/operations").FieldValuePolicy;
   classification?: "confidential" | "pii" | "bsn";
   immutable?: boolean;

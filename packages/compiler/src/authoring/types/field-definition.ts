@@ -250,7 +250,17 @@ export interface FieldDefinitionAuthoringMetadata {
  * transport schemas as projections of this type instead of copying a reduced
  * field shape into each surface.
  */
+/** Content policy of a Document reference, shared by every interface and write path. */
+export interface FieldDefinitionDocument {
+  content: "file" | "blocks";
+  mimeTypes?: string[];
+  maxBytes?: number;
+  /** Document classification used when creating content through this field. */
+  documentType?: string;
+}
+
 export interface FieldDefinition {
+  document?: FieldDefinitionDocument;
   key: string;
   /**
    * The one type axis. A base type (`string`, `integer`, `number`, `boolean`,

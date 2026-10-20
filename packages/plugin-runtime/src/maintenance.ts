@@ -17,6 +17,8 @@ export type MaintenanceContext = {
     job?: Readonly<{ name: string; appliedBy: string }>;
   }>;
   readonly store: MaintenanceStore;
+  /** Managed file staging for an owned seed that declares Document.create. */
+  readonly artifacts?: { stage(input: import("./artifacts.js").RuntimeArtifactStageInput): Promise<import("./artifacts.js").RuntimeArtifactDescriptor> };
   readonly operations: {
     execute(operation: string, input: Record<string, unknown>, options?: { actingRelationId?: string }): Promise<RuntimeOperationExecutionResult>;
   };

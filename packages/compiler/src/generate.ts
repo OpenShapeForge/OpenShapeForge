@@ -848,6 +848,7 @@ function renderManifestJson(
       primaryKey: column.primaryKey === true,
       generated: column.generated ?? null,
       ...(column.sourceField === undefined ? {} : { sourceField: column.sourceField }),
+      ...(column.document ? { document: column.document } : {}),
       ...(column.fieldPolicy === undefined ? {} : { fieldPolicy: column.fieldPolicy }),
       ...(column.classification === undefined ? {} : { classification: column.classification }),
       // Authored `immutable: true` — the runtime's writability rule refuses the

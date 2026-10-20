@@ -817,3 +817,12 @@ are refused. The runtime currently does not authorize referenced target
 records as variable sources; references therefore need ordinary reference
 fields instead. A hidden destination also withholds its authored binding,
 so resolving a live value cannot undo the field's normal redaction.
+
+
+### Document-valued properties
+
+A single `osfType: Document` reference can declare `document: { content: file, mimeTypes: [image/png], maxBytes: 5242880, documentType: attachment }`, or `document: { content: blocks, documentType: note }`. `documentType` is the destination tenant's classification code. File policies accept explicit MIME types and a positive byte limit; file restrictions on blocks content fail compilation. The same policy reaches Web and the canonical write path. Generated database guards preserve it if a referenced Document subsequently changes its active file or gains a content variant.
+
+Web reuses Document upload, storage and the variant block editor. Uploading creates an ordinary Document; saving the referring form assigns its identity. Cancelling the referring form leaves its previous reference intact; the newly uploaded Document remains in the document library. Blocks retain their own explicit save operations.
+
+A blueprint may include policy-bearing Document properties. Publication captures portable metadata, file bytes and local block content, excluding source identity and permissions. Copy/reset creates destination-tenant Documents and stages/binds new artifacts through canonical Operations in the destination transaction. The source tenant's Document/artifact identifiers are never assigned to a receiving tenant. Classification codes and block definitions must be available in the destination. Existing scalar-only blueprints are unchanged.

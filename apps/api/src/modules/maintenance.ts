@@ -446,6 +446,11 @@ async function lifecycle<T>(
     }),
     store,
     operations: Object.freeze({ execute }),
+    ...(allowed.has("Document.create") ? { artifacts: Object.freeze({ stage: (input: import("@openshapeforge/plugin-runtime").RuntimeArtifactStageInput) => tracked(() => outsideInvocation(() =>
+      withModuleOperationSession(owner.platform, { ...session, roles: [...session.roles] }, async verified => {
+        if (!verified) throw new Error("Maintenance artifact session is unavailable.");
+        return owner.platform.artifacts.stage(verified, input);
+      }))) }) } : {}),
   });
   try {
     const result = await scope.run(token, () => work(context));

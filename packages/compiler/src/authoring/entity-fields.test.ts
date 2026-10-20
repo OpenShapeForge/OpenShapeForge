@@ -304,3 +304,16 @@ describe("derived inverse collection labels", () => {
     expect(appointments?.label).toEqual({ en: "Appointments", nl: "Afspraken" });
   });
 });
+
+test("Document content rules are bounded and only apply to one Document reference", () => {
+  const document = entity("Document", []);
+  const types = deriveEntityOsfTypes([document], {});
+  const policy = { content: "file" as const, mimeTypes: ["image/png"], maxBytes: 100 };
+  expect(normalizeEntityFields(entity("Owner", [{key:"logo",osfType:"Document",document:policy}]),types).fields[0]!.document).toEqual(policy);
+  for (const invalid of [
+    {key:"logo",osfType:"string",document:policy},
+    {key:"logo",osfType:"Document",document:{content:"blocks",mimeTypes:["image/png"]}},
+    {key:"logo",osfType:"Document",document:{content:"file",mimeTypes:["image/*"]}},
+    {key:"logo",osfType:"Document",document:{content:"file",maxBytes:0}},
+  ]) expect(()=>normalizeEntityFields(entity("Owner",[invalid as Field]),types)).toThrow();
+});

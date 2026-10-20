@@ -41,6 +41,10 @@ import type {
   ModuleRuntimeContextContract,
   ModuleSeedContract,
   RuntimeOperationDefinition,
+  RuntimeConnectionSelector,
+  RuntimeConnectionValues,
+  RuntimeConnectionResolution,
+  RuntimeConnectionGrant,
   RuntimeOperationExecutionOptions,
   RuntimeOperationExecutionResult,
   RuntimeOperationProvider,
@@ -233,9 +237,7 @@ export type ModuleEgressFailureKind = "policy_blocked" | "timeout";
  * identifier from tool input, which would be untrusted anyway. `connectionId`
  * is for a module that already holds one from its own stored state.
  */
-export type ModuleConnectionSelector =
-  | { connectionId: string; adapterKey?: never }
-  | { adapterKey: string; connectionId?: never };
+export type ModuleConnectionSelector = RuntimeConnectionSelector;
 
 /**
  * Permission to open outbound connections, minted by core alongside a resolved
@@ -243,7 +245,7 @@ export type ModuleConnectionSelector =
  * cannot widen it, and cannot construct one. It is handed straight back to
  * `platform.egress.connect`, which looks the real policy up again.
  */
-export type ModuleSocketGrant = { readonly __brand: unique symbol };
+export type ModuleSocketGrant = RuntimeConnectionGrant;
 
 export type ModuleSocketRequest = {
   host: string;
@@ -259,46 +261,8 @@ export type ModuleSocketRequest = {
 };
 
 /** One Connection's values, opened for the module core decided may see them. */
-export type ModuleConnectionValues = {
-  connectionId: string;
-  connectionKey: string;
-  adapterKey: string;
-  /** The Adapter's declared transport, e.g. "rest" or "socket". */
-  transport: string;
-  /** Whether this Adapter's Connections are per employee or per organization. */
-  connectionScope: "tenant" | "user";
-  /** The employee this Connection belongs to; null for an organization one. */
-  ownerUserId: string | null;
-  /**
-   * Every configuration value, decrypted: the plain ones and the ones stored
-   * as ciphertext, keyed by the Adapter's configuration field keys. Any OAuth
-   * tokens stored against the Connection appear as `accessToken` /
-   * `refreshToken` — a socket koppeling authenticates with the token the same
-   * way an HTTP one puts it in a header.
-   */
-  values: Readonly<Record<string, string>>;
-  /** Which of those keys the Adapter classifies as secret, for a module's own logging. */
-  secretKeys: readonly string[];
-  /** Permission to connect where this Adapter says it may. */
-  egressGrant: ModuleSocketGrant;
-};
-
-export type ModuleConnectionResolution =
-  | { ok: true; connection: ModuleConnectionValues }
-  | {
-      ok: false;
-      code:
-        | "NOT_FOUND"
-        | "FORBIDDEN"
-        | "CONNECTION_REQUIRED"
-        | "SECRET_KEYRING_MISSING"
-        /** The stored OAuth sign-in expired and could not be renewed: the person signs in again. */
-        | "REAUTHORIZATION_REQUIRED"
-        /** The provider's token endpoint or the Adapter's OAuth configuration failed; nothing was handed over. */
-        | "TOKEN_REFRESH_FAILED";
-      /** A sentence for the person who has to fix it. */
-      message: string;
-    };
+export type ModuleConnectionValues = RuntimeConnectionValues;
+export type ModuleConnectionResolution = RuntimeConnectionResolution;
 
 export type ModulePlatformServices = {
   readonly webhookSecrets?: RuntimeWebhookSecretServices<TrustedSessionContext>;

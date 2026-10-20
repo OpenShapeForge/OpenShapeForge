@@ -96,7 +96,7 @@ export interface CompiledField {
   sortable?: boolean;
   entityValue?: { definitionField: string; parameterBindings?: boolean };
   /** The sibling field whose stored FieldDefinition types this value. */
-  typedBy?: { definitionField: string };
+  typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean };
   allowedDefinitions?: string[];
   childAuthorization?: "owner";
   childLock?: string;

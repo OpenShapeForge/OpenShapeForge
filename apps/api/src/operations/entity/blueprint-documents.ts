@@ -10,7 +10,7 @@ import type { GeneratedCrudTable } from "./types.js";
 
 export async function snapshotBlueprintDocuments(db: OpenShapeForgeDatabase, session: DbSessionInput, table: GeneratedCrudTable, values: Record<string, unknown>) {
  const snapshots: Record<string, PortableDocument> = {};
- const columns = table.columns.filter(column => column.document && table.source?.blueprint?.fields.includes(column.sourceField!));
+ const columns = table.columns.filter(column => (column.document || table.columns.some(value => value.typedBy?.documentColumn === column.name)) && table.source?.blueprint?.fields.includes(column.sourceField!));
  if (!columns.length) return snapshots;
  return withBlueprintDocumentServices(db, session, async (services, live) => {
   const operations=await services.operations.list(live);
@@ -58,7 +58,12 @@ export async function snapshotBlueprintDocuments(db: OpenShapeForgeDatabase, ses
   return snapshots;
  });
 }
-export async function copyBlueprintDocuments(db: OpenShapeForgeDatabase, session: DbSessionInput, snapshots: Record<string,PortableDocument>, overlay: Record<string,unknown>) {
+export async function copyBlueprintDocuments(db: OpenShapeForgeDatabase, session: DbSessionInput, snapshots: Record<string,PortableDocument>, overlay: Record<string,unknown>, table?: GeneratedCrudTable) {
  if(!Object.keys(snapshots).some(field=>!Object.hasOwn(overlay,field))) return {};
- return withBlueprintDocumentServices(db,session,(services,live)=>copyPortableDocuments(services,live,snapshots,overlay));
+ return withBlueprintDocumentServices(db,session,async(services,live)=>{
+  const remapped=Object.fromEntries(Object.entries(snapshots).map(([field,snapshot])=>[table?.columns.find(column=>column.typedBy?.documentField===field)?.sourceField ?? field,snapshot]));
+  // Null published defaults do not override their own portable content.
+  const explicit=Object.fromEntries(Object.entries(overlay).filter(([,value])=>value!=null));
+  return copyPortableDocuments(services,live,remapped,explicit);
+ });
 }

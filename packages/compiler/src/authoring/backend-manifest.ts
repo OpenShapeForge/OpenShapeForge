@@ -1413,7 +1413,13 @@ export function compileAuthoringBackendManifest(
           `[${candidate.contract.entity.name}] ${field.key}: typedBy requires a jsonb value column and a jsonb definition column.`,
         );
       }
-      value.typedBy = { definitionField: field.typedBy.definitionField, definitionColumn: definition.name };
+      const document = field.typedBy.documentField ? columnsByField.get(field.typedBy.documentField) : undefined;
+      if (field.typedBy.documentField && (!document || document.type !== "uuid")) throw new Error(`Invalid typed-value Document carrier: ${field.key}`);
+      value.typedBy = {
+        definitionField: field.typedBy.definitionField, definitionColumn: definition.name,
+        ...(field.typedBy.encrypted ? { encrypted: true } : {}),
+        ...(document ? { documentField: field.typedBy.documentField, documentColumn: document.name } : {}),
+      };
     }
 
     // One server-owned bindings map per bindable entity: the fields that

@@ -58,7 +58,7 @@ import { assertPublishableRelatedMutationInTransaction } from "./derived-executi
 import { assertHardDeleteAllowedInTransaction } from "./deletion-guards.js";
 import { assertAdmittedBeforeEffects } from "../execution-policy.js";
 import { assertCallerTopLevelFields, prepareProtectedFieldWrites } from "./field-policy.js";
-import { assertTypedValuesValid } from "./typed-values.js";
+import { prepareTypedValueWrite } from "./typed-values.js";
 import { isDeepStrictEqual } from "node:util";
 
 async function fetchGeneratedRowInTransaction(
@@ -276,10 +276,11 @@ async function insertGeneratedRowInTransaction(
 ): Promise<GeneratedEntityRow> {
   const defaulted = await applyDefaultTemplates(trx, session, table, values, entityValues.tables);
   const identified = prepareProtectedFieldWrites(table, session, defaulted, "create", undefined, false);
-  const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, identified, "create", undefined, entityValues);
+  const entityPrepared = await prepareEntityValueWriteInTransaction(trx, session, table, identified, "create", undefined, entityValues);
+  const prepared = await prepareTypedValueWrite(trx, session, table, entityPrepared);
   // A value typed by a stored FieldDefinition is checked against it here, so
   // the pair holds however the write arrived.
-  assertTypedValuesValid(table, fieldValues(prepared), undefined);
+
   await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
   await assertPublishableRelatedMutationInTransaction(trx, session, table, {
     kind: "create",
@@ -487,10 +488,11 @@ async function applyGeneratedRowUpdate(
       : sql``;
 
     const protectedValues = prepareProtectedFieldWrites(table, session, values, "update", current ?? undefined, caller, trustedFields);
-    const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, protectedValues, "update", current ?? undefined, entityValues);
+    const entityPrepared = await prepareEntityValueWriteInTransaction(trx, session, table, protectedValues, "update", current ?? undefined, entityValues);
+    const prepared = await prepareTypedValueWrite(trx, session, table, entityPrepared, current ?? undefined);
     // Either half of a typed-value pair may be the one that changes; the row
     // under the lock supplies the other.
-    assertTypedValuesValid(table, fieldValues(prepared), current ?? undefined);
+
     await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
     if (current) {
       await assertPublishableRelatedMutationInTransaction(trx, session, table, {

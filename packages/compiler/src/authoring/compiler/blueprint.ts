@@ -23,12 +23,15 @@ export function buildBlueprint(
     const column = columns.find((entry) => entry.field === key);
     const normalized = (value: string) => value.replaceAll("_", "").toLowerCase();
     const protectedName = (value: string) => RESERVED.has(normalized(value)) || /password|secret|token|credential/i.test(value);
+    const typed = field?.typedBy !== undefined;
+    const definition = field?.osfType === "fieldDefinition" && fields.some(value => value.typedBy?.definitionField === key);
+    const documentCarrier = fields.some(value => value.typedBy?.documentField === key) && field?.osfType === "Document";
     const row = entity.authorization?.rowAccess;
     const protectedColumn = column && [row?.owner?.column, row?.group?.column].includes(column.column);
     if (!field || !column || protectedName(key) || protectedName(column.column) ||
         protectedColumn || row?.recordPermissions?.field === key ||
-        field.cardinality !== "single" || field.baseType === "object" || (column.type === "uuid" && !field.document) ||
-        (field.relationship && !field.document) || field.localized || field.computed || field.readOnly || field.immutable ||
+        field.cardinality !== "single" || (field.baseType === "object" && !typed && !definition) || (column.type === "uuid" && !field.document && !documentCarrier) ||
+        (field.relationship && !field.document && !documentCarrier) || field.localized || field.computed || (field.readOnly && !documentCarrier) || (field.immutable && !definition) ||
         (field.osfType && /password|secret|token|credential/i.test(field.osfType)) ||
         field.writtenBy?.length || field.authorization || field.permissions ||
         (field.classification && field.classification.sensitivity !== "public")) {

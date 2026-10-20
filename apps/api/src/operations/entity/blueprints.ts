@@ -37,7 +37,7 @@ function text(input: Record<string, unknown>, key: string): string {
   return value;
 }
 function allowedValues(table: GeneratedCrudTable, values: Record<string, unknown>) {
-  return Object.fromEntries(policy(table).fields.map(field => [field, values[field] ?? null]));
+  return Object.fromEntries(policy(table).fields.filter(field => !table.columns.some(value => value.typedBy?.documentField === field)).map(field => [field, values[field] ?? null]));
 }
 async function readPublished(db: OpenShapeForgeDatabase, session: DbSessionInput, table: GeneratedCrudTable, blueprintId: string | null, search = "", limit = 51, offset = 0): Promise<Published[]> {
   policy(table);
@@ -103,7 +103,7 @@ export async function createFromBlueprint(db: OpenShapeForgeDatabase, session: D
   return withDbSession(db, session, async trx => {
     const source = (await readPublished(db, session, table, blueprintId))[0];
     if (!source) throw generatedCrudError("Blueprint is unavailable.", "NOT_FOUND");
-    const documents = await copyBlueprintDocuments(db, session, (source.values_json.$documents ?? {}) as Parameters<typeof copyBlueprintDocuments>[2], values);
+    const documents = await copyBlueprintDocuments(db, session, (source.values_json.$documents ?? {}) as Parameters<typeof copyBlueprintDocuments>[2], values, table);
     const merged = { ...allowedValues(table, source.values_json), ...documents, ...values };
     for (const column of table.columns) {
       const field = column.sourceField;
@@ -178,7 +178,7 @@ async function reset(db: OpenShapeForgeDatabase, session: DbSessionInput, table:
     if (source.version !== input.blueprintVersion) throw generatedCrudError("The blueprint has changed. Review its newest version first.", "VERSION_CONFLICT");
     // The canonical static executor checks the record version, edit lease and
     // confirmation in this same transaction before entering the handler.
-    const row = await updateGeneratedEntity(db, session, { table: table.name, id, values: { ...allowedValues(table, source.values_json), ...await copyBlueprintDocuments(db, session, (source.values_json.$documents ?? {}) as Parameters<typeof copyBlueprintDocuments>[2], {}) } });
+    const row = await updateGeneratedEntity(db, session, { table: table.name, id, values: { ...allowedValues(table, source.values_json), ...await copyBlueprintDocuments(db, session, (source.values_json.$documents ?? {}) as Parameters<typeof copyBlueprintDocuments>[2], {}, table) } });
     if (!row) throw generatedCrudError("Record not found.", "NOT_FOUND");
     await sql`update platform.blueprint_copies set source_version = ${source.version} where tenant_id = ${session.tenantId}::uuid and entity_name = ${nameOf(table)} and record_id = ${id}::uuid`.execute(trx);
     return serializeEntityRow(table, row);
@@ -204,6 +204,15 @@ async function publish(db: OpenShapeForgeDatabase, session: DbSessionInput, tabl
     const last = (await sql<{ version: number; values_json: Record<string, unknown>; source_record_id: string }>`select version, values_json, source_record_id from platform.blueprint_versions where tenant_id = ${session.tenantId}::uuid and entity_name = ${nameOf(table)} and blueprint_id = ${blueprintId} order by version desc limit 1`.execute(trx)).rows[0];
     if (last && last.source_record_id !== input.id) throw generatedCrudError("This blueprint identifier belongs to another record.", "BAD_USER_INPUT");
     const values = allowedValues(table, fields);
+    for (const column of table.columns) {
+      if (!column.typedBy) continue;
+      const definition = fields[column.typedBy.definitionField] as Record<string,unknown> | undefined;
+      if (column.typedBy.documentColumn && definition?.osfType === "Document") values[fieldNameForColumn(column)] = null;
+      if (column.typedBy.encrypted && (definition?.classification as Record<string,unknown> | undefined)?.sensitivity === "confidential") {
+        if (fields[fieldNameForColumn(column)] != null) throw generatedCrudError("Secret values cannot be published in a blueprint.", "BAD_USER_INPUT");
+        values[fieldNameForColumn(column)] = null;
+      }
+    }
     const documents = await snapshotBlueprintDocuments(db, session, table, fields);
     if (Object.keys(documents).length) { values.$documents = documents; for (const field of Object.keys(documents)) values[field] = null; }
     if (blueprint.include?.length) {

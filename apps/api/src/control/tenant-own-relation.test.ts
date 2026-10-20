@@ -9,7 +9,7 @@ import {ensureTenantOwnRelation,seedTenantOwnRelations} from './tenant-own-relat
 import {provisionTenant} from './provisioning.js';
 import {fakeAdmin,fakeOrganizationScopes,fakeSpi} from '../db/__tests__/__fixtures__/control-keycloak-fakes.js';
 
-const adminUrl=process.env.SCRATCH_ADMIN_DATABASE_URL!;
+const adminUrl=process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
 test('tenant creation and every-host seeds create or reuse exactly one own organization',async()=>{
  const name='tenant_own_'+randomUUID().replaceAll('-','').slice(0,12);
  const admin=new SQL(adminUrl,{max:1});let runtime:ReturnType<typeof createDatabaseRuntime>|undefined;

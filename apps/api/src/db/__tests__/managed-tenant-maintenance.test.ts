@@ -74,6 +74,8 @@ beforeAll(async () => {
   await server.unsafe(`create database "${name}"`);
   runtime = createDatabaseRuntime({ databaseUrl: url.toString() });
   await runtime.db.connection().execute((db) => runMigrationChain(db));
+  // Maintenance assertions below inspect only the service action, not bootstrap seed audits.
+  await sql`delete from platform.system_bypass_audit`.execute(runtime.db);
   // This test is the actual single-host scope mode, not a bypass of provider scope writes.
   process.env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM = "example";
   process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "host";

@@ -422,6 +422,26 @@ describe("web manifest projection", () => {
       pagination: { kind: "cursor", defaultLimit: 10, maxLimit: 200 },
     });
   });
+  test("an overview group embeds a target-owned record view with a source condition", () => {
+    const sourceView = coreView();
+    sourceView.detail!.groups.items = [{ id: "overview", label: { en: "Overview", nl: "Overzicht" }, groups: [{
+      id: "profile", label: { en: "Profile", nl: "Profiel" },
+      visibleWhen: { conditions: [{ field: "displayName", operator: "eq", value: "Person" }] },
+      relationship: { render: { component: "RelationshipPanel" }, name: "profile", view: "record" },
+    }] }];
+    const source = entity("Source", "source", [field("displayName"), field("profile", { osfType: "Target" })], sourceView, [
+      { key: "profile", fieldKey: "profile", kind: "belongsTo", target: "Target", foreignKey: "profile_id", ownership: "reference" },
+    ]);
+    source.contract.storage.columns.find(column => column.field === "profile")!.column = "profile_id";
+    const target = entity("Target", "target", [field("displayName")], coreView());
+    const result = buildWebManifest([source, target]);
+    expect(result.entities.Source!.views.record!.layout.tabs[0]!.groups[0]).toMatchObject({
+      id: "profile", relationshipId: "profile", targetView: "record", fields: [],
+      visibleWhen: { conditions: [{ field: "displayName", operator: "eq", value: "Person" }] },
+    });
+    sourceView.detail!.groups.items[0]!.groups![0]!.relationship!.view = "missing";
+    expect(() => buildWebManifest([source, target])).toThrow(/target view missing/);
+  });
   test("a single relationship selects its target record view without a route", () => {
     const sourceView = coreView();
     sourceView.detail!.groups.items[1]!.relationship = {

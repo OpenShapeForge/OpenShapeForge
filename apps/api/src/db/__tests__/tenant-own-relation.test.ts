@@ -3,11 +3,11 @@ import {test,expect} from 'bun:test';
 import {SQL} from 'bun';
 import {randomUUID} from 'node:crypto';
 import {sql} from 'kysely';
-import {createDatabaseRuntime} from '../db/connection.js';
-import {runMigrationChain} from '../db/migration-chain.js';
-import {ensureTenantOwnRelation,seedTenantOwnRelations} from './tenant-own-relation.js';
-import {provisionTenant} from './provisioning.js';
-import {fakeAdmin,fakeOrganizationScopes,fakeSpi} from '../db/__tests__/__fixtures__/control-keycloak-fakes.js';
+import {createDatabaseRuntime} from '../connection.js';
+import {runMigrationChain} from '../migration-chain.js';
+import {ensureTenantOwnRelation,seedTenantOwnRelations} from '../../control/tenant-own-relation.js';
+import {provisionTenant} from '../../control/provisioning.js';
+import {fakeAdmin,fakeOrganizationScopes,fakeSpi} from './__fixtures__/control-keycloak-fakes.js';
 
 const adminUrl=process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
 test('tenant creation and every-host seeds create or reuse exactly one own organization',async()=>{

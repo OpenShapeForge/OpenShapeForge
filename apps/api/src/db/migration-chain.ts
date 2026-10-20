@@ -73,6 +73,7 @@ import type { RunMaintenanceSeed } from "@openshapeforge/plugin-runtime";
  * (OPENSHAPEFORGE_MIGRATE_DATABASE_URL) — DDL and GRANT require it.
  */
 import type { Kysely } from "kysely";
+import { seedTenantOwnRelations } from "../control/tenant-own-relation.js";
 import { fileURLToPath } from "node:url";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../modules/field-schemas.js";
 import type { DB } from "../generated/db/types.js";
@@ -206,6 +207,7 @@ export async function runMigrationChain(
       await drainMaintenanceJobs(pending);
     } finally { active = false; await Promise.allSettled(pending.map(job => job.work)); }
   }
+  await seedTenantOwnRelations(db);
   return {
     ...generated,
     pluginMigrationsApplied: pluginMigrations.applied,

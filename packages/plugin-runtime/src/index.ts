@@ -386,7 +386,27 @@ export type PluginDatabase = {
   ): Promise<T>;
 };
 
+/** One credential resolved by core under the live verified tenant session. */
+export type RuntimeConnectionSelector =
+  | { connectionId: string; adapterKey?: never }
+  | { adapterKey: string; connectionId?: never };
+export type RuntimeConnectionResolution =
+  | { ok: true; connection: {
+      connectionId: string; connectionKey: string; adapterKey: string;
+      transport: string; connectionScope: "tenant" | "user";
+      ownerUserId: string | null; values: Readonly<Record<string, string>>;
+      secretKeys: readonly string[];
+    } }
+  | { ok: false; code: "NOT_FOUND" | "FORBIDDEN" | "CONNECTION_REQUIRED" |
+      "SECRET_KEYRING_MISSING" | "REAUTHORIZATION_REQUIRED" | "TOKEN_REFRESH_FAILED";
+      message: string };
+
 export type PluginPlatformServices = {
+  /** Core alone opens Connection values; retained or foreign sessions are refused.
+   * Absent on runtimes without this capability; consumers must fail closed. */
+  readonly secrets?: {
+    resolveConnectionValues(session: PluginSessionContext, selector: RuntimeConnectionSelector): Promise<RuntimeConnectionResolution>;
+  };
   /** Host-owned signing secret sealing and raw-body verification; no plaintext read API. */
   readonly webhookSecrets?: RuntimeWebhookSecretServices<PluginSessionContext>;
   readonly records: RuntimeRecordAccessServices<PluginSessionContext>;

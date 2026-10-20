@@ -40,6 +40,7 @@
  * fully-provisioned tenant touches nothing at all — not even `updated_at`.
  */
 import { sql } from "kysely";
+import { ensureTenantOwnRelation } from "./tenant-own-relation.js";
 import { withSystemSession } from "../db/session.js";
 import { systemSessionForOperator } from "./authorization.js";
 import { ControlServiceError, tenantNotFound } from "./errors.js";
@@ -190,6 +191,7 @@ export async function provisionTenant(
       `.execute(trx);
       const { seedStarterGroups } = await import('../accounts/starter-groups.js');
       await seedStarterGroups(trx, result.rows[0].id);
+      await ensureTenantOwnRelation(trx, result.rows[0].id);
       return result.rows[0];
     },
   );

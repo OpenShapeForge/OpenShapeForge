@@ -250,6 +250,10 @@ export async function prepareTypedValueWrite(
   const output = new Map(input);
   const pairs = typedValueColumns(table);
   if (!pairs.length) return output;
+  for (const {value} of pairs) {
+    const carrier=table.columns.find(column=>column.name===value.typedBy?.documentColumn);
+    if(carrier && input.has(carrier)) throw generatedCrudError("A typed Document carrier is server-owned; write the public value instead.", "BAD_USER_INPUT");
+  }
   const idColumn = table.columns.find(c => c.name === table.primaryKey);
   let id = current?.[table.primaryKey!] ?? (idColumn && output.get(idColumn));
   if (pairs.some(p => p.value.typedBy?.encrypted)) {
@@ -260,10 +264,6 @@ export async function prepareTypedValueWrite(
   for (const {value, definition} of pairs) {
     const metadata = value.typedBy!;
     const stored = output.has(definition) ? output.get(definition) : current?.[definition.name];
-    if (metadata.documentColumn && isRecord(stored) && stored.osfType === "Document") {
-      const carrier = table.columns.find(column => column.name === metadata.documentColumn)!;
-      if (output.has(carrier) && !output.get(value)) output.set(value,output.get(carrier));
-    }
     if (metadata.documentColumn && isRecord(stored) && stored.osfType === "Document" && isRecord(output.get(value))) {
       if (!isRecord(stored.document) || stored.document.content !== "blocks" || !current) throw generatedCrudError("This field does not accept a blocks draft.", "BAD_USER_INPUT");
       output.set(value, await applyDocumentContentDraft(trx,session,current[metadata.documentColumn],output.get(value)));

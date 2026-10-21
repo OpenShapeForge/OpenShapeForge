@@ -18,6 +18,14 @@ const session={tenantId:'11111111-1111-4111-8111-111111111111'};
 const trx={} as Transaction<DB>;
 
 describe('opt-in encrypted typed values',()=>{
+ test('the public Document value projects its physical reference as the canonical value',()=>{
+  const reference='22222222-2222-4222-8222-222222222222';
+  const documentValue=column('document_value_id','uuid',{sourceField:'documentValue'});
+  const typed=column('value','jsonb',{typedBy:{...value.typedBy,documentField:'documentValue',documentColumn:'document_value_id'}});
+  const documentTable={...table,columns:[id,definition,typed,documentValue]};
+  const projected=projectTypedValues(documentTable,{definition:{key:'value',osfType:'Document',document:{content:'blocks'}},value:null,document_value_id:reference});
+  expect(projected.value).toBe(reference);
+ });
  test('public JSON keeps envelope-shaped values and nested ciphertext keys intact',async()=>{
   const definitionValue={key:'value',osfType:'object'};
   const publicValue={ciphertext:'ordinary data',nested:{keyId:'example',algorithm:'example'}};

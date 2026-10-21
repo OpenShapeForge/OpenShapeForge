@@ -133,7 +133,7 @@ Organization switching remains available during browser authentication.
 ### Retry an unlinked OIDC account
 
 A first-broker-login flow may use the REQUIRED `osf-broker-account-retry`
-authenticator as its sole terminal execution. It never authenticates, creates
+authenticator before Keycloak’s REQUIRED native deny-access execution. It never authenticates, creates
 or links a user. A rejected account receives a native form with retry/cancel.
 An explicit retry starts the same native broker request with `prompt=login`,
 restoring the original client's prompt immediately after building the redirect.

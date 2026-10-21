@@ -201,6 +201,12 @@ jobs:
             docker rm -f kc-broker >/dev/null
             exit 1
           fi
+          if ! KC_URL=http://127.0.0.1:8080 bun scripts/keycloak-broker-retry-acceptance.ts; then
+            echo "::error::broker account retry/consent acceptance failed"
+            docker logs kc-broker | tail -100
+            docker rm -f kc-broker >/dev/null
+            exit 1
+          fi
           docker rm -f kc-broker >/dev/null
 
       # The chart runs the container with securityContext.readOnlyRootFilesystem

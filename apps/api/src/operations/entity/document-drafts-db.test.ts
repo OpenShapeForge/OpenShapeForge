@@ -53,5 +53,5 @@ test('a typed parent saves Document blocks atomically through canonical Operatio
   const refused=await execute('Chip.update','update',{id:setting,expectedVersion:current.updatedAt,values:{value:late,name:'must roll back'}});expect('error'in refused).toBe(true);
   expect((await stored()).map(row=>row.values.markdown).sort()).toEqual(['saved-0','saved-1']);expect((await read(setting)).name).not.toBe('must roll back');
   const denied=await execute('Chip.update','update',{id:setting,expectedVersion:current.updatedAt,values:{value:await draft('denied-')}},{...editor,roles:['CaseFile.All.Read']});expect('error'in denied&&denied.error.code).toBe('FORBIDDEN');
- }finally{valueColumn.required=originalRequired;valueColumn.typedBy=originalBinding;table.columns=originalColumns;await restricted?.close();await privileged?.close();await admin.unsafe(`drop database if exists "${name}" with (force)`);await admin.close();}
+ }finally{valueColumn.required=originalRequired;if(originalBinding)valueColumn.typedBy=originalBinding;else delete valueColumn.typedBy;table.columns=originalColumns;await restricted?.close();await privileged?.close();await admin.unsafe(`drop database if exists "${name}" with (force)`);await admin.close();}
 },90000);

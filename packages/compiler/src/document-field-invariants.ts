@@ -19,7 +19,7 @@ export function documentFieldInvariants(manifest: PlatformSchemaManifest): strin
     if (policy.documentType) conditions.push(`d.document_type <> ${literal(policy.documentType)}`);
     if (policy.content === "blocks") conditions.push("v.artifact_id is not null");
     else {
-      conditions.push("v.artifact_id is null", "exists(select 1 from erp.document_variants b where b.document_id=d.id and b.tenant_id=d.tenant_id)");
+      conditions.push("v.artifact_id is null", "exists(select 1 from erp.document_variants dv join erp.blocks b on b.document_variant_id=dv.id and b.tenant_id=dv.tenant_id where dv.document_id=d.id and dv.tenant_id=d.tenant_id)");
       if (policy.mimeTypes) conditions.push(`v.mime_type is null or v.mime_type not in (${policy.mimeTypes.map(literal).join(",")})`);
       if (policy.maxBytes) conditions.push(`v.byte_size is null or v.byte_size > ${policy.maxBytes}`);
     }
@@ -34,10 +34,14 @@ begin
  end if;
 end $policy$;
 create or replace function ${trigger}() returns trigger language plpgsql as $guard$
+declare policy_doc uuid;
 begin
  if TG_ARGV[0]='owner' then perform ${check}(NEW.${col},NEW.tenant_id);
  elsif TG_ARGV[0]='document' then
   if exists(select 1 from ${owner} r where r.${col}=NEW.id and r.tenant_id=NEW.tenant_id) then perform ${check}(NEW.id,NEW.tenant_id); end if;
+ elsif TG_ARGV[0]='block' then
+  select document_id into policy_doc from erp.document_variants where id=NEW.document_variant_id and tenant_id=NEW.tenant_id;
+  if exists(select 1 from ${owner} r where r.${col}=policy_doc and r.tenant_id=NEW.tenant_id) then perform ${check}(policy_doc,NEW.tenant_id); end if;
  else
   if exists(select 1 from ${owner} r where r.${col}=NEW.document_id and r.tenant_id=NEW.tenant_id) then perform ${check}(NEW.document_id,NEW.tenant_id); end if;
  end if;
@@ -49,6 +53,8 @@ drop trigger if exists ${name} on erp.documents;
 create trigger ${name} after update of current_version_id,document_type on erp.documents for each row execute function ${trigger}('document');
 drop trigger if exists ${name} on erp.document_variants;
 create trigger ${name} after insert or update of document_id on erp.document_variants for each row execute function ${trigger}('variant');
+drop trigger if exists ${name} on erp.blocks;
+create trigger ${name} after insert or update of document_variant_id on erp.blocks for each row execute function ${trigger}('block');
 `);
   }
   for (const table of manifest.tables) for (const value of table.columns) {
@@ -69,17 +75,20 @@ begin
  and (p->>'documentType' is null or d.document_type=p->>'documentType')
  and case when p->>'content'='blocks' then v.artifact_id is null
  else v.artifact_id is not null
- and not exists(select 1 from erp.document_variants b where b.document_id=d.id and b.tenant_id=d.tenant_id)
+ and not exists(select 1 from erp.document_variants dv join erp.blocks b on b.document_variant_id=dv.id and b.tenant_id=dv.tenant_id where dv.document_id=d.id and dv.tenant_id=d.tenant_id)
  and (p->'mimeTypes' is null or (p->'mimeTypes') ? v.mime_type)
  and (p->>'maxBytes' is null or v.byte_size <= (p->>'maxBytes')::bigint) end) then
  raise exception 'Document does not satisfy the field content policy' using errcode='23514'; end if;
 end $policy$;
 create or replace function ${guard}() returns trigger language plpgsql as $guard$
-declare r record;
+declare r record; policy_doc uuid;
 begin
  if TG_ARGV[0]='owner' then perform ${fn}(NEW.${col},NEW.tenant_id,NEW.${def});
  elsif TG_ARGV[0]='document' then
   for r in select * from ${owner} where ${col}=NEW.id and tenant_id=NEW.tenant_id loop perform ${fn}(NEW.id,NEW.tenant_id,r.${def}); end loop;
+ elsif TG_ARGV[0]='block' then
+  select document_id into policy_doc from erp.document_variants where id=NEW.document_variant_id and tenant_id=NEW.tenant_id;
+  for r in select * from ${owner} where ${col}=policy_doc and tenant_id=NEW.tenant_id loop perform ${fn}(policy_doc,NEW.tenant_id,r.${def}); end loop;
  else
   for r in select * from ${owner} where ${col}=NEW.document_id and tenant_id=NEW.tenant_id loop perform ${fn}(NEW.document_id,NEW.tenant_id,r.${def}); end loop;
  end if; return NEW;
@@ -90,6 +99,8 @@ drop trigger if exists ${name} on erp.documents;
 create trigger ${name} after update of current_version_id,document_type on erp.documents for each row execute function ${guard}('document');
 drop trigger if exists ${name} on erp.document_variants;
 create trigger ${name} after insert or update of document_id on erp.document_variants for each row execute function ${guard}('variant');
+drop trigger if exists ${name} on erp.blocks;
+create trigger ${name} after insert or update of document_variant_id on erp.blocks for each row execute function ${guard}('block');
 `);
   }
   return statements.length ? statements.join("\n") : undefined;

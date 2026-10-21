@@ -31,7 +31,7 @@
   },
   "dependencies": {
     "@openshapeforge/operations": "0.2.10",
-    "@openshapeforge/versioning": "0.1.8",
+    "@openshapeforge/versioning": "0.1.9",
     "yaml": "^2.8.3"
   },
   "devDependencies": {

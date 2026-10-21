@@ -14,11 +14,13 @@
  */
 import type { VersionedMigration } from "../versioned-runner.js";
 // migration-registry:imports — `bun run db:migration:new` inserts imports below this line.
+import m0018TypedTenantSettings from "./0018_typed-tenant-settings.js";
 import m0017TenantIdentityDefault from "./0017_tenant-identity-default.js";
 import m0016ChipDefinitionDefault from "./0016_chip-definition-default.js";
 
 export const versionedMigrations: VersionedMigration[] = [
   m0016ChipDefinitionDefault,
   m0017TenantIdentityDefault,
+  m0018TypedTenantSettings,
   // migration-registry:entries — `bun run db:migration:new` inserts entries above this line.
 ];

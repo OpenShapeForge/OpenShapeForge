@@ -1716,7 +1716,7 @@ export function buildWebManifest(
   if (resolved.requireTranslations) for (const operation of schemaOperations) {
     // Collection-query inputs carry field keys, not a JSON Schema; their labels
     // are covered by the entity field check above.
-    if (operation && "input" in operation && operation.input.kind === "json-schema") missing.push(...missingSchemaUiTranslations(operation.input.schema, `${operation.id}.input`));
+    if (operation && "input" in operation && operation.input?.kind === "json-schema") missing.push(...missingSchemaUiTranslations(operation.input.schema, `${operation.id}.input`));
     if (operation && "output" in operation && operation.output?.kind === "json-schema" && operation.output.schema) missing.push(...missingSchemaUiTranslations(operation.output.schema, `${operation.id}.output`));
   }
   if (missing.length) throw new Error(`Missing required UI translations: ${missing.join(", ")}`);

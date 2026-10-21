@@ -120,3 +120,24 @@ scope can select a host's platform login flow; it grants no platform role.
 Native consent, token issuance and resource-server authorization still apply.
 
 The binding survives native KC_RESTART reconstruction because it is a dedicated client note, written by the policy (not a request parameter). The authenticator records the effective scope in the native audit event. Matching is deliberately exact, including host case and trailing slash; aliases must be listed explicitly. Invalid configuration produces a bounded OAuth policy error, not a server stack trace.
+
+### Organization-aware OAuth consent
+
+The child theme keeps native OAuth consent but disables the inherited v2
+organization-switch form on that page. Keycloak 26.7.3 supplies `oauthAction`
+for consent, while the switch form incorrectly reads the absent `loginAction`.
+This prevents a template error after broker login or multi-organization
+authentication without skipping consent or changing organization admission.
+Organization switching remains available during browser authentication.
+
+### Retry an unlinked OIDC account
+
+A first-broker-login flow may use the REQUIRED `osf-broker-account-retry`
+authenticator before Keycloak’s REQUIRED native deny-access execution. It never authenticates, creates
+or links a user. A rejected account receives a native form with retry/cancel.
+An explicit retry starts the same native broker request with `prompt=login`,
+restoring the original client's prompt immediately after building the redirect.
+Keycloak retains the original client, state, redirect, scopes and PKCE binding.
+A linked account bypasses this first-login flow and keeps normal SSO. Only
+OIDC providers without a fixed prompt are supported; configure a reviewed
+pre-linked-identity policy, not an automatic account-linking flow.

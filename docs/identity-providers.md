@@ -426,3 +426,20 @@ the new version. Leaving the record untouched fails the check by design.
 the jar is present, that `kc.sh build` still completes, that Keycloak boots
 (also on a read-only root filesystem), and that the `apple` factory is
 registered in `/admin/serverinfo`.
+
+### Recover an unlinked OIDC session
+
+For hosts that admit only explicitly linked identities, configure the REQUIRED
+`osf-broker-account-retry` execution before the REQUIRED native
+`deny-access-authenticator` in first-broker-login. The recovery step challenges
+with retry/cancel and never creates, links or authenticates a user. An explicit
+retry reuses the native broker with upstream reauthentication while preserving
+the original client's state, scopes, redirect, PKCE and requested locale. Linked
+accounts retain normal SSO. Fixed prompts and non-OIDC providers are refused.
+
+`BrokerAccountRetryTest` covers session-note restoration, supported providers and
+denied/cancel/error paths; `OAuthConsentTemplateTest` renders the derived v2
+consent and escaping of rejected account text. The image workflow also runs
+`scripts/keycloak-broker-retry-acceptance.ts` against isolated native realms:
+repeat unlinked denial, linked retry, original PKCE/state/subject, two-membership
+consent, consent rejection/cancel and unchanged linked-account SSO.

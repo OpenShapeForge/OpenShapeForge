@@ -37,8 +37,8 @@ FROM quay.io/keycloak/keycloak:26.7.3@sha256:29be7252db0a106f1cd2ac17b9a56ff2668
 # the other, so each can be upgraded, audited and removed on its own.
 COPY --from=builder /build/target/openshapeforge-keycloak-spi.jar /opt/keycloak/providers/
 COPY --from=builder /build/providers/apple-identity-provider-*.jar /opt/keycloak/providers/
-# The child login theme inherits Keycloak v2 and changes only the passkey
-# registration label and skips password-field validation on passwordless forms.
+# The child theme inherits Keycloak v2 for native passkey/profile, explicit
+# broker account recovery and organization-aware OAuth consent forms.
 # Keeping it in this immutable image makes a realm's
 # loginTheme pin reproducible without a writable theme volume.
 COPY theme/openshapeforge /opt/keycloak/themes/openshapeforge

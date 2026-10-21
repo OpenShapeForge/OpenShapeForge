@@ -65,7 +65,7 @@ BUSL-1.1.
 ## Keycloak 26.7.3 OAuth consent template
 
 `theme/openshapeforge/login/login-oauth-grant.ftl` derives from
-[Keycloak 26.7.3's base consent template](https://github.com/keycloak/keycloak/blob/26.7.3/themes/src/main/resources/theme/base/login/login-oauth-grant.ftl)
+[Keycloak 26.7.3's v2 consent template](https://github.com/keycloak/keycloak/blob/26.7.3/themes/src/main/resources/theme/keycloak.v2/login/login-oauth-grant.ftl)
 under Apache-2.0, copyright Red Hat, Inc. and contributors.
 The native consent text, requested scopes, action, code and accept/cancel
 controls are preserved. The modification suppresses the inherited organization
@@ -284,3 +284,7 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 ```
+
+The template rendering tests use FreeMarker 2.3.32 (Apache-2.0), the same
+version declared by the pinned Keycloak 26.7.3 parent. This is a test-only
+dependency and adds no library to the runtime image.

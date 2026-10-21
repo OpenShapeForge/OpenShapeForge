@@ -2,6 +2,10 @@
 package com.openshapeforge.keycloak;
 
 import freemarker.cache.StringTemplateLoader;
+import freemarker.cache.ClassTemplateLoader;
+import freemarker.cache.MultiTemplateLoader;
+import freemarker.cache.TemplateLoader;
+import java.util.Properties;
 import freemarker.template.Configuration;
 import freemarker.template.TemplateMethodModelEx;
 import java.io.StringWriter;
@@ -26,12 +30,14 @@ public class OAuthConsentTemplateTest {
         loader.putTemplate("template.ftl", "<#macro registrationLayout bodyClass=''><#nested 'header'><#nested 'form'><#if switchOrganizationEnabled><form action='${url.loginAction}'></form></#if></#macro>");
         loader.putTemplate("consent.ftl", source);
         var config = new Configuration(Configuration.VERSION_2_3_32);
-        config.setTemplateLoader(loader);
+        config.setTemplateLoader(new MultiTemplateLoader(new TemplateLoader[]{loader, new ClassTemplateLoader(getClass(), "/theme/keycloak.v2/login")}));
+        var properties = new Properties();
+        try (var sourceProperties = getClass().getResourceAsStream("/theme/keycloak.v2/login/theme.properties")) { properties.load(sourceProperties); }
         TemplateMethodModelEx text = args -> args.get(0).toString();
         var data = Map.of("switchOrganizationEnabled", true,
             "client", Map.of("name", "Synthetic client", "attributes", Map.of()),
             "oauth", Map.of("code", "native-code", "clientScopesRequested", List.of(Map.of("consentScreenText", "Requested organization"))),
-            "url", new ConsentUrl(), "properties", Map.of(), "msg", text, "advancedMsg", text);
+            "url", new ConsentUrl(), "properties", properties, "msg", text, "advancedMsg", text);
         var out = new StringWriter();
         config.getTemplate("consent.ftl").process(data, out);
         String html = out.toString();
@@ -40,6 +46,8 @@ public class OAuthConsentTemplateTest {
         assertTrue(html.contains("Requested organization"));
         assertTrue(html.contains("name=\"accept\""));
         assertTrue(html.contains("name=\"cancel\""));
+        assertTrue(html.contains(properties.getProperty("kcButtonSecondaryClass")));
+        assertTrue(html.contains(properties.getProperty("kcListClass")));
         assertEquals(Boolean.TRUE, data.get("switchOrganizationEnabled"));
     }
     public static final class LoginUrl {

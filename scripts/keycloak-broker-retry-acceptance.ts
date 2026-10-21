@@ -190,6 +190,9 @@ async function main() {
     const [linked] = await api("/" + IDP + "/users?username=linked&exact=true");
     await api("", "POST", {
       realm: BROKER,
+      internationalizationEnabled: true,
+      supportedLocales: ["en", "nl"],
+      defaultLocale: "en",
       enabled: true,
       sslRequired: "none",
       organizationsEnabled: true,
@@ -288,6 +291,13 @@ async function main() {
         local.id,
       );
     }
+    const memberships = await api(
+      "/" + BROKER + "/organizations/members/" + local.id + "/organizations",
+    );
+    check(
+      memberships.length === 2,
+      "the native user has exactly two organization memberships",
+    );
     let verifier = "",
       state = "";
     function authorize() {
@@ -306,6 +316,7 @@ async function main() {
           prompt: "consent",
           state,
           kc_idp_hint: "workforce",
+          ui_locales: "nl",
           code_challenge: createHash("sha256")
             .update(verifier)
             .digest("base64url"),
@@ -327,7 +338,9 @@ async function main() {
       );
     }
     async function retry(session: Session, html: string, username: string) {
-      const form = parseForm(html, () => true);
+      const form = parseForm(html, (tag) =>
+        /id="kc-broker-account-retry-form"/.test(tag),
+      );
       form.fields.set("retry", "true");
       let r = await session.follow(
         await session.request(form.action, {
@@ -353,7 +366,7 @@ async function main() {
     ) {
       let html = await outcome.res.text();
       if (html.includes("organization-org-first")) {
-        const form = parseForm(html, () => true);
+        const form = parseForm(html, (tag) => /select-organization/.test(tag));
         const choice = /<button[^>]*id="organization-org-first"[^>]*>/.exec(
           html,
         )?.[0];
@@ -393,11 +406,19 @@ async function main() {
     out = await login(session, await out.res.text(), "wrong");
     let html = await out.res.text();
     check(
+      html.includes("Ander account gebruiken"),
+      "requested Dutch locale renders the recovery form",
+    );
+    check(
       html.includes('name="retry"') && !out.url.startsWith(CALLBACK),
       "unlinked account gets recovery without a code",
     );
     out = await retry(session, html, "wrong");
     html = await out.res.text();
+    check(
+      html.includes("Ander account gebruiken"),
+      "requested locale survives account retry",
+    );
     check(
       html.includes('name="retry"') && !out.url.startsWith(CALLBACK),
       "retrying the unlinked account remains denied",
@@ -452,7 +473,9 @@ async function main() {
     out = await session.follow(await session.request(authorize()));
     out = await login(session, await out.res.text(), "wrong");
     html = await out.res.text();
-    const cancel = parseForm(html, () => true);
+    const cancel = parseForm(html, (tag) =>
+      /id="kc-broker-account-retry-form"/.test(tag),
+    );
     cancel.fields.set("cancel", "true");
     out = await session.follow(
       await session.request(cancel.action, {

@@ -1,10 +1,11 @@
 <#-- SPDX-License-Identifier: BUSL-1.1 AND Apache-2.0
-     Derived from Keycloak 26.7.3 base/login/login-oauth-grant.ftl.
+     Derived from Keycloak 26.7.3 keycloak.v2/login/login-oauth-grant.ftl.
      Copyright Red Hat, Inc. and contributors. See THIRD-PARTY-NOTICES.md.
      Consent posts to oauthAction, not loginAction. The inherited v2 layout
      must not render its browser-flow organization-switch form on this page. -->
 <#global switchOrganizationEnabled = false>
 <#import "template.ftl" as layout>
+<#import "buttons.ftl" as buttons>
 <@layout.registrationLayout bodyClass="oauth"; section>
     <#if section = "header">
         <#if client.attributes.logoUri??>
@@ -20,14 +21,14 @@
     <#elseif section = "form">
         <div id="kc-oauth" class="content-area">
             <h3>${msg("oauthGrantRequest")}</h3>
-            <ul>
+            <ul class="${properties.kcListClass!}">
                 <#if oauth.clientScopesRequested??>
                     <#list oauth.clientScopesRequested as clientScope>
                         <li>
                             <span><#if !clientScope.parameterizedScopeParameter??>
                                         ${advancedMsg(clientScope.consentScreenText)}
                                     <#else>
-                                        ${advancedMsg(clientScope.consentScreenText)}: <b>${clientScope.parameterizedScopeParameter}</b>
+                                        ${advancedMsg(clientScope.consentScreenText, clientScope.parameterizedScopeParameter)}
                                 </#if>
                             </span>
                         </li>
@@ -52,23 +53,13 @@
                 </h3>
             </#if>
 
-            <form class="form-actions" action="${url.oauthAction}" method="POST">
+            <form class="${properties.kcFormClass} ${properties.kcMarginTopClass!}" action="${url.oauthAction}" method="POST">
                 <input type="hidden" name="code" value="${oauth.code}">
-                <div class="${properties.kcFormGroupClass!}">
-                    <div id="kc-form-options">
-                        <div class="${properties.kcFormOptionsWrapperClass!}">
-                        </div>
-                    </div>
-
-                    <div id="kc-form-buttons">
-                        <div class="${properties.kcFormButtonsWrapperClass!}">
-                            <input class="${properties.kcButtonClass!} ${properties.kcButtonPrimaryClass!} ${properties.kcButtonLargeClass!}" name="accept" id="kc-login" type="submit" value="${msg("doYes")}"/>
-                            <input class="${properties.kcButtonClass!} ${properties.kcButtonDefaultClass!} ${properties.kcButtonLargeClass!}" name="cancel" id="kc-cancel" type="submit" value="${msg("doNo")}"/>
-                        </div>
-                    </div>
-                </div>
+                <@buttons.actionGroup horizontal=true>
+                    <@buttons.button id="kc-login" name="accept" label="doYes"/>
+                    <@buttons.button id="kc-cancel" name="cancel" label="doNo" type="secondary"/>
+                </@buttons.actionGroup>
             </form>
-            <div class="clearfix"></div>
         </div>
     </#if>
 </@layout.registrationLayout>

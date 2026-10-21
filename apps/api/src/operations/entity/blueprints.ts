@@ -1,7 +1,7 @@
-import { isDeepStrictEqual } from "node:util";
 // SPDX-License-Identifier: BUSL-1.1
+import { isDeepStrictEqual } from "node:util";
 import { copyBlueprintDocuments, snapshotBlueprintDocuments } from "./blueprint-documents.js";
-import { operationFailure } from "@openshapeforge/operations";
+import { operationFailure, blueprintPresentation } from "@openshapeforge/operations";
 import { sql } from "kysely";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
@@ -218,6 +218,12 @@ async function publish(db: OpenShapeForgeDatabase, session: DbSessionInput, tabl
     const last = (await sql<{ version: number; values_json: Record<string, unknown>; source_record_id: string }>`select version, values_json, source_record_id from platform.blueprint_versions where tenant_id = ${session.tenantId}::uuid and entity_name = ${nameOf(table)} and blueprint_id = ${blueprintId} order by version desc limit 1`.execute(trx)).rows[0];
     if (last && last.source_record_id !== input.id) throw generatedCrudError("This blueprint identifier belongs to another record.", "BAD_USER_INPUT");
     const values = allowedValues(table, fields);
+    try {
+      const presentation=blueprintPresentation(input,last?.values_json.$presentation);
+      if(Object.keys(presentation).length)values.$presentation=presentation;
+    } catch(error) {
+      throw generatedCrudError(error instanceof Error?error.message:'Invalid blueprint presentation.', 'BAD_USER_INPUT');
+    }
     for (const column of table.columns) {
       if (!column.typedBy) continue;
       const definition = fields[column.typedBy.definitionField] as Record<string,unknown> | undefined;

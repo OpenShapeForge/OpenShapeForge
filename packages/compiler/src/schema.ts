@@ -329,9 +329,14 @@ export type ColumnDefinition = {
    * validates the value against it, so the pair must be resolvable from the
    * manifest alone.
    */
+  document?: { content: "file" | "blocks"; mimeTypes?: string[]; maxBytes?: number; documentType?: string };
   typedBy?: {
     definitionField: string;
     definitionColumn: string;
+    encrypted?: boolean;
+    documentField?: string;
+    documentColumn?: string;
+
   };
   /**
    * The server-owned map of field bindings for this table (one per bindable

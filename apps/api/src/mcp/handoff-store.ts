@@ -47,7 +47,7 @@ export async function createHandoff(input: {
   expiresAtMs: number;
 }): Promise<string> {
   if (input.session && (input.session.tenantId !== input.tenantId || input.session.userId !== input.userId)) {
-    throw new Error("The handoff owner must match its database session.");
+    throw new Error("Handoff identity must match the verified database session.");
   }
   const secret = base64url(randomBytes(32));
   const token = `${input.tenantId}.${input.userId}.${secret}`;

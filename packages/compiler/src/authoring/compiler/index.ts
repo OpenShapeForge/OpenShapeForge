@@ -95,7 +95,8 @@ function assertPersistedReadOnlyWriteSources(entity: import("../types.js").CoreE
   for (const field of entity.fields) {
     if (!field.persisted || field.readOnly !== true) continue;
     const intrinsic = isCompilerIntrinsicReadOnlyField(field) ||
-      field.computed !== undefined || field.deriveOnCreate !== undefined;
+      field.computed !== undefined || field.deriveOnCreate !== undefined ||
+      entity.fields.some(value => value.typedBy?.documentField === field.key);
     const canonicalWriter = (field.writtenBy?.length ?? 0) > 0;
     if (!intrinsic && !canonicalWriter && field.writeSource !== "caller") {
       throw new Error(

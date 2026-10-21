@@ -4,7 +4,7 @@
  * tool dispatch, verbatim.
  */
 import { actingRelationId } from "../db/acting-relation.js";
-import { requireActingRelationId } from "./acting-relation-guard.js";
+import { configurationOwnerPatch } from "./configuration-ownership.js";
 import { getEntityOperationContracts, getGeneratedEntity } from "../operations/entity/index.js";
 import { assertEntityValuesValid } from "../operations/entity/input-validation.js";
 import { collectElicitedValues } from "./elicitation.js";
@@ -18,7 +18,7 @@ import {
 } from "./declarative-execution.js";
 import { failedCheckSummary, testElicitedRow } from "./connection-test.js";
 import { HttpError } from "../rest/http-error.js";
-import { connectionScopeOf, fieldNameForColumn, serializeRow } from "./catalog-rows.js";
+import { fieldNameForColumn, serializeRow } from "./catalog-rows.js";
 import {
   type CatalogEntity,
   type CatalogTool,
@@ -162,23 +162,16 @@ export async function crudToolCall(
           ...(messagePrefix ? { messagePrefix } : {}),
         });
         elicitationCompleted = true;
-        // A Connection to a PERSONAL provider belongs to the person who
-        // just entered its values, and to nobody else. Until this existed,
-        // only the OAuth callback set an owner, so a personal provider
-        // configured with a password (an IMAP mailbox, an LDAP bind) landed
-        // as an organization row that row-level security shows to everyone
-        // — the credential of one employee, readable by the next. The owner
-        // comes from the verified session (the Relation the person acts
-        // as), never from tool input; an unlinked sign-in owns nothing.
+        // Shared OAuth client configuration is organisation-owned; other
+        // personal credentials belong to the verified acting Relation.
         if (
-          connectionScopeOf(sourceAuth) === "user" &&
           table.columns.some(
             (column) => fieldNameForColumn(column) === "ownerUserId",
           )
         ) {
           callArguments = {
             ...(callArguments as Record<string, unknown>),
-            ownerUserId: requireActingRelationId(session, "A personal connection"),
+            ...configurationOwnerPatch(sourceAuth, session),
           };
         }
       } catch (error) {

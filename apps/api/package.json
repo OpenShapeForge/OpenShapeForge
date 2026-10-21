@@ -12,7 +12,7 @@
     "db:provision-roles": "bun src/db/provision-roles.ts",
     "db:migration:new": "bun src/db/migrations/new-migration.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test:e2e": "bun test src/graphql/__tests__ src/rest/__tests__ src/mcp/__tests__",
+    "test:e2e": "bun ../../scripts/run-api-tests.ts e2e",
     "test:migrations": "bun test src/db"
   },
   "dependencies": {

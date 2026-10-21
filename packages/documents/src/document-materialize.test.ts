@@ -207,12 +207,25 @@ describe("contentBlockFromRow", () => {
 });
 
 describe("Document.materialize", () => {
-  test("refuses a document without a linked template version before reading any content", async () => {
+  test("refuses local parameters without a linked template definition", async () => {
     const f = fixture({ templateVersionId: null });
     await expect(materializeDocument(request, f.context)).rejects.toMatchObject({ operationError: { code: "INVALID_STATE" } });
     expect(f.authorizations).toEqual([`Document:${ids.document}`]);
     expect(f.reads).toEqual([]);
     expect(f.queries).toHaveLength(1);
+  });
+  test("materializes standalone document blocks without a template identity", async () => {
+    const f = fixture({ templateVersionId: null, parameters: {} });
+    f.data.firstText = "Standalone";
+    const snapshot = (await materializeDocument(request, f.context) as any).value;
+    expect(snapshot.documentId).toBe(ids.document);
+    expect(snapshot.templateVersionId).toBeUndefined();
+    expect(snapshot.templates).toEqual([]);
+    expect(snapshot.blocks[0].values.markdown).toBe("Standalone");
+    f.data.firstText = "Changed";
+    const changed = (await materializeDocument(request, f.context) as any).value;
+    expect(changed.compositionHash).not.toBe(snapshot.compositionHash);
+    expect(f.reads).toEqual([]);
   });
   test("materializes the root from the document's live variants and blocks, not the frozen snapshot", async () => {
     const f = fixture();

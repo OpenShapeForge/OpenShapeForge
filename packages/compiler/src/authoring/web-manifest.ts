@@ -550,7 +550,9 @@ function projectField(
 ): WebFieldProjection {
   const nestedSupports = editNested ? supports : { read: true, create: false, update: false };
   const presentation = presentations[`${parent}.${field.key}`.split(".").slice(1).join(".")]?.render
-    ?? (field.render.component === "ChoiceTiles" || field.render.props && Object.keys(field.render.props).length ? structuredClone(field.render) : undefined);
+    ?? (field.options?.presentation === "tiles"
+      ? { component: "ChoiceTiles", ...(field.render.props ? { props: structuredClone(field.render.props) } : {}) }
+      : field.render.props && Object.keys(field.render.props).length ? structuredClone(field.render) : undefined);
   if (field.options?.presentation && field.options.type !== "static") {
     throw new Error(`${parent}.${field.key}: options.presentation "${field.options.presentation}" requires static options.`);
   }
@@ -560,6 +562,7 @@ function projectField(
     id: `${parent}.${field.key}`, key: field.key,
     label: localized(field.label, field.key), description: localized(field.description, ""),
     osfType: field.osfType,
+    ...(field.document ? { document: structuredClone(field.document) } : {}),
     baseType: field.baseType,
     cardinality: field.cardinality === "collection" ? "many" : "one",
     required: field.required,
@@ -972,7 +975,7 @@ function projectEntity(
   for (const group of placements(view?.detail?.groups.items ?? []).filter(group => group.relationship?.view)) {
     if (group.fields?.length || group.groups?.length) throw new Error(`${entityName}.${group.id}: a target view placement cannot also declare local fields or groups.`);
     projectRecordTab(group);
-
+    
   }
   const tabs: WebRecordTab[] = (view?.detail?.groups.items ?? []).flatMap(projectRecordTab);
   assertVisibilityFields(entityName, "detail tab", tabs, fields);
@@ -1713,7 +1716,7 @@ export function buildWebManifest(
   if (resolved.requireTranslations) for (const operation of schemaOperations) {
     // Collection-query inputs carry field keys, not a JSON Schema; their labels
     // are covered by the entity field check above.
-    if (operation && "input" in operation && operation.input.kind === "json-schema") missing.push(...missingSchemaUiTranslations(operation.input.schema, `${operation.id}.input`));
+    if (operation && "input" in operation && operation.input?.kind === "json-schema") missing.push(...missingSchemaUiTranslations(operation.input.schema, `${operation.id}.input`));
     if (operation && "output" in operation && operation.output?.kind === "json-schema" && operation.output.schema) missing.push(...missingSchemaUiTranslations(operation.output.schema, `${operation.id}.output`));
   }
   if (missing.length) throw new Error(`Missing required UI translations: ${missing.join(", ")}`);

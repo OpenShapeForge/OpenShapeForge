@@ -13,6 +13,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { apiE2eTestFiles } from "./api-test-suites.ts";
 
 const repoRoot = resolve(import.meta.dir, "..");
 const reportDir = join(repoRoot, ".e2e-report");
@@ -22,12 +23,9 @@ const summaryPath = join(reportDir, "summary.md");
 // The three transport suites plus the real API-key cross-transport journey.
 // Keep the customer-provisioned credential path in the same full-stack gate:
 // it depends on the PostgreSQL and Keycloak services this workflow provides.
-const testFiles = [
-  "src/graphql/__tests__",
-  "src/rest/__tests__",
-  "src/mcp/__tests__",
-  "src/auth/api-key/__tests__/api-key.e2e.test.ts",
-];
+// Database-free GraphQL checks belong to test:graphql-unit in CI. Discover
+// every remaining GraphQL test so a newly added integration test cannot vanish.
+const testFiles = apiE2eTestFiles();
 
 mkdirSync(reportDir, { recursive: true });
 

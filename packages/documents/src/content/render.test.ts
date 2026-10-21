@@ -4,7 +4,7 @@ import { hashCanonicalJson, immutableContent } from "./json.js";
 import { renderTemplateSnapshot } from "./render.js";
 
 const tenantId = "00000000-0000-4000-8000-000000000001";
-async function seal(content: Record<string, unknown>) {
+async function seal<T extends Record<string, unknown>>(content: T) {
   return immutableContent({ ...content, compositionHash: await hashCanonicalJson(content) });
 }
 async function snapshot(channel: string) {
@@ -85,4 +85,12 @@ test("rendering never executes patterns or remote schema references supplied in 
   expect((await renderTemplateSnapshot(dangerous, { tenantId })).body).toStartWith("a".repeat(1000));
   const reference = await change(dangerous, value => { value.definitions.Notice.materializationSchema.properties.value.$ref = "https://example.invalid/schema"; });
   await expect(renderTemplateSnapshot(reference, { tenantId })).rejects.toThrow();
+});
+
+test("renders standalone document snapshots with their own checksum domain", async () => {
+  const {compositionHash: _, templateVersionId: __, ...content} = await snapshot("document");
+  const document = {...content, documentId: "document", documentVariantId: "variant", compositionHashVersion: "osf-document-content-v1"};
+  const sealed = {...document, compositionHash: await hashCanonicalJson(document, "osf-document-content-v1")};
+  expect((await renderTemplateSnapshot(sealed, {tenantId})).body).toBe("First\n\nSecond");
+  await expect(renderTemplateSnapshot({...sealed, documentId: "changed"}, {tenantId})).rejects.toThrow();
 });

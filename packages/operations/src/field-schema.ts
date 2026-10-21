@@ -105,7 +105,7 @@ function withFieldMetadata(
   if (field.typedBy) schema["x-osf-typed-by"] = { ...field.typedBy };
   const context = {
     ...(field.unit ? { unit: field.unit } : {}),
-    ...((field.baseType === "number" || field.baseType === "integer") && typeof field.render?.props?.currency === "string" ? { currency: field.render.props.currency } : {}),
+    ...(field.osfType === "money" && typeof field.render?.props?.currency === "string" ? { currency: field.render.props.currency } : {}),
   };
   if (Object.keys(context).length) schema["x-osf-value-context"] = context;
   if (field.render?.component) schema["x-osf-presentation"] = structuredClone(field.render);
@@ -135,6 +135,7 @@ function withFieldMetadata(
   if (field.relationship?.target) {
     schema["x-osf-reference"] = {
       entity: field.relationship.target,
+      ...(field.document ? { document: structuredClone(field.document) } : {}),
       valueField: "id",
       ...(field.relationship.constraints ? { constraints: structuredClone(field.relationship.constraints) } : {}),
     };

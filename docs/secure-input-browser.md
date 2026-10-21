@@ -9,13 +9,13 @@ The browser can initiate this interaction without an MCP session or tool call:
 1. `POST /api/entity-configuration/start` with its ordinary bearer/session and
    JSON `{ "entity": "Example", "values": { "key": "example", "definitionId": "<uuid>" } }`.
    Supply only ordinary canonical create fields, never the secure target object.
-   The response is `{ "id": "<opaque form id>", "expiresInSeconds": 1800 }`; it contains no handoff token.
-2. `GET /api/entity-configuration/pending/:id` with the returned id and same session returns
-   `{ id, displayName, messagePrefix?, definitions }`. Definitions carry the canonical JSON schema and secret classification, shared with the MCP form. Render those definitions
+   The response is `{ "expiresInSeconds": 1800 }`; it contains no handoff token.
+2. `GET /api/entity-configuration/pending` with the same session returns
+   `{ id, displayName, messagePrefix?, definitions }`. Render those definitions
    using the shared field registry; secret input stays in the browser form.
 3. `POST /api/entity-configuration/pending/:id` with the same session and
    `application/x-www-form-urlencoded` values submits directly to encryption and
-   storage. Success returns `{ "saved": true, "id": "<created record id>" }`. A failed validation returns
+   storage. Success returns `{ "saved": true }`. A failed validation returns
    `INVALID_CONFIGURATION` with bounded field errors.
 4. Read the created entity through its canonical get/list Operation. Encrypted
    values appear only as `__set__`, never plaintext or ciphertext. Submitting
@@ -35,8 +35,3 @@ Both authenticated and bearer-token form submissions claim their single-use
 handoff and save its target in one database transaction. A parallel submission
 loses before a write. Validation or write failure rolls back the claim and leaves
 the same unexpired form retryable; success commits consumption with the write.
-
-The unscoped `GET /pending` remains the discovery entry point for an MCP-started
-configuration when the authenticated fallback page does not yet know its form ID.
-A browser that calls `/start` must use the returned ID and never discover its form
-through that latest-form endpoint.

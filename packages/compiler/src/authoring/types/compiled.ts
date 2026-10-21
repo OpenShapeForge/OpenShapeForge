@@ -76,6 +76,7 @@ export interface CompiledRender {
 }
 
 export interface CompiledField {
+  document?: import("./field-definition.js").FieldDefinitionDocument;
   /** Canonical field-definition editor policy, projected unchanged to hosts. */
   authoring?: import("./field-definition.js").FieldDefinitionAuthoringMetadata;
   key: string;
@@ -95,7 +96,7 @@ export interface CompiledField {
   sortable?: boolean;
   entityValue?: { definitionField: string; parameterBindings?: boolean };
   /** The sibling field whose stored FieldDefinition types this value. */
-  typedBy?: { definitionField: string };
+  typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean };
   allowedDefinitions?: string[];
   childAuthorization?: "owner";
   childLock?: string;

@@ -15,6 +15,7 @@ import type {
   ContentEntityReference,
   ContentField,
   ContentTemplateVersion,
+  ContentTemplateVariant,
   ContentValueShape,
   TemplateParameter,
 } from "./types.js";
@@ -286,7 +287,13 @@ export function defineContentTemplateVersion(
     if (shape.defaultValue !== undefined)
       validateContentValue(shape.defaultValue, shape, `parameter default ${key}`);
   }
-  if (!Array.isArray(version.variants) || version.variants.length === 0)
+  validateContentVariants(version.variants);
+  return version;
+}
+
+/** Shared structural validation for a document or a template content collection. */
+export function validateContentVariants(variants: readonly ContentTemplateVariant[]): void {
+  if (!Array.isArray(variants) || variants.length === 0)
     contentError(
       "INVALID_VALUE",
       "A template version requires at least one channel/locale variant.",
@@ -294,7 +301,7 @@ export function defineContentTemplateVersion(
   const ids = new Set<string>();
   const keys = new Set<string>();
   const defaults = new Set<string>();
-  for (const variant of version.variants) {
+  for (const variant of variants) {
     assertContentRecord(variant, "variant");
     exactKeys(variant, ["id", "channel", "locale", "default", "blocks", "allowedDefinitions"], "variant");
     assertContentName(variant.id, "variant id");
@@ -343,7 +350,6 @@ export function defineContentTemplateVersion(
       blockIds.add(block.id);
     }
   }
-  return version;
 }
 
 /** The language subtag of a locale: `nl-NL` and `nl_NL` are both `nl`. */
@@ -361,7 +367,7 @@ export function contentLanguage(locale: string): string {
  * to another language; another channel never is.
  */
 export function selectContentTemplateVariant(
-  version: ContentTemplateVersion,
+  version: Pick<ContentTemplateVersion, "variants">,
   channel: string,
   locale: string,
 ) {

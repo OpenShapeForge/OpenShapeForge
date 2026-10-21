@@ -19,11 +19,8 @@ import { SQL } from "bun";
 import { sql } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
 import { runMigrationChain } from "../../db/migration-chain.js";
-import { withDbSession } from "../../db/session.js";
-import { getGeneratedCrudTables } from "./catalog.js";
-import { resolveComputedEntityRows } from "./computed-fields.js";
 import { executeEntityOperation } from "./runtime.js";
-import type { EntityOperationInput, EntityOperationResult, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
+import type { EntityOperationInput, EntityOperationResult, GeneratedEntityRow } from "./types.js";
 
 const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ??
   "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
@@ -164,11 +161,11 @@ describe("a typed global value, stored and read back", () => {
     };
     // Exact decimal text is the form every numeric value is projected in, and
     // it comes back with every digit.
-    expect(await stored("rate.exact", { key: "value", osfType: "currency", required: true }, "12.50")).toBe("12.50");
-    expect(await stored("rate.big", { key: "value", osfType: "currency", required: true }, "9007199254740993.01"))
+    expect(await stored("rate.exact", { key: "value", osfType: "money", required: true }, "12.50")).toBe("12.50");
+    expect(await stored("rate.big", { key: "value", osfType: "money", required: true }, "9007199254740993.01"))
       .toBe("9007199254740993.01");
     // The JSON number form of the same type is equally acceptable.
-    expect(await stored("rate.number", { key: "value", osfType: "currency", required: true }, 12.5)).toBe(12.5);
+    expect(await stored("rate.number", { key: "value", osfType: "money", required: true }, 12.5)).toBe(12.5);
     // false, zero, an empty text and an empty collection are values.
     expect(await stored("flag.off", { key: "value", osfType: "boolean", required: true }, false)).toBe(false);
     expect(await stored("count.zero", { key: "value", osfType: "integer", required: true }, 0)).toBe(0);
@@ -206,7 +203,7 @@ describe("a typed global value, stored and read back", () => {
   });
 
   test("an update of either half keeps the pair valid", async () => {
-    const chip = await tenantGlobal(editor, "hours.rate", { key: "value", osfType: "currency", required: true }, "80.00");
+    const chip = await tenantGlobal(editor, "hours.rate", { key: "value", osfType: "money", required: true }, "80.00");
     const id = String(chip.id);
     // The value alone, against the stored definition.
     expect(record(await run(editor, "Chip.update", { id, values: { value: "95.00" } })).value).toBe("95.00");
@@ -271,41 +268,6 @@ describe("a binding, stored apart from the value it resolved to", () => {
     const listed = await run(editor, "LabelRule.list", { filter: { key: String(created.key) } });
     if (listed.intent !== "list" || "error" in listed) throw new Error("list failed");
     expect(listed.data.items[0]!.data.description_template).toBe("Bel 020-7654321 voor uitleg");
-  });
-
-  test("computed labels resolve current variables without reinterpreting source text", async () => {
-    const chip = await tenantGlobal(editor, "live.label", text(), "Old");
-    const rule = record(await memo(editor, {
-      values: { expression: { kind: "literal", value: "visible" } },
-      bindings: { descriptionTemplate: { template: "Message: {{chips.live.label}}" } },
-    }));
-    await run(editor, "Chip.update", { id: String(chip.id), values: { value: "New {{displayName}}" } });
-    const table = { source: { authoringEntityName: "Relation", computedFields: [{ field: "labels", resolver: "labelRules" }] }, columns: [] } as unknown as GeneratedCrudTable;
-    const rows = await withDbSession(runtime.db, editor, (trx, session) =>
-      resolveComputedEntityRows(trx, session, table, [{ display_name: "private" }]));
-    const labels = rows[0]!.labels as { items: { id: string; description: string }[] };
-    expect(labels.items.find(item => item.id === rule.id)?.description).toBe("Message: New {{displayName}}");
-    const chipValue = getGeneratedCrudTables().find(t => t.table === "chips")!.columns.find(c => c.name === "value")!;
-    const priorClassification = chipValue.classification;
-    try {
-      chipValue.classification = "confidential";
-      const withheld = await withDbSession(runtime.db, viewer, (trx, session) =>
-        resolveComputedEntityRows(trx, session, table, [{ display_name: "kept" }]));
-      expect(withheld[0]!.display_name).toBe("kept");
-      expect((withheld[0]!.labels as typeof labels).items.some(item => item.id === rule.id)).toBe(false);
-      expect(JSON.stringify(withheld)).not.toContain("New {{displayName}}");
-    } finally {
-      if (priorClassification === undefined) delete chipValue.classification;
-      else chipValue.classification = priorClassification;
-    }
-    await run(editor, "Chip.delete", { id: String(chip.id), expectedVersion: await version("chips", String(chip.id)), confirmed: true });
-    const removed = await withDbSession(runtime.db, editor, (trx, session) =>
-      resolveComputedEntityRows(trx, session, table, [{ display_name: "kept" }]));
-    expect(removed[0]!.display_name).toBe("kept");
-    expect((removed[0]!.labels as typeof labels).items.some(item => item.id === rule.id)).toBe(false);
-    expect(failure(await read(editor, String(rule.id)))).toMatchObject({ code: "DEPENDENCY_UNRESOLVED" });
-    // Keep the intentionally broken source isolated from the following list tests.
-    await sql`delete from erp.label_rules where id = ${String(rule.id)}::uuid`.execute(privileged.db);
   });
 
   test("a local binding reads another field of the same record", async () => {

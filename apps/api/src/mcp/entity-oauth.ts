@@ -98,7 +98,7 @@ export async function mintAuthorization(
   > & {
     authorizationUrl: string;
     db?: OpenShapeForgeDatabase;
-    session?: DbSessionInput;
+    session?: import("../db/session.js").DbSessionInput;
   },
 ): Promise<{
   authorizationUrl: string;
@@ -126,6 +126,7 @@ export async function mintAuthorization(
       userId: input.userId,
       payload: { ...pendingInput, codeVerifier, expiresAtMs },
       expiresAtMs,
+      ...(session ? { session } : {}),
     });
   } else {
     state = base64url(randomBytes(24));

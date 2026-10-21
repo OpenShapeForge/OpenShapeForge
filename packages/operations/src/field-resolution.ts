@@ -194,6 +194,7 @@ export function resolveFields(
       key: field.key,
       ...(field.typedBy ? { typedBy: { ...field.typedBy } } : {}),
       osfType: field.osfType,
+      ...(field.document ? { document: structuredClone(field.document) } : {}),
       baseType,
       cardinality,
       ...(bounds ? { cardinalityBounds: bounds } : {}),

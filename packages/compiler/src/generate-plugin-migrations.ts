@@ -12,6 +12,7 @@ import type {
   PluginBaseContext,
   PluginSchemaMigration,
 } from "./plugins.js";
+import { documentFieldInvariants } from "./document-field-invariants.js";
 import { renderConstraintSql } from "./render-constraint-sql.js";
 import { assertTenantBoundReferences } from "./tenant-bound-references.js";
 import type { PlatformSchemaManifest } from "./schema.js";
@@ -235,6 +236,8 @@ export function collectPluginMigrationRegistry(
     }
   }
 
+  const documentSql = documentFieldInvariants(manifest);
+  if (documentSql) entries.push({ plugin: "osf-compiler", version: "9999_document-field-policies", sql: documentSql });
   entries.sort(compareMigrationIdentity);
   const seen = new Set<string>();
   for (const entry of entries) {

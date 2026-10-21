@@ -31,7 +31,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import Ajv2020 from "ajv/dist/2020.js";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import draft07MetaSchema from "ajv/dist/refs/json-schema-draft-07.json" with { type: "json" };
 import { parse as parseYaml } from "yaml";
 
@@ -144,7 +144,7 @@ export function createAuthoringValidator(
 ): AuthoringValidator {
   // strict:false — these schemas carry annotation keywords ajv's strict mode
   // rejects (and would reject on load, before validating anything).
-  const ajv = new Ajv2020.default({ allErrors: true, strict: false });
+  const ajv = new Ajv2020({ allErrors: true, strict: false });
   // The directory is not one dialect: gateway-routes.schema.json is draft-07.
   // Without its meta-schema, ajv refuses to even register that file and the
   // whole registry fails to build.

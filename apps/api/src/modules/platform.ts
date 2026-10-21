@@ -298,6 +298,8 @@ export function createModuleSessionCapability(
  * servers and completed operations are removed, so stale handles cannot cross
  * a reconnect or request boundary.
  */
+const documentPlatformRuntimes = new WeakMap<OpenShapeForgeDatabase, ModulePlatformRuntime>();
+
 export class ModulePlatformRuntime {
   readonly services: ModulePlatformServices;
   readonly #db: OpenShapeForgeDatabase;
@@ -357,6 +359,7 @@ export class ModulePlatformRuntime {
     } = {},
   ) {
     this.#db = db;
+    documentPlatformRuntimes.set(db, this);
     this.#capabilityOperations = options.capabilityOperations;
     const records = new RecordAccessRuntime({
       acceptsSession: (session) => this.#acceptsScopedSession(session),
@@ -1495,4 +1498,15 @@ export async function assertRestrictedModuleOperationConnection(platform: Module
   const runtime = platformRuntimes.get(platform);
   if (!runtime) throw new Error("Maintenance platform is not core owned.");
   await runtime.assertRestrictedOperationConnection(expectedDatabase);
+}
+
+/** Core-owned bridge for canonical blueprint document copies; never exported to plugins. */
+export async function withBlueprintDocumentServices<T>(db: OpenShapeForgeDatabase, session: import("../db/session.js").DbSessionInput,
+  work: (services: ModulePlatformServices, live: TrustedSessionContext) => Promise<T>): Promise<T> {
+  const runtime = documentPlatformRuntimes.get(db);
+  if (!runtime || !session.userId || !session.tenantId || !Array.isArray(session.roles) || !Array.isArray(session.groups)) throw new Error("A live tenant document runtime is required.");
+  return runtime.withActiveOperationSession(session as TrustedSessionContext, live => {
+    if (live.tenantId !== session.tenantId || live.userId !== session.userId) throw new Error("Blueprint document session mismatch.");
+    return work(runtime.services, live);
+  });
 }

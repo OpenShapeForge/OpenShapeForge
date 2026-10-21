@@ -38,7 +38,7 @@ fields:
     description:
       en: Settled amount.
       nl: Verrekend bedrag.
-    osfType: currency
+    osfType: money
     persisted:
       column: amount
       storageClass: core

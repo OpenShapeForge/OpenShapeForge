@@ -318,6 +318,7 @@ interfaces:
   graphql: {}
   web:
     views:
+      embedded: { kind: collection, collectionLayout: stack, itemView: record }
       collection:
         route:
           en: /natural-persons

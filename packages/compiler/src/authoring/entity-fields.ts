@@ -260,8 +260,13 @@ export function normalizeEntityFields(
     if (cardinality) result.cardinality = cardinality;
     if (cardinalityOf(cardinality, path).required) result.required = true;
     const collection = fieldCardinality(result) === "collection";
-    if (field.variables === "template" && (baseType !== "string" || collection)) {
-      throw new Error(`${path}: variables: template requires a single string field.`);
+    if (field.document) {
+      const policy = field.document;
+      if (semantic?.entity !== "Document" || collection || nested) throw new Error(`${path}: document requires a single Document reference.`);
+      if (!["file", "blocks"].includes(policy.content)) throw new Error(`${path}: invalid document content policy.`);
+      if (policy.content === "blocks" && (policy.mimeTypes || policy.maxBytes)) throw new Error(`${path}: file restrictions require content: file.`);
+      if (policy.mimeTypes && (!policy.mimeTypes.length || policy.mimeTypes.some(type => !/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(type)))) throw new Error(`${path}: mimeTypes must contain explicit MIME types.`);
+      if (policy.maxBytes !== undefined && (!Number.isSafeInteger(policy.maxBytes) || policy.maxBytes < 1)) throw new Error(`${path}: maxBytes must be a positive integer.`);
     }
     if ((field.entityValue || field.allowedDefinitions) && nested) {
       throw new Error(`${path}: entityValue and allowedDefinitions require a top-level field.`);
@@ -296,6 +301,12 @@ export function normalizeEntityFields(
         fieldCardinality({ cardinality: definition.cardinality ?? definitionSemantic?.cardinality ?? "single" }) !== "single"
       ) {
         throw new Error(`${path}: definitionField must name a required persisted single fieldDefinition field.`);
+      }
+      if (field.typedBy.documentField) {
+        const carrier = entity.fields.find(candidate => candidate.key === field.typedBy!.documentField);
+        if (!carrier || carrier.osfType !== "Document" || !carrier.persisted || carrier.required || !carrier.readOnly) {
+          throw new Error(`${path}: documentField must name an optional read-only persisted Document reference.`);
+        }
       }
     } else if (field.osfType === "typedValue") {
       throw new Error(`${path}: typedValue requires typedBy definitionField metadata.`);

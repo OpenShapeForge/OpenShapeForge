@@ -50,9 +50,12 @@ export type OperationFieldRelationship = {
   constraints?: OperationReferenceConstraints;
 };
 
+export type OperationDocumentPolicy = { content: "file" | "blocks"; mimeTypes?: string[]; maxBytes?: number; documentType?: string };
+
 export type OperationFieldDefinition = {
+  document?: OperationDocumentPolicy;
   key: string;
-  typedBy?: { definitionField: string };
+  typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean };
   /** A base type, a osf-type catalog key, or an entity name. */
   osfType: string;
   cardinality?: OperationFieldCardinality;
@@ -131,8 +134,9 @@ export type OperationFieldSchemaOptions = {
  * a stored definition into it through the host registry.
  */
 export type ResolvedOperationField = {
+  document?: OperationDocumentPolicy;
   key: string;
-  typedBy?: { definitionField: string };
+  typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean };
   osfType: string;
   baseType: OperationFieldBaseType;
   cardinality: "single" | "collection";

@@ -273,6 +273,15 @@
           "minLength": 1,
           "description": "The one type axis: a base type (string, integer, number, boolean, date, datetime, object), a camelCase osf-type catalog key, or a PascalCase entity name. The compiler derives the base type from the catalog."
         },
+        "document": {
+          "type": "object", "additionalProperties": false, "required": ["content"],
+          "properties": {
+            "content": { "enum": ["file", "blocks"] },
+            "mimeTypes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9.+-]+/[a-z0-9.+-]+$" } },
+            "maxBytes": { "type": "integer", "minimum": 1 },
+            "documentType": { "type": "string", "minLength": 1 }
+          }
+        },
         "transform": {
           "type": "array", "minItems": 1, "maxItems": 8,
           "items": { "type": "object", "additionalProperties": false, "required": ["use"],
@@ -286,7 +295,9 @@
         "typedBy": {
           "type": "object", "additionalProperties": false, "required": ["definitionField"],
           "description": "This field's value contract is the FieldDefinition stored in the named sibling field, compiled through the field-schema service. Requires osfType: typedValue, a single value, and a required single fieldDefinition sibling; both persist as jsonb. The shared entity write path validates the value against the stored definition on every create and update.",
-          "properties": { "definitionField": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" } }
+          "properties": { "definitionField": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+            "documentField": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+            "encrypted": { "type": "boolean" } }
         },
         "allowedDefinitions": {
           "type": "array", "minItems": 1, "uniqueItems": true,

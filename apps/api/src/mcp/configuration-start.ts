@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
-import { actingRelationId } from "../db/acting-relation.js";
 import type { DbSessionInput } from "../db/session.js";
 import { operationFailure } from "@openshapeforge/operations";
 import { HttpError } from "../rest/http-error.js";
@@ -21,7 +20,7 @@ export async function startConfigurationForSession(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   body: unknown,
-): Promise<{ id: string; expiresInSeconds: number }> {
+): Promise<{ expiresInSeconds: number }> {
   if (!session.tenantId || !session.userId) throw new HttpError(401, "UNAUTHENTICATED", "Sign in to configure this record.");
   if (!object(body) || Object.keys(body).some(key => key !== "entity" && key !== "values") || typeof body.entity !== "string" || !object(body.values)) {
     throw new HttpError(400, "BAD_USER_INPUT", "Provide the entity name and ordinary create values.");
@@ -52,7 +51,7 @@ export async function startConfigurationForSession(
   if (!source || !row || !Array.isArray(row[secure.definitionsField])) throw new HttpError(404, "NOT_FOUND", "The secure field definitions are unavailable.");
   const elicit = { ...secure, sourceTable: source.name };
   const minted = await mintConfiguration({
-    db, session, tenantId: session.tenantId, userId: session.userId, relationId: actingRelationId(session),
+    db, tenantId: session.tenantId, userId: session.userId, relationId: session.relationId ?? null,
     table: table.name, elicit,
     modelValues: handoffModelValues({ required: [], elicit, modelValues: body.values, sourceRow: row }),
     definitions: row[secure.definitionsField] as Record<string, unknown>[],
@@ -60,5 +59,5 @@ export async function startConfigurationForSession(
   });
   // Resolve and submit through /pending with the normal session; the bearer
   // handoff token never enters the browser response, URL or application state.
-  return { id: minted.id, expiresInSeconds: minted.expiresInSeconds };
+  return { expiresInSeconds: minted.expiresInSeconds };
 }

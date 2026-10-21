@@ -31,6 +31,7 @@ export type GeneratedCrudColumn = {
   primaryKey: boolean;
   generated: string | null;
   sourceField?: string;
+  document?: { content: "file" | "blocks"; mimeTypes?: string[]; maxBytes?: number; documentType?: string };
   fieldPolicy?: import("@openshapeforge/operations").FieldValuePolicy;
   classification?: "confidential" | "pii" | "bsn";
   immutable?: boolean;
@@ -52,6 +53,10 @@ export type GeneratedCrudColumn = {
   typedBy?: {
     definitionField: string;
     definitionColumn: string;
+    encrypted?: boolean;
+    documentField?: string;
+    documentColumn?: string;
+
   };
   /** The server-owned bindings map of this table, and the fields it may carry a binding for. */
   fieldBindings?: {

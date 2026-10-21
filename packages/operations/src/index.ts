@@ -182,4 +182,5 @@ export { formatMoneyDisplay, formatNumericDisplay, type MoneyDisplay, type Numer
 export { operationFieldMetadataKeywords } from "./schema-annotations.js";
 
 export { valueInvariantKeywords, orderedFieldsKeyword, uniqueByKeyword, timeZoneKeyword, isIanaTimeZone } from "./value-invariants.js";
-export { BLUEPRINT_THUMBNAIL_MAX_BYTES, BLUEPRINT_THUMBNAIL_MAX_LENGTH, BLUEPRINT_THUMBNAIL_PATTERN, isBlueprintThumbnail, blueprintPresentation, type BlueprintPresentationSnapshot } from './blueprint-presentation.js';
+
+export * from "./blueprint-presentation.js";

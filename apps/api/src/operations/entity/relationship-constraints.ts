@@ -7,6 +7,8 @@ import { fieldColumnMap } from "./columns.js";
 import { getGeneratedCrudTables, requireEntityOperation } from "./catalog.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable } from "./types.js";
 
+import { assertDocumentFieldsInTransaction } from "./document-fields.js";
+
 type PreparedValues = ReadonlyMap<GeneratedCrudColumn, unknown>;
 
 function constrainedTarget(table: GeneratedCrudTable, name: string) {
@@ -21,6 +23,7 @@ export async function assertRelationshipConstraintsInTransaction(
   table: GeneratedCrudTable,
   values: PreparedValues,
 ) {
+  await assertDocumentFieldsInTransaction(trx, session, table, values);
   for (const relationship of table.source?.graphql?.relationships ?? []) {
     if (!relationship.constraints || relationship.resolve !== "belongsTo" || !relationship.foreignKey) continue;
     const sourceColumn = table.columns.find((column) => column.name === relationship.foreignKey);

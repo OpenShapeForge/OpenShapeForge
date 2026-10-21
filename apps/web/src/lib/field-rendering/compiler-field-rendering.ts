@@ -73,10 +73,6 @@ const COMPONENT_ALIASES: Record<string, string> = {
   TextInput: "Input",
   Toggle: "Switch",
   FieldMoney: "NumberInput",
-  FieldSingleLine: "Input", FieldIntegerDecimal: "NumberInput", FieldBoolean: "Switch",
-  FieldDate: "DatePicker", FieldDateAndTime: "DateTimePicker", FieldPhone: "Input",
-  FieldMarkdown: "MarkdownText", FieldMeasurement: "JsonFieldEditor", FieldNumericRange: "JsonFieldEditor",
-  FieldTime: "Input", FieldDateRange: "JsonFieldEditor", FieldPeriod: "Input",
 };
 
 function getOsfTypeKey(field: RendererAwareField) {

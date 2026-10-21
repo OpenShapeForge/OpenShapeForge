@@ -30,3 +30,12 @@ describe("blueprint safe content", () => {
     expect(() => buildBlueprint({ ...entity, filterField: "private" }, [field], [column])).toThrow("label field");
   });
 });
+
+test("only policy-bearing Document references may be portable blueprint content", () => {
+ const logo = {...field,key:"logo",osfType:"Document",document:{content:"file" as const},relationship:{kind:"belongsTo" as const,target:"Document",entity:"document"}};
+ const owner = {...entity,blueprint:{fields:["name","logo"]}};
+ const columns = [column,{...column,field:"logo",column:"logo_id",type:"uuid"}];
+ expect(buildBlueprint(owner,[field,logo],columns)?.fields).toContain("logo");
+ const {document:_,...unbounded}=logo;
+ expect(()=>buildBlueprint(owner,[field,unbounded],columns)).toThrow("blueprint field");
+});

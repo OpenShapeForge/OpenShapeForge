@@ -250,7 +250,17 @@ export interface FieldDefinitionAuthoringMetadata {
  * transport schemas as projections of this type instead of copying a reduced
  * field shape into each surface.
  */
+/** Content policy of a Document reference, shared by every interface and write path. */
+export interface FieldDefinitionDocument {
+  content: "file" | "blocks";
+  mimeTypes?: string[];
+  maxBytes?: number;
+  /** Document classification used when creating content through this field. */
+  documentType?: string;
+}
+
 export interface FieldDefinition {
+  document?: FieldDefinitionDocument;
   key: string;
   /**
    * The one type axis. A base type (`string`, `integer`, `number`, `boolean`,
@@ -266,7 +276,7 @@ export interface FieldDefinition {
   /** A typed embedded entity value; relational leaves are lowered to real foreign keys. */
   entityValue?: { definitionField: string; parameterBindings?: boolean };
   /** This value's contract is the FieldDefinition stored in the named sibling field. */
-  typedBy?: { definitionField: string };
+  typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean };
   /** Allowed entity-value definitions on this relationship collection. */
   allowedDefinitions?: string[];
   /**

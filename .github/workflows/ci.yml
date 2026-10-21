@@ -85,12 +85,9 @@ jobs:
 
       # The web app's CRUD pages are compiler output, so a compiler change can
       # break the build without touching a single file under apps/web. Building
-      # here is what catches that. `build:web` builds packages/auth first — the
+      # here is what catches that. `build:apps` builds packages/auth first — the
       # bundler cannot resolve that package's NodeNext `.js` specifiers from
       # source (see docs/consuming.md).
-      - name: Build the web app
-        run: bun run build:web
-
       # The control plane. Nothing here is compiler output, so this build is not
       # guarding against a compiler change the way build:web is — it guards
       # against the things a typecheck cannot see: a server/client boundary
@@ -98,8 +95,11 @@ jobs:
       # does not resolve. It also needs no Keycloak or Redis: the auth module's
       # production env validation short-circuits during
       # NEXT_PHASE=phase-production-build, and every page here is dynamic.
-      - name: Build the admin app
-        run: bun run build:admin
+      # Both builds share this checkout/configuration. Prepare their shared
+      # auth dependency once, without a persistent skip flag or shared DB.
+      # The browser workflow still builds and boots its own web candidate.
+      - name: Build the web and admin apps
+        run: bun run build:apps
 
       - name: Compiler unit tests
         run: bun test packages/compiler
@@ -117,6 +117,7 @@ jobs:
           bun test scripts/core-entity-v3.test.ts
           scripts/keycloak-realm-reconcile.test.ts
           scripts/check-ts-nocheck-baseline.test.ts
+          scripts/api-test-suites.test.ts
 
       - name: Observability unit tests
         run: bun run test:observability
@@ -154,17 +155,7 @@ jobs:
           TEST_REDIS_URL: redis://127.0.0.1:6399
         run: >-
           cd apps/api && bun test src/config src/roles src/control
-          src/graphql/__tests__/introspection.test.ts
-          src/graphql/__tests__/observability-readiness.test.ts
-          src/graphql/__tests__/root-ordering.test.ts
-          src/graphql/available-tenants.unit.test.ts
-          src/graphql/__tests__/transport-hardening.test.ts
           src/graphql/generated-authz.test.ts
-          src/graphql/__tests__/classified-query-guard.unit.test.ts
-          src/graphql/__tests__/classified-nullability.unit.test.ts
-          src/graphql/__tests__/description-projection.unit.test.ts
-          src/graphql/__tests__/immutable-writability.unit.test.ts
-          src/graphql/__tests__/query-hardening.unit.test.ts
           src/auth/organization-service-identity-bearer.test.ts
           src/auth/organization-service-identities.test.ts
           src/auth/login-session-binding.test.ts
@@ -190,8 +181,6 @@ jobs:
           src/rest/serialize-generated-row.test.ts
           src/graphql/context.test.ts
           src/graphql/operation-error.test.ts
-          src/graphql/__tests__/list-input-allowlist.unit.test.ts
-          src/graphql/__tests__/decimal-scalar.unit.test.ts
           src/accounts/account-retirement.test.ts
           src/accounts/account-session.unit.test.ts
           src/accounts/catalog-session.test.ts
@@ -202,6 +191,13 @@ jobs:
           src/auth/employee-invitations.unit.test.ts
           src/auth/organization-resource-client.test.ts
           src/jobs/mail/smtp.test.ts
+
+      # Same exact database-free files as before; the integration/report
+      # runner excludes only this owned set and discovers all other tests.
+      - name: Database-free GraphQL tests
+        env:
+          TEST_REDIS_URL: redis://127.0.0.1:6399
+        run: bun run test:graphql-unit
 
       # These two replace modules (kysely, the DB session) with mock.module,
       # which is process-wide in Bun and would break every other file in the

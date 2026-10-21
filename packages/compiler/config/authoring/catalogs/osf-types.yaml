@@ -318,7 +318,7 @@ types:
   # field authors no render at all, and a web view may override the component
   # but not its props; a report that wants another scale has nowhere to say so
   # yet (docs/field-acceptance-fixture.md records that gap).
-  currency:
+  money:
     label: { en: Currency amount, nl: Geldbedrag }
     baseType: number
     icon: Banknote
@@ -371,8 +371,8 @@ types:
     baseType: object
     icon: Ruler
     render:
-      display: FieldMeasurement
-      input: FieldMeasurement
+      display: TextDisplay
+      input: JsonFieldEditor
     children:
       - key: value
         osfType: number
@@ -421,8 +421,8 @@ types:
     baseType: object
     icon: ArrowLeftRight
     render:
-      display: FieldNumericRange
-      input: FieldNumericRange
+      display: TextDisplay
+      input: JsonFieldEditor
     children:
       - key: from
         osfType: number
@@ -443,8 +443,8 @@ types:
     validation:
       pattern: "^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$"
     render:
-      display: FieldTime
-      input: FieldTime
+      display: TextDisplay
+      input: Input
 
   # As numericRange, over valid, ordered calendar dates.
   dateRange:
@@ -456,8 +456,8 @@ types:
     baseType: object
     icon: CalendarRange
     render:
-      display: FieldDateRange
-      input: FieldDateRange
+      display: TextDisplay
+      input: JsonFieldEditor
     children:
       - key: from
         osfType: date
@@ -480,8 +480,8 @@ types:
       pattern: "^[0-9]{4}(-(Q[1-4]|H[12]|0[1-9]|1[0-2]|W(0[1-9]|[1-4][0-9]|5[0-3])))?$"
       maxLength: 8
     render:
-      display: FieldPeriod
-      input: FieldPeriod
+      display: TextDisplay
+      input: Input
 
   # A bounded declarative schedule, so storing one needs no text grammar and no
   # parser. It is a VALUE contract: nothing in OSF expands a recurrence into

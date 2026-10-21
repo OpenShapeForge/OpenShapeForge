@@ -144,6 +144,7 @@ export type WebFieldOptionSource =
  * component or renderer as their default behaviour.
  */
 export type WebFieldProjection = {
+  document?: { content: "file" | "blocks"; mimeTypes?: string[]; maxBytes?: number; documentType?: string };
   /** Canonical editor profile and lock metadata; the API remains authoritative. */
   authoring?: {profile?:string;pinned?:boolean;locked?:boolean;lockedKeys?:string[];singleton?:boolean;visibleProperties?:string[]};
   /** Canonical protection metadata; the server remains the enforcement boundary. */
@@ -166,7 +167,7 @@ export type WebFieldProjection = {
   baseType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   /** Logical dynamic form metadata; physical storage stays server-side. */
   entityValue?: { definitionField: string; parameterBindings?: boolean };
-  typedBy?: { definitionField: string };
+  typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean };
   allowedDefinitions?: string[];
   relationship?: {
     targetEntityId: string;

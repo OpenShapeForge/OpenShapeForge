@@ -18,30 +18,23 @@
  * whether they are permitted, exactly as it would for an authored field — with
  * one storage reading beside it, that a NOT NULL column holds no null.
  *
- * ## The policy boundary, and why it is a refusal
- *
- * A FieldDefinition may carry policy: a `classification`, an `authorization`
- * or `permissions` block, `secureInput`, `writtenBy`, `immutable` — authored
- * on the field or inherited from its osf-type. The runtime enforces those on
- * COLUMNS: `projectGeneratedEntityRow` redacts a classified column, the
- * protected-field writer owns an `immutable` one. A definition that arrives at
- * runtime types a value inside ONE json column, so none of that machinery can
- * reach it: redacting "the confidential half" of a json value is not something
- * the static projection can do, and a guarded value in a column the reader may
- * see would simply be handed over.
- *
- * So a typed value fails closed on exactly the policies the entity-value
- * runtime already fails closed on, through that same shared guard
- * (`assertEntityValueFieldPolicy`): no policy metadata at any depth, no
- * relationship or entity-typed value, nothing the osf-type registry does not
- * know. An entity reference is refused here rather than accepted on UUID
- * shape — authorizing a reference means reading the target through its own
- * canonical read, which the entity-value carriers do because they lower each
- * reference to a real column; a value typed at runtime has no such column.
- * A variable that must carry a guarded or referencing value needs a field of
- * its own, with the column the runtime can protect.
+ * Ordinary pairs retain the fail-closed policy boundary. Explicit compiled
+ * adapters may additionally route a root Document through a real FK, or seal
+ * a confidential root string before storage. Neither option admits nested
+ * guarded fields or arbitrary runtime relationships.
+
  */
 
+import { applyDocumentContentDraft } from "./document-drafts.js";
+import { randomUUID } from "node:crypto";
+import { sql, type Transaction } from "kysely";
+import type { DB } from "../../generated/db/types.js";
+import type { DbSessionInput } from "../../db/session.js";
+import { encryptSecret, decryptSecret, keyringFromEnv, type StoredSecret } from "@openshapeforge/plugin-runtime/secrets";
+import { redactElicitedValues, SECRET_SET_SENTINEL } from "../../connectors/secrets.js";
+import { assertDocumentFieldsInTransaction } from "./document-fields.js";
+import { getGeneratedCrudTables, requireEntityOperation } from "./catalog.js";
+import { assertRecordPermissionInTransaction } from "./record-permissions.js";
 import { operationFailure } from "@openshapeforge/operations";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../../modules/field-schemas.js";
 import { fieldNameForColumn } from "./columns.js";
@@ -92,9 +85,23 @@ export function assertTypedDefinitionSupported(
   definition: Readonly<Record<string, unknown>>,
   field: string,
   origin: "submitted" | "stored",
+  policy?: GeneratedCrudColumn["typedBy"],
 ): void {
   try {
-    assertEntityValueFieldPolicy({ key: field, osfType: "object", children: [definition] });
+    let checked = definition;
+    if (definition.osfType === "Document" && policy?.documentColumn) {
+      if (!isRecord(definition.document) || !["file", "blocks"].includes(String(definition.document.content))) throw new Error("A Document content policy is required.");
+      for (const key of ["classification", "authorization", "permissions", "writtenBy", "secureInput", "immutable", "children", "item", "shape"]) {
+        if (definition[key] !== undefined) throw new Error("Unsupported Document policy.");
+      }
+      if (hasDeferredValueDefinition(definition)) throw new Error("Concrete definition required.");
+      return;
+    }
+    if (policy?.encrypted && definition.osfType === "string" && isRecord(definition.classification) && definition.classification.sensitivity === "confidential") {
+      const { classification: _classification, ...plain } = definition;
+      checked = plain;
+    }
+    assertEntityValueFieldPolicy({ key: field, osfType: "object", children: [checked] });
     if (hasDeferredValueDefinition(definition)) throw new Error("A concrete value definition is required.");
   } catch {
     throw origin === "submitted"
@@ -162,7 +169,7 @@ export function assertTypedValuesValid(
       throw operationFailure({ code: "VALIDATION", message: `${definitionField} must be a valid field definition.`,
         violations: [{ field: definitionField, code: "INVALID_TYPE", message: `${definitionField} must be a valid field definition.` }], retryable: false });
     }
-    assertTypedDefinitionSupported(stored, definitionField, hasDefinition ? "submitted" : "stored");
+    assertTypedDefinitionSupported(stored, definitionField, hasDefinition ? "submitted" : "stored", value.typedBy);
     const candidate = hasValue ? values[valueField] : current?.[value.name];
     // A NOT NULL column holds no null, whatever the definition says about its
     // own `required`: the write would otherwise be refused by the database
@@ -218,6 +225,113 @@ export function assertStoredTypedValuesSupported(
         "INVALID_DEFINITION",
       );
     }
-    assertTypedDefinitionSupported(stored, fieldNameForColumn(definition), "stored");
+    assertTypedDefinitionSupported(stored, fieldNameForColumn(definition), "stored", value.typedBy);
   }
+}
+
+
+function secretDefinition(definition: unknown): boolean {
+  return isRecord(definition) && isRecord(definition.classification) && definition.classification.sensitivity === "confidential";
+}
+function secretKeys() {
+  const keys = keyringFromEnv(process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS);
+  if (!keys) throw generatedCrudError("Secure value storage is not configured.", "INVALID_DEFINITION");
+  return keys;
+}
+function secretScope(table: GeneratedCrudTable, session: DbSessionInput, id: string): string {
+  return `${session.tenantId}:${table.schema}.${table.table}:${id}`;
+}
+
+/** Validate plaintext first, then route references to real FKs and seal secrets before SQL/events. */
+export async function prepareTypedValueWrite(
+  trx: Transaction<DB>, session: DbSessionInput, table: GeneratedCrudTable,
+  input: ReadonlyMap<GeneratedCrudColumn, unknown>, current?: GeneratedEntityRow,
+): Promise<Map<GeneratedCrudColumn, unknown>> {
+  const output = new Map(input);
+  const pairs = typedValueColumns(table);
+  if (!pairs.length) return output;
+  for (const {value} of pairs) {
+    const carrier=table.columns.find(column=>column.name===value.typedBy?.documentColumn);
+    if(carrier && input.has(carrier)) throw generatedCrudError("A typed Document carrier is server-owned; write the public value instead.", "BAD_USER_INPUT");
+  }
+  const idColumn = table.columns.find(c => c.name === table.primaryKey);
+  let id = current?.[table.primaryKey!] ?? (idColumn && output.get(idColumn));
+  if (pairs.some(p => p.value.typedBy?.encrypted)) {
+    if (!table.tenantScoped || !idColumn || idColumn.type !== "uuid") throw generatedCrudError("Secure typed values require tenant-scoped UUID records.", "INVALID_DEFINITION");
+    if (!id) { id = randomUUID(); output.set(idColumn, id); }
+  }
+  const validationCurrent = current ? {...current} : undefined;
+  for (const {value, definition} of pairs) {
+    const metadata = value.typedBy!;
+    const stored = output.has(definition) ? output.get(definition) : current?.[definition.name];
+    if (metadata.documentColumn && isRecord(stored) && stored.osfType === "Document" && isRecord(output.get(value))) {
+      if (!isRecord(stored.document) || stored.document.content !== "blocks" || !current) throw generatedCrudError("This field does not accept a blocks draft.", "BAD_USER_INPUT");
+      output.set(value, await applyDocumentContentDraft(trx,session,current[metadata.documentColumn],output.get(value)));
+    }
+    if (metadata.documentColumn && validationCurrent && isRecord(stored) && stored.osfType === "Document") {
+      validationCurrent[value.name] = current?.[metadata.documentColumn] ?? null;
+    }
+    if (metadata.encrypted && secretDefinition(stored)) {
+      const existing = current?.[value.name];
+      if (validationCurrent && isRecord(existing)) validationCurrent[value.name] = decryptSecret(secretKeys(), secretScope(table,session,String(id)), value.name, existing as StoredSecret);
+      if (output.get(value) === SECRET_SET_SENTINEL) {
+        if (!isRecord(existing)) throw generatedCrudError("This secret has not been set.", "BAD_USER_INPUT");
+        output.set(value, validationCurrent?.[value.name]);
+      }
+    }
+  }
+  const authored = Object.fromEntries([...output].map(([column, val]) => [fieldNameForColumn(column), val]));
+  assertTypedValuesValid(table, authored, validationCurrent);
+  for (const {value, definition} of pairs) {
+    if (!output.has(value) && !output.has(definition)) continue;
+    const metadata = value.typedBy!;
+    const stored = output.has(definition) ? output.get(definition) : current?.[definition.name];
+    if (isRecord(stored) && stored.osfType === "Document") {
+      const carrier = table.columns.find(c => c.name === metadata.documentColumn);
+      if (!carrier) throw generatedCrudError("A Document carrier is required.", "INVALID_DEFINITION");
+      const targetId = output.has(value) ? output.get(value) : current?.[carrier.name];
+      if (targetId != null) {
+        const target = getGeneratedCrudTables().find(t => t.source?.authoringEntityName === "Document");
+        if (!target?.tenantScoped || !target.primaryKey) throw generatedCrudError("A tenant Document target is required.", "INVALID_DEFINITION");
+        requireEntityOperation(target, "get", session);
+        const visible = await sql`select id from ${sql.id(target.schema,target.table)} where id=${String(targetId)}::uuid and tenant_id=${session.tenantId}::uuid for share`.execute(trx);
+        if (!visible.rows.length) throw generatedCrudError("The document is unavailable.", "FORBIDDEN");
+        if (target.source?.authorization?.recordPermissions) await assertRecordPermissionInTransaction(trx,session,target,String(targetId),"view");
+        await assertDocumentFieldsInTransaction(trx,session,table,new Map([[{...carrier,document:stored.document as NonNullable<GeneratedCrudColumn["document"]>},targetId]]));
+      }
+      output.set(carrier,targetId ?? null);
+      output.set(value,null);
+    } else {
+      if (metadata.documentColumn) {
+        const carrier = table.columns.find(c => c.name === metadata.documentColumn)!;
+        output.set(carrier,null);
+      }
+      if (metadata.encrypted && secretDefinition(stored) && output.has(value) && output.get(value) != null) {
+        const plaintext = output.get(value);
+        if (typeof plaintext !== "string") throw generatedCrudError("A secret must be text.", "BAD_USER_INPUT");
+        const existing = current?.[value.name];
+        const unchanged = isRecord(existing) && validationCurrent?.[value.name] === plaintext;
+        output.set(value,unchanged ? existing : encryptSecret(secretKeys(),secretScope(table,session,String(id)),value.name,plaintext));
+      }
+    }
+  }
+  return output;
+}
+
+/** Restore reference values, and redact even a malformed secret envelope fail-closed. */
+export function projectTypedValues(table: GeneratedCrudTable, row: GeneratedEntityRow): GeneratedEntityRow {
+  let output = {...row};
+  for (const {value,definition} of typedValueColumns(table)) {
+    const metadata=value.typedBy!;
+    const stored=row[definition.name];
+    if (isRecord(stored) && stored.osfType === "Document" && metadata.documentColumn) output[value.name]=row[metadata.documentColumn] ?? null;
+    if (metadata.encrypted && Object.hasOwn(row,value.name) && !secretDefinition(stored)) {
+      // Validate ordinary public data rather than guessing that envelope-shaped
+      // objects are credentials. Corrupt scalar definitions still fail closed.
+      assertTypedValuesValid(table,{[fieldNameForColumn(value)]:output[value.name]},row);
+    }
+    if (metadata.encrypted && secretDefinition(stored)) output=redactElicitedValues(output,value.name);
+    if (metadata.encrypted && secretDefinition(stored) && row[value.name] != null) output[value.name]=SECRET_SET_SENTINEL;
+  }
+  return output;
 }

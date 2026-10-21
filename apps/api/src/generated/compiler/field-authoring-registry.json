@@ -13024,7 +13024,11 @@
           "defaultValue": {
             "key": "value",
             "osfType": "string",
-            "required": false
+            "required": false,
+            "validation": {
+              "minLength": 1,
+              "maxLength": 8000
+            }
           },
           "authoring": {
             "profile": "fullFieldDefinition",

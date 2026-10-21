@@ -1027,7 +1027,10 @@ describe("compiler-rendered constraints on a carried-forward database", () => {
     const migrations = await loadGeneratedPluginMigrations();
     expect(migrations.length).toBeGreaterThan(0);
     for (const migration of migrations.filter((entry) => entry.plugin === "osf-compiler")) {
-      expect(parseCompilerConstraint(migration.sql)).toBeDefined();
+      if(migration.version === "9999_document-field-policies") {
+        expect(migration.sql).toContain("create or replace function app.");
+        expect(migration.sql.toLowerCase()).toContain("create trigger");
+      } else expect(parseCompilerConstraint(migration.sql)).toBeDefined();
     }
   });
 

@@ -76,7 +76,7 @@ fields:
   - key: definition
     osfType: fieldDefinition
     required: true
-    defaultValue: { key: value, osfType: string, required: false }
+    defaultValue: { key: value, osfType: string, required: false, validation: { minLength: 1, maxLength: 8000 } }
     authoring:
       profile: fullFieldDefinition
       lockedKeys: [key]

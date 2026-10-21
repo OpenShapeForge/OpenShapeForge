@@ -30,9 +30,17 @@ export function renderMigrationReport(
     migration: result.version,
     checksum: result.checksum,
     applied: result.applied,
+    ...(result.rollForward === undefined ? {} : { rollForward: result.rollForward }),
+    ...(result.versioned.applied.length === 0 ? {} : { versionedApplied: result.versioned.applied }),
+    ...(result.versioned.reconciled.length === 0
+      ? {}
+      : { versionedReconciled: result.versioned.reconciled }),
     ...(result.pluginMigrationsApplied.length === 0
       ? {}
       : { pluginMigrationsApplied: result.pluginMigrationsApplied }),
+    ...(result.pluginConstraintsRemoved.length === 0
+      ? {}
+      : { pluginConstraintsRemoved: result.pluginConstraintsRemoved }),
     ...(moduleLoadFailures.length === 0
       ? {}
       : {

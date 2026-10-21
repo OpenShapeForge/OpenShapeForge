@@ -77,6 +77,7 @@
     "db:migrate": "bun run --cwd apps/api db:migrate",
     "//db:reset": "Drop, recreate and rebuild the migrate URL's database from the compiled manifest. Refuses in production and without OPENSHAPEFORGE_RESET_DATABASE_CONFIRMATION naming that database; see apps/api/src/db/reset.ts.",
     "db:reset": "bun run --cwd apps/api db:reset",
+    "db:migration:new": "bun run --cwd apps/api db:migration:new",
     "db:provision-roles": "bun run --cwd apps/api db:provision-roles",
     "dev:api": "bun run --cwd apps/api dev",
     "dev:web": "bun run --cwd apps/web dev",

@@ -34,6 +34,7 @@ import {
   createConnectorResolvers,
 } from "../connectors/graphql-schema.js";
 import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
+import { availableTenantTypeDefs, availableTenantQueryFields, resolveAvailableTenants } from "./available-tenants.js";
 import {
   currentTenantQueryFields,
   currentTenantTypeDefs,
@@ -122,6 +123,7 @@ export function buildGraphqlSchema(
     ${moduleGraphql.typeDefs}
 
     ${currentTenantTypeDefs}
+    ${availableTenantTypeDefs}
 
     type Health {
       status: String!
@@ -147,6 +149,7 @@ ${sortRootFieldDefinitions(`
   """Generated presentation configuration for one entity."""
   entityPageConfigs(entitySlug: String!): EntityPageConfigs
   ${currentTenantQueryFields}
+  ${availableTenantQueryFields}
 `)}
 ${sortRootFieldDefinitions(generatedEntityQueryFields)}
 ${sortRootFieldDefinitions(`${connectorQueryFields}\n${connectorNamespaceQueryFields}`)}
@@ -189,6 +192,7 @@ ${sortRootFieldDefinitions(moduleGraphql.mutationFields)}
       }),
       entityPageConfigs: resolveEntityPageConfigs,
       currentTenant: resolveCurrentTenant,
+      availableTenants: resolveAvailableTenants,
     },
     Mutation: {
       ...generatedEntityResolvers.Mutation,
@@ -224,6 +228,7 @@ const coreQueryFieldNames = [
   "health",
   "entityPageConfigs",
   ...declaredFieldNames(currentTenantQueryFields),
+  ...declaredFieldNames(availableTenantQueryFields),
   ...declaredFieldNames(generatedEntityQueryFields),
   ...declaredFieldNames(connectorQueryFields),
   ...declaredFieldNames(connectorNamespaceQueryFields),

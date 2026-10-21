@@ -107,7 +107,7 @@ describe("searchable MCP Operations", () => {
     expect(ids("x")).toEqual([]);
   });
 
-  test("never falls back on a shared action verb alone, and pages the fallback by id", () => {
+  test("never falls back on a shared action verb alone, and pages the fallback by rank then id", () => {
     const definitions = ["a.create", "b.create", "c.create", "payroll.run"].map((id) =>
       definition(id, { name: { en: id.endsWith("create") ? "Create record" : "Run payroll" }, description: { en: "Does it." } }));
     const allowedIds = new Set(definitions.map((d) => d.id));
@@ -118,11 +118,13 @@ describe("searchable MCP Operations", () => {
     expect(search("create payroll").operations.map((entry) => (entry.operation as { id: string }).id)).toEqual(["payroll.run"]);
     const first = search("record payroll", { limit: 2 });
     const second = search("record payroll", { limit: 2, cursor: first.nextCursor });
+    // Neither word matches all; "payroll" names one Operation and "record"
+    // three, so the rarer word ranks its match first, the rest by id.
     expect([...first.operations, ...second.operations].map((entry) => (entry.operation as { id: string }).id))
-      .toEqual(["a.create", "b.create", "c.create", "payroll.run"]);
+      .toEqual(["payroll.run", "a.create", "b.create", "c.create"]);
   });
 
-  test("filters before paging and returns exact canonical schemas", () => {
+  test("filters before paging; a multi-hit set pages summaries even at limit 1, an operationId lookup answers its contract", () => {
     const definitions = [
       definition("demo.alpha", {
         concurrency: {
@@ -130,38 +132,180 @@ describe("searchable MCP Operations", () => {
           editLease: { mode: "required", expiresAfterInactivity: "PT7M" },
         },
         errors: [{ status: 409, code: "CONFLICT", description: "Already running." }],
+        effects: { data: "write", external: "none" },
       }),
       definition("demo.bravo"),
       definition("secret.hidden"),
     ];
     const allowedIds = new Set(["demo.alpha", "demo.bravo"]);
-    const first = searchOperationDefinitions({
-      definitions,
-      allowedIds,
-      arguments: { query: "demo", limit: 1 },
-      locale,
-    });
+    const search = (args: Record<string, unknown>) =>
+      searchOperationDefinitions({ definitions, allowedIds, arguments: args, locale });
+    const first = search({ query: "demo", limit: 1 });
     expect(first.operations).toHaveLength(1);
-    expect(first.operations[0]).toEqual(expect.objectContaining({
+    expect(first.operations[0]).toEqual({
+      operation: { id: "demo.alpha", intent: "invoke" },
+      key: "alpha",
+      name: "Operation demo.alpha",
+      description: "Description for demo.alpha",
+      effects: { data: "write", external: "none" },
+      reliability: { idempotency: { mode: "natural" } },
+    });
+    expect(first.nextCursor).toEqual(expect.any(String));
+    const second = search({ query: "demo", cursor: first.nextCursor, limit: 20 });
+    expect(second.operations.map((entry) => entry.operation)).toEqual([{ id: "demo.bravo", intent: "invoke" }]);
+    expect(second.nextCursor).toBeUndefined();
+    expect(JSON.stringify([...first.operations, ...second.operations])).not.toContain("secret.hidden");
+
+    const exact = search({ operationId: "demo.alpha" });
+    expect(exact).toEqual({ operations: [expect.objectContaining({
       operation: { id: "demo.alpha", intent: "invoke" },
       inputSchema: definitions[0]!.input.schema,
       outputSchema: definitions[0]!.output.schema,
       concurrency: definitions[0]!.concurrency,
       errors: [{ status: 409, code: "CONFLICT", description: "Already running." }],
-    }));
-    expect(first.nextCursor).toBe("demo.alpha");
+      effects: { data: "write", external: "none" },
+    })] });
+    // An id this session cannot use answers nothing about it.
+    expect(search({ operationId: "secret.hidden" })).toEqual({ operations: [] });
+    // A word query never returns a contract, even when it names one id.
+    expect(search({ query: "demo.alpha" }).operations.every((entry) => !("inputSchema" in entry))).toBe(true);
+  });
 
-    const second = searchOperationDefinitions({
-      definitions,
-      allowedIds,
-      arguments: { query: "demo", cursor: first.nextCursor, limit: 20 },
-      locale,
+  test("a word query ranks an id it names first but stays a summary", () => {
+    const definitions = ["Block.update", "Template.get", "Template.list", "TemplateVersion.get"].map((id) =>
+      definition(id, { name: { en: `Template ${id}` } }));
+    const found = searchOperationDefinitions({
+      definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query: "Template.get" }, locale,
+    }).operations;
+    expect((found[0]!.operation as { id: string }).id).toBe("Template.get");
+    expect(found.some((entry) => "inputSchema" in entry)).toBe(false);
+  });
+
+  test("operationId looks up exactly: the canonical id or an exact generated name, only when available", () => {
+    const definitions = ["Relation.list", "Relation.get", "Hidden.list", "Template.get", "TemplateVersion.get", "archive", "Records.archive", "example.Read", "example.read"]
+      .map((id) => definition(id, { name: { en: `Read ${id}` } }));
+    // Hidden.list, Template.get and example.Read exist but this session may not use them.
+    const allowedIds = new Set(["Relation.list", "Relation.get", "TemplateVersion.get", "archive", "Records.archive", "example.read"]);
+    const names = new Map([["relation_list", "Relation.list"], ["hidden_list", "Hidden.list"], ["template_get", "Template.get"]]);
+    const lookup = (operationId: string) => searchOperationDefinitions({
+      definitions, allowedIds, arguments: { operationId }, locale, resolveName: (name) => names.get(name),
+    }).operations;
+    const id = (operationId: string) => lookup(operationId).map((entry) => (entry.operation as { id: string }).id);
+    expect(id("Relation.list")).toEqual(["Relation.list"]);
+    expect(lookup("Relation.list")[0]).toHaveProperty("inputSchema");
+    expect(id("relation_list")).toEqual(["Relation.list"]);
+    // An unqualified id is an id like any other.
+    expect(id("archive")).toEqual(["archive"]);
+    expect(lookup("archive")[0]).toHaveProperty("inputSchema");
+    // Unavailable, unknown or only resembling: nothing, never a neighbour.
+    expect(lookup("Template.get")).toEqual([]);
+    expect(lookup("template_get")).toEqual([]);
+    expect(lookup("hidden_list")).toEqual([]);
+    expect(lookup("Template.missing")).toEqual([]);
+    expect(lookup("osf_list")).toEqual([]);
+    // Ids are compared exactly: a case variant is another Operation.
+    expect(lookup("example.Read")).toEqual([]);
+    expect(id("example.read")).toEqual(["example.read"]);
+    expect(lookup("relation.list")).toEqual([]);
+    expect(JSON.stringify(lookup("hidden_list"))).not.toContain("Hidden");
+  });
+
+  test("an operationId lookup stands alone", () => {
+    for (const extra of [{ query: "relation" }, { cursor: "x" }, { limit: 5 }]) {
+      expect(() => parseOperationSearchArguments({ operationId: "Relation.list", ...extra })).toThrow(/no query, cursor or limit/i);
+    }
+    for (const operationId of ["", "   ", 7]) {
+      expect(() => parseOperationSearchArguments({ operationId })).toThrow(/canonical Operation id/i);
+    }
+    expect(parseOperationSearchArguments({ operationId: " archive " })).toEqual({ operationId: "archive" });
+    const [search] = searchableOperationTools({ search: "osf_search_operations", execute: "osf_execute_operation" });
+    expect(search?.inputSchema).toMatchObject({
+      properties: { operationId: { type: "string", minLength: 1 } },
+      not: { anyOf: [{ required: ["operationId", "query"] }, { required: ["operationId", "cursor"] }, { required: ["operationId", "limit"] }] },
     });
-    expect(second.operations.map((entry) => entry.operation)).toEqual([
-      { id: "demo.bravo", intent: "invoke" },
-    ]);
-    expect(JSON.stringify([...first.operations, ...second.operations]))
-      .not.toContain("secret.hidden");
+  });
+
+  test("ranks naming over description and splits camel case", () => {
+    const definitions = [
+      definition("Adapter.publish", { name: { en: "Publish adapter" }, description: { en: "Publishes article content of an adapter." } }),
+      definition("KnowledgeItem.list", { name: { en: "List knowledge items" }, description: { en: "Returns article subjects; content lives in documents." } }),
+      definition("Template.list", { name: { en: "List templates" } }),
+      definition("TemplateVariant.list", { name: { en: "List template variants" } }),
+    ];
+    const ids = (query: string) => searchOperationDefinitions({
+      definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query }, locale,
+    }).operations.map((entry) => (entry.operation as { id: string }).id);
+    expect(ids("knowledge article content")[0]).toBe("KnowledgeItem.list");
+    // The full match first; an Operation a single word names follows it.
+    expect(ids("TemplateVariant")).toEqual(["TemplateVariant.list", "Template.list"]);
+    expect(ids("template variant")).toEqual(["TemplateVariant.list", "Template.list"]);
+    expect(ids("template")).toEqual(["Template.list", "TemplateVariant.list"]);
+  });
+
+  test("a query that is exactly an entity's name ranks that entity first", () => {
+    const definitions = ["CaseStepTemplate.get", "CaseTemplate.get", "Template.get", "Template.list", "TemplateVariant.get"].map((id) =>
+      definition(id, { entityName: id.split(".")[0]!, name: { en: id.split(".")[1]! } }));
+    const ids = (query: string) => searchOperationDefinitions({
+      definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query }, locale,
+    }).operations.map((entry) => (entry.operation as { id: string }).id);
+    expect(ids("Template")).toEqual(["Template.get", "Template.list", "CaseStepTemplate.get", "CaseTemplate.get", "TemplateVariant.get"]);
+    expect(ids("TemplateVariant")[0]).toBe("TemplateVariant.get");
+  });
+
+  test("an entity's authored label in any language finds its Operations", () => {
+    const definitions = [definition("KnowledgeItem.list", { entityName: "KnowledgeItem", name: { en: "list", nl: "Tonen" } }), definition("Relation.list", { entityName: "Relation" })];
+    const search = (query: string, labels?: Map<string, Record<string, string>>) => searchOperationDefinitions({
+      definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query }, locale,
+      ...(labels ? { entityLabels: labels } : {}),
+    }).operations.map((entry) => (entry.operation as { id: string }).id);
+    expect(search("kennis")).toEqual([]);
+    expect(search("kennis", new Map([["KnowledgeItem", { en: "Knowledge item", nl: "Kennisitem" }]]))).toEqual(["KnowledgeItem.list"]);
+  });
+
+  test("cursors are bound to their query and refuse tampering", () => {
+    const definitions = ["demo.a", "demo.b", "demo.c"].map((id) => definition(id));
+    const search = (args: Record<string, unknown>) => searchOperationDefinitions({
+      definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: args, locale,
+    });
+    const first = search({ query: "demo", limit: 1 });
+    expect(() => search({ query: "operation", cursor: first.nextCursor })).toThrow(/different query/i);
+    expect(() => search({ query: "demo", cursor: "demo.a" })).toThrow(/cursor is invalid/i);
+    const forged = Buffer.from(JSON.stringify({ v: 1, q: "x", s: -1, id: "demo.a" })).toString("base64url");
+    expect(() => search({ query: "demo", cursor: forged })).toThrow(/cursor is invalid/i);
+    // A well-formed cursor edited to another position is refused too.
+    const decoded = JSON.parse(Buffer.from(first.nextCursor!, "base64url").toString("utf8"));
+    for (const edit of [{ s: decoded.s + 1 }, { id: "demo.missing" }]) {
+      const edited = Buffer.from(JSON.stringify({ ...decoded, ...edit })).toString("base64url");
+      expect(() => search({ query: "demo", cursor: edited })).toThrow(/no longer matches/i);
+    }
+    // The same words in another spelling are the same query.
+    expect(search({ query: "Demo", cursor: first.nextCursor }).operations).toHaveLength(2);
+  });
+
+  test("a ranked walk with ties reaches every match once, in rank then id order", () => {
+    const definitions = Array.from({ length: 37 }, (_, index) => definition(`area${index % 3}.op${String(index).padStart(2, "0")}`, {
+      name: { en: index % 4 === 0 ? "Invoice reminder" : "Send reminder" },
+      description: { en: index % 5 === 0 ? "About an invoice." : "Something else." },
+    }));
+    const allowedIds = new Set(definitions.map((d) => d.id));
+    for (const limit of [1, 4, 20]) {
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = searchOperationDefinitions({ definitions, allowedIds, arguments: { query: "invoice reminder", limit, ...(cursor ? { cursor } : {}) }, locale });
+        seen.push(...page.operations.map((entry) => (entry.operation as { id: string }).id));
+        cursor = page.nextCursor;
+      } while (cursor);
+      // "reminder" names all 37; "invoice" names some and describes others.
+      // Those matching both come first (invoice in the name before invoice in
+      // the description), then the rest "reminder" names; each group by id.
+      const group = (index: number) => index % 4 === 0 ? 0 : index % 5 === 0 ? 1 : 2;
+      const expected = definitions
+        .map((d, index) => ({ id: d.id, group: group(index) }))
+        .sort((left, right) => left.group - right.group || (left.id < right.id ? -1 : 1))
+        .map(({ id }) => id);
+      expect(seen).toEqual(expected);
+    }
   });
 
   test("validates generic arguments without accepting identity metadata", () => {
@@ -268,7 +412,7 @@ describe("operation search matches the model's own words", () => {
     expect(ids("uitnodiging")).toEqual(["accounts.invite-member"]);
   });
 
-  test("without a full match, any longer word still finds candidates, in id order", () => {
+  test("without a full match, any longer word still finds candidates, best fit first", () => {
     expect(ids("invite user with finance viewer role")).toEqual(["accounts.invite-member", "accounts.list-roles"]);
   });
 
@@ -276,3 +420,55 @@ describe("operation search matches the model's own words", () => {
     expect(ids("payroll")).toEqual([]);
   });
 });
+
+describe("operation search weighs the word itself over a resemblance", () => {
+  const definitions = [
+    definition("Relation.list", { intent: "list", entityName: "Relation", name: { en: "List relations" }, description: { en: "Returns a page of relations." } }),
+    definition("Relation.delete", { intent: "delete", entityName: "Relation", name: { en: "Delete relation" }, description: { en: "Deletes one relation by name." } }),
+    definition("PersonalNote.list", { intent: "list", entityName: "PersonalNote", name: { en: "List personal notes" }, description: { en: "Returns notes." } }),
+    definition("Archive.list", { intent: "list", entityName: "Archive", name: { en: "List archives" }, description: { en: "Returns archives." } }),
+  ];
+  const entityFields = new Map([
+    ["Relation", ["Display name", "Natural persons", "Weergavenaam", "Natuurlijke personen"]],
+    ["PersonalNote", ["Name", "Text"]],
+    ["Archive", ["Name"]],
+  ]);
+  const ids = (query: string, fields: Map<string, string[]> | null = entityFields) => searchOperationDefinitions({
+    definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query }, locale, ...(fields ? { entityFields: fields } : {}),
+  }).operations.map((entry) => (entry.operation as { id: string }).id);
+
+  test("an inflected form is the word; a shared prefix only resembles it", () => {
+    // "persons" is "person"; "personal" merely starts like it.
+    const found = ids("person name");
+    expect(found.indexOf("PersonalNote.list")).toBeGreaterThan(found.indexOf("Relation.list"));
+    expect(found.indexOf("PersonalNote.list")).toBeGreaterThan(found.indexOf("Relation.delete"));
+  });
+
+  test("a verb asks for an intent but is not a subject", () => {
+    expect(ids("find person by name")).toEqual(["Relation.list", "PersonalNote.list"]);
+    expect(ids("delete relation")[0]).toBe("Relation.delete");
+    expect(ids("find archive")).toEqual(["Archive.list"]);
+    expect(ids("find nothing")).toEqual([]);
+  });
+
+  test("a word nearly every Operation has tells little apart", () => {
+    // "name" is a field of every entity here; "persons" of one. The archive
+    // matches only the common word, so it is never listed before a relation.
+    const found = ids("name person");
+    expect(found.slice(0, 2).sort()).toEqual(["Relation.delete", "Relation.list"]);
+  });
+
+  test("a compound ends in the word it is built from", () => {
+    // "naam" is only in Relation's "Weergavenaam".
+    expect(ids("relation naam")).toEqual(["Relation.delete", "Relation.list"]);
+    expect(ids("naam")).toEqual(["Relation.delete", "Relation.list"]);
+  });
+
+  test("field labels are only searched when the session sees them", () => {
+    // Without them nothing says a relation has persons.
+    // No Operation matches both words then: each word on its own.
+    expect(ids("person name", null)).toEqual(["Relation.delete", "PersonalNote.list"]);
+    expect(ids("naam", null)).toEqual([]);
+  });
+});
+

@@ -120,3 +120,19 @@ refresh behavior. Deployment activation and live acceptance remain host work.
 Canonical REST Operation projections including edit leases, and their event feed used by an MCP App can explicitly bind to their existing MCP resource with `x-openshapeforge-mcp-resource`. In host mode, only the configured public origin and canonical shared or organization MCP paths are accepted. The header carries no identity: the credential must still prove the exact resource audience, issuer, signature, subject and admitted organization membership. Shared resources also retain the configured API audience; organization resources retain their registry binding. Only those projections explicitly enable this policy with `mcpAppResource`; ordinary API requests, API-key provisioning/exchange, connector OAuth and GraphQL keep the static client allowlist. Control projections accept only the configured `/admin/mcp` binding and still require verified platform authority.
 
 Binary artifact routes are outside this JSON projection and retain their ordinary browser-client policy.
+
+`Query.availableTenants` is an authenticated account-self projection for a human
+bearer session. It reads the verified subject's current enabled native
+organization memberships with the configured tenant-realm administration
+client only when its full configured issuer matches the verified session issuer, then intersects them with active provisioned tenants and that person's
+admitted, unblocked membership. An unclaimed pending invitation is also eligible
+when it matches the bearer's verified email; discovery does not claim it or
+create a Relation. Only tenant id, slug and display name are returned. No
+subject/tenant argument, global registry list or browser administration token is
+accepted. Each mapped tenant is read with RLS enabled and empty roles/groups;
+existing ordinary tenant queries remain fenced to the selected organization.
+Native discovery is bounded to 100 memberships and fails closed on provider
+errors. Results are shared only within a GraphQL request, so the next request
+observes native membership removal and admission blocking. A choice does not
+establish authority: selecting another organization requires its own scoped
+OAuth session and the ordinary tenant binding/admission checks.

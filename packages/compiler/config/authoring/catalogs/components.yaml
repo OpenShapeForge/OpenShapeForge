@@ -211,7 +211,7 @@ components:
   Switch:
     kind: field
     description: Boolean toggle switch.
-    props: []
+    props: [layout, trueLabel, falseLabel, nullLabel]
 
   ReferenceSelect:
     kind: field

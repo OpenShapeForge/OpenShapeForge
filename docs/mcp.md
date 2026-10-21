@@ -291,9 +291,20 @@ model; `osf_describe` is the write contract.
 
 When the deployment selects the **searchable Operation projection**, the fixed
 `osf_search_operations` / `osf_execute_operation` pair also covers authorized
-entity CRUD and runtime provider Operations. Search returns the exact MCP input
-schema, including field withholding and concurrency controls, plus canonical
-interaction and prerequisite metadata. Pagination uses `nextCursor`. Covered
+entity CRUD and runtime provider Operations. A word `query` ranks its matches:
+the words that name an Operation (id, key, entity, the entity's authored labels
+in every language, the Operation name) count more than its description, and a
+query that is exactly an entity's name ranks that entity first. It pages short
+summaries — identity, name, description, target, effects and reliability —
+with a `nextCursor` bound to that query and to an entry of its result (a cursor that no longer names one is refused), and never returns a schema. The same
+tool called with only `operationId` looks one Operation up: the exact canonical
+id, or a generated tool name the existing exact matcher resolves without
+ambiguity, returns that available Operation alone with its full contract — the
+exact MCP input schema including field withholding and concurrency controls,
+the output schema, errors, and canonical interaction and prerequisite metadata.
+An id this session cannot use returns nothing; ids are compared exactly, never
+case-folded or guessed. `operationId` cannot be combined with `query`, `cursor`
+or `limit`. Covered
 CRUD, authored operation and provider tools no longer consume individual slots
 in `tools/list`; tools without a canonical replacement remain advertised.
 The dedicated projection continues to offer its authored tool names.

@@ -13,8 +13,8 @@
  * query works without session GUCs.
  *
  * A differing checksum on its own does not say whether the database is
- * empty, built from another manifest, or another branch's altogether, and
- * each has its own next command. `findUndeclaredDatabaseSchema` and
+ * empty, behind this build, or another branch's altogether, and each has its
+ * own next command. `findUndeclaredDatabaseSchema` and
  * `describeGeneratedSchemaDrift` answer that so callers can print a
  * remediation that works: see the comment on `describeGeneratedSchemaDrift`.
  */
@@ -120,10 +120,11 @@ export type UndeclaredSchemaManifestTable = {
  * Find schema the database has and this branch does not declare.
  *
  * The checksum says the database and the code differ; this says which way.
- * Both directions end in `db:reset`, but a database carrying schema this
- * branch never declared is a *shared* database another worktree built, and
- * the honest remedy there is a scratch database rather than destroying what
- * the other branch is using.
+ * A database that is merely behind is carried forward by `db:migrate`; one
+ * carrying schema this branch never declared is a *shared* database another
+ * worktree built, or one that needs a versioned migration — and the honest
+ * remedy for the former is a scratch database rather than destroying what the
+ * other branch is using.
  *
  * Only schemas the manifest covers are examined, so unrelated schemas on the
  * same database are never mistaken for drift. Within those schemas there is
@@ -226,14 +227,14 @@ export async function findUndeclaredDatabaseSchema(
 }
 
 /**
- * - "migrate": the database is empty; `db:migrate` builds it.
- * - "reset": the database was built from another manifest, or has tables
- *   but no generated-schema record, and nothing in it is foreign to this
- *   branch. A built database is never changed in place, so `db:reset` (or
- *   a scratch database) is the fix.
+ * - "migrate": the database is empty, and `db:migrate` builds it; or it is
+ *   behind this build with nothing foreign in it, and `db:migrate` carries it
+ *   forward (refusing, with the listing, any drift that is not additive).
+ * - "reset": the database has tables but no generated-schema record: the
+ *   chain adopts nothing, so `db:reset` (or a scratch database) is the fix.
  * - "foreign-schema": the database carries schema this branch does not
- *   declare — a shared database another worktree built. The same reset, but
- *   the honest suggestion is a scratch database.
+ *   declare — a shared database another worktree built. The honest
+ *   suggestion is a scratch database.
  */
 export type SchemaDriftRemediationKind = "migrate" | "reset" | "foreign-schema";
 
@@ -286,8 +287,8 @@ const SCRATCH_DATABASE_RECIPE = [
  * Two questions. Does the database contain schema this branch does not
  * declare? Then it is someone else's build and a scratch database is the
  * remedy that leaves them alone. Otherwise: is there a build at all? An empty
- * database is built by `db:migrate`; a built one whose checksum differs is
- * rebuilt by `db:reset`, because nothing rolls a built database forward.
+ * database is built by `db:migrate`, and a built one whose checksum differs is
+ * carried forward by it.
  */
 export function describeGeneratedSchemaDrift(
   drift: GeneratedSchemaDriftResult,
@@ -324,10 +325,10 @@ export function describeGeneratedSchemaDrift(
         ...listUndeclared("table", undeclared.tables),
         ...listUndeclared("column", undeclared.columns),
         "",
-        "`bun run db:migrate` cannot fix this and refuses it whatever the checksum",
-        "says: nothing is dropped or altered in place. This is what a database shared between git worktrees",
-        "looks like once another branch — one that declares more than this one — has",
-        "built it. It is not a regression in the branch under test.",
+        "`bun run db:migrate` refuses this whatever the checksum says: it never drops",
+        "what the manifest does not declare. This is what a database shared between git",
+        "worktrees looks like once another branch — one that declares more than this",
+        "one — has built it. It is not a regression in the branch under test.",
         "",
         "Run the suite against a scratch database (reuses the connection strings you",
         "already have, without echoing them here):",
@@ -380,14 +381,17 @@ export function describeGeneratedSchemaDrift(
   }
 
   return {
-    kind: "reset",
+    kind: "migrate",
     message: [
-      `Generated schema drift detected (status: "${drift.status}"): ${database} was built from another manifest.`,
+      `Generated schema drift detected (status: "${drift.status}"): ${database} is behind this branch's manifest.`,
       ...checksums,
       "",
-      "A built database is never changed in place — `bun run db:migrate` refuses a",
-      "checksum mismatch — so rebuild it from this branch's manifest, destroying",
-      "its data:",
+      "Nothing in the database is outside this branch's manifest, so carry it",
+      "forward — pending versioned migrations, then the additive roll-forward:",
+      "  bun run db:migrate",
+      "",
+      "If that refuses non-additive drift on a disposable database, rebuild it from",
+      "this branch's manifest, destroying its data:",
       RESET_RECIPE,
       "",
       "Or leave the shared database alone entirely and run against a scratch one:",

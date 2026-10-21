@@ -1,6 +1,6 @@
 {
   "name": "@openshapeforge/plugin-runtime",
-  "version": "0.1.9",
+  "version": "0.1.15",
   "description": "Stable runtime contracts for OpenShapeForge plugins.",
   "repository": {
     "type": "git",
@@ -28,7 +28,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@openshapeforge/operations": "workspace:*",
+    "@openshapeforge/operations": "0.2.10",
     "fastify": "^5.8.2",
     "kysely": "^0.29.4"
   },

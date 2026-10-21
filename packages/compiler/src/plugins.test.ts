@@ -41,7 +41,7 @@ describe("compiler plugins", () => {
     expect(new Set(migrations.migrations.map(({ plugin }) => plugin))).toEqual(
       new Set(["osf-compiler"]),
     );
-    expect(migrations.migrations.every(({ sql }) => sql.includes("ALTER TABLE")))
+    expect(migrations.migrations.every(({ sql }) => sql.includes("ALTER TABLE") || (sql.includes("create or replace function app.") && sql.toLowerCase().includes("create trigger"))))
       .toBe(true);
     const operationCatalog = JSON.parse(first.groups.operations.find((artifact) =>
       artifact.path.endsWith("operations/catalog.json"),

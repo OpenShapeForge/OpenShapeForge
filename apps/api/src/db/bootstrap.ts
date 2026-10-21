@@ -2,13 +2,13 @@
 /**
  * Building a database from the manifest, and the lock that serializes it.
  *
- * In the reset model a database is CREATED from the compiled manifest rather
- * than migrated through history: the schema is versioned by git, `db:reset`
- * drops and recreates the database, and an empty database is built on first
- * contact. All three paths — `db:migrate`, `db:reset`, and the API's own
- * startup — run the same chain (migration-chain.ts) under the same advisory
- * lock, so "migrate on an empty database" and "bootstrap on first start" are
- * one thing, not two that have to be kept in step.
+ * An empty database is CREATED from the compiled manifest; a built one is
+ * carried forward by `db:migrate`, and a disposable development one may be
+ * dropped and rebuilt by `db:reset`. All three paths — `db:migrate`,
+ * `db:reset`, and the API's own startup on an empty database — run the same
+ * chain (migration-chain.ts) under the same advisory lock, so "migrate on an
+ * empty database" and "bootstrap on first start" are one thing, not two that
+ * have to be kept in step.
  *
  * The lock is what keeps two replicas — or a bootstrapping API pod and a
  * reset job — from building the same database at once. It is taken with no
@@ -80,7 +80,8 @@ export type BootstrapOutcome =
       /**
        * - "migrated": the database already matches the bundled manifest.
        * - "behind": it was built from another manifest; that is drift for
-       *   `db:reset` to settle, not something to build over.
+       *   `db:migrate` (or, in development, `db:reset`) to settle, not
+       *   something the API changes on its own at startup.
        * - "foreign-schema": it carries schema this build does not declare —
        *   another branch's, or a legacy layout — or declared tables with no
        *   generated-schema row; building the manifest over the top would

@@ -407,6 +407,7 @@ function buildToolsForEntity(
   table: string,
   referentiedata: CoreReferentiedataSnapshot,
   relationshipTargets: ReadonlyMap<string, EntityRelationshipTarget>,
+  contracts: readonly CompiledEntityContract[],
 ): McpToolDefinition[] {
   const mcp = contract.mcp;
   if (!mcp) return [];
@@ -428,7 +429,7 @@ function buildToolsForEntity(
   // incomplete and tries anyway; a model that reads "reviewedAt is written by
   // example.finding.review" calls that instead. The sentence is worth more
   // than the refusal it prevents.
-  const sortable = entitySortableFieldKeys(contract, mcp.elicitOnCreate?.into);
+  const sortable = entitySortableFieldKeys(contract, mcp.elicitOnCreate?.into, contracts);
   const filterField = contract.entity.filterField;
   const tools: McpToolDefinition[] = [];
   const output = entityRecordOutputSchema(
@@ -1399,6 +1400,7 @@ export function buildMcpCatalog(
         input.table,
         referentiedata,
         relationshipTargets,
+        inputs.map((entry) => entry.contract),
       ),
     );
 

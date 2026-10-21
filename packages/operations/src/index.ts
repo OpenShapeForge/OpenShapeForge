@@ -182,3 +182,5 @@ export { formatMoneyDisplay, formatNumericDisplay, type MoneyDisplay, type Numer
 export { operationFieldMetadataKeywords } from "./schema-annotations.js";
 
 export { valueInvariantKeywords, orderedFieldsKeyword, uniqueByKeyword, timeZoneKeyword, isIanaTimeZone } from "./value-invariants.js";
+
+export * from "./blueprint-presentation.js";

@@ -16,6 +16,7 @@ import rawOperationCatalog from "../../generated/operations/catalog.json" with {
 import { collectionManagedFields, collectionMutationError, withoutCollectionInputs } from "./collection-policy.js";
 import {
   generatedCrudError,
+  projectGeneratedEntityRow,
   getGeneratedCrudTables,
   requireEntityOperation,
 } from "./catalog.js";

@@ -91,3 +91,9 @@ test("an unclosed description placeholder is left as text in linear time", () =>
     display_name: "Robin", relation_type: "person",
   }).items[0]!.description).toBe("Hi Robin");
 });
+
+test("a bound description never reinterprets tokens inside the resolved value", () => {
+  const rule = { ...rules[0]!, description_template: "Call {{displayName}}", description_bound: true };
+  const result = evaluateLabelRules(relationTable, [rule], { display_name: "secret", hubble_demo_segment: "banking" });
+  expect(result.items[0]?.description).toBe("Call {{displayName}}");
+});

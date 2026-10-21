@@ -61,7 +61,7 @@ describe.skipIf(!generic)("canonical entity schemas through the real dispatch pa
       const { tools } = await client.listTools();
       expect(tools.map(tool => tool.name)).toContain("osf_search_operations");
       expect(tools.map(tool => tool.name)).not.toContain("osf_describe");
-      const result = await client.callTool({ name: "osf_search_operations", arguments: { query: "Address.create", limit: 20 } });
+      const result = await client.callTool({ name: "osf_search_operations", arguments: { operationId: "Address.create" } });
       expect(result.isError).toBeFalsy();
       const page = result.structuredContent as { operations: { operation: { id: string }; inputSchema: { properties: Record<string, unknown> } }[] };
       const address = page.operations.find(row => row.operation.id === "Address.create");

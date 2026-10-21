@@ -213,9 +213,10 @@ repo bundling this package needs to do the same.
   (the compiler renders constraints as name-guarded DO blocks; a plugin's
   free-form `schemaMigrations` must repeat safely), and an entry that fails
   is rolled back and named. Do not record checksums or skip entries that
-  were "already applied"; a changed constraint moves the manifest checksum,
-  and the host's generated-schema step must refuse a built database whose
-  recorded checksum differs (the reset model, [migrations.md](migrations.md)).
+  were "already applied". Because a rendered constraint is guarded by name
+  alone, a host that carries a built database forward must reconcile a
+  CHECK whose definition changed and drop constraints the registry no longer
+  renders ([migrations.md](migrations.md#compiler-rendered-constraints)).
   The reference implementation is
   `apps/api/src/db/migrations/generated-plugin-migrations.ts`.
 - The host repo owns everything downstream of the artifacts: the API

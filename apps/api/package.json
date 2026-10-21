@@ -10,6 +10,7 @@
     "db:migrate": "bun src/db/migrate.ts",
     "db:reset": "bun src/db/reset.ts",
     "db:provision-roles": "bun src/db/provision-roles.ts",
+    "db:migration:new": "bun src/db/migrations/new-migration.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:e2e": "bun ../../scripts/run-api-tests.ts e2e",
     "test:migrations": "bun test src/db"

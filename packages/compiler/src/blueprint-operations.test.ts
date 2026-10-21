@@ -26,6 +26,10 @@ test("blueprint Operations preserve edit controls and separate publication right
   const publish = operations.find((operation) => operation.handler === "Template.publish")!;
   expect(publish.auth).toEqual({ mode: "session", roles: ["platform-operator"], recordPermission: "edit" });
   expect(publish.inputSchema.required).toEqual(["id", "expectedVersion", "leaseToken"]);
+  expect(publish.inputSchema.properties).toHaveProperty("thumbnail");
+  expect(publish.inputSchema.properties).toHaveProperty("retired");
+  const list=operations.find(operation=>operation.handler==="Template.list")!;
+  expect((list.outputSchema as any).properties.items.items.properties).toHaveProperty("thumbnail");
 });
 
 test('Independent copies expose publication and provenance, without reset',()=>{

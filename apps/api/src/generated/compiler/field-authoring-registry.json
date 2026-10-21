@@ -332,14 +332,20 @@
       }
     },
     "markdown": {
+      "props": {
+        "variableListLabel": {
+          "en": "Variables",
+          "nl": "Variabelen"
+        }
+      },
       "label": {
         "en": "Markdown",
         "nl": "Markdown"
       },
       "baseType": "string",
       "render": {
-        "display": "TextDisplay",
-        "input": "MarkdownText"
+        "display": "FieldMarkdown",
+        "input": "FieldMarkdown"
       }
     },
     "email": {
@@ -364,6 +370,9 @@
       "audit": true
     },
     "phone": {
+      "props": {
+        "country": "netherlands"
+      },
       "label": {
         "en": "Phone number",
         "nl": "Telefoonnummer"
@@ -374,8 +383,8 @@
         "pattern": "^\\+?[0-9\\s\\-()]{7,20}$"
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldPhone",
+        "input": "FieldPhone"
       },
       "classification": {
         "sensitivity": "pii",
@@ -708,6 +717,12 @@
       }
     },
     "measurement": {
+      "props": {
+        "unitLabel": {
+          "en": "Unit",
+          "nl": "Eenheid"
+        }
+      },
       "kind": "object",
       "label": {
         "en": "Measurement",
@@ -820,6 +835,16 @@
       }
     },
     "numericRange": {
+      "props": {
+        "minimumLabel": {
+          "en": "From",
+          "nl": "Van"
+        },
+        "maximumLabel": {
+          "en": "To",
+          "nl": "Tot"
+        }
+      },
       "schema": {
         "x-osf-ordered-fields": {
           "lower": "from",
@@ -860,6 +885,9 @@
       ]
     },
     "localTime": {
+      "props": {
+        "precision": "second"
+      },
       "label": {
         "en": "Time of day",
         "nl": "Tijdstip"
@@ -875,6 +903,16 @@
       }
     },
     "dateRange": {
+      "props": {
+        "startLabel": {
+          "en": "From",
+          "nl": "Van"
+        },
+        "endLabel": {
+          "en": "To",
+          "nl": "Tot"
+        }
+      },
       "schema": {
         "x-osf-ordered-fields": {
           "lower": "from",
@@ -915,6 +953,38 @@
       ]
     },
     "calendarPeriod": {
+      "props": {
+        "typeLabel": {
+          "en": "Period type",
+          "nl": "Soort periode"
+        },
+        "valueLabel": {
+          "en": "Period value",
+          "nl": "Periode"
+        },
+        "kindLabels": {
+          "month": {
+            "en": "Month",
+            "nl": "Maand"
+          },
+          "quarter": {
+            "en": "Quarter",
+            "nl": "Kwartaal"
+          },
+          "year": {
+            "en": "Year",
+            "nl": "Jaar"
+          },
+          "halfYear": {
+            "en": "Half-year",
+            "nl": "Halfjaar"
+          },
+          "week": {
+            "en": "Week",
+            "nl": "Week"
+          }
+        }
+      },
       "label": {
         "en": "Calendar period",
         "nl": "Kalenderperiode"
@@ -22075,7 +22145,6 @@
               }
             ]
           },
-          "variables": "template",
           "suggestions": {
             "sourceKey": "entityFields"
           }
@@ -22092,6 +22161,7 @@
             "nl": "Template met dynamische variabelen dat een gepersonaliseerde uitleg produceert wanneer op het label wordt geklikt."
           },
           "osfType": "variableTemplate",
+          "variables": "template",
           "validation": {
             "maxLength": 2000
           },
@@ -22107,7 +22177,6 @@
               }
             ]
           },
-          "variables": "template",
           "suggestions": {
             "sourceKey": "entityFields"
           }
@@ -39950,102 +40019,51 @@
           }
         },
         {
-          "key": "valueType",
+          "key": "definition",
+          "osfType": "fieldDefinition",
           "required": true,
+          "immutable": true,
           "label": {
-            "en": "Value type",
-            "nl": "Waardetype"
-          },
-          "description": {
-            "en": "Data shape used by the setting value.",
-            "nl": "Datastructuur die door de instellingswaarde wordt gebruikt."
-          },
-          "defaultValue": "string",
-          "validation": {
-            "minLength": 1,
-            "maxLength": 20
-          },
-          "options": {
-            "type": "referentiedata",
-            "referentieGroep": "TENANTSETTINGVALUETYPE"
+            "en": "Definition",
+            "nl": "Definitie"
           },
           "persisted": {
-            "column": "value_type",
+            "column": "definition",
             "storageClass": "core"
-          },
-          "osfType": "referenceDataCode"
-        },
-        {
-          "key": "valueText",
-          "osfType": "string",
-          "required": false,
-          "label": {
-            "en": "Text value",
-            "nl": "Tekstwaarde"
-          },
-          "description": {
-            "en": "Plain string value for text-based settings.",
-            "nl": "Eenvoudige tekenreekswaarde voor tekstinstellingen."
-          },
-          "validation": {
-            "maxLength": 4000
-          },
-          "persisted": {
-            "column": "value_text",
-            "storageClass": "core"
-          },
-          "visibility": {
-            "conditions": [
-              {
-                "field": "valueType",
-                "operator": "eq",
-                "value": "string"
-              }
-            ]
           }
         },
         {
-          "key": "valueJson",
-          "osfType": "object",
-          "required": false,
-          "label": {
-            "en": "JSON value",
-            "nl": "JSON-waarde"
+          "key": "value",
+          "osfType": "typedValue",
+          "typedBy": {
+            "definitionField": "definition",
+            "documentField": "documentValue",
+            "encrypted": true
           },
-          "description": {
-            "en": "Structured JSON value for object-based settings.",
-            "nl": "Gestructureerde JSON-waarde voor objectgebaseerde instellingen."
+          "label": {
+            "en": "Value",
+            "nl": "Waarde"
           },
           "persisted": {
-            "column": "value_json",
+            "column": "value",
             "storageClass": "core"
-          },
-          "visibility": {
-            "conditions": [
-              {
-                "field": "valueType",
-                "operator": "eq",
-                "value": "json"
-              }
-            ]
           }
         },
         {
-          "key": "isSecret",
-          "osfType": "boolean",
-          "required": true,
+          "key": "documentValue",
+          "osfType": "Document",
+          "readOnly": true,
           "label": {
-            "en": "Secret",
-            "nl": "Geheim"
+            "en": "Document",
+            "nl": "Document"
           },
-          "description": {
-            "en": "Whether the setting should be stored and handled as a secret.",
-            "nl": "Of de instelling als geheim moet worden opgeslagen en verwerkt."
-          },
-          "defaultValue": false,
           "persisted": {
-            "column": "is_secret",
+            "column": "document_value_id",
             "storageClass": "core"
+          },
+          "relationship": {
+            "ownership": "reference",
+            "inverse": false
           }
         },
         {

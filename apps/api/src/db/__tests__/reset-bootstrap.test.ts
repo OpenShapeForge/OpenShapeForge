@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The two ways a database comes into being in the reset model, each against
+ * The two ways a database comes into being from scratch, each against
  * a throwaway scratch database on the same Postgres instance (created and
  * dropped through the admin URL; no shared database is touched):
  *
@@ -113,7 +113,7 @@ describe("bootstrapIfEmpty", () => {
   );
 
   test(
-    "leaves a database built from another manifest, and a foreign one, for db:reset",
+    "leaves a database built from another manifest, and a foreign one, exactly as it was",
     async () => {
       await withScratchDb(async (url) => {
         await withDb(url, (db) => db.connection().execute((conn) => runMigrationChain(conn)));

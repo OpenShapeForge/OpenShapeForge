@@ -83,3 +83,40 @@ Chromium, checks the app return and absence of an identity cookie, and refuses
 consumed, revoked, tampered, disabled-organization and foreign-return cases.
 The app return in this proof is a login-entry fixture, not an authenticated host
 journey. Reports, screenshots and video are retained under `.runtime/`.
+
+## MCP resource scopes for dynamically registered clients
+
+The opt-in `osf-mcp-resource-scopes` client-policy executor runs at two native
+Keycloak boundaries. `REGISTERED` attaches explicitly registration-enabled resource scopes as
+**optional** scopes in the DCR transaction, before its response. Explicit `registration-scopes` can also make supporting OpenID scopes available when a client registers a smaller scope set than it later requests. It changes no
+user role grants, default scopes or callbacks. Supporting scopes cannot also be the resource scope of any configured binding. They use lowercase
+names (`[a-z][a-z0-9_-]*`), excluding `openid`; they require registration opt-in.
+An organization-free binding cannot attach `organization`. The scopes may expose
+claims for roles already held by the user, but do not grant those roles. `AUTHORIZATION_REQUEST`
+validates one exact RFC 8707 `resource` and records its configured scope in a server-owned client note after native scope, redirect and PKCE validation, before login and consent. The required `osf-mcp-resource-scope-binding` authenticator must be the first browser-flow execution; it projects that note idempotently into native scope state before cookie or scope conditions run. No client mutation occurs at login.
+Resource scope names are explicit lowercase OAuth tokens (up to 150 letters, digits, colons, underscores or hyphens); standard identity scopes such as `openid`, `organization` and `roles` cannot be resource scopes. For product resources, choose a scope name such as `product-shared-mcp` outside the tenant-owned `mcp-resource:<alias>` namespace; the host provisions and reconciles that scope and its audience mappers. If clients must request it during registration, the host must also include it in its Allowed Client Scopes policy. Built-in identity scopes and the `organization:`/`org:` namespaces cannot be resource scopes. A scope belonging to another configured resource, a conflicting tenant resource scope, or a repeated resource/scope parameter fails closed.
+Requests without a resource, and resources outside this policy, retain native
+behavior. Existing clients must already have the optional scope; the executor
+never repairs them during login.
+
+Configure a realm client profile containing this executor, then reference the
+profile from an enabled `any-client` client policy. The executor configuration is:
+
+```json
+{
+  "resources": [
+    {"resource": "https://app.example.test/admin/mcp", "scope": "mcp-resource:control", "organization": false, "registration": true, "registration-scopes": ["profile", "roles"]},
+    {"resource": "https://app.example.test/acme/mcp", "scope": "mcp-resource:acme", "organization": true, "registration": false}
+  ]
+}
+```
+
+Registration attachment is opt-in per binding (`registration` defaults to false); do not enable it for a tenant audience unless that audience is deliberately available to every registering client. Membership and resource-server role checks still enforce access. A missing realm scope is skipped during registration with a warning naming the scope and its role. Requests requiring that missing scope remain denied by native validation; other supported scope requests can proceed. Resource URLs are exact HTTPS
+addresses without userinfo, query or fragment; no wildcard or prefix matching
+is performed. The host owns the scopes, audience mappers, registration callback
+policy and authentication flows. An organization-free binding removes requested
+`organization`/`organization:<alias>` scopes for that request only. The resulting
+scope can select a host's platform login flow; it grants no platform role.
+Native consent, token issuance and resource-server authorization still apply.
+
+The binding survives native KC_RESTART reconstruction because it is a dedicated client note, written by the policy (not a request parameter). The authenticator records the effective scope in the native audit event. Matching is deliberately exact, including host case and trailing slash; aliases must be listed explicitly. Invalid configuration produces a bounded OAuth policy error, not a server stack trace.

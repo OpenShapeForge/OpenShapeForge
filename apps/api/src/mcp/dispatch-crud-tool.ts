@@ -189,6 +189,7 @@ export async function crudToolCall(
           : [];
         const minted = await mintConfiguration({
           db,
+          session,
           tenantId: session.tenantId as string,
           userId: session.userId as string,
           relationId: actingRelationId(session),

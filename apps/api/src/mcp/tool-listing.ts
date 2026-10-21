@@ -229,7 +229,8 @@ export function createToolListing(scope: ServerScope) {
     for (const entry of available) {
       if (entry.runtimeOperation && ids.has(entry.runtimeOperation.id)) covered.add(entry.tool.name);
     }
-    // Exact schemas now ride on search results, including dedicated entities.
+    // Exact schemas ride on the search tool's operationId lookup,
+    // including dedicated entities, so osf_describe adds nothing here.
     covered.add(GENERIC_DESCRIBE_TOOL_NAME);
     return available.filter((entry) => !covered.has(entry.tool.name)).map((entry) =>
       entry.tool.name === searchableOperationToolNames.execute &&

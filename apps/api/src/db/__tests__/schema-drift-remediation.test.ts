@@ -5,12 +5,12 @@
  * The preflight's value is not that it fails — it is that the reader knows
  * what to do next. Three situations produce a checksum mismatch and take
  * different next commands: an empty database, which `bun run db:migrate`
- * builds; a database built from another manifest, which `bun run db:reset`
- * rebuilds because nothing rolls a built database forward; and a database
- * carrying schema this branch does not declare, which is another worktree's
- * build and is best left alone for a scratch database. Telling the reader
- * to run migrate on a built database costs them a round trip that cannot
- * succeed, so which message is chosen is worth a test of its own.
+ * builds; a database behind this branch, which `bun run db:migrate` carries
+ * forward; and a database carrying schema this branch does not declare,
+ * which is another worktree's build and is best left alone for a scratch
+ * database — migrate refuses it, so telling the reader to run it there costs
+ * a round trip that cannot succeed. Which message is chosen is worth a test
+ * of its own.
  *
  * These are pure: `describeGeneratedSchemaDrift` takes the drift status and the
  * schema comparison as data, so every case is reachable without arranging a
@@ -38,16 +38,16 @@ function drift(
 
 const nothingUndeclared: UndeclaredDatabaseSchema = { tables: [], columns: [] };
 
-describe("describeGeneratedSchemaDrift — database built from another manifest", () => {
-  test('"behind" with nothing undeclared points at db:reset, never db:migrate', () => {
+describe("describeGeneratedSchemaDrift — database behind this branch", () => {
+  test('"behind" with nothing undeclared points at db:migrate, with db:reset as the disposable fallback', () => {
     const remediation = describeGeneratedSchemaDrift(drift("behind"), nothingUndeclared, {
       databaseName: "openshapeforge_dev",
     });
 
-    expect(remediation.kind).toBe("reset");
-    expect(remediation.message).toContain('database "openshapeforge_dev" was built from another manifest');
+    expect(remediation.kind).toBe("migrate");
+    expect(remediation.message).toContain('database "openshapeforge_dev" is behind this branch\'s manifest');
+    expect(remediation.message).toContain("  bun run db:migrate");
     expect(remediation.message).toContain("bun run db:reset");
-    expect(remediation.message).not.toContain("  bun run db:migrate");
     // The reader must not be told the branch's schema is foreign to the DB.
     expect(remediation.message).not.toContain("does not declare");
   });
@@ -114,7 +114,7 @@ describe("describeGeneratedSchemaDrift — database ahead of the branch", () => 
     );
     expect(remediation.message).toContain("- table  platform.api_keys");
     // The whole point: it must say migrate cannot help, and offer a real step.
-    expect(remediation.message).toContain("`bun run db:migrate` cannot fix this and refuses it whatever the checksum");
+    expect(remediation.message).toContain("`bun run db:migrate` refuses this whatever the checksum says");
     expect(remediation.message).toContain("create database openshapeforge_e2e");
     expect(remediation.message).toContain(
       'DATABASE_URL="${DATABASE_URL%/*}/openshapeforge_e2e" bun run test:e2e',
@@ -140,7 +140,7 @@ describe("describeGeneratedSchemaDrift — database ahead of the branch", () => 
 
     // Derived from the reader's own DATABASE_URL rather than interpolated, so
     // the message cannot leak a credential into test output or a CI log. The
-    // rebuild is the reset model's own command, confirmed by database name.
+    // rebuild is confirmed by database name.
     expect(remediation.message).toContain(
       'OPENSHAPEFORGE_RESET_DATABASE_CONFIRMATION="${DATABASE_URL##*/}" bun run db:reset',
     );
@@ -170,7 +170,7 @@ describe("describeGeneratedSchemaDrift — database ahead of the branch", () => 
     });
 
     expect(remediation.kind).toBe("foreign-schema");
-    expect(remediation.message).toContain("cannot fix this");
+    expect(remediation.message).toContain("refuses this whatever the checksum says");
   });
 });
 

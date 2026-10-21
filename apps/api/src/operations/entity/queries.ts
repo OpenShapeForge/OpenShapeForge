@@ -430,6 +430,7 @@ export async function fetchGeneratedEntityRow(
   session: DbSessionInput,
   table: GeneratedCrudTable,
   id: string,
+  lock = false,
 ): Promise<GeneratedEntityRow | null> {
   return withDbSession(db, session, async (trx) => {
     const tenantWhere =
@@ -442,6 +443,7 @@ export async function fetchGeneratedEntityRow(
       where ${sql.id("row_source", table.primaryKey!)}::text = ${id}
         ${tenantWhere}
       limit 1
+      ${lock ? sql`for update` : sql``}
     `.execute(trx);
 
     return result.rows[0]?.row ?? null;

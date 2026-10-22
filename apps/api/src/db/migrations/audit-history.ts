@@ -64,6 +64,11 @@ export async function auditHistoryReady(db: OpenShapeForgeDatabase, tables: read
 }
 
 export async function applyAuditHistory(db: OpenShapeForgeDatabase, tables: readonly GeneratedCrudTable[] = manifest.tables as unknown as GeneratedCrudTable[], timelines: Timelines = auditCatalog.timelines): Promise<void> {
+  if (db.isTransaction) return installAuditHistory(db, tables, timelines);
+  await db.transaction().execute(tx => installAuditHistory(tx, tables, timelines));
+}
+
+async function installAuditHistory(db: OpenShapeForgeDatabase, tables: readonly GeneratedCrudTable[], timelines: Timelines): Promise<void> {
   const configs = auditTableConfigs(tables, timelines);
   const registry = JSON.stringify(Object.fromEntries(configs.map(config => [config.entity, config]))).replaceAll("'", "''");
   await sql.raw(`

@@ -1,20 +1,22 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Current-model invariant DDL: every stored business row journals in its writer transaction. */
 import { sql } from "kysely";
+import auditCatalog from "../../generated/operations/audit.json" with { type: "json" };
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { OpenShapeForgeDatabase } from "../connection.js";
 import type { GeneratedCrudTable } from "../../operations/entity/types.js";
 
 type Config = { entity: string; aggregate: string; schema: string; table: string; pk: string;
-  fields: Record<string, { name: string; hidden: boolean }>; visibility: string[];
+  fields: Record<string, { name: string; hidden: boolean; exact: boolean }>; visibility: string[];
   parents: Array<{ column: string; entity: string }> };
 
-export function auditTableConfigs(tables: readonly GeneratedCrudTable[]): Config[] {
+type Timelines = Readonly<Record<string, { include?: readonly string[]; parents?: readonly string[] }>>;
+export function auditTableConfigs(tables: readonly GeneratedCrudTable[], timelines: Timelines = auditCatalog.timelines): Config[] {
   const business = tables.filter(table => table.source?.authoringEntityName && table.primaryKey && table.tenantScoped);
   const parentEdges = new Map<string, Array<{ parent: GeneratedCrudTable; column: string }>>();
   for (const parent of business) {
     const relations = parent.source?.graphql?.relationships ?? [];
-    const includes = parent.source?.audit?.timeline?.include ?? [];
+    const includes = timelines[parent.source!.authoringEntityName!]?.include ?? [];
     for (const name of includes) if (!relations.some(relation => relation.name === name && relation.resolve === "hasMany" && relation.foreignKey && !relation.via)) {
       throw new Error(`${parent.source!.authoringEntityName}: audit timeline include ${name} requires a stored child relationship.`);
     }
@@ -25,11 +27,24 @@ export function auditTableConfigs(tables: readonly GeneratedCrudTable[]): Config
       edges.push({ parent, column: relation.foreignKey }); parentEdges.set(child.name, edges);
     }
   }
+  for (const child of business) {
+    for (const name of timelines[child.source!.authoringEntityName!]?.parents ?? []) {
+      const relation = child.source?.graphql?.relationships?.find(item => item.name === name);
+      const parent = business.find(table => table.source?.graphql?.typeName === relation?.target);
+      if (!relation || relation.resolve !== "belongsTo" || !relation.foreignKey || relation.via || !parent) throw new Error("Audit timeline parents require an exact stored reference.");
+      const edges = parentEdges.get(child.name) ?? [];
+      if (!edges.some(edge => edge.parent.name === parent.name && edge.column === relation.foreignKey)) edges.push({ parent, column: relation.foreignKey });
+      parentEdges.set(child.name, edges);
+    }
+  }
   function config(table: GeneratedCrudTable): Config {
     return { entity: table.source!.authoringEntityName!, aggregate: table.source!.graphql?.singleQueryName ?? table.source!.authoringEntityName!,
-      schema: table.schema, table: table.table, pk: table.primaryKey!, visibility: table.realtime?.visibilityColumns ?? [],
+      schema: table.schema, table: table.table, pk: table.primaryKey!, visibility: (table.realtime?.visibilityColumns ?? []).filter(name => {
+        const column = table.columns.find(column => column.name === name);
+        return column && !column.classification && !column.fieldPolicy && !/password|secret|token|credential|private.?key|cipher|encrypted/i.test(name);
+      }),
       fields: Object.fromEntries(table.columns.filter(column => column.sourceField).map(column => [column.name, {
-        name: column.sourceField!, hidden: !!column.classification || !!column.fieldPolicy || /password|secret|token|credential|private.?key|cipher|encrypted/i.test(column.name),
+        name: column.sourceField!, exact: ["numeric", "bigint"].includes(column.type), hidden: !!column.classification || !!column.fieldPolicy || /password|secret|token|credential|private.?key|cipher|encrypted/i.test(column.name),
       }])), parents: (parentEdges.get(table.name) ?? []).map(edge => ({ column: edge.column, entity: edge.parent.source!.authoringEntityName! })) };
   }
   return business.map(table => config(table));
@@ -48,8 +63,8 @@ export async function auditHistoryReady(db: OpenShapeForgeDatabase, tables: read
   return result.rows.some(row => row.name === "platform.entity_events" && row.handler === "audit_event_envelope") && expected.every(name => active.has(name));
 }
 
-export async function applyAuditHistory(db: OpenShapeForgeDatabase, tables: readonly GeneratedCrudTable[] = manifest.tables as unknown as GeneratedCrudTable[]): Promise<void> {
-  const configs = auditTableConfigs(tables);
+export async function applyAuditHistory(db: OpenShapeForgeDatabase, tables: readonly GeneratedCrudTable[] = manifest.tables as unknown as GeneratedCrudTable[], timelines: Timelines = auditCatalog.timelines): Promise<void> {
+  const configs = auditTableConfigs(tables, timelines);
   const registry = JSON.stringify(Object.fromEntries(configs.map(config => [config.entity, config]))).replaceAll("'", "''");
   await sql.raw(`
     create or replace function platform.audit_config(entity text) returns jsonb
@@ -111,7 +126,7 @@ export async function applyAuditHistory(db: OpenShapeForgeDatabase, tables: read
     begin
       if row_data is null then return null; end if;
       for k,field in select * from jsonb_each(cfg->'fields') loop
-        result=result || jsonb_build_object(field->>'name',case when (field->>'hidden')::boolean then '"[REDACTED]"'::jsonb else platform.audit_redact(row_data->k) end);
+        result=result || jsonb_build_object(field->>'name',case when (field->>'hidden')::boolean then '"[REDACTED]"'::jsonb when (field->>'exact')::boolean and row_data->k<>'null'::jsonb then to_jsonb(row_data->>k) else platform.audit_redact(row_data->k) end);
       end loop; return result;
     end $$;
 
@@ -132,7 +147,7 @@ export async function applyAuditHistory(db: OpenShapeForgeDatabase, tables: read
       insert into platform.entity_events(tenant_id,aggregate_type,aggregate_id,event_type,payload,occurred_at)
         values((event_row->>'tenant_id')::uuid,cfg->>'aggregate',event_row->>(cfg->>'pk'),
           case TG_OP when 'INSERT' then 'created' when 'UPDATE' then 'updated' else 'deleted' end,
-          jsonb_build_object('table',TG_TABLE_NAME,'schema',TG_TABLE_SCHEMA,'operation',lower(TG_OP), 'visibility',visibility,
+          jsonb_build_object('table',TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME,'schema',TG_TABLE_SCHEMA,'operation',case TG_OP when 'INSERT' then 'created' when 'UPDATE' then 'updated' else 'deleted' end, 'visibility',visibility,
             'audit',jsonb_build_object('entityType',cfg->>'entity','before',before_values,'after',after_values,'changedFields',changes,'subjects',subjects,'beforeSubjects',platform.audit_subjects(cfg,prior),'afterSubjects',platform.audit_subjects(cfg,current_row))),clock_timestamp());
       return null;
     end $$;
@@ -146,6 +161,8 @@ export async function applyAuditHistory(db: OpenShapeForgeDatabase, tables: read
         return NEW;
       elsif TG_OP='DELETE' then raise exception 'Audit events are append-only' using errcode='42501'; end if;
       if jsonb_typeof(NEW.payload)<>'object' then raise exception 'Audit payload must be an object' using errcode='22023'; end if;
+      if envelope ? 'changedFields' and (jsonb_typeof(envelope->'changedFields')<>'array' or exists(select 1 from jsonb_array_elements(envelope->'changedFields') e where jsonb_typeof(e)<>'string')) then raise exception 'Invalid audit changed fields' using errcode='22023'; end if;
+      if envelope ? 'subjects' and (jsonb_typeof(envelope->'subjects')<>'array' or exists(select 1 from jsonb_array_elements(envelope->'subjects') e where jsonb_typeof(e->'entityType') is distinct from 'string' or jsonb_typeof(e->'recordId') is distinct from 'string')) then raise exception 'Invalid audit subjects' using errcode='22023'; end if;
       identity=nullif(current_setting('app.user_id',true),'');
       correlation=coalesce(nullif(current_setting('app.audit_correlation',true),''),pg_current_xact_id()::text);
       NEW.payload=platform.audit_redact(coalesce(NEW.payload,'{}'::jsonb)) || jsonb_build_object('audit',platform.audit_redact(envelope) || jsonb_build_object(

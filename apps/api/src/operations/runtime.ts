@@ -1565,7 +1565,7 @@ export async function invokeOperation(
         ),
     });
     },
-  ));
+  ), context.session?.principalKind);
 }
 
 function applyErrorResponseMetadata(

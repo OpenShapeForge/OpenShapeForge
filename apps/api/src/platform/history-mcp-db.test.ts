@@ -25,14 +25,16 @@ const session = (tenantId: string, roles = ["Audit.Logs.ReadAll"]) => ({ tenantI
 
 function table(entity: string, name: string, columns: string[], children: { name: string; target: string; foreignKey: string }[] = []): GeneratedCrudTable {
   return { name: `audit_probe.${name}`, schema: "audit_probe", table: name, primaryKey: "id", tenantScoped: true, domainInternal: false, generatedCrudEligible: true,
-    columns: ["id", ...columns].map(column => ({ name: column, type: "text", required: false, primaryKey: column === "id", generated: null, sourceField: column === "budget_id" ? "budgetId" : column === "line_id" ? "lineId" : column,
+    columns: ["id", ...columns].map(column => ({ name: column, type: column === "exact_amount" ? "numeric" : "text", required: false, primaryKey: column === "id", generated: null, sourceField: column === "budget_id" ? "budgetId" : column === "line_id" ? "lineId" : column,
       ...(column === "private_note" ? { classification: "confidential" as const } : {}) })),
-    source: { authoringEntityName: entity, audit: { timeline: { include: children.map(child => child.name) } }, graphql: { typeName: entity, singleQueryName: entity,
+    source: { authoringEntityName: entity, graphql: { typeName: entity, singleQueryName: entity,
       listQueryName: entity, createMutationName: "create", updateMutationName: "update", deleteMutationName: "delete", relationships: children.map(child => ({ ...child, type: child.target, resolve: "hasMany" as const })) } } };
 }
 const tables = [table("ProbeBudget", "budgets", ["name"], [{ name: "lines", target: "ProbeLine", foreignKey: "budget_id" }]),
   table("ProbeLine", "lines", ["budget_id", "name"], [{ name: "values", target: "ProbeValue", foreignKey: "line_id" }]),
-  table("ProbeValue", "amounts", ["line_id", "amount", "private_note"]), table("ProbeContact", "contacts", ["name", "private_note"])];
+  table("ProbeValue", "amounts", ["line_id", "amount", "private_note", "exact_amount"]), table("ProbeContact", "contacts", ["name", "private_note"])];
+
+tables[2]!.realtime = { readPredicate: "true", visibilityColumns: ["private_note"] };
 
 test("AuditEvent YAML reads: uniform transactional registration, structured filters, raw details, composed timelines and tenant isolation", async () => {
   const name = `history_test_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -46,18 +48,18 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
     await sql.raw(`create schema audit_probe;
       create table audit_probe.budgets(id uuid primary key,tenant_id uuid not null,name text);
       create table audit_probe.lines(id uuid primary key,tenant_id uuid not null,budget_id uuid references audit_probe.budgets(id) on delete cascade,name text);
-      create table audit_probe.amounts(id uuid primary key,tenant_id uuid not null,line_id uuid references audit_probe.lines(id) on delete cascade,amount text,private_note text);
+      create table audit_probe.amounts(id uuid primary key,tenant_id uuid not null,line_id uuid references audit_probe.lines(id) on delete cascade,amount text,private_note text,exact_amount numeric);
       create table audit_probe.contacts(id uuid primary key,tenant_id uuid not null,name text,private_note text);
       grant usage on schema audit_probe to openshapeforge_app;
       grant select,insert,update,delete on all tables in schema audit_probe to openshapeforge_app;`).execute(privileged.db);
     for (const table of tables) await sql.raw(`alter table audit_probe.${table.table} enable row level security;
       alter table audit_probe.${table.table} force row level security;
       create policy tenant on audit_probe.${table.table} using(tenant_id::text=current_setting('app.tenant_id',true)) with check(tenant_id::text=current_setting('app.tenant_id',true));`).execute(privileged.db);
-    await applyAuditHistory(privileged.db, tables);
+    await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });
     await withAuditContext("ProbeBudget.apply", "trusted-context", () => withDbSession(runtime.db, session(tenant), async tx => {
       await sql`insert into audit_probe.budgets values(${budget}::uuid,${tenant}::uuid,'Plan'),(${movedBudget}::uuid,${tenant}::uuid,'Second plan')`.execute(tx);
       await sql`insert into audit_probe.lines values(${line}::uuid,${tenant}::uuid,${budget}::uuid,'Sales')`.execute(tx);
-      await sql`insert into audit_probe.amounts values(${value}::uuid,${tenant}::uuid,${line}::uuid,'100','classified-never-store')`.execute(tx);
+      await sql`insert into audit_probe.amounts values(${value}::uuid,${tenant}::uuid,${line}::uuid,'100','classified-never-store',9007199254740993.123456789)`.execute(tx);
       await sql`insert into audit_probe.contacts values(${contact}::uuid,${tenant}::uuid,'Contact','classified-never-store')`.execute(tx);
     }));
     await withAuditContext("ProbeBudget.adjust", "trusted-context", () => withDbSession(runtime.db, session(tenant), async tx => {
@@ -109,6 +111,7 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
       const result = await call("AuditEvent.get", { id: changed.items[0].id }); expect(result.isError).toBeFalsy();
       expect(JSON.stringify(result.structuredContent)).toContain('"amount":"100"'); expect(JSON.stringify(result.structuredContent)).toContain('"amount":"120"');
       expect(JSON.stringify(result.structuredContent)).not.toMatch(/classified-never-store|changed-never-store/);
+      expect(JSON.stringify(result.structuredContent)).toContain('\"exact_amount\":\"9007199254740993.123456789\"');
       const semantic = all.items.find(event => event.eventType === "semantic-event");
       expect(JSON.stringify((await call("AuditEvent.get", { id: semantic.id })).structuredContent)).not.toContain("must-not-store");
       const seen = new Set<string>(); let after: string | undefined;

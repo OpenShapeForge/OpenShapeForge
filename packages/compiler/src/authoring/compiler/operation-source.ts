@@ -24,7 +24,7 @@ export function operationSourceEntity(entity: CoreEntity, fields: CompiledField[
   if (!entity.source) return entity;
   if (hasProfiles || entity.fields.some(field => field.persisted || field.relationship) ||
       entity.indexes?.length || entity.versioning || entity.blueprint || entity.workerAccess ||
-      entity.authorization?.rowAccess) {
+      entity.authorization?.rowAccess || entity.audit) {
     throw new Error(`${entity.entity}: an Operation-backed source has no persisted fields, SQL relationships, profiles, indexes, versioning or storage policies.`);
   }
   for (const field of fields) {

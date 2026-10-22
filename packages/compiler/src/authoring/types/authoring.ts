@@ -544,7 +544,7 @@ export interface OperationCatalogDefinition {
 }
 
 export interface CoreEntity {
-  audit?: { timeline?: { include: string[] } };
+  audit?: { timeline?: { include?: string[]; parents?: string[] } };
   /** Canonical read Operations resolve records; this entity owns no SQL table. */
   source?: { kind: "operations"; query?: { mode?: "structured"; filterFields: string[]; sortFields: string[] } };
   /** Explicit safe scalar content copied from a published blueprint. */

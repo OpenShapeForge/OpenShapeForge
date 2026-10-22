@@ -140,7 +140,6 @@ export type GeneratedCrudTable = {
       }>;
     }>;
     authoringEntityName?: string;
-    audit?: { timeline?: { include: string[] } };
     /** The entity's authored name in both languages, for what a person reads. */
     labels?: { en?: string; nl?: string };
     versioning?: {

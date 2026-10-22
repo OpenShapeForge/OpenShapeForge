@@ -70,7 +70,7 @@ public final class BrokerAccountRetry extends AbstractIdpAuthenticator {
         String locale = session.getAuthNote(LocaleSelectorProvider.USER_REQUEST_LOCALE);
         AuthenticationProcessor.resetFlow(session, LoginActionsService.AUTHENTICATE_PATH);
         if (locale != null) session.setAuthNote(LocaleSelectorProvider.USER_REQUEST_LOCALE, locale);
-        session.setClientNote(OAuth2Constants.PROMPT, "login");
+        session.setClientNote(OAuth2Constants.PROMPT, "select_account");
         try { return retry.get(); }
         finally {
             if (original == null) session.removeClientNote(OAuth2Constants.PROMPT);

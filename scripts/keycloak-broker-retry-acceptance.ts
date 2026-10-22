@@ -187,6 +187,7 @@ async function main() {
       users: upstreamUsers,
     });
     created.push(IDP);
+    await api("/" + IDP + "/clients", "POST", {clientId:"upstream-app",protocol:"openid-connect",publicClient:true,standardFlowEnabled:true,redirectUris:[CALLBACK],defaultClientScopes:["basic","profile","email"]});
     const [linked] = await api("/" + IDP + "/users?username=linked&exact=true");
     await api("", "POST", {
       realm: BROKER,
@@ -402,8 +403,17 @@ async function main() {
       );
     }
     let session = new Session();
-    let out = await session.follow(await session.request(authorize()));
+    const upstreamVerifier = randomBytes(48).toString("base64url");
+    const upstreamUrl = KC_URL + "/realms/" + IDP + "/protocol/openid-connect/auth?" + new URLSearchParams({client_id:"upstream-app",redirect_uri:CALLBACK,response_type:"code",scope:"openid profile email",code_challenge:createHash("sha256").update(upstreamVerifier).digest("base64url"),code_challenge_method:"S256"});
+    let out = await session.follow(await session.request(upstreamUrl));
     out = await login(session, await out.res.text(), "wrong");
+    check(out.url.startsWith(CALLBACK), "the first app authenticates the other upstream account");
+    const upstreamResponse = await fetch(KC_URL + "/realms/" + IDP + "/protocol/openid-connect/token", {method:"POST",body:new URLSearchParams({grant_type:"authorization_code",client_id:"upstream-app",redirect_uri:CALLBACK,code:new URL(out.url).searchParams.get("code")!,code_verifier:upstreamVerifier})});
+    check(upstreamResponse.ok,"the first app exchanges its authorization code");
+    const upstreamTokens = await upstreamResponse.json();
+    const userinfo = () => fetch(KC_URL + "/realms/" + IDP + "/protocol/openid-connect/userinfo",{headers:{authorization:"Bearer "+upstreamTokens.access_token}});
+    check((await userinfo()).ok,"the first app session is initially usable");
+    out = await session.follow(await session.request(authorize()));
     let html = await out.res.text();
     check(
       html.includes("Ander account gebruiken"),
@@ -456,6 +466,10 @@ async function main() {
       (await api("/" + BROKER + "/users")).length === 1,
       "no account was created or linked for the rejected identity",
     );
+    const priorIdentity = await userinfo();
+    check(priorIdentity.ok && (await priorIdentity.json()).preferred_username === "wrong", "account choice retains the first app's original account and access session");
+    const priorRefresh = await fetch(KC_URL + "/realms/" + IDP + "/protocol/openid-connect/token", {method:"POST",body:new URLSearchParams({grant_type:"refresh_token",client_id:"upstream-app",refresh_token:upstreamTokens.refresh_token})});
+    check(priorRefresh.ok,"the first account's refresh session also survives switching to the linked account");
     session.forgetRealm(BROKER);
     out = await session.follow(await session.request(authorize()));
     const ssoBody = await out.res.clone().text();

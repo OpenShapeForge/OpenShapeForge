@@ -40,7 +40,7 @@ public class BrokerAccountRetryTest {
         });
         try {
             BrokerAccountRetry.reauthenticate(session, () -> {
-                assertEquals("login", notes.get("prompt"));
+                assertEquals("select_account", notes.get("prompt"));
                 assertFalse(broker.containsKey("BROKERED_CONTEXT"));
                 assertEquals("nl", broker.get(LocaleSelectorProvider.USER_REQUEST_LOCALE));
                 for (String key : List.of("scope", "state", "code_challenge", "redirect_uri")) assertEquals(before.get(key),notes.get(key));

@@ -1,3 +1,4 @@
+import { applyAuditHistory } from "../../db/migrations/audit-history.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -124,7 +125,7 @@ async function seed(count = 2, tenantId = tenant) {
     const childId = randomUUID(); children.push(childId);
     await sql`insert into erp.blocks(id,tenant_id,title,parent_id,parent_id_position) values (${childId}::uuid, ${tenantId}::uuid, 'Synthetic child', ${id}::uuid, ${index})`.execute(privileged!.db);
   }
-  return { id, children, expectedVersion: await version(id) };
+  return { id, children, expectedVersion: await version(id), events: (await state(id)).events };
 }
 async function version(id: string) {
   return String((await sql<{ version: string }>`select updated_at::text as version from erp.template_variants where id = ${id}::uuid`.execute(privileged!.db)).rows[0]!.version);
@@ -182,6 +183,7 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
       grant select,insert,update,delete on all tables in schema erp,platform to openshapeforge_app;
       grant usage on all sequences in schema platform to openshapeforge_app;
       grant execute on all functions in schema app to openshapeforge_app`.execute(privileged.db);
+    await applyAuditHistory(privileged.db, [fixture().parent, fixture().child], {});
     restricted = createDatabaseRuntime({ databaseUrl: databaseUrl(true), maxConnections: 4 });
   }, 30_000);
   beforeEach(async () => {
@@ -231,7 +233,7 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
     const after = await state(seeded.id);
     expect(after.rows.map((row) => row.id)).toEqual(result.orderedIds);
     expect(after.rows.map((row) => row.parent_id_position)).toEqual([0, 1, 2]);
-    expect(after.events).toBe(5);
+    expect(after.events).toBe(seeded.events + 5);
     expect(after.version).not.toBe(seeded.expectedVersion);
     expect(result.parent.id).toBe(seeded.id);
   });
@@ -256,7 +258,7 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
     expect(accepted.payload).toEqual({ ...initial, public: "After" });
     const acceptedState = await state(seeded.id);
     expect(acceptedState.version).not.toBe(seeded.expectedVersion);
-    expect(acceptedState.events).toBe(2);
+    expect(acceptedState.events).toBe(seeded.events + 3);
     for (const [details, code, message] of [
       [{ secret: "Changed" }, "FORBIDDEN", 'Not authorized to change field "details.secret".'],
       [{ locked: "Changed" }, "BAD_USER_INPUT", 'Protected field "details.locked" cannot be changed or removed.'],
@@ -328,7 +330,7 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
   test("explicit transaction entry refuses a mismatched verified session", async () => {
     const { execute } = fixture(), seeded = await seed();
     await fails(withDbSession(restricted!.db, session, (trx) => execute.inTransaction(trx, { ...session, userId: randomUUID() }, binding, { id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "Denied" } })), "FORBIDDEN");
-    expect((await state(seeded.id)).events).toBe(0);
+    expect((await state(seeded.id)).events).toBe(seeded.events);
   });
   test("non-sortable insert needs no child update Operation and leaves sibling versions untouched", async () => {
     const f = fixture(), seeded = await seed();
@@ -343,7 +345,7 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
       expect(result.orderedIds).toEqual([...seeded.children, result.childId].sort());
       const after = await sql`select id, updated_at::text from erp.blocks where id<>${result.childId}::uuid order by id`.execute(privileged!.db);
       expect(after.rows).toEqual(old.rows);
-      expect((await state(seeded.id)).events).toBe(2);
+      expect((await state(seeded.id)).events).toBe(seeded.events + 2);
       await fails(f.execute(restricted!.db, session, binding, { id: seeded.id, expectedVersion: await version(seeded.id), values: { title: "Denied" }, beforeId: null }), "BAD_USER_INPUT");
       await fails(f.execute(restricted!.db, session, { ...binding, action: "move" }, { id: seeded.id, expectedVersion: await version(seeded.id), childId: result.childId }), "RELATION_COLLECTION_MUTATION_UNSUPPORTED");
     } finally { await sql`alter table erp.blocks alter column parent_id_position drop default`.execute(privileged!.db); }
@@ -371,7 +373,7 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
       operations.find((op) => op.entityName === entity && op.intent === intent)!.authorization.roles = ["Synthetic.Denied"];
       await fails(execute(restricted!.db, session, binding, { id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "Denied" } }), "FORBIDDEN");
     }
-    expect((await state(seeded.id)).events).toBe(0);
+    expect((await state(seeded.id)).events).toBe(seeded.events);
   });
   test("record edit and create permission requirements are enforced transactionally", async () => {
     const seeded = await seed();
@@ -383,7 +385,7 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
     const empty = await seed(0), f = fixture();
     f.child.source!.authorization!.recordPermissions = { field: "permissions", column: "permissions", empty: "restricted", createRequires: ["view", "edit"] };
     await fails(f.execute(restricted!.db, session, binding, { id: empty.id, expectedVersion: empty.expectedVersion, values: { title: "Denied", permissions: {} } }), "FORBIDDEN");
-    expect((await state(seeded.id)).events).toBe(0);
+    expect((await state(seeded.id)).events).toBe(empty.events);
   });
   test("visible but non-editable siblings cannot be reordered; authorized record ACLs succeed", async () => {
     const f = fixture(), seeded = await seed();
@@ -421,7 +423,7 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
       });
     }
     await fails(execute(restricted!.db, session, binding, { id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "Denied" }, table: "erp.blocks" } as never), "BAD_USER_INPUT");
-    expect((await state(seeded.id)).events).toBe(0);
+    expect((await state(seeded.id)).events).toBe(seeded.events);
   });
   test("incomplete entityValue storage metadata fails closed before any committed write", async () => {
     const seeded = await seed();
@@ -649,7 +651,7 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
       const f = fixture(); Object.assign(f.child.columns.find((column) => column.name === "title")!, policy);
       await fails(f.execute(restricted!.db, session, binding, { id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "Denied" } }), "BAD_USER_INPUT");
     }
-    expect((await state(seeded.id)).events).toBe(0);
+    expect((await state(seeded.id)).events).toBe(seeded.events);
   });
   test("reference/junction/restricted-read collections and nested descendants remain unsupported", async () => {
     const seeded = await seed();

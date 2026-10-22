@@ -62,10 +62,10 @@ const activeDbSession = new AsyncLocalStorage<{
   db: Kysely<unknown>;
   trx: Transaction<unknown>;
   session: DbSessionContext;
+  audit: ReturnType<typeof auditContext>;
 }>();
 
-async function applyAuditSession<T>(trx: Transaction<T>): Promise<void> {
-  const audit = auditContext();
+async function applyAuditSession<T>(trx: Transaction<T>, audit: ReturnType<typeof auditContext> | null = auditContext()): Promise<void> {
   await sql`select set_config('app.audit_operation', ${audit?.operationId ?? ""}, true),
     set_config('app.audit_correlation', ${audit?.correlationId ?? crypto.randomUUID()}, true),
     set_config('app.audit_actor_kind', ${audit?.actorKind ?? "system"}, true)`.execute(trx);
@@ -262,10 +262,21 @@ export async function withDbSession<TDatabase, TResult>(
     if (!sameSession) {
       throw new Error("Nested database work cannot replace the active session.");
     }
-    if (!options.independent) return callback(
-      active.trx as Transaction<TDatabase>,
-      active.session,
-    );
+    if (!options.independent) {
+      const audit = auditContext();
+      const trx = active.trx as Transaction<TDatabase>;
+      if (audit?.operationId === active.audit?.operationId && audit?.correlationId === active.audit?.correlationId && audit?.actorKind === active.audit?.actorKind) return callback(trx, active.session);
+      await applyAuditSession(trx, audit ?? null);
+      try {
+        const result = await activeDbSession.run({ ...active, audit }, () => withInvocationSavepoint(trx, () => callback(trx, active.session)));
+        await applyAuditSession(trx, active.audit ?? null);
+        return result;
+      } catch (error) {
+        // A caller's savepoint may need to recover an aborted transaction first.
+        try { await applyAuditSession(trx, active.audit ?? null); } catch { /* Preserve the original failure. */ }
+        throw error;
+      }
+    }
   }
   const hooks = { afterCommit: [] as DbSessionAfterCommitHook[] };
 
@@ -280,6 +291,7 @@ export async function withDbSession<TDatabase, TResult>(
           db: db as Kysely<unknown>,
           trx: trx as Transaction<unknown>,
           session,
+          audit: auditContext(),
         },
         () => callback(trx, session),
       );
@@ -459,7 +471,8 @@ export async function withSystemSession<TDatabase, TResult>(
         await sql`select set_config('app.tenant_id', ${input.tenantId}, true)`.execute(trx);
       }
       await sql`select set_config('app.user_id', ${input.databaseActorId ?? input.actorSubject}, true)`.execute(trx);
-      await applyAuditSession(trx);
+      const audit = auditContext();
+      await applyAuditSession(trx, audit ? { ...audit, actorKind: "system" } : null);
       await sql`select set_config('app.roles', ${input.roles.join(",")}, true)`.execute(trx);
       await sql`select set_config('app.bypass_rls', 'true', true)`.execute(trx);
 

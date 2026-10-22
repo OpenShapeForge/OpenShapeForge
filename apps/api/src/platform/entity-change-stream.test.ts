@@ -99,20 +99,20 @@ test("rollback never publishes and late commits get later delivery cursors witho
 });
 
 test("expired and unavailable cursors reset to current high water", async () => {
-  const current = await readChangeBatch(runtime.db, actor);
-  await sql`update platform.entity_events set occurred_at = now() - interval '2 days' where delivery_sequence = ${current.cursor}`.execute(privileged.db);
-  expect((await readChangeBatch(runtime.db, actor, current.cursor)).reset).toBe(true);
-  expect((await readChangeBatch(runtime.db, actor, "9223372036854775807")).reset).toBe(true);
-  expect((await readChangeBatch(runtime.db, actor, "0")).reset).toBe(true);
+  const isolated = { ...actor, tenantId: randomUUID() };
+  await sql`insert into platform.entity_events(tenant_id,aggregate_type,aggregate_id,event_type,payload,occurred_at,delivery_sequence) values(${isolated.tenantId}::uuid,'fixture','old','updated','{}',now()-interval '2 days',1)`.execute(privileged.db);
+  const current = await readChangeBatch(runtime.db, isolated);
+  expect((await readChangeBatch(runtime.db, isolated, current.cursor)).reset).toBe(true);
+  expect((await readChangeBatch(runtime.db, isolated, "9223372036854775807")).reset).toBe(true);
+  expect((await readChangeBatch(runtime.db, isolated, "0")).reset).toBe(true);
 });
 
 test("a recent checkpoint cannot replay an older expired event delivered after it", async () => {
   const isolated = { ...actor, tenantId: randomUUID() };
   await withDbSession(runtime.db, isolated, async trx => appendScopedEntityEventInTransaction(trx, { aggregateType: "fixture", aggregateId: "recent", eventType: "updated" }));
   const checkpoint = await readChangeBatch(runtime.db, isolated);
-  const late = await withDbSession(runtime.db, isolated, async trx => appendScopedEntityEventInTransaction(trx, { aggregateType: "fixture", aggregateId: "late", eventType: "updated" }));
+  await sql`insert into platform.entity_events(tenant_id,aggregate_type,aggregate_id,event_type,payload,occurred_at,delivery_sequence) values(${isolated.tenantId}::uuid,'fixture','late','updated','{}',now()-interval '2 days',${BigInt(checkpoint.cursor)+1n})`.execute(privileged.db);
   const delivered = await readChangeBatch(runtime.db, isolated, checkpoint.cursor);
-  await sql`update platform.entity_events set occurred_at = now() - interval '2 days' where id = ${late.id}`.execute(privileged.db);
   const replay = await readChangeBatch(runtime.db, isolated, checkpoint.cursor);
   expect(replay).toEqual({ cursor: delivered.cursor, reset: true, changes: [] });
 });

@@ -11,7 +11,6 @@ import { getGeneratedCrudTables } from "./catalog.js";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import {
   elicitedOutputColumn,
-  generatedCrudAggregateId,
   generatedCrudError,
   projectGeneratedEntityRow,
   readGeneratedCrudTable,

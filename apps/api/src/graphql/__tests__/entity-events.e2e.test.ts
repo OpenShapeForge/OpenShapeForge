@@ -49,17 +49,17 @@ for (const table of tables) {
       const id = await createRow(table, tenantA);
       const afterCreate = await eventsFor(tenantA, table, id);
       const created = afterCreate.map((event) => event.eventType);
-      // Plugin commands may persist through the generic core (and journal a
-      // create) or own their transaction completely. Both are valid; reads
-      // and refused writes below must not change the observed baseline.
-      expect([[], ["created"]]).toContainEqual(created);
+      // Every stored row is journaled, including plugin-owned transactions.
+      expect(created.filter(event => event === "created")).toHaveLength(1);
+      expect(created.every(event => ["created", "updated"].includes(event))).toBe(true);
       // A realtime-projected entity also journals the columns its channel
       // filters on; the manifest says which, so the assertion follows it.
       if (created.length > 0) {
-        expect(afterCreate[0]!.payload).toEqual({
+        expect(afterCreate[0]!.payload).toMatchObject({
           table: table.name,
           schema: table.schema,
           operation: "created",
+          audit: expect.objectContaining({ entityType: table.source!.authoringEntityName, changedFields: expect.any(Array), subjects: expect.any(Array) }),
           ...(table.realtime
             ? {
                 visibility: Object.fromEntries(

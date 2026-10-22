@@ -802,7 +802,7 @@ export class ModulePlatformRuntime {
   }
 
   #executeOperation(session: TrustedSessionContext, request: RuntimeOperationRequest, options: RuntimeOperationExecutionOptions = {}): Promise<RuntimeOperationExecutionResult> {
-    return withAuditContext(request.operation.id, session.credential, () => this.#executeOperationWithContext(session, request, options));
+    return withAuditContext(request.operation.id, session.credential, () => this.#executeOperationWithContext(session, request, options), session.principalKind);
   }
 
   async #executeOperationWithContext(

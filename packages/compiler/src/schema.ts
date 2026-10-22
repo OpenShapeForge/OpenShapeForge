@@ -386,7 +386,6 @@ export type TableSourceDefinition = {
   transitions?: import("./authoring/types/compiled.js").CompiledTransitionField[];
   path?: string;
   authoringEntityName?: string;
-  audit?: { timeline?: { include: string[] } };
   authoringEntitySlug?: string;
   generatedCrudEligibility?: "explicitly_enabled" | "explicitly_disabled";
   versioning?: {

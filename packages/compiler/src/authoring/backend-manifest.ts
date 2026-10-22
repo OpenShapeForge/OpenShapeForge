@@ -1552,7 +1552,6 @@ export function compileAuthoringBackendManifest(
         ...(candidate.contract.blueprint ? { blueprint: candidate.contract.blueprint } : {}),
         ...(candidate.contract.transitions ? { transitions: candidate.contract.transitions } : {}),
         authoringEntityName: candidate.contract.entity.name,
-        ...(candidate.contract.audit ? { audit: candidate.contract.audit } : {}),
         authoringEntitySlug: candidate.slug,
         generatedCrudEligibility: generatedCrudEligible ? "explicitly_enabled" : "explicitly_disabled",
         ...(candidate.contract.hardDelete
@@ -1656,7 +1655,15 @@ export function compileAuthoringBackendManifest(
   bindOwnerAxes(physicalCandidates, tables);
   validateDefaultTemplates(tables);
   for (const table of tables) {
-    for (const name of table.source?.audit?.timeline?.include ?? []) {
+    const audit = physicalCandidates.find(candidate => candidate.contract.entity.name === table.source?.authoringEntityName)?.contract.audit;
+    for (const name of audit?.timeline?.parents ?? []) {
+      const relation = table.source?.graphql?.relationships?.find(item => item.name === name);
+      if (!relation || relation.resolve !== "belongsTo" || !relation.foreignKey || relation.through ||
+          !tables.some(parent => parent.tenantScoped && parent.columns.some(column => column.primaryKey) && parent.source?.graphql?.typeName === relation.target)) {
+        throw new Error(`${table.source?.authoringEntityName}: audit timeline parent ${name} requires a stored parent relationship.`);
+      }
+    }
+    for (const name of audit?.timeline?.include ?? []) {
       const relation = table.source?.graphql?.relationships?.find(item => item.name === name);
       if (!relation || relation.resolve !== "hasMany" || !relation.foreignKey || relation.through ||
           !tables.some(child => child.tenantScoped && child.columns.some(column => column.primaryKey) && child.source?.graphql?.typeName === relation.target)) {

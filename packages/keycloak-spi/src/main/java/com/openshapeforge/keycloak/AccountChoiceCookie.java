@@ -15,8 +15,10 @@ import org.keycloak.util.TokenUtil;
 public final class AccountChoiceCookie extends CookieAuthenticator {
     @Override public void authenticate(AuthenticationFlowContext context) {
         var auth = context.getAuthenticationSession();
+        String prompt = auth.getClientNote(OIDCLoginProtocol.PROMPT_PARAM);
         if (!OIDCLoginProtocol.LOGIN_PROTOCOL.equals(auth.getProtocol())
-                || !TokenUtil.hasPrompt(auth.getClientNote(OIDCLoginProtocol.PROMPT_PARAM),
+                || TokenUtil.hasPrompt(prompt, OIDCLoginProtocol.PROMPT_VALUE_NONE)
+                || !TokenUtil.hasPrompt(prompt,
                     OIDCLoginProtocol.PROMPT_VALUE_SELECT_ACCOUNT)) {
             super.authenticate(context);
             return;

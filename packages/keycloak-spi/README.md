@@ -135,7 +135,9 @@ Organization switching remains available during browser authentication.
 A first-broker-login flow may use the REQUIRED `osf-broker-account-retry`
 authenticator before Keycloak’s REQUIRED native deny-access execution. It never authenticates, creates
 or links a user. A rejected account receives a native form with retry/cancel.
-An explicit retry starts the same native broker request with `prompt=select_account`,
+An explicit retry uses `prompt=login` by default. A provider whose upstream
+supports OSF account choice may opt in with `config["osf.account-choice"] = "true"`;
+only that reviewed capability makes retry use `prompt=select_account`,
 restoring the original client's prompt immediately after building the redirect.
 Keycloak retains the original client, state, redirect, scopes and PKCE binding.
 A linked account bypasses this first-login flow and keeps normal SSO. Only
@@ -147,14 +149,19 @@ pre-linked-identity policy, not an automatic account-linking flow.
 
 The image extends the native `auth-cookie` factory at a higher provider order.
 Every ordinary OIDC/SAML request delegates to Keycloak's original cookie
-authenticator. Only an explicit OIDC `prompt=select_account` skips cookie SSO.
+authenticator. Only an interactive OIDC `prompt=select_account` skips cookie SSO.
+Requests containing `prompt=none` retain native behavior and do not expire cookies.
 It recreates a pending authorization attached to an existing user-session id
 and clears the realm's browser identity pointer without revoking the old
 server-side access or refresh sessions. Username, passkey, required actions,
 consent and token issuance remain native. The most recently selected account
 becomes the browser's SSO default; already-open applications keep their sessions.
 Cancelling account choice can leave the SSO pointer empty, while app sessions
-remain valid. This adds no account links, memberships or permissions.
+remain valid. Repeated choices can retain additional sessions until native SSO
+idle/max lifetimes expire them. Recreating a root authorization session can
+expire other unfinished login forms in that browser; this guarantee covers
+already authenticated app sessions, not simultaneous unfinished authorizations.
+This adds no account links, memberships or permissions.
 
 The provider registration and Keycloak internals are version-locked to the
 image. Native acceptance must prove both old-account access and refresh after

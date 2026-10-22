@@ -254,6 +254,7 @@ async function main() {
             validateSignature: "true",
             useJwksUrl: "true",
             defaultScope: "openid profile email",
+            "osf.account-choice": "true",
           },
         },
       ],
@@ -338,17 +339,14 @@ async function main() {
         }),
       );
     }
-    async function retry(session: Session, html: string, username: string) {
+    async function retry(session: Session, html: string, username: string, expectedPrompt = "select_account") {
       const form = parseForm(html, (tag) =>
         /id="kc-broker-account-retry-form"/.test(tag),
       );
       form.fields.set("retry", "true");
-      let r = await session.follow(
-        await session.request(form.action, {
-          method: "POST",
-          body: form.fields,
-        }),
-      );
+      const redirect = await session.request(form.action, {method:"POST",body:form.fields});
+      check(new URL(redirect.headers.get("location")!, KC_URL).searchParams.get("prompt") === expectedPrompt, "retry requests the declared upstream prompt capability");
+      let r = await session.follow(redirect);
       let body = await r.res.text();
       const reset =
         /id="reset-login"[^>]*onclick="location.href='([^']+)'"/.exec(
@@ -483,6 +481,18 @@ async function main() {
         new URL(out.url).searchParams.get("state") === state,
       "native consent rejection preserves state and issues no code",
     );
+    const providerPath = "/" + BROKER + "/identity-provider/instances/workforce";
+    const provider = await api(providerPath);
+    delete provider.config["osf.account-choice"];
+    await api(providerPath,"PUT",provider);
+    session = new Session();
+    out = await session.follow(await session.request(authorize()));
+    out = await login(session, await out.res.text(), "wrong");
+    out = await retry(session, await out.res.text(), "linked", "login");
+    out = await consent(session, out, true);
+    check(out.url.startsWith(CALLBACK) && new URL(out.url).searchParams.has("code"), "an ordinary OIDC provider without account-choice capability retains reauthentication recovery");
+    provider.config["osf.account-choice"] = "true";
+    await api(providerPath,"PUT",provider);
     session = new Session();
     out = await session.follow(await session.request(authorize()));
     out = await login(session, await out.res.text(), "wrong");

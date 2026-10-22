@@ -177,6 +177,15 @@ function fakeKeycloak(): KeycloakOrganizationMembersClient & {
 }
 
 describe("employee invitations", () => {
+  test("group-only admission records an empty role list through the invitation handler",async()=>{
+    await withScratchDb(async(appDb,adminDb)=>{
+      await seedTenants(adminDb);
+      const invitation=await inviteEmployee(appDb,sessionFor(tenantA,ADMIN_ROLES),fakeKeycloak(),{email:'group-only@example.test',roles:[]});
+      expect(invitation.roles).toEqual([]);
+      expect((await listInvitations(appDb,sessionFor(tenantA,ADMIN_ROLES)))[0]?.roles).toEqual([]);
+    });
+  },TEST_TIMEOUT);
+
   test("multiple roles survive MCP invitation, replay and first sign-in together", async () => {
     await withScratchDb(async (appDb, adminDb) => {
       await seedTenants(adminDb);

@@ -328,7 +328,6 @@ export async function callEmployeeInvitationTool(
   }
   try {
     const email = stringArgument(args, "email", true)!;
-    if (Object.hasOwn(args, "role")) throw new HttpError(400, "VALIDATION", 'Use "roles", an array of role keys.');
     if (!Array.isArray(args.roles) || args.roles.length === 0) throw new HttpError(400, "VALIDATION", 'Select at least one role in "roles".');
     const relationId = stringArgument(args, "relationId", false);
     const admission = await inviteEmployee(db, scoped, keycloak, {

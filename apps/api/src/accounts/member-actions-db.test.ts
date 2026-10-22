@@ -82,7 +82,7 @@ test('member directory and recovery isolate tenants and address only the registe
     expect(sent).toEqual([{kind:'password',id:subject},{kind:'passkey',id:subject}]);
     expect(lookups.every(row=>row.organization==='org-'+tenant && row.id===subject)).toBe(true);
     expect(await getMember({id:target},context)).toMatchObject({value:{id:target,email,credentialTypes:'webauthn-passwordless'}});
-    expect(await inviteMember({email,firstName:'Existing',lastName:'Member'},context)).toMatchObject({code:'ALREADY_MEMBER'});
+    expect(await inviteMember({email,firstName:'Existing',lastName:'Member',roles:['org_employee']},context)).toMatchObject({code:'ALREADY_MEMBER'});
     expect(await resendMemberInvitation({id:target,confirmed:true},context)).toMatchObject({status:404});
     expect(await revokeMemberInvitation({id:target,confirmed:true},context)).toMatchObject({status:404});
     expect(await resendMemberInvitation({id:pending,confirmed:true},context)).toMatchObject({value:{updated:true}});

@@ -165,6 +165,30 @@ export function employeeInvitationRoleGrants(
     : baseline;
 }
 
+/** Validate the complete selection before any provider call or admission write. */
+export function invitationRoles(value: unknown): string[] {
+  if (!Array.isArray(value) || value.some(role => typeof role !== "string" || !isEmployeeInvitationRole(role))) {
+    throw new HttpError(400, "VALIDATION", "roles must be an array of declared organization role keys or custom role ids.");
+  }
+  return [...new Set(value as string[])];
+}
+
+export async function validateInvitationRoles(trx: Transaction<DB>, tenantId: string, roles: readonly string[]): Promise<void> {
+  const ids = roles.flatMap(role => { const id = customRoleId(role); return id ? [id] : []; });
+  if (!ids.length) return;
+  const found = await sql<{ id: string }>`select id from platform.organization_access_roles
+    where tenant_id = ${tenantId}::uuid and id in (${sql.join(ids.map(id => sql`${id}::uuid`))})`.execute(trx);
+  if (found.rows.length !== ids.length) throw new HttpError(400, "VALIDATION", "Choose roles from this organization.");
+}
+
+function invitationRoleArray(roles: readonly string[]) {
+  return sql`array[${sql.join(roles.map(role => sql`${role}`))}]::text[]`;
+}
+
+export function employeeInvitationRolesGrants(roles: readonly string[]): readonly string[] {
+  return [...new Set(roles.flatMap(role => employeeInvitationRoleGrants(role)))];
+}
+
 /**
  * The Keycloak client that service-account entity roles live on. Reuses the
  * same env var the API key path already reads for the identical question
@@ -184,13 +208,13 @@ export type InviteEmployeeInput = {
   relationId?: string;
   firstName?: string | undefined;
   lastName?: string | undefined;
-  role?: EmployeeInvitationRole | null;
+  roles: readonly EmployeeInvitationRole[];
 };
 
 export type EmployeeInvitation = {
   id: string;
   email: string;
-  role: EmployeeInvitationRole | null;
+  roles: readonly EmployeeInvitationRole[];
   firstName: string | null;
   lastName: string | null;
   status: "pending" | "revoked" | "accepted";
@@ -273,7 +297,7 @@ async function tenantOrganization(
 type InvitationRow = {
   id: string;
   email: string;
-  role: string | null;
+  roles: string[];
   first_name: string | null;
   last_name: string | null;
   status: "pending" | "revoked" | "accepted";
@@ -286,7 +310,7 @@ export function toInvitation(row: InvitationRow): EmployeeInvitation {
   return {
     id: row.id,
     email: row.email,
-    role: row.role as EmployeeInvitationRole | null,
+    roles: row.roles,
     firstName: row.first_name,
     lastName: row.last_name,
     status: row.status,
@@ -312,20 +336,9 @@ export async function inviteEmployee(
 ): Promise<EmployeeAdmission> {
   requireAdmin(session);
   const email = normalisedEmail(input.email);
-  if (input.role != null && !isEmployeeInvitationRole(input.role)) {
-    throw new HttpError(
-      400,
-      "VALIDATION",
-      `role must be a declared organization role key or a custom role id; declared keys: ${declaredEmployeeInvitationRoles().join(", ")}.`,
-    );
-  }
+  const roles = invitationRoles(input.roles);
   const actor = session.relation?.identityId ?? session.userId;
-  const customId = input.role ? customRoleId(input.role) : undefined;
-  if (customId) {
-    const found = await withDbSession(db, session, tx => sql`select id from platform.organization_access_roles
-      where tenant_id=${session.tenantId}::uuid and id=${customId}::uuid`.execute(tx));
-    if (!found.rows.length) throw new HttpError(400, 'VALIDATION', 'Choose a role from this organization.');
-  }
+  await withDbSession(db, session, trx => validateInvitationRoles(trx, session.tenantId, roles));
 
   const { organizationId } = await withDbSession(db, session, (trx) =>
     tenantOrganization(trx, session.tenantId),
@@ -343,7 +356,7 @@ export async function inviteEmployee(
   } catch (error) {
     console.warn("[employee-invitation] " + JSON.stringify({
       outcome: "keycloak_failed", tenantId: session.tenantId, organizationId,
-      actor, role: input.role,
+      actor, roles,
       code: error instanceof KeycloakAdminError ? error.code : "UNKNOWN",
       status: error instanceof KeycloakAdminError ? error.status : null,
     }));
@@ -351,7 +364,7 @@ export async function inviteEmployee(
   }
 
   const invitation = await withDbSession(db, session, (trx) =>
-    recordEmployeeInvitation(trx, session.tenantId, actor, input, email),
+    recordEmployeeInvitation(trx, session.tenantId, actor, { ...input, roles }, email),
   );
   // Keycloak sends no invite-user mail to an existing member; its
   // invite-existing-user mail tells them about the new access instead. A failure
@@ -377,7 +390,7 @@ export async function inviteEmployee(
   }
   console.info("[employee-invitation] " + JSON.stringify({
     outcome: "admission_recorded", tenantId: session.tenantId, organizationId,
-    invitationId: invitation.id, actor, role: input.role, delivery, ...(accessNotice ? { accessNotice } : {}),
+    invitationId: invitation.id, actor, roles, delivery, ...(accessNotice ? { accessNotice } : {}),
   }));
   return { ...invitation, delivery, ...(accessNotice ? { accessNotice } : {}) };
 }
@@ -387,17 +400,19 @@ export async function recordEmployeeInvitation(
   trx: Transaction<DB>, tenantId: string, actor: string, input: InviteEmployeeInput,
   email = normalisedEmail(input.email),
 ): Promise<EmployeeInvitation> {
+    const roles = invitationRoles(input.roles);
+    await validateInvitationRoles(trx, tenantId, roles);
     if (input.relationId) await validateInvitationTarget(trx, tenantId, input.relationId, email);
     const inserted = await sql<InvitationRow>`
       insert into platform.employee_invitations
-        (tenant_id, email, role, first_name, last_name, invited_by, relation_id)
+        (tenant_id, email, roles, first_name, last_name, invited_by, relation_id)
       values
-        (${tenantId}, ${email}, ${input.role ?? null},
+        (${tenantId}, ${email}, ${invitationRoleArray(roles)},
          ${input.firstName ?? null}, ${input.lastName ?? null}, ${actor}, ${input.relationId ?? null})
       on conflict (tenant_id, lower(email)) where status = 'pending'
       do update set
         relation_id = coalesce(excluded.relation_id, platform.employee_invitations.relation_id),
-        role = excluded.role,
+        roles = excluded.roles,
         first_name = excluded.first_name,
         last_name = excluded.last_name,
         invited_by = excluded.invited_by,
@@ -406,7 +421,7 @@ export async function recordEmployeeInvitation(
       where platform.employee_invitations.relation_id is null
          or excluded.relation_id is null
          or platform.employee_invitations.relation_id = excluded.relation_id
-      returning id, email, role, first_name, last_name, status, invited_by, invited_at, revoked_at
+      returning id, email, roles, first_name, last_name, status, invited_by, invited_at, revoked_at
     `.execute(trx);
     if (!inserted.rows[0]) throw new HttpError(409, "CONFLICT", "Invitation already belongs to another relation.");
     return toInvitation(inserted.rows[0]);
@@ -420,7 +435,7 @@ export async function listInvitations(
   requireAdmin(session);
   return withDbSession(db, session, async (trx) => {
     const result = await sql<InvitationRow>`
-      select id, email, role, first_name, last_name, status, invited_by, invited_at, revoked_at
+      select id, email, roles, first_name, last_name, status, invited_by, invited_at, revoked_at
         from platform.employee_invitations
        where tenant_id = ${session.tenantId}
          and status = 'pending'
@@ -437,7 +452,7 @@ export async function listInvitations(
 // module owns `platform.employee_invitations` — its RLS, its status shape and
 // the meaning of each status live in one place.
 
-export type PendingInvitationMatch = { id: string; role: EmployeeInvitationRole | null; relationId?: string | null };
+export type PendingInvitationMatch = { id: string; roles: readonly EmployeeInvitationRole[]; relationId?: string | null };
 
 /**
  * The tenant's still-pending invitation for `email`, or null. A plain read
@@ -450,8 +465,8 @@ export async function findPendingInvitation(
   tenantId: string,
   email: string,
 ): Promise<PendingInvitationMatch | null> {
-  const result = await sql<{ id: string; role: EmployeeInvitationRole | null; relation_id: string | null }>`
-    select id, role, relation_id
+  const result = await sql<{ id: string; roles: readonly EmployeeInvitationRole[]; relation_id: string | null }>`
+    select id, roles, relation_id
       from platform.employee_invitations
      where tenant_id = ${tenantId}
        and lower(email) = lower(${email})
@@ -460,8 +475,9 @@ export async function findPendingInvitation(
      limit 1
   `.execute(trx);
   const row = result.rows[0];
-  if (!row || (row.role !== null && !isEmployeeInvitationRole(row.role))) return null;
-  return { id: row.id, role: row.role, ...(row.relation_id ? { relationId: row.relation_id } : {}) };
+  if (!row) return null;
+  await validateInvitationRoles(trx, tenantId, invitationRoles(row.roles));
+  return { id: row.id, roles: row.roles, ...(row.relation_id ? { relationId: row.relation_id } : {}) };
 }
 
 /**
@@ -479,8 +495,8 @@ export async function claimPendingInvitation(
   trx: Transaction<DB>,
   tenantId: string,
   invitationId: string,
-): Promise<{ role: EmployeeInvitationRole | null } | null> {
-  const result = await sql<{ role: EmployeeInvitationRole | null }>`
+): Promise<{ roles: EmployeeInvitationRole[] } | null> {
+  const result = await sql<{ roles: EmployeeInvitationRole[] }>`
     update platform.employee_invitations
        set status = 'accepted',
            accepted_at = now(),
@@ -488,10 +504,12 @@ export async function claimPendingInvitation(
      where id = ${invitationId}
        and tenant_id = ${tenantId}
        and status = 'pending'
-    returning role
+    returning roles
   `.execute(trx);
   const row = result.rows[0];
-  return row && (row.role === null || isEmployeeInvitationRole(row.role)) ? row : null;
+  if (!row) return null;
+  await validateInvitationRoles(trx, tenantId, invitationRoles(row.roles));
+  return row;
 }
 
 export type RevokeInvitationInput = { email: string };
@@ -567,7 +585,7 @@ export async function revokeInvitation(
        where tenant_id = ${session.tenantId}
          and lower(email) = lower(${email})
          and status = 'pending'
-      returning id, email, role, first_name, last_name, status, invited_by, invited_at, revoked_at
+      returning id, email, roles, first_name, last_name, status, invited_by, invited_at, revoked_at
     `.execute(trx);
     const row = result.rows[0];
     if (!row) {

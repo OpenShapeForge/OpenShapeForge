@@ -5,7 +5,7 @@
  * admin script run by hand (auth/employee-invitations.ts):
  *
  *   invite_employee    — admit an e-mail address into this organization with
- *                        a pre-selected role, sending mail only when needed.
+ *                        pre-selected roles, sending mail only when needed.
  *   list_invitations   — the tenant's still-pending invitations.
  *   revoke_invitation  — cancel a pending admission and withdraw any matching
  *                        Keycloak invitation that still exists.
@@ -25,7 +25,6 @@ import {
   revokeInvitation,
   type EmployeeAdmission,
   type EmployeeInvitation,
-  type EmployeeInvitationRole,
 } from "../auth/employee-invitations.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
@@ -41,11 +40,12 @@ const INVITE_EMPLOYEE: Tool = {
   name: INVITE_EMPLOYEE_TOOL,
   title: "Admit an employee",
   description:
-    "Admit an employee or colleague into this organization with a pre-selected role. " +
+    "Admit an employee or colleague into this organization with pre-selected roles. " +
+    "Pass all required role keys in roles together; updating a pending admission replaces its complete role selection. " +
     "A person not yet in the Keycloak organization receives an invitation e-mail. Someone who is " +
     "already a member is e-mailed an organization invitation with the sign-in link instead, and can sign in again immediately. An " +
     "existing pending invitation is reused without resending it. Report the returned delivery " +
-    "and nextStep exactly: status pending means the application role awaits sign-in, not that an " +
+    "and nextStep exactly: status pending means the application roles await sign-in, not that an " +
     "e-mail was sent or must be accepted. For organization administrators.",
   inputSchema: {
     type: "object",
@@ -61,13 +61,16 @@ const INVITE_EMPLOYEE: Tool = {
           "created on request. Their account is linked to it at first sign-in instead of a new " +
           "Relation being made. Omit it when no Relation was asked for.",
       },
-      role: {
-        type: "string",
-        description: "A role key, applied on first sign-in.",
+      roles: {
+        type: "array",
+        minItems: 1,
+        uniqueItems: true,
+        description: "Role keys, applied together on first sign-in.",
+        items: { type: "string", "x-osf-reference": { entity: "AccessRole", valueField: "key" } },
         "x-osf-reference": { entity: "AccessRole", valueField: "key" },
       },
     },
-    required: ["email", "role"],
+    required: ["email", "roles"],
     additionalProperties: false,
   },
   annotations: {
@@ -97,7 +100,7 @@ const REVOKE_INVITATION: Tool = {
   name: REVOKE_INVITATION_TOOL,
   title: "Revoke a pending invitation",
   description:
-    "Cancel a pending admission for an e-mail address so its pre-selected role is no " +
+    "Cancel a pending admission for an e-mail address so its pre-selected roles are no " +
     "longer applied when they sign in. If Keycloak still holds an invitation, it is also " +
     "withdrawn and the link in the delivered e-mail stops working.",
   inputSchema: {
@@ -122,7 +125,7 @@ export function sessionMayInviteEmployees(
 }
 
 /**
- * invite_employee with the declared role keys spelled out in its `role`
+ * invite_employee with the declared role keys spelled out in its `roles`
  * field. The model cannot read the AccessRole catalogue in every session, and
  * a guessed key ("finance.viewer") is refused as a write — so the keys travel
  * with the tool. No `enum`: an organization's custom role ids stay valid.
@@ -142,10 +145,10 @@ export function inviteEmployeeTool(roles: readonly string[] = declaredEmployeeIn
       ...INVITE_EMPLOYEE.inputSchema,
       properties: {
         ...schema.properties,
-        role: {
-          ...schema.properties.role,
+        roles: {
+          ...schema.properties.roles,
           description:
-            "The role applied on first sign-in, as one of these keys exactly as written: " +
+            "All roles applied together on first sign-in, using these keys exactly as written: " +
             `${choices.join("; ")}. Match the person's wording to a label here and name the ` +
             "role to them by that label, not its key; a custom role id of this organization " +
             "is also accepted. Do not invent a key.",
@@ -168,7 +171,7 @@ function publicInvitation(invitation: EmployeeInvitation): Record<string, unknow
   return {
     id: invitation.id,
     email: invitation.email,
-    role: invitation.role,
+    roles: invitation.roles,
     firstName: invitation.firstName,
     lastName: invitation.lastName,
     status: invitation.status,
@@ -182,17 +185,17 @@ export function publicEmployeeAdmission(admission: EmployeeAdmission): Record<st
   const outcome = admission.delivery === "sent"
     ? {
         reason: "invitation_sent",
-        message: "Keycloak accepted a new invitation e-mail request. The role awaits the person's sign-in.",
+        message: "Keycloak accepted a new invitation e-mail request. The roles await the person's sign-in.",
         nextStep: "The person must follow the invitation link and sign in.",
       }
     : admission.delivery === "not_required"
     ? {
         reason: "existing_organization_member",
         message: admission.accessNotice === "sent"
-          ? "This person already has an account in this organization, so the role was admitted directly. The identity provider e-mailed them about it (an organization invitation whose link only confirms they are a member). The role applies when they sign out and sign in again."
+          ? "This person already has an account in this organization, so the roles were admitted directly. The identity provider e-mailed them about it (an organization invitation whose link only confirms they are a member). The roles apply when they sign out and sign in again."
           : admission.accessNotice === "failed"
-          ? "This person already has an account in this organization, so the role was admitted directly, but no e-mail could be sent. The role applies at their next sign-in."
-          : "This person already belongs to the Keycloak organization. No e-mail was sent. The role awaits their next sign-in.",
+          ? "This person already has an account in this organization, so the roles were admitted directly, but no e-mail could be sent. The roles apply at their next sign-in."
+          : "This person already belongs to the Keycloak organization. No e-mail was sent. The roles await their next sign-in.",
         nextStep: admission.accessNotice === "sent"
           ? "Tell the person they received an e-mail about their access, and that they sign out and sign in again with their existing account for the role to apply."
           : admission.accessNotice === "failed"
@@ -325,13 +328,14 @@ export async function callEmployeeInvitationTool(
   }
   try {
     const email = stringArgument(args, "email", true)!;
-    const role = stringArgument(args, "role", true)!;
+    if (Object.hasOwn(args, "role")) throw new HttpError(400, "VALIDATION", 'Use "roles", an array of role keys.');
+    if (!Array.isArray(args.roles) || args.roles.length === 0) throw new HttpError(400, "VALIDATION", 'Select at least one role in "roles".');
     const relationId = stringArgument(args, "relationId", false);
     const admission = await inviteEmployee(db, scoped, keycloak, {
       email,
       firstName: stringArgument(args, "firstName", false),
       lastName: stringArgument(args, "lastName", false),
-      role: role as EmployeeInvitationRole,
+      roles: args.roles as string[],
       ...(relationId ? { relationId } : {}),
     });
     return succeeded(publicEmployeeAdmission(admission));

@@ -70,7 +70,7 @@ test("Account collections, seek paging, tenant-scoped point reads and shared Rel
       else await admin`insert into platform.identity_relations(identity_id,tenant_id,status,roles) values(${id},${index === 2 ? own : other},'pending_confirmation',ARRAY['org_employee'])`;
     }
     await admin`insert into platform.identity_relations(identity_id,tenant_id,status,roles) values(${ids[0]},${other},'pending_confirmation',ARRAY['other-role'])`;
-    await admin`insert into platform.employee_invitations(id,tenant_id,email,status,invited_by,role) values(${invitation},${own},'invitation@example.test','pending','account-proof','org_employee')`;
+    await admin`insert into platform.employee_invitations(id,tenant_id,email,status,invited_by,roles) values(${invitation},${own},'invitation@example.test','pending','account-proof',ARRAY['org_employee'])`;
     const first: any = await directory.listOrganizationAccounts({ first: 1 }, context);
     expect(first.value.totalCount).toBe(3);
     expect(first.value.items).toHaveLength(1);

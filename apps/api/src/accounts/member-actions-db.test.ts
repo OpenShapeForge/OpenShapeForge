@@ -49,8 +49,8 @@ test('member directory and recovery isolate tenants and address only the registe
       await admin`insert into platform.identity_relations(identity_id,tenant_id,relation_id,status,linked_at,linked_by)
         values(${row.id},${row.tenant},${row.relation},${row.relation?'linked':'pending_confirmation'},${row.relation?new Date():null},${row.relation?'test':null})`;
     }
-    await admin`insert into platform.employee_invitations(id,tenant_id,email,role,first_name,last_name,invited_by)
-      values(${pending},${tenant},'pending@example.test','org_employee','Pending','Member',${actor})`;
+    await admin`insert into platform.employee_invitations(id,tenant_id,email,roles,first_name,last_name,invited_by)
+      values(${pending},${tenant},'pending@example.test',ARRAY['org_employee'],'Pending','Member',${actor})`;
     const outsider={...context,session:{...session,roles:[]}};
     expect(await listInvitationRelations({},outsider)).toMatchObject({status:403});
     const choices:any=await listInvitationRelations({},context);
@@ -60,7 +60,7 @@ test('member directory and recovery isolate tenants and address only the registe
       values(${unlinked},${tenant},'Existing invite target','person','active')`;
     await admin`insert into erp.contact_details(id,tenant_id,relation_id,type,value,status)
       values(${crypto.randomUUID()},${tenant},${unlinked},'email','invite-target@example.test','active')`;
-    expect(await inviteMember({email:' invite-target@example.test ',firstName:'Target',lastName:'Person',role:'org_employee'},context))
+    expect(await inviteMember({email:' invite-target@example.test ',firstName:'Target',lastName:'Person',roles:['org_employee']},context))
       .toMatchObject({status:409,code:'CONFLICT'});
     expect(sent).toEqual([]);
 
@@ -112,10 +112,10 @@ test('member directory and recovery isolate tenants and address only the registe
     client.hasMemberByEmail=async()=>false;
     client.inviteUser=async(organization:string,input:any)=>{sent.push({kind:'invite:'+organization,id:input.email});};
     const before=sent.length;
-    expect(await inviteMember({email:'cross-tenant@example.test',firstName:'Cross',lastName:'Tenant',role:'org_employee',relationId:foreignRelation},context))
+    expect(await inviteMember({email:'cross-tenant@example.test',firstName:'Cross',lastName:'Tenant',roles:['org_employee'],relationId:foreignRelation},context))
       .toMatchObject({status:404,code:'NOT_FOUND'});
     expect(sent).toHaveLength(before);
-    const invited:any=await inviteMember({email:'invite-target@example.test',firstName:'Target',lastName:'Person',role:'org_employee',relationId:unlinked},context);
+    const invited:any=await inviteMember({email:'invite-target@example.test',firstName:'Target',lastName:'Person',roles:['org_employee'],relationId:unlinked},context);
     expect(invited).toMatchObject({value:{status:'pending',delivery:'sent'}});
     expect((await admin`select relation_id from platform.employee_invitations where id=${invited.value.id}`)[0].relation_id).toBe(unlinked);
     expect(sent).toHaveLength(before+1);

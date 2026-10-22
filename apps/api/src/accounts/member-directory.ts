@@ -36,7 +36,7 @@ export async function directory(c: ModuleOperationContext) {
     union all
     select p.id, coalesce(nullif(trim(concat_ws(' ',p.first_name,p.last_name)),''),p.email),p.email,
       case when p.status='pending' then 'invited' else p.status end,
-      p.relation_id,p.invited_at,array[]::text[],array[]::text[],''
+      p.relation_id,p.invited_at,p.roles,array[]::text[],''
     from platform.employee_invitations p where p.tenant_id=${s.tenantId}::uuid and p.status in ('pending','revoked')
     order by label,id`.execute(tx)).rows);
   return rows.map(({ direct, inherited, ...row }) => ({ ...row,

@@ -32,7 +32,7 @@ import {
 } from "../graphql/generated-crud.js";
 import {
   claimPendingInvitation,
-  employeeInvitationRoleGrants,
+  employeeInvitationRolesGrants,
   type PendingInvitationMatch,
 } from "./employee-invitations.js";
 import {
@@ -83,7 +83,7 @@ export async function admitInvitedPerson(
   const linked = await withDbSession(db, runtime, async (trx) => {
     const role = await claimPendingInvitation(trx, session.tenantId, invitation.id);
     if (!role) throw notInvited(session, claims);
-    const roles = employeeInvitationRoleGrants(role.role);
+    const roles = employeeInvitationRolesGrants(role.roles);
     // The claim locks the invitation; re-read its target in this transaction.
     const target = await sql<{ relation_id: string | null }>`select relation_id from platform.employee_invitations
       where id = ${invitation.id} and tenant_id = ${session.tenantId}`.execute(trx);
@@ -113,7 +113,7 @@ export async function admitInvitedPerson(
       console.info(
         `[auth] Linked identity ${identityId} (${claims.subject}) to Relation ` +
           `${relationId} "${displayName}" in tenant ${session.tenantId} (just in time, on ` +
-          `invitation ${invitation.id}; holds ${role.role ?? "group-derived access"} here).`,
+          `invitation ${invitation.id}; holds ${role.roles.join(", ") || "group-derived access"} here).`,
       );
     }
     // Lost a race with another replica: keep its link; this transaction's
@@ -152,7 +152,7 @@ export async function acceptPendingInvitation(
       const link = await readLinkRow(trx, identityId, session.tenantId);
       if (link?.relation_id !== target.rows[0].relation_id) throw new SessionAuthenticationUnavailableError("The invitation belongs to another relation.");
     }
-    const granted = employeeInvitationRoleGrants(role.role);
+    const granted = employeeInvitationRolesGrants(role.roles);
     if (!(await writeMembershipRoles(trx, session.tenantId, identityId, granted))) {
       throw new SessionAuthenticationUnavailableError("The identity link vanished while accepting; try again.");
     }

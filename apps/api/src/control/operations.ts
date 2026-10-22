@@ -285,7 +285,7 @@ const HANDLERS: Readonly<Record<string, ControlHandler>> = {
     const lastName = optionalString(input, "lastName");
     return manageTenantInvitations({ db: context.db, administrator: context.session.administrator,
       ...(context.runtime.clients ? { firstAdministrator: context.runtime.clients.firstAdministrator } : {}), log: context.log, correlationId: context.correlationId },
-    "create", { slug: requireSlug(input, "slug"), email: requiredString(input, "email"), role: requiredString(input, "role"),
+    "create", { slug: requireSlug(input, "slug"), email: requiredString(input, "email"), roles: input.roles as string[],
       ...(firstName ? { firstName } : {}), ...(lastName ? { lastName } : {}) });
   },
   revokeTenantInvitation: (input, context) =>

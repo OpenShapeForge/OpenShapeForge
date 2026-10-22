@@ -160,7 +160,7 @@ const AUTHORED: readonly Authored[] = [
   {
     id: "control.create-tenant-invitation", handler: "createTenantInvitation", title: "Create tenant invitation",
     description: "Invites a tenant member or explicitly sends an existing member a fresh sign-in notice without changing accepted roles.", roles: [CONTROL_ROLE], effects: WRITE_EXTERNAL, idempotency: "none",
-    input: { properties: { slug, email: { type: "string", format: "email" }, role: { type: "string", enum: ["org_admin", "org_employee"] }, firstName: { type: "string" }, lastName: { type: "string" } }, required: ["slug", "email", "role"] },
+    input: { properties: { slug, email: { type: "string", format: "email" }, roles: { type: "array", minItems: 1, uniqueItems: true, items: { type: "string", enum: ["org_admin", "org_employee"] } }, firstName: { type: "string" }, lastName: { type: "string" } }, required: ["slug", "email", "roles"] },
     rest: { method: "POST", path: "/api/control/v1/tenants/:slug/invitations", status: 201 }, mcp: "create_tenant_invitation",
   },
   {

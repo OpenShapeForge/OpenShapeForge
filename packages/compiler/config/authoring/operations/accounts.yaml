@@ -5,7 +5,7 @@ operations:
   inviteAccount:
     id: accounts.create
     name: { en: Create account, nl: Account aanmaken }
-    description: { en: Invite a login for this relation. Group roles provide access; a direct role is optional., nl: Nodig een login uit voor deze relatie. Groepsrollen geven toegang; een directe rol is optioneel. }
+    description: { en: Invite a login for this relation. Group roles provide access; direct roles are optional., nl: Nodig een login uit voor deze relatie. Groepsrollen geven toegang; directe rollen zijn optioneel. }
     implementation: { type: plugin, plugin: accounts, handler: inviteAccount }
     input:
       schema:
@@ -15,7 +15,7 @@ operations:
         properties:
           relationId: { type: string, format: uuid, x-osf-i18n: { title: { en: Relation, nl: Relatie } } }
           email: { type: string, format: email, maxLength: 320, x-osf-i18n: { title: { en: Email, nl: E-mail } }, x-osf-reference: { entity: ContactDetail, valueField: value, constraints: { type: { eq: email } }, bindings: { relationId: relationId } } }
-          role: { type: string, x-osf-i18n: { title: { en: Role, nl: Rol } }, x-osf-reference: { entity: AccessRole, valueField: key } }
+          roles: { type: array, uniqueItems: true, items: { type: string }, x-osf-i18n: { title: { en: Roles, nl: Rollen } }, x-osf-reference: { entity: AccessRole, valueField: key } }
     output:
       schema:
         type: object

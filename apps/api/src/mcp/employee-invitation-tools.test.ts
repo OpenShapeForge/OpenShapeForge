@@ -12,7 +12,7 @@ import {
 import { EMPLOYEE_INVITATION_ADMIN_ROLE } from "../auth/employee-invitations.js";
 
 describe("sessionMayInviteEmployees", () => {
-  test("requires the contract's administrator role, same as link_identity", () => {
+  test("requires the contract's administrator roles, same as link_identity", () => {
     expect(sessionMayInviteEmployees({ roles: [EMPLOYEE_INVITATION_ADMIN_ROLE] })).toBe(true);
     expect(sessionMayInviteEmployees({ roles: ["org_employee"] })).toBe(false);
     expect(sessionMayInviteEmployees({ roles: [] })).toBe(false);
@@ -41,11 +41,11 @@ describe("employeeInvitationToolsForSession", () => {
     }).find((tool) => tool.name === INVITE_EMPLOYEE_TOOL)!;
     const schema = invite.inputSchema as unknown as {
       required: string[];
-      properties: { role: { enum?: string[]; "x-osf-reference": { entity: string; valueField: string } } };
+      properties: { roles: { enum?: string[]; "x-osf-reference": { entity: string; valueField: string } } };
     };
-    expect(schema.required).toEqual(["email", "role"]);
-    expect(schema.properties.role.enum).toBeUndefined();
-    expect(schema.properties.role["x-osf-reference"]).toEqual({ entity: "AccessRole", valueField: "key" });
+    expect(schema.required).toEqual(["email", "roles"]);
+    expect(schema.properties.roles.enum).toBeUndefined();
+    expect(schema.properties.roles["x-osf-reference"]).toEqual({ entity: "AccessRole", valueField: "key" });
   });
 
   test("invite_employee describes admission and conditional delivery truthfully", () => {
@@ -55,14 +55,14 @@ describe("employeeInvitationToolsForSession", () => {
     expect(invite.title).toBe("Admit an employee");
     expect(invite.description).toContain("is e-mailed an organization invitation with the sign-in link");
     expect(invite.description).toContain("reused without resending");
-    expect(invite.description).toContain("status pending means the application role awaits sign-in");
+    expect(invite.description).toContain("status pending means the application roles await sign-in");
   });
 
   test("invite_employee reports each delivery outcome explicitly", () => {
     const invitation = {
       id: "invitation-1",
       email: "person@example.com",
-      role: "org_employee" as const,
+      roles: ["org_employee"] as const,
       firstName: null,
       lastName: null,
       status: "pending" as const,
@@ -74,13 +74,13 @@ describe("employeeInvitationToolsForSession", () => {
       admitted: true,
       delivery: "sent",
       reason: "invitation_sent",
-      message: "Keycloak accepted a new invitation e-mail request. The role awaits the person's sign-in.",
+      message: "Keycloak accepted a new invitation e-mail request. The roles await the person's sign-in.",
       nextStep: "The person must follow the invitation link and sign in.",
     });
     expect(publicEmployeeAdmission({ ...invitation, delivery: "not_required" })).toMatchObject({
       delivery: "not_required",
       reason: "existing_organization_member",
-      message: "This person already belongs to the Keycloak organization. No e-mail was sent. The role awaits their next sign-in.",
+      message: "This person already belongs to the Keycloak organization. No e-mail was sent. The roles await their next sign-in.",
       nextStep: "The person must sign out and sign in again with this account. There is no e-mail invitation to accept.",
     });
     expect(publicEmployeeAdmission({ ...invitation, delivery: "not_required", accessNotice: "sent" })).toMatchObject({
@@ -100,14 +100,14 @@ describe("employeeInvitationToolsForSession", () => {
 describe("inviteEmployeeTool", () => {
   test("spells out the declared role keys with their labels, without an enum", () => {
     const tool = inviteEmployeeTool(["finance_viewer", "org_employee"]);
-    const role = (tool.inputSchema as unknown as { properties: { role: { description: string; enum?: unknown } } }).properties.role;
+    const role = (tool.inputSchema as unknown as { properties: { roles: { description: string; enum?: unknown } } }).properties.roles;
     expect(role.description).toContain("finance_viewer;");
     expect(role.description).toContain("org_employee (");
     expect(role.description).toContain("Do not invent a key");
     expect(role.enum).toBeUndefined();
   });
   test("keeps the plain field when no roles are declared", () => {
-    const role = (inviteEmployeeTool([]).inputSchema as unknown as { properties: { role: { description: string } } }).properties.role;
-    expect(role.description).toBe("A role key, applied on first sign-in.");
+    const role = (inviteEmployeeTool([]).inputSchema as unknown as { properties: { roles: { description: string } } }).properties.roles;
+    expect(role.description).toBe("Role keys, applied together on first sign-in.");
   });
 });

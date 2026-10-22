@@ -17,7 +17,7 @@ type Dependencies = {
 };
 
 type InvitationAction = "list" | "get" | "create" | "revoke" | "resend";
-type Input = { slug: string; invitationId?: string; email?: string; role?: string; firstName?: string; lastName?: string };
+type Input = { slug: string; invitationId?: string; email?: string; roles?: string[]; firstName?: string; lastName?: string };
 const AUDIT_ACTION: Readonly<Record<InvitationAction, string>> = {
   list: "control.list-tenant-invitations",
   get: "control.get-tenant-invitation",
@@ -107,7 +107,7 @@ export async function manageTenantInvitations(
         }
 
         const rows = (await sql<Parameters<typeof toInvitation>[0]>`
-          select id, email, role, first_name, last_name, status, invited_by, invited_at, revoked_at
+          select id, email, roles, first_name, last_name, status, invited_by, invited_at, revoked_at
           from platform.employee_invitations
           where tenant_id = ${tenant.id}
           order by invited_at desc
@@ -156,7 +156,7 @@ export async function manageTenantInvitations(
                 status: invitation.status,
                 sentAt: invitationTimestamp(invitation.sentDate),
                 expiresAt: invitationTimestamp(invitation.expiresAt),
-                role: local?.role ?? null,
+                roles: local?.roles ?? [],
                 registrationStatus: local?.status ?? "untracked",
                 canResend: Boolean(
                   (local?.status === "pending" || (local?.status === "accepted" && linkedEmails.has(local.email.toLowerCase()))) && tenant.status === "active" && organization.enabled,
@@ -172,7 +172,7 @@ export async function manageTenantInvitations(
           let email: string;
           try { email = normalisedEmail(String(input.email ?? "")).toLowerCase(); }
           catch { throw new FirstAdministratorError("INVALID_INPUT", "A valid email address is required."); }
-          if (!input.role || !isEmployeeInvitationRole(input.role)) throw new FirstAdministratorError("INVALID_INPUT", "role must be org_admin or org_employee.");
+          if (!Array.isArray(input.roles) || input.roles.length === 0 || input.roles.some(role => !["org_admin", "org_employee"].includes(role) || !isEmployeeInvitationRole(role))) throw new FirstAdministratorError("INVALID_INPUT", "roles must select org_admin and/or org_employee.");
           if (tenant.status !== "active" || !organization.enabled) throw new FirstAdministratorError("TENANT_NOT_READY", "Inviting requires an active tenant and organization.");
           const names = { ...(input.firstName ? { firstName: input.firstName } : {}), ...(input.lastName ? { lastName: input.lastName } : {}) };
           const member = await clients.members.hasMemberByEmail(organization.id, email);
@@ -184,15 +184,15 @@ export async function manageTenantInvitations(
               and lower(i.email) = lower(${email})
           `.execute(trx)).rows : [];
           if (member && accepted && admission.length) {
-            if (admission.length !== 1 || !(admission[0]!.roles ?? []).includes(input.role)) throw new FirstAdministratorError("INVITATION_ROLE_CONFLICT", "This member is already admitted with another role. Use assign_tenant_member_roles; no email was sent and no role was changed.");
+            if (admission.length !== 1 || !input.roles.every(role => (admission[0]!.roles ?? []).includes(role))) throw new FirstAdministratorError("INVITATION_ROLE_CONFLICT", "This member is already admitted with another role. Use assign_tenant_member_roles; no email was sent and no role was changed.");
             const delivery = await deliverInvitation(clients.members, organization.id, { email, ...names }, { knownNonMember: !member });
-            return { tenantSlug: input.slug, invitationId: accepted.id, ...toInvitation(accepted), role: input.role, ...invitationOutcome(input.slug, delivery) };
+            return { tenantSlug: input.slug, invitationId: accepted.id, ...toInvitation(accepted), roles: input.roles, ...invitationOutcome(input.slug, delivery) };
           }
           // Every explicit admission records current intent, including re-admission
           // after acceptance. Existing members receive the native sign-in notice.
           const delivery = await deliverInvitation(clients.members, organization.id, { email, ...names }, { knownNonMember: !member });
           const invitation = await recordEmployeeInvitation(trx, tenant.id, `${deps.administrator.issuer}#${deps.administrator.subject}`,
-            { email, role: input.role, ...names });
+            { email, roles: input.roles, ...names });
           return { tenantSlug: input.slug, invitationId: invitation.id, ...invitation,
             ...invitationOutcome(input.slug, delivery) };
         }
@@ -208,7 +208,7 @@ export async function manageTenantInvitations(
           return { tenantSlug: input.slug, invitationId: local?.id ?? invitation.id, email: invitation.email, firstName: invitation.firstName,
             lastName: invitation.lastName, status: invitation.status,
             sentAt: invitationTimestamp(invitation.sentDate), expiresAt: invitationTimestamp(invitation.expiresAt),
-            role: local?.role ?? null, registrationStatus: local?.status ?? "untracked",
+            roles: local?.roles ?? [], registrationStatus: local?.status ?? "untracked",
             canResend: Boolean((local?.status === "pending" || (local?.status === "accepted" && linkedEmails.has(local.email.toLowerCase()))) && tenant.status === "active" && organization.enabled),
             canRevoke: local?.status !== "accepted" && invitationCanBeRevoked(invitation.status) };
         }
@@ -308,7 +308,7 @@ export async function manageTenantInvitations(
         return {
           tenant: input.slug,
           email: invitation.email,
-          role: local.role,
+          roles: local.roles,
           status: "resent",
           ...invitationOutcome(input.slug, "email_sent"),
         };

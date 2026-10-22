@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { ModuleOperationErrorResult, ModuleOperationHandler } from "../modules/contract.js";
-import { inviteEmployee, type EmployeeInvitationRole } from "../auth/employee-invitations.js";
+import { inviteEmployee } from "../auth/employee-invitations.js";
 import { KeycloakAdminError } from "../control/keycloak-organization-admin.js";
 import { HttpError } from "../rest/http-error.js";
 
@@ -16,7 +16,7 @@ export const inviteAccount: ModuleOperationHandler = async (input, context) => {
   if (!members || !context.db) return refusal(503, "OPERATION_UNAVAILABLE", "Account invitations are not configured.");
   try {
     const invitation = await inviteEmployee(context.db, { ...session, tenantId: session.tenantId, userId: session.userId }, members, {
-      relationId: input.relationId as string, email: input.email as string, role: input.role as EmployeeInvitationRole,
+      relationId: input.relationId as string, email: input.email as string, roles: (input.roles as string[] | undefined) ?? [],
     });
     return { value: { id: invitation.id, email: invitation.email, status: invitation.status, delivery: invitation.delivery, ...(invitation.accessNotice ? { accessNotice: invitation.accessNotice } : {}) } };
   } catch (error) {

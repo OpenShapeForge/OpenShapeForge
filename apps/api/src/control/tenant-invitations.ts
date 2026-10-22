@@ -186,7 +186,7 @@ export async function manageTenantInvitations(
           if (member && accepted && admission.length) {
             if (admission.length !== 1 || !input.roles.every(role => (admission[0]!.roles ?? []).includes(role))) throw new FirstAdministratorError("INVITATION_ROLE_CONFLICT", "This member is already admitted with another role. Use assign_tenant_member_roles; no email was sent and no role was changed.");
             const delivery = await deliverInvitation(clients.members, organization.id, { email, ...names }, { knownNonMember: !member });
-            return { tenantSlug: input.slug, invitationId: accepted.id, ...toInvitation(accepted), ...invitationOutcome(input.slug, delivery) };
+            return { tenantSlug: input.slug, invitationId: accepted.id, ...toInvitation(accepted), roles: (admission[0]!.roles ?? []).filter(isEmployeeInvitationRole), ...invitationOutcome(input.slug, delivery) };
           }
           // Every explicit admission records current intent, including re-admission
           // after acceptance. Existing members receive the native sign-in notice.

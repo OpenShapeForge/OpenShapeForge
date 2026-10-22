@@ -10,7 +10,7 @@ import { invalidQuery, structuredFilter, type QueryField } from "./structured-fi
 
 export const AUDIT_PLUGIN = "osf-audit";
 const entityType = sql`coalesce(payload->'audit'->>'entityType',aggregate_type)`;
-const subjects = sql`coalesce(payload->'audit'->'subjects',jsonb_build_array(jsonb_build_object('entityType',aggregate_type,'recordId',aggregate_id)))`;
+const subjects = sql`platform.audit_event_subjects(payload,aggregate_type,aggregate_id)`;
 const fields: Record<string, QueryField> = {
   id: { sql: sql`id::text`, kind: "text" }, entityType: { sql: entityType, kind: "text" },
   recordId: { sql: sql`aggregate_id`, kind: "text" }, eventType: { sql: sql`event_type`, kind: "text" },
@@ -23,6 +23,9 @@ const fields: Record<string, QueryField> = {
   subjects: { sql: subjects, kind: "objects" },
 };
 
+export const auditFilterFields = Object.keys(fields);
+const metadataPayload = sql<unknown>`jsonb_build_object('audit',jsonb_build_object(
+ 'entityType',payload->'audit'->'entityType','actorId',payload->'audit'->'actorId','actorKind',payload->'audit'->'actorKind','operationId',payload->'audit'->'operationId','correlationId',payload->'audit'->'correlationId','changedFields',payload->'audit'->'changedFields','subjects',payload->'audit'->'subjects'))`.as("payload");
 const columns = ["id", "aggregate_type", "aggregate_id", "event_type", "occurred_at"] as const;
 const safePayload = sql<unknown>`platform.audit_redact(payload)`.as("payload");
 function object(value: unknown): Record<string, unknown> {
@@ -68,19 +71,20 @@ export function auditOperationHandler(operation: Pick<OperationContract, "handle
         if (typeof input.after !== "string" || input.after.length > 4096) throw new Error();
         cursor = JSON.parse(Buffer.from(input.after, "base64url").toString());
         if (!cursor || cursor.scope !== scope || typeof cursor.value !== "string" || cursor.value.length > 2000 || !UUID_PATTERN.test(cursor.id)) throw new Error();
+        if (sortField === "id" && !UUID_PATTERN.test(cursor.value)) throw new Error();
         if (fields[sortField]!.kind === "timestamp" && !Number.isFinite(Date.parse(cursor.value))) throw new Error();
       } catch { invalidQuery("The cursor does not match this organization and query."); }
     }
     const field = fields[sortField]!;
-    const sorting = field.kind === "timestamp" ? field.sql : sql`coalesce(${field.sql},'')`;
-    const bound = cursor ? field.kind === "timestamp" ? sql`${cursor.value}::timestamptz` : sql`${cursor.value}` : sql`null`;
+    const sorting = sortField === "id" ? sql`id` : field.kind === "timestamp" ? field.sql : sql`coalesce(${field.sql},'')`;
+    const bound = cursor ? sortField === "id" ? sql`${cursor.value}::uuid` : field.kind === "timestamp" ? sql`${cursor.value}::timestamptz` : sql`${cursor.value}` : sql`null`;
     const comparison = direction === "asc" ? sql`>` : sql`<`, order = direction === "asc" ? sql`asc` : sql`desc`;
     return withDbSession(db, session, async tx => {
       const base = tx.selectFrom("platform.entity_events").where("tenant_id", "=", session.tenantId!).where(predicate);
       const count = await base.select(sql<string>`count(*)::text`.as("count")).executeTakeFirstOrThrow();
-      let query = base.select(columns).select(safePayload).select(sql<string>`${sorting}::text`.as("sort_value"));
-      if (cursor) query = query.where(sql<boolean>`(${sorting} ${comparison} ${bound} or (${sorting}=${bound} and id::text ${comparison} ${cursor.id}))`);
-      const rows = await query.orderBy(sql`${sorting} ${order}`).orderBy(sql`id::text ${order}`).limit(first + 1).execute();
+      let query = base.select(columns).select(metadataPayload).select(sql<string>`${sorting}::text`.as("sort_value"));
+      if (cursor) query = query.where(sql<boolean>`(${sorting} ${comparison} ${bound} or (${sorting}=${bound} and id ${comparison} ${cursor.id}::uuid))`);
+      const rows = await query.orderBy(sql`${sorting} ${order}`).orderBy(sql`id ${order}`).limit(first + 1).execute();
       const page = rows.slice(0, first), last = page.at(-1);
       return { value: { items: page.map(row => view(row, false)), totalCount: Number(count.count),
         nextCursor: rows.length > first && last ? Buffer.from(JSON.stringify({ scope, value: last.sort_value, id: last.id })).toString("base64url") : null } };

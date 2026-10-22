@@ -445,6 +445,8 @@ export type TableSourceDefinition = {
     };
     relationships: Array<{
       through?: { field: string; column: string; target: string };
+      via?: string;
+      viaSchema?: string;
       name: string;
       target: string;
       type: string;

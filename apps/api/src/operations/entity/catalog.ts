@@ -15,7 +15,7 @@ import {
 } from "../../graphql/generated-authz.js";
 import { fieldNameForColumn, tableColumnMap } from "./columns.js";
 import { normalizeEntityStorageRow } from "./serialize-result.js";
-import { entityValueCarriers, entityValuePhysicalColumns, projectEntityValueRow } from "./entity-value-io.js";
+import { entityValueCarriers, projectEntityValueRow } from "./entity-value-io.js";
 import { assertStoredTypedValuesSupported, projectTypedValues } from "./typed-values.js";
 import { projectVisibleFieldBindings } from "./field-binding-policy.js";
 import { generatedEntityValues } from "../../modules/entity-value-registry.js";
@@ -27,7 +27,6 @@ import type {
   GeneratedEntityRow,
   ListPageInput,
 } from "./types.js";
-
 
 /**
  * Whether every row of `table` is its own tenant: the compiler stamps
@@ -53,7 +52,6 @@ export function isGeneratedCrudOperationEnabled(
     table.source?.crud?.operations?.[operation] === true
   );
 }
-
 
 
 // Precomputed per-table, per-operation role allow-sets from the manifest's
@@ -261,7 +259,6 @@ export function isGeneratedCrudTableReadable(name: string) {
   );
 }
 
-
 export function generatedCrudError(
   message: string,
   code: string,
@@ -328,16 +325,4 @@ export function readGeneratedCrudTable(
   }
   requireEntityOperation(table, operation, session);
   return table;
-}
-
-
-export function generatedCrudAggregateId(table: GeneratedCrudTable, row: GeneratedEntityRow) {
-  const id = row[table.primaryKey!];
-  if (id === null || id === undefined || id === "") {
-    throw generatedCrudError(
-      `Generated CRUD event for ${table.name} is missing primary key ${table.primaryKey}.`,
-      "INTERNAL_SERVER_ERROR",
-    );
-  }
-  return String(id);
 }

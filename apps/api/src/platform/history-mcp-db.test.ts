@@ -14,14 +14,16 @@ import { ModulePlatformRuntime } from "../modules/platform.js";
 import { __buildGeneratedMcpServerForTests } from "../mcp/generated-mcp-server.js";
 import { listOperationContracts, runtimeStaticOperationRegistrations } from "../operations/runtime.js";
 import type { GeneratedCrudTable } from "../operations/entity/types.js";
+import { jsonbLiteral } from "../db/sql-helpers.js";
 import { withAuditContext } from "./audit-context.js";
+import { auditFilterFields } from "./history-operations.js";
 import { appendEntityEvent } from "./entity-events.js";
 
 const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL;
 if (!adminUrl) throw new Error("SCRATCH_ADMIN_DATABASE_URL must name the disposable test server.");
 const tenant = crypto.randomUUID(), otherTenant = crypto.randomUUID(), actor = crypto.randomUUID();
 const budget = crypto.randomUUID(), movedBudget = crypto.randomUUID(), line = crypto.randomUUID(), value = crypto.randomUUID(), contact = crypto.randomUUID();
-const session = (tenantId: string, roles = ["Audit.Logs.ReadAll"]) => ({ tenantId, userId: actor, roles, groups: [], scope: "tenant" as const, credential: "trusted-context" as const });
+const session = (tenantId: string, roles = ["Audit.Logs.ReadAll"]) => ({ tenantId, userId: actor, roles, groups: [], scope: "tenant" as const, credential: "trusted-context" as const, principalKind: "person" as const });
 
 function table(entity: string, name: string, columns: string[], children: { name: string; target: string; foreignKey: string }[] = []): GeneratedCrudTable {
   return { name: `audit_probe.${name}`, schema: "audit_probe", table: name, primaryKey: "id", tenantScoped: true, domainInternal: false, generatedCrudEligible: true,
@@ -34,6 +36,7 @@ const tables = [table("ProbeBudget", "budgets", ["name"], [{ name: "lines", targ
   table("ProbeLine", "lines", ["budget_id", "name"], [{ name: "values", target: "ProbeValue", foreignKey: "line_id" }]),
   table("ProbeValue", "amounts", ["line_id", "amount", "private_note", "exact_amount"]), table("ProbeContact", "contacts", ["name", "private_note"])];
 
+tables[3]!.retention = { clock: { column: "name" }, rules: [{ id: "probe", action: "delete", duration: { maximum: { days: 1 } } }] };
 tables[2]!.realtime = { readPredicate: "true", visibilityColumns: ["private_note"] };
 
 test("AuditEvent YAML reads: uniform transactional registration, structured filters, raw details, composed timelines and tenant isolation", async () => {
@@ -56,20 +59,26 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
       alter table audit_probe.${table.table} force row level security;
       create policy tenant on audit_probe.${table.table} using(tenant_id::text=current_setting('app.tenant_id',true)) with check(tenant_id::text=current_setting('app.tenant_id',true));`).execute(privileged.db);
     await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });
-    await withAuditContext("ProbeBudget.apply", "trusted-context", () => withDbSession(runtime.db, session(tenant), async tx => {
+    await withAuditContext("ProbeBudget.apply", "control-bearer", () => withDbSession(runtime.db, session(tenant), async tx => {
       await sql`insert into audit_probe.budgets values(${budget}::uuid,${tenant}::uuid,'Plan'),(${movedBudget}::uuid,${tenant}::uuid,'Second plan')`.execute(tx);
       await sql`insert into audit_probe.lines values(${line}::uuid,${tenant}::uuid,${budget}::uuid,'Sales')`.execute(tx);
-      await sql`insert into audit_probe.amounts values(${value}::uuid,${tenant}::uuid,${line}::uuid,'100','classified-never-store',9007199254740993.123456789)`.execute(tx);
+      await withAuditContext("ProbeValue.create", "trusted-context", () => withDbSession(runtime.db, session(tenant), nested => sql`insert into audit_probe.amounts values(${value}::uuid,${tenant}::uuid,${line}::uuid,'100','classified-never-store',9007199254740993.123456789)`.execute(nested)));
+      await expect(withAuditContext("ProbeValue.refused", "trusted-context", () => withDbSession(runtime.db, session(tenant), nested => sql`select 1/0`.execute(nested)))).rejects.toThrow();
       await sql`insert into audit_probe.contacts values(${contact}::uuid,${tenant}::uuid,'Contact','classified-never-store')`.execute(tx);
     }));
-    await withAuditContext("ProbeBudget.adjust", "trusted-context", () => withDbSession(runtime.db, session(tenant), async tx => {
+    const plan = await privileged.db.transaction().execute(async tx => {
+      await sql`set local enable_seqscan=off`.execute(tx);
+      return sql`explain select id from platform.entity_events where platform.audit_event_subjects(payload,aggregate_type,aggregate_id) @> ${jsonbLiteral([{ entityType: "ProbeBudget", recordId: budget }])}`.execute(tx);
+    });
+    expect(JSON.stringify(plan.rows)).toContain("audit_event_subjects_idx");
+    await withAuditContext("ProbeBudget.adjust", "control-bearer", () => withDbSession(runtime.db, session(tenant), async tx => {
       await sql`update audit_probe.amounts set amount='120',private_note='changed-never-store' where id=${value}::uuid`.execute(tx);
     }));
     // Rollback must discard both the state change and its audit event.
     await expect(withAuditContext("ProbeBudget.rollback", "trusted-context", () => withDbSession(runtime.db, session(tenant), async tx => {
       await sql`update audit_probe.amounts set amount='999' where id=${value}::uuid`.execute(tx); throw new Error("rollback");
     }))).rejects.toThrow("rollback");
-    await withAuditContext("ProbeBudget.move", "trusted-context", () => withDbSession(runtime.db, session(tenant), async tx => {
+    await withAuditContext("ProbeBudget.move", "control-bearer", () => withDbSession(runtime.db, session(tenant), async tx => {
       await sql`update audit_probe.lines set budget_id=${movedBudget}::uuid where id=${line}::uuid`.execute(tx);
     }));
     await appendEntityEvent(runtime.db, session(otherTenant), { aggregateType: "ProbeBudget", aggregateId: budget, eventType: "foreign-only", payload: { password: "must-not-store" } });
@@ -94,11 +103,16 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
       for (const id of ["AuditEvent.list", "AuditEvent.get"]) {
         const found = await client.callTool({ name: "osf_search_operations", arguments: { query: id } }); expect(JSON.stringify(found.structuredContent)).toContain(id);
       }
+      const filterContract = listOperationContracts().find(operation => operation.key === "AuditEvent.list")!.inputSchema as any;
+      expect(Object.keys(filterContract.$defs.filter0.properties).filter(key => !["and", "or"].includes(key)).sort()).toEqual([...auditFilterFields].sort());
       const all = await list(); expect(all.totalCount).toBe(8); expect(all.items).toHaveLength(8);
       expect(all.items.every(event => event.actorId === actor)).toBe(true);
       expect(all.items.some(event => event.operationId === "ProbeBudget.apply" && event.actorKind === "person")).toBe(true);
       expect(all.items.filter(event => event.operationId === "ProbeBudget.apply").map(event => event.correlationId).filter((id, index, ids) => ids.indexOf(id) === index)).toHaveLength(1);
       expect(all.items.some(event => event.operationId === "ProbeBudget.rollback")).toBe(false);
+      expect(all.items.find(event => event.entityType === "ProbeValue" && event.eventType === "created")?.operationId).toBe("ProbeValue.create");
+      expect(all.items.find(event => event.entityType === "ProbeContact" && event.eventType === "created")?.operationId).toBe("ProbeBudget.apply");
+      expect(all.items.find(event => event.operationId === "ProbeValue.create")?.correlationId).toBe(all.items.find(event => event.entityType === "ProbeContact" && event.eventType === "created")?.correlationId);
       expect(all.items.every(event => event.rawData === null && event.beforeValues === null && event.afterValues === null)).toBe(true);
       const timeline = await list({ filter: { subjects: { contains: { entityType: "ProbeBudget", recordId: budget } } } });
       expect(timeline.items.some(event => event.entityType === "ProbeValue" && event.eventType === "updated")).toBe(true);
@@ -112,6 +126,8 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
       expect(JSON.stringify(result.structuredContent)).toContain('"amount":"100"'); expect(JSON.stringify(result.structuredContent)).toContain('"amount":"120"');
       expect(JSON.stringify(result.structuredContent)).not.toMatch(/classified-never-store|changed-never-store/);
       expect(JSON.stringify(result.structuredContent)).toContain('\"exact_amount\":\"9007199254740993.123456789\"');
+      const retained = all.items.find(event => event.entityType === "ProbeContact" && event.eventType === "created");
+      expect(((await call("AuditEvent.get", { id: retained.id })).structuredContent as any).data.afterValues.name).toBe("[REDACTED]");
       const semantic = all.items.find(event => event.eventType === "semantic-event");
       expect(JSON.stringify((await call("AuditEvent.get", { id: semantic.id })).structuredContent)).not.toContain("must-not-store");
       const seen = new Set<string>(); let after: string | undefined;
@@ -144,14 +160,17 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
     await expect(withDbSession(runtime.db, session(tenant), tx => sql`update audit_probe.contacts set name='Must roll back' where id=${contact}::uuid`.execute(tx))).rejects.toThrow();
     expect((await sql<{ name: string }>`select name from audit_probe.contacts where id=${contact}::uuid`.execute(privileged.db)).rows[0]!.name).toBe("Contact");
     await sql.raw('drop trigger refusal on platform.entity_events').execute(privileged.db);
-    expect(await auditHistoryReady(privileged.db, tables)).toBe(true);
+    expect(await auditHistoryReady(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } })).toBe(true);
     // A failed policy install must not leave a partially replaced registry or producer set.
     await expect(applyAuditHistory(privileged.db, [...tables, table("ProbeMissing", "missing", ["name"])], { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } })).rejects.toThrow();
     expect((await sql<{ config: unknown }>`select platform.audit_config('ProbeMissing') as config`.execute(privileged.db)).rows[0]!.config).toBeNull();
-    expect(await auditHistoryReady(privileged.db, tables)).toBe(true);
+    expect(await auditHistoryReady(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } })).toBe(true);
     await sql.raw('alter table audit_probe.amounts disable trigger audit_business_row').execute(privileged.db);
-    expect(await auditHistoryReady(privileged.db, tables)).toBe(false);
+    expect(await auditHistoryReady(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } })).toBe(false);
     await sql.raw('alter table audit_probe.amounts enable trigger audit_business_row').execute(privileged.db);
+    await sql.raw("drop trigger audit_business_row on audit_probe.amounts; create trigger audit_business_row after insert or update or delete on audit_probe.amounts for each row execute function platform.audit_business_row('{}')").execute(privileged.db);
+    expect(await auditHistoryReady(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } })).toBe(false);
+    await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });
     const stored = await sql<{ payload: unknown }>`select payload from platform.entity_events`.execute(privileged.db);
     expect(JSON.stringify(stored.rows)).not.toMatch(/classified-never-store|changed-never-store|must-not-store/);
     await expect(sql`delete from platform.entity_events`.execute(privileged.db)).rejects.toThrow();

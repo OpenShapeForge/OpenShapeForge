@@ -14,5 +14,7 @@ test("verified bearer principal kind distinguishes integration writes and nested
   }, "service");
   withAuditContext("person", "bearer", () => expect(auditContext()!.actorKind).toBe("person"), "person");
   withAuditContext("maintenance", undefined, () => expect(auditContext()!.actorKind).toBe("system"));
+  withAuditContext("delegate", "grant", () => expect(auditContext()!.actorKind).toBe("integration"));
+  withAuditContext("unsigned-kind", "trusted-context", () => expect(auditContext()!.actorKind).toBe("unknown"));
   expect(auditContext()).toBeUndefined();
 });

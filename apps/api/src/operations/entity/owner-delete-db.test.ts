@@ -1,3 +1,5 @@
+import { getGeneratedCrudTables } from "./catalog.js";
+import { applyAuditHistory } from "../../db/migrations/audit-history.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * Generic delete of a collection owner against PostgreSQL: refused while an
@@ -70,6 +72,9 @@ const fails = (promise: Promise<unknown>, code: string) => expect(promise).rejec
       grant select,insert,update,delete on all tables in schema erp,platform to openshapeforge_app;
       grant usage on all sequences in schema platform to openshapeforge_app;
       grant execute on all functions in schema app to openshapeforge_app`.execute(privileged.db);
+    const audited = structuredClone(getGeneratedCrudTables().filter(table => ["Document", "DocumentVariant"].includes(table.source?.authoringEntityName ?? "")));
+    for (const table of audited) table.source!.graphql!.relationships = table.source!.graphql!.relationships.filter(relation => audited.some(candidate => candidate.source?.graphql?.typeName === relation.target));
+    await applyAuditHistory(privileged.db, audited, {});
     restricted = createDatabaseRuntime({ databaseUrl: databaseUrl(true), maxConnections: 2 });
   }, 30_000);
   beforeEach(async () => {
@@ -86,7 +91,7 @@ const fails = (promise: Promise<unknown>, code: string) => expect(promise).rejec
     await fails(deleteGeneratedEntity(restricted!.db, session, { table: "erp.documents", id: owner }), "RELATION_COLLECTION_MUTATION_UNSUPPORTED");
     expect(await count("documents")).toBe(1);
     expect(await count("document_variants")).toBe(2);
-    expect((await sql<{ count: number }>`select count(*)::int as count from platform.entity_events`.execute(privileged!.db)).rows[0]!.count).toBe(0);
+    expect((await sql<{ count: number }>`select count(*)::int as count from platform.entity_events`.execute(privileged!.db)).rows[0]!.count).toBe(3);
   });
 
   test("succeeds once the owner has no owned children", async () => {
@@ -94,6 +99,6 @@ const fails = (promise: Promise<unknown>, code: string) => expect(promise).rejec
     await sql`delete from erp.document_variants where document_id = ${owner}::uuid`.execute(privileged!.db);
     expect(await deleteGeneratedEntity(restricted!.db, session, { table: "erp.documents", id: owner })).toBe(true);
     expect(await count("documents")).toBe(0);
-    expect((await sql<{ count: number }>`select count(*)::int as count from platform.entity_events where event_type = 'deleted'`.execute(privileged!.db)).rows[0]!.count).toBe(1);
+    expect((await sql<{ count: number }>`select count(*)::int as count from platform.entity_events where event_type = 'deleted' and aggregate_id = ${owner}`.execute(privileged!.db)).rows[0]!.count).toBe(1);
   });
 });

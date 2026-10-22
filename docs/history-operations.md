@@ -62,13 +62,13 @@ former parent's timeline even after moving or removal.
 Current-model invariant DDL installs a transactional row trigger on every
 stored, tenant-scoped authored entity, including plugin-backed writes. Generic
 CRUD does not append a duplicate event in application code. Failure to persist
-the event rolls back the business write, and rollback discards both. No-op SQL
-updates append nothing. Semantic events use the same journal envelope. The
+the event rolls back the business write, and rollback discards both. Byte-identical SQL
+updates append nothing; a CRUD write that changes updatedAt still records that field. Semantic events use the same journal envelope. The
 journal permits delivery-cursor updates only; payload mutation and deletion are
 refused. API readiness refuses a schema without active audit triggers.
 
 Every newly recorded event includes the verified actor (when one exists), actor
-kind, canonical Operation and correlation context. Nested work shares its causal
+kind, canonical Operation and correlation context. Verified service principals and API keys are integrations; an unrecorded principal kind remains unknown. Nested work shares its causal
 correlation. Maintenance outside an Operation is explicitly system work; it does
 not guess an Operation or a human actor. Account lifecycle adapters record their
 source-owned state changes. Business row events record before/after snapshots,
@@ -76,10 +76,10 @@ changed field names and timeline subjects. Reads append no new audit events.
 
 List results contain metadata only. `AuditEvent.get` returns the recorded
 `beforeValues`, `afterValues` and `rawData` too. These are the retained, redacted
-values: secrets, protected fields and elicited/hidden values are never copied
+values: secrets, protected fields, retention-governed values and elicited/hidden values are never copied
 into row snapshots. Raw payload keys with credential/secret semantics are
 redacted recursively. Visibility snapshots used for internal change delivery
-are not returned as raw audit data. Value types are preserved. Missing historic
+are not returned as raw audit data. Exact decimal/bigint snapshots use strings to preserve precision. Missing historic
 actors, Operation IDs and snapshots remain unknown; nothing reconstructs facts
 that were never recorded. External-provider events only contain the facts the
 provider adapter observed, not an invented snapshot of a remote system.
@@ -88,3 +88,7 @@ The API binds a correlation and Operation context at its shared dispatch and
 database-session boundaries, so MCP, REST, workflow and module writes use the
 same registration. The storage remains `platform.entity_events`; its delivery
 sequence and existing change-stream consumers retain their own purpose.
+
+Timeline policy is emitted separately in `operations/audit.json`. Invariant installation is atomic and readiness checks the exact producer configuration.
+
+For entities with declared retention, audit retains event metadata and changed field names, but masks row values rather than creating an indefinitely retained second copy. The live record remains governed by its existing retention and legal-hold policy.

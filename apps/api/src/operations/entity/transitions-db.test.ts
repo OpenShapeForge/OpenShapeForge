@@ -1,3 +1,4 @@
+import { applyAuditHistory } from "../../db/migrations/audit-history.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * The generic status-transition runtime against PostgreSQL, on the one core
@@ -205,6 +206,7 @@ describe("status transitions against PostgreSQL", () => {
       grant usage on all sequences in schema platform to openshapeforge_app;
       grant execute on all functions in schema app to openshapeforge_app`).execute(privileged.db);
     await sql.raw(`alter database "${scratchName}" set deadlock_timeout = '200ms'`).execute(privileged.db);
+    await applyAuditHistory(privileged.db, [table], {});
     restricted = createDatabaseRuntime({ databaseUrl: databaseUrl(true), maxConnections: 4 });
     registerEntityOperationAvailability(restricted.db, bindOperationHandlers([]));
   }, 30_000);
@@ -250,7 +252,7 @@ describe("status transitions against PostgreSQL", () => {
     expect(recordPermissionsAllowRow(binding.table, (await row(allowed))!, ["edit"], session)).toBe(true);
     await fails(executeTransition(restricted!.db, session, binding, { id: denied }), "FORBIDDEN");
     expect((await row(denied))!.status).toBe("pending");
-    expect(await events(denied)).toEqual(["created"]);
+    expect(await events(denied)).toEqual(["created", "updated"]);
     expect(await executeTransition(restricted!.db, session, binding, { id: allowed })).toMatchObject({ id: allowed, status: "triggered" });
   });
 
@@ -260,7 +262,7 @@ describe("status transitions against PostgreSQL", () => {
       operationError: { code: "INVALID_STATE", message: "AgreementMilestone is triggered; trigger moves status from pending to triggered." },
     });
     expect((await row(id))!.status).toBe("triggered");
-    expect(await events(id)).toEqual(["created"]);
+    expect(await events(id)).toEqual(["created", "updated"]);
   });
 
   test("cancel runs from pending or triggered and is refused afterwards; the status names every rule as its writer", async () => {

@@ -1211,6 +1211,6 @@ async function executeEntityOperationWithContext(
 }
 
 export const executeEntityOperation: typeof executeEntityOperationWithContext = (db, session, request, ...rest) =>
-  withAuditContext(request.operation.id, (session as { credential?: string }).credential,
+  withAuditContext(request.operation.id, (session as { credential?: import("../../auth/trusted-context.js").SessionCredential }).credential,
     () => executeEntityOperationWithContext(db, session, request, ...rest),
     (session as { principalKind?: "person" | "service" }).principalKind);

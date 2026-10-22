@@ -14,7 +14,22 @@
  *         organization                     ALTERNATIVE  identity-first, by e-mail domain
  *     passkey-browser-forms                ALTERNATIVE
  *       auth-username-form                 REQUIRED
- *       webauthn-authenticator-passwordless REQUIRED
+ *       passkey-browser-sign-in            REQUIRED
+ *         webauthn-authenticator-passwordless ALTERNATIVE  a passkey this person has
+ *         osf-email-sign-in                ALTERNATIVE  a code + same-browser link by e-mail
+ *
+ * ── Passkey OR e-mail, and the person chooses ───────────────────────────────
+ * Not everybody has a device that can make a passkey, and a passkey-only door
+ * stranded invited people who registered but never enrolled one. So the
+ * credential step offers two ways in, as Keycloak alternatives: somebody with
+ * a passkey is asked for it first and sees "try another way" for e-mail;
+ * somebody without one goes straight to the e-mail step (the passkey
+ * authenticator is not configured for them, so Keycloak skips it). The e-mail
+ * step (packages/keycloak-spi EmailSignIn) mails a 6-digit code and a link that
+ * only continues the login in the browser that asked for it. That makes the
+ * inbox a root of trust — which it already was: invitations and the
+ * admin-issued enrolment link arrive the same way. Still no password anywhere.
+ * The platform-operator re-authentication flow stays passkey-only.
  *
  * ── The Organization identity-first step ────────────────────────────────────
  * Keycloak's stock browser flow carries the same step (its "Organization"
@@ -71,6 +86,11 @@ export const PASSKEY_ORGANIZATION_FLOW = "passkey-browser-organization";
 const PASSKEY_ORGANIZATION_CONDITIONAL_FLOW = "passkey-browser-organization-conditional";
 /** Sub-flow holding the actual credential challenge. */
 const PASSKEY_FORMS_FLOW = "passkey-browser-forms";
+/** The two ways in, as Keycloak alternatives: passkey or e-mail. */
+export const PASSKEY_SIGN_IN_FLOW = "passkey-browser-sign-in";
+
+/** OSF provider id of the e-mail code + same-browser link authenticator. */
+export const EMAIL_SIGN_IN_AUTHENTICATOR = "osf-email-sign-in";
 
 /** Keycloak's provider id for the passwordless (passkey) authenticator. */
 const WEBAUTHN_PASSWORDLESS_AUTHENTICATOR = "webauthn-authenticator-passwordless";
@@ -163,7 +183,7 @@ export function passkeyBrowserFlows(): KeycloakAuthenticationFlowExport[] {
     },
     {
       alias: PASSKEY_FORMS_FLOW,
-      description: "Identify the person, then require a passkey. Deliberately contains no password authenticator.",
+      description: "Identify the person, then let them sign in with a passkey or by e-mail. Deliberately contains no password authenticator.",
       providerId: "basic-flow",
       topLevel: false,
       builtIn: false,
@@ -180,12 +200,37 @@ export function passkeyBrowserFlows(): KeycloakAuthenticationFlowExport[] {
           authenticatorFlow: false,
           userSetupAllowed: false,
         },
-        // REQUIRED, not ALTERNATIVE: there is nothing to be an alternative
-        // TO, and ALTERNATIVE-with-one-execution is how a flow accidentally
-        // becomes optional.
+        // REQUIRED around the two alternatives: one of them must succeed.
+        // A lone ALTERNATIVE at this level is how a flow accidentally becomes
+        // optional.
+        {
+          flowAlias: PASSKEY_SIGN_IN_FLOW,
+          requirement: "REQUIRED",
+          priority: 20,
+          authenticatorFlow: true,
+          userSetupAllowed: false,
+        },
+      ],
+    },
+    {
+      alias: PASSKEY_SIGN_IN_FLOW,
+      description: "A passkey, or a one-time code and same-browser link by e-mail. The person chooses.",
+      providerId: "basic-flow",
+      topLevel: false,
+      builtIn: false,
+      authenticationExecutions: [
+        // First: Keycloak offers a credential the person HAS before anything
+        // else, and lists the rest under "try another way".
         {
           authenticator: WEBAUTHN_PASSWORDLESS_AUTHENTICATOR,
-          requirement: "REQUIRED",
+          requirement: "ALTERNATIVE",
+          priority: 10,
+          authenticatorFlow: false,
+          userSetupAllowed: false,
+        },
+        {
+          authenticator: EMAIL_SIGN_IN_AUTHENTICATOR,
+          requirement: "ALTERNATIVE",
           priority: 20,
           authenticatorFlow: false,
           userSetupAllowed: false,

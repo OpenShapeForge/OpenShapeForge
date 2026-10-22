@@ -4,8 +4,10 @@
  *
  * ── The rule ────────────────────────────────────────────────────────────────
  * A HUMAN signs in with a passkey (WebAuthn, resident credential, user
- * verification required). There is no password execution anywhere in the
- * browser flow, none in the REGISTRATION flow an invited person meets either,
+ * verification required) or, when they choose to or have no passkey, with a
+ * one-time code and same-browser link sent to their verified e-mail address
+ * (see keycloak-passkey-browser-flow.ts). There is no password execution
+ * anywhere in the browser flow, none in the REGISTRATION flow an invited person meets either,
  * and the direct-grant (Resource Owner Password Credentials) flow is wired to
  * an authenticator that always denies, so there is no second door. Client
  * secrets are untouched: a confidential client or a service account is not a
@@ -58,9 +60,12 @@
  *     explicitly; the realm default is
  *     `actionTokenGeneratedByAdminLifespan`, 12 hours. Redeeming it drops the
  *     person straight into passkey enrolment with no password anywhere in the
- *     path. Nobody can trigger it for themselves: `resetPasswordAllowed` is
- *     forced off below, so there is no self-service "e-mail me a link" form.
- *     An administrator has to do it, and it is written to the admin event log.
+ *     path. `resetPasswordAllowed` stays forced off: the self-service route is
+ *     the e-mail sign-in step, which proves the inbox and then OFFERS a
+ *     passkey (osf-passkey-offer) instead of handing out any credential.
+ *
+ *  4. E-MAIL SIGN-IN, for everybody, any time: the person chooses it on the
+ *     login page. Nobody needs support to get in.
  *
  * ── Google Workspace, and any other Organization-linked provider ──────────
  * Federation IS an accepted alternative to presenting a passkey, and an
@@ -71,10 +76,18 @@
 
 import { PASSKEY_REQUIRED_ACTIONS } from "./keycloak-passkey-required-actions.js";
 import type { KeycloakRequiredActionExport } from "./keycloak-passkey-required-actions.js";
-export { WEBAUTHN_PASSWORDLESS_REQUIRED_ACTION } from "./keycloak-passkey-required-actions.js";
+export {
+  PASSKEY_OFFER_REQUIRED_ACTION,
+  WEBAUTHN_PASSWORDLESS_REQUIRED_ACTION,
+} from "./keycloak-passkey-required-actions.js";
 export type { KeycloakRequiredActionExport };
 import { PASSKEY_BROWSER_FLOW, passkeyBrowserFlows } from "./keycloak-passkey-browser-flow.js";
-export { PASSKEY_BROWSER_FLOW, PASSKEY_ORGANIZATION_FLOW } from "./keycloak-passkey-browser-flow.js";
+export {
+  EMAIL_SIGN_IN_AUTHENTICATOR,
+  PASSKEY_BROWSER_FLOW,
+  PASSKEY_ORGANIZATION_FLOW,
+  PASSKEY_SIGN_IN_FLOW,
+} from "./keycloak-passkey-browser-flow.js";
 
 /** Top-level direct-grant flow alias — the one that always denies. */
 export const PASSKEY_DIRECT_GRANT_FLOW = "passkey-direct-grant-denied";
@@ -82,6 +95,8 @@ export const PASSKEY_DIRECT_GRANT_FLOW = "passkey-direct-grant-denied";
 export const PASSKEY_REGISTRATION_FLOW = "passkey-registration";
 /** The form sub-flow the registration page renders. */
 const PASSKEY_REGISTRATION_FORM = "passkey-registration-form";
+/** OSF form action: an account created from a matching invitation has a proven e-mail. */
+export const INVITATION_EMAIL_VERIFIED_ACTION = "osf-invitation-email-verified";
 
 export interface KeycloakAuthenticationExecutionExport {
   authenticator?: string;
@@ -203,12 +218,10 @@ export function buildPasskeyProfile(options: {
         // invited person was handed a form asking for a username AND A
         // PASSWORD — a credential the browser flow above will never accept.
         // This flow is the stock one with that execution simply absent, and
-        // nothing replaces it: the account is created with no credential, and
-        // the `webauthn-register-passwordless` DEFAULT required action (see
-        // keycloak-passkey-required-actions.ts) is what the person meets next,
-        // in the same session, before any token is issued. Keycloak 26.5.3 has
-        // no registration-time WebAuthn form action — the required action IS
-        // the supported shape.
+        // nothing replaces it: the account is created with no credential. The
+        // person signs in by passkey or by e-mail code afterwards; a passkey is
+        // offered (osf-passkey-offer), never forced, so a device that cannot
+        // make one is not a dead end.
         alias: PASSKEY_REGISTRATION_FLOW,
         description: "Account creation for an invited person. Contains no password execution.",
         providerId: "basic-flow",
@@ -237,6 +250,16 @@ export function buildPasskeyProfile(options: {
             authenticator: "registration-user-creation",
             requirement: "REQUIRED",
             priority: 20,
+            authenticatorFlow: false,
+            userSetupAllowed: false,
+          },
+          // After the user exists: the invitation token was mailed to this
+          // address and Keycloak refused any other, so the address is proven.
+          // A second "verify your e-mail" mail here is how invitees got stuck.
+          {
+            authenticator: INVITATION_EMAIL_VERIFIED_ACTION,
+            requirement: "REQUIRED",
+            priority: 30,
             authenticatorFlow: false,
             userSetupAllowed: false,
           },

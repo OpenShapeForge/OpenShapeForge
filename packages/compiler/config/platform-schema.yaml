@@ -1018,7 +1018,7 @@ tables:
       - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
       - { name: relation_id, type: uuid }
       - { name: email, type: text, required: true }
-      - { name: role, type: text }
+      - { name: roles, type: "text[]", required: true, default: "'{}'::text[]" }
       - { name: first_name, type: text }
       - { name: last_name, type: text }
       - { name: status, type: text, required: true, default: "'pending'::text" }

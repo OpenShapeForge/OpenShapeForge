@@ -119,12 +119,12 @@ operations:
       schema:
         type: object
         additionalProperties: false
-        required: [email, firstName, lastName, role]
+        required: [email, firstName, lastName, roles]
         properties:
           email: { type: string, format: email, maxLength: 320, x-osf-i18n: { title: { en: Email, nl: E-mail } } }
           firstName: { type: string, minLength: 1, maxLength: 120, x-osf-i18n: { title: { en: First name, nl: Voornaam } } }
           lastName: { type: string, minLength: 1, maxLength: 120, x-osf-i18n: { title: { en: Last name, nl: Achternaam } } }
-          role: { type: string, x-osf-i18n: { title: { en: Role, nl: Rol } }, x-osf-reference: { entity: AccessRole, valueField: key } }
+          roles: { type: array, uniqueItems: true, minItems: 1, items: { type: string }, x-osf-i18n: { title: { en: Roles, nl: Rollen } }, x-osf-reference: { entity: AccessRole, valueField: key } }
           relationId: { type: string, format: uuid, x-osf-i18n: { title: { en: Existing relation, nl: Bestaande relatie } }, x-osf-reference: { entity: AccessInvitationRelation, valueField: id } }
     output:
       schema:

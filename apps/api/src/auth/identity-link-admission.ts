@@ -32,7 +32,7 @@ import {
 } from "../graphql/generated-crud.js";
 import {
   claimPendingInvitation,
-  employeeInvitationRoleGrants,
+  employeeInvitationRolesGrants,
   type PendingInvitationMatch,
 } from "./employee-invitations.js";
 import {
@@ -81,9 +81,9 @@ export async function admitInvitedPerson(
   const displayName = displayNameFromClaims(claims);
   const runtime = elevated(session);
   const linked = await withDbSession(db, runtime, async (trx) => {
-    const role = await claimPendingInvitation(trx, session.tenantId, invitation.id);
-    if (!role) throw notInvited(session, claims);
-    const roles = employeeInvitationRoleGrants(role.role);
+    const claimed = await claimPendingInvitation(trx, session.tenantId, invitation.id);
+    if (!claimed) throw notInvited(session, claims);
+    const roles = employeeInvitationRolesGrants(claimed.roles);
     // The claim locks the invitation; re-read its target in this transaction.
     const target = await sql<{ relation_id: string | null }>`select relation_id from platform.employee_invitations
       where id = ${invitation.id} and tenant_id = ${session.tenantId}`.execute(trx);
@@ -113,7 +113,7 @@ export async function admitInvitedPerson(
       console.info(
         `[auth] Linked identity ${identityId} (${claims.subject}) to Relation ` +
           `${relationId} "${displayName}" in tenant ${session.tenantId} (just in time, on ` +
-          `invitation ${invitation.id}; holds ${role.role ?? "group-derived access"} here).`,
+          `invitation ${invitation.id}; holds ${claimed.roles.join(", ") || "group-derived access"} here).`,
       );
     }
     // Lost a race with another replica: keep its link; this transaction's
@@ -144,15 +144,15 @@ export async function acceptPendingInvitation(
   identityId: string,
 ): Promise<readonly string[] | null> {
   const roles = await withDbSession(db, elevated(session), async (trx) => {
-    const role = await claimPendingInvitation(trx, session.tenantId, invitation.id);
-    if (!role) return null;
+    const claimed = await claimPendingInvitation(trx, session.tenantId, invitation.id);
+    if (!claimed) return null;
     const target = await sql<{ relation_id: string | null }>`select relation_id from platform.employee_invitations
       where id = ${invitation.id} and tenant_id = ${session.tenantId}`.execute(trx);
     if (target.rows[0]?.relation_id) {
       const link = await readLinkRow(trx, identityId, session.tenantId);
       if (link?.relation_id !== target.rows[0].relation_id) throw new SessionAuthenticationUnavailableError("The invitation belongs to another relation.");
     }
-    const granted = employeeInvitationRoleGrants(role.role);
+    const granted = employeeInvitationRolesGrants(claimed.roles);
     if (!(await writeMembershipRoles(trx, session.tenantId, identityId, granted))) {
       throw new SessionAuthenticationUnavailableError("The identity link vanished while accepting; try again.");
     }

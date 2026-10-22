@@ -146,7 +146,7 @@ describe("tenant invitation administration", () => {
     // The fake database returns no row for the invitation insert, which the create reports as a conflict.
     const create = recordingDatabase();
     await expect(manageTenantInvitations({ db: create.db, administrator, firstAdministrator: clients() }, "create",
-      { slug: "acme", email: "b@example.test", role: "org_employee" })).rejects.toMatchObject({ code: "CONFLICT" });
+      { slug: "acme", email: "b@example.test", roles: ["org_employee"] })).rejects.toMatchObject({ code: "CONFLICT" });
     expect(create.tenantLock()).toBe("for no key update");
   });
 });

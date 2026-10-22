@@ -198,7 +198,7 @@ describe("actor: relation stamps under a trusted-context session", () => {
     await fails(executeTransition(restricted.db, session, relationStampedBinding(), { id }), "FORBIDDEN");
     expect((await sql<{ status: string }>`select status from erp.agreement_milestones where id = ${id}::uuid`.execute(privileged.db)).rows[0]!.status).toBe("pending");
     // The person's bearer login (invited) admits them; the next web session acts as that Relation.
-    await sql`insert into platform.employee_invitations (tenant_id, email, role, invited_by) values (${tenantId}::uuid, ${`${userId}@example.test`}, 'org_employee', 'admin')`.execute(privileged.db);
+    await sql`insert into platform.employee_invitations (tenant_id, email, roles, invited_by) values (${tenantId}::uuid, ${`${userId}@example.test`}, ARRAY['org_employee'], 'admin')`.execute(privileged.db);
     const admitted = await resolveIdentityLink(restricted.db, { tenantId, userId, roles: ROLES, groups: [], scope: "tenant" },
       { issuer: ISSUER, subject: userId, email: `${userId}@example.test`, givenName: "Web", familyName: "Person" });
     expect(admitted).toMatchObject({ status: "linked" });
@@ -307,7 +307,7 @@ describe("actor: relation stamps under a trusted-context session", () => {
     expect(sessionRelation(await trustedSession(tenantId, userId))).toBeNull();
     const key = linkCacheKey(ISSUER, userId, tenantId);
     // The cached "no row" does not settle the bearer path: invited now, it admits.
-    await sql`insert into platform.employee_invitations (tenant_id, email, role, invited_by) values (${tenantId}::uuid, ${email}, 'org_employee', 'admin')`.execute(privileged.db);
+    await sql`insert into platform.employee_invitations (tenant_id, email, roles, invited_by) values (${tenantId}::uuid, ${email}, ARRAY['org_employee'], 'admin')`.execute(privileged.db);
     const before = linkGeneration(key);
     const admitted = await resolveIdentityLink(restricted.db, bearer, claims);
     expect(admitted?.status).toBe("linked");
@@ -326,7 +326,7 @@ describe("actor: relation stamps under a trusted-context session", () => {
     const bearer = { tenantId, userId: serviceAccount, roles: ROLES, groups: [], scope: "tenant" as const };
     await expect(resolveIdentityLink(restricted.db, bearer, claims)).rejects.toMatchObject({ code: "NOT_INVITED" });
     // Invited: phase 2 claims the empty pending row instead of losing to it.
-    await sql`insert into platform.employee_invitations (tenant_id, email, role, invited_by) values (${tenantId}::uuid, ${claims.email}, 'org_employee', 'admin')`.execute(privileged.db);
+    await sql`insert into platform.employee_invitations (tenant_id, email, roles, invited_by) values (${tenantId}::uuid, ${claims.email}, ARRAY['org_employee'], 'admin')`.execute(privileged.db);
     const admitted = await resolveIdentityLink(restricted.db, bearer, claims);
     expect(admitted).toMatchObject({ status: "linked", roles: expect.arrayContaining(["org_employee"]) });
     const rows = (await sql<{ n: string }>`select count(*)::text as n from platform.identity_relations ir join platform.identities i on i.id = ir.identity_id where i.subject = ${serviceAccount} and ir.tenant_id = ${tenantId}::uuid`.execute(privileged.db)).rows[0]!.n;
@@ -340,7 +340,7 @@ describe("actor: relation stamps under a trusted-context session", () => {
     const email = `${userId}@example.test`;
     const claims = { issuer: ISSUER, subject: userId, email, givenName: "Raced", familyName: "Person" };
     const bearer = { tenantId, userId, roles: ROLES, groups: [], scope: "tenant" as const };
-    await sql`insert into platform.employee_invitations (tenant_id, email, role, invited_by) values (${tenantId}::uuid, ${email}, 'org_employee', 'admin')`.execute(privileged.db);
+    await sql`insert into platform.employee_invitations (tenant_id, email, roles, invited_by) values (${tenantId}::uuid, ${email}, ARRAY['org_employee'], 'admin')`.execute(privileged.db);
     const admitted = await resolveIdentityLink(restricted.db, bearer, claims);
     const key = linkCacheKey(ISSUER, userId, tenantId);
     // Bump the generation as an administrator's link_identity would, then read again as the bearer path.

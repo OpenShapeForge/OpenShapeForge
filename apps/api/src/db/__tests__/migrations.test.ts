@@ -1388,4 +1388,46 @@ describe("tenant registry identity default (0017)", () => {
       });
     });
   }, TEST_TIMEOUT);
+  test("invitation role migration preserves pending, accepted, revoked and group-only admissions", async () => {
+    await withScratchDb(async url => {
+      await runChain(url);
+      const tenant = randomUUID();
+      const ids = [randomUUID(), randomUUID(), randomUUID()];
+      const relation = randomUUID();
+      await withDb(url, async db => {
+        await sql`insert into platform.tenants(id, slug, name, status)
+          values (${tenant}, ${`roles-${tenant}`}, 'Role migration', 'active')`.execute(db);
+        await sql`alter table platform.employee_invitations alter column roles drop default,
+          alter column roles drop not null,
+          alter column roles type text using roles[1]`.execute(db);
+        await sql`alter table platform.employee_invitations rename column roles to role`.execute(db);
+        for (let i = 0; i < ids.length; i++) {
+          await sql`insert into platform.employee_invitations
+            (id, tenant_id, relation_id, email, role, status, invited_by, first_name, invited_at, accepted_at, revoked_at)
+            values (${ids[i]}, ${tenant}, ${relation}, ${`person${i}@example.test`},
+              ${i === 2 ? null : 'org_employee'}, ${['pending', 'accepted', 'revoked'][i]},
+              'kept-administrator', 'Kept', '2026-01-01T12:00:00Z',
+              ${i === 1 ? '2026-01-02T12:00:00Z' : null}::timestamptz,
+              ${i === 2 ? '2026-01-02T12:00:00Z' : null}::timestamptz)`.execute(db);
+        }
+        await sql`delete from platform.schema_migrations where version = '0019_employee-invitation-roles'`.execute(db);
+        await staleChecksum(db);
+      });
+      const result = await runChain(url);
+      expect(result.versioned.applied).toContain('0019_employee-invitation-roles');
+      await withDb(url, async db => {
+        const rows = await sql<{ id: string; roles: string[]; relation_id: string; invited_by: string; status: string; first_name: string; invited_at: Date }>`
+          select id::text, roles, relation_id::text, invited_by, status, first_name, invited_at
+          from platform.employee_invitations where tenant_id = ${tenant} order by email`.execute(db);
+        expect(rows.rows.map(row => ({...row, invited_at: row.invited_at.toISOString()}))).toEqual(ids.map((id,i) => ({
+          id, roles: i === 2 ? [] : ['org_employee'], relation_id: relation,
+          invited_by: 'kept-administrator', status: ['pending', 'accepted', 'revoked'][i]!,
+          first_name: 'Kept', invited_at: '2026-01-01T12:00:00.000Z',
+        })));
+        expect((await diffManifestAgainstDatabase(db)).nonAdditive).toEqual([]);
+      });
+      expect((await runChain(url)).versioned.skipped).toContain('0019_employee-invitation-roles');
+    });
+  }, TEST_TIMEOUT);
+
 });

@@ -152,7 +152,7 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     expect(sends).toEqual(['org-acme:admin@example.com']);
     const rows = (await sql<any>`select i.*, t.slug from platform.employee_invitations i join platform.tenants t on t.id=i.tenant_id`.execute(owner.db)).rows;
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ slug: 'acme', role: 'org_admin', invited_by: `${administrator.issuer}#operator` });
+    expect(rows[0]).toMatchObject({ slug: 'acme', roles: ['org_admin'], invited_by: `${administrator.issuer}#operator` });
     const audit = (await sql<any>`select * from platform.system_bypass_audit`.execute(owner.db)).rows;
     expect(audit).toHaveLength(2);
     expect(audit.every(a => a.tenant_id === null && a.succeeded && a.actor_subject === `${administrator.issuer}#operator (platform-admin)` && a.reason === 'platform-mcp: control.invite-first-tenant-admin acme')).toBe(true);
@@ -194,13 +194,13 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     admins = [{ email: 'admin@example.com' }];
     expect(await invite()).toMatchObject({ status: 'pending', delivery: 'email_sent', signInUrl: 'https://example.example/acme' });
     expect(sends).toHaveLength(1);
-    expect((await sql<any>`select email, role, status from platform.employee_invitations`.execute(owner.db)).rows)
-      .toEqual([{ email: 'admin@example.com', role: 'org_admin', status: 'pending' }]);
+    expect((await sql<any>`select email, roles, status from platform.employee_invitations`.execute(owner.db)).rows)
+      .toEqual([{ email: 'admin@example.com', roles: ['org_admin'], status: 'pending' }]);
   });
   it('admits and emails an existing account and supports another explicit invitation', async () => {
     members = ['admin@example.com'];
     const result = await invite();
-    expect(result).toMatchObject({ status: 'pending', role: 'org_admin', delivery: 'email_sent' });
+    expect(result).toMatchObject({ status: 'pending', roles: ['org_admin'], delivery: 'email_sent' });
     expect(result.signInUrl).toBe('https://example.example/acme');
     expect(sends).toHaveLength(1);
     expect((await invite()).delivery).toBe('email_sent');
@@ -232,18 +232,18 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     process.env.OPENSHAPEFORGE_API_KEY_ROLE_CLIENT_ID = Object.keys(tables).find(client => 'org_admin' in tables[client]!);
     members = ['member@example.com'];
     const create = () => manageTenantInvitations({ db: runtime.db, administrator, firstAdministrator: clients }, 'create',
-      { slug: 'acme', email: 'Member@example.com', role: 'org_admin' }) as Promise<any>;
-    expect(await create()).toMatchObject({ email: 'member@example.com', role: 'org_admin', delivery: 'email_sent' });
+      { slug: 'acme', email: 'Member@example.com', roles: ['org_admin'] }) as Promise<any>;
+    expect(await create()).toMatchObject({ email: 'member@example.com', roles: ['org_admin'], delivery: 'email_sent' });
     expect(sends).toHaveLength(1);
     await sql`update platform.employee_invitations set status='accepted', accepted_at=now()`.execute(owner.db);
-    expect(await create()).toMatchObject({ status: 'pending', delivery: 'email_sent', role: 'org_admin' });
+    expect(await create()).toMatchObject({ status: 'pending', delivery: 'email_sent', roles: ['org_admin'] });
     await sql`insert into platform.identities (email) values ('member@example.com');
       insert into platform.identity_relations (identity_id, tenant_id, status, roles)
       select i.id,t.id,'linked',array['org_admin'] from platform.identities i, platform.tenants t where t.slug='acme';
       update platform.employee_invitations set status='accepted', accepted_at=now() where status='pending';`.execute(owner.db);
     expect(await create()).toMatchObject({ status: 'accepted', delivery: 'email_sent' });
     await expect(manageTenantInvitations({ db: runtime.db, administrator, firstAdministrator: clients }, 'create',
-      { slug: 'acme', email: 'member@example.com', role: 'org_employee' })).rejects.toMatchObject({code:'INVITATION_ROLE_CONFLICT'});
+      { slug: 'acme', email: 'member@example.com', roles: ['org_employee'] })).rejects.toMatchObject({code:'INVITATION_ROLE_CONFLICT'});
     expect(existingSends).toHaveLength(3);
     members = [];
     expect(await create()).toMatchObject({ status: 'pending', delivery: 'email_sent' });
@@ -253,14 +253,16 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
   });
   it('uses current admission roles rather than the historical invitation role', async () => {
     await invite(); members = ['admin@example.com'];
-    await sql`update platform.employee_invitations set status='accepted', accepted_at=now(),role='org_employee';
+    await sql`update platform.employee_invitations set status='accepted', accepted_at=now(),roles=ARRAY['org_employee'];
       insert into platform.identities(email) values('admin@example.com');
       insert into platform.identity_relations(identity_id,tenant_id,status,roles)
       select i.id,t.id,'linked',array['org_admin'] from platform.identities i,platform.tenants t where t.slug='acme'`.execute(owner.db);
-    const create = (role:'org_admin'|'org_employee') => manageTenantInvitations({db:runtime.db,administrator,firstAdministrator:clients},'create',{slug:'acme',email:'admin@example.com',role});
-    expect(await create('org_admin')).toMatchObject({role:'org_admin',delivery:'email_sent'});
+    const create = (role:'org_admin'|'org_employee') => manageTenantInvitations({db:runtime.db,administrator,firstAdministrator:clients},'create',{slug:'acme',email:'admin@example.com',roles:[role]});
+    expect(await create('org_admin')).toMatchObject({roles:['org_admin'],delivery:'email_sent'});
     await expect(create('org_employee')).rejects.toMatchObject({code:'INVITATION_ROLE_CONFLICT'});
     expect(existingSends).toHaveLength(1);
+    await sql`update platform.identity_relations set roles=ARRAY['org_admin','org_employee']`.execute(owner.db);
+    expect(await create('org_admin')).toMatchObject({roles:['org_admin','org_employee'],delivery:'email_sent'});
   });
 
   it('keeps a provider notice addressable after local intent was revoked', async () => {
@@ -273,8 +275,8 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
   });
 
   it('does not elevate a pending employee invitation', async () => {
-    await sql`insert into platform.employee_invitations (tenant_id,email,role,invited_by)
-      select id,'admin@example.com','org_employee','tenant-admin' from platform.tenants where slug='acme'`.execute(owner.db);
+    await sql`insert into platform.employee_invitations (tenant_id,email,roles,invited_by)
+      select id,'admin@example.com',ARRAY['org_employee'],'tenant-admin' from platform.tenants where slug='acme'`.execute(owner.db);
     await expect(invite()).rejects.toMatchObject({ code: 'FIRST_ADMIN_ALREADY_ASSIGNED' });
     expect(sends).toHaveLength(0);
   });
@@ -290,7 +292,7 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
   });
   it('leaves the ordinary invitation org_admin gate intact', async () => {
     await expect(inviteEmployee(runtime.db, { roles: ['platform-operator'] } as never, clients.members,
-      { email: 'admin@example.com', role: 'org_admin' })).rejects.toMatchObject({ status: 403 });
+      { email: 'admin@example.com', roles: ['org_admin'] })).rejects.toMatchObject({ status: 403 });
     expect(sends).toHaveLength(0);
   });
 
@@ -309,7 +311,7 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     const result = await manage('list') as any;
     expect(result.invitations).toHaveLength(1);
     expect(result.invitations[0]).toMatchObject({
-      email: 'admin@example.com', role: 'org_admin', canResend: true, canRevoke: true,
+      email: 'admin@example.com', roles: ['org_admin'], canResend: true, canRevoke: true,
       sentAt: '2026-09-05T22:39:20.000Z', expiresAt: '2026-09-06T10:39:20.000Z',
     });
     expect(JSON.stringify(result)).not.toContain('inviteLink');
@@ -344,7 +346,7 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
   it('resends without changing recipient, role or stored invitation', async () => {
     const { delivery: _, nextStep: __, ...original } = await invite();
     expect(await manage('resend', 'org-acme-invite')).toMatchObject({
-      status: 'resent', email: 'admin@example.com', role: 'org_admin', delivery: 'email_sent',
+      status: 'resent', email: 'admin@example.com', roles: ['org_admin'], delivery: 'email_sent',
     });
     expect(await invite()).toMatchObject(original);
     expect(sends).toEqual(['org-acme:admin@example.com', 'resent:org-acme']);
@@ -352,12 +354,12 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
 
   it('opens and resends the durable create id after the provider replaces its invitation id', async () => {
     const created = await manageTenantInvitations({db:runtime.db,administrator,firstAdministrator:clients}, 'create',
-      {slug:'acme',email:'admin@example.com',role:'org_admin'}) as any;
+      {slug:'acme',email:'admin@example.com',roles:['org_admin']}) as any;
     expect((await manage('list') as any).invitations[0].invitationId).toBe(created.invitationId);
     const current = await manageTenantInvitations({db:runtime.db,administrator,firstAdministrator:clients}, 'get',
       {slug:'acme',invitationId:created.invitationId}) as any;
     expect(current).toMatchObject({invitationId:created.invitationId,canResend:true});
-    expect(await manage('resend',created.invitationId)).toMatchObject({status:'resent',role:'org_admin'});
+    expect(await manage('resend',created.invitationId)).toMatchObject({status:'resent',roles:['org_admin']});
     await expect(manage('resend',created.invitationId,'other')).rejects.toMatchObject({code:'INVITATION_NOT_FOUND'});
   });
 
@@ -372,9 +374,9 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
       insert into platform.identity_relations (identity_id,tenant_id,status)
       select i.id,t.id,'linked' from platform.identities i,platform.tenants t where t.slug='acme'`.execute(owner.db);
     expect((await manage('list') as any).invitations[0]).toMatchObject({canResend:true,canRevoke:false});
-    expect(await manage('resend', 'org-acme-invite')).toMatchObject({ status: 'resent', role: 'org_admin', delivery: 'email_sent' });
-    expect((await sql<any>`select status,role from platform.employee_invitations`.execute(owner.db)).rows)
-      .toEqual([{status:'accepted',role:'org_admin'}]);
+    expect(await manage('resend', 'org-acme-invite')).toMatchObject({ status: 'resent', roles: ['org_admin'], delivery: 'email_sent' });
+    expect((await sql<any>`select status,roles from platform.employee_invitations`.execute(owner.db)).rows)
+      .toEqual([{status:'accepted',roles:['org_admin']}]);
     expect(sends).toEqual(['org-acme:admin@example.com', 'org-acme:admin@example.com']);
     expect(existingSends).toEqual(['org-acme:admin@example.com']);
   });

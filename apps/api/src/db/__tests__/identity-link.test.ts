@@ -166,8 +166,8 @@ async function invite(
   role: "org_admin" | "org_employee" = "org_employee",
 ) {
   await sql`
-    insert into platform.employee_invitations (tenant_id, email, role, invited_by)
-    values (${tenantId}, ${email}, ${role}, 'test-admin')
+    insert into platform.employee_invitations (tenant_id, email, roles, invited_by)
+    values (${tenantId}, ${email}, ARRAY[${role}], 'test-admin')
     on conflict do nothing
   `.execute(adminDb);
 }
@@ -190,8 +190,8 @@ async function invitedSignIn(
 
 async function invitationRows(adminDb: Kysely<DB>, tenantId: string) {
   return (
-    await sql<{ email: string; role: string; status: string; accepted_at: Date | null }>`
-      select email, role, status, accepted_at from platform.employee_invitations
+    await sql<{ email: string; roles: string[]; status: string; accepted_at: Date | null }>`
+      select email, roles, status, accepted_at from platform.employee_invitations
        where tenant_id = ${tenantId} order by invited_at
     `.execute(adminDb)
   ).rows;
@@ -377,7 +377,7 @@ describe("identity ↔ Relation link", () => {
 
         // And the invitation is spent, so it cannot admit a second person.
         expect(await invitationRows(adminDb, tenantA)).toMatchObject([
-          { email: "Dave@Example.com", role: "org_admin", status: "accepted" },
+          { email: "Dave@Example.com", roles: ["org_admin"], status: "accepted" },
         ]);
 
         // A later session reads the same roles back from the row.
@@ -491,14 +491,14 @@ describe("identity ↔ Relation link", () => {
         const jo = person("jo");
         await invite(adminDb, tenantA, "jo@example.com", "org_admin");
         await sql`
-          update platform.employee_invitations set role = 'org_employee'
+          update platform.employee_invitations set roles = ARRAY['org_employee']
            where tenant_id = ${tenantA} and lower(email) = 'jo@example.com' and status = 'pending'
         `.execute(adminDb);
         const { state } = await signIn(appDb, jo, tenantA);
         expect(state!.roles).toEqual([...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort());
         expect(await invitationRows(adminDb, tenantA)).toMatchObject([
           { email: "ian@example.com", status: "revoked" },
-          { email: "jo@example.com", role: "org_employee", status: "accepted" },
+          { email: "jo@example.com", roles: ["org_employee"], status: "accepted" },
         ]);
       });
     },
@@ -565,7 +565,7 @@ describe("identity ↔ Relation link", () => {
       const invitation = (await sql<{id: string}>`select id from platform.employee_invitations
         where tenant_id=${tenantA} and email=${who.claims.email!} and status='pending'`.execute(adminDb)).rows[0]!;
       await expect(admitInvitedPerson(appDb, sessionFor(who, tenantA), who.claims,
-        winner.state!.identityId, {id: invitation.id, role: "org_admin"})).rejects.toMatchObject({code: "AUTHENTICATION_UNAVAILABLE"});
+        winner.state!.identityId, {id: invitation.id, roles: ["org_admin"]})).rejects.toMatchObject({code: "AUTHENTICATION_UNAVAILABLE"});
       expect((await sql`select id from erp.relations where tenant_id=${tenantA}`.execute(adminDb)).rows).toHaveLength(1);
       expect((await sql`select status from platform.employee_invitations where id=${invitation.id}`.execute(adminDb)).rows[0]).toMatchObject({status: "pending"});
       expect((await signIn(appDb, who, tenantA)).state!.relationId).toBe(winner.state!.relationId);

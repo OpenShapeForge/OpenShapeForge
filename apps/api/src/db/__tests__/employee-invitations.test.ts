@@ -19,6 +19,8 @@ import {
   revokeInvitation,
 } from "../../auth/employee-invitations.js";
 import type { KeycloakOrganizationMembersClient } from "../../control/keycloak-organization-members.js";
+import { resolveIdentityLink, __resetIdentityLinkForTests } from "../../auth/identity-link.js";
+import { callEmployeeInvitationTool } from "../../mcp/employee-invitation-tools.js";
 import { KeycloakAdminError } from "../../control/keycloak-organization-admin.js";
 
 const ADMIN_URL =
@@ -175,6 +177,71 @@ function fakeKeycloak(): KeycloakOrganizationMembersClient & {
 }
 
 describe("employee invitations", () => {
+  test("group-only admission records an empty role list through the invitation handler",async()=>{
+    await withScratchDb(async(appDb,adminDb)=>{
+      await seedTenants(adminDb);
+      const invitation=await inviteEmployee(appDb,sessionFor(tenantA,ADMIN_ROLES),fakeKeycloak(),{email:'group-only@example.test',roles:[]});
+      expect(invitation.roles).toEqual([]);
+      expect((await listInvitations(appDb,sessionFor(tenantA,ADMIN_ROLES)))[0]?.roles).toEqual([]);
+    });
+  },TEST_TIMEOUT);
+
+  test("multiple roles survive MCP invitation, replay and first sign-in together", async () => {
+    await withScratchDb(async (appDb, adminDb) => {
+      await seedTenants(adminDb);
+      const custom = randomUUID();
+      await sql`insert into platform.organization_access_roles (id, tenant_id, label, permissions)
+        values (${custom}, ${tenantA}, 'Budget reviewer', ARRAY['Relations.All.Read'])`.execute(adminDb);
+      const selected = ['org_employee', `custom:${custom}`];
+      const keycloak = fakeKeycloak();
+      const session = { ...sessionFor(tenantA, ADMIN_ROLES), credential: 'bearer' as const };
+      const first = await callEmployeeInvitationTool('invite_employee', {
+        email: 'multi@example.test', roles: selected,
+      }, appDb, session, keycloak);
+      expect(first?.isError).not.toBe(true);
+      expect(first?.structuredContent).toMatchObject({ roles: selected, delivery: 'sent' });
+      // Reusing a pending invitation replaces the complete selection without another email.
+      const narrowed = await inviteEmployee(appDb, session, keycloak, { email: 'multi@example.test', roles: [selected[1]!] });
+      expect(narrowed.id).toBe((first?.structuredContent as any).id);
+      expect(narrowed.roles).toEqual([selected[1]!]);
+      const replay = await inviteEmployee(appDb, session, keycloak, {
+        email: 'multi@example.test', roles: [...selected, 'org_employee'],
+      });
+      expect(replay.roles).toEqual(selected);
+      expect(replay.delivery).toBe('already_pending');
+      expect(keycloak.pending).toHaveLength(1);
+      expect((await listInvitations(appDb, session))[0]?.roles).toEqual(selected);
+      const subject = randomUUID();
+      __resetIdentityLinkForTests();
+      const state = await resolveIdentityLink(appDb, { ...sessionFor(tenantA, []), userId: subject }, {
+        issuer: 'http://localhost:8181/realms/openshapeforge', subject, email: 'multi@example.test',
+      });
+      expect(state).toMatchObject({ status: 'linked' });
+      expect(state?.roles).toContain('org_employee');
+      expect(state?.roles).toContain(`custom:${custom}`);
+      expect((await sql<{ roles: string[]; status: string }>`select roles, status from platform.employee_invitations
+        where id = ${replay.id}`.execute(adminDb)).rows).toEqual([{ roles: selected, status: 'accepted' }]);
+      expect(await listInvitations(appDb, sessionFor(tenantB, ADMIN_ROLES))).toEqual([]);
+    });
+  }, TEST_TIMEOUT);
+
+  test("an invalid or foreign custom role refuses the complete invitation before sending mail", async () => {
+    await withScratchDb(async (appDb, adminDb) => {
+      await seedTenants(adminDb);
+      const foreign = randomUUID();
+      await sql`insert into platform.organization_access_roles (id, tenant_id, label, permissions)
+        values (${foreign}, ${tenantB}, 'Foreign role', ARRAY['Relations.All.Read'])`.execute(adminDb);
+      const keycloak = fakeKeycloak();
+      for (const roles of [['org_employee', 'invented-role'], ['org_employee', `custom:${foreign}`]]) {
+        await expect(inviteEmployee(appDb, sessionFor(tenantA, ADMIN_ROLES), keycloak, {
+          email: 'refused@example.test', roles,
+        })).rejects.toMatchObject({ status: 400, code: 'VALIDATION' });
+      }
+      expect(keycloak.calls).toEqual([]);
+      expect((await sql`select id from platform.employee_invitations`.execute(adminDb)).rows).toEqual([]);
+    });
+  }, TEST_TIMEOUT);
+
   test(
     "an administrator invites, lists, and revokes; a non-administrator is refused",
     async () => {
@@ -187,7 +254,7 @@ describe("employee invitations", () => {
         await expect(
           inviteEmployee(appDb, employee, keycloak, {
             email: "colleague@example.com",
-            role: "org_employee",
+            roles: ["org_employee"],
           }),
         ).rejects.toMatchObject({ status: 403 });
         expect(keycloak.calls).toEqual([]);
@@ -196,11 +263,11 @@ describe("employee invitations", () => {
           email: "Colleague@Example.com",
           firstName: "New",
           lastName: "Colleague",
-          role: "org_employee",
+          roles: ["org_employee"],
         });
         expect(invitation).toMatchObject({
           email: "Colleague@Example.com",
-          role: "org_employee",
+          roles: ["org_employee"],
           status: "pending",
           delivery: "sent",
         });
@@ -234,9 +301,9 @@ describe("employee invitations", () => {
         // unique index only covers status = 'pending').
         const second = await inviteEmployee(appDb, admin, keycloak, {
           email: "colleague@example.com",
-          role: "org_admin",
+          roles: ["org_admin"],
         });
-        expect(second.role).toBe("org_admin");
+        expect(second.roles).toEqual(["org_admin"]);
         expect(await listInvitations(appDb, admin)).toHaveLength(1);
       });
     },
@@ -251,7 +318,7 @@ describe("employee invitations", () => {
         const keycloak = fakeKeycloak();
         await inviteEmployee(appDb, sessionFor(tenantA, ADMIN_ROLES), keycloak, {
           email: "a-only@example.com",
-          role: "org_employee",
+          roles: ["org_employee"],
         });
 
         const seenFromB = await listInvitations(appDb, sessionFor(tenantB, ADMIN_ROLES));
@@ -282,12 +349,12 @@ describe("employee invitations", () => {
           appDb,
           sessionFor(tenantA, ADMIN_ROLES),
           keycloak,
-          { email: "Existing@Example.com", role: "org_admin" },
+          { email: "Existing@Example.com", roles: ["org_admin"] },
         );
 
         expect(invitation).toMatchObject({
           email: "Existing@Example.com",
-          role: "org_admin",
+          roles: ["org_admin"],
           status: "pending",
           delivery: "not_required",
         });
@@ -316,7 +383,7 @@ describe("employee invitations", () => {
           appDb,
           sessionFor(tenantA, ADMIN_ROLES),
           keycloak,
-          { email: "Pending@Example.com", role: "org_employee" },
+          { email: "Pending@Example.com", roles: ["org_employee"] },
         );
 
         expect(admission).toMatchObject({
@@ -348,7 +415,7 @@ describe("employee invitations", () => {
           appDb,
           sessionFor(tenantA, ADMIN_ROLES),
           keycloak,
-          { email: "Expired@Example.com", role: "org_employee" },
+          { email: "Expired@Example.com", roles: ["org_employee"] },
         );
 
         expect(admission.delivery).toBe("sent");
@@ -377,7 +444,7 @@ describe("employee invitations", () => {
           appDb,
           sessionFor(tenantA, ADMIN_ROLES),
           keycloak,
-          { email: "Statusless@Example.com", role: "org_employee" },
+          { email: "Statusless@Example.com", roles: ["org_employee"] },
         );
 
         expect(admission.delivery).toBe("already_pending");
@@ -407,7 +474,7 @@ describe("employee invitations", () => {
           appDb,
           sessionFor(tenantA, ADMIN_ROLES),
           keycloak,
-          { email: "Race@Example.com", role: "org_employee" },
+          { email: "Race@Example.com", roles: ["org_employee"] },
         );
 
         expect(admission.delivery).toBe("already_pending");
@@ -430,7 +497,7 @@ describe("employee invitations", () => {
         await expect(
           inviteEmployee(appDb, sessionFor(unprovisioned, ADMIN_ROLES), keycloak, {
             email: "x@example.com",
-            role: "org_employee",
+            roles: ["org_employee"],
           }),
         ).rejects.toMatchObject({ status: 409 });
         expect(keycloak.calls).toEqual([]);

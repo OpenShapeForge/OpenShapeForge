@@ -117,10 +117,10 @@ describe("platform read policies do not authorize DELETE", () => {
             `.execute(trx);
             await sql`
               insert into platform.employee_invitations
-                (id, tenant_id, email, role, invited_by)
+                (id, tenant_id, email, roles, invited_by)
               values
                 (${invitation}::uuid, ${tenantA}::uuid, 'colleague@example.test',
-                 'org_employee', 'test')
+                 ARRAY['org_employee'], 'test')
             `.execute(trx);
           },
         );

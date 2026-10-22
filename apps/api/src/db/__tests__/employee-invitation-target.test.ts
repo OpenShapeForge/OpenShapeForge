@@ -67,7 +67,7 @@ test("a relation invitation rejects a different tenant before sending mail", () 
   const foreignRelation = await relation(db, other);
   const kc = keycloak();
   await expect(inviteEmployee(app, session(own, true), kc.client, {
-    relationId: foreignRelation, email: "scope@example.test", role: "org_employee",
+    relationId: foreignRelation, email: "scope@example.test", roles: ["org_employee"],
   })).rejects.toMatchObject({ status: 404, code: "NOT_FOUND" });
   expect(kc.calls).toEqual([]);
   expect((await sql`select id from platform.employee_invitations`.execute(db)).rows).toHaveLength(0);
@@ -80,7 +80,7 @@ test("first login honors the explicitly invited relation over email candidates w
   const candidate = await relation(db, own, email);
   const foreignCandidate = await relation(db, other, email);
   const kc = keycloak();
-  await inviteEmployee(app, session(own, true), kc.client, { relationId: target, email, role: "org_employee" });
+  await inviteEmployee(app, session(own, true), kc.client, { relationId: target, email, roles: ["org_employee"] });
   const claims = { issuer: "https://identity.example.test/realms/test", subject: randomUUID(), email: email.toLowerCase(), name: "Invited Person" };
   const login = session(own);
   login.userId = claims.subject;
@@ -106,13 +106,13 @@ test("an existing linked account cannot be invited onto a different relation", (
   const original = await relation(db, own), other = await relation(db, own);
   const kc = keycloak(), admin = session(own, true);
   const email = "linked@example.test";
-  await inviteEmployee(app, admin, kc.client, { relationId: original, email, role: "org_employee" });
+  await inviteEmployee(app, admin, kc.client, { relationId: original, email, roles: ["org_employee"] });
   const login = session(own);
   const claims = { issuer: "https://identity.example.test/realms/test", subject: login.userId, email, name: "Linked Person" };
   __resetIdentityLinkForTests();
   const state = await resolveIdentityLink(app, login, claims);
   const callsBefore = kc.calls.length;
-  await expect(inviteEmployee(app, admin, kc.client, { relationId: other, email, role: "org_admin" }))
+  await expect(inviteEmployee(app, admin, kc.client, { relationId: other, email, roles: ["org_admin"] }))
     .rejects.toMatchObject({ status: 409, code: "CONFLICT" });
   expect(kc.calls).toHaveLength(callsBefore);
   __resetIdentityLinkForTests();
@@ -128,12 +128,12 @@ test("invite_employee links the invitation to the Relation the assistant just cr
   const kc = keycloak();
   const admin = { ...session(own, true), credential: "trusted-context" as const };
   const refused = await callEmployeeInvitationTool(INVITE_EMPLOYEE_TOOL, {
-    email: "foreign@example.test", role: "org_employee", relationId: foreign,
+    email: "foreign@example.test", roles: ["org_employee"], relationId: foreign,
   }, app as never, admin, kc.client);
   expect(refused?.isError).toBe(true);
   expect(kc.calls).toEqual([]);
   const admitted = await callEmployeeInvitationTool(INVITE_EMPLOYEE_TOOL, {
-    email: "linked@example.test", role: "org_employee", relationId: created,
+    email: "linked@example.test", roles: ["org_employee"], relationId: created,
   }, app as never, admin, kc.client);
   expect(admitted?.isError).toBeFalsy();
   const rows = (await sql<{ relation_id: string | null }>`select relation_id from platform.employee_invitations

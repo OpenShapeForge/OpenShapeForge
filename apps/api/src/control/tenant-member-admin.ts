@@ -225,10 +225,9 @@ export async function changeTenantMemberRoles(deps: Dependencies, slug: string, 
       }
       // A provider account is not an application membership. Record explicit
       // admission rather than inventing a link or taking over an email match.
-      if (selected.length !== 1) throw new ControlInputError("Select one admission role for an unlinked member.");
       const invitation = await recordEmployeeInvitation(trx, tenant.id,
         `${deps.administrator.issuer}#${deps.administrator.subject}`,
-        { email: member.email, role: selected[0]!, firstName: member.firstName ?? undefined, lastName: member.lastName ?? undefined });
+        { email: member.email, roles: selected, firstName: member.firstName ?? undefined, lastName: member.lastName ?? undefined });
       return { tenantSlug: slug, memberId, roles: [], action: "awaiting_sign_in", invitationId: invitation.id, ...invitationOutcome(slug, "no_email_existing_account") };
     }
     const grants = new Set(selected.flatMap((role) => employeeInvitationRoleGrants(role)));

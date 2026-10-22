@@ -46,8 +46,8 @@ test("native membership intersects own admitted or invited access, with RLS reta
       }
       for (const kind of ["invited","revoked"]) {
         const tenant=tenants.find(t=>t.kind===kind)!;
-        await sql`insert into platform.employee_invitations(tenant_id,email,role,status,invited_by,revoked_at)
-          values(${tenant.id},${email},null,${kind==='invited'?'pending':'revoked'},'proof',${kind==='revoked'?sql`now()`:null})`.execute(tx);
+        await sql`insert into platform.employee_invitations(tenant_id,email,roles,status,invited_by,revoked_at)
+          values(${tenant.id},${email},ARRAY[]::text[],${kind==='invited'?'pending':'revoked'},'proof',${kind==='revoked'?sql`now()`:null})`.execute(tx);
       }
     });
     const session={tenantId:tenants[0]!.id,userId,issuer,verifiedEmail:email,credential:'bearer' as const,principalKind:'person' as const,roles:['org_admin'],groups:[],scope:'tenant' as const};
@@ -55,6 +55,10 @@ test("native membership intersects own admitted or invited access, with RLS reta
     let memberships=tenants.filter(t=>t.kind!=='not-native').map(t=>({id:t.org,enabled:t.kind!=='provider-disabled'}));
     const source=()=>({realm:'test',issuer,list:async(subject:string)=>{expect(subject).toBe(userId);return memberships;}});
     expect((await readAvailableTenants(context,source)).map(t=>t.name)).toEqual(['invited','own','second']);
+    const invitedTenant = tenants.find(t => t.kind === 'invited')!.id;
+    await sql`update platform.employee_invitations set roles=ARRAY['retired-role'] where tenant_id=${invitedTenant}`.execute(privileged.db);
+    expect((await readAvailableTenants(context,source)).map(t=>t.name)).toEqual(['own','second']);
+    await sql`update platform.employee_invitations set roles=ARRAY[]::text[] where tenant_id=${invitedTenant}`.execute(privileged.db);
     const { verifiedEmail: _email, ...unverifiedSession } = session;
     expect((await readAvailableTenants({...context,session:unverifiedSession},source)).map(t=>t.name)).toEqual(['own','second']);
     // Discovery does not admit an invitation or write roles.

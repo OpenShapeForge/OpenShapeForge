@@ -145,6 +145,10 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
     expect((await sql<{ name: string }>`select name from audit_probe.contacts where id=${contact}::uuid`.execute(privileged.db)).rows[0]!.name).toBe("Contact");
     await sql.raw('drop trigger refusal on platform.entity_events').execute(privileged.db);
     expect(await auditHistoryReady(privileged.db, tables)).toBe(true);
+    // A failed policy install must not leave a partially replaced registry or producer set.
+    await expect(applyAuditHistory(privileged.db, [...tables, table("ProbeMissing", "missing", ["name"])], { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } })).rejects.toThrow();
+    expect((await sql<{ config: unknown }>`select platform.audit_config('ProbeMissing') as config`.execute(privileged.db)).rows[0]!.config).toBeNull();
+    expect(await auditHistoryReady(privileged.db, tables)).toBe(true);
     await sql.raw('alter table audit_probe.amounts disable trigger audit_business_row').execute(privileged.db);
     expect(await auditHistoryReady(privileged.db, tables)).toBe(false);
     await sql.raw('alter table audit_probe.amounts enable trigger audit_business_row').execute(privileged.db);

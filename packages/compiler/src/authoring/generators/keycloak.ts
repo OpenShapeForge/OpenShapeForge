@@ -1509,9 +1509,6 @@ export function generateKeycloakRealmArtifacts(
     // sends (theme/openshapeforge/email); Keycloak's stock theme has none.
     emailTheme: realmCfg.emailTheme ?? "openshapeforge",
     registrationAllowed: realmCfg.registrationAllowed,
-    // No username to invent at signup: a taken name stopped an invitee
-    // halfway through registration. Existing usernames are untouched.
-    registrationEmailAsUsername: true,
     loginWithEmailAllowed: realmCfg.loginWithEmailAllowed,
     duplicateEmailsAllowed: realmCfg.duplicateEmailsAllowed,
     // Forced off, in every mode. "Forgot password" is a self-service path to a

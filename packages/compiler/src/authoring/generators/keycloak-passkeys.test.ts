@@ -4,7 +4,9 @@ import {
   PASSKEY_BROWSER_FLOW,
   PASSKEY_DIRECT_GRANT_FLOW,
   PASSKEY_ORGANIZATION_FLOW,
+  PASSKEY_OFFER_REQUIRED_ACTION,
   PASSKEY_REGISTRATION_FLOW,
+  PASSKEY_SIGN_IN_FLOW,
   WEBAUTHN_PASSWORDLESS_REQUIRED_ACTION,
   buildPasskeyProfile,
   resolvePasskeyRpId,
@@ -92,10 +94,17 @@ describe("passkey profile — no password path for a human", () => {
 describe("passkey profile — required actions", () => {
   const byAlias = Object.fromEntries(profile().requiredActions.map((a) => [a.alias, a]));
 
-  it("walks a person with no passkey through enrolling one", () => {
+  it("offers a passkey instead of forcing one, so a device without passkeys is no dead end", () => {
+    // Enabled: the admin enrolment link and the offer start it. Not default:
+    // forcing it on every new account is what stranded invitees.
     expect(byAlias[WEBAUTHN_PASSWORDLESS_REQUIRED_ACTION]).toMatchObject({
       enabled: true,
-      defaultAction: true,
+      defaultAction: false,
+    });
+    expect(byAlias[PASSKEY_OFFER_REQUIRED_ACTION]).toMatchObject({
+      providerId: PASSKEY_OFFER_REQUIRED_ACTION,
+      enabled: true,
+      defaultAction: false,
     });
   });
 
@@ -158,14 +167,35 @@ describe("passkey profile — an invited person creates an account without a pas
     expect(reachable.filter((a) => a.includes("password") && !a.includes("passwordless"))).toEqual([]);
   });
 
-  it("leaves the passkey to the default required action, which is the only supported shape", () => {
-    // Keycloak 26.5.3 ships no registration-time WebAuthn form action
-    // (measured: /authentication/form-action-providers lists five, none of
-    // them WebAuthn), so enrolment has to be the required action — and it has
-    // to be a DEFAULT one, or the account would exist with no way in at all.
-    const action = profile().requiredActions.find((a) => a.alias === WEBAUTHN_PASSWORDLESS_REQUIRED_ACTION);
-    expect(action?.enabled).toBe(true);
-    expect(action?.defaultAction).toBe(true);
+  it("treats the invitation as proof of the address, after the account exists", () => {
+    const p = profile();
+    const form = p.authenticationFlows.find((f) => f.alias === "passkey-registration-form")!;
+    expect(form.authenticationExecutions.map((e) => [e.authenticator, e.requirement])).toEqual([
+      ["registration-user-creation", "REQUIRED"],
+      ["osf-invitation-email-verified", "REQUIRED"],
+    ]);
+  });
+});
+
+describe("passkey profile — a person always chooses passkey or e-mail", () => {
+  const p = profile();
+  const byAlias = new Map(p.authenticationFlows.map((f) => [f.alias, f]));
+
+  it("identifies the person, then offers a passkey OR an e-mail code as alternatives", () => {
+    expect(
+      byAlias.get("passkey-browser-forms")!.authenticationExecutions.map((e) => [e.authenticator ?? e.flowAlias, e.requirement]),
+    ).toEqual([
+      ["auth-username-form", "REQUIRED"],
+      [PASSKEY_SIGN_IN_FLOW, "REQUIRED"],
+    ]);
+    // Order is behaviour: Keycloak asks for a credential the person has first
+    // and lists the e-mail step under "try another way".
+    expect(
+      byAlias.get(PASSKEY_SIGN_IN_FLOW)!.authenticationExecutions.map((e) => [e.authenticator, e.requirement]),
+    ).toEqual([
+      ["webauthn-authenticator-passwordless", "ALTERNATIVE"],
+      ["osf-email-sign-in", "ALTERNATIVE"],
+    ]);
   });
 });
 

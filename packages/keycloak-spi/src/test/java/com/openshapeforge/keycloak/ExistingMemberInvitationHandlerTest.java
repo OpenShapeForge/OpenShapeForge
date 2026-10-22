@@ -18,13 +18,14 @@ public class ExistingMemberInvitationHandlerTest {
             case "isEnabled" -> enabled; case "isMember" -> member; case "getRedirectUrl" -> target; default -> null;
         });
     }
-    @Test public void returnsOnlyAnEnabledVerifiedExistingMemberToTheConfiguredApp() {
+    @Test public void returnsOnlyAnEnabledExistingMemberToTheConfiguredApp() {
         assertEquals(ORIGIN + "/acme", ExistingMemberInvitationHandler.existingMemberTarget(ORIGIN,
                 org(true, true, ORIGIN + "/acme"), user(true, true)));
         assertNull(ExistingMemberInvitationHandler.existingMemberTarget(ORIGIN, org(false, true, ORIGIN), user(true,true)));
         assertNull(ExistingMemberInvitationHandler.existingMemberTarget(ORIGIN, org(true, false, ORIGIN), user(true,true)));
         assertNull(ExistingMemberInvitationHandler.existingMemberTarget(ORIGIN, org(true, true, ORIGIN), user(false,true)));
-        assertNull(ExistingMemberInvitationHandler.existingMemberTarget(ORIGIN, org(true, true, ORIGIN), user(true,false)));
+        // An unverified member is returned too: the invitation link proves the address.
+        assertEquals(ORIGIN, ExistingMemberInvitationHandler.existingMemberTarget(ORIGIN, org(true, true, ORIGIN), user(true,false)));
         assertNull(ExistingMemberInvitationHandler.existingMemberTarget(ORIGIN, null, user(true,true)));
         assertNull(ExistingMemberInvitationHandler.existingMemberTarget(ORIGIN, org(true,true,ORIGIN), null));
     }

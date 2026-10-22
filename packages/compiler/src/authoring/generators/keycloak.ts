@@ -197,6 +197,7 @@ interface KeycloakRealmExport {
   accountTheme?: string;
   adminTheme?: string;
   emailTheme?: string;
+  registrationEmailAsUsername?: boolean;
   registrationAllowed?: boolean;
   loginWithEmailAllowed?: boolean;
   duplicateEmailsAllowed?: boolean;
@@ -1498,11 +1499,19 @@ export function generateKeycloakRealmArtifacts(
     // Carrying that into a published realm would let Keycloak accept
     // unencrypted traffic, so the mode overrides it outright.
     sslRequired: dev ? realmCfg.sslRequired : "external",
-    loginTheme: realmCfg.loginTheme,
+    // The passkey profile's own pages (e-mail sign-in, passkey offer) ship in
+    // the OSF image's `openshapeforge` theme; a consuming theme must provide
+    // them too (same file names and form contract).
+    loginTheme: realmCfg.loginTheme ?? "openshapeforge",
     accountTheme: realmCfg.accountTheme,
     adminTheme: realmCfg.adminTheme,
-    emailTheme: realmCfg.emailTheme,
+    // The OSF Keycloak image ships the e-mail templates the sign-in step
+    // sends (theme/openshapeforge/email); Keycloak's stock theme has none.
+    emailTheme: realmCfg.emailTheme ?? "openshapeforge",
     registrationAllowed: realmCfg.registrationAllowed,
+    // No username to invent at signup: a taken name stopped an invitee
+    // halfway through registration. Existing usernames are untouched.
+    registrationEmailAsUsername: true,
     loginWithEmailAllowed: realmCfg.loginWithEmailAllowed,
     duplicateEmailsAllowed: realmCfg.duplicateEmailsAllowed,
     // Forced off, in every mode. "Forgot password" is a self-service path to a

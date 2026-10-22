@@ -36,17 +36,23 @@ public final class ExistingMemberInvitationHandler extends InviteOrgActionTokenH
         if (invitation == null || invitation.isExpired()) return super.handleToken(token, context);
 
         if (!provider.getInvitationManager().remove(token.getId())) return super.handleToken(token, context);
+        // Keycloak's verifier matched the token's address to this user, and the
+        // token only reached them through that mailbox: the address is proven.
+        // An unverified member used to fall through to "already a member" here,
+        // with no way left to finish setting up the account.
+        if (!user.isEmailVerified()) user.setEmailVerified(true);
+        user.removeRequiredAction(UserModel.RequiredAction.VERIFY_EMAIL);
         context.getEvent().event(EventType.INVITE_ORG).detail(Details.ORG_ID, organization.getId())
                 .detail(Details.USERNAME, user.getUsername())
                 .detail("osf.invitation_outcome", "existing_member_return").success();
-        // No membership, role, required action or SSO session is created here.
+        // No membership, role or SSO session is created here.
         // The destination starts its normal login and checks current admission.
         return Response.seeOther(URI.create(target)).build();
     }
 
     static String existingMemberTarget(String origin, OrganizationModel organization, UserModel user) {
         if (organization == null || !organization.isEnabled() || user == null || !user.isEnabled()
-                || !user.isEmailVerified() || !organization.isMember(user)) return null;
+                || !organization.isMember(user)) return null;
         String target = organization.getRedirectUrl();
         return EnrollmentContinuation.allowedTarget(origin, target) ? target : null;
     }

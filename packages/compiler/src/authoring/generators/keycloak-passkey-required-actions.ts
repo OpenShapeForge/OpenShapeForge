@@ -11,6 +11,8 @@
 
 /** Keycloak's provider id for the passkey enrolment required action. */
 export const WEBAUTHN_PASSWORDLESS_REQUIRED_ACTION = "webauthn-register-passwordless";
+/** OSF provider id of the skippable passkey offer (packages/keycloak-spi PasskeyOffer). */
+export const PASSKEY_OFFER_REQUIRED_ACTION = "osf-passkey-offer";
 
 export interface KeycloakRequiredActionExport {
   alias: string;
@@ -80,15 +82,28 @@ export const PASSKEY_REQUIRED_ACTIONS: KeycloakRequiredActionExport[] = [
       config: {},
     },
     {
-      // defaultAction: every new user carries it, so somebody who arrives
-      // over Google Workspace, or through an admin-issued enrolment link,
-      // is walked through creating a passkey and leaves with one.
+      // Enabled (the admin-issued enrolment link and the passkey offer start
+      // it) but NOT a default action any more: forcing it on every new user
+      // stranded the people whose device cannot make a passkey, between a
+      // finished registration and an app they could not reach.
       alias: WEBAUTHN_PASSWORDLESS_REQUIRED_ACTION,
       name: "Webauthn Register Passwordless",
       providerId: WEBAUTHN_PASSWORDLESS_REQUIRED_ACTION,
       enabled: true,
-      defaultAction: true,
+      defaultAction: false,
       priority: 90,
+      config: {},
+    },
+    {
+      // OSF required action: after an e-mail sign-in, ask whether to add a
+      // passkey on this device, with "not now" (remembered for 30 days). It
+      // triggers itself; never assign it by hand.
+      alias: PASSKEY_OFFER_REQUIRED_ACTION,
+      name: "Offer a passkey after e-mail sign-in",
+      providerId: PASSKEY_OFFER_REQUIRED_ACTION,
+      enabled: true,
+      defaultAction: false,
+      priority: 95,
       config: {},
     },
     { alias: "VERIFY_PROFILE", name: "Verify Profile", providerId: "VERIFY_PROFILE", enabled: true, defaultAction: false, priority: 100, config: {} },

@@ -187,6 +187,7 @@ async function main() {
       users: upstreamUsers,
     });
     created.push(IDP);
+    await api("/" + IDP + "/clients", "POST", {clientId:"upstream-app",protocol:"openid-connect",publicClient:true,standardFlowEnabled:true,redirectUris:[CALLBACK],defaultClientScopes:["basic","profile","email"]});
     const [linked] = await api("/" + IDP + "/users?username=linked&exact=true");
     await api("", "POST", {
       realm: BROKER,
@@ -253,6 +254,7 @@ async function main() {
             validateSignature: "true",
             useJwksUrl: "true",
             defaultScope: "openid profile email",
+            "osf.account-choice": "true",
           },
         },
       ],
@@ -337,17 +339,14 @@ async function main() {
         }),
       );
     }
-    async function retry(session: Session, html: string, username: string) {
+    async function retry(session: Session, html: string, username: string, expectedPrompt = "select_account") {
       const form = parseForm(html, (tag) =>
         /id="kc-broker-account-retry-form"/.test(tag),
       );
       form.fields.set("retry", "true");
-      let r = await session.follow(
-        await session.request(form.action, {
-          method: "POST",
-          body: form.fields,
-        }),
-      );
+      const redirect = await session.request(form.action, {method:"POST",body:form.fields});
+      check(new URL(redirect.headers.get("location")!, KC_URL).searchParams.get("prompt") === expectedPrompt, "retry requests the declared upstream prompt capability");
+      let r = await session.follow(redirect);
       let body = await r.res.text();
       const reset =
         /id="reset-login"[^>]*onclick="location.href='([^']+)'"/.exec(
@@ -402,8 +401,17 @@ async function main() {
       );
     }
     let session = new Session();
-    let out = await session.follow(await session.request(authorize()));
+    const upstreamVerifier = randomBytes(48).toString("base64url");
+    const upstreamUrl = KC_URL + "/realms/" + IDP + "/protocol/openid-connect/auth?" + new URLSearchParams({client_id:"upstream-app",redirect_uri:CALLBACK,response_type:"code",scope:"openid profile email",code_challenge:createHash("sha256").update(upstreamVerifier).digest("base64url"),code_challenge_method:"S256"});
+    let out = await session.follow(await session.request(upstreamUrl));
     out = await login(session, await out.res.text(), "wrong");
+    check(out.url.startsWith(CALLBACK), "the first app authenticates the other upstream account");
+    const upstreamResponse = await fetch(KC_URL + "/realms/" + IDP + "/protocol/openid-connect/token", {method:"POST",body:new URLSearchParams({grant_type:"authorization_code",client_id:"upstream-app",redirect_uri:CALLBACK,code:new URL(out.url).searchParams.get("code")!,code_verifier:upstreamVerifier})});
+    check(upstreamResponse.ok,"the first app exchanges its authorization code");
+    const upstreamTokens = await upstreamResponse.json();
+    const userinfo = () => fetch(KC_URL + "/realms/" + IDP + "/protocol/openid-connect/userinfo",{headers:{authorization:"Bearer "+upstreamTokens.access_token}});
+    check((await userinfo()).ok,"the first app session is initially usable");
+    out = await session.follow(await session.request(authorize()));
     let html = await out.res.text();
     check(
       html.includes("Ander account gebruiken"),
@@ -456,6 +464,10 @@ async function main() {
       (await api("/" + BROKER + "/users")).length === 1,
       "no account was created or linked for the rejected identity",
     );
+    const priorIdentity = await userinfo();
+    check(priorIdentity.ok && (await priorIdentity.json()).preferred_username === "wrong", "account choice retains the first app's original account and access session");
+    const priorRefresh = await fetch(KC_URL + "/realms/" + IDP + "/protocol/openid-connect/token", {method:"POST",body:new URLSearchParams({grant_type:"refresh_token",client_id:"upstream-app",refresh_token:upstreamTokens.refresh_token})});
+    check(priorRefresh.ok,"the first account's refresh session also survives switching to the linked account");
     session.forgetRealm(BROKER);
     out = await session.follow(await session.request(authorize()));
     const ssoBody = await out.res.clone().text();
@@ -469,6 +481,18 @@ async function main() {
         new URL(out.url).searchParams.get("state") === state,
       "native consent rejection preserves state and issues no code",
     );
+    const providerPath = "/" + BROKER + "/identity-provider/instances/workforce";
+    const provider = await api(providerPath);
+    delete provider.config["osf.account-choice"];
+    await api(providerPath,"PUT",provider);
+    session = new Session();
+    out = await session.follow(await session.request(authorize()));
+    out = await login(session, await out.res.text(), "wrong");
+    out = await retry(session, await out.res.text(), "linked", "login");
+    out = await consent(session, out, true);
+    check(out.url.startsWith(CALLBACK) && new URL(out.url).searchParams.has("code"), "an ordinary OIDC provider without account-choice capability retains reauthentication recovery");
+    provider.config["osf.account-choice"] = "true";
+    await api(providerPath,"PUT",provider);
     session = new Session();
     out = await session.follow(await session.request(authorize()));
     out = await login(session, await out.res.text(), "wrong");

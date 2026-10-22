@@ -39,8 +39,8 @@ public class BrokerAccountRetryTest {
             default -> null;
         });
         try {
-            BrokerAccountRetry.reauthenticate(session, () -> {
-                assertEquals("login", notes.get("prompt"));
+            BrokerAccountRetry.reauthenticate(session, "select_account", () -> {
+                assertEquals("select_account", notes.get("prompt"));
                 assertFalse(broker.containsKey("BROKERED_CONTEXT"));
                 assertEquals("nl", broker.get(LocaleSelectorProvider.USER_REQUEST_LOCALE));
                 for (String key : List.of("scope", "state", "code_challenge", "redirect_uri")) assertEquals(before.get(key),notes.get(key));
@@ -66,6 +66,14 @@ public class BrokerAccountRetryTest {
         for (String fixed : List.of("login", "none", " ")) assertFalse(BrokerAccountRetry.supported(provider("oidc", fixed)));
         assertFalse(BrokerAccountRetry.supported(provider("saml", null)));
         var disabled = provider("oidc", null); disabled.setEnabled(false); assertFalse(BrokerAccountRetry.supported(disabled));
+    }
+    @Test public void upstreamAccountChoiceRequiresAnExplicitCapability() {
+        var source = provider("oidc", null);
+        assertEquals("login", BrokerAccountRetry.retryPrompt(source));
+        source.getConfig().put("osf.account-choice", "false");
+        assertEquals("login", BrokerAccountRetry.retryPrompt(source));
+        source.getConfig().put("osf.account-choice", "true");
+        assertEquals("select_account", BrokerAccountRetry.retryPrompt(source));
     }
     private List<String> action(Map<String,String> fields, IdentityProviderModel provider) {
         var values = new MultivaluedHashMap<String,String>(); fields.forEach(values::putSingle);

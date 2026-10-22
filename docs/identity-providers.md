@@ -436,6 +436,13 @@ with retry/cancel and never creates, links or authenticates a user. An explicit
 retry reuses the native broker with upstream reauthentication while preserving
 the original client's state, scopes, redirect, PKCE and requested locale. Linked
 accounts retain normal SSO. Fixed prompts and non-OIDC providers are refused.
+The default upstream prompt is `login`, retaining ordinary OIDC reauthentication.
+For an upstream running the OSF cookie extension, explicitly set the provider
+configuration `osf.account-choice` to the string `true` to request `select_account`
+and preserve its other app sessions. Do not enable this for an issuer without
+that capability: stock Keycloak does not implement account choice. Passive
+requests never enter the account-choice extension. See the SPI README for
+SSO-pointer, session-lifetime and unfinished-login limitations.
 
 `BrokerAccountRetryTest` covers session-note restoration, supported providers and
 denied/cancel/error paths; `OAuthConsentTemplateTest` renders the derived v2

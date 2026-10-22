@@ -198,7 +198,7 @@ describe("actor: relation stamps under a trusted-context session", () => {
     await fails(executeTransition(restricted.db, session, relationStampedBinding(), { id }), "FORBIDDEN");
     expect((await sql<{ status: string }>`select status from erp.agreement_milestones where id = ${id}::uuid`.execute(privileged.db)).rows[0]!.status).toBe("pending");
     // The person's bearer login (invited) admits them; the next web session acts as that Relation.
-    await sql`insert into platform.employee_invitations (tenant_id, email, roles, invited_by) values (${tenantId}::uuid, ${`${userId}@example.test`}, 'org_employee', 'admin')`.execute(privileged.db);
+    await sql`insert into platform.employee_invitations (tenant_id, email, roles, invited_by) values (${tenantId}::uuid, ${`${userId}@example.test`}, ARRAY['org_employee'], 'admin')`.execute(privileged.db);
     const admitted = await resolveIdentityLink(restricted.db, { tenantId, userId, roles: ROLES, groups: [], scope: "tenant" },
       { issuer: ISSUER, subject: userId, email: `${userId}@example.test`, givenName: "Web", familyName: "Person" });
     expect(admitted).toMatchObject({ status: "linked" });

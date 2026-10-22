@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { auditContext } from "../platform/audit-context.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
@@ -62,6 +63,13 @@ const activeDbSession = new AsyncLocalStorage<{
   trx: Transaction<unknown>;
   session: DbSessionContext;
 }>();
+
+async function applyAuditSession<T>(trx: Transaction<T>): Promise<void> {
+  const audit = auditContext();
+  await sql`select set_config('app.audit_operation', ${audit?.operationId ?? ""}, true),
+    set_config('app.audit_correlation', ${audit?.correlationId ?? crypto.randomUUID()}, true),
+    set_config('app.audit_actor_kind', ${audit?.actorKind ?? "system"}, true)`.execute(trx);
+}
 
 export function registerDbSessionAfterCommit(hook: DbSessionAfterCommitHook) {
   const store = dbSessionHooks.getStore();
@@ -173,6 +181,7 @@ export async function applyDbSession<TDatabase>(
   await sql`select set_config('app.bypass_rls', 'false', true)`.execute(trx);
   await sql`select set_config('app.tenant_id', ${session.tenantId}, true)`.execute(trx);
   await sql`select set_config('app.user_id', ${session.userId}, true)`.execute(trx);
+  await applyAuditSession(trx);
   await sql`select set_config('app.roles', ${session.roles.join(",")}, true)`.execute(trx);
   await sql`select set_config('app.scope', ${session.scope}, true)`.execute(trx);
   await sql`select set_config('app.relation_group_ids', ${session.relationGroupIds.join(",")}, true)`.execute(trx);
@@ -450,6 +459,7 @@ export async function withSystemSession<TDatabase, TResult>(
         await sql`select set_config('app.tenant_id', ${input.tenantId}, true)`.execute(trx);
       }
       await sql`select set_config('app.user_id', ${input.databaseActorId ?? input.actorSubject}, true)`.execute(trx);
+      await applyAuditSession(trx);
       await sql`select set_config('app.roles', ${input.roles.join(",")}, true)`.execute(trx);
       await sql`select set_config('app.bypass_rls', 'true', true)`.execute(trx);
 

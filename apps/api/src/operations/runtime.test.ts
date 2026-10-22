@@ -424,6 +424,7 @@ describe("canonical operation runtime", () => {
         operation.implementation?.type === "collection" ||
         operation.implementation?.type === "entity-type-list" ||
         operation.implementation?.type === "constrained-reference-create" ||
+        operation.plugin === "osf-audit" ||
         operation.plugin === "osf-billing" ||
         operation.plugin === "osf-blueprints" ||
         operation.plugin === "osf-control" ||

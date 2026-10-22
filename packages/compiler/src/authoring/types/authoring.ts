@@ -544,8 +544,9 @@ export interface OperationCatalogDefinition {
 }
 
 export interface CoreEntity {
+  audit?: { timeline?: { include: string[] } };
   /** Canonical read Operations resolve records; this entity owns no SQL table. */
-  source?: { kind: "operations"; query?: { filterFields: string[]; sortFields: string[] } };
+  source?: { kind: "operations"; query?: { mode?: "structured"; filterFields: string[]; sortFields: string[] } };
   /** Explicit safe scalar content copied from a published blueprint. */
   blueprint?: { fields: string[]; mode?: "copy"; include?: BlueprintInclude[]; bindings?: BlueprintBinding[] };
   /** Named cross-tenant worker; enforced together with the dedicated DB role. */

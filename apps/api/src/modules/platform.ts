@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Core-owned services made available to reviewed runtime modules. */
+import { withAuditContext } from "../platform/audit-context.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Server } from "@modelcontextprotocol/server";
 import { sql, type Transaction } from "kysely";
@@ -828,7 +829,11 @@ export class ModulePlatformRuntime {
     return matches[0];
   }
 
-  async #executeOperation(
+  #executeOperation(session: TrustedSessionContext, request: RuntimeOperationRequest, options: RuntimeOperationExecutionOptions = {}): Promise<RuntimeOperationExecutionResult> {
+    return withAuditContext(request.operation.id, session.credential, () => this.#executeOperationWithContext(session, request, options));
+  }
+
+  async #executeOperationWithContext(
     session: TrustedSessionContext,
     request: RuntimeOperationRequest,
     options: RuntimeOperationExecutionOptions = {},

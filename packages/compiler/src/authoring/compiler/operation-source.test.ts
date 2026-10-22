@@ -196,3 +196,19 @@ test("query capabilities are bounded, explicit, and projected from the executabl
     kind: "collection-query", filterFields: ["label"], sortFields: ["id", "label"], pagination: { kind: "cursor", defaultLimit: 50, maxLimit: 200 },
   });
 });
+
+test("structured source queries publish typed bounded predicates for a second entity without a Web route", () => {
+  const input = entity("ReadOnlyContact"); delete input.interfaces!.web;
+  input.fields.push({ key: "occurredAt", osfType: "datetime", label: { en: "Time", nl: "Tijd" } });
+  input.source!.query = { mode: "structured", filterFields: ["id", "label", "occurredAt"], sortFields: ["label", "occurredAt"] };
+  const compiled = contract(input);
+  const list = compiled.pluginOperations!.find(op => op.key === "list")!.definition.input!.schema as any;
+  expect(list.properties.filter).toEqual({ $ref: "#/$defs/filter0" });
+  expect(list.$defs.filter0.properties.id.properties.in.maxItems).toBe(100);
+  expect(list.$defs.filter0.properties.occurredAt.properties.gte.format).toBe("date-time");
+  expect(list.$defs.filter4.properties.or).toBeUndefined();
+  expect(list.$defs.filter0.properties.email).toBeUndefined();
+  expect(compiled.entityOperations.create).toBeUndefined();
+  const invalid = entity(); invalid.source!.query = { mode: "structured", filterFields: ["missing"], sortFields: ["label"] };
+  expect(() => contract(invalid)).toThrow("Invalid structured query field missing");
+});

@@ -7,6 +7,7 @@ import {
   type DatabaseRuntime,
   type OpenShapeForgeDatabase,
 } from "../db/connection.js";
+import { auditHistoryReady } from "../db/migrations/audit-history.js";
 import { bootstrapIfEmpty } from "../db/bootstrap.js";
 import {
   checkGeneratedSchemaDrift,
@@ -38,6 +39,7 @@ export const API_READINESS_ERROR_CODES = new Set([
   "GENERATED_SCHEMA_BEHIND",
   "GENERATED_SCHEMA_UNMIGRATED",
   "GENERATED_SCHEMA_FOREIGN",
+  "AUDIT_HISTORY_UNAVAILABLE",
 ]);
 
 function readinessError(code: string): Error {
@@ -259,6 +261,7 @@ export function createApiReadinessChecks(
               : "GENERATED_SCHEMA_UNMIGRATED",
           );
         }
+        if (!(await auditHistoryReady(databaseRuntime.db))) throw readinessError("AUDIT_HISTORY_UNAVAILABLE");
         if (isForeign(await findUndeclaredDatabaseSchema(databaseRuntime.db))) {
           throw readinessError("GENERATED_SCHEMA_FOREIGN");
         }

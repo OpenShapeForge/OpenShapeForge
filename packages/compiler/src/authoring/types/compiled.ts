@@ -703,7 +703,8 @@ export interface CompiledTransitionField {
 }
 
 export interface CompiledEntityContract {
-  source?: { kind: "operations"; query?: { filterFields: string[]; sortFields: string[] } };
+  audit?: { timeline?: { include: string[] } };
+  source?: { kind: "operations"; query?: { mode?: "structured"; filterFields: string[]; sortFields: string[] } };
   blueprint?: CompiledBlueprint;
   /** Status state machines declared on fields; absent when the entity has none. */
   transitions?: CompiledTransitionField[];

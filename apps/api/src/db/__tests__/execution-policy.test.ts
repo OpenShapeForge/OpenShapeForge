@@ -488,7 +488,7 @@ describe("host execution policies against PostgreSQL", () => {
     await sql`delete from erp.document_types`.execute(privileged!.db);
     await sql`delete from erp.template_versions`.execute(privileged!.db);
     await sql`delete from erp.templates`.execute(privileged!.db);
-    await sql`delete from platform.entity_events`.execute(privileged!.db);
+    await sql`truncate platform.entity_events`.execute(privileged!.db);
     // A keyed Operation's receipt row belongs to a registered tenant.
     for (const tenantId of [tenantA, tenantB]) {
       await sql`insert into platform.tenants (id, slug, name, status)

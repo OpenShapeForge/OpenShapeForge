@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Operation-backed entities share the ordinary field model, never a second output schema. */
 import type { CoreEntity, CompiledField } from "../types.js";
+import { structuredQuerySchema } from "./structured-query.js";
 import { operationAction } from "../entity-model.js";
 import { compiledObjectSchema } from "../../field-json-schema.js";
 import { entityRecordEnvelopeSchema } from "../../entity-operation-json-schema.js";
@@ -46,14 +47,15 @@ export function operationSourceEntity(entity: CoreEntity, fields: CompiledField[
     record.properties[field.key] = { anyOf: [schema, { type: "null" }],
       ...Object.fromEntries(Object.entries(schema).filter(([key]) => key.startsWith("x-osf-"))) };
   }
+  const structured = entity.source.query?.mode === "structured";
   const scalarFields = fields.filter(field => field.cardinality === "single" && field.baseType === "string");
   const queryFields = entity.source.query?.filterFields ?? scalarFields.map(field => field.key);
   const sortFields = entity.source.query?.sortFields ?? scalarFields.map(field => field.key);
-  if (!sortFields.length || [...queryFields, ...sortFields].some(key => !scalarFields.some(field => field.key === key))) {
+  if (!structured && (!sortFields.length || [...queryFields, ...sortFields].some(key => !scalarFields.some(field => field.key === key)))) {
     throw new Error(`${entity.entity}: source query capabilities must name scalar string fields and include at least one sort field.`);
   }
-  const inputProperties = Object.fromEntries(queryFields.map(key => [key, { type: "string", maxLength: 500, "x-osf-i18n": { title: fields.find(field => field.key === key)!.label } }]));
-  const listInput = { type: "object", additionalProperties: false, properties: {
+  const inputProperties = structured ? {} : Object.fromEntries(queryFields.map(key => [key, { type: "string", maxLength: 500, "x-osf-i18n": { title: fields.find(field => field.key === key)!.label } }]));
+  const listInput = structured ? structuredQuerySchema(fields, queryFields, sortFields) : { type: "object", additionalProperties: false, properties: {
     first: { type: "integer", minimum: 1, maximum: 200, default: 50, "x-osf-i18n": { title: { en: "Page size", nl: "Paginagrootte" } } },
     after: { type: "string", "x-osf-i18n": { title: { en: "Cursor", nl: "Cursor" } } }, ...inputProperties,
     sortField: { type: "string", enum: sortFields, "x-osf-i18n": { title: { en: "Sort field", nl: "Sorteerveld" },

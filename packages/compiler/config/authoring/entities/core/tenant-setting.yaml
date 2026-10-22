@@ -114,7 +114,6 @@ interfaces:
           read: { en: /tenant-settings/:id, nl: /tenant-settings/:id }
           create: { en: /tenant-settings/create, nl: /tenant-settings/aanmaken }
         title: "{{key}}"
-        subtitle: ""
         badges: []
         layout:
           tabs:
@@ -123,6 +122,7 @@ interfaces:
               fields: [value]
         modes:
           create:
+            title: { en: Create tenant setting, nl: Tenantinstelling aanmaken }
             groups:
               - title: { en: Setting, nl: Instelling }
                 fields: [namespace, key, definition, value, description]

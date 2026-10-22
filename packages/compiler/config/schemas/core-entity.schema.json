@@ -1863,6 +1863,8 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "render": {"oneOf": [{"type": "string", "x-osf-i18n": {"title": {"en": "Component", "nl": "Component"}}}, {"$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/render"}], "x-osf-i18n": {"title": {"en": "Presentation", "nl": "Weergave"}}},
+        "bindings": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "minLength": 1, "x-osf-i18n": {"title": {"en": "Source field", "nl": "Bronveld"}}}, "x-osf-i18n": {"title": {"en": "Name part bindings", "nl": "Koppeling naamdelen"}}},
         "showInReadNavigation": {
           "type": "boolean",
           "description": "Show this supplementary tab in ordinary read navigation; edit forms and contextual selection retain it.",

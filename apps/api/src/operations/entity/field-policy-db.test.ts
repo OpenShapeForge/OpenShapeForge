@@ -483,6 +483,10 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       expect(await latestConfigurationForSession({ ...writer, tenantId: randomUUID() }, runtime.db)).toBeNull();
       expect(await consumeConfigurationForSession(pending!.id, { ...writer, tenantId: randomUUID() }, runtime.db)).toBe(false);
       expect(await consumeConfigurationForSession(pending!.id, writer, runtime.db)).toBe(true);
+      const standalone = await startConfigurationForSession(runtime.db, writer, body);
+      expect(typeof standalone.id).toBe("string");
+      expect((await latestConfigurationForSession(writer, runtime.db))?.id).toBe(standalone.id);
+      expect(await consumeConfigurationForSession(standalone.id, writer, runtime.db)).toBe(true);
       await expect(startConfigurationForSession(runtime.db, viewer, body)).rejects.toBeDefined();
       await expect(startConfigurationForSession(runtime.db, { ...writer, tenantId: randomUUID() }, body)).rejects.toMatchObject({ code: "NOT_FOUND" });
       await expect(startConfigurationForSession(runtime.db, writer, { ...body, values: { ...body.values, data: { token: "must not be accepted" } } })).rejects.toBeDefined();

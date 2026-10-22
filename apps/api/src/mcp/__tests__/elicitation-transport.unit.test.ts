@@ -5,7 +5,7 @@ import { collectElicitedValues } from "../elicitation.js";
 import { elicitationFallback } from "../handoff-config.js";
 import { HttpError } from "../../rest/http-error.js";
 
-test("a modern tools/call can continue through the private form handoff when push elicitation is unavailable", async () => {
+test("a modern tools/call classifies the SDK's push-elicitation refusal as a handoff condition", async () => {
   let refusal: unknown;
   const handler = createMcpHandler(() => {
     const server = new Server({ name: "secure-input-regression", version: "1" }, { capabilities: { tools: {} } });
@@ -43,6 +43,8 @@ test("a modern tools/call can continue through the private form handoff when pus
 
 test("only unsupported protocol or capability errors select the form handoff", () => {
   expect(elicitationFallback(new SdkError(SdkErrorCode.CapabilityNotSupported, "Form unsupported"))).toBe("unsupported");
+  expect(elicitationFallback(new SdkError(SdkErrorCode.ConnectionClosed, "Connection closed"))).toBeNull();
+  expect(elicitationFallback(new SdkError(SdkErrorCode.RequestTimeout, "Request timed out"))).toBe("timeout");
   expect(elicitationFallback(new HttpError(500, "SECRET_KEYRING_MISSING", "Missing keyring"))).toBeNull();
   expect(elicitationFallback(new Error("Provider configuration is invalid"))).toBeNull();
 });

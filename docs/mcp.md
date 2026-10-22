@@ -79,8 +79,10 @@ For ordinary configuration data (a `create_connection` for an Adapter, or any
 create Operation with a secure-input `interaction`), the runtime preserves
 this UX order:
 
-1. **In-client elicitation** — the secure form in place; values never touch
-   the model.
+1. **In-client elicitation** — the secure form in place on legacy protocol
+   revisions; values never touch the model. On revision `2026-07-28`, the
+   runtime continues at tier 2 or 3: native `inputRequired`/`inputResponse`
+   continuation is not yet implemented.
 2. **An MCP App**, only when the client advertises `io.modelcontextprotocol/ui`
    **and** `OPENSHAPEFORGE_PUBLIC_ORIGIN` is `https://`. The app renders the
    handoff form in an iframe inside the host's own https sandbox, so an

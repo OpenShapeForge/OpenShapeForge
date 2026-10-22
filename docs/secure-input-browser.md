@@ -37,8 +37,11 @@ loses before a write. Validation or write failure rolls back the claim and leave
 the same unexpired form retryable; success commits consumption with the write.
 
 MCP clients whose protocol disallows server-push elicitation, or whose
-capabilities exclude form elicitation, receive the existing private MCP App or
-authenticated browser handoff instead. Unsupported transport errors do not
+capabilities exclude form elicitation, receive the existing private MCP App
+when they advertise its UI capability and the public origin is HTTPS.
+Otherwise the result exposes the single-use configuration URL, as described
+in `docs/mcp.md`; the entered credentials still bypass the model.
+Unsupported transport errors do not
 relax create admission or allow credentials as ordinary tool arguments. Other
 errors (including missing encryption keys) still refuse the operation.
 The latest-form `/pending` endpoint is for discovering an MCP-started form;

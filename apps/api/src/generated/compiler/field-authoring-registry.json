@@ -332,6 +332,12 @@
       }
     },
     "markdown": {
+      "props": {
+        "variableListLabel": {
+          "en": "Variables",
+          "nl": "Variabelen"
+        }
+      },
       "label": {
         "en": "Markdown",
         "nl": "Markdown"
@@ -364,6 +370,9 @@
       "audit": true
     },
     "phone": {
+      "props": {
+        "country": "netherlands"
+      },
       "label": {
         "en": "Phone number",
         "nl": "Telefoonnummer"
@@ -374,8 +383,8 @@
         "pattern": "^\\+?[0-9\\s\\-()]{7,20}$"
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldPhone",
+        "input": "FieldPhone"
       },
       "classification": {
         "sensitivity": "pii",
@@ -708,6 +717,12 @@
       }
     },
     "measurement": {
+      "props": {
+        "unitLabel": {
+          "en": "Unit",
+          "nl": "Eenheid"
+        }
+      },
       "kind": "object",
       "label": {
         "en": "Measurement",
@@ -820,6 +835,16 @@
       }
     },
     "numericRange": {
+      "props": {
+        "minimumLabel": {
+          "en": "From",
+          "nl": "Van"
+        },
+        "maximumLabel": {
+          "en": "To",
+          "nl": "Tot"
+        }
+      },
       "schema": {
         "x-osf-ordered-fields": {
           "lower": "from",
@@ -860,6 +885,9 @@
       ]
     },
     "localTime": {
+      "props": {
+        "precision": "second"
+      },
       "label": {
         "en": "Time of day",
         "nl": "Tijdstip"
@@ -875,6 +903,16 @@
       }
     },
     "dateRange": {
+      "props": {
+        "startLabel": {
+          "en": "From",
+          "nl": "Van"
+        },
+        "endLabel": {
+          "en": "To",
+          "nl": "Tot"
+        }
+      },
       "schema": {
         "x-osf-ordered-fields": {
           "lower": "from",
@@ -915,6 +953,38 @@
       ]
     },
     "calendarPeriod": {
+      "props": {
+        "typeLabel": {
+          "en": "Period type",
+          "nl": "Soort periode"
+        },
+        "valueLabel": {
+          "en": "Period value",
+          "nl": "Periode"
+        },
+        "kindLabels": {
+          "month": {
+            "en": "Month",
+            "nl": "Maand"
+          },
+          "quarter": {
+            "en": "Quarter",
+            "nl": "Kwartaal"
+          },
+          "year": {
+            "en": "Year",
+            "nl": "Jaar"
+          },
+          "halfYear": {
+            "en": "Half-year",
+            "nl": "Halfjaar"
+          },
+          "week": {
+            "en": "Week",
+            "nl": "Week"
+          }
+        }
+      },
       "label": {
         "en": "Calendar period",
         "nl": "Kalenderperiode"
@@ -7101,6 +7171,208 @@
       },
       "displayTemplate": "{{fileName}}",
       "filterField": "fileName",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "AuditEvent": {
+      "kind": "provider",
+      "entity": "AuditEvent",
+      "entityIdentity": true,
+      "baseType": "object",
+      "label": {
+        "en": "Audit event",
+        "nl": "Auditgebeurtenis"
+      },
+      "pluralLabel": {
+        "en": "Audit events",
+        "nl": "Auditgebeurtenissen"
+      },
+      "shape": [
+        {
+          "key": "id",
+          "osfType": "string",
+          "required": true,
+          "readOnly": true,
+          "validation": {
+            "format": "uuid"
+          },
+          "label": {
+            "en": "Event",
+            "nl": "Gebeurtenis"
+          }
+        },
+        {
+          "key": "entityType",
+          "osfType": "string",
+          "required": true,
+          "readOnly": true,
+          "label": {
+            "en": "Entity type",
+            "nl": "Entiteitstype"
+          }
+        },
+        {
+          "key": "recordId",
+          "osfType": "string",
+          "required": true,
+          "readOnly": true,
+          "label": {
+            "en": "Record",
+            "nl": "Record"
+          }
+        },
+        {
+          "key": "eventType",
+          "osfType": "string",
+          "required": true,
+          "readOnly": true,
+          "label": {
+            "en": "Event type",
+            "nl": "Gebeurtenistype"
+          }
+        },
+        {
+          "key": "occurredAt",
+          "osfType": "datetime",
+          "required": true,
+          "readOnly": true,
+          "label": {
+            "en": "Time",
+            "nl": "Tijdstip"
+          }
+        },
+        {
+          "key": "actorId",
+          "osfType": "string",
+          "readOnly": true,
+          "label": {
+            "en": "Actor",
+            "nl": "Actor"
+          }
+        },
+        {
+          "key": "actorKind",
+          "osfType": "string",
+          "readOnly": true,
+          "label": {
+            "en": "Actor kind",
+            "nl": "Actorsoort"
+          }
+        },
+        {
+          "key": "operationId",
+          "osfType": "string",
+          "readOnly": true,
+          "label": {
+            "en": "Operation",
+            "nl": "Operation"
+          }
+        },
+        {
+          "key": "correlationId",
+          "osfType": "string",
+          "readOnly": true,
+          "label": {
+            "en": "Correlation",
+            "nl": "Samenhang"
+          }
+        },
+        {
+          "key": "changedFields",
+          "osfType": "string",
+          "cardinality": "collection",
+          "required": true,
+          "readOnly": true,
+          "label": {
+            "en": "Changed fields",
+            "nl": "Gewijzigde velden"
+          }
+        },
+        {
+          "key": "subjects",
+          "osfType": "object",
+          "cardinality": "collection",
+          "required": true,
+          "readOnly": true,
+          "label": {
+            "en": "Timeline subjects",
+            "nl": "Tijdlijnonderwerpen"
+          },
+          "children": [
+            {
+              "key": "entityType",
+              "osfType": "string",
+              "required": true,
+              "label": {
+                "en": "Entity type",
+                "nl": "Entiteitstype"
+              }
+            },
+            {
+              "key": "recordId",
+              "osfType": "string",
+              "required": true,
+              "label": {
+                "en": "Record",
+                "nl": "Record"
+              }
+            }
+          ]
+        },
+        {
+          "key": "beforeValues",
+          "osfType": "object",
+          "readOnly": true,
+          "label": {
+            "en": "Recorded previous values",
+            "nl": "Vastgelegde vorige waarden"
+          }
+        },
+        {
+          "key": "afterValues",
+          "osfType": "object",
+          "readOnly": true,
+          "label": {
+            "en": "Recorded new values",
+            "nl": "Vastgelegde nieuwe waarden"
+          }
+        },
+        {
+          "key": "rawData",
+          "osfType": "object",
+          "readOnly": true,
+          "label": {
+            "en": "Recorded redacted payload",
+            "nl": "Vastgelegde geredigeerde payload"
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "auditEventId": {
+      "kind": "entityId",
+      "entity": "AuditEvent",
+      "baseType": "string",
+      "label": {
+        "en": "Audit event",
+        "nl": "Auditgebeurtenis"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "optionSource": {
+        "type": "entity",
+        "source": "AuditEvent",
+        "valueField": "id"
+      },
+      "displayTemplate": "{{eventType}}",
+      "filterField": "eventType",
       "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
@@ -39950,102 +40222,51 @@
           }
         },
         {
-          "key": "valueType",
+          "key": "definition",
+          "osfType": "fieldDefinition",
           "required": true,
+          "immutable": true,
           "label": {
-            "en": "Value type",
-            "nl": "Waardetype"
-          },
-          "description": {
-            "en": "Data shape used by the setting value.",
-            "nl": "Datastructuur die door de instellingswaarde wordt gebruikt."
-          },
-          "defaultValue": "string",
-          "validation": {
-            "minLength": 1,
-            "maxLength": 20
-          },
-          "options": {
-            "type": "referentiedata",
-            "referentieGroep": "TENANTSETTINGVALUETYPE"
+            "en": "Definition",
+            "nl": "Definitie"
           },
           "persisted": {
-            "column": "value_type",
+            "column": "definition",
             "storageClass": "core"
-          },
-          "osfType": "referenceDataCode"
-        },
-        {
-          "key": "valueText",
-          "osfType": "string",
-          "required": false,
-          "label": {
-            "en": "Text value",
-            "nl": "Tekstwaarde"
-          },
-          "description": {
-            "en": "Plain string value for text-based settings.",
-            "nl": "Eenvoudige tekenreekswaarde voor tekstinstellingen."
-          },
-          "validation": {
-            "maxLength": 4000
-          },
-          "persisted": {
-            "column": "value_text",
-            "storageClass": "core"
-          },
-          "visibility": {
-            "conditions": [
-              {
-                "field": "valueType",
-                "operator": "eq",
-                "value": "string"
-              }
-            ]
           }
         },
         {
-          "key": "valueJson",
-          "osfType": "object",
-          "required": false,
-          "label": {
-            "en": "JSON value",
-            "nl": "JSON-waarde"
+          "key": "value",
+          "osfType": "typedValue",
+          "typedBy": {
+            "definitionField": "definition",
+            "documentField": "documentValue",
+            "encrypted": true
           },
-          "description": {
-            "en": "Structured JSON value for object-based settings.",
-            "nl": "Gestructureerde JSON-waarde voor objectgebaseerde instellingen."
+          "label": {
+            "en": "Value",
+            "nl": "Waarde"
           },
           "persisted": {
-            "column": "value_json",
+            "column": "value",
             "storageClass": "core"
-          },
-          "visibility": {
-            "conditions": [
-              {
-                "field": "valueType",
-                "operator": "eq",
-                "value": "json"
-              }
-            ]
           }
         },
         {
-          "key": "isSecret",
-          "osfType": "boolean",
-          "required": true,
+          "key": "documentValue",
+          "osfType": "Document",
+          "readOnly": true,
           "label": {
-            "en": "Secret",
-            "nl": "Geheim"
+            "en": "Document",
+            "nl": "Document"
           },
-          "description": {
-            "en": "Whether the setting should be stored and handled as a secret.",
-            "nl": "Of de instelling als geheim moet worden opgeslagen en verwerkt."
-          },
-          "defaultValue": false,
           "persisted": {
-            "column": "is_secret",
+            "column": "document_value_id",
             "storageClass": "core"
+          },
+          "relationship": {
+            "ownership": "reference",
+            "inverse": false
           }
         },
         {

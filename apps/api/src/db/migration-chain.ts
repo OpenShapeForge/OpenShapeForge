@@ -94,6 +94,7 @@ import { applyOrganizationRelationLinkMigration } from "./migrations/organizatio
 import { applyUpdateNoticesMigration } from "./migrations/update-notices.js";
 import { applyBlueprintsMigration, applyBlueprintsGrants } from "./migrations/blueprints.js";
 import { applyOperationExecutionReceiptsMigration } from "./migrations/operation-execution-receipts.js";
+import { applyAuditHistory } from "./migrations/audit-history.js";
 import { applyJobsMigration } from "./migrations/jobs.js";
 import {
   applyGeneratedSchemaMigration,
@@ -171,6 +172,7 @@ export async function runMigrationChain(
   await applyOperationExecutionReceiptsMigration(db);
   await applyJobsMigration(db);
   await applyBlueprintsMigration(db);
+  await applyAuditHistory(db);
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);
   await applyBlueprintsGrants(db);

@@ -10,7 +10,6 @@ import { entityValueCarriers, prepareEntityValueWriteInTransaction, type EntityV
 import { getGeneratedCrudTables } from "./catalog.js";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import {
-  appendGeneratedCrudEvent,
   elicitedOutputColumn,
   generatedCrudAggregateId,
   generatedCrudError,
@@ -358,11 +357,6 @@ async function insertGeneratedRowInTransaction(
   // public create refuses an owned child (collectionMutationError), so this
   // covers the in-transaction create the collection insert runs.
   await draftOwningHead(trx, entityValues.tables ?? getGeneratedCrudTables(), table, row);
-  await appendGeneratedCrudEvent(trx, table, {
-    aggregateId: generatedCrudAggregateId(table, row),
-    eventType: "created",
-    row,
-  }, entityValues.registry);
   return projectGeneratedEntityRow(table, session, row, entityValues.registry);
 }
 
@@ -554,11 +548,6 @@ async function applyGeneratedRowUpdate(
     const row = result.rows[0]?.row ?? null;
     if (!row) return unchangedRow();
     await draftOwningHead(trx, entityValues.tables ?? getGeneratedCrudTables(), table, row);
-    await appendGeneratedCrudEvent(trx, table, {
-      aggregateId: generatedCrudAggregateId(table, row),
-      eventType: "updated",
-      row,
-    }, entityValues.registry);
     return projectGeneratedEntityRow(table, session, row, entityValues.registry);
   }).catch((error) => {
     throw translateDatabaseError(table, error);
@@ -698,11 +687,6 @@ export async function deleteGeneratedEntity(
       }
       return false;
     }
-    await appendGeneratedCrudEvent(trx, table, {
-      aggregateId: generatedCrudAggregateId(table, row),
-      eventType: "deleted",
-      row,
-    });
     return true;
   }).catch((error) => {
     throw translateDatabaseError(table, error);

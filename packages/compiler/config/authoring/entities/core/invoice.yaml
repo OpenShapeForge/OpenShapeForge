@@ -27,6 +27,9 @@ indexes:
       - invoiceNumber
     unique: true
     where: { field: invoiceNumber, present: true }
+audit:
+  timeline:
+    include: [invoiceLines, invoicePayments, invoiceVatBuckets]
 fields:
   - key: invoiceKind
     required: true

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { withAuditContext } from "../platform/audit-context.js";
 import { liveMaintenanceRunner } from "../modules/maintenance.js";
 import { blueprintOperationHandler } from "./entity/blueprints.js";
 import { TRANSITIONS_PLUGIN, transitionAvailabilityHandler, transitionOperationHandler } from "./entity/transitions.js";
@@ -1529,7 +1530,7 @@ export async function invokeOperation(
     });
   };
 
-  return withModuleOperationSession(
+  return withAuditContext(bound.operation.key, context.session?.credential, () => withModuleOperationSession(
     context.platform,
     context.session,
     (session) => {
@@ -1564,7 +1565,7 @@ export async function invokeOperation(
         ),
     });
     },
-  );
+  ));
 }
 
 function applyErrorResponseMetadata(

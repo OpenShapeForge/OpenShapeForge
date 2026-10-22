@@ -35,6 +35,9 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+audit:
+  timeline:
+    include: [naturalPersons, legalEntities, contactDetails, addresses, addressAssignments, communicationPreferences, groupMemberships, roles]
 fields:
   - key: labels
     osfType: labelSet

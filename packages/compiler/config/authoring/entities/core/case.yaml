@@ -45,6 +45,9 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+audit:
+  timeline:
+    include: [statusEvents, parties, objectLinks, contactMoments, documents, tasks, milestones]
 fields:
   - key: code
     osfType: string

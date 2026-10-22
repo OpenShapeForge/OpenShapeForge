@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { getGeneratedCrudTables } from "./table-registry.js";
+import { withAuditContext } from "../../platform/audit-context.js";
 import { createFromBlueprint } from "./blueprints.js";
 import { assertCallerTopLevelFields } from "./field-policy.js";
 import {
@@ -16,7 +18,6 @@ import rawOperationCatalog from "../../generated/operations/catalog.json" with {
 import { collectionManagedFields, collectionMutationError, withoutCollectionInputs } from "./collection-policy.js";
 import {
   generatedCrudError,
-  getGeneratedCrudTables,
   requireEntityOperation,
 } from "./catalog.js";
 import {
@@ -876,7 +877,7 @@ function listPageInput(input: EntityOperationInput | undefined): ListPageInput {
 }
 
 /** Interface-neutral dispatcher used by REST, MCP and future transports. */
-export async function executeEntityOperation(
+async function executeEntityOperationWithContext(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   request: EntityOperationRequest,
@@ -1208,3 +1209,7 @@ export async function executeEntityOperation(
     } as EntityOperationResult;
   }
 }
+
+export const executeEntityOperation: typeof executeEntityOperationWithContext = (db, session, request, ...rest) =>
+  withAuditContext(request.operation.id, (session as { credential?: string }).credential,
+    () => executeEntityOperationWithContext(db, session, request, ...rest));

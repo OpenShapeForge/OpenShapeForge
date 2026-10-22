@@ -7,7 +7,7 @@ import { createDbSessionContext, withDbSession, type DbSessionInput } from "../.
 import { normalizeTimestampToken } from "../../db/timestamps.js";
 import rawCatalog from "../../generated/operations/catalog.json" with { type: "json" };
 import { generatedEntityValues } from "../../modules/entity-value-registry.js";
-import { appendGeneratedCrudEvent, generatedCrudError, getGeneratedCrudTables, isGeneratedCrudOperationEnabled, projectGeneratedEntityRow, requireEntityOperation, translateDatabaseError } from "./catalog.js";
+import { generatedCrudError, getGeneratedCrudTables, isGeneratedCrudOperationEnabled, projectGeneratedEntityRow, requireEntityOperation, translateDatabaseError } from "./catalog.js";
 import { fieldNameForColumn } from "./columns.js";
 import { collectionManagedFields } from "./collection-policy.js";
 import { createGeneratedEntityInTransaction } from "./mutations.js";
@@ -287,7 +287,6 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
             const row = updated.rows[0]?.row;
             if (row) {
               changed = true;
-              await appendGeneratedCrudEvent(trx, target, { aggregateId: childId, eventType: "updated", row }, entityValues);
             } else if (!(await sql<{ id: string }>`select id from ${sql.id(target.schema, target.table)} where id = ${childId}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid`.execute(trx)).rows[0]) {
               throw generatedCrudError("Child update was refused.", "FORBIDDEN");
             }
@@ -299,7 +298,6 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
             where id = ${childId}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid returning to_jsonb(${sql.id(target.table)}.*) as row`.execute(trx);
           const row = deleted.rows[0]?.row;
           if (!row) throw generatedCrudError("Child removal was refused.", "FORBIDDEN");
-          await appendGeneratedCrudEvent(trx, target, { aggregateId: childId, eventType: "deleted", row }, entityValues);
           ordered.splice(ordered.indexOf(childId), 1);
           changed = true;
         }
@@ -323,7 +321,6 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
         const row = result.rows[0]?.row;
         if (!row) throw generatedCrudError("Child update was refused.", "FORBIDDEN");
         changed = true;
-        await appendGeneratedCrudEvent(trx, target, { aggregateId: id, eventType: "updated", row }, entityValues);
       }
       if (!changed) {
         return { parent: projectGeneratedEntityRow(owner, session, locked.rows[0].row, entityValues), childId, orderedIds: relation.sortable ? ordered : [...ordered].sort() };
@@ -341,7 +338,6 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       const draft = draftRule(owner);
       if (draft) await sql`update ${sql.id(owner.schema, owner.table)} set ${sql.id(draft.column)} = ${draft.value} where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid`.execute(trx);
       else await draftOwningHead(trx, catalog.tables, owner, parentRow);
-      await appendGeneratedCrudEvent(trx, owner, { aggregateId: request.id, eventType: "updated", row: draft ? { ...parentRow, [draft.column]: draft.value } : parentRow }, entityValues);
       return { parent: projectGeneratedEntityRow(owner, session, draft ? { ...parentRow, [draft.column]: draft.value } : parentRow, entityValues), childId, orderedIds: relation.sortable ? ordered : [...ordered].sort() };
     };
     return (transaction ? run(transaction) : withDbSession(db!, session, run)).catch((error) => { throw translateDatabaseError(owner, error); });

@@ -1552,6 +1552,7 @@ export function compileAuthoringBackendManifest(
         ...(candidate.contract.blueprint ? { blueprint: candidate.contract.blueprint } : {}),
         ...(candidate.contract.transitions ? { transitions: candidate.contract.transitions } : {}),
         authoringEntityName: candidate.contract.entity.name,
+        ...(candidate.contract.audit ? { audit: candidate.contract.audit } : {}),
         authoringEntitySlug: candidate.slug,
         generatedCrudEligibility: generatedCrudEligible ? "explicitly_enabled" : "explicitly_disabled",
         ...(candidate.contract.hardDelete
@@ -1654,6 +1655,15 @@ export function compileAuthoringBackendManifest(
   bindVersioningStorage(physicalCandidates, tables);
   bindOwnerAxes(physicalCandidates, tables);
   validateDefaultTemplates(tables);
+  for (const table of tables) {
+    for (const name of table.source?.audit?.timeline?.include ?? []) {
+      const relation = table.source?.graphql?.relationships?.find(item => item.name === name);
+      if (!relation || relation.resolve !== "hasMany" || !relation.foreignKey || relation.through ||
+          !tables.some(child => child.tenantScoped && child.columns.some(column => column.primaryKey) && child.source?.graphql?.typeName === relation.target)) {
+        throw new Error(`${table.source?.authoringEntityName}: audit timeline include ${name} requires a stored child relationship.`);
+      }
+    }
+  }
 
   return {
     version: 1,

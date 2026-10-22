@@ -16,6 +16,9 @@ pluralLabels:
   nl: Begrotingen
 domains:
   - finance
+audit:
+  timeline:
+    include: [budgetLines]
 fields:
   - key: code
     osfType: string

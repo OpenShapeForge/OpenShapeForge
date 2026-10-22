@@ -6,7 +6,7 @@
  *
  * Split out of generated-mcp-server.ts.
  */
-import { Server } from "@modelcontextprotocol/server";
+import { Server, SdkError, SdkErrorCode } from "@modelcontextprotocol/server";
 import { keyringFromEnv } from "../connectors/secrets.js";
 import { HttpError } from "../rest/http-error.js";
 
@@ -24,7 +24,7 @@ export function schemaUsesArtifactUpload(value: unknown): boolean {
 
 /**
  * Whether a failed elicitation should fall back to the browser handoff.
- * Unsupported clients, auto-answering clients (declared the capability, then
+ * Unsupported protocol revisions or clients, auto-answering clients (declared the capability, then
  * "declined" in machine time), dismissed forms and timed-out forms all land
  * here; a person who genuinely declined simply never opens the link and its
  * token expires. Every other failure (missing source row, keyring problems)
@@ -33,6 +33,12 @@ export function schemaUsesArtifactUpload(value: unknown): boolean {
 export function elicitationFallback(
   error: unknown,
 ): "unsupported" | "declined" | "timeout" | null {
+  // Modern MCP returns input requests rather than allowing server push. The
+  // existing private browser/App handoff is also usable on that transport.
+  if (error instanceof SdkError && (
+    error.code === SdkErrorCode.MethodNotSupportedByProtocolVersion ||
+    error.code === SdkErrorCode.CapabilityNotSupported
+  )) return "unsupported";
   if (error instanceof HttpError) {
     if (error.code === "ELICITATION_UNSUPPORTED") return "unsupported";
     if (error.code === "ELICITATION_DECLINED") return "declined";

@@ -293,7 +293,7 @@ export async function registerConfigurationHandoffRoutes(
           },
         });
       }
-      return reply.send({ saved: true });
+      return reply.send({ saved: true, id: outcome.id });
     },
   );
 

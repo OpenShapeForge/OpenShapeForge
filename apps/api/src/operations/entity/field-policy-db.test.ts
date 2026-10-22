@@ -5,6 +5,7 @@ import { SQL } from "bun";
 import { sql } from "kysely";
 import { FIELD_ITEM_ID } from "@openshapeforge/operations";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
+import { withDbSession } from "../../db/session.js";
 import type { GeneratedCrudTable } from "./types.js";
 
 // Bun shares imported modules across test files. A separate process guarantees
@@ -412,6 +413,7 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
         submitPending(parallelPending, "visible=second", parallelId),
       ]);
       expect(parallel.map(response => response.status).sort()).toEqual([200, 409]);
+      expect(parallel.find(response => response.status === 200)!.output).toEqual({ saved: true, id: String(created.id) });
       expect((await events(String(created.id))).length).toBe(beforeParallelEvents.length + 1);
       const tokenPending = await mint(writer.tenantId);
       const beforeTokenEvents = await events(String(created.id));
@@ -469,10 +471,12 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
         definitions: [{ key: "token", osfType: "string", classification: { sensitivity: "confidential" } }],
       } });
       const body = { entity: "ProtectedFieldsFixture", values: { key: `browser-${randomUUID()}`, label: "Browser configuration", explicitSecret: "not a credential", definitionId: definition.id } };
-      const admitted = await startConfigurationForSession(runtime.db, writer, body);
-      expect(admitted).toEqual({ expiresInSeconds: 1800 });
+      const admitted = await withDbSession(runtime.db, writer, () => startConfigurationForSession(runtime.db, writer, body));
+      expect(typeof admitted.id).toBe("string");
+      expect(admitted.expiresInSeconds).toBe(1800);
       expect(JSON.stringify(admitted)).not.toContain("token");
       const pending = await latestConfigurationForSession(writer, runtime.db);
+      expect(admitted.id).toBe(pending!.id);
       expect(pending!.pending.modelValues).toEqual(body.values);
       expect(pending!.pending.definitions).toMatchObject([{ key: "token", osfType: "string" }]);
       expect(await latestConfigurationForSession({ ...writer, userId: randomUUID() }, runtime.db)).toBeNull();

@@ -697,7 +697,7 @@ operations:
                       EXPIRED: { en: Expired, nl: Verlopen }
                 sentAt: { type: [string, 'null'], format: date-time, x-osf-i18n: { title: { en: Sent at, nl: Verzonden op } } }
                 expiresAt: { type: [string, 'null'], format: date-time, x-osf-i18n: { title: { en: Expires at, nl: Verloopt op } } }
-                role: { type: [string, 'null'], x-osf-i18n: { title: { en: Role, nl: Rol } } }
+                roles: { type: array, items: { type: string }, x-osf-i18n: { title: { en: Roles, nl: Rollen } } }
                 registrationStatus:
                   type: string
                   x-osf-i18n:
@@ -709,7 +709,7 @@ operations:
                       untracked: { en: Not registered locally, nl: Niet lokaal geregistreerd }
                 canResend: { type: boolean, x-osf-i18n: { title: { en: Can resend, nl: Opnieuw versturen mogelijk } } }
                 canRevoke: { type: boolean, x-osf-i18n: { title: { en: Can revoke, nl: Intrekken mogelijk } } }
-              required: [tenantSlug, invitationId, email, firstName, lastName, status, sentAt, expiresAt, role, registrationStatus, canResend, canRevoke]
+              required: [tenantSlug, invitationId, email, firstName, lastName, status, sentAt, expiresAt, roles, registrationStatus, canResend, canRevoke]
           unresolved:
             type: array
             items:
@@ -784,11 +784,13 @@ operations:
           email: { type: string, format: email, x-osf-i18n: { title: { en: Email, nl: E-mail } } }
           firstName: { type: string, x-osf-i18n: { title: { en: First name, nl: Voornaam } } }
           lastName: { type: string, x-osf-i18n: { title: { en: Last name, nl: Achternaam } } }
-          role:
-            type: string
-            enum: [org_admin, org_employee]
-            x-osf-i18n: { title: { en: Role, nl: Rol }, enum: { org_admin: { en: Organization administrator, nl: Organisatiebeheerder }, org_employee: { en: Employee, nl: Medewerker } } }
-        required: [slug, email, role]
+          roles:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items: { type: string, enum: [org_admin, org_employee], x-osf-i18n: { title: { en: Role, nl: Rol }, enum: { org_admin: { en: Organization administrator, nl: Organisatiebeheerder }, org_employee: { en: Employee, nl: Medewerker } } } }
+            x-osf-i18n: { title: { en: Roles, nl: Rollen } }
+        required: [slug, email, roles]
     output: { schema: *invitationResultOutput }
     auth: { mode: control, roles: [platform-operator] }
     tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
@@ -2367,8 +2369,8 @@ interfaces:
         recordRoute: /tenants/:slug/invitations/:invitationId
         idField: invitationId
         displayField: email
-        fields: [tenantSlug, invitationId, email, firstName, lastName, status, sentAt, expiresAt, role, registrationStatus]
-        columns: [email, role, status, registrationStatus, sentAt, expiresAt]
+        fields: [tenantSlug, invitationId, email, firstName, lastName, status, sentAt, expiresAt, roles, registrationStatus]
+        columns: [email, roles, status, registrationStatus, sentAt, expiresAt]
         operations:
           list: { operation: listTenantInvitations, resultField: invitations }
           get: { operation: getTenantInvitation }

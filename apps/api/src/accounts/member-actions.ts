@@ -12,8 +12,8 @@ import type { ModuleOperationContext, ModuleOperationHandler } from '../modules/
 export const inviteMember=memberGuard(async(input,c)=>{
   const p=await provider(c);
   if(typeof input.email!=='string')throw new HttpError(400,'VALIDATION','Enter an email address.');
-  if(input.role !== undefined && (typeof input.role !== 'string' || !input.role.trim()))
-    throw new HttpError(400,'VALIDATION','Choose a role from this organization.');
+  if(!Array.isArray(input.roles) || input.roles.length === 0)
+    throw new HttpError(400,'VALIDATION','Choose at least one role from this organization.');
   for(const field of ['firstName','lastName'])if(typeof input[field]!=='string' || !(input[field] as string).trim() || (input[field] as string).length>120)
     throw new HttpError(400,'VALIDATION','Enter a name of 1 to 120 characters.');
   // Adding a member is not a role-edit operation for an already linked account.
@@ -25,7 +25,7 @@ export const inviteMember=memberGuard(async(input,c)=>{
     if(matches.length)throw new HttpError(409,'CONFLICT','This email belongs to an existing relation. Select the invitation relation explicitly.');
   }
   const invitation=await inviteEmployee(c.db!,p.s,p.client,{email:input.email,firstName:input.firstName as string|undefined,
-    lastName:input.lastName as string|undefined,role:input.role === undefined ? 'org_employee' : input.role as string,...(relationId?{relationId}:{})});
+    lastName:input.lastName as string|undefined,roles:input.roles as string[],...(relationId?{relationId}:{})});
   await memberAudit(c,invitation.id,'member.invited');
   return {value:{id:invitation.id,email:invitation.email,status:invitation.status,delivery:invitation.delivery}};
 });

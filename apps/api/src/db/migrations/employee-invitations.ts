@@ -17,10 +17,8 @@ import { ensureCheckConstraint } from "./sql-invariants.js";
  *     an expression, not a table-wide key, so revoking and re-inviting the
  *     same address is not a conflict — only two simultaneously PENDING
  *     invitations for the same address in the same tenant are;
- *   - `role` held to the two composite client roles an invitation may name
- *     today (`org_admin`, `org_employee`). Whatever applies the role after
- *     sign-in is free to grow that list; the check only has to track what an
- *     invitation itself may name;
+ *   - the declared role selection is stored as one array; runtime validation
+ *     checks every key and organization-owned custom role before admission;
  *   - `status` held to pending | revoked | accepted, with the timestamps each
  *     requires. `accepted` is reserved for the day the sign-in path in
  *     identity-link.ts consumes a matching row; nothing sets it yet;
@@ -36,9 +34,6 @@ export async function applyEmployeeInvitationsMigration(db: OpenShapeForgeDataba
       on platform.employee_invitations (tenant_id, lower(email))
       where status = 'pending';
   `.execute(db);
-
-  // Assignable role names come from the generated authorization catalog.
-  await sql`alter table platform.employee_invitations drop constraint if exists employee_invitations_role_check`.execute(db);
 
   await ensureCheckConstraint(db, {
     table: "platform.employee_invitations",

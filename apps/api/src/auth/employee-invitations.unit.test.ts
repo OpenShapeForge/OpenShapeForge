@@ -6,7 +6,7 @@ import type { DB } from "../generated/db/types.js";
 import { KeycloakAdminError } from "../control/keycloak-organization-admin.js";
 import type { KeycloakOrganizationMembersClient } from "../control/keycloak-organization-members.js";
 import {
-  EMPLOYEE_INVITATION_ADMIN_ROLE, employeeInvitationRoleGrants, inviteEmployee, revokeInvitation,
+  EMPLOYEE_INVITATION_ADMIN_ROLE, employeeInvitationRoleGrants, employeeInvitationRolesGrants, invitationRoles, inviteEmployee, revokeInvitation,
 } from "./employee-invitations.js";
 import identity from '../generated/compiler/identity.json' with { type: 'json' };
 
@@ -43,7 +43,7 @@ describe("invitation log lines", () => {
   const ADDRESS = "invitee.private@example.test";
   const session = { tenantId: TENANT, userId: "22222222-2222-4222-8222-222222222222", roles: [EMPLOYEE_INVITATION_ADMIN_ROLE] };
   const row = {
-    id: "33333333-3333-4333-8333-333333333333", email: ADDRESS, role: null, first_name: null, last_name: null,
+    id: "33333333-3333-4333-8333-333333333333", email: ADDRESS, roles: [], first_name: null, last_name: null,
     status: "pending", invited_by: session.userId, invited_at: new Date(0).toISOString(), revoked_at: null,
   };
   const connection: DatabaseConnection = {
@@ -81,8 +81,8 @@ describe("invitation log lines", () => {
   afterEach(() => { for (const spy of spies.splice(0)) spy.mockRestore(); });
 
   test("an admission, a Keycloak failure and a revocation are logged by id, never by address", async () => {
-    await expect(inviteEmployee(db, session, keycloak(false), { email: ADDRESS })).resolves.toMatchObject({ id: row.id, email: ADDRESS });
-    await expect(inviteEmployee(db, session, keycloak(true), { email: ADDRESS })).rejects.toBeDefined();
+    await expect(inviteEmployee(db, session, keycloak(false), { email: ADDRESS, roles: [] })).resolves.toMatchObject({ id: row.id, email: ADDRESS, roles: [] });
+    await expect(inviteEmployee(db, session, keycloak(true), { email: ADDRESS, roles: [] })).rejects.toBeDefined();
     await expect(revokeInvitation(db, session, keycloak(false), { email: ADDRESS })).resolves.toMatchObject({ id: row.id });
     expect(logged.some((line) => line.includes('"admission_recorded"') && line.includes(row.id))).toBe(true);
     expect(logged.some((line) => line.includes('"keycloak_failed"'))).toBe(true);
@@ -95,16 +95,26 @@ describe("invitation log lines", () => {
     const notifying = (fail: boolean) => ({ ...keycloak(false),
       async inviteExistingMember(organizationId: string, email: string) { calls.push(`${organizationId} ${email}`); if (fail) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "smtp", 500); return true; },
     }) as unknown as KeycloakOrganizationMembersClient;
-    await expect(inviteEmployee(db, session, notifying(false), { email: ADDRESS, role: "org_employee" }))
+    await expect(inviteEmployee(db, session, notifying(false), { email: ADDRESS, roles: ["org_employee"] }))
       .resolves.toMatchObject({ delivery: "not_required", accessNotice: "sent" });
     expect(calls).toEqual([`org-1 ${ADDRESS}`]);
-    await expect(inviteEmployee(db, session, notifying(true), { email: ADDRESS, role: "org_employee" }))
+    await expect(inviteEmployee(db, session, notifying(true), { email: ADDRESS, roles: ["org_employee"] }))
       .resolves.toMatchObject({ delivery: "not_required", accessNotice: "failed" });
     expect(logged.some((line) => line.includes('"access_notice_failed"'))).toBe(true);
     const missing = { ...keycloak(false), async inviteExistingMember() { return false; } } as unknown as KeycloakOrganizationMembersClient;
-    await expect(inviteEmployee(db, session, missing, { email: ADDRESS, role: "org_employee" }))
+    await expect(inviteEmployee(db, session, missing, { email: ADDRESS, roles: ["org_employee"] }))
       .resolves.toMatchObject({ accessNotice: "failed" });
     expect(logged.some((line) => line.includes('"MEMBER_NOT_FOUND"'))).toBe(true);
     expect(logged.filter((line) => line.includes(ADDRESS))).toEqual([]);
   });
+});
+
+ test("role-list validation rejects malformed lists and grants each persona only once", () => {
+  for (const roles of [undefined, null, 'org_employee', [null], ['not-a-role']]) {
+    expect(() => invitationRoles(roles)).toThrow();
+  }
+  expect(invitationRoles(['org_employee', 'org_employee'])).toEqual(['org_employee']);
+  expect(employeeInvitationRolesGrants(['org_employee', 'org_admin'])).toEqual([
+    ...new Set([...employeeInvitationRoleGrants('org_employee'), ...employeeInvitationRoleGrants('org_admin')]),
+  ]);
 });

@@ -74,12 +74,12 @@ export async function inviteFirstTenantAdministrator(
       if (!organization.enabled || organization.id !== tenant.keycloak_organization_id || organization.alias !== input.slug)
         throw new FirstAdministratorError("TENANT_NOT_READY", "The linked organization does not match the active tenant.");
       const prior = (await sql<Parameters<typeof toInvitation>[0]>`
-        select id, email, role, first_name, last_name, status, invited_by, invited_at, revoked_at
+        select id, email, roles, first_name, last_name, status, invited_by, invited_at, revoked_at
         from platform.employee_invitations where tenant_id = ${tenant.id}
         and status in ('pending', 'accepted')
-        and (role = 'org_admin' or lower(email) = ${email})
+        and ('org_admin' = any(roles) or lower(email) = ${email})
       `.execute(trx)).rows;
-      if (prior.some(p => p.role !== "org_admin" || p.email.toLowerCase() !== email))
+      if (prior.some(p => (p.roles.length !== 1 || p.roles[0] !== "org_admin") || p.email.toLowerCase() !== email))
         throw new FirstAdministratorError("FIRST_ADMIN_ALREADY_ASSIGNED", "An administrator or conflicting invitation already exists; use the tenant administrator workflow.");
       const admins = await clients.members.organizationAdministrators(organization.id, memberRoleClientId(), IDENTITY_LINK_ADMIN_ROLE);
       if (admins.some(a => a.email?.toLowerCase() !== email))
@@ -99,7 +99,7 @@ export async function inviteFirstTenantAdministrator(
       if (previous?.status === "accepted" && linked) return result(toInvitation(previous), delivery);
       if (delivery === "already_pending" && previous?.status === "pending") return result(toInvitation(previous), delivery);
       // Also repairs a confirmed Keycloak invite whose earlier DB commit failed.
-      const invitation = await recordEmployeeInvitation(trx, tenant.id, actor, { email, role: "org_admin" });
+      const invitation = await recordEmployeeInvitation(trx, tenant.id, actor, { email, roles: ["org_admin"] });
       return result(invitation, delivery);
     });
   } catch (error) {

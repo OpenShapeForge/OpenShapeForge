@@ -110,10 +110,10 @@ describe("tenant member roles from the control plane", () => {
         // account, without inventing an identity link or a provider-wide role.
         expect(await changeTenantMemberRoles(deps, "acme", subject, ["org_admin"], "assign"))
           .toMatchObject({ action: "awaiting_sign_in", roles: [] });
-        const intent = (await sql<{role: string; status: string}>`
-          select role, status from platform.employee_invitations where tenant_id = ${TENANT} and email = 'nora@example.com'
+        const intent = (await sql<{roles: string[]; status: string}>`
+          select roles, status from platform.employee_invitations where tenant_id = ${TENANT} and email = 'nora@example.com'
         `.execute(adminDb)).rows;
-        expect(intent).toEqual([{role: "org_admin", status: "pending"}]);
+        expect(intent).toEqual([{roles: ["org_admin"], status: "pending"}]);
         expect((await sql`select * from platform.identity_relations where tenant_id = ${TENANT}`.execute(adminDb)).rows).toHaveLength(0);
         expect((await sql`select * from platform.employee_invitations where tenant_id = ${OTHER_TENANT}`.execute(adminDb)).rows).toHaveLength(0);
         await sql`delete from platform.employee_invitations where tenant_id = ${TENANT}`.execute(adminDb);
@@ -121,8 +121,8 @@ describe("tenant member roles from the control plane", () => {
         // Invited as an employee in acme and in other, signed in to both.
         for (const tenant of [TENANT, OTHER_TENANT]) {
           await sql`
-            insert into platform.employee_invitations (tenant_id, email, role, invited_by)
-            values (${tenant}, 'nora@example.com', 'org_employee', 'test-admin')
+            insert into platform.employee_invitations (tenant_id, email, roles, invited_by)
+            values (${tenant}, 'nora@example.com', ARRAY['org_employee'], 'test-admin')
           `.execute(adminDb);
           __resetIdentityLinkForTests();
           await resolveIdentityLink(appDb, { tenantId: tenant, userId: subject, roles: [], groups: [], scope: "self" }, claims);
@@ -270,8 +270,8 @@ describe("tenant member roles from the control plane", () => {
         const back = await resolveIdentityLink(appDb, noraSession, claims);
         expect(back).toMatchObject({ status: "pending_confirmation", roles: [] });
         await sql`
-          insert into platform.employee_invitations (tenant_id, email, role, invited_by)
-          values (${TENANT}, 'nora@example.com', 'org_admin', 'test-admin')
+          insert into platform.employee_invitations (tenant_id, email, roles, invited_by)
+          values (${TENANT}, 'nora@example.com', ARRAY['org_admin'], 'test-admin')
         `.execute(adminDb);
         await confirmPendingLink(appDb, { ...noraSession, relation: back });
         __resetIdentityLinkForTests();

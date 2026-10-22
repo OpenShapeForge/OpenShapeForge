@@ -1,0 +1,82 @@
+schemaVersion: 1
+kind: operationCatalog
+plugin: osf-audit
+operations:
+  listAudit:
+    id: audit.list
+    name: { en: Audit log, nl: Auditlog }
+    description:
+      en: Read this organization's recorded events, newest first. Filter by aggregate type, record, event type or time. Returns event metadata only; actor may be unknown and field changes are not reconstructed. Use aggregateType and aggregateId from an event to read its timeline.
+      nl: Lees geregistreerde gebeurtenissen van deze organisatie, nieuwste eerst. Filter op aggregaattype, record, gebeurtenistype of tijd. Alleen gebeurtenismetadata; actor kan onbekend zijn en veldwijzigingen worden niet gereconstrueerd. Gebruik aggregateType en aggregateId uit een gebeurtenis voor de tijdlijn.
+    implementation: { type: plugin, plugin: osf-audit, handler: listAudit }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties: &filters
+          aggregateType: { type: string, minLength: 1, maxLength: 200, description: Exact aggregateType recorded by the event writer. }
+          aggregateId: { type: string, minLength: 1, maxLength: 512, description: Exact record identifier recorded by the event writer. }
+          eventType: { type: string, minLength: 1, maxLength: 200 }
+          since: { type: string, format: date-time, description: Inclusive lower timestamp bound. }
+          until: { type: string, format: date-time, description: Exclusive upper timestamp bound. }
+          limit: { type: integer, minimum: 1, maximum: 100, default: 25 }
+          cursor: { type: string, minLength: 1, maxLength: 150, description: nextCursor from the previous page of the same filters. }
+    output: &output
+      schema:
+        type: object
+        additionalProperties: false
+        required: [events, nextCursor]
+        properties:
+          events:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [id, aggregateType, aggregateId, eventType, occurredAt, actor]
+              properties:
+                id: { type: string, format: uuid }
+                aggregateType: { type: string }
+                aggregateId: { type: string }
+                eventType: { type: string }
+                occurredAt: { type: string, format: date-time }
+                actor: { type: [string, "null"], description: Recorded actor UUID when present; null when the journal does not identify one. }
+          nextCursor: { type: [string, "null"] }
+    auth: { mode: session, roles: [Audit.Logs.All, Audit.Logs.ReadAll] }
+    tenancy: &tenant { mode: required }
+    effects: &effects { data: read, external: none }
+    reliability: &natural { idempotency: { mode: natural } }
+    confirmation: &none { mode: none }
+    errors: &errors
+      - { status: 400, code: BAD_USER_INPUT, description: Invalid filters or cursor. }
+      - { status: 401, code: UNAUTHENTICATED, description: An authenticated organization session is required. }
+      - { status: 403, code: FORBIDDEN, description: History read permission is required. }
+      - { status: 503, code: DATABASE_NOT_CONFIGURED, description: The database is unavailable. }
+  listTimeline:
+    id: timeline.list
+    name: { en: Record timeline, nl: Recordtijdlijn }
+    description:
+      en: Read recorded events for one exact aggregateType and aggregateId in this organization, newest first, including deleted records. Use the pair returned by audit.list; different writer aggregate types remain distinct. Returns metadata only, without raw payloads or reconstructed field changes.
+      nl: Lees gebeurtenissen voor één exact aggregateType en aggregateId in deze organisatie, nieuwste eerst, ook voor verwijderde records. Gebruik het paar uit audit.list; verschillende aggregaattypen blijven onderscheiden. Alleen metadata, zonder ruwe payloads of gereconstrueerde veldwijzigingen.
+    implementation: { type: plugin, plugin: osf-audit, handler: listTimeline }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [aggregateType, aggregateId]
+        properties: *filters
+    output: *output
+    auth: { mode: session, roles: [Timeline.All, Timeline.Events.ReadAll] }
+    tenancy: *tenant
+    effects: *effects
+    reliability: *natural
+    confirmation: *none
+    errors: *errors
+interfaces:
+  rest:
+    operations:
+      listAudit: { method: POST, path: /api/audit/list, response: { status: 200, kind: json } }
+      listTimeline: { method: POST, path: /api/timeline/list, response: { status: 200, kind: json } }
+  mcp:
+    operations:
+      listAudit: { name: audit_list }
+      listTimeline: { name: timeline_list }

@@ -52,7 +52,7 @@ export type { CompiledPluginOperation } from "./plugins.js";
  * `osf-billing` the milestone billing run and the milestone create that
  * freezes a computed amount.
  */
-export const CORE_OPERATION_MODULES: readonly string[] = ["accounts", "osf-billing", "osf-blueprints", "osf-control", "osf-edit-leases", "osf-grants", "osf-jobs", "osf-source-sync", "osf-transitions"];
+export const CORE_OPERATION_MODULES: readonly string[] = ["accounts", "osf-audit", "osf-billing", "osf-blueprints", "osf-control", "osf-edit-leases", "osf-grants", "osf-jobs", "osf-source-sync", "osf-transitions"];
 
 /**
  * The one OpenAPI security scheme every `auth.mode: capability` Operation is
@@ -136,6 +136,8 @@ const RESERVED_API_NAMESPACES = new Set([
 const CORE_MODULE_API_NAMESPACES: ReadonlyMap<string, readonly string[]> = new Map([
   ["control", ["osf-control"]],
   ["jobs", ["osf-jobs"]],
+  ["audit", ["osf-audit"]],
+  ["timeline", ["osf-audit"]],
   // Status transitions and the billing run live under the entity's own
   // generated REST resource (POST /api/rest/v1/<base>/:id/<key>, POST
   // /api/rest/v1/billing-runs/execute): they are that resource's verbs.

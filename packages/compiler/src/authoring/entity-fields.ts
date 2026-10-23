@@ -222,7 +222,10 @@ export function normalizeEntityFields(
   entity: CoreEntity,
   catalog: Record<string, OsfTypeDefinition>,
 ): CoreEntity {
-  const identityKey = `${entity.entity[0]!.toLowerCase()}${entity.entity.slice(1)}Id`;
+  // A subtype keeps its base's identity alias and inverse collections: it
+  // stores the base's rows, so what points at the base points at it too.
+  const identityOwner = entity.subtype?.base ?? entity.entity;
+  const identityKey = `${identityOwner[0]!.toLowerCase()}${identityOwner.slice(1)}Id`;
   const normalize = (field: Field, nested = false, ancestry: readonly string[] = []): Field => {
     const path = `${entity.entity}.${field.key}`;
     if (!field.osfType) throw new Error(`${path}: osfType is required.`);
@@ -343,7 +346,7 @@ export function normalizeEntityFields(
     result.relationship = relationshipOf(entity, field, result, semantic, catalog, collection);
     return result;
   };
-  const fields = withInverseCollections(entity.entity, entity.fields, inverseCollectionsFor(entity.entity, catalog));
+  const fields = withInverseCollections(entity.entity, entity.fields, inverseCollectionsFor(identityOwner, catalog));
   return { ...entity, fields: fields.map((field) => normalize(field)) };
 }
 
@@ -424,7 +427,9 @@ function relationshipOf(
   if (field.persisted) throw new Error(`${path}: entity collections use a relation, never a JSON column.`);
   const inverse = metadata.inverse;
   if (typeof inverse !== "string") throw new Error(`${path}: a collection names the referencing field on ${target} as its inverse.`);
-  let inverseTarget = entity.entity;
+  // The referencing field on the target names the stored entity, which for a
+  // subtype is its base.
+  let inverseTarget = entity.subtype?.base ?? entity.entity;
   let through: { field: string; column: string; target: string } | undefined;
   if (metadata.via) {
     const via = entity.fields.find((candidate) => candidate.key === metadata.via);

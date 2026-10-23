@@ -247,12 +247,24 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   };
   const { coreEntity, profiles, mappings, componentCatalog } = artifacts;
 
-  const relationships = resolveRelationships(artifacts);
-  const columns = resolveStorageColumns(coreEntity.fields, profiles);
-  const modelFields = resolveModelFields(valueDefinition
+  // A subtype projects the base's complete storage model: its hidden fields
+  // stay in the base contract and the physical table, and leave every public
+  // section of this contract below.
+  const subtype = coreEntity.subtype;
+  const hidden = new Set(subtype?.hidden ?? []);
+  const completeRelationships = resolveRelationships(artifacts);
+  const relationships = completeRelationships.filter((relationship) => !hidden.has(relationship.key));
+  const completeColumns = resolveStorageColumns(coreEntity.fields, profiles);
+  const columns = completeColumns.filter((column) => !hidden.has(column.field));
+  const completeModelFields = resolveModelFields(valueDefinition
     ? normalizeEntityFields({ ...coreEntity, fields: [...coreEntity.fields, ...profiles.flatMap((profile) => profile.fields ?? [])] }, artifacts.osfTypes).fields
     : coreEntity.fields, componentCatalog, artifacts.osfTypes);
-  const graphql = buildGraphQL(coreEntity, profiles, relationships, componentCatalog, artifacts.osfTypes);
+  const modelFields = completeModelFields.filter((field) => !hidden.has(field.key));
+  const completeGraphql = buildGraphQL(coreEntity, profiles, relationships, componentCatalog, artifacts.osfTypes);
+  const graphql = hidden.size === 0 ? completeGraphql : {
+    ...completeGraphql,
+    fields: completeGraphql.fields.filter((field) => !hidden.has(field.name)),
+  };
   const crud = buildCrud(coreEntity);
   const rest = buildRest(coreEntity, crud);
   const mcp = buildMcp(coreEntity, crud);
@@ -287,12 +299,12 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
       entityOperations.update?.implementation.type !== "entity")) {
     throw new Error(`[${coreEntity.entity}] blueprint copying requires canonical entity-backed create and update Operations.`);
   }
-  const tableName = deriveTableName(coreEntity.entity);
+  const tableName = deriveTableName(subtype?.base ?? coreEntity.entity);
 
   resolveDerivedOnCreateBindings({
     entityName: coreEntity.entity,
-    fields: modelFields,
-    columns,
+    fields: completeModelFields,
+    columns: completeColumns,
     ...(coreEntity.indexes ? { indexes: coreEntity.indexes } : {}),
     tenantScoped: coreEntity.authorization !== undefined,
   });
@@ -335,6 +347,20 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
       },
     } : {}),
     ...(coreEntity.hardDelete ? { hardDelete: coreEntity.hardDelete } : {}),
+    ...(subtype ? {
+      subtype: {
+        base: { name: subtype.base, id: `${coreEntity.module}.${subtype.base}`, slug: subtype.baseSlug },
+        scope: Object.entries(subtype.scope).map(([field, value]) => {
+          const column = completeColumns.find((candidate) => candidate.field === field);
+          if (!column) throw new Error(`[${coreEntity.entity}] scope field ${field} has no storage column.`);
+          return { field, column: column.column, value };
+        }),
+        hiddenFields: [...hidden].sort(),
+        hiddenColumns: completeColumns
+          .filter((column) => hidden.has(column.field))
+          .map((column) => ({ field: column.field, column: column.column })),
+      },
+    } : {}),
     crud,
     entityOperations,
     pluginOperations: pluginOperations(operationSourceEntity(coreEntity, modelFields, profiles.length > 0)),

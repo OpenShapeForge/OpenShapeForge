@@ -81,6 +81,7 @@ export function mergePromotedTables(
   const merged: PlatformSchemaManifest = {
     ...baseManifest,
     ...(promotedManifest.entityValues ? { entityValues: promotedManifest.entityValues } : {}),
+    ...(promotedManifest.entitySubtypes ? { entitySubtypes: promotedManifest.entitySubtypes } : {}),
     description:
       "Greenfield platform schema with authoring-catalog generated backend tables.",
     relationshipRegister: [...relationships.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, entry]) => entry),

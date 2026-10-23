@@ -68,6 +68,7 @@ import {
   renderOperationCatalog,
 } from "./generate-operations.js";
 import type { GeneratedArtifact, PlatformSchemaManifest } from "./schema.js";
+import { tableRegistryName } from "./schema.js";
 import type { CompiledEntityInfo } from "./plugins.js";
 import type { CompiledField } from "./authoring/types.js";
 import { renderEmptyApiPersistedOperationArtifact } from "./persisted-operations.js";
@@ -269,11 +270,11 @@ function mcpCatalogInputs(
   manifest: PlatformSchemaManifest,
 ): McpCatalogInput[] {
   const tableByEntityName = new Map(
-    manifest.tables
+    [...manifest.tables, ...(manifest.entitySubtypes ?? [])]
       .filter((table) => table.source?.authoringEntityName)
       .map((table) => [
         table.source!.authoringEntityName!,
-        `${table.schema}.${table.name}`,
+        tableRegistryName(table),
       ]),
   );
   return entities.flatMap((entity) => {

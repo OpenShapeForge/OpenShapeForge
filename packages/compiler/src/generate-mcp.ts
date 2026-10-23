@@ -412,6 +412,10 @@ function buildToolsForEntity(
   if (!mcp) return [];
 
   const fields = contract.model.fields;
+  // A subtype's scope discriminators are fixed by the server, not written by
+  // a process; the "written only by" note is about the latter.
+  const scopeFields = new Set((contract.subtype?.scope ?? []).map((scope) => scope.field));
+  const processWrittenFields = fields.filter((field) => !scopeFields.has(field.key));
   const relationships = entityRelationshipKeys(contract, relationshipTargets);
   // The elicited target field never appears in the create schema: its values
   // come from the person at the client via elicitation, not from the model.
@@ -498,7 +502,7 @@ function buildToolsForEntity(
         .filter((part): part is string => Boolean(part))
         .join(" ");
       return operation === "create" || operation === "update"
-        ? `${description}${operationWrittenNote(fields, language)}`
+        ? `${description}${operationWrittenNote(processWrittenFields, language)}`
         : description;
     };
     const languages = otherLanguages(authored);

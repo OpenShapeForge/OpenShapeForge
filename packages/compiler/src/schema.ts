@@ -580,9 +580,30 @@ export type TableSourceDefinition = {
   retentionSource?: string;
 };
 
+/**
+ * A subtype's binding to the base table it shares. Carried by the virtual
+ * table entries under `PlatformSchemaManifest.entitySubtypes`, which the
+ * generic runtime serves beside the physical tables but no DDL emits.
+ */
+export type TableSubtypeBinding = {
+  base: {
+    entityName: string;
+    entityId: string;
+    slug: string;
+    /** The physical `schema.table` the subtype's rows live in. */
+    table: string;
+  };
+  /** Discriminator columns the runtime fixes on every row of this subtype. */
+  scope: Array<{ field: string; column: string; value: string | number | boolean }>;
+  /** Base columns absent from this projection, with the fields they store. */
+  hiddenColumns: Array<{ field: string; column: string }>;
+};
+
 export type TableDefinition = {
   schema: string;
   name: string;
+  /** Present on a virtual subtype table (see TableSubtypeBinding). */
+  subtype?: TableSubtypeBinding;
   tenantScoped: boolean;
   domainInternal?: boolean;
   /**
@@ -742,8 +763,28 @@ export type PlatformSchemaManifest = {
   description?: string;
   relationshipRegister?: RelationshipRegisterEntry[];
   tables: TableDefinition[];
+  /**
+   * Subtype projections of physical tables: served by the generic runtime
+   * as entities of their own, never emitted as DDL. Each entry's `schema`
+   * and `name` are the base table's; its `subtype` binding says so.
+   */
+  entitySubtypes?: TableDefinition[];
   entityValues?: import("./authoring/entity-value-types.js").EntityValueRegistry;
 };
+
+/**
+ * The registry name a subtype's virtual table is served under: distinct from
+ * the physical `schema.table` it shares, so one registry holds both. The
+ * compiler emits it into the manifest and the MCP catalog; the runtime never
+ * derives it.
+ */
+export function tableRegistryName(table: Pick<TableDefinition, "schema" | "name" | "subtype" | "source">): string {
+  const physical = `${table.schema}.${table.name}`;
+  if (!table.subtype) return physical;
+  const entityName = table.source?.authoringEntityName;
+  if (!entityName) throw new Error(`Subtype table ${physical} has no authoring entity name.`);
+  return `${physical}@${entityName}`;
+}
 
 export type GeneratedArtifact = {
   path: string;

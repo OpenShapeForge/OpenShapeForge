@@ -17,8 +17,15 @@ import { BASE_ENTITY_FILENAME, applyBaseEntityToCore, loadBaseEntity } from "./b
 import { assertEntityAuthoring } from "./entity-authoring.js";
 import { deriveEntityOsfTypes, deriveProviderOsfTypes, normalizeEntityFields } from "./entity-fields.js";
 import { loadOperationCatalogs } from "./operation-catalog.js";
+import {
+  assertEntitySubtypeModel,
+  composeEntitySubtype,
+  isEntitySubtypeDocument,
+} from "./entity-subtype.js";
+import { authoringValidator } from "./schema-validation.js";
 import type {
   CoreEntity,
+  EntitySubtypeDocument,
   EntityProfile,
   EntityMapping,
   TransformCatalog,
@@ -288,12 +295,35 @@ export function loadEntity(
 
   // Core entity — resolved anywhere under entities/ (subfolders allowed).
   const corePath = resolveEntityFilePath(authoringDir, entityFileName);
-  const rawCoreEntity = loadYaml<CoreEntity>(corePath);
+  const rawDocument = loadYaml<CoreEntity | EntitySubtypeDocument>(corePath);
   const baseEntity = loadBaseEntity(authoringDir);
-  let coreEntity = applyBaseEntityToCore(rawCoreEntity, baseEntity, {
-    kind: "core",
-    path: corePath,
-  });
+  let coreEntity: CoreEntity;
+  if (isEntitySubtypeDocument(rawDocument)) {
+    // The document's shape is held to its schema at load: a subtype can
+    // arrive from a packaged layer the corpus gate never sees.
+    authoringValidator().validate(rawDocument, corePath);
+    const base = resolveSubtypeBase(authoringDir, rawDocument, corePath);
+    coreEntity = composeEntitySubtype(
+      rawDocument,
+      applyBaseEntityToCore(base.document, baseEntity, { kind: "core", path: base.path }),
+      { origin: corePath, baseOrigin: base.path, baseSlug: base.slug },
+    );
+    // The subtype's interfaces are a merge fragment; the merged result is
+    // what has to be a complete interface declaration.
+    authoringValidator().validateFragment(
+      "core-entity.schema.json#/$defs/entityInterfacesV2",
+      coreEntity.interfaces ?? {},
+      `${corePath} (merged interfaces)`,
+    );
+  } else {
+    if ((rawDocument as { subtype?: unknown }).subtype !== undefined) {
+      throw new Error(`${corePath}: subtype is derived by the loader from kind: entitySubtype; it cannot be authored on a coreEntity.`);
+    }
+    coreEntity = applyBaseEntityToCore(rawDocument, baseEntity, {
+      kind: "core",
+      path: corePath,
+    });
+  }
   validateEntityContentIdentifiers(coreEntity, corePath);
 
   // Semantic types (core + context catalogs merged). Normalization resolves
@@ -302,6 +332,7 @@ export function loadEntity(
   const osfTypes = loadOsfTypes(authoringDir);
   coreEntity = normalizeEntityFields(coreEntity, osfTypes);
   assertEntityAuthoring(coreEntity, corePath);
+  assertEntitySubtypeModel(coreEntity, osfTypes, corePath);
 
   // Scan for context partials (field extensions)
   const profiles: EntityProfile[] = [];
@@ -345,6 +376,36 @@ export function loadEntity(
   const viewDefinition = existsSync(viewPath) ? loadYaml<ViewDefinition>(viewPath) : null;
 
   return { coreEntity, profiles, mappings, transformCatalog, componentCatalog, osfTypes, retentionPolicies, appShell, viewDefinition };
+}
+
+/**
+ * The base a subtype extends: the coreEntity file whose `entity` is the
+ * subtype's `extends`, anywhere under `entities/`. A base that is itself a
+ * subtype is refused (no chains), as is a base with partial profiles, whose
+ * profile table the subtype could not reach.
+ */
+function resolveSubtypeBase(
+  authoringDir: string,
+  subtype: EntitySubtypeDocument,
+  origin: string,
+): { slug: string; path: string; document: CoreEntity } {
+  for (const file of listEntityFiles(authoringDir)) {
+    const document = loadYaml<{ kind?: string; entity?: string }>(file.path);
+    if (document?.entity !== subtype.extends) continue;
+    if (document.kind === "entitySubtype") {
+      throw new Error(`${origin}: extends ${subtype.extends}, which is itself a subtype (${file.path}); subtype chains are not supported.`);
+    }
+    if (document.kind !== "coreEntity") {
+      throw new Error(`${origin}: extends ${subtype.extends}, but ${file.path} is not a coreEntity.`);
+    }
+    for (const contextName of listDirs(join(authoringDir, "contexts"))) {
+      if (existsSync(join(authoringDir, "contexts", contextName, "partial", `${file.slug}.yaml`))) {
+        throw new Error(`${origin}: extends ${subtype.extends}, which has a partial profile (context ${contextName}); profiled bases are not supported for subtypes.`);
+      }
+    }
+    return { slug: file.slug, path: file.path, document: document as CoreEntity };
+  }
+  throw new Error(`${origin}: extends ${subtype.extends}, but no authored coreEntity declares that entity.`);
 }
 
 export function assertPartialProfileHasNoCrud(

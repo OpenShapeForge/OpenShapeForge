@@ -48,3 +48,8 @@ test("a missing or unfinished release cannot be installed or upgraded", () => {
 test("release check does not update workloads", () => {
   const f = fixture(); try { expect(f.run({}, ["--check-release"]).exitCode).toBe(0); expect(existsSync(f.upgrade)).toBe(false); } finally { f.clean(); }
 });
+
+test("pinned Bun rejects the malformed Brotli regression before deployment", () => {
+  const z = require("node:zlib");
+  expect(() => z.brotliDecompressSync(Buffer.from("200010414141fcffff07002228f00b60f7f41f000000", "hex"))).toThrow(expect.objectContaining({code: "ERR__ERROR_FORMAT_BLOCK_SWITCH", errno: -17}));
+});

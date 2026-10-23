@@ -2,6 +2,8 @@
 import { describe, expect, test } from "bun:test";
 import { getGeneratedCrudTables, requireEntityOperation } from "./catalog.js";
 import { catalog } from "../../mcp/catalog.js";
+import { sessionMayInvoke } from "../../mcp/session-projection.js";
+import roleComposites from "../../generated/compiler/role-composites.json";
 import type { DbSessionInput } from "../../db/session.js";
 
 const tables = getGeneratedCrudTables();
@@ -17,10 +19,12 @@ describe("the compiled Task read contract", () => {
     expect(task).toBeDefined();
     for (const operation of ["list", "get"] as const) {
       expect(() => requireEntityOperation(task, operation, reader)).not.toThrow();
-      expect(() => requireEntityOperation(task, operation, { ...reader, roles: [] })).toThrow();
+      expect(sessionMayInvoke(task, operation, reader)).toBe(true);
+      expect(() => requireEntityOperation(task, operation, { ...reader, roles: [] })).toThrow("Not authorized");
     }
     for (const operation of ["create", "update", "delete"] as const) {
-      expect(() => requireEntityOperation(task, operation, reader)).toThrow();
+      expect(() => requireEntityOperation(task, operation, reader)).toThrow("Not authorized");
+      expect(sessionMayInvoke(task, operation, reader)).toBe(false);
       expect(() => requireEntityOperation(task, operation, { ...reader, roles: ["General.All.ReadWrite"] })).not.toThrow();
     }
   });
@@ -29,8 +33,14 @@ describe("the compiled Task read contract", () => {
     const general = tables.filter(table => table !== task && table.source?.authorization?.roles?.read?.includes("General.All.Read"));
     expect(general.length).toBeGreaterThan(0);
     for (const table of general) {
-      expect(() => requireEntityOperation(table, "get", reader)).toThrow();
+      if (sessionMayInvoke(table, "get", { ...reader, roles: ["General.All.Read"] })) {
+        expect(() => requireEntityOperation(table, "get", reader)).toThrow("Not authorized");
+      }
     }
+  });
+
+  test("the shared role is unassigned until a host grants it", () => {
+    expect(JSON.stringify(roleComposites)).not.toContain("Tasks.All.Read");
   });
 
   test("MCP exposes only the existing list and get Operations", () => {

@@ -56,10 +56,6 @@
     }
   },
   "Tasks.All.Read": {
-    "label": {
-      "en": "Read tasks",
-      "nl": "Taken lezen"
-    },
     "phrase": {
       "en": "view tasks",
       "nl": "taken inzien"

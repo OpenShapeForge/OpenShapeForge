@@ -378,6 +378,106 @@ Relationships are fields; there is no entity-level `relationships:` block
   reference> }`) is the one collection that stays authored: it has no
   foreign key of its own to derive from.
 
+## Entity subtypes: `kind: entitySubtype`
+
+A subtype is a scoped projection of one stored entity: the same table and the
+same record identities, served under its own entity name, Operations, routes
+and tools, for the rows whose discriminator holds one fixed value. It adds no
+field, relationship or storage. `Team` in `entities/core/team.yaml` is the
+shipped example, a `RelationGroup` whose `groupType` is `team`:
+
+```yaml
+schemaVersion: 3
+kind: entitySubtype
+entity: Team
+extends: RelationGroup          # the base coreEntity, anywhere under entities/
+scope:
+  groupType: team               # base field -> the value every Team carries
+title: Team
+labels: { en: Team, nl: Team }
+pluralLabels: { en: Teams, nl: Teams }
+fields:
+  - key: groupType
+    hidden: true                # absent from every read, write and schema of Team
+  - key: name
+    label: { en: Team name, nl: Teamnaam }
+    validation: { maxLength: 60 }   # may only tighten the base's constraint
+operations:
+  list:
+    description: { en: Returns a page of teams; other group types never appear here. }
+    guidance: { assistant: { en: Find a team by name before changing it. } }
+interfaces:
+  rest: { basePath: teams }
+  mcp: { resource: { uri: app://teams, name: Teams } }
+  web:
+    views:
+      collection: { route: { en: /teams, nl: /teams }, title: { en: Teams, nl: Teams } }
+      record:
+        routes: { read: { en: /teams/:id, nl: /teams/:id }, create: { en: /teams/new, nl: /teams/nieuw } }
+```
+
+What the loader does with it (`authoring/entity-subtype.ts`):
+
+- **Composition happens after layering.** The base is resolved by its `entity`
+  name from the resolved authoring tree, so every layer's `entityPatch` to the
+  base is inherited; a later layer may also `entityPatch` the subtype file by
+  its own slug. A subtype of a subtype is refused.
+- **Everything is inherited unless restated:** fields, relationships and their
+  derived collections, Operations with their concurrency, confirmation and
+  stamps, authorization, the web layout, the MCP instructions. The subtype may
+  restate `title`, `description`, `labels`, `pluralLabels`, `displayTemplate`,
+  `filterField`, `domains`, per-field `label`/`description`/`help`, per-Operation
+  `name`/`description`/`guidance`, and its `interfaces` (a strategic-merge
+  fragment over the base's, so a collection block without `columns` inherits
+  the base's columns). Interfaces merge like `entityPatch`: keyed arrays by
+  `key`/`id`/`title`, `$delete: true` removes an inherited item.
+- **It may narrow, never widen.** `authorization.roles`, field `permissions`
+  and `authorization`, `rowAccess`, Operation projections: the same
+  monotonic rules a layered `entityPatch` is held to. `required` accepts only
+  `true`; `validation` keeps every base constraint and may raise a minimum,
+  lower a maximum or add a constraint. Anything else on a field or an
+  Operation — type, storage, relationship, implementation, effects — is
+  refused by the schema (`entity-subtype.schema.json`) or the composer.
+- **`scope` is server-owned.** The discriminator must be a persisted, single
+  string/number/boolean field of the base; the value must fit it (and be one
+  of its static options). The runtime sets it on create and filters every
+  list, get, update, delete, lease, confirmation challenge, record-permission
+  check and relationship traversal by it; a caller that supplies it, by field
+  or column name, is refused on every interface. The field is `readOnly` in
+  the subtype's contract and absent from its inputs.
+- **`hidden: true` is contract-level.** The field leaves the subtype's
+  `model`, `storage`, GraphQL type, REST/MCP schemas, web fields, columns,
+  groups, context and inherited placements; reads never return it and a write
+  naming it is refused. The base keeps it. A hidden required column must have
+  a server-owned value (the scope, a `defaultValue`, `defaultTemplate`,
+  `writtenBy` or derivation), otherwise compilation fails. A hidden field the
+  subtype's own configuration still names, or that an inherited
+  `displayTemplate`, record `title`, `filterField`, confirmation challenge or
+  row-access policy depends on, fails compilation and asks for a restatement.
+- **One table, one identity.** The backend manifest emits no table, index,
+  constraint, policy or retention for a subtype; it binds a virtual table
+  (`manifest.entitySubtypes`, registry name `<schema>.<table>@<Entity>`) to
+  the base's. Leases, confirmation challenges and lease availability use the
+  base entity id, so a record has one lease whichever projection took it;
+  audit events are the base aggregate's; row-level security is the base's.
+  The base's Operations still see and may retype the same rows: a `Team`
+  whose `groupType` is changed through `RelationGroup.update` simply leaves
+  the subtype.
+- **Identities must be distinct.** Entity name, GraphQL names, REST base
+  path, MCP tool prefix and resource URI, and web collection/record routes
+  (per locale) are audited across every entity, subtypes included.
+- A menu item `entity: team` (the file stem) resolves to the subtype's
+  collection route like any entity's.
+
+Not supported in this iteration, refused at load: subtype chains; bases that
+are Operation-backed (`source`), value definitions, versioned, worker-accessed,
+carry field `transitions`, plugin- or collection-implemented Operations, or
+partial profiles. A subtype is not a relationship target (`osfType: Team` is
+unknown; reference the base), inherits no `blueprint`, `indexes`, `audit`,
+`retention` or `hooks` of its own, and has no realtime change stream of its own.
+The generic manifest-derived e2e lifecycle skips subtypes; the runtime proof
+lives in `apps/api/src/operations/entity/entity-subtype-db.test.ts`.
+
 ## `_base.yaml` — shared meta fields
 
 `entities/_base.yaml` (`kind: baseEntity`) is merged into **every** core and

@@ -1,0 +1,124 @@
+schemaVersion: 3
+kind: entitySubtype
+entity: Team
+extends: RelationGroup
+# Every Team is the RelationGroup row whose group type is `team`. The runtime
+# sets that value on create and filters every read and write by it; callers
+# never supply it, so the field is hidden below.
+scope:
+  groupType: team
+title: Team
+description:
+  en: A team of relations that work together, kept as a typed relation group.
+  nl: Een team van relaties die samenwerken, bijgehouden als een getypeerde relatiegroep.
+labels:
+  en: Team
+  nl: Team
+pluralLabels:
+  en: Teams
+  nl: Teams
+fields:
+  - key: groupType
+    hidden: true
+  - key: name
+    label:
+      en: Team name
+      nl: Teamnaam
+    description:
+      en: Name of the team.
+      nl: Naam van het team.
+operations:
+  list:
+    name:
+      en: List teams
+      nl: Teams tonen
+    description:
+      en: Returns a filtered and sorted page of teams. Only relation groups of type team are
+        included; other group types never appear here.
+      nl: Geeft een gefilterde en gesorteerde pagina met teams terug. Alleen relatiegroepen van
+        het type team zijn opgenomen; andere groepstypen verschijnen hier nooit.
+    guidance:
+      assistant:
+        en: Use this to find a team by name or status before reading or changing it. A record
+          that is not a team is not found through this Operation even when its id is known.
+        nl: Gebruik dit om een team op naam of status te vinden voordat je het leest of wijzigt.
+          Een record dat geen team is, wordt via deze Operation niet gevonden, ook niet op id.
+  get:
+    name:
+      en: Get team
+      nl: Team ophalen
+    description:
+      en: Returns one team by its canonical id. A relation group of another type answers not
+        found.
+      nl: Geeft een team terug op basis van het canonieke id. Een relatiegroep van een ander
+        type geeft niet gevonden.
+  create:
+    name:
+      en: Create team
+      nl: Team aanmaken
+    description:
+      en: Creates one team after validating its fields. The group type is set to team by the
+        server; a submitted group type is refused.
+      nl: Maakt een team aan na validatie van de velden. Het groepstype wordt door de server op
+        team gezet; een meegestuurd groepstype wordt geweigerd.
+  update:
+    name:
+      en: Update team
+      nl: Team wijzigen
+    description:
+      en: Updates one team while holding its server-issued edit lease and current version. The
+        team cannot be turned into another group type through this Operation.
+      nl: Wijzigt een team met de server-uitgegeven bewerkingslease en actuele versie. Het team
+        kan via deze Operation niet in een ander groepstype veranderen.
+  delete:
+    name:
+      en: Delete team
+      nl: Team verwijderen
+    description:
+      en: Permanently deletes one team after a server-issued, version-bound confirmation
+        challenge. Only a team is deleted here; other relation groups are not reachable.
+      nl: Verwijdert een team definitief na een door de server uitgegeven, versiegebonden
+        bevestigingsvraag. Alleen een team wordt hier verwijderd; andere relatiegroepen zijn niet
+        bereikbaar.
+interfaces:
+  rest:
+    basePath: teams
+  mcp:
+    operations:
+      delete:
+        instructions:
+          en: Acquire an edit lease first; request the confirmation challenge and answer it with
+            the exact current team name.
+          nl: Vraag eerst een bewerkingslease en bevestigingsvraag aan en beantwoord die met exact
+            de actuele teamnaam.
+    resource:
+      uri: app://teams
+      name: Teams
+      description: Read the teams available to the signed-in identity.
+      templateDescription: Read one team by its canonical id.
+  web:
+    views:
+      collection:
+        route:
+          en: /teams
+          nl: /teams
+        title:
+          en: Teams
+          nl: Teams
+      record:
+        routes:
+          read:
+            en: /teams/:id
+            nl: /teams/:id
+          create:
+            en: /teams/new
+            nl: /teams/nieuw
+        modes:
+          create:
+            title:
+              en: Create team
+              nl: Team aanmaken
+          update:
+            title:
+              en: Update team
+              nl: Team wijzigen

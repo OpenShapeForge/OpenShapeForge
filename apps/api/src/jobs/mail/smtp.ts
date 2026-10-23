@@ -53,7 +53,7 @@ export function readSmtpConfig(env: NodeJS.ProcessEnv = process.env): SmtpConfig
   const secure = url.protocol === "smtps:";
   const timeout = Number.parseInt(env.OPENSHAPEFORGE_SMTP_TIMEOUT_MS ?? "", 10);
   return {
-    host: url.hostname,
+    host: url.hostname.replace(/^\[|\]$/g, ""),
     port: url.port ? Number.parseInt(url.port, 10) : secure ? 465 : 25,
     secure,
     ...(url.username ? { auth: { user: decodeURIComponent(url.username), pass: decodeURIComponent(url.password) } } : {}),

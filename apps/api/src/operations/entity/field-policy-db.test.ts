@@ -525,6 +525,7 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
     process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = keyringText;
     const keyring = keyringFromEnv(keyringText)!;
     const token = "synthetic-personal-probe-token";
+    const actor = { ...writer, relationId: randomUUID() };
     const provider = await record();
     const connection = await record();
     const name = `verify_fixture_${randomUUID()}`;
@@ -540,15 +541,12 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
         auth = '{"profile":"oauth2AuthorizationCode"}'::jsonb,
         probe = '{"method":"GET","pathTemplate":"/check"}'::jsonb,
         egress_hosts = '["probe.example.invalid"]'::jsonb where id = ${provider.id}::uuid`.execute(privileged.db);
-      await sql`update erp.protected_fields_fixtures set definition_id = ${provider.id}, owner_user_id = ${writer.userId},
+      await sql`update erp.protected_fields_fixtures set definition_id = ${provider.id}, owner_user_id = ${actor.relationId},
         data = ${jsonbLiteral({ accessToken: encryptSecret(keyring, connectionTokenSecretScope(table.name), "accessToken", token) })}
         where id = ${connection.id}::uuid`.execute(privileged.db);
-      // A restrictive owner policy supplements the compiler's tenant policy.
-      await sql`create policy probe_fixture_owner on erp.protected_fields_fixtures as restrictive for select
-        using (owner_user_id is null or owner_user_id = current_setting('app.user_id', true))`.execute(privileged.db);
       const publicRead = await getGeneratedEntity(runtime.db, writer, { table: table.name, id: String(connection.id) });
       expect((publicRead!.data as Record<string, unknown>).accessToken).toBe("__set__");
-      const invoke = (session = writer, id = connection.id) => platformToolCall({
+      const invoke = (session: import("../../db/session.js").DbSessionInput = actor, id = connection.id) => platformToolCall({
         db: runtime.db, session, name, tables: new Map([[table.name, table]]),
         request: { params: { name, arguments: { id } } },
         egressOwner: { fetch: async (request: import("../../modules/contract.js").ModuleEgressRequest) => {
@@ -564,15 +562,29 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       expect(requests).toBe(1);
       expect(JSON.stringify(result)).not.toContain(token);
       expect(JSON.stringify(result)).not.toContain("ciphertext");
-      for (const session of [{ ...writer, roles: [] }, { ...writer, tenantId: randomUUID() }, { ...writer, userId: randomUUID() }]) {
+      for (const session of [{ ...actor, roles: [] }, { ...actor, tenantId: randomUUID() }, { ...actor, relationId: randomUUID() }, writer, { ...actor, userId: actor.relationId, relationId: null }]) {
         const denied = await invoke(session);
         expect(denied?.isError).toBe(true);
         expect(JSON.stringify(denied)).not.toContain(token);
         expect(requests).toBe(1);
       }
-      expect((await invoke(writer, randomUUID()))?.isError).toBe(true);
-      expect(requests).toBe(1);
-      expect((await getGeneratedEntity(runtime.db, writer, { table: table.name, id: String(connection.id) }))!.data).toEqual(publicRead!.data);
+      for (const id of [randomUUID(), "", " ", "not-a-uuid"]) {
+        const denied = await invoke(actor, id);
+        expect(denied?.isError).toBe(true);
+        expect(denied?.structuredContent).toMatchObject({ error: { code: "NOT_FOUND" } });
+        expect(requests).toBe(1);
+      }
+      // Linked logins share the acting Relation, never a login's user id.
+      expect((await invoke({ ...actor, userId: randomUUID() }))?.isError).not.toBe(true);
+      expect(requests).toBe(2);
+      // The database owner fence composes with the explicit dispatch check.
+      await sql`create policy probe_fixture_owner on erp.protected_fields_fixtures as restrictive for select
+        using (owner_user_id is null or owner_user_id = app.current_relation_id()::text)`.execute(privileged.db);
+      expect((await invoke())?.isError).not.toBe(true);
+      expect(requests).toBe(3);
+      expect((await invoke({ ...actor, relationId: randomUUID() }))?.isError).toBe(true);
+      expect(requests).toBe(3);
+      expect((await getGeneratedEntity(runtime.db, actor, { table: table.name, id: String(connection.id) }))!.data).toEqual(publicRead!.data);
     } finally {
       await sql`drop policy if exists probe_fixture_owner on erp.protected_fields_fixtures`.execute(privileged.db);
       catalog.entities.splice(catalog.entities.indexOf(entity as never), 1);

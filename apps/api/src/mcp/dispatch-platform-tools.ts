@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { employeeInvitationKeycloakClient } from "./employee-invitation-keycloak.js";
-import { getGeneratedEntity } from "../operations/entity/index.js";
+import { fetchGeneratedEntityRow, getGeneratedEntity } from "../operations/entity/index.js";
+import { ownedByActingRelation } from "../db/acting-relation.js";
 import { testElicitedRow } from "./connection-test.js";
 import { discoverProviderSchema } from "./discovery.js";
 import { HttpError } from "../rest/http-error.js";
@@ -176,11 +177,15 @@ export async function platformToolCall(
       if (typeof id !== "string") {
         throw new HttpError(400, "VALIDATION", 'Argument "id" is required.');
       }
-      // The role gate above authorizes testing; the runtime read retains tenant
+      // The role gate above authorizes testing; the storage read retains tenant
       // and row-level isolation without replacing credentials by read markers.
       // Only the verification report below may leave this internal path.
-      const serialized = await runtimeRowByFilter(db, session, tables, table.name, { id });
-      if (!serialized) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
+      const row = await fetchGeneratedEntityRow(db, session, table, id);
+      if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
+      const serialized = serializeRow(table, row);
+      if (serialized.ownerUserId != null && !ownedByActingRelation(serialized.ownerUserId, session)) {
+        throw new HttpError(404, "NOT_FOUND", "Resource not found.");
+      }
       const elicit = entityForTable(testTool.table)?.elicitOnCreate;
       if (!elicit) {
         throw new HttpError(

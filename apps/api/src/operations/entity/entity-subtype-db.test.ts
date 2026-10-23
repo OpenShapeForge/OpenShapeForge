@@ -123,12 +123,11 @@ describe("the Team subtype is served from the relation groups table", () => {
     expect(team.subtype).toEqual({
       base: { entityName: "RelationGroup", entityId: "core.RelationGroup", slug: "relation-group", table: "erp.relation_groups" },
       scope: [{ field: "groupType", column: "group_type", value: "team" }],
-      hiddenColumns: [{ field: "groupType", column: "group_type" }, { field: "externalCode", column: "external_code" }],
+      hiddenColumns: [{ field: "groupType", column: "group_type" }],
     });
     expect(team.columns.map((column) => column.name)).not.toContain("group_type");
-    expect(team.columns.map((column) => column.name)).not.toContain("external_code");
+    expect(team.columns.map((column) => column.name)).toContain("external_code");
     expect(group.columns.map((column) => column.name)).toContain("group_type");
-    expect(group.columns.map((column) => column.name)).toContain("external_code");
     for (const intent of ["list", "get", "create", "update", "delete"]) {
       expect(getEntityOperationContracts().find((operation) => operation.id === `Team.${intent}`)?.entityName).toBe("Team");
     }
@@ -225,27 +224,44 @@ describe("the Team subtype is served from the relation groups table", () => {
   });
 
   test("a hidden optional field keeps its stored value but is neither read nor writable through the subtype", async () => {
+    // The shipped Team hides only its discriminator. This proves the runtime
+    // contract for a hidden optional field with a stored value on a
+    // test-only projection of Team that also hides externalCode, the way the
+    // collection suites shape runtime metadata; the registry entry is
+    // restored afterwards.
     const actor = session(randomUUID());
-    const id = randomUUID();
-    await sql`
-      insert into erp.relation_groups (id, tenant_id, name, group_type, status, external_code)
-      values (${id}::uuid, ${actor.tenantId}::uuid, 'Coded', 'team', 'active', 'EXT-1')
-    `.execute(privileged.db);
-    const read = record(await run(actor, "Team.get", { id }));
-    expect(read).toMatchObject({ name: "Coded" });
-    expect(read).not.toHaveProperty("external_code");
-    expect(read).not.toHaveProperty("externalCode");
-    expect(rows(await run(actor, "Team.list", { filter: { name: "Coded" } }))[0]).not.toHaveProperty("external_code");
-    expect(record(await run(actor, "RelationGroup.get", { id }))).toMatchObject({ external_code: "EXT-1" });
+    const team = getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === "Team")!;
+    const original = { columns: team.columns, subtype: team.subtype! };
+    team.columns = team.columns.filter((column) => column.name !== "external_code");
+    team.subtype = { ...original.subtype, hiddenColumns: [...original.subtype.hiddenColumns, { field: "externalCode", column: "external_code" }] };
+    try {
+      const id = randomUUID();
+      await sql`
+        insert into erp.relation_groups (id, tenant_id, name, group_type, status, external_code)
+        values (${id}::uuid, ${actor.tenantId}::uuid, 'Coded', 'team', 'active', 'EXT-1')
+      `.execute(privileged.db);
+      const read = record(await run(actor, "Team.get", { id }));
+      expect(read).toMatchObject({ name: "Coded" });
+      expect(read).not.toHaveProperty("external_code");
+      expect(read).not.toHaveProperty("externalCode");
+      expect(rows(await run(actor, "Team.list", { filter: { name: "Coded" } }))[0]).not.toHaveProperty("external_code");
+      expect(record(await run(actor, "RelationGroup.get", { id }))).toMatchObject({ external_code: "EXT-1" });
 
-    expect(failure(await run(actor, "Team.create", { values: { name: "Coded twice", externalCode: "EXT-2" } })))
-      .toMatchObject({ code: "BAD_USER_INPUT", message: expect.stringContaining("externalCode") });
-    expect(failure(await run(actor, "Team.list", { filter: { externalCode: "EXT-1" } }))).toMatchObject({ code: "BAD_USER_INPUT" });
-    const held = await lease(actor, "Team.update", id);
-    expect(failure(await run(actor, "Team.update", {
-      id, values: { external_code: "EXT-2" }, expectedVersion: held.targetVersion, leaseToken: held.leaseToken,
-    }))).toMatchObject({ code: "BAD_USER_INPUT" });
-    expect(await stored(id)).toMatchObject({ external_code: "EXT-1", group_type: "team" });
+      expect(failure(await run(actor, "Team.create", { values: { name: "Coded twice", externalCode: "EXT-2" } })))
+        .toMatchObject({ code: "BAD_USER_INPUT", message: expect.stringContaining("externalCode") });
+      expect(failure(await run(actor, "Team.list", { filter: { externalCode: "EXT-1" } }))).toMatchObject({ code: "BAD_USER_INPUT" });
+      const held = await lease(actor, "Team.update", id);
+      expect(failure(await run(actor, "Team.update", {
+        id, values: { external_code: "EXT-2" }, expectedVersion: held.targetVersion, leaseToken: held.leaseToken,
+      }))).toMatchObject({ code: "BAD_USER_INPUT" });
+      expect(await stored(id)).toMatchObject({ external_code: "EXT-1", group_type: "team" });
+    } finally {
+      team.columns = original.columns;
+      team.subtype = original.subtype;
+    }
+    // The shipped projection reads and writes the field like the base.
+    const plain = String(record(await run(actor, "Team.create", { values: { name: "Plain", externalCode: "EXT-3" } })).id);
+    expect(record(await run(actor, "Team.get", { id: plain }))).toMatchObject({ external_code: "EXT-3" });
   });
 
   test("a native collection Operation through the Team parent reaches team rows only and keeps the child's own contract", async () => {

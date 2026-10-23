@@ -547,12 +547,12 @@ describe("the shipped Team subtype of RelationGroup", () => {
     expect(teamContract.subtype).toMatchObject({
       base: { name: "RelationGroup", slug: "relation-group" },
       scope: [{ field: "groupType", column: "group_type", value: "team" }],
-      hiddenFields: ["externalCode", "groupType"],
-      hiddenColumns: [{ field: "groupType", column: "group_type" }, { field: "externalCode", column: "external_code" }],
+      hiddenFields: ["groupType"],
+      hiddenColumns: [{ field: "groupType", column: "group_type" }],
     });
     expect(teamContract.model.fields.map((field) => field.key)).toEqual(
-      groupContract.model.fields.map((field) => field.key).filter((key) => key !== "groupType" && key !== "externalCode"));
-    expect(teamContract.storage.columns.map((column) => column.column)).not.toContain("external_code");
+      groupContract.model.fields.map((field) => field.key).filter((key) => key !== "groupType"));
+    expect(teamContract.storage.columns.map((column) => column.column)).toContain("external_code");
     expect(teamContract.model.relationships.map((relationship) => relationship.key)).toEqual(
       groupContract.model.relationships.map((relationship) => relationship.key));
     expect(teamContract.views.core?.routes.list).toEqual({ en: "/teams", nl: "/teams" });

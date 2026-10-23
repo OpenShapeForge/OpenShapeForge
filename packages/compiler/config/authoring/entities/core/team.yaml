@@ -20,10 +20,6 @@ pluralLabels:
 fields:
   - key: groupType
     hidden: true
-  # The external functional code belongs to the generic group administration;
-  # a team is managed by name. The base keeps the value.
-  - key: externalCode
-    hidden: true
   - key: name
     label:
       en: Team name

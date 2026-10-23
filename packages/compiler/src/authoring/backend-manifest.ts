@@ -1655,6 +1655,23 @@ export function compileAuthoringBackendManifest(
   bindVersioningStorage(physicalCandidates, tables);
   bindOwnerAxes(physicalCandidates, tables);
   validateDefaultTemplates(tables);
+  for (const table of tables) {
+    const audit = physicalCandidates.find(candidate => candidate.contract.entity.name === table.source?.authoringEntityName)?.contract.audit;
+    for (const name of audit?.timeline?.parents ?? []) {
+      const relation = table.source?.graphql?.relationships?.find(item => item.name === name);
+      if (!relation || relation.resolve !== "belongsTo" || !relation.foreignKey || relation.through || relation.via ||
+          !tables.some(parent => parent.tenantScoped && parent.columns.some(column => column.primaryKey) && parent.source?.graphql?.typeName === relation.target)) {
+        throw new Error(`${table.source?.authoringEntityName}: audit timeline parent ${name} requires a stored parent relationship.`);
+      }
+    }
+    for (const name of audit?.timeline?.include ?? []) {
+      const relation = table.source?.graphql?.relationships?.find(item => item.name === name);
+      if (!relation || relation.resolve !== "hasMany" || !relation.foreignKey || relation.through || relation.via ||
+          !tables.some(child => child.tenantScoped && child.columns.some(column => column.primaryKey) && child.source?.graphql?.typeName === relation.target)) {
+        throw new Error(`${table.source?.authoringEntityName}: audit timeline include ${name} requires a stored child relationship.`);
+      }
+    }
+  }
 
   return {
     version: 1,

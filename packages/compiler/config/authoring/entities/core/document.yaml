@@ -62,6 +62,9 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+audit:
+  timeline:
+    include: [versions]
 fields:
   - key: code
     osfType: string

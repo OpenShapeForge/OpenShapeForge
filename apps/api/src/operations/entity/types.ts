@@ -65,6 +65,7 @@ export type GeneratedCrudColumn = {
 };
 
 export type GeneratedCrudRelationship = {
+  through?: { field: string; column: string; target: string };
   name: string;
   target: string;
   type: string;

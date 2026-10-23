@@ -516,7 +516,8 @@ describe("worker-role RLS axis", () => {
 
             // Step 2 — the run. Same worker role, tenant now known.
             await sql`select set_config('app.tenant_id', ${fixture.tenantA}, false)`.execute(conn);
-            expect(await count("platform.entity_events")).toBe(1);
+            // The stored business row and its explicit semantic event are both journaled.
+            expect(await count("platform.entity_events")).toBe(2);
 
             // ...and it is the tenant predicate doing that work, not the worker
             // role: another tenant's rows stay invisible throughout.

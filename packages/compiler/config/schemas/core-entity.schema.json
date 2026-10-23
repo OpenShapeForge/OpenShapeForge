@@ -14,10 +14,34 @@
     "fields"
   ],
   "properties": {
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeline": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "include"
+          ],
+          "properties": {
+            "include": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
     "source": {
       "type": "object", "additionalProperties": false,
       "required": ["kind"], "properties": { "kind": { "const": "operations" },
         "query": { "type": "object", "additionalProperties": false, "required": ["filterFields", "sortFields"], "properties": {
+          "mode": { "const": "structured" },
           "filterFields": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
           "sortFields": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
         } }

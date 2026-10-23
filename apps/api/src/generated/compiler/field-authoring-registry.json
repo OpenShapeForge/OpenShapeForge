@@ -7177,6 +7177,208 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "AuditEvent": {
+      "kind": "provider",
+      "entity": "AuditEvent",
+      "entityIdentity": true,
+      "baseType": "object",
+      "label": {
+        "en": "Audit event",
+        "nl": "Auditgebeurtenis"
+      },
+      "pluralLabel": {
+        "en": "Audit events",
+        "nl": "Auditgebeurtenissen"
+      },
+      "shape": [
+        {
+          "key": "id",
+          "osfType": "string",
+          "required": true,
+          "readOnly": true,
+          "validation": {
+            "format": "uuid"
+          },
+          "label": {
+            "en": "Event",
+            "nl": "Gebeurtenis"
+          }
+        },
+        {
+          "key": "entityType",
+          "osfType": "string",
+          "required": true,
+          "readOnly": true,
+          "label": {
+            "en": "Entity type",
+            "nl": "Entiteitstype"
+          }
+        },
+        {
+          "key": "recordId",
+          "osfType": "string",
+          "required": true,
+          "readOnly": true,
+          "label": {
+            "en": "Record",
+            "nl": "Record"
+          }
+        },
+        {
+          "key": "eventType",
+          "osfType": "string",
+          "required": true,
+          "readOnly": true,
+          "label": {
+            "en": "Event type",
+            "nl": "Gebeurtenistype"
+          }
+        },
+        {
+          "key": "occurredAt",
+          "osfType": "datetime",
+          "required": true,
+          "readOnly": true,
+          "label": {
+            "en": "Time",
+            "nl": "Tijdstip"
+          }
+        },
+        {
+          "key": "actorId",
+          "osfType": "string",
+          "readOnly": true,
+          "label": {
+            "en": "Actor",
+            "nl": "Actor"
+          }
+        },
+        {
+          "key": "actorKind",
+          "osfType": "string",
+          "readOnly": true,
+          "label": {
+            "en": "Actor kind",
+            "nl": "Actorsoort"
+          }
+        },
+        {
+          "key": "operationId",
+          "osfType": "string",
+          "readOnly": true,
+          "label": {
+            "en": "Operation",
+            "nl": "Operation"
+          }
+        },
+        {
+          "key": "correlationId",
+          "osfType": "string",
+          "readOnly": true,
+          "label": {
+            "en": "Correlation",
+            "nl": "Samenhang"
+          }
+        },
+        {
+          "key": "changedFields",
+          "osfType": "string",
+          "cardinality": "collection",
+          "required": true,
+          "readOnly": true,
+          "label": {
+            "en": "Changed fields",
+            "nl": "Gewijzigde velden"
+          }
+        },
+        {
+          "key": "subjects",
+          "osfType": "object",
+          "cardinality": "collection",
+          "required": true,
+          "readOnly": true,
+          "label": {
+            "en": "Timeline subjects",
+            "nl": "Tijdlijnonderwerpen"
+          },
+          "children": [
+            {
+              "key": "entityType",
+              "osfType": "string",
+              "required": true,
+              "label": {
+                "en": "Entity type",
+                "nl": "Entiteitstype"
+              }
+            },
+            {
+              "key": "recordId",
+              "osfType": "string",
+              "required": true,
+              "label": {
+                "en": "Record",
+                "nl": "Record"
+              }
+            }
+          ]
+        },
+        {
+          "key": "beforeValues",
+          "osfType": "object",
+          "readOnly": true,
+          "label": {
+            "en": "Recorded previous values",
+            "nl": "Vastgelegde vorige waarden"
+          }
+        },
+        {
+          "key": "afterValues",
+          "osfType": "object",
+          "readOnly": true,
+          "label": {
+            "en": "Recorded new values",
+            "nl": "Vastgelegde nieuwe waarden"
+          }
+        },
+        {
+          "key": "rawData",
+          "osfType": "object",
+          "readOnly": true,
+          "label": {
+            "en": "Recorded redacted payload",
+            "nl": "Vastgelegde geredigeerde payload"
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "auditEventId": {
+      "kind": "entityId",
+      "entity": "AuditEvent",
+      "baseType": "string",
+      "label": {
+        "en": "Audit event",
+        "nl": "Auditgebeurtenis"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "optionSource": {
+        "type": "entity",
+        "source": "AuditEvent",
+        "valueField": "id"
+      },
+      "displayTemplate": "{{eventType}}",
+      "filterField": "eventType",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "BankReconciliation": {
       "kind": "entity",
       "entity": "BankReconciliation",

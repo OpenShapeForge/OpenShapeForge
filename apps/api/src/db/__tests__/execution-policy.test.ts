@@ -488,7 +488,7 @@ describe("host execution policies against PostgreSQL", () => {
     await sql`delete from erp.document_types`.execute(privileged!.db);
     await sql`delete from erp.template_versions`.execute(privileged!.db);
     await sql`delete from erp.templates`.execute(privileged!.db);
-    await sql`delete from platform.entity_events`.execute(privileged!.db);
+    await sql`truncate platform.entity_events`.execute(privileged!.db);
     // A keyed Operation's receipt row belongs to a registered tenant.
     for (const tenantId of [tenantA, tenantB]) {
       await sql`insert into platform.tenants (id, slug, name, status)
@@ -989,6 +989,7 @@ describe("host execution policies against PostgreSQL", () => {
       returning id, to_json(updated_at)#>>'{}' as version
     `.execute(privileged!.db);
     const { id: variantId, version: variantVersion } = variants.rows[0]!;
+    const baselineJournal = await sql<{ count: string }>`select count(*)::text as count from platform.entity_events where tenant_id = ${tenantA}::uuid`.execute(privileged!.db);
     policyCalls.length = 0;
 
     // Hold the REFERENCED template version, which only the child's own
@@ -1029,7 +1030,7 @@ describe("host execution policies against PostgreSQL", () => {
       select count(*)::text as count from platform.entity_events
       where tenant_id = ${tenantA}::uuid
     `.execute(privileged!.db);
-    expect(journal.rows[0]!.count).toBe("0");
+    expect(journal.rows[0]!.count).toBe(baselineJournal.rows[0]!.count);
   }, 60_000);
 
   /**

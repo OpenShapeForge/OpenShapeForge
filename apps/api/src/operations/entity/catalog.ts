@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
-import manifest from "../../generated/db/manifest.json" with { type: "json" };
+import { generatedCrudTables, isGeneratedCrudTableEligible } from "./table-registry.js";
+export { getGeneratedCrudTables, isGeneratedCrudTableEligible } from "./table-registry.js";
 import { operationFailure } from "@openshapeforge/operations";
 import { notAuthorizedRefusal } from "./authorization-refusal-text.js";
 import { redactElicitedValues } from "../../connectors/secrets.js";
@@ -8,14 +9,13 @@ import {
   classifyDatabaseError,
   type DatabaseErrorTableContext,
 } from "../../db/database-refusals.js";
-import { appendScopedEntityEventInTransaction } from "../../platform/entity-events.js";
 import {
   assertClassifiedQueryFieldsAllowed,
   redactRow,
 } from "../../graphql/generated-authz.js";
 import { fieldNameForColumn, tableColumnMap } from "./columns.js";
 import { normalizeEntityStorageRow } from "./serialize-result.js";
-import { entityValueCarriers, entityValuePhysicalColumns, projectEntityValueRow } from "./entity-value-io.js";
+import { entityValueCarriers, projectEntityValueRow } from "./entity-value-io.js";
 import { assertStoredTypedValuesSupported, projectTypedValues } from "./typed-values.js";
 import { projectVisibleFieldBindings } from "./field-binding-policy.js";
 import { generatedEntityValues } from "../../modules/entity-value-registry.js";
@@ -27,10 +27,6 @@ import type {
   GeneratedEntityRow,
   ListPageInput,
 } from "./types.js";
-
-export function isGeneratedCrudTableEligible(table: GeneratedCrudTable): boolean {
-  return !table.domainInternal && table.generatedCrudEligible === true;
-}
 
 /**
  * Whether every row of `table` is its own tenant: the compiler stamps
@@ -57,11 +53,6 @@ export function isGeneratedCrudOperationEnabled(
   );
 }
 
-const generatedCrudTables = new Map(
-  (manifest.tables as GeneratedCrudTable[])
-    .filter((table) => isGeneratedCrudTableEligible(table) && table.primaryKey)
-    .map((table) => [table.name, table]),
-);
 
 // Precomputed per-table, per-operation role allow-sets from the manifest's
 // source.authorization block. Membership checks are exact case-sensitive
@@ -268,10 +259,6 @@ export function isGeneratedCrudTableReadable(name: string) {
   );
 }
 
-export function getGeneratedCrudTables() {
-  return [...generatedCrudTables.values()];
-}
-
 export function generatedCrudError(
   message: string,
   code: string,
@@ -338,52 +325,4 @@ export function readGeneratedCrudTable(
   }
   requireEntityOperation(table, operation, session);
   return table;
-}
-
-function generatedCrudAggregateType(table: GeneratedCrudTable) {
-  const aggregateType = table.source?.graphql?.singleQueryName?.trim();
-  if (!aggregateType) {
-    throw generatedCrudError(
-      `Generated CRUD table ${table.name} is missing source.graphql.singleQueryName.`,
-      "INTERNAL_SERVER_ERROR",
-    );
-  }
-  return aggregateType;
-}
-
-export async function appendGeneratedCrudEvent(
-  trx: Parameters<typeof appendScopedEntityEventInTransaction>[0],
-  table: GeneratedCrudTable,
-  input: {
-    aggregateId: string;
-    eventType: "created" | "updated" | "deleted";
-    row: GeneratedEntityRow;
-  },
-  entityValues = generatedEntityValues,
-) {
-  const hidden = entityValuePhysicalColumns(table, entityValues);
-  await appendScopedEntityEventInTransaction(trx, {
-    aggregateType: generatedCrudAggregateType(table),
-    aggregateId: input.aggregateId,
-    eventType: input.eventType,
-    payload: {
-      table: table.name,
-      schema: table.schema,
-      operation: input.eventType,
-      ...(table.realtime ? {
-        visibility: Object.fromEntries(table.realtime.visibilityColumns.filter((column) => !hidden.has(column)).map(column => [column, input.row[column] ?? null])) as import("../../generated/db/types.js").Json,
-      } : {}),
-    },
-  });
-}
-
-export function generatedCrudAggregateId(table: GeneratedCrudTable, row: GeneratedEntityRow) {
-  const id = row[table.primaryKey!];
-  if (id === null || id === undefined || id === "") {
-    throw generatedCrudError(
-      `Generated CRUD event for ${table.name} is missing primary key ${table.primaryKey}.`,
-      "INTERNAL_SERVER_ERROR",
-    );
-  }
-  return String(id);
 }

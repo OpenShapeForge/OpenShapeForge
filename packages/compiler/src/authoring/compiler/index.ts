@@ -317,6 +317,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     },
     storage: { table: tableName, columns },
     ...(coreEntity.source ? { source: coreEntity.source } : {}),
+    ...(coreEntity.audit ? { audit: coreEntity.audit } : {}),
     ...(blueprint ? { blueprint } : {}),
     ...(transitions.length ? { transitions } : {}),
     ...(coreEntity.workerAccess ? { workerAccess: coreEntity.workerAccess } : {}),

@@ -35,6 +35,8 @@ describe("document content against PostgreSQL", () => {
     await sql`insert into erp.template_variants (id, tenant_id, template_id, channel, locale) values (${randomUUID()}::uuid, ${tenant}::uuid, ${ids.template}::uuid, 'email', 'en')`.execute(privileged());
     const firstVersion = await publishTemplate(context, ids.template);
     const documentId = await createDocument();
+    const recordedUpdates = async () => (await sql<{ payload: { audit: { before: unknown; after: unknown; changedFields: string[] } } }>`select payload from platform.entity_events where aggregate_type='document' and aggregate_id=${documentId} and event_type='updated'`.execute(privileged())).rows;
+    const beforeLink = (await recordedUpdates()).length;
 
     // Link: one variant per template variant; blocks come from the frozen snapshot, in template order, with provenance.
     await fails(handlers.linkTemplate!({ id: documentId, templateVersionId: firstVersion, parameters: { name: 7 } }, context), "VALIDATION_FAILED");
@@ -45,8 +47,13 @@ describe("document content against PostgreSQL", () => {
     let blocks = await variantBlocks(nl.id);
     expect(shape(blocks)).toEqual([["template", ids.first, false, "Hello {{local.name}}"], ["template", ids.second, false, "Second"]]);
     expect(await variantBlocks((await variant(documentId, "email", "en")).id)).toEqual([]);
-    expect(events.map((event) => [event.aggregateType, event.eventType])).toEqual([["document", "updated"]]);
-    expect(events[0]!.payload).toEqual({ table: "documents", schema: "erp", operation: "updated", visibility: { tenant_id: tenant } });
+    expect(events.filter(event => event.aggregateType === "document")).toEqual([]);
+    // The pin and parameters are two real row updates; no empty plugin hint duplicates them.
+    expect((await recordedUpdates()).length - beforeLink).toBe(2);
+    for (const { payload } of await recordedUpdates()) {
+      expect(payload.audit.before).not.toBeNull(); expect(payload.audit.after).not.toBeNull();
+      expect(payload.audit.changedFields.length).toBeGreaterThan(0);
+    }
 
     // Local work through the owner-scoped collection Operations: edit the second block, insert a local block before it.
     const session = dbInput(editor);
@@ -62,7 +69,9 @@ describe("document content against PostgreSQL", () => {
     await sql`update erp.blocks set "values" = ${jsonbLiteral({ markdown: "Hello again {{local.name}}" })} where id = ${ids.first}::uuid`.execute(privileged());
     await sql`insert into erp.blocks (id, tenant_id, variant_id, variant_id_position, definition_key, "values", locked)
       values (${third}::uuid, ${tenant}::uuid, ${ids.variant}::uuid, 2, 'TextBlock', ${jsonbLiteral({ markdown: "Third" })}, true)`.execute(privileged());
+    const beforeFollow = (await recordedUpdates()).length;
     const secondVersion = await publishTemplate(context, ids.template);
+    expect((await recordedUpdates()).length - beforeFollow).toBe(1);
     expect(await document(documentId)).toMatchObject({ template_version_id: secondVersion, follow_error: null, lifecycle_status: "draft" });
     blocks = await variantBlocks(nl.id);
     expect(shape(blocks)).toEqual([
@@ -73,7 +82,7 @@ describe("document content against PostgreSQL", () => {
     ]);
     expect(blocks[3]!.locked).toBe(true);
     expect(blocks[0]!.updated_at).not.toBe(untouched);
-    expect(events.at(-1)).toMatchObject({ aggregateType: "document", eventType: "updated", payload: { table: "documents", operation: "updated" } });
+    expect(events.filter(event => event.aggregateType === "document")).toEqual([]);
 
     // A locked block refuses the owner-scoped update, move and remove; the others still work.
     await fails(collections(restricted(), session, binding("update"), { id: nl.id, expectedVersion: await version(), childId: blocks[3]!.id, values: { values: { markdown: "Not allowed" } } }), "INVALID_STATE");

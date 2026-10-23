@@ -39,6 +39,9 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+audit:
+  timeline:
+    include: [cases, documents, processes]
 fields:
   - key: code
     osfType: string

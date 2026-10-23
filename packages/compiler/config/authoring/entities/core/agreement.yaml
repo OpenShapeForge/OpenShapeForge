@@ -31,6 +31,9 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+audit:
+  timeline:
+    include: [agreementComponents, agreementMilestones]
 fields:
   - key: code
     osfType: string

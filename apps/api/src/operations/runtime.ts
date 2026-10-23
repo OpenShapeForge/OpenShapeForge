@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { withAuditContext } from "../platform/audit-context.js";
 import { liveMaintenanceRunner } from "../modules/maintenance.js";
 import { blueprintOperationHandler } from "./entity/blueprints.js";
 import { TRANSITIONS_PLUGIN, transitionAvailabilityHandler, transitionOperationHandler } from "./entity/transitions.js";
 import { CONTROL_PLUGIN, controlOperationHandler } from "../control/operations.js";
+import { AUDIT_PLUGIN, auditOperationHandler } from "../platform/history-operations.js";
 import { JOBS_PLUGIN, jobsOperationHandler } from "../jobs/operations.js";
 import {
   bearerIssuerOf,
@@ -626,6 +628,11 @@ export function bindOperationHandlers(
     // The durable job queue is core as well: its handlers (jobs/operations.ts)
     // bind in every process, so a deployment administers its outbox without
     // an operation module.
+    if (operation.plugin === AUDIT_PLUGIN) {
+      if (modulesByName.has(AUDIT_PLUGIN)) throw new Error("The core audit runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: auditOperationHandler(operation) });
+      continue;
+    }
     if (operation.plugin === JOBS_PLUGIN) {
       if (modulesByName.has(JOBS_PLUGIN)) throw new Error("The core jobs runtime cannot be replaced by a plugin.");
       bound.set(operation.key, { operation, handler: jobsOperationHandler(operation) });
@@ -1523,7 +1530,7 @@ export async function invokeOperation(
     });
   };
 
-  return withModuleOperationSession(
+  return withAuditContext(bound.operation.key, context.session?.credential, () => withModuleOperationSession(
     context.platform,
     context.session,
     (session) => {
@@ -1558,7 +1565,7 @@ export async function invokeOperation(
         ),
     });
     },
-  );
+  ), context.session?.principalKind);
 }
 
 function applyErrorResponseMetadata(

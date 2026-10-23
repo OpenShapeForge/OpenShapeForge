@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { auditContext, runWithAuditContext, type AuditContext } from "../platform/audit-context.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
@@ -61,7 +62,16 @@ const activeDbSession = new AsyncLocalStorage<{
   db: Kysely<unknown>;
   trx: Transaction<unknown>;
   session: DbSessionContext;
+  audit: AuditContext;
 }>();
+
+async function applyAuditSession<T>(trx: Transaction<T>, input: AuditContext | null | undefined = auditContext()): Promise<AuditContext> {
+  const audit = input ?? { operationId: "", correlationId: crypto.randomUUID(), actorKind: "system" as const };
+  await sql`select set_config('app.audit_operation', ${audit.operationId}, true),
+    set_config('app.audit_correlation', ${audit.correlationId}, true),
+    set_config('app.audit_actor_kind', ${audit.actorKind}, true)`.execute(trx);
+  return audit;
+}
 
 export function registerDbSessionAfterCommit(hook: DbSessionAfterCommitHook) {
   const store = dbSessionHooks.getStore();
@@ -173,6 +183,7 @@ export async function applyDbSession<TDatabase>(
   await sql`select set_config('app.bypass_rls', 'false', true)`.execute(trx);
   await sql`select set_config('app.tenant_id', ${session.tenantId}, true)`.execute(trx);
   await sql`select set_config('app.user_id', ${session.userId}, true)`.execute(trx);
+  const audit = await applyAuditSession(trx);
   await sql`select set_config('app.roles', ${session.roles.join(",")}, true)`.execute(trx);
   await sql`select set_config('app.scope', ${session.scope}, true)`.execute(trx);
   await sql`select set_config('app.relation_group_ids', ${session.relationGroupIds.join(",")}, true)`.execute(trx);
@@ -227,6 +238,7 @@ export async function applyDbSession<TDatabase>(
   await sql`select set_config('app.user_groups', ${descendants.join(",")}, true)`.execute(trx);
   await sql`select set_config('app.user_groups_exact', ${exact.join(",")}, true)`.execute(trx);
   await sql`select set_config('app.user_groups_ancestors', ${ancestors.join(",")}, true)`.execute(trx);
+  return audit;
 }
 
 export async function withDbSession<TDatabase, TResult>(
@@ -253,10 +265,21 @@ export async function withDbSession<TDatabase, TResult>(
     if (!sameSession) {
       throw new Error("Nested database work cannot replace the active session.");
     }
-    if (!options.independent) return callback(
-      active.trx as Transaction<TDatabase>,
-      active.session,
-    );
+    if (!options.independent) {
+      const audit = auditContext() ?? active.audit;
+      const trx = active.trx as Transaction<TDatabase>;
+      if (audit?.operationId === active.audit?.operationId && audit?.correlationId === active.audit?.correlationId && audit?.actorKind === active.audit?.actorKind) return callback(trx, active.session);
+      await applyAuditSession(trx, audit);
+      try {
+        const result = await activeDbSession.run({ ...active, audit }, () => callback(trx, active.session));
+        await applyAuditSession(trx, active.audit);
+        return result;
+      } catch (error) {
+        // A caller's savepoint may need to recover an aborted transaction first.
+        try { await applyAuditSession(trx, active.audit); } catch { /* Preserve the original failure. */ }
+        throw error;
+      }
+    }
   }
   const hooks = { afterCommit: [] as DbSessionAfterCommitHook[] };
 
@@ -265,15 +288,16 @@ export async function withDbSession<TDatabase, TResult>(
       ? db.transaction().setIsolationLevel(options.isolationLevel)
       : db.transaction();
     return transaction.execute(async (trx) => {
-      await applyDbSession(trx, session);
-      return activeDbSession.run(
+      const audit = await applyDbSession(trx, session);
+      return runWithAuditContext(audit, () => activeDbSession.run(
         {
           db: db as Kysely<unknown>,
           trx: trx as Transaction<unknown>,
           session,
+          audit,
         },
         () => callback(trx, session),
-      );
+      ));
     });
   });
 
@@ -450,6 +474,8 @@ export async function withSystemSession<TDatabase, TResult>(
         await sql`select set_config('app.tenant_id', ${input.tenantId}, true)`.execute(trx);
       }
       await sql`select set_config('app.user_id', ${input.databaseActorId ?? input.actorSubject}, true)`.execute(trx);
+      const audit = auditContext();
+      const appliedAudit = await applyAuditSession(trx, audit ? { ...audit, actorKind: "system" } : null);
       await sql`select set_config('app.roles', ${input.roles.join(",")}, true)`.execute(trx);
       await sql`select set_config('app.bypass_rls', 'true', true)`.execute(trx);
 
@@ -460,7 +486,7 @@ export async function withSystemSession<TDatabase, TResult>(
           (${auditId}, ${input.actorSubject}, ${input.reason}, ${startedAt}, ${input.tenantId ?? null})
       `.execute(trx);
 
-      const result = await callback(trx, { auditId, startedAt });
+      const result = await runWithAuditContext(appliedAudit, () => callback(trx, { auditId, startedAt }));
       succeeded = true;
       endedAt = new Date().toISOString();
 

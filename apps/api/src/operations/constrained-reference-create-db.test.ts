@@ -1,3 +1,4 @@
+import { applyAuditHistory } from "../db/migrations/audit-history.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -88,6 +89,7 @@ suite("atomic constrained reference creation against PostgreSQL", () => {
       grant select,insert,update,delete on all tables in schema erp,platform to openshapeforge_app;
       grant usage on all sequences in schema platform to openshapeforge_app;
       grant execute on all functions in schema app to openshapeforge_app`).execute(privileged.db);
+    await applyAuditHistory(privileged.db, [target, child], {});
     restricted = createDatabaseRuntime({ databaseUrl: databaseUrl(true), maxConnections: 2 });
   }, 30_000);
   afterAll(async () => {

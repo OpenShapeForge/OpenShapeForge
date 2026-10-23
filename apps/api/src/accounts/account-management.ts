@@ -68,7 +68,11 @@ function change(kind: 'block' | 'restore' | 'assignRole' | 'revokeRole'): Module
         else await sql`update platform.identity_relations set access_blocked=${blocked},updated_at=clock_timestamp()
           where tenant_id=${session.tenantId}::uuid and identity_id=${id}::uuid`.execute(tx);
         await appendScopedEntityEventInTransaction(tx, { aggregateType: 'Account', aggregateId: id, eventType: 'updated',
-          payload: { action: kind, actor: session.userId, ...(typeof input.roleKey === 'string' ? { role: input.roleKey } : {}) } });
+          payload: { action: kind, actor: session.userId, ...(typeof input.roleKey === 'string' ? { role: input.roleKey } : {}),
+            audit: { entityType: 'Account',
+              before: { status: member.access_blocked ? 'blocked' : 'linked', directRoles: member.roles },
+              after: { status: blocked ? 'blocked' : 'linked', directRoles: roles },
+              changedFields: roleChange ? ['directRoles'] : ['status'] } } });
         registerDbSessionAfterCommit(() => invalidateIdentityLink(member.issuer, member.subject, session.tenantId));
       }
       return { issuer: member.issuer, subject: member.subject, updated };

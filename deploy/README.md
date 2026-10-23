@@ -382,3 +382,5 @@ The normal provisioning/migration hooks still run from the pinned API image.
 No realm is regenerated or imported. The full **Deploy** workflow remains the
 path for an intentional identity/configuration release; its production passkey
 requirements stay enforced. Both workflows share one deployment lock.
+
+The runtime workflow uses chart templates from the dispatched main commit. Review chart changes since the installed revision before dispatch; `--reuse-values` preserves installed values, not historical templates. The workflow resolves the published API tag and requires an exact digest match before any cluster write.

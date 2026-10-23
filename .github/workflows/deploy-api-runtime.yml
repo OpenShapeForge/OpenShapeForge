@@ -34,6 +34,14 @@ jobs:
           persist-credentials: false
       - name: Validate immutable runtime selection
         run: bash scripts/deploy-api-runtime.sh --validate-only
+      - name: Verify the published API tag matches the selected digest
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
+          actual=$(docker buildx imagetools inspect "ghcr.io/openshapeforge/openshapeforge-api:$IMAGE_TAG" --format '{{json .Manifest.Digest}}' | jq -r .)
+          [[ "$actual" == "$API_IMAGE_DIGEST" ]] || { echo "API tag digest mismatch: $actual != $API_IMAGE_DIGEST" >&2; exit 1; }
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - name: Configure Scaleway CLI
         uses: scaleway/action-scw@2e34a1eb35cf3cac627f24643a101fea269cbd83 # v0.0.3

@@ -3,7 +3,7 @@ import { operationFailure } from "@openshapeforge/operations";
 import type { ModuleOperationHandler } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
 import { contentCarrier } from "./content-runtime.js";
-import { appendRecordEvent, blockColumns, deleteDocumentVariants, readTemplateVersion, templateParameterFields, withDocumentCommand } from "./document-blocks.js";
+import { blockColumns, deleteDocumentVariants, readTemplateVersion, templateParameterFields, withDocumentCommand } from "./document-blocks.js";
 import { applyTemplateVersion, type ApplyContext } from "./document-follow.js";
 import { object, refuse, uuid } from "./validation.js";
 
@@ -75,7 +75,6 @@ export const linkTemplate: ModuleOperationHandler = async (input, context) => {
       await applyTemplateVersion(apply, { id: documentId, template_version_id: sameTemplate && tracked ? document!.template_version_id : null }, next!);
       if (parameters) await rows(trx, "update erp.documents set parameters = $2::text::jsonb where tenant_id = app.current_tenant() and id = $1::uuid", [documentId, JSON.stringify(parameters)]);
     });
-    await appendRecordEvent(platform, session, { aggregateType: "document", table: "documents", id: documentId, operation: "updated" });
     const stored = (await rows<{ row: Record<string, unknown> }>(trx, "select to_jsonb(d.*) as row from erp.documents d where tenant_id = app.current_tenant() and id = $1::uuid", [documentId]))[0]?.row;
     return projectDocument(stored ?? {});
   });

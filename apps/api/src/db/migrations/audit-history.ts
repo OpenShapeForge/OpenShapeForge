@@ -6,6 +6,7 @@ import auditCatalog from "../../generated/operations/audit.json" with { type: "j
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { OpenShapeForgeDatabase } from "../connection.js";
 import type { GeneratedCrudTable } from "../../operations/entity/types.js";
+import type { RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
 
 type Config = { entity: string; aggregate: string; schema: string; table: string; pk: string;
   fields: Record<string, { name: string; hidden: boolean; exact: boolean }>; visibility: string[];
@@ -39,10 +40,14 @@ export function auditTableConfigs(tables: readonly GeneratedCrudTable[], timelin
     }
   }
   function config(table: GeneratedCrudTable): Config {
+    const physicalColumns = new Set((manifest.entityValues.carriers as unknown as RuntimeEntityValueCarrier[])
+      .filter(carrier => carrier.schema === table.schema && carrier.table === table.table)
+      .flatMap(carrier => Object.values(carrier.definitions).flatMap(definition => definition.references
+        .flatMap(reference => [reference.column, ...(reference.parameterColumn ? [reference.parameterColumn] : [])]))));
     return { entity: table.source!.authoringEntityName!, aggregate: table.source!.graphql?.singleQueryName ?? table.source!.authoringEntityName!,
       schema: table.schema, table: table.table, pk: table.primaryKey!, visibility: (table.realtime?.visibilityColumns ?? []).filter(name => {
         const column = table.columns.find(column => column.name === name);
-        return column && (!table.retention || name === "id" || name.endsWith("_id")) && !column.classification && !column.fieldPolicy && !/password|secret|token|credential|private.?key|cipher|encrypted/i.test(name);
+        return column && !physicalColumns.has(name) && (!table.retention || name === "id" || name.endsWith("_id")) && !column.classification && !column.fieldPolicy && !/password|secret|token|credential|private.?key|cipher|encrypted/i.test(name);
       }),
       fields: Object.fromEntries(table.columns.filter(column => column.sourceField).map(column => [column.name, {
         name: column.sourceField!, exact: ["numeric", "bigint"].includes(column.type), hidden: !!table.retention || !!column.classification || !!column.fieldPolicy || /password|secret|token|credential|private.?key|cipher|encrypted/i.test(column.name),
@@ -164,14 +169,15 @@ async function installAuditHistory(db: OpenShapeForgeDatabase, tables: readonly 
 
     create or replace function platform.audit_event_envelope() returns trigger
     language plpgsql set search_path=pg_catalog as $$
-    declare envelope jsonb=coalesce(NEW.payload->'audit','{}'::jsonb); identity text; correlation text;
+    declare envelope jsonb=coalesce(NEW.payload->'audit','{}'::jsonb); identity text; correlation text; changes jsonb;
     begin
       if TG_OP='UPDATE' then
         if (to_jsonb(NEW)-'delivery_sequence') is distinct from (to_jsonb(OLD)-'delivery_sequence') then raise exception 'Audit events are immutable' using errcode='42501'; end if;
         return NEW;
       elsif TG_OP='DELETE' then raise exception 'Audit events are append-only' using errcode='42501'; end if;
       if jsonb_typeof(NEW.payload)<>'object' then raise exception 'Audit payload must be an object' using errcode='22023'; end if;
-      if envelope ? 'changedFields' and (jsonb_typeof(envelope->'changedFields')<>'array' or exists(select 1 from jsonb_array_elements(envelope->'changedFields') e where jsonb_typeof(e)<>'string')) then raise exception 'Invalid audit changed fields' using errcode='22023'; end if;
+      changes=coalesce(envelope->'changedFields',NEW.payload->'changedFields','[]'::jsonb);
+      if jsonb_typeof(changes)<>'array' or exists(select 1 from jsonb_array_elements(changes) e where jsonb_typeof(e)<>'string') then raise exception 'Invalid audit changed fields' using errcode='22023'; end if;
       if envelope ? 'subjects' and (jsonb_typeof(envelope->'subjects')<>'array' or exists(select 1 from jsonb_array_elements(envelope->'subjects') e where jsonb_typeof(e->'entityType') is distinct from 'string' or jsonb_typeof(e->'recordId') is distinct from 'string')) then raise exception 'Invalid audit subjects' using errcode='22023'; end if;
       identity=nullif(current_setting('app.user_id',true),'');
       correlation=coalesce(nullif(current_setting('app.audit_correlation',true),''),pg_current_xact_id()::text);
@@ -179,7 +185,7 @@ async function installAuditHistory(db: OpenShapeForgeDatabase, tables: readonly 
         'version',1,'entityType',coalesce(envelope->>'entityType',platform.audit_entity_name(NEW.aggregate_type),NEW.aggregate_type),
         'actorId',identity,'actorKind',coalesce(nullif(current_setting('app.audit_actor_kind',true),''),'system'),
         'operationId',nullif(current_setting('app.audit_operation',true),''),'correlationId',correlation,
-        'changedFields',coalesce(envelope->'changedFields',NEW.payload->'changedFields','[]'::jsonb),
+        'changedFields',changes,
         'subjects',coalesce(envelope->'subjects',jsonb_build_array(jsonb_build_object('entityType',coalesce(platform.audit_entity_name(NEW.aggregate_type),NEW.aggregate_type),'recordId',NEW.aggregate_id)))));
       return NEW;
     end $$;

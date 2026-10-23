@@ -7,7 +7,7 @@ import accounts from "../accounts/runtime.js";
 import documents from "@openshapeforge/documents/runtime";
 import versioning from "@openshapeforge/versioning/runtime";
 import { createDatabaseRuntime } from "../db/connection.js";
-import { withDbSession } from "../db/session.js";
+import { withDbSession, withInvocationSavepoint } from "../db/session.js";
 import { runMigrationChain } from "../db/migration-chain.js";
 import { applyAuditHistory, auditHistoryReady } from "../db/migrations/audit-history.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
@@ -63,7 +63,7 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
       await sql`insert into audit_probe.budgets values(${budget}::uuid,${tenant}::uuid,'Plan'),(${movedBudget}::uuid,${tenant}::uuid,'Second plan')`.execute(tx);
       await sql`insert into audit_probe.lines values(${line}::uuid,${tenant}::uuid,${budget}::uuid,'Sales')`.execute(tx);
       await withAuditContext("ProbeValue.create", "trusted-context", () => withDbSession(runtime.db, session(tenant), nested => sql`insert into audit_probe.amounts values(${value}::uuid,${tenant}::uuid,${line}::uuid,'100','classified-never-store',9007199254740993.123456789)`.execute(nested)));
-      await expect(withAuditContext("ProbeValue.refused", "trusted-context", () => withDbSession(runtime.db, session(tenant), nested => sql`select 1/0`.execute(nested)))).rejects.toThrow();
+      await expect(withInvocationSavepoint(tx, () => withAuditContext("ProbeValue.refused", "trusted-context", () => withDbSession(runtime.db, session(tenant), nested => sql`select 1/0`.execute(nested))))).rejects.toThrow();
       await sql`insert into audit_probe.contacts values(${contact}::uuid,${tenant}::uuid,'Contact','classified-never-store')`.execute(tx);
     }));
     const plan = await privileged.db.transaction().execute(async tx => {
@@ -83,6 +83,9 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
     }));
     await appendEntityEvent(runtime.db, session(otherTenant), { aggregateType: "ProbeBudget", aggregateId: budget, eventType: "foreign-only", payload: { password: "must-not-store" } });
     await appendEntityEvent(runtime.db, session(tenant), { aggregateType: "ProbeContact", aggregateId: contact, eventType: "semantic-event", payload: { accessToken: "must-not-store", nested: { clientSecret: "must-not-store" } } });
+    for (const payload of [{ changedFields: { invalid: true } }, { changedFields: [1] }, { audit: { changedFields: null } }]) {
+      await expect(appendEntityEvent(runtime.db, session(tenant), { aggregateType: "ProbeContact", aggregateId: contact, eventType: "invalid-fields", payload })).rejects.toThrow();
+    }
 
     async function clientFor(tenantId: string, held: string[], run: (client: Client) => Promise<void>) {
       const platform = new ModulePlatformRuntime(runtime.db);
@@ -175,6 +178,27 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
     expect(JSON.stringify(stored.rows)).not.toMatch(/classified-never-store|changed-never-store|must-not-store/);
     await expect(sql`delete from platform.entity_events`.execute(privileged.db)).rejects.toThrow();
     await expect(sql`update platform.entity_events set payload='{}'::jsonb`.execute(privileged.db)).rejects.toThrow();
+    const bulkTenant = crypto.randomUUID(), bulkBudget = crypto.randomUUID(), bulkLine = crypto.randomUUID();
+    const started = performance.now();
+    await withDbSession(runtime.db, session(bulkTenant), async tx => {
+      await sql`insert into audit_probe.budgets values(${bulkBudget}::uuid,${bulkTenant}::uuid,'Bulk')`.execute(tx);
+      await sql`insert into audit_probe.lines values(${bulkLine}::uuid,${bulkTenant}::uuid,${bulkBudget}::uuid,'Bulk line')`.execute(tx);
+      await sql`insert into audit_probe.amounts select gen_random_uuid(),${bulkTenant}::uuid,${bulkLine}::uuid,n::text,'masked',n::numeric from generate_series(1,1000) n`.execute(tx);
+    });
+    const durationMs = performance.now() - started;
+    const bulk = await sql<{ count: number }>`select count(*)::int as count from platform.entity_events where tenant_id=${bulkTenant}::uuid and platform.audit_event_subjects(payload,aggregate_type,aggregate_id) @> ${jsonbLiteral([{ entityType: "ProbeBudget", recordId: bulkBudget }])}`.execute(privileged.db);
+    expect(bulk.rows[0]!.count).toBe(1002);
+    console.log(JSON.stringify({ auditBulkChildRows: 1000, timelineLevels: 3, recordedRootEvents: 1002, durationMs }));
+    // Rehearse the documented owner-only, complete-tenant offboarding step.
+    await privileged.db.transaction().execute(async tx => {
+      await sql.raw("lock table platform.entity_events in access exclusive mode; alter table platform.entity_events disable trigger audit_event_envelope").execute(tx);
+      await sql`delete from platform.entity_events where tenant_id=${otherTenant}::uuid`.execute(tx);
+      await sql.raw("alter table platform.entity_events enable trigger audit_event_envelope").execute(tx);
+    });
+    expect((await sql<{ count: number }>`select count(*)::int as count from platform.entity_events where tenant_id=${otherTenant}::uuid`.execute(privileged.db)).rows[0]!.count).toBe(0);
+    expect((await sql<{ count: number }>`select count(*)::int as count from platform.entity_events where tenant_id=${bulkTenant}::uuid`.execute(privileged.db)).rows[0]!.count).toBe(1002);
+    expect(await auditHistoryReady(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } })).toBe(true);
+    await expect(sql`delete from platform.entity_events where tenant_id=${tenant}::uuid`.execute(privileged.db)).rejects.toThrow();
   } finally {
     await runtime.close(); await privileged.close(); await admin.unsafe(`drop database if exists "${name}" with (force)`); await admin.close();
   }

@@ -13,7 +13,7 @@ import type { PublishFollower, PublishFollowerContext } from "@openshapeforge/ve
 import { orderedChildren, parseSnapshot, rowId, type PublishedSnapshot, type SnapshotNode } from "@openshapeforge/versioning/snapshot";
 import { rows } from "./commands.js";
 import {
-  appendRecordEvent, blockColumns, blockContent, contentKey, deleteDocumentBlocks, insertDocumentBlock, insertDocumentVariant, listDocumentBlocks, listDocumentVariants,
+  blockColumns, blockContent, contentKey, deleteDocumentBlocks, insertDocumentBlock, insertDocumentVariant, listDocumentBlocks, listDocumentVariants,
   markBlocksDiverged, readTemplateVersion, replaceDocumentBlockContent, templateVariants, updateBlockPositions, withDocumentCommand,
   type BlockColumns, type DocumentVariantRow, type TemplateVersionRow,
 } from "./document-blocks.js";
@@ -230,8 +230,5 @@ export const followTemplatePublish: PublishFollower = async (context) => {
     await isolateFollowFailures(documents, applyBatch, async (document, error) => {
       await rows(trx, `update erp.documents set follow_error = $2::text, ${TOUCH} where tenant_id = app.current_tenant() and id = $1::uuid`, [document.id, describe(platform, error).slice(0, 2000)]);
     });
-    for (const document of documents) {
-      await appendRecordEvent(platform, session, { aggregateType: "document", table: "documents", id: document.id, operation: "updated" });
-    }
   });
 };

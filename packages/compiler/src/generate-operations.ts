@@ -107,6 +107,7 @@ const GRAPHQL_FIELD = /^[_A-Za-z][_0-9A-Za-z]*$/;
 const SECURITY_SCHEME = /^[A-Za-z0-9._-]+$/;
 const REST_PATH = /^\/api\/[a-z][a-z0-9-]*(?:\/(?::[_A-Za-z][_0-9A-Za-z]*|[a-z0-9][a-z0-9._-]*))*$/;
 const RESERVED_API_NAMESPACES = new Set([
+  "audit-events",
   "api-keys",
   "artifacts",
   "connectors",
@@ -136,8 +137,7 @@ const RESERVED_API_NAMESPACES = new Set([
 const CORE_MODULE_API_NAMESPACES: ReadonlyMap<string, readonly string[]> = new Map([
   ["control", ["osf-control"]],
   ["jobs", ["osf-jobs"]],
-  ["audit", ["osf-audit"]],
-  ["timeline", ["osf-audit"]],
+  ["audit-events", ["osf-audit"]],
   // Status transitions and the billing run live under the entity's own
   // generated REST resource (POST /api/rest/v1/<base>/:id/<key>, POST
   // /api/rest/v1/billing-runs/execute): they are that resource's verbs.
@@ -1331,6 +1331,16 @@ function operationErrorResponse(errors: readonly OperationError[]): Record<strin
   };
 }
 
+/** Standalone JSON Schema fragments become document-relative when embedded. */
+function openApiSchemaReferences(value: unknown, location: string): unknown {
+  if (Array.isArray(value)) return value.map(item => openApiSchemaReferences(item, location));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key,
+    key === "$ref" && typeof child === "string" && (child === "#" || child.startsWith("#/"))
+      ? location + child.slice(1) : openApiSchemaReferences(child, location),
+  ]));
+}
+
 export function operationOpenApiPaths(
   operations: readonly CompiledPluginOperation[],
   sessionSecuritySchemes: readonly string[] = ["bearerAuth"],
@@ -1440,7 +1450,8 @@ export function operationOpenApiPaths(
           ? { parameters: [...pathParameters, ...queryParameters, ...idempotencyParameters] }
           : {}),
         ...(rest.method === "GET" || rest.method === "DELETE" ? {} : {
-          requestBody: { required: bodyRequired.length > 0, content: { "application/json": { schema: bodySchema } } },
+          requestBody: { required: bodyRequired.length > 0, content: { "application/json": { schema: openApiSchemaReferences(bodySchema,
+            `#/paths/${openApiPath.replaceAll("~", "~0").replaceAll("/", "~1")}/${method}/requestBody/content/application~1json/schema`) } } },
         }),
         responses,
       },

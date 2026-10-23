@@ -6,7 +6,7 @@
  * so a plugin that adds a reference column needs no change here. Ownership,
  * ordering and provenance columns are the only ones this module writes itself.
  */
-import type { PluginPlatformServices, PluginSessionContext, RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
+import type { RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
 import { childNodes, findChild, orderedChildren, parseSnapshot, type PublishedSnapshot, type SnapshotNode } from "@openshapeforge/versioning/snapshot";
 import { rows } from "./commands.js";
 
@@ -182,12 +182,3 @@ export function templateParameterFields(snapshot: PublishedSnapshot): readonly R
   return Array.isArray(fields) ? fields.filter((field): field is Record<string, unknown> => Boolean(field && typeof field === "object")) : [];
 }
 
-/** The same event a generated CRUD write appends (apps/api operations/entity/catalog.ts appendGeneratedCrudEvent). */
-export async function appendRecordEvent(platform: PluginPlatformServices, session: PluginSessionContext, record: {
-  aggregateType: "documentVariant" | "document"; table: "document_variants" | "documents"; id: string; operation: "created" | "updated";
-}): Promise<void> {
-  await platform.events.append(session, {
-    aggregateType: record.aggregateType, aggregateId: record.id, eventType: record.operation,
-    payload: { table: record.table, schema: "erp", operation: record.operation, visibility: { tenant_id: session.tenantId ?? null } },
-  });
-}

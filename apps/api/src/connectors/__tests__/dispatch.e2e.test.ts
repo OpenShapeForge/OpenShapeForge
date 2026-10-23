@@ -632,6 +632,12 @@ describe("audit trail", () => {
     const serialized = JSON.stringify(events.rows);
     // Field NAMES are recorded…
     expect(serialized).toContain("accessKeyId");
+    const configured = events.rows.find(event => event.event_type === "connector.configured")!.payload as {
+      changedFields: string[]; audit: { changedFields: string[] };
+    };
+    expect(configured.changedFields).toEqual(["accessKeyId", "endpoint", "region", "secretAccessKey"]);
+    expect(configured.audit.changedFields).toEqual(configured.changedFields);
+    expect(configured).not.toHaveProperty("secretFields");
     // …and never a value, secret or otherwise.
     expect(serialized).not.toContain("dispatch-secret-value");
     expect(serialized).not.toContain("AKIA-DISPATCH");

@@ -10,7 +10,7 @@
  *   complete_onboarding  — verifies the checklist, records completion on the
  *                          person's identity ↔ tenant link row, answers the
  *                          final status; refuses with the missing steps.
- * The optional workflow is shipped as an Agent Skill by the integrations plugin.
+ * Plugins may supply the optional workflow as an Agent Skill.
  *
  * The checklist is COMPUTED from what the server already knows, never stored
  * as text: the identity link (auth/identity-link.ts), for an organization
@@ -95,7 +95,7 @@ export function onboardingStepKeyFromUri(uri: string): OnboardingStepKey | null 
 export const ONBOARDING_INSTRUCTION =
   " Call `whoami` first. Its `onboarding` field is an index, not a how-to." +
   " Onboarding is optional guidance, not a prerequisite for using the app or its offered tools." +
-  " On request, read a listed onboarding skill; step detail is at `osf://onboarding/step/<key>`;" +
+  " On request, read a listed onboarding skill if available; step guidance is at `osf://onboarding/step/<key>`;" +
   " without resources call `onboarding_status`.";
 
 // ---------------------------------------------------------------------------
@@ -504,7 +504,7 @@ export function computeOnboarding(
     sentences.push(
       applicable.length === done.length
         ? "Every step is done; call complete_onboarding to record it."
-        : "Onboarding is optional; read onboarding_status if the person asks for help.",
+        : "Onboarding is optional; use the step guidance if the person asks for help.",
     );
   }
   return {
@@ -522,7 +522,7 @@ export function missingSteps(summary: OnboardingSummary): OnboardingStep[] {
 }
 
 // ---------------------------------------------------------------------------
-// Guide text
+// Roles
 
 const ROLE_ADMIN = "org_admin";
 

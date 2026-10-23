@@ -182,7 +182,7 @@ describe("computeOnboarding", () => {
     const inProgress = computeOnboarding(facts());
     expect(inProgress.status).toBe("In progress");
     expect(inProgress.summary).toContain("1 of 2 steps done");
-    expect(inProgress.summary).toContain("Onboarding is optional; read onboarding_status if the person asks for help.");
+    expect(inProgress.summary).toContain("Onboarding is optional; use the step guidance if the person asks for help.");
 
     const allDone = computeOnboarding(facts({ preferences: { offered: true, count: 1 } }));
     expect(allDone.status).toBe("In progress");
@@ -221,7 +221,7 @@ describe("computeOnboarding", () => {
   });
 });
 
-describe("guide text and instructions", () => {
+describe("onboarding roles and instructions", () => {
   it("uses the authored access administrator permission, not people-management authority", () => {
     expect(isOrganizationAdministrator([IDENTITY_LINK_ADMIN_ROLE])).toBe(true);
     expect(isOrganizationAdministrator(["org_admin"])).toBe(true);
@@ -687,7 +687,7 @@ describe("the onboarding tools", () => {
     expect(onboardingToolsForSession(session()).map((tool) => tool.name)).toEqual([
       ONBOARDING_STATUS_TOOL,
       COMPLETE_ONBOARDING_TOOL,
-        ]);
+    ]);
     expect(onboardingToolsForSession(session({ userId: null }))).toEqual([]);
   });
 

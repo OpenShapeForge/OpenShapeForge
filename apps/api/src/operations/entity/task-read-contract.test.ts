@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { getGeneratedCrudTables, requireEntityOperation } from "./catalog.js";
 import { catalog } from "../../mcp/catalog.js";
 import { sessionMayInvoke } from "../../mcp/session-projection.js";
-import roleComposites from "../../generated/compiler/role-composites.json";
+import roleComposites from "../../generated/compiler/role-composites.json" with { type: "json" };
 import type { DbSessionInput } from "../../db/session.js";
 
 const tables = getGeneratedCrudTables();

@@ -280,6 +280,9 @@ roleLabels:
     phrase: { en: manage the organization's settings, nl: de organisatie-instellingen beheren }
   General.All.Read:
     phrase: { en: view general records, nl: algemene gegevens inzien }
+  Tasks.All.Read:
+    label: { en: Read tasks, nl: Taken lezen }
+    phrase: { en: view tasks, nl: taken inzien }
 
 # Hand-authored client roles below complement roles derived from entity YAML.
 clientRoles:

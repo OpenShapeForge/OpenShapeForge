@@ -15,8 +15,8 @@
  * credentials. Enough for a relay and for Mailpit in the compose stack; a
  * deployment with other needs supplies its own MailProvider.
  */
-import { connect as connectTcp, type Socket } from "node:net";
-import { connect as connectTls, type TLSSocket } from "node:tls";
+import { connect as connectTcp, isIP, type Socket } from "node:net";
+import { connect as connectTls, checkServerIdentity, type PeerCertificate, type TLSSocket } from "node:tls";
 import { MailDeliveryError, renderMailMessage, type MailAddress, type MailMessage, type MailProvider } from "./provider.js";
 
 export type SmtpConfig = {
@@ -53,7 +53,7 @@ export function readSmtpConfig(env: NodeJS.ProcessEnv = process.env): SmtpConfig
   const secure = url.protocol === "smtps:";
   const timeout = Number.parseInt(env.OPENSHAPEFORGE_SMTP_TIMEOUT_MS ?? "", 10);
   return {
-    host: url.hostname,
+    host: url.hostname.replace(/^\[|\]$/g, ""),
     port: url.port ? Number.parseInt(url.port, 10) : secure ? 465 : 25,
     secure,
     ...(url.username ? { auth: { user: decodeURIComponent(url.username), pass: decodeURIComponent(url.password) } } : {}),
@@ -75,20 +75,28 @@ const MAX_BUFFERED_REPLY = 64 * 1024;
  */
 function handshake<T extends Socket | TLSSocket>(timeoutMs: number, what: string, start: (ready: () => void) => T): Promise<T> {
   return new Promise((resolve, reject) => {
+    let socket: T | undefined;
+    let settled = false;
     const settle = (error: Error | null) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      socket.off("error", onError);
-      socket.off("close", onClose);
-      if (!error) return resolve(socket);
-      socket.destroy();
-      reject(error);
+      socket?.off("error", onError);
+      socket?.off("close", onClose);
+      if (!error && socket) return resolve(socket);
+      socket?.destroy();
+      reject(error ?? new Error(`${what} failed: no socket.`));
     };
     const onError = (error: Error) => settle(error);
     const onClose = () => settle(new Error(`${what} failed: the connection closed.`));
     const timer = setTimeout(() => settle(new Error(`${what} timed out.`)), timeoutMs);
-    const socket = start(() => settle(null));
-    socket.on("error", onError);
-    socket.on("close", onClose);
+    try {
+      socket = start(() => queueMicrotask(() => settle(null)));
+      socket.on("error", onError);
+      socket.on("close", onClose);
+    } catch (error) {
+      settle(error instanceof Error ? error : new Error(String(error)));
+    }
   });
 }
 
@@ -178,7 +186,7 @@ class SmtpConnection {
     plain.setTimeout(0);
     try {
       this.#socket = await handshake(this.timeoutMs, "SMTP TLS handshake", (ready) =>
-        connectTls({ socket: plain, servername: host, rejectUnauthorized }, ready));
+        connectTls({ socket: plain, ...tlsIdentity(host), rejectUnauthorized }, ready));
     } catch (error) {
       plain.destroy();
       throw error;
@@ -193,10 +201,19 @@ class SmtpConnection {
   }
 }
 
+// SNI carries DNS names only. Certificate identity validation must still use
+// the configured relay address, including an IP address in the certificate SAN.
+function tlsIdentity(host: string) {
+  return {
+    ...(isIP(host) ? {} : { servername: host }),
+    checkServerIdentity: (_servername: string, cert: PeerCertificate) => checkServerIdentity(host, cert),
+  };
+}
+
 async function open(config: SmtpConfig): Promise<SmtpConnection> {
   const socket = config.secure
     ? await handshake(config.timeoutMs, "SMTP TLS handshake", (ready) =>
-      connectTls({ host: config.host, port: config.port, servername: config.host, rejectUnauthorized: config.rejectUnauthorized }, ready))
+      connectTls({ host: config.host, port: config.port, ...tlsIdentity(config.host), rejectUnauthorized: config.rejectUnauthorized }, ready))
     : await handshake(config.timeoutMs, "SMTP connect", (ready) => connectTcp({ host: config.host, port: config.port }, ready));
   return new SmtpConnection(socket, config.timeoutMs);
 }

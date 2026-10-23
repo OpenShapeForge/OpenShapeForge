@@ -10,6 +10,9 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { createServer, type Server, type Socket } from "node:net";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createMailDeliverHandler } from "./deliver.js";
 import { configuredMailProvider, createJobsRuntimeModule } from "../module.js";
 import { createNullMailProvider, isMailAddress, MAIL_NOT_CONFIGURED, MailDeliveryError, renderMailMessage, type MailMessage } from "./provider.js";
@@ -170,8 +173,31 @@ describe("smtp provider", () => {
     expect(flooded.elapsed).toBeLessThan(2_000);
   }, 10_000);
 
+  test("TLS validates IP SANs and rejects mismatches for implicit TLS and STARTTLS", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "smtp-tls-"));
+    try {
+      for (const [name, ip] of [["matching", "127.0.0.1"], ["mismatch", "127.0.0.2"]]) {
+        const cert = join(dir, `${name}.pem`), key = join(dir, `${name}.key`);
+        const generated = Bun.spawnSync(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+          "-subj", "/CN=fixture", "-addext", `subjectAltName=IP:${ip}`, "-keyout", key, "-out", cert]);
+        expect(generated.exitCode).toBe(0);
+        for (const mode of ["smtps", "starttls"]) {
+          const child = Bun.spawn([process.execPath, new URL("./smtp-tls.fixture.ts", import.meta.url).pathname,
+            cert, key, mode, name === "matching" ? "accept" : "reject"], {
+            env: { ...process.env, NODE_EXTRA_CA_CERTS: cert }, stdout: "pipe", stderr: "pipe",
+          });
+          const output = await new Response(child.stdout).text();
+          const errors = await new Response(child.stderr).text();
+          expect(await child.exited, errors).toBe(0);
+          expect(JSON.parse(output).passed).toBe(true);
+        }
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }, 20_000);
+
   test("the URL carries scheme, port and credentials; the sender is separate", () => {
     expect(readSmtpConfig({})).toBeNull();
+    expect(readSmtpConfig({ OPENSHAPEFORGE_SMTP_URL: "smtps://[::1]:465", OPENSHAPEFORGE_MAIL_FROM: "a@b.test" })?.host).toBe("::1");
     expect(() => readSmtpConfig({ OPENSHAPEFORGE_SMTP_URL: "smtp://localhost:1025" })).toThrow(/OPENSHAPEFORGE_MAIL_FROM/);
     expect(readSmtpConfig({ OPENSHAPEFORGE_SMTP_URL: "smtps://u%40x:p@relay.test", OPENSHAPEFORGE_MAIL_FROM: "a@b.test" })).toMatchObject({
       host: "relay.test", port: 465, secure: true, auth: { user: "u@x", pass: "p" }, from: "a@b.test",

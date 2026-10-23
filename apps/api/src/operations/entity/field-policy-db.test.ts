@@ -5,6 +5,7 @@ import { SQL } from "bun";
 import { sql } from "kysely";
 import { FIELD_ITEM_ID } from "@openshapeforge/operations";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
+import { jsonbLiteral } from "../../db/sql-helpers.js";
 import { withDbSession } from "../../db/session.js";
 import type { GeneratedCrudTable } from "./types.js";
 
@@ -41,9 +42,13 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
         { key: "osfType", osfType: "string", label: { en: "Type" } },
         { key: "classification", osfType: "object", label: { en: "Classification" }, children: [{ key: "sensitivity", osfType: "string", label: { en: "Sensitivity" } }] },
       ] } as never);
+      for (const key of ["baseUrlTemplate", "ownerUserId"]) fields.push({ key, osfType: "string", label: { en: key }, persisted: { column: key === "ownerUserId" ? "owner_user_id" : "base_url_template", storageClass: "core" } } as never);
+      fields.push({ key: "egressHosts", osfType: "string", cardinality: "collection", label: { en: "Egress hosts" }, persisted: { column: "egress_hosts", storageClass: "core" } } as never);
+      for (const [key, children] of [["auth", ["profile"]], ["probe", ["method", "pathTemplate"]]] as const) fields.push({ key, osfType: "object", label: { en: key }, persisted: { column: key, storageClass: "core" }, children: children.map(key => ({ key, osfType: "string", label: { en: key } })) } as never);
       fields.find(field => field.key === "data")?.children?.push(
         { key: "otherVisible", osfType: "string", label: { en: "Other visible" } },
         { key: "token", osfType: "object", label: { en: "Token" }, classification: { sensitivity: "confidential" } },
+        { key: "accessToken", osfType: "object", label: { en: "Personal token" }, classification: { sensitivity: "confidential" } },
       );
     },
   }));
@@ -510,4 +515,71 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       data: { label: null, visible: "old", restricted: null, fixed: "initial", otherVisible: "retained" } });
     expect(contactsOf(merged!)).toEqual(contactsOf(initial).map(contact => ({ ...contact, private: null })));
   });
+  test("connection verification uses encrypted storage while public reads stay masked and denied callers never probe", async () => {
+    const { catalog, catalogTestTools } = await import("../../mcp/catalog.js");
+    const { platformToolCall } = await import("../../mcp/dispatch-platform-tools.js");
+    const { connectionTokenSecretScope } = await import("../../connectors/secrets.js");
+    const { encryptSecret } = await import("../../connectors/secrets.js");
+    const previousKeyring = process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;
+    const keyringText = `probe-fixture:${Buffer.alloc(32, 41).toString("base64")}`;
+    process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = keyringText;
+    const keyring = keyringFromEnv(keyringText)!;
+    const token = "synthetic-personal-probe-token";
+    const provider = await record();
+    const connection = await record();
+    const name = `verify_fixture_${randomUUID()}`;
+    const entity = { entity: "ProtectedFieldsFixture", table: table.name,
+      elicitOnCreate: { sourceField: "definitionId", sourceEntity: "ProtectedFieldsFixture", sourceTable: table.name, definitionsField: "definitions", into: "data" } };
+    const previousSecureInput = table.source!.secureInputOnCreate;
+    table.source!.secureInputOnCreate = entity.elicitOnCreate;
+    catalog.entities.push(entity as never);
+    catalogTestTools.push({ name, table: table.name, entity: entity.entity } as never);
+    let requests = 0;
+    try {
+      await sql`update erp.protected_fields_fixtures set base_url_template = 'https://probe.example.invalid',
+        auth = '{"profile":"oauth2AuthorizationCode"}'::jsonb,
+        probe = '{"method":"GET","pathTemplate":"/check"}'::jsonb,
+        egress_hosts = '["probe.example.invalid"]'::jsonb where id = ${provider.id}::uuid`.execute(privileged.db);
+      await sql`update erp.protected_fields_fixtures set definition_id = ${provider.id}, owner_user_id = ${writer.userId},
+        data = ${jsonbLiteral({ accessToken: encryptSecret(keyring, connectionTokenSecretScope(table.name), "accessToken", token) })}
+        where id = ${connection.id}::uuid`.execute(privileged.db);
+      // A restrictive owner policy supplements the compiler's tenant policy.
+      await sql`create policy probe_fixture_owner on erp.protected_fields_fixtures as restrictive for select
+        using (owner_user_id is null or owner_user_id = current_setting('app.user_id', true))`.execute(privileged.db);
+      const publicRead = await getGeneratedEntity(runtime.db, writer, { table: table.name, id: String(connection.id) });
+      expect((publicRead!.data as Record<string, unknown>).accessToken).toBe("__set__");
+      const invoke = (session = writer, id = connection.id) => platformToolCall({
+        db: runtime.db, session, name, tables: new Map([[table.name, table]]),
+        request: { params: { name, arguments: { id } } },
+        egressOwner: { fetch: async (request: import("../../modules/contract.js").ModuleEgressRequest) => {
+          requests++;
+          expect(String(request.url)).toBe("https://probe.example.invalid/check");
+          expect(new Headers(request.init.headers).get("authorization")).toBe(`Bearer ${token}`);
+          return Response.json({ providerSecret: token });
+        } },
+      } as unknown as import("../../mcp/tool-dispatch.js").DirectCallScope);
+      const result = await invoke();
+      expect(result?.isError).not.toBe(true);
+      expect(result?.structuredContent).toMatchObject({ ok: true, checks: [{ outcome: "passed" }, { outcome: "passed" }, { outcome: "passed" }, { outcome: "passed" }] });
+      expect(requests).toBe(1);
+      expect(JSON.stringify(result)).not.toContain(token);
+      expect(JSON.stringify(result)).not.toContain("ciphertext");
+      for (const session of [{ ...writer, roles: [] }, { ...writer, tenantId: randomUUID() }, { ...writer, userId: randomUUID() }]) {
+        const denied = await invoke(session);
+        expect(denied?.isError).toBe(true);
+        expect(JSON.stringify(denied)).not.toContain(token);
+        expect(requests).toBe(1);
+      }
+      expect((await invoke(writer, randomUUID()))?.isError).toBe(true);
+      expect(requests).toBe(1);
+      expect((await getGeneratedEntity(runtime.db, writer, { table: table.name, id: String(connection.id) }))!.data).toEqual(publicRead!.data);
+    } finally {
+      await sql`drop policy if exists probe_fixture_owner on erp.protected_fields_fixtures`.execute(privileged.db);
+      catalog.entities.splice(catalog.entities.indexOf(entity as never), 1);
+      catalogTestTools.splice(catalogTestTools.findIndex(tool => tool.name === name), 1);
+      table.source!.secureInputOnCreate = previousSecureInput;
+      if (previousKeyring === undefined) delete process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS; else process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = previousKeyring;
+    }
+  }, 30_000);
+
 }

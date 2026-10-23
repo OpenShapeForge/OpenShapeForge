@@ -176,12 +176,11 @@ export async function platformToolCall(
       if (typeof id !== "string") {
         throw new HttpError(400, "VALIDATION", 'Argument "id" is required.');
       }
-      const row = await getGeneratedEntity(db, session, {
-        table: table.name,
-        id,
-      });
-      if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      const serialized = serializeRow(table, row);
+      // The role gate above authorizes testing; the runtime read retains tenant
+      // and row-level isolation without replacing credentials by read markers.
+      // Only the verification report below may leave this internal path.
+      const serialized = await runtimeRowByFilter(db, session, tables, table.name, { id });
+      if (!serialized) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
       const elicit = entityForTable(testTool.table)?.elicitOnCreate;
       if (!elicit) {
         throw new HttpError(

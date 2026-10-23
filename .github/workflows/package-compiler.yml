@@ -58,7 +58,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24.21.0'
-      - name: Pin npm packaging version
+      - name: Pin npm smoke-install version
         run: npm install --global npm@11.19.0 --ignore-scripts
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -83,9 +83,11 @@ jobs:
           cp docs/consuming.md packages/compiler/README.md
           rm -rf /tmp/compiler-pack
           mkdir -p /tmp/compiler-pack
-          npm pack --pack-destination /tmp/compiler-pack ./packages/operations
-          npm pack --pack-destination /tmp/compiler-pack ./packages/interface-web
-          npm pack --pack-destination /tmp/compiler-pack ./packages/compiler
+          # Bun resolves workspace links in packed manifests. Raw npm pack
+          # preserves workspace:* and produces packages npm cannot install.
+          for package in operations interface-web compiler; do
+            (cd "packages/${package}" && bun pm pack --destination /tmp/compiler-pack)
+          done
 
       # Install the tarball into a scratch project OUTSIDE the workspace (an
       # in-workspace install would resolve back to packages/compiler and prove
@@ -138,9 +140,9 @@ jobs:
   # Its own job, not a step above: it is the only thing here needing
   # `packages: write`, and the pack job also runs on pull requests, where that
   # grant would be pure attack surface. It re-packs rather than downloading the
-  # artifact because `npm publish` packs identically (same npm, same committed
-  # tree — the smoke test in `pack` proved that exact content) and a download
-  # step would add another pinned action for no additional proof.
+  # artifact because the publisher owns the distribution's version rewriting.
+  # The Bun smoke artifacts prove the file contents and carry exact workspace
+  # pins; the published manifests carry the documented caret ranges on main.
   publish:
     name: Publish to GitHub Packages
     needs: pack

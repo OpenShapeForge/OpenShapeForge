@@ -55,7 +55,7 @@ describe("the platform's fixed tools", () => {
     // the measurement optimistic.
     expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
       "whoami", "upload_document_file", "link_identity", "confirm_my_link",
-      "set_organization_relation", "invite_employee", "onboarding_guide", "updates_guide",
+      "set_organization_relation", "invite_employee", "onboarding_status", "complete_onboarding", "updates_guide",
     ]));
     const bytes = tools.reduce((sum, tool) => sum + advertisedToolBytes(tool), 0);
     expect(bytes).toBeLessThanOrEqual(PLATFORM_TOOL_BYTES_ALLOWANCE);

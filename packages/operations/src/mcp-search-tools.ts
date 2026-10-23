@@ -109,8 +109,20 @@ export function searchableOperationToolDefinitions(
       },
       outputSchema: {
         type: "object",
+        $defs: {
+          JsonValue: {
+            anyOf: [
+              { type: "object" },
+              { type: "array", items: { $ref: "#/$defs/JsonValue" } },
+              { type: "string" },
+              { type: "number" },
+              { type: "boolean" },
+              { type: "null" },
+            ],
+          },
+        },
         properties: {
-          data: {},
+          data: { $ref: "#/$defs/JsonValue" },
           operations: { type: "array", items: { type: "object" } },
           resources: { type: "array", items: { type: "object" } },
         },

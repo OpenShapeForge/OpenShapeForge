@@ -20,6 +20,13 @@ npmjs.com) by the **Package compiler** workflow
   (or an exact `0.2.0-dev.<sha>`) installs one commit of the workspace, not a
   mix.
 
+On `main`, internal `workspace:*` dependencies are published as caret ranges
+such as `^0.2.11`; the development workspace still uses its local source.
+Commit a lockfile for reproducible consumer installs. Hosts that require one
+exact shared contract version can also declare an exact dependency and override.
+The uploaded Bun smoke-test artifacts use exact internal pins, while the npm
+publisher applies the documented main-channel ranges.
+
 GitHub's npm registry requires authentication even for public packages, so
 consumers need a token with `read:packages` (a classic PAT, or
 `GITHUB_TOKEN` in Actions). Point the `@openshapeforge` scope at the registry

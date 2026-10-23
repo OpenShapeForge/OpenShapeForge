@@ -680,13 +680,13 @@ Operation; the runtime still enforces the ordinary authorization and validation
 contract. Checklist progress is a server-side fact, not remembered prose:
 
 - the server's `initialize` instructions ask the model to call `whoami` first,
-  explain that onboarding is optional, and offer `onboarding_guide` on request;
+  explain that onboarding is optional, and offer a listed onboarding skill, when available, on request;
 - `whoami` carries an `onboarding` object: a **computed checklist**, also
   available on its own as the `onboarding_status` tool;
 - `complete_onboarding` records completion durably, once, per (identity,
-  tenant); `onboarding_guide` is the process for the assistant.
+  tenant); a plugin may supply the optional process as an Agent Skill.
 
-All three tools are listed for every authenticated session
+Both tools are listed for every authenticated session
 (`apps/api/src/mcp/onboarding.ts`; wired into the generated server by a few
 delimited hunks).
 
@@ -702,7 +702,7 @@ delimited hunks).
     { "key": "preferences",              "title": "Working preferences",                     "status": "todo",           "howTo": "Ask the person, in one batched question, about working hours, priorities and house style, then save the answer with set_my_preferences (omit `tool` to apply it to all tools). They may skip this: complete_onboarding { skip: true }." },
     { "key": "guide",                    "title": "Role guide read",                         "status": "not_applicable", "howTo": "No role guide applies to this person's roles." }
   ],
-  "summary": "Onboarding is in progress: 1 of 4 steps done (to do: organization_connections, connections, preferences). Onboarding is optional; use onboarding_guide if the person asks for help."
+  "summary": "Onboarding is in progress: 1 of 4 steps done (to do: organization_connections, connections, preferences). Onboarding is optional; use the step guidance if the person asks for help."
 }
 ```
 
@@ -745,19 +745,14 @@ On success it writes the row (the identity's own, under the existing
 row-level policy) and answers the final checklist. Calling it again answers
 `alreadyCompleted: true`.
 
-**`onboarding_guide`** is the process for the assistant: call `whoami` first;
-walk the `todo` steps in order; ask the preferences in one batched question,
-never one item at a time; never ask for secrets in chat (sign-ins go through
-the URL `connect_service` returns, organization credentials through the
-secure form or the `configurationUrl` a create tool answers with); confirm
-with `complete_onboarding`; afterwards never mention onboarding again. Its
-wording follows the caller's role: an organization administrator gets an
-administrator section — organization connections first (`create_connection`,
-the secure form or the `configurationUrl` for clients without one, the
-redirect URL for OAuth providers, then `test_connection`), then their own
-personal sign-in, then preferences; linking colleagues with `link_identity`;
-`provider_setup_guide` for adding a provider — while an employee is told to
-ask an administrator for what they cannot do themselves.
+A plugin may contribute an onboarding workflow through `agentSkills`. Discover
+its manifest with `skills/list`, verify the manifest with `skills/get`, and read
+its files with `resources/read`. Static workflow documentation can be public;
+it grants no authority to run administrative actions. A contribution's optional
+role allowlist controls visibility of the whole skill, not individual files.
+If no onboarding skill is listed, use `onboarding_status` and the step resources
+for live role- and deployment-specific guidance. The former `onboarding_guide`
+tool is removed; completion, permissions and validation remain server-enforced.
 
 **Service descriptions say what they need.** A derived Service tool whose
 Adapter needs an organization connection, or a personal sign-in, carries one

@@ -31,8 +31,8 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@openshapeforge/operations": "0.2.10",
-    "@openshapeforge/interface-web": "0.2.11",
+    "@openshapeforge/operations": "workspace:*",
+    "@openshapeforge/interface-web": "workspace:*",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "ejs": "^5.0.1",

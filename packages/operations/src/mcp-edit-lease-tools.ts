@@ -54,7 +54,7 @@ function resultEnvelopeSchema(data: Record<string, unknown>): Record<string, unk
         required: ["data", "operations"],
         properties: {
           data,
-          operations: { type: "array", maxItems: 0, items: {} },
+          operations: { type: "array", maxItems: 0, items: { type: "object" } },
         },
       },
       {

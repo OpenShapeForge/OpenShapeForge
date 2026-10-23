@@ -4,11 +4,11 @@ import { connectionTokenSecretScope } from "../connectors/secrets.js";
 import { HttpError } from "../rest/http-error.js";
 import { listGeneratedEntityStorageRowsForTable } from "../operations/entity/queries.js";
 import { serializeRow } from "./catalog-rows.js";
-import { accessTokenNeedsRefresh, refreshConnectionRowLocked, refreshLeewaySeconds } from "./connection-token-refresh.js";
+import { accessTokenNeedsRefresh, fieldNameForColumn, refreshConnectionRowLocked, refreshLeewaySeconds } from "./connection-token-refresh.js";
 import { resolveTemplate } from "./declarative-execution.js";
 import type { ElicitOnCreateEntry } from "./elicitation.js";
 import { elicitedKeyring } from "./handoff-config.js";
-import { readClientCredentials, urlSafeConnectionValues } from "./session-connections.js";
+import { readClientCredentials, selectOAuthConnectionRow, urlSafeConnectionValues } from "./session-connections.js";
 import type { DirectCallScope } from "./tool-dispatch.js";
 
 type Row = Record<string, unknown>;
@@ -30,17 +30,15 @@ export async function prepareConnectionTest(
   if (personal) {
     // Select the shared configuration explicitly; unrelated personal rows must
     // neither consume a page nor supply another person's OAuth credentials.
-    const field = (name: string) => table.columns.find(column =>
-      (column.sourceField ?? column.name.replace(/_([a-z0-9])/g, (_, char: string) => char.toUpperCase())) === name)?.name;
-    const ownerColumn = field("ownerUserId");
+    const ownerColumn = table.columns.find(column => fieldNameForColumn(column) === "ownerUserId")?.name;
     if (!ownerColumn) throw new HttpError(500, "INTERNAL", "Connection owner column is missing.");
     const rows = await listGeneratedEntityStorageRowsForTable(ctx.db, ctx.session, table, {
       filter: { [elicit.sourceField]: sourceRow.id },
-      fixedWhere: [{ column: ownerColumn, value: null }], limit: 2,
+      fixedWhere: [{ column: ownerColumn, value: null }], limit: 1,
+      sort: { field: "id", direction: "asc" },
     });
     const shared = rows.rows.map(value => serializeRow(table, value));
-    if (shared.length > 1) throw new HttpError(400, "CONNECTION_AMBIGUOUS", "Multiple organization connections configure this provider.");
-    tenant = shared[0];
+    tenant = selectOAuthConnectionRow(shared, "tenant", null);
   }
   const urlValues = urlSafeConnectionValues(tenant, elicit.into, sourceRow[elicit.definitionsField], elicit.sourceTable);
   const fallback = personal ? { fallbackPlainValues: urlValues.plain } : {};
@@ -49,7 +47,7 @@ export async function prepareConnectionTest(
       !accessTokenNeedsRefresh(values, refreshLeewaySeconds(auth))) return { row, ...fallback };
 
   const keyring = elicitedKeyring();
-  if (!keyring || !table || typeof auth.tokenUrl !== "string") {
+  if (!keyring || typeof auth.tokenUrl !== "string") {
     throw new HttpError(400, "PROVIDER_MISCONFIGURED", "Token refresh is not configured.");
   }
   const credentials = readClientCredentials(tenant, elicit.into, elicit.sourceTable);

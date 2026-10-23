@@ -590,21 +590,35 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       expect(decryptSecret(keyring, tokenScope, "refreshToken", persisted.refreshToken as never)).toBe("synthetic-rotated-refresh");
       expect((await events(String(connection.id))).filter(event => event.event_type === "connection.token_refreshed")).toHaveLength(1);
       expect((await invoke())?.isError).not.toBe(true);expect(refreshes).toBe(1);expect(probes).toBe(3);
+      // A provider may omit expires_in: refresh when possible, otherwise ask the provider.
+      const unknownExpiry = tokenValues("synthetic-expired-access", "synthetic-refresh-before") as Record<string, unknown>;
+      delete unknownExpiry.accessTokenExpiresAt;
+      await sql`update erp.protected_fields_fixtures set data = ${jsonbLiteral(unknownExpiry)} where id = ${connection.id}::uuid`.execute(privileged.db);
+      expect((await invoke())?.isError).not.toBe(true);expect(refreshes).toBe(2);expect(probes).toBe(4);
+      await sql`update erp.protected_fields_fixtures set data = ${jsonbLiteral({ accessToken: encryptSecret(keyring, tokenScope, "accessToken", "synthetic-fresh-access") })} where id = ${connection.id}::uuid`.execute(privileged.db);
+      expect((await invoke())?.isError).not.toBe(true);expect(refreshes).toBe(2);expect(probes).toBe(5);
       // An organization-owned OAuth row uses the same lifecycle without borrowing personal tokens.
       await sql`update erp.protected_fields_fixtures set data = ${jsonbLiteral({ ...sharedValues, ...tokenValues("synthetic-expired-access", "synthetic-refresh-before") })} where id = ${shared.id}::uuid`.execute(privileged.db);
-      expect((await invoke(actor, shared.id))?.isError).not.toBe(true);expect(refreshes).toBe(2);expect(probes).toBe(4);
+      expect((await invoke(actor, shared.id))?.isError).not.toBe(true);expect(refreshes).toBe(3);expect(probes).toBe(6);
       // Revoked consent must stop before probing and preserve encrypted token state.
       await sql`update erp.protected_fields_fixtures set data = ${jsonbLiteral(tokenValues("synthetic-expired-access", "synthetic-refresh-before"))} where id = ${connection.id}::uuid`.execute(privileged.db);
       rejectRefresh = true;
       const refused = await invoke();expect(refused?.isError).toBe(true);
       expect(refused?.structuredContent).toMatchObject({ error: { code: "REAUTHORIZATION_REQUIRED" } });
-      expect(JSON.stringify(refused)).not.toContain("synthetic-refresh-before");expect(probes).toBe(4);
+      expect(JSON.stringify(refused)).not.toContain("synthetic-refresh-before");expect(probes).toBe(6);
       expect((await events(String(connection.id))).some(event => event.event_type === "connection.reauthorization_required")).toBe(true);
       // A disallowed token endpoint never reaches the network or falls through to a probe.
       const beforeDenied = refreshes;
       await sql`update erp.protected_fields_fixtures set egress_hosts = '["probe.example.invalid"]'::jsonb where id = ${provider.id}::uuid`.execute(privileged.db);
-      const blocked = await invoke();expect(blocked?.isError).toBe(true);expect(refreshes).toBe(beforeDenied);expect(probes).toBe(4);
+      const blocked = await invoke();expect(blocked?.isError).toBe(true);expect(refreshes).toBe(beforeDenied);expect(probes).toBe(6);
       expect(JSON.stringify(blocked)).not.toContain("synthetic-client-secret");
+      // Missing configuration is actionable, and never reaches either endpoint.
+      await sql`update erp.protected_fields_fixtures set auth = '{"profile":"oauth2AuthorizationCode"}'::jsonb where id = ${provider.id}::uuid`.execute(privileged.db);
+      expect((await invoke())?.structuredContent).toMatchObject({ error: { code: "PROVIDER_MISCONFIGURED" } });
+      await sql`update erp.protected_fields_fixtures set auth = '{"profile":"oauth2AuthorizationCode","tokenUrl":"https://oauth.example.invalid/token"}'::jsonb where id = ${provider.id}::uuid`.execute(privileged.db);
+      await sql`update erp.protected_fields_fixtures set definition_id = null where id = ${shared.id}::uuid`.execute(privileged.db);
+      expect((await invoke())?.structuredContent).toMatchObject({ error: { code: "CONNECTION_MISSING" } });
+      expect(refreshes).toBe(beforeDenied);expect(probes).toBe(6);
     } finally {
       catalog.entities.splice(catalog.entities.indexOf(entity as never), 1);
       catalogTestTools.splice(catalogTestTools.findIndex(tool => tool.name === name), 1);
@@ -641,7 +655,7 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
         probe = '{"method":"GET","pathTemplate":"/check"}'::jsonb,
         egress_hosts = '["probe.example.invalid"]'::jsonb where id = ${provider.id}::uuid`.execute(privileged.db);
       await sql`update erp.protected_fields_fixtures set definition_id = ${provider.id}, owner_user_id = ${actor.relationId},
-        data = ${jsonbLiteral({ accessToken: encryptSecret(keyring, connectionTokenSecretScope(table.name), "accessToken", token), accessTokenExpiresAt: new Date(Date.now() + 3600_000).toISOString() })}
+        data = ${jsonbLiteral({ accessToken: encryptSecret(keyring, connectionTokenSecretScope(table.name), "accessToken", token) })}
         where id = ${connection.id}::uuid`.execute(privileged.db);
       const publicRead = await getGeneratedEntity(runtime.db, writer, { table: table.name, id: String(connection.id) });
       expect((publicRead!.data as Record<string, unknown>).accessToken).toBe("__set__");

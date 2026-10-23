@@ -147,7 +147,7 @@ export function createRedisRateLimitStore(
   // request waits for the store before proceeding uncounted, so a store that
   // hangs would add its own latency to every request rather than being routed
   // around. Failing fast is what makes "skip on error" cheap.
-  const client = new RedisClient(url, { connectionTimeout: 500 });
+  const client = new RedisClient(url, { connectionTimeout: 500, maxRetries: 0 });
 
   class RedisRateLimitStore implements RateLimitStore {
     incr(

@@ -90,7 +90,16 @@ export function searchableOperationToolDefinitions(
       outputSchema: {
         type: "object",
         properties: {
-          data: {},
+          data: {
+            anyOf: [
+              { type: "object" },
+              { type: "array" },
+              { type: "string" },
+              { type: "number" },
+              { type: "boolean" },
+              { type: "null" },
+            ],
+          },
           operations: { type: "array", items: { type: "object" } },
           resources: { type: "array", items: { type: "object" } },
         },

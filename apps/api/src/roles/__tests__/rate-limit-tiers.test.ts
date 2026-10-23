@@ -12,6 +12,7 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { RedisClient } from "bun";
+import { createServer, connect, type Socket } from "node:net";
 import type { FastifyInstance } from "fastify";
 import {
   TRUSTED_CONTEXT_HEADERS,
@@ -171,6 +172,50 @@ describe.skipIf(!REDIS_URL)("shared store", () => {
     expect(errors.length).toBe(1);
     await close();
   });
+
+  test("a store outage is bounded and the shared limiter recovers when Redis returns", async () => {
+    const upstream = new URL(REDIS_URL!);
+    const sockets = new Set<Socket>();
+    const proxy = createServer((incoming) => {
+      const outgoing = connect({ host: upstream.hostname, port: Number(upstream.port || 6379) });
+      for (const socket of [incoming, outgoing]) {
+        sockets.add(socket);
+        socket.on("close", () => sockets.delete(socket));
+        socket.on("error", () => { incoming.destroy(); outgoing.destroy(); });
+      }
+      incoming.pipe(outgoing).pipe(incoming);
+    });
+    const listen = (port: number) => new Promise<void>((resolve) => proxy.listen(port, "127.0.0.1", resolve));
+    await listen(0);
+    const port = (proxy.address() as { port: number }).port;
+    const metrics = createRateLimitMetrics();
+    const { Store, close } = createRedisRateLimitStore(`redis://127.0.0.1:${port}`, metrics, () => {}, `recovery:${crypto.randomUUID()}`);
+    const store = new Store({});
+    const increment = () => new Promise<{ error: Error | null; current: number | undefined }>((resolve) => {
+      store.incr("one-budget", (error, value) => resolve({ error, current: value?.current }), 60_000, 10);
+    });
+    try {
+      expect(await increment()).toEqual({ error: null, current: 1 });
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => proxy.close(() => resolve()));
+      const started = Date.now();
+      expect((await increment()).error).toBeTruthy();
+      expect(Date.now() - started).toBeLessThan(2_000);
+      await listen(port);
+      let recovered: Awaited<ReturnType<typeof increment>> | undefined;
+      const deadline = Date.now() + 5_000;
+      do {
+        recovered = await increment();
+        if (!recovered.error) break;
+        await Bun.sleep(50);
+      } while (Date.now() < deadline);
+      expect(recovered).toEqual({ error: null, current: 2 });
+    } finally {
+      await close();
+      for (const socket of sockets) socket.destroy();
+      if (proxy.listening) await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    }
+  }, 10_000);
 
   test("a key with no expiry is treated as a full window, not as expired", async () => {
     // PTTL returns -1 for a key without a TTL. Reporting that verbatim as the

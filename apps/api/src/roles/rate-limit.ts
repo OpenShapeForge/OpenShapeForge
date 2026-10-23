@@ -147,7 +147,7 @@ export function createRedisRateLimitStore(
   // request waits for the store before proceeding uncounted, so a store that
   // hangs would add its own latency to every request rather than being routed
   // around. Failing fast is what makes "skip on error" cheap.
-  const client = new RedisClient(url, { connectionTimeout: 500, maxRetries: 0 });
+  const client = new RedisClient(url, { connectionTimeout: 500, enableOfflineQueue: false });
 
   class RedisRateLimitStore implements RateLimitStore {
     incr(
@@ -155,28 +155,31 @@ export function createRedisRateLimitStore(
       callback: (error: Error | null, result?: { current: number; ttl: number }) => void,
       timeWindow: number,
     ): void {
-      client
-        .send("EVAL", [INCR_WITH_TTL, "1", `${keyPrefix}:${key}`, String(timeWindow)])
+      let settled = false;
+      const fail = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        metrics.storeErrors += 1;
+        onError(error);
+        callback(error as Error);
+      };
+      // Reconnection runs independently; a request never waits through its
+      // retries or leaves a command queued to consume a later window's budget.
+      const timer = setTimeout(() => fail(new Error("Rate-limit store timed out.")), 500);
+      client.connect()
+        .then(() => settled ? undefined : client.send("EVAL", [INCR_WITH_TTL, "1", `${keyPrefix}:${key}`, String(timeWindow)]))
         .then((raw) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
           const [current, ttl] = raw as [number, number];
-          // PTTL returns -1 for a key with no expiry: treat it as a full
-          // window rather than as "expires immediately", which would hand the
-          // caller a fresh budget on every request.
           callback(null, {
             current: Number(current),
             ttl: Number(ttl) >= 0 ? Number(ttl) : timeWindow,
           });
         })
-        .catch((error: unknown) => {
-          // A limiter that fails the request when its store blinks turns a
-          // Redis hiccup into an outage. Counted, reported, and skipped (the
-          // plugin is registered with skipOnError) — the in-flight request
-          // proceeds uncounted, which is the lesser harm, and storeErrors makes
-          // it visible rather than silent.
-          metrics.storeErrors += 1;
-          onError(error);
-          callback(error as Error);
-        });
+        .catch(fail);
     }
 
     child(): RateLimitStore {

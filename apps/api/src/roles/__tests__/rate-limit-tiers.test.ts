@@ -185,7 +185,10 @@ describe.skipIf(!REDIS_URL)("shared store", () => {
       }
       incoming.pipe(outgoing).pipe(incoming);
     });
-    const listen = (port: number) => new Promise<void>((resolve) => proxy.listen(port, "127.0.0.1", resolve));
+    const listen = (port: number) => new Promise<void>((resolve, reject) => {
+      proxy.once("error", reject);
+      proxy.listen(port, "127.0.0.1", () => { proxy.off("error", reject); resolve(); });
+    });
     await listen(0);
     const port = (proxy.address() as { port: number }).port;
     const metrics = createRateLimitMetrics();
@@ -201,6 +204,8 @@ describe.skipIf(!REDIS_URL)("shared store", () => {
       const started = Date.now();
       expect((await increment()).error).toBeTruthy();
       expect(Date.now() - started).toBeLessThan(2_000);
+      // Longer than Bun's former default ten-attempt reconnection budget.
+      await Bun.sleep(12_000);
       await listen(port);
       let recovered: Awaited<ReturnType<typeof increment>> | undefined;
       const deadline = Date.now() + 5_000;
@@ -215,7 +220,30 @@ describe.skipIf(!REDIS_URL)("shared store", () => {
       for (const socket of sockets) socket.destroy();
       if (proxy.listening) await new Promise<void>((resolve) => proxy.close(() => resolve()));
     }
-  }, 10_000);
+  }, 25_000);
+
+  test("a stalled store reports a single deadline failure", async () => {
+    const sockets = new Set<Socket>();
+    const stalled = createServer(socket => { sockets.add(socket); socket.on("error", () => {}); });
+    await new Promise<void>(resolve => stalled.listen(0, "127.0.0.1", resolve));
+    const metrics = createRateLimitMetrics(), errors: unknown[] = [];
+    const { Store, close } = createRedisRateLimitStore(`redis://127.0.0.1:${(stalled.address() as { port: number }).port}`, metrics, error => errors.push(error));
+    let callbacks = 0;
+    try {
+      const error = await new Promise<Error | null>(resolve => new Store({}).incr("stalled", error => { callbacks++; resolve(error); }, 1000, 10));
+      expect(error?.message).toBe("Rate-limit store timed out.");
+      expect(metrics.storeErrors).toBe(1);
+      expect(errors).toHaveLength(1);
+      await close();
+      await Bun.sleep(25);
+      expect(callbacks).toBe(1);
+      expect(metrics.storeErrors).toBe(1);
+    } finally {
+      await close();
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>(resolve => stalled.close(() => resolve()));
+    }
+  });
 
   test("a key with no expiry is treated as a full window, not as expired", async () => {
     // PTTL returns -1 for a key without a TTL. Reporting that verbatim as the

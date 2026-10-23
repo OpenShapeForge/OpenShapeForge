@@ -147,7 +147,27 @@ export function createRedisRateLimitStore(
   // request waits for the store before proceeding uncounted, so a store that
   // hangs would add its own latency to every request rather than being routed
   // around. Failing fast is what makes "skip on error" cheap.
-  const client = new RedisClient(url, { connectionTimeout: 500, enableOfflineQueue: false });
+  const createClient = () => new RedisClient(url, {
+    connectionTimeout: 500, maxRetries: 0, autoReconnect: false, enableOfflineQueue: false,
+  });
+  let client = createClient();
+  let closed = false;
+  let connecting: Promise<RedisClient> | undefined;
+  function connectOnce(): Promise<RedisClient> {
+    if (closed) return Promise.reject(new Error("Rate-limit store is closed."));
+    if (client.connected) return Promise.resolve(client);
+    if (!connecting) {
+      const current = client;
+      // A failed Bun client is terminal. Replace it for the next request,
+      // rather than depending on a finite background reconnection budget.
+      connecting = current.connect().then(() => current).catch((error) => {
+        current.close();
+        if (!closed) client = createClient();
+        throw error;
+      }).finally(() => { connecting = undefined; });
+    }
+    return connecting;
+  }
 
   class RedisRateLimitStore implements RateLimitStore {
     incr(
@@ -160,15 +180,17 @@ export function createRedisRateLimitStore(
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        // The API uses skipOnError; this signal records each fail-open request.
         metrics.storeErrors += 1;
         onError(error);
         callback(error as Error);
       };
-      // Reconnection runs independently; a request never waits through its
-      // retries or leaves a command queued to consume a later window's budget.
+      // Coalesced reconnects and an offline queue cannot hold up requests.
+      // An EVAL already sent may still consume budget after this deadline;
+      // accepting that conservative increment is safer than replaying it.
       const timer = setTimeout(() => fail(new Error("Rate-limit store timed out.")), 500);
-      client.connect()
-        .then(() => settled ? undefined : client.send("EVAL", [INCR_WITH_TTL, "1", `${keyPrefix}:${key}`, String(timeWindow)]))
+      connectOnce()
+        .then((connected) => settled ? undefined : connected.send("EVAL", [INCR_WITH_TTL, "1", `${keyPrefix}:${key}`, String(timeWindow)]))
         .then((raw) => {
           if (settled) return;
           settled = true;
@@ -176,6 +198,7 @@ export function createRedisRateLimitStore(
           const [current, ttl] = raw as [number, number];
           callback(null, {
             current: Number(current),
+            // PTTL -1 means no expiry, so retain a full window rather than reset it.
             ttl: Number(ttl) >= 0 ? Number(ttl) : timeWindow,
           });
         })
@@ -190,6 +213,7 @@ export function createRedisRateLimitStore(
   return {
     Store: RedisRateLimitStore as unknown as RateLimitStoreConstructor,
     close: async () => {
+      closed = true;
       client.close();
     },
   };

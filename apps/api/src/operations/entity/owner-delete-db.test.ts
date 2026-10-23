@@ -73,7 +73,7 @@ const fails = (promise: Promise<unknown>, code: string) => expect(promise).rejec
       grant usage on all sequences in schema platform to openshapeforge_app;
       grant execute on all functions in schema app to openshapeforge_app`.execute(privileged.db);
     const audited = structuredClone(getGeneratedCrudTables().filter(table => ["Document", "DocumentVariant"].includes(table.source?.authoringEntityName ?? "")));
-    for (const table of audited) table.source!.graphql!.relationships = table.source!.graphql!.relationships.filter(relation => audited.some(candidate => candidate.source?.graphql?.typeName === relation.target));
+    for (const table of audited) table.source!.graphql!.relationships = (table.source!.graphql!.relationships ?? []).filter(relation => audited.some(candidate => candidate.source?.graphql?.typeName === relation.target));
     await applyAuditHistory(privileged.db, audited, {});
     restricted = createDatabaseRuntime({ databaseUrl: databaseUrl(true), maxConnections: 2 });
   }, 30_000);

@@ -534,7 +534,12 @@ function assertInheritedContractOmitsHidden(merged: Record<string, unknown>, hid
     if (hidden.has(field.key)) continue;
     const definition = field.typedBy?.definitionField ?? field.entityValue?.definitionField;
     if (definition && hidden.has(definition)) naming(`field ${field.key}`, definition);
-    if (field.typedBy?.documentField && hidden.has(field.typedBy.documentField)) naming(`field ${field.key}`, field.typedBy.documentField);
+    // The Document carrier of a typed value, where the field model declares
+    // one: read structurally, so a compiler whose `typedBy` has no such
+    // property composes the same subtypes without losing the guard here.
+    const typedBy = isPlainObject(field.typedBy) ? field.typedBy : undefined;
+    const documentField = typedBy?.documentField;
+    if (typeof documentField === "string" && hidden.has(documentField)) naming(`field ${field.key}`, documentField);
   }
 }
 

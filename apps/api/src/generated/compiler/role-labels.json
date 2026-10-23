@@ -54,5 +54,11 @@
       "en": "view general records",
       "nl": "algemene gegevens inzien"
     }
+  },
+  "Tasks.All.Read": {
+    "phrase": {
+      "en": "view tasks",
+      "nl": "taken inzien"
+    }
   }
 }

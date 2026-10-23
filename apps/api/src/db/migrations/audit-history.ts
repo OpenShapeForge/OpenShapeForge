@@ -104,6 +104,18 @@ async function installAuditHistory(db: OpenShapeForgeDatabase, tables: readonly 
       end if; return value;
     end $$;
 
+    create or replace function platform.audit_recorded_subjects(cfg jsonb, record_key text, tenant_key uuid) returns jsonb
+    language sql stable set search_path=pg_catalog as $$
+      select case when jsonb_array_length(payload->'audit'->'afterSubjects')>0
+        then payload->'audit'->'afterSubjects' else payload->'audit'->'beforeSubjects' end
+      from platform.entity_events
+      where tenant_id=tenant_key and aggregate_type=cfg->>'aggregate'
+        and payload->'audit'->>'entityType'=cfg->>'entity' and aggregate_id=record_key
+        and jsonb_typeof(payload->'audit'->'beforeSubjects')='array'
+        and jsonb_typeof(payload->'audit'->'afterSubjects')='array'
+      order by sequence desc limit 1
+    $$;
+
     create or replace function platform.audit_subjects(cfg jsonb, row_data jsonb, visited text[] default '{}') returns jsonb
     language plpgsql stable set search_path=pg_catalog as $$
     declare result jsonb='[]'; edge jsonb; parent_row jsonb; parent_id text; tenant text; parent_cfg jsonb; identity text; prior_subjects jsonb;
@@ -123,9 +135,7 @@ async function installAuditHistory(db: OpenShapeForgeDatabase, tables: readonly 
           execute format('select to_jsonb(p) from %I.%I p where %I::text=$1 and tenant_id::text=$2',parent_cfg->>'schema',parent_cfg->>'table',parent_cfg->>'pk') into parent_row using parent_id,tenant;
           if parent_row is not null then result=result || platform.audit_subjects(parent_cfg,parent_row,visited);
           else
-            select case when jsonb_array_length(coalesce(payload->'audit'->'afterSubjects','[]'::jsonb))>0 then payload->'audit'->'afterSubjects' else payload->'audit'->'beforeSubjects' end
-              into prior_subjects from platform.entity_events
-              where tenant_id::text=tenant and payload->'audit'->>'entityType'=edge->>'entity' and aggregate_id=parent_id order by sequence desc limit 1;
+            prior_subjects=platform.audit_recorded_subjects(parent_cfg,parent_id,tenant::uuid);
             result=result || coalesce(prior_subjects,'[]'::jsonb);
           end if;
         end if;
@@ -170,6 +180,7 @@ async function installAuditHistory(db: OpenShapeForgeDatabase, tables: readonly 
     create or replace function platform.audit_event_envelope() returns trigger
     language plpgsql set search_path=pg_catalog as $$
     declare envelope jsonb=coalesce(NEW.payload->'audit','{}'::jsonb); identity text; correlation text; changes jsonb;
+      entity text; cfg jsonb; source_row jsonb; observed_subjects jsonb;
     begin
       if TG_OP='UPDATE' then
         if (to_jsonb(NEW)-'delivery_sequence') is distinct from (to_jsonb(OLD)-'delivery_sequence') then raise exception 'Audit events are immutable' using errcode='42501'; end if;
@@ -179,14 +190,24 @@ async function installAuditHistory(db: OpenShapeForgeDatabase, tables: readonly 
       changes=coalesce(envelope->'changedFields',NEW.payload->'changedFields','[]'::jsonb);
       if jsonb_typeof(changes)<>'array' or exists(select 1 from jsonb_array_elements(changes) e where jsonb_typeof(e)<>'string') then raise exception 'Invalid audit changed fields' using errcode='22023'; end if;
       if envelope ? 'subjects' and (jsonb_typeof(envelope->'subjects')<>'array' or exists(select 1 from jsonb_array_elements(envelope->'subjects') e where jsonb_typeof(e->'entityType') is distinct from 'string' or jsonb_typeof(e->'recordId') is distinct from 'string')) then raise exception 'Invalid audit subjects' using errcode='22023'; end if;
+      entity=coalesce(envelope->>'entityType',platform.audit_entity_name(NEW.aggregate_type),NEW.aggregate_type);
+      if not (envelope ? 'subjects') then
+        cfg=platform.audit_config(entity);
+        if cfg is not null then
+          execute format('select to_jsonb(p) from %I.%I p where %I::text=$1 and tenant_id=$2',cfg->>'schema',cfg->>'table',cfg->>'pk')
+            into source_row using NEW.aggregate_id,NEW.tenant_id;
+          if source_row is not null then observed_subjects=platform.audit_subjects(cfg,source_row);
+          else observed_subjects=platform.audit_recorded_subjects(cfg,NEW.aggregate_id,NEW.tenant_id); end if;
+        end if;
+      end if;
       identity=nullif(current_setting('app.user_id',true),'');
       correlation=coalesce(nullif(current_setting('app.audit_correlation',true),''),pg_current_xact_id()::text);
       NEW.payload=platform.audit_redact(coalesce(NEW.payload,'{}'::jsonb)) || jsonb_build_object('audit',platform.audit_redact(envelope) || jsonb_build_object(
-        'version',1,'entityType',coalesce(envelope->>'entityType',platform.audit_entity_name(NEW.aggregate_type),NEW.aggregate_type),
+        'version',1,'entityType',entity,
         'actorId',identity,'actorKind',coalesce(nullif(current_setting('app.audit_actor_kind',true),''),'system'),
         'operationId',nullif(current_setting('app.audit_operation',true),''),'correlationId',correlation,
         'changedFields',changes,
-        'subjects',coalesce(envelope->'subjects',jsonb_build_array(jsonb_build_object('entityType',coalesce(platform.audit_entity_name(NEW.aggregate_type),NEW.aggregate_type),'recordId',NEW.aggregate_id)))));
+        'subjects',coalesce(envelope->'subjects',observed_subjects,jsonb_build_array(jsonb_build_object('entityType',entity,'recordId',NEW.aggregate_id)))));
       return NEW;
     end $$;
     create or replace function platform.audit_event_subjects(payload jsonb, entity text, record text) returns jsonb

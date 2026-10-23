@@ -82,6 +82,7 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
       await sql`update audit_probe.lines set budget_id=${movedBudget}::uuid where id=${line}::uuid`.execute(tx);
     }));
     await appendEntityEvent(runtime.db, session(otherTenant), { aggregateType: "ProbeBudget", aggregateId: budget, eventType: "foreign-only", payload: { password: "must-not-store" } });
+    await appendEntityEvent(runtime.db, session(otherTenant), { aggregateType: "ProbeLine", aggregateId: line, eventType: "foreign-line-only", payload: {} });
     await appendEntityEvent(runtime.db, session(tenant), { aggregateType: "ProbeContact", aggregateId: contact, eventType: "semantic-event", payload: { accessToken: "must-not-store", nested: { clientSecret: "must-not-store" } } });
     for (const payload of [{ changedFields: { invalid: true } }, { changedFields: [1] }, { audit: { changedFields: null } }]) {
       await expect(appendEntityEvent(runtime.db, session(tenant), { aggregateType: "ProbeContact", aggregateId: contact, eventType: "invalid-fields", payload })).rejects.toThrow();
@@ -141,15 +142,46 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
       expect((await call("AuditEvent.get", { id: crypto.randomUUID() })).isError).toBe(true);
       for (const id of ["AuditEvent.create", "AuditEvent.update", "AuditEvent.delete", "audit.list", "timeline.list"]) expect((await call(id, {})).isError).toBe(true);
     });
+    // A later semantic signal has no row snapshot and must not hide the last recorded ancestry.
+    await appendEntityEvent(runtime.db, session(tenant), { aggregateType: "ProbeLine", aggregateId: line, eventType: "line.reviewed", payload: {} });
+    await clientFor(tenant, ["Audit.Logs.ReadAll"], async client => {
+      const result = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: "AuditEvent.list", input: { filter: {
+        subjects: { contains: { entityType: "ProbeBudget", recordId: movedBudget } }, eventType: { eq: "line.reviewed" },
+      } } } });
+      expect(result.isError).toBeFalsy(); expect((result.structuredContent as any).data.items).toHaveLength(1);
+    });
+    await sql.raw("alter policy tenant on audit_probe.lines using(false)").execute(privileged.db);
+    try {
+      await withAuditContext("ProbeValue.hidden-parent", "trusted-context", () => withDbSession(runtime.db, session(tenant), tx =>
+        sql`update audit_probe.amounts set amount='125' where id=${value}::uuid`.execute(tx)));
+      await clientFor(tenant, ["Audit.Logs.ReadAll"], async client => {
+        const result = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: "AuditEvent.list", input: { filter: {
+          subjects: { contains: { entityType: "ProbeBudget", recordId: movedBudget } }, operationId: { eq: "ProbeValue.hidden-parent" },
+        } } } });
+        expect(result.isError).toBeFalsy(); expect((result.structuredContent as any).data.items).toHaveLength(1);
+      });
+    } finally {
+      await sql.raw("alter policy tenant on audit_probe.lines using(tenant_id::text=current_setting('app.tenant_id',true))").execute(privileged.db);
+    }
     // Cascaded deletion must retain the parent timeline links on every descendant event.
     await withAuditContext("ProbeBudget.delete", "trusted-context", () => withDbSession(runtime.db, session(tenant), tx => sql`delete from audit_probe.budgets where id=${movedBudget}::uuid`.execute(tx)));
     await clientFor(tenant, ["Audit.Logs.ReadAll"], async client => {
       const result = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: "AuditEvent.list", input: { filter: { subjects: { contains: { entityType: "ProbeBudget", recordId: movedBudget } }, eventType: { eq: "deleted" } } } } });
       expect(result.isError).toBeFalsy(); expect((result.structuredContent as any).data.items.map((event: any) => event.entityType).sort()).toEqual(["ProbeBudget", "ProbeLine", "ProbeValue"]);
     });
+    await appendEntityEvent(runtime.db, session(tenant), { aggregateType: "ProbeLine", aggregateId: line, eventType: "line.archived", payload: {} });
+    await clientFor(tenant, ["Audit.Logs.ReadAll"], async client => {
+      const result = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: "AuditEvent.list", input: { filter: {
+        subjects: { contains: { entityType: "ProbeBudget", recordId: movedBudget } }, eventType: { eq: "line.archived" },
+      } } } });
+      expect(result.isError).toBeFalsy(); expect((result.structuredContent as any).data.items).toHaveLength(1);
+    });
     await clientFor(otherTenant, ["Audit.Logs.ReadAll"], async client => {
       const result = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: "AuditEvent.list", input: {} } });
-      expect(result.isError).toBeFalsy(); expect((result.structuredContent as any).data.items.map((event: any) => event.eventType)).toEqual(["foreign-only"]);
+      expect(result.isError).toBeFalsy();
+      const events = (result.structuredContent as any).data.items;
+      expect(events.map((event: any) => event.eventType).sort()).toEqual(["foreign-line-only", "foreign-only"]);
+      expect(events.find((event: any) => event.eventType === "foreign-line-only").subjects).toEqual([{ entityType: "ProbeLine", recordId: line }]);
     });
     await clientFor(tenant, [], async client => {
       for (const id of ["AuditEvent.list", "AuditEvent.get"]) {

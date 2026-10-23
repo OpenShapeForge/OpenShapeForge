@@ -67,6 +67,12 @@ updates append nothing; a CRUD write that changes updatedAt still records that f
 journal permits delivery-cursor updates only; payload mutation and deletion are
 refused. API readiness refuses a schema without active audit triggers.
 
+Semantic events for a known stored business record use those same declared
+timeline relationships: its writer-visible current ancestry, or its last
+recorded row ancestry after removal. A metadata-only semantic signal cannot
+replace that recorded row state during a later cascade. Unknown external
+records keep their source-recorded subjects; no remote state is inferred.
+
 Every newly recorded event includes the verified actor (when one exists), actor
 kind, canonical Operation and correlation context. Verified service principals and API keys are integrations; an unrecorded principal kind remains unknown. Nested work shares its causal
 correlation. Maintenance outside an Operation is explicitly system work; it does

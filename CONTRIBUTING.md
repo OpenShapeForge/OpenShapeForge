@@ -7,7 +7,7 @@ hand-written engines — never the generated output.
 
 ## Prerequisites
 
-- **bun >= 1.3** (the repo pins `bun@1.3.4` as package manager)
+- **bun >= 1.4.4** (the repo pins `bun@1.4.4` as package manager)
 - **Docker** with Compose, for the local stack: Postgres on `5434`, Keycloak on `8181`
 - **k6** (`brew install k6`) — optional, only for `bun run test:perf`
 

@@ -191,8 +191,9 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
     console.log(JSON.stringify({ auditBulkChildRows: 1000, timelineLevels: 3, recordedRootEvents: 1002, durationMs }));
     // Rehearse the documented owner-only, complete-tenant offboarding step.
     await privileged.db.transaction().execute(async tx => {
+      await sql`select set_config('app.tenant_id',${otherTenant},true)`.execute(tx);
       await sql.raw("lock table platform.entity_events in access exclusive mode; alter table platform.entity_events disable trigger audit_event_envelope").execute(tx);
-      await sql`delete from platform.entity_events where tenant_id=${otherTenant}::uuid`.execute(tx);
+      await sql`delete from platform.entity_events where tenant_id=app.current_tenant()`.execute(tx);
       await sql.raw("alter table platform.entity_events enable trigger audit_event_envelope").execute(tx);
     });
     expect((await sql<{ count: number }>`select count(*)::int as count from platform.entity_events where tenant_id=${otherTenant}::uuid`.execute(privileged.db)).rows[0]!.count).toBe(0);

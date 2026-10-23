@@ -57,7 +57,7 @@ const context = { repoRoot: "/repo", authoringDir: "/repo/authoring", webPresent
 
 describe("first-class plugin operations", () => {
   test("embedded request schemas resolve nested filter definitions in the OpenAPI document", () => {
-    const inputSchema = { type: "object", required: ["quoteId"], properties: { quoteId: { type: "string" }, filter: { $ref: "#/$defs/filter0" } }, $defs: {
+    const inputSchema = { type: "object", examples: [{ data: { $ref: "#/business-value" } }], required: ["quoteId"], properties: { quoteId: { type: "string" }, filter: { $ref: "#/$defs/filter0" } }, $defs: {
       filter0: { type: "object", properties: { and: { type: "array", items: { $ref: "#/$defs/filter1" } } } },
       filter1: { type: "object", properties: { name: { type: "string" } } },
     } };
@@ -68,6 +68,7 @@ describe("first-class plugin operations", () => {
     expect(resolve(body.properties.filter.$ref)).toEqual(body.$defs.filter0);
     expect(resolve(body.$defs.filter0.properties.and.items.$ref)).toEqual(body.$defs.filter1);
     expect((compiled[0]!.inputSchema.properties as any).filter.$ref).toBe("#/$defs/filter0");
+    expect(body.examples).toEqual(inputSchema.examples);
   });
   test("distinguishes authenticated-session auth from an explicit deny-all role list", () => {
     const authenticated = {

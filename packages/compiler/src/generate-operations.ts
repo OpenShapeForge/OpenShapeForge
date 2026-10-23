@@ -1337,7 +1337,7 @@ function openApiSchemaReferences(value: unknown, location: string): unknown {
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(Object.entries(value).map(([key, child]) => [key,
     key === "$ref" && typeof child === "string" && (child === "#" || child.startsWith("#/"))
-      ? location + child.slice(1) : openApiSchemaReferences(child, location),
+      ? location + child.slice(1) : ["default", "const", "enum", "examples", "example"].includes(key) ? child : openApiSchemaReferences(child, location),
   ]));
 }
 

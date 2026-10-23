@@ -134,10 +134,11 @@ The same transaction restores the guard before committing.
 
 ```sql
 BEGIN;
+SET LOCAL app.tenant_id = '11111111-1111-4111-8111-111111111111';
 LOCK TABLE platform.entity_events IN ACCESS EXCLUSIVE MODE;
 ALTER TABLE platform.entity_events DISABLE TRIGGER audit_event_envelope;
 DELETE FROM platform.entity_events
- WHERE tenant_id = '11111111-1111-4111-8111-111111111111'::uuid;
+ WHERE tenant_id = app.current_tenant();
 ALTER TABLE platform.entity_events ENABLE TRIGGER audit_event_envelope;
 COMMIT;
 ```

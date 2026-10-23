@@ -371,3 +371,14 @@ helm template openshapeforge deploy/helm/openshapeforge-api \
   with `start --optimized`. Set `tmpVolume.enabled=false` or
   `keycloak.writableVolumes.enabled=false` only alongside
   `securityContext.readOnlyRootFilesystem=false`.
+
+## Update only an existing API runtime
+
+For a runtime security release, dispatch **Deploy API runtime** from reviewed
+`main` with a published `sha-<commit>` tag and its immutable `sha256:…` digest.
+It requires the existing `openshapeforge` Helm release to be deployed and retains
+its values, including Keycloak, realm data, credentials, issuer and ingress.
+The normal provisioning/migration hooks still run from the pinned API image.
+No realm is regenerated or imported. The full **Deploy** workflow remains the
+path for an intentional identity/configuration release; its production passkey
+requirements stay enforced. Both workflows share one deployment lock.

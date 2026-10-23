@@ -119,6 +119,7 @@ jobs:
           scripts/check-ts-nocheck-baseline.test.ts
           scripts/api-test-suites.test.ts
           scripts/published-tar.test.ts
+          scripts/deploy-api-runtime.test.ts
 
       - name: Observability unit tests
         run: bun run test:observability
@@ -271,6 +272,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+      - name: Prove runtime updates preserve identity and credentials
+        run: python3 scripts/test-api-runtime-render.py
 
       - name: Helm lint
         run: helm lint ./deploy/helm/openshapeforge-api

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { registerResourceReadHandler } from "./resource-read-handler.js";
+import { registerPromptHandlers } from "./prompts.js";
 import { registerAgentSkillHandlers } from "./agent-skills.js";
 import { createToolListing } from "./tool-listing.js";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
@@ -235,9 +236,7 @@ export function createSessionSurface(scope: ServerScope) {
 
   registerResourceReadHandler(scope, { onboarding, sessionInfo });
 
-  server.setRequestHandler('prompts/list', async () => ({
-    prompts: [],
-  }));
+  registerPromptHandlers(server, scope.prompts, session.roles);
 
   return {
     listedResources,

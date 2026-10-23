@@ -16,7 +16,7 @@ import { operationErrorOf } from "@openshapeforge/operations";
 import { type ElicitOnCreateEntry } from "./elicitation.js";
 import { HttpError } from "../rest/http-error.js";
 import type { JsonRecord, PendingConfiguration, StoredFieldDefinition } from "./configuration-handoff.js";
-import { elicitationSchemaFromDefinitions, storeElicitedValues } from "./elicitation.js";
+import { elicitationSchemaFromDefinitions, isSecretDefinition, storeElicitedValues } from "./elicitation.js";
 import { storedFieldBaseType } from "../modules/field-schemas.js";
 export function coerceValue(
   definition: StoredFieldDefinition,
@@ -53,8 +53,8 @@ export type ParsedSubmission = {
 export function configurationFormDefinitions(
   pending: PendingConfiguration,
 ): JsonRecord[] {
-  return elicitationSchemaFromDefinitions(pending.definitions)
-    .elicitable as JsonRecord[];
+  const { schema, elicitable } = elicitationSchemaFromDefinitions(pending.definitions);
+  return elicitable.map(field => ({ ...field, schema: schema.properties[String(field.key)], secret: isSecretDefinition(field) }));
 }
 
 /** Parse a urlencoded submission against the pending definitions. */

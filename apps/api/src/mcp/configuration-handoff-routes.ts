@@ -69,7 +69,7 @@ export async function registerConfigurationHandoffRoutes(
   );
 
   type ConfigurationSubmission =
-    | { ok: true }
+    | { ok: true; id: string }
     | {
         ok: false;
         errors: Record<string, string>;
@@ -202,10 +202,10 @@ export async function registerConfigurationHandoffRoutes(
         pending.elicit.into,
         values[pending.elicit.into] as Record<string, unknown>,
       );
-      return { ok: true };
+      return { ok: true, id: String(existing.id) };
     }
-    await createGeneratedEntityForTable(db, writeSession, tableDef, values);
-    return { ok: true };
+    const created = await createGeneratedEntityForTable(db, writeSession, tableDef, values);
+    return { ok: true, id: String(created[tableDef.primaryKey!]) };
   };
 
   class SubmissionRejected extends Error {
@@ -237,7 +237,8 @@ export async function registerConfigurationHandoffRoutes(
   instance.get(`${ENTITY_CONFIGURATION_PATH}/pending`, async (request) => {
     const { db, session } = await requireMcpSession(request);
     const found = await latestConfigurationForSession(session, db);
-    if (!found) {
+    const requestedId = (request.query as { formId?: unknown })?.formId;
+    if (!found || requestedId !== undefined && requestedId !== found.id) {
       throw new HttpError(
         404,
         "NOT_FOUND",
@@ -276,7 +277,7 @@ export async function registerConfigurationHandoffRoutes(
           },
         });
       }
-      return reply.send({ saved: true });
+      return reply.send({ saved: true, id: outcome.id });
     },
   );
 

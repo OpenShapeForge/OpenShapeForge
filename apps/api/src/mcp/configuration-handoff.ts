@@ -22,7 +22,7 @@
  * pending payload in the database while only the token hash is stored for
  * lookup. The in-memory store below exists only for dependency-free unit tests.
  */
-import { randomBytes } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 import { type ElicitOnCreateEntry } from "./elicitation.js";
 
 export {
@@ -103,8 +103,9 @@ export async function mintConfiguration(
   input: Omit<PendingConfiguration, "token" | "expiresAtMs"> & {
     db?: OpenShapeForgeDatabase;
   },
-): Promise<{ token: string; expiresInSeconds: number }> {
+): Promise<{ id: string; token: string; expiresInSeconds: number }> {
   sweep();
+  const id = randomUUID();
   const expiresAtMs = Date.now() + TOKEN_TTL_MS;
   const { db, ...payload } = input;
   let token: string;
@@ -112,6 +113,7 @@ export async function mintConfiguration(
     const keyring = keyringFromEnv(process.env[KEYRING_ENV]);
     if (!keyring) throw new Error(`Set ${KEYRING_ENV}.`);
     token = await createHandoff({
+      id,
       db,
       keyring,
       kind: "entity_configuration",
@@ -124,7 +126,7 @@ export async function mintConfiguration(
     token = base64url(randomBytes(24));
     pendingByToken.set(token, { ...payload, token, expiresAtMs });
   }
-  return { token, expiresInSeconds: TOKEN_TTL_MS / 1000 };
+  return { id, token, expiresInSeconds: TOKEN_TTL_MS / 1000 };
 }
 
 /** Non-consuming lookup: the person may reload the form or fix a mistake. */

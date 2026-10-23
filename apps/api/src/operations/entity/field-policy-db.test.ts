@@ -470,9 +470,10 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       } });
       const body = { entity: "ProtectedFieldsFixture", values: { key: `browser-${randomUUID()}`, label: "Browser configuration", explicitSecret: "not a credential", definitionId: definition.id } };
       const admitted = await startConfigurationForSession(runtime.db, writer, body);
-      expect(admitted).toEqual({ expiresInSeconds: 1800 });
+      expect(admitted).toEqual({ id: expect.any(String), expiresInSeconds: 1800 });
       expect(JSON.stringify(admitted)).not.toContain("token");
       const pending = await latestConfigurationForSession(writer, runtime.db);
+      expect(pending!.id).toBe(admitted.id);
       expect(pending!.pending.modelValues).toEqual(body.values);
       expect(pending!.pending.definitions).toMatchObject([{ key: "token", osfType: "string" }]);
       expect(await latestConfigurationForSession({ ...writer, userId: randomUUID() }, runtime.db)).toBeNull();

@@ -40,6 +40,8 @@ export async function createHandoff(input: {
   tenantId: string;
   userId: string;
   payload: Record<string, unknown>;
+  /** Optional server-generated correlation id; never authorizes access. */
+  id?: string;
   expiresAtMs: number;
   /** Preserve a canonical Operation's verified session and transaction. */
   session?: DbSessionInput;
@@ -49,7 +51,7 @@ export async function createHandoff(input: {
   }
   const secret = base64url(randomBytes(32));
   const token = `${input.tenantId}.${input.userId}.${secret}`;
-  const id = randomUUID();
+  const id = input.id ?? randomUUID();
   const encrypted = encryptSecret(
     input.keyring,
     id,

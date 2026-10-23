@@ -112,7 +112,9 @@ describe("MCP browser handoff persistence", () => {
           const tenantId = randomUUID();
           const userId = randomUUID();
           const otherUserId = randomUUID();
+          const formId = randomUUID();
           const token = await createHandoff({
+            id: formId,
             db,
             keyring: KEYRING,
             kind: "entity_configuration",
@@ -171,6 +173,8 @@ describe("MCP browser handoff persistence", () => {
             session,
           });
           expect(latest?.payload).toEqual({ marker: "not-plaintext" });
+          expect(latest?.id).toBe(formId);
+          expect(await readHandoff({db,keyring:KEYRING,kind:"entity_configuration",token:formId,consume:false})).toBeNull();
           expect(
             await readLatestHandoffForSession({
               db,

@@ -53,8 +53,9 @@ export function configurationFallbackLead(
   if (delivery === "app") {
     return (
       prefix +
-      "The client has received a private MCP App for the secure form; the " +
-      "URL is not exposed to this chat. The app also offers an external-browser fallback."
+      "A private secure form has been offered to this client; its display is not confirmed. " +
+      "If no form is visible, use externalUrl when provided and sign in as the same " +
+      "person in the same organization. The private handoff URL is not exposed to this chat."
     );
   }
   return (

@@ -13,11 +13,9 @@ import {
   COMPLETE_ONBOARDING_TOOL,
   gatherOnboardingFacts,
   missingSteps,
-  ONBOARDING_GUIDE_TOOL,
   ONBOARDING_INSTRUCTION,
   ONBOARDING_STATUS_TOOL,
   ONBOARDING_VERSION,
-  onboardingGuideText,
   isOrganizationAdministrator,
   onboardingIndex,
   onboardingToolProjection,
@@ -184,7 +182,7 @@ describe("computeOnboarding", () => {
     const inProgress = computeOnboarding(facts());
     expect(inProgress.status).toBe("In progress");
     expect(inProgress.summary).toContain("1 of 2 steps done");
-    expect(inProgress.summary).toContain("Onboarding is optional; use onboarding_guide if the person asks for help.");
+    expect(inProgress.summary).toContain("Onboarding is optional; read onboarding_status if the person asks for help.");
 
     const allDone = computeOnboarding(facts({ preferences: { offered: true, count: 1 } }));
     expect(allDone.status).toBe("In progress");
@@ -230,30 +228,6 @@ describe("guide text and instructions", () => {
     expect(isOrganizationAdministrator(["people_manager"])).toBe(false);
     expect(isOrganizationAdministrator([])).toBe(false);
   });
-  it("words the guide for the role", () => {
-    const employee = onboardingGuideText(["org_employee"]);
-    expect(employee).toContain("ask an organization administrator to run link_identity");
-    expect(employee).not.toContain("create_connection");
-    const administrator = onboardingGuideText(["org_admin", "integration_admin"]);
-    expect(administrator).toContain("link_identity yourself");
-    expect(administrator).toContain("create_connection");
-    expect(administrator).toContain("elicitation");
-    expect(administrator).toContain("configurationUrl");
-    expect(administrator).toContain("organization connections first");
-    expect(administrator).toContain("test_connection");
-    expect(administrator).toContain("provider_setup_guide");
-    expect(administrator.indexOf("organization connections first")).toBeLessThan(
-      administrator.indexOf("then your own personal sign-in"),
-    );
-    for (const text of [employee, administrator]) {
-      expect(text).toContain("Call whoami first");
-      expect(text).toContain("ONE batched question");
-      expect(text).toContain("Never ask for secrets");
-      expect(text).toContain("complete_onboarding");
-      expect(text).toContain("do not mention onboarding again");
-    }
-  });
-
   it("names both ways to the detail in the server instructions", () => {
     expect(ONBOARDING_INSTRUCTION).toContain("Call `whoami` first");
     expect(ONBOARDING_INSTRUCTION).toContain("is an index");
@@ -263,19 +237,11 @@ describe("guide text and instructions", () => {
     expect(ONBOARDING_INSTRUCTION.length).toBeLessThan(400);
   });
 
-  it("tells the guide reader that whoami says what, not how", () => {
-    for (const text of [onboardingGuideText(["org_employee"]), onboardingGuideText(["org_admin"])]) {
-      expect(text).toContain("`onboarding` field is the INDEX");
-      expect(text).toContain("osf://onboarding/step/<key>");
-      expect(text).toContain("cannot read resources");
-    }
-  });
-
   it("embeds the checklist in whoami and appends to its summary", () => {
     const info = { name: "Hans", summary: "You are Hans." };
     const inProgress = withOnboarding(info, computeOnboarding(facts()));
     expect(inProgress.onboarding.status).toBe("In progress");
-    expect(inProgress.summary).toBe("You are Hans. Onboarding is in progress; optional guidance is available via onboarding_guide. App and tool use do not require completing this checklist.");
+    expect(inProgress.summary).toBe("You are Hans. Onboarding is in progress; optional guidance is available via onboarding_status. App and tool use do not require completing this checklist.");
     const none = withOnboarding(info, computeOnboarding(facts({ relation: null, record: null })));
     expect(none.summary).toBe("You are Hans.");
   });
@@ -721,8 +687,7 @@ describe("the onboarding tools", () => {
     expect(onboardingToolsForSession(session()).map((tool) => tool.name)).toEqual([
       ONBOARDING_STATUS_TOOL,
       COMPLETE_ONBOARDING_TOOL,
-      ONBOARDING_GUIDE_TOOL,
-    ]);
+        ]);
     expect(onboardingToolsForSession(session({ userId: null }))).toEqual([]);
   });
 
@@ -810,10 +775,8 @@ describe("the onboarding tools", () => {
     );
   });
 
-  it("returns the role-aware guide", async () => {
-    const { env } = environment({ session: session({ roles: ["org_admin"] }) });
-    const result = await callOnboardingTool(ONBOARDING_GUIDE_TOOL, {}, env);
-    expect(result!.content[0]!.type).toBe("text");
-    expect((result!.content[0] as { text: string }).text).toContain("create_connection");
+  it("does not dispatch the former instruction-only tool", async () => {
+    const { env } = environment({});
+    expect(await callOnboardingTool("onboarding_guide", {}, env)).toBeUndefined();
   });
 });

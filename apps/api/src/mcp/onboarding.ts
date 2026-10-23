@@ -3,16 +3,14 @@
  * First-use onboarding: the checklist an assistant walks a person through the
  * first time they connect, and the durable record that it happened.
  *
- * Three MCP tools, listed for every authenticated session:
+ * Two MCP tools, listed for every authenticated session:
  *
  *   onboarding_status    — the computed checklist (also embedded in `whoami`
  *                          as `onboarding`).
  *   complete_onboarding  — verifies the checklist, records completion on the
  *                          person's identity ↔ tenant link row, answers the
  *                          final status; refuses with the missing steps.
- *   onboarding_guide     — the process for the assistant, worded for the
- *                          caller's role (organization administrator vs
- *                          employee).
+ * The optional workflow is shipped as an Agent Skill by the integrations plugin.
  *
  * The checklist is COMPUTED from what the server already knows, never stored
  * as text: the identity link (auth/identity-link.ts), for an organization
@@ -67,11 +65,9 @@ export const ONBOARDING_VERSION = 2;
 
 export const ONBOARDING_STATUS_TOOL = "onboarding_status";
 export const COMPLETE_ONBOARDING_TOOL = "complete_onboarding";
-export const ONBOARDING_GUIDE_TOOL = "onboarding_guide";
 export const ONBOARDING_TOOL_NAMES: readonly string[] = [
   ONBOARDING_STATUS_TOOL,
   COMPLETE_ONBOARDING_TOOL,
-  ONBOARDING_GUIDE_TOOL,
 ];
 
 /**
@@ -99,7 +95,7 @@ export function onboardingStepKeyFromUri(uri: string): OnboardingStepKey | null 
 export const ONBOARDING_INSTRUCTION =
   " Call `whoami` first. Its `onboarding` field is an index, not a how-to." +
   " Onboarding is optional guidance, not a prerequisite for using the app or its offered tools." +
-  " On request, follow `onboarding_guide`; for one step read `osf://onboarding/step/<key>`;" +
+  " On request, read a listed onboarding skill; step detail is at `osf://onboarding/step/<key>`;" +
   " without resources call `onboarding_status`.";
 
 // ---------------------------------------------------------------------------
@@ -508,7 +504,7 @@ export function computeOnboarding(
     sentences.push(
       applicable.length === done.length
         ? "Every step is done; call complete_onboarding to record it."
-        : "Onboarding is optional; use onboarding_guide if the person asks for help.",
+        : "Onboarding is optional; read onboarding_status if the person asks for help.",
     );
   }
   return {
@@ -529,108 +525,10 @@ export function missingSteps(summary: OnboardingSummary): OnboardingStep[] {
 // Guide text
 
 const ROLE_ADMIN = "org_admin";
-const ROLE_INTEGRATION_ADMIN = "integration_admin";
 
 export function isOrganizationAdministrator(roles: readonly string[] | null | undefined): boolean {
   const granted = new Set(roles ?? []);
   return granted.has(ROLE_ADMIN) || granted.has(IDENTITY_LINK_ADMIN_ROLE);
-}
-
-/** The process for the assistant, worded for the caller's role. */
-export function onboardingGuideText(roles: readonly string[] | null | undefined): string {
-  const administrator = isOrganizationAdministrator(roles);
-  const integrationAdministrator = new Set(roles ?? []).has(ROLE_INTEGRATION_ADMIN);
-  const lines = [
-    "First use — how to set this person up. Follow in order; do not narrate the process.",
-    "",
-    "Call whoami first. Its `onboarding` field is the INDEX: `status`, a done/total count and",
-    "`steps`, each key + title + done, todo or not_applicable — it says WHAT is open, never how.",
-    "If status is Completed, stop reading and never mention onboarding again. Otherwise walk the",
-    "todo steps in the order listed, and for each one get the how-to first: read the resource",
-    "osf://onboarding/step/<key>, or call onboarding_status once for every step with its howTo",
-    "(that is the way in a client that cannot read resources). The steps:",
-    "",
-    "1. identity — the person's login must be linked to their Relation. Pending with a",
-    "   candidate: run confirm_my_link after telling them who the candidate is. No candidate:",
-    administrator
-      ? "   as organization administrator you can run link_identity yourself (e-mail + Relation)."
-      : "   ask an organization administrator to run link_identity; you cannot do this for them.",
-    "2. organization_connections — administrators only; see the administrator section below.",
-    "3. connections — for every provider listed as not connected, run connect_service with the",
-    "   tool name from the step, hand the person the returned URL, and wait by checking (call",
-    "   onboarding_status or osf://onboarding/step/connections every ten seconds or so, for up",
-    "   to about three minutes) rather than asking them to say when they are done.",
-    "4. preferences — ask ONE batched question covering working hours, priorities and house",
-    "   style (language, tone, how formal), never one item at a time. Save the answer in their",
-    "   own words with set_my_preferences (omit `tool` so it applies to all tools). If they",
-    "   would rather not, that is fine: complete with skip: true. Do NOT ask the per-tool",
-    "   onboarding here (assistance level Melden / Voorbereiden / Routine doen, a tool's own",
-    "   choices): each tool with onboarding asks at its first call - its result carries the",
-    "   questions and set_my_preferences {tool, assistanceLevel, choices} stores the answers;",
-    "   get_my_preferences shows what is stored for which tool.",
-    "5. guide — read every role guide the step names (its howTo names the tool) and follow",
-    "   it from then on.",
-    "",
-    "Never ask for secrets, tokens, passwords or keys in chat: sign-ins go through the URL",
-    "connect_service returns, organization credentials through the secure form or the",
-    "configurationUrl a create tool answers with.",
-    "When every step is done, call complete_onboarding once (with skip: true only if the person",
-    "skipped preferences) and confirm to them in one sentence that they are set up. Afterwards",
-    "do not mention onboarding again; if a later whoami reports it re-opened, a new step was",
-    "added — walk only that step.",
-  ];
-  if (administrator) {
-    lines.push(
-      "",
-      "Administrator section — you also own the organization's side, in this order:",
-      "a. organization connections first: for every Adapter the organization_connections step",
-      "   lists as not configured, run create_connection with that adapterId (plus key and name).",
-      "   The Adapter's configuration values are never typed in chat: a client that supports",
-      "   elicitation shows a secure form; any other client (Codex, ChatGPT) gets a result with",
-      "   pending: true and a configurationUrl — give the person that link to open in a browser.",
-      "   For an OAuth provider, register the redirect URL from the step on the provider's OAuth",
-      "   client before entering the values. Then verify with test_connection.",
-      "b. then your own personal sign-in (connections), c. then preferences.",
-      "To add an employee or colleague, run invite_employee {email, roles}. It creates their",
-      "admission and reports what happened: someone not yet in the Keycloak organization receives an",
-      "invitation e-mail; an existing member can receive a native sign-in notice and can sign in again;",
-      "an existing pending invitation is reused without being resent. The selected roles are",
-      "applied automatically when they sign in. In your reply, use the tool's delivery and",
-      "nextStep exactly. For delivery not_required, inspect accessNotice: sent means a sign-in notice",
-      "was requested; failed means admission exists but no successful notice is claimed; absent means",
-      "no notice capability is configured. A pending",
-      "status means the roles await sign-in, not that a mail was sent. list_invitations shows",
-      "pending role admissions, regardless of whether an existing member received a sign-in notice;",
-      "revoke_invitation cancels one that has not been accepted yet. For someone who has ALREADY",
-      "signed in without being invited first (they show up unlinked or pending), use",
-      "link_identity instead to link their login to a Relation and assign roles by hand.",
-      "Personal sign-ins remain each employee's own; you cannot connect on their behalf. To add a",
-      "provider that does not exist yet, follow provider_setup_guide.",
-      "d. Corporate single sign-on (e.g. Google Workspace) is linked per organization, not",
-      "   realm-wide: an administrator with Keycloak access links the identity provider to this",
-      "   organization's Keycloak Organization (control/keycloak-organization-admin.ts's",
-      "   linkIdentityProvider) so only this tenant's employees see it, never another tenant's.",
-      "d2. Give the assistant company context: run set_organization_relation {relationId} with the",
-      "    Relation (relationType: organization) that IS this company, and its businessContext",
-      "    field (relation_update) is then readable by any session through osf://organization/",
-      "    profile — a one-time \"what does this company do\" instead of re-explaining it every",
-      "    conversation. Distinct from that Relation's notes field, which stays internal.",
-      "e. A sign-in without a matching invitation or existing link is refused; it does not",
-      "   grant read-only access. Use invite_employee for the exact e-mail address, then ask",
-      "   the person to sign in again. For an existing unlinked identity, inspect",
-      "   list_pending_members and use link_identity when manual linking is needed.",
-    );
-  }
-  if (integrationAdministrator) {
-    lines.push(
-      "",
-      "Each Adapter's `setup` field says what the organization must configure for it (OAuth",
-      "client, secrets, scopes) and where the values go: the secure form of create_connection.",
-      "Before creating any provider definition, read provider_setup_guide — it is the fixed",
-      "process and overrides this text where they overlap.",
-    );
-  }
-  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -686,30 +584,12 @@ const COMPLETE_ONBOARDING: Tool = {
   },
 };
 
-const ONBOARDING_GUIDE: Tool = {
-  name: ONBOARDING_GUIDE_TOOL,
-  title: "Onboarding guide",
-  description:
-    "How to set up a person who connects for the first time: the order of the steps in " +
-    "whoami's `onboarding`, what to ask (one batched question), what never to ask (secrets), " +
-    "and how to confirm with complete_onboarding. Call it when whoami reports onboarding is " +
-    "not Completed.",
-  inputSchema: { type: "object", properties: {}, additionalProperties: false },
-  annotations: {
-    title: "Onboarding guide",
-    readOnlyHint: true,
-    destructiveHint: false,
-    idempotentHint: true,
-    openWorldHint: false,
-  },
-};
-
-/** The onboarding tools this session is shown: all three, for every authenticated session. */
+/** The onboarding tools this session is shown: both, for every authenticated session. */
 export function onboardingToolsForSession(
   session: Pick<TrustedSessionContext, "tenantId" | "userId">,
 ): Tool[] {
   if (!session.tenantId || !session.userId) return [];
-  return [ONBOARDING_STATUS, COMPLETE_ONBOARDING, ONBOARDING_GUIDE];
+  return [ONBOARDING_STATUS, COMPLETE_ONBOARDING];
 }
 
 // ---------------------------------------------------------------------------
@@ -1129,7 +1009,7 @@ export function withOnboarding<T extends { summary: string }>(
       ? "Onboarding is completed."
       : onboarding.status === "Not applicable"
         ? null
-        : `Onboarding is ${onboarding.status.toLowerCase()}; optional guidance is available via onboarding_guide. App and tool use do not require completing this checklist.`;
+        : `Onboarding is ${onboarding.status.toLowerCase()}; optional guidance is available via onboarding_status. App and tool use do not require completing this checklist.`;
   return {
     ...info,
     onboarding: onboardingIndex(onboarding),
@@ -1181,9 +1061,6 @@ export async function callOnboardingTool(
     return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
   }
   try {
-    if (name === ONBOARDING_GUIDE_TOOL) {
-      return { content: [{ type: "text", text: onboardingGuideText(env.session.roles) }] };
-    }
     if (name === ONBOARDING_STATUS_TOOL) {
       return succeeded(await describeOnboarding(env));
     }

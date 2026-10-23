@@ -15,6 +15,7 @@ import {
 import { fieldColumnMap, tableColumnMap } from "./columns.js";
 import { resolveComputedEntityRows } from "./computed-fields.js";
 import { assertBoundFieldQueryAllowed, resolveBoundEntityRows } from "./field-bindings.js";
+import { subtypeScopeWhere } from "./subtype-scope.js";
 import type {
   CountedEntityConnection,
   GeneratedCrudColumn,
@@ -306,7 +307,9 @@ async function listGeneratedEntityRowsForTable(
   const limit = normalizeLimit(input.limit);
   const offset = decodeOffsetCursor(input.cursor);
   const fixedWhere = [...tenantFixedWhere(table, session), ...(input.fixedWhere ?? [])];
-  const ordinaryWhere = buildFilterConditions(table, session, input.filter, fixedWhere);
+  // A subtype sees its own rows only, whatever the caller's filter says; the
+  // discriminator may be hidden, so it is never an ordinary filter column.
+  const ordinaryWhere = sql`(${buildFilterConditions(table, session, input.filter, fixedWhere)})${subtypeScopeWhere(table, "row_source")}`;
   const where = relationScope ? sql`(${ordinaryWhere}) and (${relationScope.where})` : ordinaryWhere;
   const orderBy = relationScope?.orderBy ?? buildSortExpression(table, input.sort);
 
@@ -441,6 +444,7 @@ export async function fetchGeneratedEntityRow(
       from ${sql.id(table.schema, table.table)} as row_source
       where ${sql.id("row_source", table.primaryKey!)}::text = ${id}
         ${tenantWhere}
+        ${subtypeScopeWhere(table, "row_source")}
       limit 1
     `.execute(trx);
 

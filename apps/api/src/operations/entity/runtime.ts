@@ -69,6 +69,7 @@ import {
   assertNoOperationWrittenValues,
 } from "./write-policy.js";
 import { bindableFields, prepareFieldBindings, type PreparedFieldBindings } from "./field-bindings.js";
+import { assertNoCallerSubtypeValues, policyEntityId, policyOperation } from "./subtype-scope.js";
 import { sessionRelation } from "../../auth/identity-link.js";
 import { sql } from "kysely";
 
@@ -160,7 +161,7 @@ async function leaseUnavailabilityByTarget(
   ];
   if (protectedOperations.length === 0) return new Map();
   const byTarget = await editLeaseErrorsByTarget(db, session, {
-    entityId: protectedOperations[0]!.entityId,
+    entityId: policyEntityId(table, protectedOperations[0]!),
     targetIds,
   });
   return new Map(
@@ -228,6 +229,7 @@ function requireContractValues(
 ): void {
   assertNoCallerElicitedOutput(table, values);
   assertNoOperationWrittenValues(table, values);
+  assertNoCallerSubtypeValues(table, values);
   assertNoCallerFieldBindings(table, values);
   assertCallerTopLevelFields(table, session, values, operation.intent as "create" | "update");
   assertEntityValuesValid(operation, table, values, options);
@@ -674,7 +676,7 @@ export async function acquireEditLeaseForEntityOperation(
     await assertRecordPermission(db, session, table, input.targetId, permission);
   }
   return acquireEntityEditLease(db, session, {
-    operation: operation as LeaseProtectedOperation,
+    operation: policyOperation(table, operation as LeaseProtectedOperation),
     table,
     targetId: input.targetId,
   });
@@ -891,7 +893,9 @@ async function executeEntityOperationWithContext(
     // even though the underlying mutation still refuses the write later.
     requireEntityOperation(table, request.operation.intent, session);
     const entityName = authoredEntityId(table);
-    const operation = entityOperationContract(request.operation.id);
+    // A subtype's leases and challenges are the base record's, so the
+    // contract this request runs under carries the base's identity.
+    const operation = policyOperation(table, entityOperationContract(request.operation.id));
     const admit = () => assertOperationAdmitted(db, session, {
       id: operation.id,
       intent: operation.intent,

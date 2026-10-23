@@ -9,6 +9,7 @@ import { primaryKeyEquals } from "./columns.js";
 import { notAuthorizedRefusal } from "./authorization-refusal-text.js";
 import { operationFailure } from "@openshapeforge/operations";
 import type { GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
+import { subtypeScopeWhere } from "./subtype-scope.js";
 
 export type RecordPermissionAction = "view" | "edit" | "delete";
 
@@ -209,6 +210,7 @@ export async function assertRecordPermissionInTransaction(
     from ${sql.id(table.schema, table.table)} as row_source
     where ${primaryKeyEquals(table, id, "row_source")}
       ${tenantWhere}
+      ${subtypeScopeWhere(table, "row_source")}
     limit 1
   `.execute(trx);
   if (result.rows[0]?.allowed !== true) {

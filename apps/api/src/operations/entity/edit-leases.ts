@@ -15,6 +15,7 @@ import { normalizeTimestampToken } from "../../db/timestamps.js";
 import { appendScopedEntityEventInTransaction } from "../../platform/entity-events.js";
 import { fieldNameForColumn } from "./columns.js";
 import { lockedError } from "./edit-lease-locked.js";
+import { subtypeScopeWhere } from "./subtype-scope.js";
 import type { GeneratedCrudTable } from "./types.js";
 
 export type EditLeaseRequirement = {
@@ -116,6 +117,7 @@ async function currentVersionInTransaction(
     from ${sql.id(table.schema, table.table)}
     where ${sql.id(table.primaryKey!)}::text = ${targetId}
       ${tenantWhere}
+      ${subtypeScopeWhere(table)}
   `.execute(trx);
   const version = result.rows[0]?.version;
   return version === undefined ? null : normalizeTimestampToken(String(version));
@@ -152,6 +154,7 @@ export async function validateEntityVersionInTransaction(
     from ${sql.id(input.table.schema, input.table.table)}
     where ${sql.id(input.table.primaryKey!)}::text = ${input.targetId}
       ${tenantWhere}
+      ${subtypeScopeWhere(input.table)}
     for update
   `.execute(trx);
   const current = result.rows[0]?.version;

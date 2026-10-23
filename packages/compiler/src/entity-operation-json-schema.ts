@@ -1,3 +1,4 @@
+import { relatedUpdateSchema } from "./related-update-schema.js";
 import { blueprintBindingsSchema } from "./blueprint-create-schema.js";
 // SPDX-License-Identifier: BUSL-1.1
 /** Concrete JSON Schemas for the canonical entity Operation executor. */
@@ -717,7 +718,12 @@ export function entityOperationJsonSchemas(
     }
     case "update": {
       const { values, definitions } = entityValuesSchema(contract, "update", contracts, referentiedata);
-      const inputSchema = controlled({ id, values, ...entityBindingControlProperties(contract) }, ["id", "values"]);
+      const relatedChanges = relatedUpdateSchema(contract, contracts, (entity, intent) => {
+        const nested = entityValuesSchema(entity, intent, contracts, referentiedata);
+        Object.assign(definitions, nested.definitions);
+        return nested.values;
+      });
+      const inputSchema = controlled({ id, values, ...entityBindingControlProperties(contract), ...(relatedChanges ? { relatedChanges } : {}) }, ["id", "values"]);
       return {
         inputSchema: {
           ...inputSchema,

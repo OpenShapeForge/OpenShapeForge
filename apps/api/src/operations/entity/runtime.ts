@@ -1,3 +1,5 @@
+import { classifyDatabaseError } from "../../db/database-refusals.js";
+import { applyRelatedChanges } from "./related-update.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { getGeneratedCrudTables } from "./table-registry.js";
 import { withAuditContext } from "../../platform/audit-context.js";
@@ -1127,13 +1129,26 @@ async function executeEntityOperationWithContext(
                 : {}),
             }
           : undefined;
-        const data = await governed(() => updateGeneratedEntity(db, session, {
-          table: table.name,
-          id: requireId(request.input),
-          values,
+        const writeParent = () => updateGeneratedEntity(db, session, {
+          table: table.name, id: requireId(request.input), values,
           ...(prepared.bindings ? { fieldBindings: prepared.bindings } : {}),
           ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
           ...(guard ? { guard } : {}),
+        });
+        const relatedChanges = request.input?.relatedChanges;
+        if (relatedChanges !== undefined) assertOperationInputValid(operation, request.input ?? {});
+        const data = await governed(() => relatedChanges === undefined ? writeParent() : withDbSession(db, session, async trx => {
+          const parent = await writeParent();
+          if (!parent) throw operationFailure({code:"NOT_FOUND",message:"Record not found.",retryable:false});
+          await applyRelatedChanges(trx, session, table, requireId(request.input), relatedChanges as never, getGeneratedCrudTables(), async (child, intent, input) => {
+            const childOp = entityOperationContract(entityOperationRef(child, intent).id);
+            if (childOp.implementation?.type !== "entity" || childOp.effects.external !== "none" || childOp.interaction.secureInput || childOp.prerequisites?.length || childOp.interaction.confirmation.mode !== "none" || (intent === "create" && childOp.concurrency?.editLease) || childOp.reliability.idempotency.mode === "keyed") throw operationFailure({code:"VALIDATION",message:"This related write requires its own guarded Operation.",retryable:false});
+            const result = await executeEntityOperation(db, session, {operation:entityOperationRef(child,intent),input});
+            if ("error" in result) throw operationFailure(result.error);
+            if (!result.data) throw operationFailure({code:"NOT_FOUND",message:"Related record not found.",retryable:false});
+            return result.data as never;
+          });
+          return parent;
         }));
         return {
           intent: "update",
@@ -1193,7 +1208,8 @@ async function executeEntityOperationWithContext(
       }
     }
   } catch (error) {
-    const operationError = operationErrorOf(error);
+    const refusal = request.input?.relatedChanges ? classifyDatabaseError(error) : undefined;
+    const operationError = operationErrorOf(error) ?? (refusal ? {code:refusal.code,message:refusal.message,retryable:false} : undefined);
     // A canonical failure is the answer; anything else is a defect. Report it
     // before it collapses into the opaque internal error the caller sees, so
     // the server log holds the cause (#471). Message only — no input, no session.

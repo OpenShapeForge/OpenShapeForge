@@ -214,6 +214,8 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  mcp:
+    tools: generic
   rest: {}
   graphql: {}
   web:

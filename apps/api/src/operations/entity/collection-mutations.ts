@@ -22,6 +22,7 @@ import { assertEntityValueInput, entityValueCarriers, prepareEntityValueWriteInT
 import { assertRelationshipConstraintsInTransaction } from "./relationship-constraints.js";
 import type { EntityOperationContract, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
 import type { LeaseProtectedOperation } from "./edit-leases.js";
+import { consumeEntityEditLeaseInTransaction } from "./edit-leases.js";
 import { hasConsumedCollectionLease } from "./collection-lease-context.js";
 import { assertAdmittedBeforeEffects, assertEffectsWereAdmitted } from "../execution-policy.js";
 
@@ -30,6 +31,8 @@ export type CollectionMutationBinding = { entityName: string; field: string; act
 export type CollectionMutationRequest = {
   id: string;
   expectedVersion: string;
+  childExpectedVersion?: string;
+  childLeaseToken?: string;
   values?: Record<string, unknown>;
   childId?: string;
   beforeId?: string | null;
@@ -106,9 +109,11 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
     const parent = parents.length === 1 ? parents[0] : undefined;
     const rels = parent?.source?.graphql?.relationships?.filter((rel) => rel.fieldKey === binding.field) ?? [];
     const rel = rels.length === 1 ? rels[0] : undefined;
-    if (!parent || !rel || rel.kind !== "hasMany" || rel.resolve !== "hasMany" || rel.ownership !== "owned" || rel.via || !rel.inverse || !rel.foreignKey) unsupported("A canonical owned inverse collection is required.");
+    if (!parent || !rel || rel.kind !== "hasMany" || rel.resolve !== "hasMany" || !["owned", "reference"].includes(rel.ownership ?? "") || rel.via || !rel.inverse || !rel.foreignKey) unsupported("A canonical owned inverse collection is required.");
     const owner = parent!;
     const relation = rel!;
+    if (relation.ownership === "reference" && (relation.sortable || relation.childAuthorization === "owner" || !["insert", "update"].includes(binding.action))) unsupported("Reference collections retain child permissions and support insert/update only.");
+    if (relation.ownership === "reference" && binding.action === "update" && (typeof request.childExpectedVersion !== "string" || !Number.isFinite(Date.parse(request.childExpectedVersion)))) invalid("A member expected version is required.");
     if (binding.action === "move" && !relation.sortable) unsupported("Move requires a sortable collection.");
     if (!relation.sortable && request.beforeId !== undefined) invalid("beforeId is not accepted for a non-sortable collection.");
     const targets = catalog.tables.filter((table) => table.source?.graphql?.typeName === relation.target);
@@ -142,7 +147,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
     const via = relation.childAuthorization === "owner" ? parentOp : undefined;
     const readOp = safeOperation(catalog.operations, target, "list", session, via);
     const editing = binding.action === "update" || binding.action === "remove";
-    const updateOp = relation.sortable || editing ? safeOperation(catalog.operations, target, "update", session, via) : undefined;
+    const updateOp = relation.sortable || editing ? safeOperation(catalog.operations, target, "update", session, via, relation.ownership === "reference") : undefined;
     const createOp = binding.action === "insert" ? safeOperation(catalog.operations, target, "create", session, via) : undefined;
     const versionField = parentOp.concurrency?.version?.field;
     const version = owner.columns.find((column) => fieldNameForColumn(column) === versionField);
@@ -150,7 +155,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
     const childVersion = updateOp?.concurrency?.version;
     if (childVersion && (childVersion.mode !== "required" || !target.columns.some((column) => fieldNameForColumn(column) === childVersion.field && column.name === "updated_at" && column.type === "timestamptz"))) unsupported("Child version metadata is unsupported.");
     if (!request || !uuid.test(request.id) || typeof request.expectedVersion !== "string" || !Number.isFinite(Date.parse(request.expectedVersion))) invalid("A parent id and timestamp expectedVersion are required.");
-    if (Object.keys(request).some((key) => !["id", "expectedVersion", "values", "childId", "beforeId"].includes(key))) invalid("Unknown collection mutation input.");
+    if (Object.keys(request).some((key) => !["id", "expectedVersion", "values", "childId", "beforeId", ...(relation.ownership === "reference" ? ["childExpectedVersion", "childLeaseToken"] : [])].includes(key))) invalid("Unknown collection mutation input.");
     if (request.beforeId != null && (typeof request.beforeId !== "string" || !uuid.test(request.beforeId))) invalid("beforeId must be a child UUID or null.");
     if (binding.action === "move" && (typeof request.childId !== "string" || !uuid.test(request.childId) || request.values !== undefined)) invalid("Move requires childId and does not accept values.");
     if (editing && (typeof request.childId !== "string" || !uuid.test(request.childId) || request.beforeId !== undefined)) invalid(`${binding.action} requires childId and does not accept beforeId.`);
@@ -271,6 +276,14 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
         await permission(trx, session, target, childId, updateOp!, "edit");
         const current = rows.find((row) => row.id === childId)!;
         if (binding.action === "update") {
+          if (relation.ownership === "reference") {
+            if (updateOp!.concurrency?.editLease) {
+              if (!request.childLeaseToken) invalid("The member edit lease is required.");
+              await consumeEntityEditLeaseInTransaction(trx,session,{operation:updateOp! as LeaseProtectedOperation,targetId:childId,expectedVersion:request.childExpectedVersion!,leaseToken:request.childLeaseToken!});
+            }
+            const check = await sql<{matches: boolean}>`select updated_at = ${normalizeTimestampToken(request.childExpectedVersion!)}::timestamptz as matches from ${sql.id(target.schema,target.table)} where id=${childId}::uuid and tenant_id=${session.tenantId}::uuid`.execute(trx);
+            if (!check.rows[0]?.matches) throw generatedCrudError("The member changed; reload before editing.","VERSION_CONFLICT");
+          }
           assertCallerTopLevelFields(target, session, request.values!, "update");
           const protectedValues = prepareProtectedFieldWrites(target, session,
             normalizeWritableValues(target, request.values!, "update", entityValues), "update", current);

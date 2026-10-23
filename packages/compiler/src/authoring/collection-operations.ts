@@ -26,7 +26,10 @@ export function materializeCollectionOperations(
       if (owner.entity.valueDefinition || !["insert", "move", "update", "remove"].includes(action)) fail("collection Operations require an identity-bearing owner and insert|move|update|remove.");
       const field = owner.model.fields.find((field) => field.key === key);
       const relation = owner.model.relationships.find((relation) => relation.fieldKey === key);
-      if (!field || field.cardinality !== "collection" || relation?.kind !== "hasMany" || relation.through || relation.ownership !== "owned" || !relation.inverse || !relation.foreignKey) fail("collection Operations require an owned inverse collection field.");
+      if (!field || field.cardinality !== "collection" || relation?.kind !== "hasMany" || relation.through || !["owned", "reference"].includes(relation.ownership ?? "") || !relation.inverse || !relation.foreignKey) fail("collection Operations require a direct inverse collection field.");
+      if (relation.ownership === "reference" && (action === "move" || action === "remove")) fail("Reference collections support insert and update only; ending a link is an ordinary dated update.");
+      if (relation.ownership === "reference" && (relation.childAuthorization === "owner" || relation.sortable)) fail("Reference collections retain child permissions and cannot be sorted through their parent.");
+      if (relation.ownership === "reference" && typeof relation.cardinality === "object" && ((relation.cardinality.min ?? 0)>0 || typeof relation.cardinality.max === "number")) fail("Reference collection batches require an unbounded optional collection.");
       if (action === "move" && !relation.sortable) fail("move requires a sortable collection.");
       const child = contracts.find((contract) => contract.entity.name === relation.target);
       if (!child || child.entity.valueDefinition) fail("collection child storage is absent.");
@@ -42,7 +45,7 @@ export function materializeCollectionOperations(
       requireEntityOperation(child.entityOperations.list, "child list");
       // update and remove edit an owned child through its owner; the child's own
       // update Operation proves it is mutable, its roles are not required.
-      if (relation.sortable || action === "update" || action === "remove") requireEntityOperation(child.entityOperations.update, "child update");
+      if (relation.sortable || action === "update" || action === "remove") requireEntityOperation(child.entityOperations.update, "child update", relation.ownership === "reference");
       if (update.concurrency?.version?.mode !== "required" || update.concurrency.version.field !== "updatedAt" ||
         !owner.storage.columns.some((column) => column.field === "updatedAt" && column.column === "updated_at" && column.type === "timestamptz")) fail("owner update requires persisted updatedAt version concurrency.");
       const declaredLease = definition.concurrency?.editLease;
@@ -124,7 +127,7 @@ export function materializeCollectionOperations(
         if (branches.length) values.allOf = [...(Array.isArray(values.allOf) ? values.allOf : []), ...branches];
         properties.values = { ...values, ...title("Values", "Waarden") }; required.push("values");
       } else if (action === "update") {
-        const childUpdate = requireEntityOperation(child.entityOperations.update, "child update");
+        const childUpdate = requireEntityOperation(child.entityOperations.update, "child update", relation.ownership === "reference");
         const input = entityOperationJsonSchemas(child, childUpdate, contracts, referentiedata).inputSchema;
         const values = structuredClone((input.properties as Record<string, unknown>).values) as Record<string, unknown>;
         if (!values || values.type !== "object" || !values.properties) fail("child update must expose a concrete values object.");
@@ -132,6 +135,11 @@ export function materializeCollectionOperations(
         definitions = input.$defs;
         delete properties.beforeId;
         properties.childId = { ...uuid, ...title("Child ID", "Onderliggend ID") }; required.push("childId");
+        if (relation.ownership === "reference") {
+          if (childUpdate.concurrency?.version?.mode !== "required" || childUpdate.concurrency.version.field !== "updatedAt") fail("Reference child update requires updatedAt version concurrency.");
+          if (childUpdate.concurrency?.editLease) { properties.childLeaseToken = {type:"string",minLength:1,...title("Member edit lease", "Bewerkingslease van het lidmaatschap")}; required.push("childLeaseToken"); }
+          properties.childExpectedVersion = {type: "string", format: "date-time", ...title("Expected member version", "Verwachte lidmaatschapsversie")}; required.push("childExpectedVersion");
+        }
         properties.values = { ...values, ...title("Values", "Waarden") }; required.push("values");
       } else {
         if (action === "remove") delete properties.beforeId;

@@ -577,7 +577,8 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       await sql`drop policy if exists probe_fixture_owner on erp.protected_fields_fixtures`.execute(privileged.db);
       catalog.entities.splice(catalog.entities.indexOf(entity as never), 1);
       catalogTestTools.splice(catalogTestTools.findIndex(tool => tool.name === name), 1);
-      table.source!.secureInputOnCreate = previousSecureInput;
+      if (previousSecureInput === undefined) delete table.source!.secureInputOnCreate;
+      else table.source!.secureInputOnCreate = previousSecureInput;
       if (previousKeyring === undefined) delete process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS; else process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = previousKeyring;
     }
   }, 30_000);

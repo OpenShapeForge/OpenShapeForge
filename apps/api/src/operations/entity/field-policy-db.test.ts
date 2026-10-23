@@ -522,6 +522,111 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       data: { label: null, visible: "old", restricted: null, fixed: "initial", otherVisible: "retained" } });
     expect(contactsOf(merged!)).toEqual(contactsOf(initial).map(contact => ({ ...contact, private: null })));
   });
+  test("connection probes refresh expired OAuth once, persist rotation, and never refresh for denied callers", async () => {
+    const { catalog, catalogTestTools } = await import("../../mcp/catalog.js");
+    const { platformToolCall } = await import("../../mcp/dispatch-platform-tools.js");
+    const { connectionTokenSecretScope, encryptSecret } = await import("../../connectors/secrets.js");
+    const previous = process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;
+    const keyringText = `refresh-fixture:${Buffer.alloc(32, 42).toString("base64")}`;
+    process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = keyringText;
+    const keyring = keyringFromEnv(keyringText)!;
+    const actor = { ...writer, relationId: randomUUID() };
+    const provider = await record(), connection = await record(), shared = await record();
+    const name = `refresh_fixture_${randomUUID()}`;
+    const entity = { entity: "ProtectedFieldsFixture", table: table.name,
+      elicitOnCreate: { sourceField: "definitionId", sourceEntity: "ProtectedFieldsFixture", sourceTable: table.name, definitionsField: "definitions", into: "data" } };
+    const previousSecureInput = table.source!.secureInputOnCreate;
+    table.source!.secureInputOnCreate = entity.elicitOnCreate;
+    catalog.entities.push(entity as never);catalogTestTools.push({ name, table: table.name, entity: entity.entity } as never);
+    const tokenScope = connectionTokenSecretScope(table.name);
+    const tokenValues = (access: string, refresh: string) => ({
+      accessToken: encryptSecret(keyring, tokenScope, "accessToken", access),
+      refreshToken: encryptSecret(keyring, tokenScope, "refreshToken", refresh),
+      accessTokenExpiresAt: new Date(Date.now() - 3600_000).toISOString(),
+    });
+    const sharedValues = { clientId: "fixture-client", clientSecret: encryptSecret(keyring, table.name, "clientSecret", "synthetic-client-secret") };
+    let refreshes = 0, probes = 0, rejectRefresh = false;
+    const invoke = (session: import("../../db/session.js").DbSessionInput = actor, id = connection.id) => platformToolCall({
+      db: runtime.db, session, name, requestId: randomUUID(), tables: new Map([[table.name, table]]),
+      request: { params: { name, arguments: { id } } },
+      egressOwner: { fetch: async (request: import("../../modules/contract.js").ModuleEgressRequest) => {
+        if (String(request.url) === "https://oauth.example.invalid/token") {
+          refreshes++;
+          const body = new URLSearchParams(await new Response(request.init.body).text());
+          expect(body.get("grant_type")).toBe("refresh_token");
+          expect(body.get("refresh_token")).toBe("synthetic-refresh-before");
+          expect(body.get("client_id")).toBe("fixture-client");
+          expect(body.get("client_secret")).toBe("synthetic-client-secret");
+          if (rejectRefresh) return Response.json({ error: "invalid_grant", error_description: "synthetic-refresh-before" }, { status: 400 });
+          await new Promise(resolve => setTimeout(resolve, 30));
+          return Response.json({ access_token: "synthetic-fresh-access", refresh_token: "synthetic-rotated-refresh", expires_in: 3600, token_type: "Bearer" });
+        }
+        probes++;expect(String(request.url)).toBe("https://probe.example.invalid/check");
+        expect(new Headers(request.init.headers).get("authorization")).toBe("Bearer synthetic-fresh-access");
+        return Response.json({ ignored: "synthetic-fresh-access" });
+      } },
+    } as unknown as import("../../mcp/tool-dispatch.js").DirectCallScope);
+    try {
+      await sql`update erp.protected_fields_fixtures set base_url_template = 'https://probe.example.invalid',
+        auth = '{"profile":"oauth2AuthorizationCode","tokenUrl":"https://oauth.example.invalid/token"}'::jsonb,
+        probe = '{"method":"GET","pathTemplate":"/check"}'::jsonb,
+        egress_hosts = '["probe.example.invalid","oauth.example.invalid"]'::jsonb where id = ${provider.id}::uuid`.execute(privileged.db);
+      await sql`update erp.protected_fields_fixtures set definition_id = ${provider.id}, owner_user_id = null,
+        data = ${jsonbLiteral(sharedValues)}
+        where id = ${shared.id}::uuid`.execute(privileged.db);
+      await sql`update erp.protected_fields_fixtures set definition_id = ${provider.id}, owner_user_id = ${actor.relationId},
+        data = ${jsonbLiteral(tokenValues("synthetic-expired-access", "synthetic-refresh-before"))} where id = ${connection.id}::uuid`.execute(privileged.db);
+      for (const session of [{ ...actor, roles: [] }, { ...actor, tenantId: randomUUID() }, { ...actor, relationId: randomUUID() }]) {
+        expect((await invoke(session))?.isError).toBe(true);
+      }
+      expect(refreshes).toBe(0);expect(probes).toBe(0);
+      const results = await Promise.all([invoke(), invoke()]);
+      for (const result of results) {expect(result?.isError, JSON.stringify(result?.structuredContent)).not.toBe(true);expect(result?.structuredContent).toMatchObject({ ok: true });
+        for (const secret of ["synthetic-expired-access", "synthetic-fresh-access", "synthetic-refresh-before", "synthetic-rotated-refresh", "synthetic-client-secret", "ciphertext"]) expect(JSON.stringify(result)).not.toContain(secret);
+      }
+      expect(refreshes).toBe(1);expect(probes).toBe(2);
+      const persisted = (await stored(String(connection.id))).data as Record<string, unknown>;
+      expect(decryptSecret(keyring, tokenScope, "accessToken", persisted.accessToken as never)).toBe("synthetic-fresh-access");
+      expect(decryptSecret(keyring, tokenScope, "refreshToken", persisted.refreshToken as never)).toBe("synthetic-rotated-refresh");
+      expect((await events(String(connection.id))).filter(event => event.event_type === "connection.token_refreshed")).toHaveLength(1);
+      expect((await invoke())?.isError).not.toBe(true);expect(refreshes).toBe(1);expect(probes).toBe(3);
+      // A provider may omit expires_in: refresh when possible, otherwise ask the provider.
+      const unknownExpiry = tokenValues("synthetic-expired-access", "synthetic-refresh-before") as Record<string, unknown>;
+      delete unknownExpiry.accessTokenExpiresAt;
+      await sql`update erp.protected_fields_fixtures set data = ${jsonbLiteral(unknownExpiry)} where id = ${connection.id}::uuid`.execute(privileged.db);
+      expect((await invoke())?.isError).not.toBe(true);expect(refreshes).toBe(2);expect(probes).toBe(4);
+      await sql`update erp.protected_fields_fixtures set data = ${jsonbLiteral({ accessToken: encryptSecret(keyring, tokenScope, "accessToken", "synthetic-fresh-access") })} where id = ${connection.id}::uuid`.execute(privileged.db);
+      expect((await invoke())?.isError).not.toBe(true);expect(refreshes).toBe(2);expect(probes).toBe(5);
+      // An organization-owned OAuth row uses the same lifecycle without borrowing personal tokens.
+      await sql`update erp.protected_fields_fixtures set data = ${jsonbLiteral({ ...sharedValues, ...tokenValues("synthetic-expired-access", "synthetic-refresh-before") })} where id = ${shared.id}::uuid`.execute(privileged.db);
+      expect((await invoke(actor, shared.id))?.isError).not.toBe(true);expect(refreshes).toBe(3);expect(probes).toBe(6);
+      // Revoked consent must stop before probing and preserve encrypted token state.
+      await sql`update erp.protected_fields_fixtures set data = ${jsonbLiteral(tokenValues("synthetic-expired-access", "synthetic-refresh-before"))} where id = ${connection.id}::uuid`.execute(privileged.db);
+      rejectRefresh = true;
+      const refused = await invoke();expect(refused?.isError).toBe(true);
+      expect(refused?.structuredContent).toMatchObject({ error: { code: "REAUTHORIZATION_REQUIRED" } });
+      expect(JSON.stringify(refused)).not.toContain("synthetic-refresh-before");expect(probes).toBe(6);
+      expect((await events(String(connection.id))).some(event => event.event_type === "connection.reauthorization_required")).toBe(true);
+      // A disallowed token endpoint never reaches the network or falls through to a probe.
+      const beforeDenied = refreshes;
+      await sql`update erp.protected_fields_fixtures set egress_hosts = '["probe.example.invalid"]'::jsonb where id = ${provider.id}::uuid`.execute(privileged.db);
+      const blocked = await invoke();expect(blocked?.isError).toBe(true);expect(refreshes).toBe(beforeDenied);expect(probes).toBe(6);
+      expect(JSON.stringify(blocked)).not.toContain("synthetic-client-secret");
+      // Missing configuration is actionable, and never reaches either endpoint.
+      await sql`update erp.protected_fields_fixtures set auth = '{"profile":"oauth2AuthorizationCode"}'::jsonb where id = ${provider.id}::uuid`.execute(privileged.db);
+      expect((await invoke())?.structuredContent).toMatchObject({ error: { code: "PROVIDER_MISCONFIGURED" } });
+      await sql`update erp.protected_fields_fixtures set auth = '{"profile":"oauth2AuthorizationCode","tokenUrl":"https://oauth.example.invalid/token"}'::jsonb where id = ${provider.id}::uuid`.execute(privileged.db);
+      await sql`update erp.protected_fields_fixtures set definition_id = null where id = ${shared.id}::uuid`.execute(privileged.db);
+      expect((await invoke())?.structuredContent).toMatchObject({ error: { code: "CONNECTION_MISSING" } });
+      expect(refreshes).toBe(beforeDenied);expect(probes).toBe(6);
+    } finally {
+      catalog.entities.splice(catalog.entities.indexOf(entity as never), 1);
+      catalogTestTools.splice(catalogTestTools.findIndex(tool => tool.name === name), 1);
+      if (previousSecureInput === undefined) delete table.source!.secureInputOnCreate;else table.source!.secureInputOnCreate = previousSecureInput;
+      if (previous === undefined) delete process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;else process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = previous;
+    }
+  }, 30_000);
+
   test("connection verification uses encrypted storage while public reads stay masked and denied callers never probe", async () => {
     const { catalog, catalogTestTools } = await import("../../mcp/catalog.js");
     const { platformToolCall } = await import("../../mcp/dispatch-platform-tools.js");

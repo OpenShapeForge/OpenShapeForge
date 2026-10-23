@@ -84,10 +84,17 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
     await admin.unsafe(`create database "${database}"`);
     url.pathname = `/${database}`;
     privileged = createDatabaseRuntime({ databaseUrl: url.toString() });
-    await privileged.db.connection().execute((connection) => runMigrationChain(connection));
+    // The fixture extends the caller catalog, not the compiled base schema SQL.
+    // Install the base first, then the fixture table and the complete audit policy.
+    const fixtures = runtimeManifest.tables as unknown as GeneratedCrudTable[];
+    fixtures.splice(fixtures.indexOf(table), 1);
+    try { await privileged.db.connection().execute((connection) => runMigrationChain(connection)); }
+    finally { fixtures.push(table); }
     url.username = "openshapeforge_app"; url.password = "openshapeforge_app";
     runtime = createDatabaseRuntime({ databaseUrl: url.toString() });
     await sql.raw(artifacts.find((artifact: { path: string }) => artifact.path.endsWith("schema.sql"))!.contents).execute(privileged.db);
+    const { applyAuditHistory } = await import("../../db/migrations/audit-history.js");
+    await applyAuditHistory(privileged.db);
     await sql`grant select, insert, update, delete on erp.protected_fields_fixtures to openshapeforge_app`.execute(privileged.db);
     // Exercise database-authored values, which do not enter the submitted map.
     await sql`alter table erp.protected_fields_fixtures alter column data set default
@@ -265,7 +272,7 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
     expect((await sql<{ count: number }>`select count(*)::int as count from erp.protected_fields_fixtures`.execute(privileged.db)).rows[0]!.count).toBe(beforeCount);
   });
 
-  test("SQL JSON defaults receive row identities before the create result and its single event", async () => {
+  test("SQL JSON defaults receive row identities before the create result and journal both stored row changes", async () => {
     const created = await createGeneratedEntity(runtime.db, editor, { table: table.name, values: { label: "Default record" } });
     const defaults = contactsOf(created);
     expect(defaults).toHaveLength(1);
@@ -273,7 +280,7 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
     expect(defaults[0]?.[FIELD_ITEM_ID]).toMatch(/^[0-9a-f-]{36}$/);
     expect(contactsOf(await stored(String(created.id)))).toEqual([{ ...defaults[0]!, private: "default contact secret" }]);
     const createdEvents = await events(String(created.id));
-    expect(createdEvents.map(event => event.event_type)).toEqual(["created"]);
+    expect(createdEvents.map(event => event.event_type)).toEqual(["created", "updated"]);
     const updated = await updateGeneratedEntity(runtime.db, editor, { table: table.name, id: String(created.id),
       values: { data: { contacts: [identify(defaults[0]!, { name: "Default renamed" })] } } });
     expect(contactsOf(updated!)[0]?.[FIELD_ITEM_ID]).toBe(defaults[0]?.[FIELD_ITEM_ID]);

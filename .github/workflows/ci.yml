@@ -118,6 +118,7 @@ jobs:
           scripts/keycloak-realm-reconcile.test.ts
           scripts/check-ts-nocheck-baseline.test.ts
           scripts/api-test-suites.test.ts
+          scripts/published-tar.test.ts
 
       - name: Observability unit tests
         run: bun run test:observability

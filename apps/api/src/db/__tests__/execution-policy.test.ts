@@ -989,6 +989,7 @@ describe("host execution policies against PostgreSQL", () => {
       returning id, to_json(updated_at)#>>'{}' as version
     `.execute(privileged!.db);
     const { id: variantId, version: variantVersion } = variants.rows[0]!;
+    const baselineJournal = await sql<{ count: string }>`select count(*)::text as count from platform.entity_events where tenant_id = ${tenantA}::uuid`.execute(privileged!.db);
     policyCalls.length = 0;
 
     // Hold the REFERENCED template version, which only the child's own
@@ -1029,7 +1030,7 @@ describe("host execution policies against PostgreSQL", () => {
       select count(*)::text as count from platform.entity_events
       where tenant_id = ${tenantA}::uuid
     `.execute(privileged!.db);
-    expect(journal.rows[0]!.count).toBe("0");
+    expect(journal.rows[0]!.count).toBe(baselineJournal.rows[0]!.count);
   }, 60_000);
 
   /**

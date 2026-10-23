@@ -528,6 +528,7 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
     const actor = { ...writer, relationId: randomUUID() };
     const provider = await record();
     const connection = await record();
+    const sharedConnection = await record();
     const name = `verify_fixture_${randomUUID()}`;
     const entity = { entity: "ProtectedFieldsFixture", table: table.name,
       elicitOnCreate: { sourceField: "definitionId", sourceEntity: "ProtectedFieldsFixture", sourceTable: table.name, definitionsField: "definitions", into: "data" } };
@@ -565,6 +566,7 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       for (const session of [{ ...actor, roles: [] }, { ...actor, tenantId: randomUUID() }, { ...actor, relationId: randomUUID() }, writer, { ...actor, userId: actor.relationId, relationId: null }]) {
         const denied = await invoke(session);
         expect(denied?.isError).toBe(true);
+        expect(denied?.structuredContent).toMatchObject({ error: { code: "NOT_FOUND" } });
         expect(JSON.stringify(denied)).not.toContain(token);
         expect(requests).toBe(1);
       }
@@ -585,6 +587,16 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       expect((await invoke({ ...actor, relationId: randomUUID() }))?.isError).toBe(true);
       expect(requests).toBe(3);
       expect((await getGeneratedEntity(runtime.db, actor, { table: table.name, id: String(connection.id) }))!.data).toEqual(publicRead!.data);
+      await sql`update erp.protected_fields_fixtures set auth = '{"profile":"apiKey","scheme":"bearer","tokenFrom":"token"}'::jsonb
+        where id = ${provider.id}::uuid`.execute(privileged.db);
+      await sql`update erp.protected_fields_fixtures set definition_id = ${provider.id},
+        data = ${jsonbLiteral({ token: encryptSecret(keyring, table.name, "token", token) })}
+        where id = ${sharedConnection.id}::uuid`.execute(privileged.db);
+      const shared = await invoke(writer, sharedConnection.id);
+      expect(shared?.isError).not.toBe(true);
+      expect(shared?.structuredContent).toMatchObject({ ok: true });
+      expect(JSON.stringify(shared)).not.toContain(token);
+      expect(requests).toBe(4);
     } finally {
       await sql`drop policy if exists probe_fixture_owner on erp.protected_fields_fixtures`.execute(privileged.db);
       catalog.entities.splice(catalog.entities.indexOf(entity as never), 1);

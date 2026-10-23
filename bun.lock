@@ -181,13 +181,13 @@
     },
     "packages/compiler": {
       "name": "@openshapeforge/compiler",
-      "version": "0.2.24",
+      "version": "0.2.25",
       "bin": {
         "openshapeforge-compiler": "./src/index.ts",
       },
       "dependencies": {
-        "@openshapeforge/interface-web": "0.2.11",
-        "@openshapeforge/operations": "0.2.10",
+        "@openshapeforge/interface-web": "workspace:*",
+        "@openshapeforge/operations": "workspace:*",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
         "ejs": "^5.0.1",
@@ -203,10 +203,10 @@
     },
     "packages/documents": {
       "name": "@openshapeforge/documents",
-      "version": "0.2.13",
+      "version": "0.2.14",
       "dependencies": {
-        "@openshapeforge/operations": "0.2.10",
-        "@openshapeforge/versioning": "0.1.9",
+        "@openshapeforge/operations": "workspace:*",
+        "@openshapeforge/versioning": "workspace:*",
         "yaml": "^2.8.3",
       },
       "devDependencies": {
@@ -220,9 +220,9 @@
     },
     "packages/interface-web": {
       "name": "@openshapeforge/interface-web",
-      "version": "0.2.11",
+      "version": "0.2.12",
       "dependencies": {
-        "@openshapeforge/operations": "0.2.10",
+        "@openshapeforge/operations": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "^1.3.5",
@@ -266,9 +266,9 @@
     },
     "packages/plugin-runtime": {
       "name": "@openshapeforge/plugin-runtime",
-      "version": "0.1.15",
+      "version": "0.1.16",
       "dependencies": {
-        "@openshapeforge/operations": "0.2.10",
+        "@openshapeforge/operations": "workspace:*",
         "fastify": "^5.8.2",
         "kysely": "^0.29.4",
       },
@@ -302,9 +302,9 @@
     },
     "packages/versioning": {
       "name": "@openshapeforge/versioning",
-      "version": "0.1.9",
+      "version": "0.1.10",
       "dependencies": {
-        "@openshapeforge/operations": "0.2.10",
+        "@openshapeforge/operations": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "^1.3.5",
@@ -1451,16 +1451,6 @@
     "@envelop/prometheus/@envelop/core": ["@envelop/core@5.6.0", "", { "dependencies": { "@envelop/instrumentation": "^1.0.0", "@envelop/types": "^5.2.1", "@whatwg-node/promise-helpers": "^1.2.4", "tslib": "^2.5.0" } }, "sha512-cD7HNfAzJVw/0Pxneu51UAKzUGLvkctk9rr9DVJ9b7FDe4nSa9kAGMRxx145H6ooELIUMjTd2buk3PuvjJmp/A=="],
 
     "@graphql-tools/executor/@graphql-tools/utils": ["@graphql-tools/utils@12.0.0", "", { "dependencies": { "@graphql-typed-document-node/core": "^3.1.1", "@whatwg-node/promise-helpers": "^1.0.0", "cross-inspect": "1.0.1", "tslib": "^2.4.0" }, "peerDependencies": { "graphql": "^14.0.0 || ^15.0.0 || ^16.0.0 || ^17.0.0" } }, "sha512-aMdIo/l+8j4lhamWAf+MWHr+lOW8zArSBKXspqtKHgt5I2JF9LS55KDLUe/L9AiJOV/O6qJJ60hgYydbnJHbxg=="],
-
-    "@openshapeforge/compiler/@openshapeforge/operations": ["@openshapeforge/operations@0.2.10", "https://npm.pkg.github.com/download/@openshapeforge/operations/0.2.10/0b198f1cab67478dfb2a2d0883a09c72b844a057", {}, "sha512-PHnMVzpnJkimaTnx6Z+WeC+aQqiiQnEvHzGqJIgAPli61sqjlq9QxF3VoKhfPVKhBesboBJLf1p+PUKuXz8Gaw=="],
-
-    "@openshapeforge/documents/@openshapeforge/operations": ["@openshapeforge/operations@0.2.10", "https://npm.pkg.github.com/download/@openshapeforge/operations/0.2.10/0b198f1cab67478dfb2a2d0883a09c72b844a057", {}, "sha512-PHnMVzpnJkimaTnx6Z+WeC+aQqiiQnEvHzGqJIgAPli61sqjlq9QxF3VoKhfPVKhBesboBJLf1p+PUKuXz8Gaw=="],
-
-    "@openshapeforge/interface-web/@openshapeforge/operations": ["@openshapeforge/operations@0.2.10", "https://npm.pkg.github.com/download/@openshapeforge/operations/0.2.10/0b198f1cab67478dfb2a2d0883a09c72b844a057", {}, "sha512-PHnMVzpnJkimaTnx6Z+WeC+aQqiiQnEvHzGqJIgAPli61sqjlq9QxF3VoKhfPVKhBesboBJLf1p+PUKuXz8Gaw=="],
-
-    "@openshapeforge/plugin-runtime/@openshapeforge/operations": ["@openshapeforge/operations@0.2.10", "https://npm.pkg.github.com/download/@openshapeforge/operations/0.2.10/0b198f1cab67478dfb2a2d0883a09c72b844a057", {}, "sha512-PHnMVzpnJkimaTnx6Z+WeC+aQqiiQnEvHzGqJIgAPli61sqjlq9QxF3VoKhfPVKhBesboBJLf1p+PUKuXz8Gaw=="],
-
-    "@openshapeforge/versioning/@openshapeforge/operations": ["@openshapeforge/operations@0.2.10", "https://npm.pkg.github.com/download/@openshapeforge/operations/0.2.10/0b198f1cab67478dfb2a2d0883a09c72b844a057", {}, "sha512-PHnMVzpnJkimaTnx6Z+WeC+aQqiiQnEvHzGqJIgAPli61sqjlq9QxF3VoKhfPVKhBesboBJLf1p+PUKuXz8Gaw=="],
 
     "@opentelemetry/instrumentation/@opentelemetry/api-logs": ["@opentelemetry/api-logs@0.213.0", "", { "dependencies": { "@opentelemetry/api": "^1.3.0" } }, "sha512-zRM5/Qj6G84Ej3F1yt33xBVY/3tnMxtL1fiDIxYbDWYaZ/eudVw3/PBiZ8G7JwUxXxjW8gU4g6LnOyfGKYHYgw=="],
 

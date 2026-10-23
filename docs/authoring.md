@@ -423,8 +423,15 @@ What the loader does with it (`authoring/entity-subtype.ts`):
   base is inherited; a later layer may also `entityPatch` the subtype file by
   its own slug. A subtype of a subtype is refused.
 - **Everything is inherited unless restated:** fields, relationships and their
-  derived collections, Operations with their concurrency, confirmation and
-  stamps, authorization, the web layout, the MCP instructions. The subtype may
+  derived collections, the canonical entity Operations and the native
+  collection Operations (`implementation.type: collection`, for example a
+  host plugin's `insertMembership`/`updateMembership` patched onto the base)
+  with their concurrency, confirmation and stamps, authorization, retention,
+  the web layout, the MCP instructions. A plugin-handled Operation on the
+  base is refused: nothing would hold it to the subtype's scope. The
+  composition runs over the base as it effectively is (meta fields merged,
+  fields normalized), so a derived inverse collection such as `memberships`
+  is a base field a subtype may hide like any other. The subtype may
   restate `title`, `description`, `labels`, `pluralLabels`, `displayTemplate`,
   `filterField`, `domains`, per-field `label`/`description`/`help`, per-Operation
   `name`/`description`/`guidance`, and its `interfaces` (a strategic-merge
@@ -432,15 +439,20 @@ What the loader does with it (`authoring/entity-subtype.ts`):
   the base's columns). Interfaces merge like `entityPatch`: keyed arrays by
   `key`/`id`/`title`, `$delete: true` removes an inherited item.
 - **It may narrow, never widen.** `authorization.roles`, field `permissions`
-  and `authorization`, `rowAccess`, Operation projections: the same
-  monotonic rules a layered `entityPatch` is held to. `required` accepts only
+  and `authorization`, Operation projections: the same monotonic rules a
+  layered `entityPatch` is held to. `authorization.rowAccess` is refused on a
+  subtype altogether: the row policy is the base table's row-level security,
+  which no projection can tighten, so it is inherited exactly. `required` accepts only
   `true`; `validation` keeps every base constraint and may raise a minimum,
   lower a maximum or add a constraint. Anything else on a field or an
   Operation — type, storage, relationship, implementation, effects — is
   refused by the schema (`entity-subtype.schema.json`) or the composer.
 - **`scope` is server-owned.** The discriminator must be a persisted, single
-  string/number/boolean field of the base; the value must fit it (and be one
-  of its static options). The runtime sets it on create and filters every
+  string/number/boolean field of the base; the value must fit it: its base
+  type and static options at load, and at manifest build the field's whole
+  compiled value contract — validation and reference-data options included —
+  so a subtype whose every create would be refused fails compilation instead.
+  The runtime sets it on create and filters every
   list, get, update, delete, lease, confirmation challenge, record-permission
   check and relationship traversal by it; a caller that supplies it, by field
   or column name, is refused on every interface. The field is `readOnly` in
@@ -454,15 +466,22 @@ What the loader does with it (`authoring/entity-subtype.ts`):
   subtype's own configuration still names, or that an inherited
   `displayTemplate`, record `title`, `filterField`, confirmation challenge or
   row-access policy depends on, fails compilation and asks for a restatement.
+  Hiding an inverse collection also removes the native collection Operations
+  on that field from the subtype (the base keeps them), so no endpoint of the
+  subtype reveals or changes what it hides; the runtime refuses a relationship
+  traversal the projection does not declare.
 - **One table, one identity.** The backend manifest emits no table, index,
-  constraint, policy or retention for a subtype; it binds a virtual table
+  constraint or policy for a subtype; it binds a virtual table
   (`manifest.entitySubtypes`, registry name `<schema>.<table>@<Entity>`) to
-  the base's. Leases, confirmation challenges and lease availability use the
-  base entity id, so a record has one lease whichever projection took it;
-  audit events are the base aggregate's; row-level security is the base's.
-  The base's Operations still see and may retype the same rows: a `Team`
-  whose `groupType` is changed through `RelationGroup.update` simply leaves
-  the subtype.
+  the base's, carrying the base's compiled retention so the delete guards
+  (minimum period, legal hold) apply through the subtype exactly as through
+  the base, hidden clock fields included. Leases, confirmation challenges and
+  lease availability use the base entity id, so a record has one lease
+  whichever projection took it — a native collection Operation on a subtype
+  parent consumes that same lease; audit events are the base aggregate's;
+  row-level security is the base's. The base's Operations still see and may
+  retype the same rows: a `Team` whose `groupType` is changed through
+  `RelationGroup.update` simply leaves the subtype.
 - **Identities must be distinct.** Entity name, GraphQL names, REST base
   path, MCP tool prefix and resource URI, and web collection/record routes
   (per locale) are audited across every entity, subtypes included.
@@ -471,10 +490,10 @@ What the loader does with it (`authoring/entity-subtype.ts`):
 
 Not supported in this iteration, refused at load: subtype chains; bases that
 are Operation-backed (`source`), value definitions, versioned, worker-accessed,
-carry field `transitions`, plugin- or collection-implemented Operations, or
-partial profiles. A subtype is not a relationship target (`osfType: Team` is
-unknown; reference the base), inherits no `blueprint`, `indexes`, `audit`,
-`retention` or `hooks` of its own, and has no realtime change stream of its own.
+carry field `transitions`, plugin-implemented Operations, or partial profiles.
+A subtype is not a relationship target (`osfType: Team` is unknown; reference
+the base), inherits no `blueprint`, `indexes` or `audit` composition of its
+own, and has no realtime change stream of its own.
 The generic manifest-derived e2e lifecycle skips subtypes; the runtime proof
 lives in `apps/api/src/operations/entity/entity-subtype-db.test.ts`.
 

@@ -64,7 +64,13 @@
         }
       }
     },
-    "authorization": { "$ref": "core-entity.schema.json#/properties/authorization" },
+    "authorization": {
+      "description": "Role lists may only narrow the base's. The row policy (rowAccess) is the base table's row-level security and is inherited exactly.",
+      "allOf": [
+        { "$ref": "core-entity.schema.json#/properties/authorization" },
+        { "properties": { "rowAccess": false } }
+      ]
+    },
     "operations": {
       "type": "object",
       "description": "Text of inherited Operations, restated for the subtype. Keys must exist on the base; behaviour, effects and controls are inherited.",

@@ -1,6 +1,8 @@
 import { validateDefaultTemplates } from "./compiler/default-template.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { join, relative } from "node:path";
+import Ajv2020 from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
 import { compile } from "./compiler/index.js";
 import type { CompiledEntityContract } from "./types/compiled.js";
 import {
@@ -856,6 +858,7 @@ function columnFieldPolicy(field: CompiledField, referentiedata: CoreReferentied
  */
 function buildSubtypeTable(
   candidate: CompiledCandidate,
+  base: CompiledCandidate,
   tables: readonly TableDefinition[],
   referentiedata: CoreReferentiedataSnapshot,
   eligibility: { generatedCrudAllowlist: ReadonlySet<string>; domainInternalEntities: ReadonlySet<string> },
@@ -868,9 +871,25 @@ function buildSubtypeTable(
   }
   const hiddenColumns = new Set(subtype.hiddenColumns.map((column) => column.column));
   const fieldByKey = new Map(contract.model.fields.map((field) => [field.key, field]));
+  // The fixed value must be one the base would accept from a caller: its
+  // whole effective value contract, reference data included. A subtype
+  // whose every create the database or validation would refuse is a build
+  // failure, not a tool that never works.
+  const scopeValidator = new Ajv2020.default({ allErrors: true, strict: false });
+  (addFormats as unknown as (instance: typeof scopeValidator) => unknown)(scopeValidator);
   for (const scope of subtype.scope) {
     if (!baseTable.columns.some((column) => column.name === scope.column)) {
       throw new Error(`${describeCandidateOrigin(candidate)}: scope column ${scope.column} is not a column of ${baseTable.schema}.${baseTable.name}.`);
+    }
+    const field = base.contract.model.fields.find((candidateField) => candidateField.key === scope.field);
+    if (!field) throw new Error(`${describeCandidateOrigin(candidate)}: scope field ${scope.field} is not a field of ${subtype.base.name}.`);
+    const validate = scopeValidator.compile(compiledFieldSchema(field, referentiedata, { includeDefault: false }));
+    if (!validate(scope.value)) {
+      const reasons = (validate.errors ?? []).map((error) => error.message ?? "is invalid").join("; ");
+      throw new Error(
+        `${describeCandidateOrigin(candidate)}: scope.${scope.field} value ${JSON.stringify(scope.value)} does not satisfy ` +
+          `${subtype.base.name}.${scope.field}'s value contract (${reasons}); every create of this subtype would be refused.`,
+      );
     }
   }
   const columns = baseTable.columns
@@ -911,6 +930,10 @@ function buildSubtypeTable(
     domainInternal,
     generatedCrudEligible,
     columns,
+    // The base's retention clocks, minimum periods and legal hold guard the
+    // shared rows: the delete path reads them from the table it serves, so
+    // they travel with the projection even when it hides the clock fields.
+    ...(baseTable.retention ? { retention: structuredClone(baseTable.retention) } : {}),
     source: {
       path: candidate.path,
       authoringEntityName: contract.entity.name,
@@ -1804,7 +1827,11 @@ export function compileAuthoringBackendManifest(
   // Bound last, so the virtual tables copy the base tables' final columns,
   // relation storage and enriched relationship metadata.
   const entitySubtypes = subtypeCandidates
-    .map((candidate) => buildSubtypeTable(candidate, tables, options.referentiedata ?? {}, { generatedCrudAllowlist, domainInternalEntities }))
+    .map((candidate) => {
+      const base = physicalCandidates.find((physical) => physical.contract.entity.name === candidate.contract.subtype!.base.name);
+      if (!base) throw new Error(`${describeCandidateOrigin(candidate)}: subtype base ${candidate.contract.subtype!.base.name} is not a stored entity of this manifest.`);
+      return buildSubtypeTable(candidate, base, tables, options.referentiedata ?? {}, { generatedCrudAllowlist, domainInternalEntities });
+    })
     .sort((left, right) => left.source!.authoringEntityName!.localeCompare(right.source!.authoringEntityName!));
 
   return {

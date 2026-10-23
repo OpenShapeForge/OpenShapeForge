@@ -24,6 +24,7 @@ import type { EntityOperationContract, GeneratedCrudTable, GeneratedEntityRow } 
 import type { LeaseProtectedOperation } from "./edit-leases.js";
 import { consumeEntityEditLeaseInTransaction } from "./edit-leases.js";
 import { hasConsumedCollectionLease } from "./collection-lease-context.js";
+import { subtypeScopeWhere } from "./subtype-scope.js";
 import { assertAdmittedBeforeEffects, assertEffectsWereAdmitted } from "../execution-policy.js";
 
 /** Compiler/boot-owned binding, never a request-selected table or FK. */
@@ -134,7 +135,9 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
     const foreignKey = target.columns.find((column) => column.name === relation.foreignKey);
     const position = target.columns.find((column) => column.name === relation.positionColumn);
     const inverse = target.source?.graphql?.relationships?.find((item) => item.fieldKey === relation.inverse);
-    if (!foreignKey || foreignKey.type !== "uuid" || foreignKey.writtenBy?.length || inverse?.resolve !== "belongsTo" || inverse.target !== owner.source?.graphql?.typeName || inverse.foreignKey !== foreignKey.name || (relation.sortable && (!position || position.type !== "integer" || position.immutable || position.writtenBy?.length || !target.columns.some((column) => column.name === "updated_at" && column.type === "timestamptz")))) unsupported("Inverse or position metadata is inconsistent.");
+    // The child points at the stored entity: the base, when the owner is a subtype projection.
+    const storedOwnerType = owner.subtype?.base.entityName ?? owner.source?.graphql?.typeName;
+    if (!foreignKey || foreignKey.type !== "uuid" || foreignKey.writtenBy?.length || inverse?.resolve !== "belongsTo" || inverse.target !== storedOwnerType || inverse.foreignKey !== foreignKey.name || (relation.sortable && (!position || position.type !== "integer" || position.immutable || position.writtenBy?.length || !target.columns.some((column) => column.name === "updated_at" && column.type === "timestamptz")))) unsupported("Inverse or position metadata is inconsistent.");
     if (target.realtime?.readPredicate !== '"tenant_id" = app.current_tenant()' || target.realtime.visibilityColumns.length !== 1 || target.realtime.visibilityColumns[0] !== "tenant_id") unsupported("The collection must have complete tenant-level read visibility.");
     const guardedOwnerLease = guard?.entityName === binding.entityName && guard.intent === "invoke" &&
       hasConsumedCollectionLease(transaction, session, guard, request.id, request.expectedVersion);
@@ -203,7 +206,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       if (!context?.matches) throw generatedCrudError("The transaction must use the same verified session as the collection Operation.", "FORBIDDEN");
       const locked = await sql<{ row: GeneratedEntityRow; matches: boolean }>`select to_jsonb(${sql.id(owner.table)}.*) as row,
         ${sql.id("updated_at")} = ${normalizeTimestampToken(request.expectedVersion)}::timestamptz as matches
-        from ${sql.id(owner.schema, owner.table)} where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid for update`.execute(trx);
+        from ${sql.id(owner.schema, owner.table)} where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid${subtypeScopeWhere(owner)} for update`.execute(trx);
       if (!locked.rows[0]) throw generatedCrudError("Parent not found or not visible.", "NOT_FOUND");
       await permission(trx, session, owner, request.id, parentOp, "edit");
       if (!locked.rows[0].matches) throw generatedCrudError("The parent changed; reload before editing its collection.", "VERSION_CONFLICT");
@@ -344,7 +347,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       // silently ungoverned change.
       assertEffectsWereAdmitted(trx, session, "collection mutation");
       const touched = await sql<{ row: GeneratedEntityRow }>`update ${sql.id(owner.schema, owner.table)} set updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')
-        where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid returning to_jsonb(${sql.id(owner.table)}.*) as row`.execute(trx);
+        where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid${subtypeScopeWhere(owner)} returning to_jsonb(${sql.id(owner.table)}.*) as row`.execute(trx);
       const parentRow = touched.rows[0]?.row;
       if (!parentRow) throw generatedCrudError("Parent update was refused.", "FORBIDDEN");
       // The draft rule from the manifest: the owner is a versioned head, or one owns it.

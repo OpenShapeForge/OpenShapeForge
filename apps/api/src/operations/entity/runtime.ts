@@ -652,13 +652,13 @@ export async function acquireEditLeaseForEntityOperation(
       );
     }
     return acquireEntityEditLease(db, session, {
-      operation: {
+      operation: policyOperation(table, {
         id: custom.key,
         entityId: custom.target.entityId,
         entityName: custom.target.entityName,
-        intent: "invoke",
+        intent: "invoke" as const,
         concurrency: custom.concurrency,
-      },
+      }),
       table,
       targetId: input.targetId,
     });

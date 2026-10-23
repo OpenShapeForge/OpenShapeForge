@@ -39,8 +39,13 @@ const DOCUMENT_KEYS = new Set([
 ]);
 const FIELD_OVERRIDE_KEYS = new Set(["key", "hidden", "label", "description", "help", "required", "validation", "permissions", "authorization"]);
 const OPERATION_OVERRIDE_KEYS = new Set(["name", "description", "guidance"]);
-/** Base properties a subtype never inherits: they describe the physical table or a second Operation set. */
-const BASE_KEYS_NOT_INHERITED = ["blueprint", "audit", "retention", "hooks", "workerAccess", "hardDelete", "versioning", "ui"] as const;
+/**
+ * Base properties a subtype never inherits: a second blueprint Operation set,
+ * the audit timeline composition and the lowered UI are the base's own.
+ * Retention, hooks and hard-delete rules stay: they guard the shared rows and
+ * the runtime reads them from the table the subtype is served from.
+ */
+const BASE_KEYS_NOT_INHERITED = ["blueprint", "audit", "workerAccess", "versioning", "ui"] as const;
 const INTRINSIC_FIELDS = new Set(["id", "tenantId", "createdAt", "updatedAt"]);
 /** Validation constraints a subtype may only tighten, with the direction that tightens them. */
 const NARROWING_RULES: Record<string, "raise" | "lower"> = {
@@ -118,6 +123,12 @@ export function assertEntitySubtypeDocument(document: unknown, origin: string): 
   }
   for (const key of ["authorization", "interfaces", "labels", "pluralLabels"] as const) {
     if (subtype[key] !== undefined && !isPlainObject(subtype[key])) fail(origin, `${key} must be an object.`);
+  }
+  // Row policy is the base table's row-level security; a subtype cannot add
+  // an axis the physical policy would not enforce, so it inherits the policy
+  // exactly and may narrow roles and field rights only.
+  if (isPlainObject(subtype.authorization) && subtype.authorization.rowAccess !== undefined) {
+    fail(origin, "authorization.rowAccess is inherited from the base exactly; a subtype may narrow authorization.roles and field permissions, not the row policy.");
   }
 }
 
@@ -361,9 +372,13 @@ export function composeEntitySubtype(
   for (const field of base.fields) {
     if (field.transitions) fail(origin, `extends ${base.entity}, whose field ${field.key} is a state machine; bases with transitions are not supported for subtypes.`);
   }
+  // Canonical entity Operations and the native collection Operations the
+  // compiler implements are inherited; the runtime scopes both through the
+  // subtype's table. An arbitrary plugin handler is not: nothing holds it to
+  // the subtype's scope.
   for (const [key, operation] of Object.entries(base.operations ?? {})) {
-    if (operation.implementation.type !== "entity") {
-      fail(origin, `extends ${base.entity}, whose Operation ${key} is ${operation.implementation.type}-implemented; a subtype inherits canonical entity Operations only.`);
+    if (operation.implementation.type !== "entity" && operation.implementation.type !== "collection") {
+      fail(origin, `extends ${base.entity}, whose Operation ${key} is ${operation.implementation.type}-implemented; a subtype inherits canonical entity and native collection Operations only.`);
     }
   }
 
@@ -433,6 +448,28 @@ export function composeEntitySubtype(
   assertEntitySecurityOnlyNarrows(base as unknown as JsonObject, merged as unknown as JsonObject, origin);
 
   if (hidden.size > 0) {
+    // A hidden collection takes its native collection Operations with it:
+    // an insert or update endpoint on a field the subtype does not have
+    // would reveal and change what "hidden" promises is absent. The base
+    // keeps those Operations. Done after the narrowing check above, which
+    // rightly refuses a patch that removes an Operation.
+    const operations = { ...(merged.operations as Record<string, Record<string, unknown>> | undefined) };
+    const removed = Object.entries(operations)
+      .filter(([, operation]) => {
+        const implementation = isPlainObject(operation.implementation) ? operation.implementation : undefined;
+        return implementation?.type === "collection" && typeof implementation.field === "string" && hidden.has(implementation.field);
+      })
+      .map(([key]) => key);
+    for (const key of removed) delete operations[key];
+    merged.operations = operations;
+    const interfaces = isPlainObject(merged.interfaces) ? { ...merged.interfaces } : undefined;
+    for (const name of ["rest", "graphql", "mcp", "web"] as const) {
+      const projection = interfaces && isPlainObject(interfaces[name]) ? { ...interfaces[name] } : undefined;
+      if (!projection || !isPlainObject(projection.operations)) continue;
+      projection.operations = Object.fromEntries(Object.entries(projection.operations).filter(([key]) => !removed.includes(key)));
+      interfaces![name] = projection;
+    }
+    if (interfaces) merged.interfaces = interfaces;
     const leaked = findExplicitHiddenReference(
       { interfaces: subtype.interfaces, operations: subtype.operations, displayTemplate: subtype.displayTemplate, filterField: subtype.filterField },
       hidden,

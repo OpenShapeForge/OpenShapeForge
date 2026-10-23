@@ -34,7 +34,9 @@ export function materializeCollectionOperations(
       const child = contracts.find((contract) => contract.entity.name === relation.target);
       if (!child || child.entity.valueDefinition) fail("collection child storage is absent.");
       const inverse = child.model.relationships.find((candidate) => candidate.fieldKey === relation.inverse);
-      if (inverse?.kind !== "belongsTo" || inverse.target !== owner.entity.name || inverse.foreignKey !== relation.foreignKey) fail("collection inverse does not refer to its owner.");
+      // A child points at the stored entity; for a subtype owner that is its base.
+      const storedOwner = owner.subtype?.base.name ?? owner.entity.name;
+      if (inverse?.kind !== "belongsTo" || inverse.target !== storedOwner || inverse.foreignKey !== relation.foreignKey) fail("collection inverse does not refer to its owner.");
       const requireEntityOperation = (operation: CompiledEntityOperation | undefined, name: string, allowOwnerLease = false): CompiledEntityOperation => {
         if (!operation || operation.implementation.type !== "entity" || !operation.authorization.roles.length ||
           operation.effects.external !== "none" || operation.interaction.confirmation.mode !== "none" || operation.interaction.secureInput ||

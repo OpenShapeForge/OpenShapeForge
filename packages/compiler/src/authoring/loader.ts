@@ -297,15 +297,26 @@ export function loadEntity(
   const corePath = resolveEntityFilePath(authoringDir, entityFileName);
   const rawDocument = loadYaml<CoreEntity | EntitySubtypeDocument>(corePath);
   const baseEntity = loadBaseEntity(authoringDir);
+  // Semantic types (core + context catalogs merged). Normalization resolves
+  // every field's base type and derives the inverse collections, which the
+  // v2 authoring checks below read.
+  const osfTypes = loadOsfTypes(authoringDir);
   let coreEntity: CoreEntity;
   if (isEntitySubtypeDocument(rawDocument)) {
     // The document's shape is held to its schema at load: a subtype can
     // arrive from a packaged layer the corpus gate never sees.
     authoringValidator().validate(rawDocument, corePath);
     const base = resolveSubtypeBase(authoringDir, rawDocument, corePath);
+    // The subtype composes over the base as it effectively is: meta fields
+    // merged and fields normalized, so the derived inverse collections are
+    // base fields a subtype may hide like any other.
+    const effectiveBase = normalizeEntityFields(
+      applyBaseEntityToCore(base.document, baseEntity, { kind: "core", path: base.path }),
+      osfTypes,
+    );
     coreEntity = composeEntitySubtype(
       rawDocument,
-      applyBaseEntityToCore(base.document, baseEntity, { kind: "core", path: base.path }),
+      effectiveBase,
       { origin: corePath, baseOrigin: base.path, baseSlug: base.slug },
     );
     // The subtype's interfaces are a merge fragment; the merged result is
@@ -326,10 +337,6 @@ export function loadEntity(
   }
   validateEntityContentIdentifiers(coreEntity, corePath);
 
-  // Semantic types (core + context catalogs merged). Normalization resolves
-  // every field's base type and derives the inverse collections, which the
-  // v2 authoring checks below read.
-  const osfTypes = loadOsfTypes(authoringDir);
   coreEntity = normalizeEntityFields(coreEntity, osfTypes);
   assertEntityAuthoring(coreEntity, corePath);
   assertEntitySubtypeModel(coreEntity, osfTypes, corePath);

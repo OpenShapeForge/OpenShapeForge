@@ -43,24 +43,40 @@ function group(): Doc {
       roles: { read: ["Groups.Read", "Groups.Manage"], create: ["Groups.Manage"], update: ["Groups.Manage"], delete: ["Groups.Manage"] },
       rowAccess: { enabled: true, empty: "public" },
     },
+    retention: { mode: "inline", duration: "P1Y", startsFrom: { strategy: "createdAt" }, disposition: { action: "archive" } },
     fields: [
-      { key: "name", osfType: "string", required: true, label: { en: "Name" }, validation: { minLength: 1, maxLength: 100 },
+      { key: "name", osfType: "string", required: true, label: { en: "Name", nl: "Naam" }, validation: { minLength: 1, maxLength: 100 },
         persisted: { column: "name", storageClass: "core" } },
-      { key: "groupType", osfType: "string", required: true, label: { en: "Group type" },
+      { key: "groupType", osfType: "string", required: true, label: { en: "Group type", nl: "Groepstype" },
         options: { type: "static", items: [{ value: "team", label: { en: "Team" } }, { value: "project", label: { en: "Project" } }, { value: "other", label: { en: "Other" } }] },
         persisted: { column: "group_type", storageClass: "core" } },
-      { key: "status", osfType: "string", required: true, defaultValue: "active", label: { en: "Status" },
+      { key: "status", osfType: "string", required: true, defaultValue: "active", label: { en: "Status", nl: "Status" },
         permissions: { write: ["Groups.Manage"] },
         persisted: { column: "status", storageClass: "core" } },
-      { key: "secretNote", osfType: "string", label: { en: "Secret note" }, validation: { maxLength: 500 },
+      { key: "secretNote", osfType: "string", label: { en: "Secret note", nl: "Geheime notitie" }, validation: { maxLength: 500 },
         persisted: { column: "secret_note", storageClass: "core" } },
-      { key: "leadId", osfType: "Person", label: { en: "Lead" }, persisted: { column: "lead_id", storageClass: "core" },
+      { key: "leadId", osfType: "Person", label: { en: "Lead", nl: "Leider" }, persisted: { column: "lead_id", storageClass: "core" },
         relationship: { ownership: "reference", inverse: { key: "ledGroups" } } },
     ],
     operations: {
       list: operation("list"), get: operation("get"), create: operation("create"),
       update: operation("update", { concurrency: { version: { mode: "required", field: "updatedAt" }, editLease: { mode: "required", expiresAfterInactivity: "PT15M" } } }),
       delete: operation("delete"),
+      // The native collection Operations a host plugin patches onto the base
+      // (insert/update a member through the group), as the employee plugin
+      // does for memberships: authored before any subtype derives from it.
+      insertMember: {
+        name: { en: "Add member" }, description: { en: "Adds a person to the group." },
+        implementation: { type: "collection", field: "members", action: "insert" },
+        effects: { data: "write", external: "none" }, reliability: { idempotency: { mode: "none" } }, confirmation: { mode: "none" },
+        concurrency: { version: { mode: "required", field: "updatedAt" } },
+      },
+      updateMember: {
+        name: { en: "Change member" }, description: { en: "Changes a member of the group." },
+        implementation: { type: "collection", field: "members", action: "update" },
+        effects: { data: "write", external: "none" }, reliability: { idempotency: { mode: "none" } }, confirmation: { mode: "none" },
+        concurrency: { version: { mode: "required", field: "updatedAt" } },
+      },
     },
     interfaces: {
       rest: {}, graphql: {}, mcp: { resource: { uri: "app://groups", name: "Groups" } },
@@ -101,7 +117,8 @@ function person(): Doc {
       { key: "name", osfType: "string", required: true, persisted: { column: "name", storageClass: "core" } },
       { key: "groupId", osfType: "Group", persisted: { column: "group_id", storageClass: "core" }, relationship: { ownership: "reference", inverse: { key: "members" } } },
     ],
-    operations: { list: operation("list"), get: operation("get"), create: operation("create"), update: operation("update"), delete: operation("delete") },
+    operations: { list: operation("list"), get: operation("get"), create: operation("create"),
+      update: operation("update", { concurrency: { version: { mode: "required", field: "updatedAt" } } }), delete: operation("delete") },
     interfaces: { rest: {}, graphql: {}, mcp: {}, web: { views: {
       collection: { route: "/persons", columns: [{ key: "name" }] },
       record: { routes: { read: "/persons/:id" }, title: "{{name}}", layout: { tabs: [{ id: "main", label: { en: "Main" }, groups: [{ title: { en: "Main" }, fields: ["name"] }] }] } },
@@ -117,7 +134,7 @@ function team(): Doc {
     fields: [
       { key: "groupType", hidden: true },
       { key: "secretNote", hidden: true },
-      { key: "name", label: { en: "Team name" }, validation: { maxLength: 60 } },
+      { key: "name", label: { en: "Team name", nl: "Teamnaam" }, validation: { maxLength: 60 } },
     ],
     authorization: { roles: { read: ["Groups.Manage"] } },
     operations: { list: { description: { en: "Lists teams only." }, guidance: { assistant: { en: "Find a team before changing it." } } } },
@@ -213,8 +230,45 @@ describe("composing a subtype over its base", () => {
     expect(teamContract.entityOperations.update?.concurrency?.editLease?.mode).toBe("required");
     expect(teamContract.entityOperations.list?.id).toBe("Team.list");
     expect(teamContract.entityOperations.list?.entityId).toBe("core.Team");
-    expect(teamContract.pluginOperations).toEqual([]);
     expect(teamContract.blueprint).toBeUndefined();
+  });
+
+  test("inherits the base's native collection Operations under its own identity", () => {
+    expect(teamContract.pluginOperations?.map((operation) => operation.id)).toEqual(["Team.insertMember", "Team.updateMember"]);
+    expect(teamContract.pluginOperations?.[0]).toMatchObject({
+      key: "insertMember", entityId: "core.Team", entityName: "Team",
+      definition: { implementation: { type: "collection", field: "members", action: "insert" } },
+    });
+    expect(groupContract.pluginOperations?.map((operation) => operation.id)).toEqual(["Group.insertMember", "Group.updateMember"]);
+    // An arbitrary plugin handler is still refused: nothing holds it to the scope.
+    const plugged = corpus();
+    (plugged.group!.operations as Doc).archive = {
+      name: { en: "Archive" }, description: { en: "Archives." }, implementation: { type: "plugin", plugin: "groups", handler: "archive" },
+      target: { scope: "record", inputField: "id" }, input: { schema: { type: "object" } }, output: { schema: { type: "object" } },
+      auth: { mode: "session", roles: ["Groups.Manage"] }, tenancy: { mode: "required" },
+      effects: { data: "write", external: "none" }, reliability: { idempotency: { mode: "none" } }, confirmation: { mode: "none" },
+    };
+    expect(() => compile(loadEntity(authoringDir(plugged), "team"))).toThrow(/Operation archive is plugin-implemented/);
+  });
+
+  test("hides a derived inverse collection together with its collection Operations", () => {
+    const hiddenMembers = corpus({ squad: {
+      ...team(), entity: "Squad", fields: [{ key: "groupType", hidden: true }, { key: "members", hidden: true }],
+      interfaces: { rest: { basePath: "squads" }, mcp: { resource: { uri: "app://squads", name: "Squads" } },
+        web: { views: { collection: { route: "/squads" }, record: { routes: { read: "/squads/:id", create: "/squads/new" } } } } },
+    } });
+    const squad = compile(loadEntity(authoringDir(hiddenMembers), "squad"));
+    expect(squad.subtype?.hiddenFields).toEqual(["groupType", "members"]);
+    expect(squad.model.fields.map((field) => field.key)).not.toContain("members");
+    expect(squad.model.relationships.map((relationship) => relationship.key)).toEqual(["leadId"]);
+    expect(squad.graphql.relationships.map((relationship) => relationship.name)).toEqual(["leadId"]);
+    expect(squad.pluginOperations).toEqual([]);
+    expect(squad.views.core?.detail?.groups.items.map((tab) => tab.id)).toEqual(["overview"]);
+    // The base keeps the collection and its Operations.
+    expect(groupContract.pluginOperations?.length).toBe(2);
+    // A relationship the base does not have is still refused.
+    const unknown = corpus({ squad: { ...team(), entity: "Squad", fields: [{ key: "memberships", hidden: true }], interfaces: {} } });
+    expect(() => compile(loadEntity(authoringDir(unknown), "squad"))).toThrow(/fields.memberships does not exist on Group/);
   });
 
   test("hides fields from every public section and keeps the discriminator server-owned", () => {
@@ -234,7 +288,7 @@ describe("composing a subtype over its base", () => {
     expect(teamContract.authorization.roles.read).toEqual(["Groups.Manage"]);
     expect(groupContract.authorization.roles.read).toEqual(["Groups.Read", "Groups.Manage"]);
     expect(teamContract.authorization.roles.update).toEqual(["Groups.Manage"]);
-    expect(teamContract.model.fields.find((field) => field.key === "name")).toMatchObject({ label: { en: "Team name" }, validation: { minLength: 1, maxLength: 60 } });
+    expect(teamContract.model.fields.find((field) => field.key === "name")).toMatchObject({ label: { en: "Team name", nl: "Teamnaam" }, validation: { minLength: 1, maxLength: 60 } });
     expect(teamContract.entityOperations.list?.description).toEqual({ en: "Lists teams only." });
     expect(teamContract.entityOperations.list?.guidance).toEqual({ assistant: { en: "Find a team before changing it." } });
     expect(teamContract.entityOperations.get?.description).toEqual(groupContract.entityOperations.get?.description);
@@ -270,6 +324,10 @@ describe("the backend manifest and generated artifacts", () => {
       manifest.tables.find((table) => table.name === "groups")!.columns.map((column) => column.name).filter((name) => name !== "group_type" && name !== "secret_note"));
     expect(teamTable.indexes).toBeUndefined();
     expect(teamTable.rowScope).toBeUndefined();
+    // The base's retention guard travels with the projection: the delete
+    // path reads minimum periods and holds from the table it serves.
+    expect(teamTable.retention).toEqual(manifest.tables.find((table) => table.name === "groups")!.retention);
+    expect(teamTable.retention?.clock.column).toBe("created_at");
     expect(teamTable.source?.authorization?.roles.read).toEqual(["Groups.Manage"]);
     expect(teamTable.source?.graphql?.relationships.map((relationship) => relationship.name)).toEqual(["leadId", "members"]);
     expect(teamTable.source?.rest?.basePath).toBe("teams");
@@ -323,6 +381,12 @@ describe("the backend manifest and generated artifacts", () => {
     expect(web.entities.Team?.views.collection.columns.map((column) => column.key)).toEqual(["name", "status"]);
     expect(web.entities.Team?.relationships.members).toMatchObject({ kind: "hasMany", targetEntityId: "Person", targetRoute: "/persons" });
     expect(web.entities.Team?.operations.list?.id).toBe("Team.list");
+    // The inherited native collection Operations are the subtype's own
+    // addressable Operations, materialized over its own relationship.
+    expect(web.entities.Team?.relationships.members?.operations.insert?.id).toBe("Team.insertMember");
+    expect(web.entities.Team?.relationships.members?.operations.update?.id).toBe("Team.updateMember");
+    expect(web.entities.Team?.relationships.members?.mutationSupport).toBe("atomic");
+    expect(web.entities.Group?.relationships.members?.operations.insert?.id).toBe("Group.insertMember");
 
     const mcp = buildMcpCatalog(entities.map((entity) => ({
       slug: entity.slug, contract: entity.contract,
@@ -395,8 +459,8 @@ describe("refusals", () => {
     refuse(variant((subtype) => { subtype.scope = { leadId: "x" }; }), "team", /scope.leadId must be a single scalar field/);
     refuse(variant((subtype) => { subtype.scope = { groupType: 7 }; }), "team", /does not fit the string field/);
     refuse(variant((subtype) => { subtype.scope = { groupType: "committee" }; }), "team", /not one of the field's static options/);
-    // A derived collection is not an authored base field at all.
-    refuse(variant((subtype) => { subtype.scope = { members: "x" }; }), "team", /scope.members does not exist on Group/);
+    // A derived collection is a base field, but no discriminator.
+    refuse(variant((subtype) => { subtype.scope = { members: "x" }; }), "team", /scope.members must be a persisted field/);
     refuse(variant((subtype) => { subtype.scope = { id: "x" }; }), "team", /intrinsic identity field/);
     refuse(variant((subtype) => { subtype.scope = {}; }), "team", /scope: must NOT have fewer than 1 properties/);
   });
@@ -420,10 +484,24 @@ describe("refusals", () => {
     expect(compile(loadEntity(authoringDir(hiddenStatus), "team")).subtype?.hiddenFields).toEqual(["groupType", "secretNote", "status"]);
   });
 
+  test("the row policy is inherited exactly; only roles and field rights narrow", () => {
+    refuse(variant((subtype) => { subtype.authorization = { roles: { read: ["Groups.Manage"] }, rowAccess: { enabled: true, empty: "public", owner: { field: "leadId" } } }; }), "team", /rowAccess/);
+    refuse(variant((subtype) => { subtype.authorization = { roles: { read: ["Groups.Manage"] }, rowAccess: { enabled: true, empty: "public" } }; }), "team", /rowAccess/);
+  });
+
+  test("a scope value must satisfy the base field's whole value contract", () => {
+    const patterned = corpus();
+    (patterned.group!.fields as Doc[])[1] = { ...((patterned.group!.fields as Doc[])[1] as Doc), validation: { pattern: "^t" } };
+    expect(() => manifestOf(patterned)).toThrow(/scope.groupType value "project" does not satisfy Group.groupType's value contract/);
+    const fits = corpus();
+    (fits.group!.fields as Doc[])[1] = { ...((fits.group!.fields as Doc[])[1] as Doc), validation: { pattern: "^(t|p)" } };
+    expect(manifestOf(fits).entitySubtypes?.length).toBe(2);
+  });
+
   test("rights and validation may narrow, never widen", () => {
     refuse(variant((subtype) => { subtype.authorization = { roles: { read: ["Groups.Read", "Groups.Manage", "Everyone"] } }; }), "team", /widens authorization.roles.read/);
     refuse(variant((subtype) => { subtype.authorization = { roles: { read: ["Groups.Manage"], create: ["Groups.Read"] } }; }), "team", /widens authorization.roles.create/);
-    refuse(variant((subtype) => { subtype.authorization = { roles: { read: ["Groups.Manage"] }, rowAccess: { enabled: false } }; }), "team", /removes authorization.rowAccess/);
+    refuse(variant((subtype) => { subtype.authorization = { roles: { read: ["Groups.Manage"] }, rowAccess: { enabled: false } }; }), "team", /rowAccess/);
     refuse(variant((subtype) => { (subtype.fields as Doc[]).push({ key: "status", permissions: { write: ["Groups.Manage", "Groups.Read"] } }); }), "team", /widens fields.status.permissions.write/);
     // Narrowing field rights is the point: a tighter write list compiles.
     const tighter = variant((subtype) => { (subtype.fields as Doc[]).push({ key: "status", permissions: { write: [] } }); });
@@ -469,10 +547,12 @@ describe("the shipped Team subtype of RelationGroup", () => {
     expect(teamContract.subtype).toMatchObject({
       base: { name: "RelationGroup", slug: "relation-group" },
       scope: [{ field: "groupType", column: "group_type", value: "team" }],
-      hiddenFields: ["groupType"],
+      hiddenFields: ["externalCode", "groupType"],
+      hiddenColumns: [{ field: "groupType", column: "group_type" }, { field: "externalCode", column: "external_code" }],
     });
     expect(teamContract.model.fields.map((field) => field.key)).toEqual(
-      groupContract.model.fields.map((field) => field.key).filter((key) => key !== "groupType"));
+      groupContract.model.fields.map((field) => field.key).filter((key) => key !== "groupType" && key !== "externalCode"));
+    expect(teamContract.storage.columns.map((column) => column.column)).not.toContain("external_code");
     expect(teamContract.model.relationships.map((relationship) => relationship.key)).toEqual(
       groupContract.model.relationships.map((relationship) => relationship.key));
     expect(teamContract.views.core?.routes.list).toEqual({ en: "/teams", nl: "/teams" });

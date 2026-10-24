@@ -2,6 +2,8 @@
 import { describe, expect, test } from "bun:test";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import {
+  assertOperationExecutionRoute,
+  secureOperationTool,
   parseOperationExecuteArguments,
   parseOperationSearchArguments,
   searchableOperationTools,
@@ -274,5 +276,28 @@ describe("operation search matches the model's own words", () => {
 
   test("a single unmatched word finds nothing rather than everything", () => {
     expect(ids("payroll")).toEqual([]);
+  });
+});
+
+
+describe("secure Operation app routing", () => {
+  const names = { search: "search", execute: "execute", secureExecute: "execute_secure" };
+  const ordinary = definition("Relation.list");
+  const secure = definition("Connection.create", { interaction: { secureInput: {} } } as Partial<RuntimeOperationDefinition>);
+
+  test("ordinary execution advertises no app, secure execution is restricted to secure Operations", () => {
+    const executor = searchableOperationTools(names)[1]!;
+    expect(executor._meta).toBeUndefined();
+    const tool = secureOperationTool(executor, names.secureExecute, [secure.id], true);
+    expect(tool._meta).toEqual({ ui: { resourceUri: "ui://openshapeforge/configuration" } });
+    expect(tool.inputSchema.properties?.operationId).toEqual({ type: "string", enum: [secure.id] });
+    expect(secureOperationTool(executor, names.secureExecute, [secure.id], false)._meta).toBeUndefined();
+  });
+
+  test("rejects wrong routes before dispatch while admitting both correct routes", () => {
+    expect(() => assertOperationExecutionRoute(ordinary, false, names)).not.toThrow();
+    expect(() => assertOperationExecutionRoute(secure, true, names)).not.toThrow();
+    expect(() => assertOperationExecutionRoute(ordinary, true, names)).toThrow("Use execute for this Operation");
+    expect(() => assertOperationExecutionRoute(secure, false, names)).toThrow("Use execute_secure");
   });
 });

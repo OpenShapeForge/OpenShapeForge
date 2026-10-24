@@ -20,10 +20,11 @@ function providerDefinition(index: number): RuntimeOperationDefinition {
     effects: { data: "read", external: "read" }, reliability: { idempotency: { mode: "natural" } },
   };
 }
-async function fixture(count: number, roles: string[], run: (client: Client) => Promise<void>, tenantId = tenant) {
+async function fixture(count: number, roles: string[], run: (client: Client) => Promise<void>, tenantId = tenant, secure = false) {
   const db = {} as never;
   const platform = new ModulePlatformRuntime(db);
   const definitions = Array.from({ length: count }, (_, index) => providerDefinition(index));
+  if (secure) definitions[0] = { ...definitions[0]!, interaction: { secureInput: { type: "secureInput", sourceEntity: "Adapter", sourceField: "adapterId", definitionsField: "fields", into: "configurationValues" } } } as RuntimeOperationDefinition;
   const visible = (session: { tenantId?: string | null; roles: readonly string[] }) => session.tenantId === tenant && session.roles.includes("Organization.All.ReadWrite");
   platform.registerOperationProviders([{ name: "example", operationProviders: [{
     id: "example.services",
@@ -36,7 +37,7 @@ async function fixture(count: number, roles: string[], run: (client: Client) => 
     modules: [accountsRuntime, documentsRuntime as never, versioningRuntime as never, { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }) } }],
     operationToolProjection: { mode: "searchable", search: "osf_search_operations", execute: "osf_execute_operation" },
   });
-  const client = new Client({ name: "service-management", version: "1" });
+  const client = new Client({ name: "service-management", version: "1" }, { capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } } } });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   try { await server.connect(serverTransport); await client.connect(clientTransport); await run(client); }
   finally { platform.unregisterServer(server); await client.close(); await server.close(); }
@@ -49,6 +50,8 @@ describe("complete searchable MCP session", () => {
     await fixture(0, ["Organization.All.ReadWrite"], async (client) => { baseline = (await client.listTools()).tools.map((tool) => tool.name); });
     await fixture(500, ["Organization.All.ReadWrite"], async (client) => {
       expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(baseline);
+      expect((await client.listTools()).tools.find((tool) => tool.name === "osf_execute_operation")?._meta?.ui).toBeUndefined();
+      expect(baseline).not.toContain("osf_execute_operation_secure");
       expect(baseline).toContain("osf_search_operations"); expect(baseline).toContain("osf_execute_operation");
       const ids: string[] = []; let cursor: string | undefined;
       do {
@@ -66,6 +69,9 @@ describe("complete searchable MCP session", () => {
     await fixture(0, [...operation.authorization.roles], async (client) => {
       const page = data(await client.callTool({ name: "osf_search_operations", arguments: { query: operation.id } }));
       expect(page.operations.map((candidate) => candidate.operation.id)).toContain(operation.id);
+      const tools = (await client.listTools()).tools;
+      const secureTool = tools.find((tool) => tool.name === "osf_execute_operation_secure");
+      expect(secureTool).toBeUndefined();
       const result = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: operation.id, input: { id: "invalid-uuid" } } });
       expect(result.isError).toBe(true); expect(JSON.stringify(result.structuredContent)).not.toContain("NOT_FOUND");
       expect(JSON.stringify(result.structuredContent)).toMatch(/VALIDATION|BAD_USER_INPUT/);
@@ -82,6 +88,38 @@ describe("complete searchable MCP session", () => {
       } while (cursor);
       expect(ids).toContain("Relation.create");
     });
+  });
+
+  test("only the secure route advertises an app and rejects ordinary Operations before execution", async () => {
+    const previous = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+    process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = "https://api.example.test";
+    try {
+      await fixture(2, ["Organization.All.ReadWrite"], async (client) => {
+        const tools = (await client.listTools()).tools;
+        expect(tools.find((tool) => tool.name === "osf_execute_operation")?._meta?.ui).toBeUndefined();
+        const secureTool = tools.find((tool) => tool.name === "osf_execute_operation_secure");
+        expect(secureTool?._meta?.ui).toEqual({ resourceUri: "ui://openshapeforge/configuration" });
+        expect(secureTool!.inputSchema.properties?.operationId).toEqual({ type: "string", enum: [providerDefinition(0).id] });
+        const invoke = (name: string, index: number) => client.callTool({ name, arguments: { operationId: providerDefinition(index).id, input: { value: "ordinary input" } } });
+        expect((await invoke("osf_execute_operation", 0)).structuredContent).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
+        expect((await invoke(secureTool!.name, 1)).structuredContent).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
+        expect((await invoke(secureTool!.name, 0)).structuredContent).toMatchObject({ data: { value: "ordinary input" } });
+        expect((await invoke("osf_execute_operation", 1)).structuredContent).toMatchObject({ data: { value: "ordinary input" } });
+      }, tenant, true);
+    } finally {
+      if (previous === undefined) delete process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+      else process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = previous;
+    }
+  });
+
+  test("secure route is not offered outside its role and tenant", async () => {
+    for (const [roles, tenantId] of [[[], tenant], [["Organization.All.ReadWrite"], "33333333-3333-4333-8333-333333333333"]] as const) {
+      await fixture(1, [...roles], async (client) => {
+        expect((await client.listTools()).tools.some((tool) => tool.name === "osf_execute_operation_secure")).toBe(false);
+        const result = await client.callTool({ name: "osf_execute_operation_secure", arguments: { operationId: providerDefinition(0).id, input: {} } });
+        expect(result.structuredContent).toMatchObject({ error: { code: "NOT_FOUND" } });
+      }, tenantId, true);
+    }
   });
 
   test("ordinary sessions cannot discover or invoke administrator CRUD", async () => {

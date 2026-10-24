@@ -568,7 +568,7 @@ const LOCALIZED_TEXT_IDENTITY_ORDER = ["en", "nl", "fr"] as const;
  * restate all of a tab's groups, which is exactly how a patch drifts from its
  * base.
  */
-function mergeKeyIdentity(item: JsonValue, mergeKey: ArrayMergeKey): string | null {
+export function mergeKeyIdentity(item: JsonValue, mergeKey: ArrayMergeKey): string | null {
   if (!isPlainObject(item)) return null;
   const value = item[mergeKey];
   if (typeof value === "string") return value;
@@ -581,7 +581,7 @@ function mergeKeyIdentity(item: JsonValue, mergeKey: ArrayMergeKey): string | nu
   return null;
 }
 
-function arrayMergeKey(items: JsonValue[]): ArrayMergeKey | null {
+export function arrayMergeKey(items: JsonValue[]): ArrayMergeKey | null {
   for (const candidate of ARRAY_MERGE_KEYS) {
     if (
       items.length > 0 &&
@@ -601,16 +601,19 @@ function arrayMergeKey(items: JsonValue[]): ArrayMergeKey | null {
  *   `$delete: true` removes the base item; new keys append
  * - all other arrays are replaced wholesale
  */
-export function strategicMerge(base: JsonValue, patch: JsonValue): JsonValue {
+export type MergeObserver = (path: string[], action: "set" | "delete") => void;
+export function strategicMerge(base: JsonValue, patch: JsonValue, observe?: MergeObserver, path: string[] = []): JsonValue {
   if (isPlainObject(base) && isPlainObject(patch)) {
     const result: { [key: string]: JsonValue } = { ...base };
     for (const [key, patchValue] of Object.entries(patch)) {
       if (patchValue === null) {
         delete result[key];
+        observe?.([...path, key], "delete");
       } else if (key in result) {
-        result[key] = strategicMerge(result[key]!, patchValue);
+        result[key] = strategicMerge(result[key]!, patchValue, observe, [...path, key]);
       } else {
         result[key] = patchValue;
+        observe?.([...path, key], "set");
       }
     }
     return result;
@@ -632,19 +635,23 @@ export function strategicMerge(base: JsonValue, patch: JsonValue): JsonValue {
         );
         if (patchItem.$delete === true) {
           if (index >= 0) result.splice(index, 1);
+          observe?.([...path, `${mergeKey}=${identity}`], "delete");
           continue;
         }
         if (index >= 0) {
-          result[index] = strategicMerge(result[index]!, patchItem);
+          result[index] = strategicMerge(result[index]!, patchItem, observe, [...path, `${mergeKey}=${identity}`]);
         } else {
           result.push(patchItem);
+          observe?.([...path, `${mergeKey}=${identity}`], "set");
         }
       }
       return result;
     }
+    observe?.(path, "set");
     return patch;
   }
 
+  observe?.(path, "set");
   return patch;
 }
 
@@ -1268,10 +1275,10 @@ export function authoringLayerDirs(repoRoot: string, config?: AuthoringConfig): 
  * Resolves the configured layers into a single authoring directory.
  * Single layer without patches -> that directory, untouched (fast path).
  */
-export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfig): string {
+export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfig, trace?: AuthoringTraceSink): string {
   const layerDirs = authoringLayerDirs(repoRoot, config);
 
-  if (layerDirs.length === 1) {
+  if (layerDirs.length === 1 && !trace) {
     return layerDirs[0]!;
   }
 
@@ -1284,14 +1291,16 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
   const buildDir = mkdtempSync(join(buildRoot, `process-${process.pid}-`));
   materializedAuthoringDirs.add(buildDir);
   try {
-    return materializeAuthoringLayers(buildDir, layerDirs);
+    return materializeAuthoringLayers(buildDir, layerDirs, trace);
   } catch (error) {
     discardMaterializedAuthoringDir(buildDir);
     throw error;
   }
 }
 
-function materializeAuthoringLayers(buildDir: string, layerDirs: string[]): string {
+export type AuthoringTraceSink = { document(target: string, sourcePath: string, patch: boolean, base?: JsonValue): MergeObserver | undefined };
+
+function materializeAuthoringLayers(buildDir: string, layerDirs: string[], trace?: AuthoringTraceSink): string {
   // relativePath -> { sourceLayer, contents } for plain files;
   // entity slugs are tracked separately so patches can target them by slug.
   const files = new Map<string, { layer: string; path: string }>();
@@ -1328,7 +1337,7 @@ function materializeAuthoringLayers(buildDir: string, layerDirs: string[]): stri
             readFileSync(join(target.layer, target.path), "utf8"),
           ) as JsonValue;
           const { kind: _kind, ...patchBody } = parsed as { [key: string]: JsonValue };
-          const merged = strategicMerge(baseDoc, patchBody as JsonValue);
+          const merged = strategicMerge(baseDoc, patchBody as JsonValue, trace?.document(targetRelative, sourcePath, true, baseDoc));
           assertEntitySecurityOnlyNarrows(
             baseDoc,
             merged,
@@ -1423,7 +1432,7 @@ function materializeAuthoringLayers(buildDir: string, layerDirs: string[]): stri
           ) as JsonValue;
           const overlayDoc = YAML.parse(readFileSync(sourcePath, "utf8")) as JsonValue;
           assertOsfTypeCatalogOnlyAdds(baseDoc, overlayDoc, `${layerDir}/${relativePath}`, target.layer);
-          const merged = strategicMerge(baseDoc, overlayDoc);
+          const merged = strategicMerge(baseDoc, overlayDoc, trace?.document(relativePath, sourcePath, true, baseDoc));
           const mergedPath = join(buildDir, relativePath);
           mkdirSync(join(mergedPath, ".."), { recursive: true });
           writeFileSync(mergedPath, YAML.stringify(merged), "utf8");
@@ -1468,6 +1477,7 @@ function materializeAuthoringLayers(buildDir: string, layerDirs: string[]): stri
           entityPathByName.set(entityName, { layer: layerDir, path: relativePath });
         }
       }
+      trace?.document(relativePath, sourcePath, false);
       files.set(relativePath, { layer: layerDir, path: relativePath });
     }
   }

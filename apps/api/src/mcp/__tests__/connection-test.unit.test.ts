@@ -187,7 +187,7 @@ describe("testElicitedRow", () => {
     expect(urlCheck?.detail).not.toContain("apiToken");
   });
 
-  it("resolves encrypted values into URLs once their field is reclassified non-secret", async () => {
+  it.each(["subdomain", "accessToken"])("resolves an encrypted %s into URLs once reclassified non-secret", async (field) => {
     // The repair path: a subdomain first saved encrypted (misclassified as
     // confidential), then reclassified internal on the source — the stored
     // ciphertext must work as-is, without re-entering the value.
@@ -195,14 +195,22 @@ describe("testElicitedRow", () => {
       row: {
         id: "c1",
         values: values({
-          subdomain: encryptSecret(KEYRING, ELICIT.sourceTable, "subdomain", "acme"),
+          [field]: encryptSecret(KEYRING, ELICIT.sourceTable, field, "acme"),
         }),
       },
-      sourceRow: SOURCE,
+      sourceRow: {
+        ...SOURCE,
+        baseUrlTemplate: `https://{${field}}.example.com`,
+        definitions: [...SOURCE.definitions, { key: field, classification: { sensitivity: "internal" } }],
+        probe: { pathTemplate: "/api/me" },
+      },
       elicit: ELICIT,
       table: TABLE,
       keyring: KEYRING,
-      fetchImpl: refusingFetch,
+      fetchImpl: (async (url: unknown) => {
+        expect(String(url)).toBe("https://acme.example.com/api/me");
+        return new Response("{}", { status: 200 });
+      }) as unknown as typeof fetch,
     });
     expect(report.ok).toBe(true);
     expect(

@@ -142,7 +142,6 @@ function looksLikeStoredSecret(value: unknown): value is StoredSecret {
   );
 }
 
-
 function refuse(
   code: Extract<ModuleConnectionResolution, { ok: false }>["code"],
   message: string,

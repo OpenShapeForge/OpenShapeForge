@@ -50,7 +50,7 @@ type JsonRecord = Record<string, unknown>;
 const KEYRING_ENV = "OPENSHAPEFORGE_ELICITED_SECRET_KEYS";
 const PROBE_TIMEOUT_MS = 15_000;
 
-/** Runtime-issued token fields live under the personal scope, not the elicited one. */
+/** Authorization-code callback tokens are never eligible for URL interpolation. */
 const TOKEN_FIELDS = new Set(["accessToken", "refreshToken"]);
 
 export type ConnectionTestCheck = {
@@ -203,7 +203,8 @@ export async function testElicitedRow(
     // classification is the policy.
     const urlSafeKeys = new Set(
       [...definitionFieldKeys(sourceRow[elicit.definitionsField])].filter(
-        (key) => !secretClassified.has(key) && !TOKEN_FIELDS.has(key),
+        (key) => !secretClassified.has(key) &&
+          (auth?.profile !== "oauth2AuthorizationCode" || !TOKEN_FIELDS.has(key)),
       ),
     );
     const split = splitConnectionValues(

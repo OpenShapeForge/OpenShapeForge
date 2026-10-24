@@ -23,7 +23,7 @@ export async function collectLocalWebAuthoring(repoRoot:string,entityIds:string[
   const target=targets.get(basename(source.path));
   authoring[entityId]={path:source.path,web:entity.interfaces.web,targetPath:target?relative(repoRoot,target):`${targetDir}/design-mode/${basename(source.path)}`,sourceYaml:target?readFileSync(target,'utf8'):'kind: entityPatch\n'};
  }
- const catalog=Bun.YAML.parse(readFileSync(join(import.meta.dir,'../../config/authoring/catalogs/components.yaml'),'utf8')) as {components?:Record<string,{kind?:string;description?:string}>};
+ const catalog=Bun.YAML.parse(readFileSync(join(authoringDir,'catalogs/components.yaml'),'utf8')) as {components?:Record<string,{kind?:string;description?:string}>};
  const components=Object.entries(catalog.components??{}).filter(([,c])=>c.kind==='field').map(([name,c])=>({name,description:c.description??''}));
  return {authoring,schema:resolvedWebInterfaceSchema(),components,inspection:collectAuthoringInspection(repoRoot,undefined,sourceRoots)};
 }

@@ -288,6 +288,42 @@ describe("testElicitedRow", () => {
     expect(credentials?.detail).toContain("per person");
   });
 
+  it.each([
+    [ELICIT.sourceTable, true],
+    [connectionTokenSecretScope(TABLE), false],
+    ["other.providers", false],
+  ])("verifies an API-key accessToken only under its elicitation scope (%s)", async (scope, valid) => {
+    let probeCalls = 0;
+    const report = await testElicitedRow({
+      row: {
+        id: "api-key-connection",
+        values: {
+          accessToken: encryptSecret(KEYRING, scope, "accessToken", "fake-service-key"),
+        },
+      },
+      sourceRow: {
+        ...SOURCE,
+        baseUrlTemplate: "https://api.example.com",
+        auth: { profile: "apiKey", scheme: "bearer", tokenFrom: "accessToken" },
+        probe: { pathTemplate: "/crm/v3/objects/contacts" },
+        definitions: [{ key: "accessToken", required: true, classification: { sensitivity: "confidential" } }],
+      },
+      elicit: ELICIT,
+      table: TABLE,
+      keyring: KEYRING,
+      fetchImpl: (async (url: unknown, init?: RequestInit) => {
+        probeCalls++;
+        expect(String(url)).toBe("https://api.example.com/crm/v3/objects/contacts");
+        expect((init?.headers as Record<string, string>).authorization).toBe("Bearer fake-service-key");
+        return new Response("{}", { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+    expect(report.ok).toBe(valid);
+    expect(probeCalls).toBe(valid ? 1 : 0);
+    expect(report.checks.find(check => check.check === "credentials")?.outcome).toBe(valid ? "passed" : "failed");
+    expect(JSON.stringify(report)).not.toContain("fake-service-key");
+  });
+
   it("verifies a personal token row with the personal secret scope", async () => {
     const seen: { auth?: string | undefined; url?: string | undefined } = {};
     const report = await testElicitedRow({

@@ -216,9 +216,10 @@ export async function testElicitedRow(
             `A stored secret needs the keyring; set ${KEYRING_ENV}.`,
           );
         }
-        // Token fields were encrypted by the sign-in callback under the
-        // connection's token scope; elicited fields under the source table.
-        const scope = TOKEN_FIELDS.has(field)
+        // Only authorization-code callbacks store tokens under the connection
+        // token scope. An elicited API key may also be named accessToken and
+        // must use the source-table scope used when the form encrypted it.
+        const scope = auth?.profile === "oauth2AuthorizationCode" && TOKEN_FIELDS.has(field)
           ? connectionTokenSecretScope(input.table)
           : elicit.sourceTable;
         return decryptSecret(keyring, scope, field, stored);

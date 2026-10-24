@@ -96,7 +96,13 @@ export function createToolListing(scope: ServerScope) {
     };
   });
   const availableTools = async (): Promise<ListedTool[]> => {
-    const runtimeOperationTools = await runtimeProviderToolsForSession();
+    const searchable = operationToolProjection.mode === "searchable" && modulePlatform
+      ? await searchableSessionOperations(scope)
+      : undefined;
+    const runtimeOperationTools = searchable
+      ? searchable.definitions.filter((definition) => searchable.providerIds.has(definition.id))
+        .map((definition) => projectRuntimeOperationTool(definition, locale))
+      : await runtimeProviderToolsForSession();
     const coreTools = [
       SESSION_INFO_TOOL, // session-info (whoami / osf://session): every authenticated session
       ...(canUploadArtifacts
@@ -170,8 +176,8 @@ export function createToolListing(scope: ServerScope) {
         ? searchableOperationTools(searchableOperationToolNames)
         : []),
     ] as Tool[];
-    if (operationToolProjection.mode === "searchable" && modulePlatform && searchableOperationToolNames.secureExecute) {
-      const { definitions } = await searchableSessionOperations(scope);
+    if (searchable && searchableOperationToolNames.secureExecute) {
+      const { definitions } = searchable;
       const secureIds = definitions.filter((definition) => definition.interaction?.secureInput).map((definition) => definition.id);
       const executor = coreTools.find((tool) => tool.name === searchableOperationToolNames.execute);
       if (executor && secureIds.length) coreTools.push(secureOperationTool(

@@ -36,6 +36,7 @@ export async function searchableSessionOperations(scope: ServerScope) {
   };
   return {
     allowedIds,
+    providerIds,
     entities,
     canonicalText,
     entityLabels,

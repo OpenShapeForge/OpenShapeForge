@@ -14,10 +14,11 @@ export async function collectLocalWebAuthoring(repoRoot:string,entityIds:string[
  const targets=new Map<string,string>();
  if(existsSync(targetRoot))for(const file of readdirSync(targetRoot,{recursive:true}) as string[]){if(!file.endsWith('.yaml'))continue;const key=basename(file);if(targets.has(key))throw new Error(`Ambiguous authoring target: ${key}`);targets.set(key,join(targetRoot,file));}
  const active=await loadActivePlatformCompile(repoRoot);
+ const authoringDir=resolveActiveAuthoringDir(repoRoot);
  const authoring:Record<string,{path:string;web:unknown;targetPath:string;sourceYaml:string;subtype?:{base:string;baseSlug:string;hidden:string[]}}>={};
  for(const entityId of [...entityIds].sort()){
   const source=active.entities.find(e=>e.contract.entity.name===entityId);if(!source)continue;
-  const entity=loadEntity(resolveActiveAuthoringDir(repoRoot),source.slug).coreEntity;
+  const entity=loadEntity(authoringDir,source.slug).coreEntity;
   if(!entity.interfaces?.web)continue;
   const target=targets.get(basename(source.path));
   authoring[entityId]={path:source.path,web:entity.interfaces.web,targetPath:target?relative(repoRoot,target):`${targetDir}/design-mode/${basename(source.path)}`,sourceYaml:target?readFileSync(target,'utf8'):'kind: entityPatch\n'};

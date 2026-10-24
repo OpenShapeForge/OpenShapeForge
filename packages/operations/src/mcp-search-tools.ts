@@ -8,7 +8,6 @@ export const DEFAULT_OPERATION_SEARCH_RESULTS = 10;
 export type SearchableOperationToolNames = {
   search: string;
   execute: string;
-  secureExecute?: string;
 };
 
 export function searchableOperationToolDefinitions(
@@ -85,10 +84,7 @@ export function searchableOperationToolDefinitions(
       description:
         "Execute one canonical Operation, with input matching the contract the search tool returns for " +
         "its operationId. For a keyed Operation, reuse the same idempotencyKey only when retrying the " +
-        "exact same input." +
-        (names.secureExecute
-          ? ` For an Operation declaring interaction.secureInput, use ${names.secureExecute} instead; never pass secrets through this tool.`
-          : ""),
+        "exact same input.",
       inputSchema: {
         type: "object",
         properties: {

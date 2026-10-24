@@ -1348,6 +1348,7 @@ describe("buildMcpCatalog", () => {
       mode: "searchable",
       search: "osf_search_operations",
       execute: "osf_execute_operation",
+      secureExecute: "osf_execute_operation_secure",
     });
   });
 

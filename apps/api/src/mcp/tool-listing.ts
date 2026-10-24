@@ -181,7 +181,7 @@ export function createToolListing(scope: ServerScope) {
       const secureIds = definitions.filter((definition) => definition.interaction?.secureInput).map((definition) => definition.id);
       const executor = coreTools.find((tool) => tool.name === searchableOperationToolNames.execute);
       if (executor && secureIds.length) coreTools.push(secureOperationTool(
-        executor, searchableOperationToolNames.secureExecute, secureIds,
+        executor, searchableOperationToolNames.secureExecute,
         supportsMcpApp(server) && publicOriginIsHttps(),
       ));
     }

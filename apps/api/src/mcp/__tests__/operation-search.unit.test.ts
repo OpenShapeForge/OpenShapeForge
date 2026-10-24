@@ -483,10 +483,10 @@ describe("secure Operation app routing", () => {
   test("ordinary execution advertises no app, secure execution is restricted to secure Operations", () => {
     const executor = searchableOperationTools(names)[1]!;
     expect(executor._meta).toBeUndefined();
-    const tool = secureOperationTool(executor, names.secureExecute, [secure.id], true);
+    const tool = secureOperationTool(executor, names.secureExecute, true);
     expect(tool._meta).toEqual({ ui: { resourceUri: "ui://openshapeforge/configuration" } });
-    expect(tool.inputSchema.properties?.operationId).toEqual({ type: "string", enum: [secure.id] });
-    expect(secureOperationTool(executor, names.secureExecute, [secure.id], false)._meta).toBeUndefined();
+    expect(tool.inputSchema.properties?.operationId).toMatchObject({ type: "string", minLength: 1 });
+    expect(secureOperationTool(executor, names.secureExecute, false)._meta).toBeUndefined();
   });
 
   test("rejects wrong routes before dispatch while admitting both correct routes", () => {

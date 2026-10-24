@@ -641,6 +641,7 @@ export function auditOperationSurfaceCollisions(
       SEARCHABLE_OPERATION_TOOL_NAMES.execute,
       "shared searchable Operation executor",
     );
+    claimSurface(mcp, "MCP tool", SEARCHABLE_OPERATION_TOOL_NAMES.secureExecute, "shared secure Operation executor");
   }
   return projection;
 }

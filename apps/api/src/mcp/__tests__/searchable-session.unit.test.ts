@@ -7,6 +7,7 @@ import documentsRuntime from "@openshapeforge/documents/runtime";
 import versioningRuntime from "@openshapeforge/versioning/runtime";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
 import { __buildGeneratedMcpServerForTests } from "../generated-mcp-server.js";
+import { coreOwnsStaticToolName } from "../session-projection.js";
 import { catalog } from "../catalog.js";
 import { getEntityOperationContracts } from "../../operations/entity/index.js";
 
@@ -132,7 +133,7 @@ describe("complete searchable MCP session", () => {
         expect(tools.find((tool) => tool.name === "osf_execute_operation")?._meta?.ui).toBeUndefined();
         const secureTool = tools.find((tool) => tool.name === "osf_execute_operation_secure");
         expect(secureTool?._meta?.ui).toEqual({ resourceUri: "ui://openshapeforge/configuration" });
-        expect(secureTool!.inputSchema.properties?.operationId).toEqual({ type: "string", enum: [providerDefinition(0).id] });
+        expect(secureTool!.inputSchema.properties?.operationId).toMatchObject({ type: "string", minLength: 1 });
         const invoke = (name: string, index: number) => client.callTool({ name, arguments: { operationId: providerDefinition(index).id, input: { value: "ordinary input" } } });
         expect((await invoke("osf_execute_operation", 0)).structuredContent).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
         expect((await invoke(secureTool!.name, 1)).structuredContent).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
@@ -143,6 +144,11 @@ describe("complete searchable MCP session", () => {
       if (previous === undefined) delete process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
       else process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = previous;
     }
+  });
+
+  test("the secure executor name is reserved against plugin and derived tools", () => {
+    expect(coreOwnsStaticToolName("osf_execute_operation_secure", { mode: "searchable", search: "osf_search_operations", execute: "osf_execute_operation" })).toBe(true);
+    expect(coreOwnsStaticToolName("custom_execute_secure", { mode: "searchable", search: "custom_search", execute: "custom_execute" })).toBe(true);
   });
 
   test("secure route is not offered outside its role and tenant", async () => {

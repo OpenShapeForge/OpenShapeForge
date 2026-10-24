@@ -17,7 +17,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./src/*": "./src/*",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./inspection": "./src/authoring/inspection.ts"
   },
   "//files": "src is the runtime \u2014 there is no build step. config must ship too: schema-validation.ts resolves config/schemas relative to its own module, so a tarball without it fails on the first authoring validation.",
   "files": [

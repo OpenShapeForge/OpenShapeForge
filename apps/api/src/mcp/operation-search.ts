@@ -6,13 +6,14 @@ import {
   MAX_OPERATION_SEARCH_RESULTS,
   compareCodeUnits,
   searchableOperationToolDefinitions,
-  type SearchableOperationToolNames,
+  type SearchableOperationToolNames as CoreSearchableOperationToolNames,
 } from "@openshapeforge/operations";
 import { createHash } from "node:crypto";
+import { ENTITY_CONFIGURATION_APP_URI } from "./handoff-config.js";
 import { HttpError } from "../rest/http-error.js";
 import { localizedText, type ResolvedLocale } from "./locale.js";
 
-export type { SearchableOperationToolNames } from "@openshapeforge/operations";
+export type SearchableOperationToolNames = CoreSearchableOperationToolNames & { secureExecute?: string };
 
 export type OperationSearchArguments =
   | { operationId: string }
@@ -92,7 +93,33 @@ export function runtimeOperationEnvelopeSchema(
 export function searchableOperationTools(
   names: SearchableOperationToolNames,
 ): Tool[] {
-  return searchableOperationToolDefinitions(names) as Tool[];
+  const tools = searchableOperationToolDefinitions(names) as Tool[];
+  return tools;
+}
+
+/** Only this narrowly scoped tool can mount the secure-input app. */
+export function secureOperationTool(executor: Tool, name: string, appSupported: boolean): Tool {
+  return {
+    ...executor,
+    name,
+    title: "Enter secure Operation input",
+    annotations: { ...executor.annotations, title: "Enter secure Operation input" },
+    description: "Execute a canonical Operation declaring interaction.secureInput. Opens its private form when supported. Never pass secrets in input; enter them only in the private form. Use the ordinary executor for every other Operation.",
+    inputSchema: {
+      ...executor.inputSchema,
+      properties: { ...executor.inputSchema.properties, operationId: { type: "string", minLength: 1, description: "Exact available canonical Operation id declaring interaction.secureInput." } },
+    },
+    ...(appSupported ? { _meta: { ui: { resourceUri: ENTITY_CONFIGURATION_APP_URI } } } : {}),
+  };
+}
+
+export function assertOperationExecutionRoute(definition: RuntimeOperationDefinition, secureRoute: boolean, names: SearchableOperationToolNames): void {
+  const requiresSecureInput = Boolean(definition.interaction?.secureInput);
+  if (secureRoute !== requiresSecureInput) {
+    throw new HttpError(400, "BAD_USER_INPUT", requiresSecureInput
+      ? `Use ${names.secureExecute ?? `${names.execute}_secure`} for this Operation's private input form. Never send secrets through the ordinary executor.`
+      : `Use ${names.execute} for this Operation; it does not need a private input form.`);
+  }
 }
 
 export function parseOperationSearchArguments(value: unknown): OperationSearchArguments {

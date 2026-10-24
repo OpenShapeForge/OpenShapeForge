@@ -267,7 +267,7 @@ export function coreOwnsStaticToolName(
     ...UPDATE_TOOL_NAMES, // update notices (mcp/update-notices.ts)
     ...EDIT_LEASE_TOOL_NAMES, // central entity edit leases
     ...(projection.mode === "searchable"
-      ? [projection.search, projection.execute]
+      ? [projection.search, projection.execute, `${projection.execute}_secure`]
       : []),
   ].includes(name);
 }

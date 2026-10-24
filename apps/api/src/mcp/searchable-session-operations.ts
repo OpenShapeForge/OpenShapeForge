@@ -6,8 +6,8 @@ import { describeTool, withheldClassifiedFields } from "./entity-tool-projection
 import { toolsForSession } from "./session-projection.js";
 import type { ServerScope } from "./server-scope.js";
 
-/** One live MCP projection over canonical entity, static and provider Operations. */
-export async function searchableSessionOperations(scope: ServerScope) {
+/** One live availability snapshot, without projecting every entity schema. */
+export async function searchableSessionOperationAvailability(scope: ServerScope) {
   if (!scope.modulePlatform) throw new Error("Canonical Operation runtime is unavailable.");
   // One snapshot: the providers are enumerated once, and the definitions and
   // the provider ids among them cannot disagree.
@@ -18,6 +18,14 @@ export async function searchableSessionOperations(scope: ServerScope) {
     ...entities.keys(),
     ...providerIds,
   ]);
+  return { definitions: definitions.filter((definition) => allowedIds.has(definition.id)), providerIds, entities, allowedIds };
+}
+
+export type SearchableSessionAvailability = Awaited<ReturnType<typeof searchableSessionOperationAvailability>>;
+
+/** One live MCP projection over canonical entity, static and provider Operations. */
+export async function searchableSessionOperations(scope: ServerScope) {
+  const { definitions, providerIds, entities, allowedIds } = await searchableSessionOperationAvailability(scope);
   // A covered CRUD Operation shows its tool's title and description in the
   // session's language; search still matches the canonical name and
   // description in every authored language as well (operation-search.ts).
@@ -36,6 +44,7 @@ export async function searchableSessionOperations(scope: ServerScope) {
   };
   return {
     allowedIds,
+    providerIds,
     entities,
     canonicalText,
     entityLabels,

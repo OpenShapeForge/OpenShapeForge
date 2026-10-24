@@ -1279,6 +1279,11 @@ describe("first-class plugin operations", () => {
         60,
       )
     ).toThrow(/osf_search_operations.*plugin operation.*shared searchable Operation catalog/);
+    const secureNameCollision = genericNameCollision.map((candidate, index) => index === 0
+      ? { ...candidate, transports: { ...candidate.transports, mcp: { enabled: true as const, name: "osf_execute_operation_secure" } } }
+      : candidate);
+    expect(() => auditOperationSurfaceCollisions(secureNameCollision, { version: 1, tables: [] }, [], 60))
+      .toThrow(/osf_execute_operation_secure.*plugin operation.*shared secure Operation executor/);
   });
 
   test("rejects duplicate or invalid generated TypeScript function names", () => {

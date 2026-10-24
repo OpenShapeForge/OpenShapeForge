@@ -867,6 +867,7 @@ export type ExecutionCompatibilityContribution = {
 export const SEARCHABLE_OPERATION_TOOL_NAMES = {
   search: "osf_search_operations",
   execute: "osf_execute_operation",
+  secureExecute: "osf_execute_operation_secure",
 } as const;
 
 export type McpOperationToolProjection = "dedicated" | "searchable";
@@ -1951,6 +1952,10 @@ export function buildMcpCatalog(
       owner: "shared searchable Operation executor",
       kind: "other",
     });
+    claimName(SEARCHABLE_OPERATION_TOOL_NAMES.secureExecute, {
+      owner: "shared secure Operation executor",
+      kind: "other",
+    });
   }
   assertAdvertisedToolBytes(
     advertisedToolSizes({
@@ -1984,7 +1989,8 @@ export function buildMcpCatalog(
     operationTools,
     operationToolProjection: {
       mode: operationToolProjection,
-      ...SEARCHABLE_OPERATION_TOOL_NAMES,
+      search: SEARCHABLE_OPERATION_TOOL_NAMES.search,
+      execute: SEARCHABLE_OPERATION_TOOL_NAMES.execute,
     },
     executionCompatibility: executionCompatibilityOperations,
   };

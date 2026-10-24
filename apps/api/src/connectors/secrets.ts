@@ -41,7 +41,11 @@ export function connectionTokenSecretScope(connectionTable: string): string {
   return `${connectionTable}:tokens`;
 }
 
-/** API keys may be named accessToken too; only OAuth callbacks use token AAD. */
+/**
+ * API keys may be named accessToken too; only OAuth callbacks use token AAD.
+ * On authorization-code providers, accessToken/refreshToken are reserved for
+ * the callback and cannot also name an elicited configuration field.
+ */
 export function connectionValueSecretScope(
   connectionTable: string,
   sourceTable: string,

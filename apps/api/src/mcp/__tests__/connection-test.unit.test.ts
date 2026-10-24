@@ -187,7 +187,8 @@ describe("testElicitedRow", () => {
     expect(urlCheck?.detail).not.toContain("apiToken");
   });
 
-  it.each(["subdomain", "accessToken"])("resolves an encrypted %s into URLs once reclassified non-secret", async (field) => {
+  it("resolves encrypted values into URLs once their field is reclassified non-secret", async () => {
+    const field = "subdomain";
     // The repair path: a subdomain first saved encrypted (misclassified as
     // confidential), then reclassified internal on the source — the stored
     // ciphertext must work as-is, without re-entering the value.

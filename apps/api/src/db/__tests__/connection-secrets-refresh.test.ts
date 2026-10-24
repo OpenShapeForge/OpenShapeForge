@@ -334,7 +334,8 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
         expect(fresh.connection.values.accessToken).toBe("access-1");
         expect(endpoint.exchanges()).toBe(0);
 
-        // The app-password mailbox: no profile, no token, nothing to renew.
+        // Neither manually configured variant uses authorization-code OAuth;
+        // even the field named accessToken has nothing to renew.
         const tenantId = randomUUID();
         const userId = randomUUID();
         const adapterId = randomUUID();

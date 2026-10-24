@@ -73,6 +73,9 @@ describe("complete searchable MCP session", () => {
     // provider ids, never a second provider listing beside it.
     await fixture(3, ["Organization.All.ReadWrite"], async (client) => {
       providerListings = 0;
+      await client.listTools();
+      expect(providerListings).toBe(1);
+      providerListings = 0;
       const page = data(await client.callTool({ name: "osf_search_operations", arguments: { query: "example.service.", limit: 2 } }));
       expect(page.operations).toHaveLength(2);
       expect(providerListings).toBe(2);

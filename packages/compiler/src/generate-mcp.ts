@@ -936,7 +936,6 @@ export type McpCatalog = {
     mode: McpOperationToolProjection;
     search: typeof SEARCHABLE_OPERATION_TOOL_NAMES.search;
     execute: typeof SEARCHABLE_OPERATION_TOOL_NAMES.execute;
-    secureExecute: typeof SEARCHABLE_OPERATION_TOOL_NAMES.secureExecute;
   };
   /** Internal adapter-removal seam; never listed as an MCP tool. */
   executionCompatibility: {
@@ -1990,7 +1989,8 @@ export function buildMcpCatalog(
     operationTools,
     operationToolProjection: {
       mode: operationToolProjection,
-      ...SEARCHABLE_OPERATION_TOOL_NAMES,
+      search: SEARCHABLE_OPERATION_TOOL_NAMES.search,
+      execute: SEARCHABLE_OPERATION_TOOL_NAMES.execute,
     },
     executionCompatibility: executionCompatibilityOperations,
   };

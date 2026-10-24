@@ -314,7 +314,7 @@ The dedicated projection continues to offer its authored tool names.
 Entity execution uses the existing MCP adapter, preserving private configuration,
 confirmation, edit leases and definition-change notifications. A private
 configuration handoff is returned under `data` with an Operation reference in
-`resumeWith`; credentials never become model input. Only `osf_execute_operation_secure` executes Operations declaring
+`resumeWith`; credentials never become model input. Within the searchable executor pair, only `osf_execute_operation_secure` executes Operations declaring
 `interaction.secureInput` and links the existing configuration MCP App for clients
 supporting it. Ordinary `osf_execute_operation` calls never advertise a UI. Each
 route rejects Operations belonging to the other route before execution. Clients

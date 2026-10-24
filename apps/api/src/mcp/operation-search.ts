@@ -94,7 +94,6 @@ export function searchableOperationTools(
   names: SearchableOperationToolNames,
 ): Tool[] {
   const tools = searchableOperationToolDefinitions(names) as Tool[];
-  if (names.secureExecute) tools[1]!.description += ` For an Operation declaring interaction.secureInput, use ${names.secureExecute} instead; never pass secrets through this tool.`;
   return tools;
 }
 

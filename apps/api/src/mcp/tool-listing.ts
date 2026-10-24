@@ -25,7 +25,7 @@ import { connectorToolsForSession } from "../connectors/mcp-tools.js";
 import type { McpToolCallSource } from "../modules/contract.js";
 import { assertUniqueToolNames, decorateMcpTools, moduleTools } from "../modules/mcp-hooks.js";
 import { SESSION_INFO_TOOL, SESSION_INFO_TOOL_NAME } from "./session-info.js";
-import { searchableSessionOperations, searchableCoveredToolNames } from "./searchable-session-operations.js";
+import { searchableSessionOperationAvailability, searchableCoveredToolNames, type SearchableSessionAvailability } from "./searchable-session-operations.js";
 import { secureOperationTool, searchableOperationTools } from "./operation-search.js";
 import { type ProjectedRuntimeOperationTool, catalog, catalogDerivedTools } from "./catalog.js";
 import { projectRuntimeOperationTool } from "./catalog-rows.js";
@@ -95,9 +95,9 @@ export function createToolListing(scope: ServerScope) {
         : {}),
     };
   });
-  const availableTools = async (): Promise<ListedTool[]> => {
+  const availableTools = async (availability?: SearchableSessionAvailability): Promise<ListedTool[]> => {
     const searchable = operationToolProjection.mode === "searchable" && modulePlatform
-      ? await searchableSessionOperations(scope)
+      ? availability ?? await searchableSessionOperationAvailability(scope)
       : undefined;
     const runtimeOperationTools = searchable
       ? searchable.definitions.filter((definition) => searchable.providerIds.has(definition.id))
@@ -236,9 +236,10 @@ export function createToolListing(scope: ServerScope) {
   };
 
   const listedTools = async (): Promise<ListedTool[]> => {
-    const available = await availableTools();
-    if (operationToolProjection.mode !== "searchable" || !modulePlatform) return available;
-    const { definitions } = await searchableSessionOperations(scope);
+    if (operationToolProjection.mode !== "searchable" || !modulePlatform) return availableTools();
+    const availability = await searchableSessionOperationAvailability(scope);
+    const available = await availableTools(availability);
+    const { definitions } = availability;
     const covered = searchableCoveredToolNames(scope, definitions);
     const ids = new Set(definitions.map((definition) => definition.id));
     for (const entry of available) {

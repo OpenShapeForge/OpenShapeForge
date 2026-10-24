@@ -315,9 +315,9 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
     TEST_TIMEOUT,
   );
 
-  test(
-    "leaves a token that is still live, and an app-password Adapter, alone",
-    async () => {
+  test.each(["appPassword", "accessToken"])(
+    "leaves a live OAuth token and a manually elicited %s alone",
+    async (field) => {
         const live = await seedOAuthMailbox(admin, new Date(Date.now() + 30 * 60_000));
         const endpoint = tokenEndpoint(() => {
           throw new Error("no token endpoint may be called");
@@ -334,7 +334,8 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
         expect(fresh.connection.values.accessToken).toBe("access-1");
         expect(endpoint.exchanges()).toBe(0);
 
-        // The app-password mailbox: no profile, no token, nothing to renew.
+        // Neither manually configured variant uses authorization-code OAuth;
+        // even the field named accessToken has nothing to renew.
         const tenantId = randomUUID();
         const userId = randomUUID();
         const adapterId = randomUUID();
@@ -343,14 +344,14 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
           await sql`
             insert into integration.adapters (id, tenant_id, key, name, description, transport, discovery, auth, configuration_fields, egress_hosts)
             values (${adapterId}::uuid, ${tenantId}::uuid, ${adapterKey}, 'Mailbox', 'test', 'socket', 'none',
-                    ${JSON.stringify({ scheme: "none", connectionScope: "user" })}::text::jsonb,
-                    ${JSON.stringify([{ key: "appPassword", classification: { sensitivity: "confidential" } }])}::text::jsonb,
+                    ${JSON.stringify(field === "accessToken" ? { scheme: "bearer", profile: "apiKey", tokenFrom: field, connectionScope: "user" } : { scheme: "none", connectionScope: "user" })}::text::jsonb,
+                    ${JSON.stringify([{ key: field, classification: { sensitivity: "confidential" } }])}::text::jsonb,
                     ${JSON.stringify(["imap.provider.example:993"])}::text::jsonb)
           `.execute(conn);
           await sql`
             insert into integration.connections (id, tenant_id, key, name, adapter_id, configuration_values, owner_user_id)
             values (${randomUUID()}::uuid, ${tenantId}::uuid, 'mailbox-bram', 'Mailbox van Bram', ${adapterId}::uuid,
-                    ${JSON.stringify({ address: "bram@example.test", appPassword: encryptSecret(KEYRING, ELICIT_SCOPE, "appPassword", "app-pw") })}::text::jsonb,
+                    ${JSON.stringify({ address: "bram@example.test", [field]: encryptSecret(KEYRING, ELICIT_SCOPE, field, "app-pw") })}::text::jsonb,
                     ${userId}::uuid)
           `.execute(conn);
         });
@@ -363,8 +364,8 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
           artifacts: ARTIFACTS,
         });
         if (!password.ok) throw new Error(`${password.code}: ${password.message}`);
-        expect(password.connection.values.appPassword).toBe("app-pw");
-        expect(password.connection.values.accessToken).toBeUndefined();
+        expect(password.connection.values[field]).toBe("app-pw");
+        expect(password.connection.values[field === "accessToken" ? "appPassword" : "accessToken"]).toBeUndefined();
         expect(endpoint.exchanges()).toBe(0);
     },
     TEST_TIMEOUT,

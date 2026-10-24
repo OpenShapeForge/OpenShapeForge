@@ -42,6 +42,7 @@ import { withDbSession } from "../db/session.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import {
   connectionTokenSecretScope,
+  connectionValueSecretScope,
   decryptSecret,
   keyringFromEnv,
   type SecretKeyring,
@@ -140,8 +141,6 @@ function looksLikeStoredSecret(value: unknown): value is StoredSecret {
     typeof (value as StoredSecret).keyId === "string"
   );
 }
-
-const TOKEN_FIELDS = new Set(["accessToken", "refreshToken"]);
 
 function refuse(
   code: Extract<ModuleConnectionResolution, { ok: false }>["code"],
@@ -371,7 +370,7 @@ export async function resolveConnectionValues(
         }
         values[key] = decryptSecret(
           keyring,
-          TOKEN_FIELDS.has(key) ? tokenScope : elicitScope,
+          connectionValueSecretScope(execution.connectionTable, elicitScope, (row.adapter_auth as JsonRecord | null)?.profile, key),
           key,
           value,
         );

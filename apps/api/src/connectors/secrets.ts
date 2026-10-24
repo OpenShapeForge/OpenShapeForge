@@ -41,6 +41,23 @@ export function connectionTokenSecretScope(connectionTable: string): string {
   return `${connectionTable}:tokens`;
 }
 
+/**
+ * API keys may be named accessToken too; only OAuth callbacks use token AAD.
+ * On authorization-code providers, accessToken/refreshToken are reserved for
+ * the callback and cannot also name an elicited configuration field.
+ */
+export function connectionValueSecretScope(
+  connectionTable: string,
+  sourceTable: string,
+  authProfile: unknown,
+  field: string,
+): string {
+  return authProfile === "oauth2AuthorizationCode" &&
+    (field === "accessToken" || field === "refreshToken")
+    ? connectionTokenSecretScope(connectionTable)
+    : sourceTable;
+}
+
 const MAX_ELICITED_VALUE_JSON_DEPTH = 64;
 
 function looksLikeStoredSecret(value: unknown): value is Record<string, unknown> {

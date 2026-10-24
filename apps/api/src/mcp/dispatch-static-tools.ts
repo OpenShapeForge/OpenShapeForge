@@ -12,7 +12,7 @@ import { searchableSessionOperations } from "./searchable-session-operations.js"
 import { entityOperationContract } from "../operations/entity/index.js";
 import { pluginEntityTransportInput } from "../operations/entity/transport-input.js";
 import { entityIsGeneric } from "./generic-tool-projection.js";
-import { parseOperationExecuteArguments, searchOperationDefinitions } from "./operation-search.js";
+import { assertOperationExecutionRoute, parseOperationExecuteArguments, searchOperationDefinitions } from "./operation-search.js";
 import { invokeOperation } from "../operations/runtime.js";
 import {
   catalog,
@@ -171,7 +171,7 @@ export async function staticToolCall(
   }
   if (
     operationToolProjection.mode === "searchable" &&
-    name === searchableOperationToolNames.execute
+    (name === searchableOperationToolNames.execute || name === searchableOperationToolNames.secureExecute)
   ) {
     if (!modulePlatform) {
       return failed(
@@ -193,6 +193,7 @@ export async function staticToolCall(
       if (!definition) {
         throw new HttpError(404, "NOT_FOUND", "The requested Operation is not available.");
       }
+      assertOperationExecutionRoute(definition, name === searchableOperationToolNames.secureExecute, searchableOperationToolNames);
       const entity = entities.get(definition.id);
       if (entity) {
         // Enter the same adapter as the dedicated/generic tool, including

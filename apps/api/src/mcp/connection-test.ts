@@ -26,7 +26,7 @@ import { HttpError } from "../rest/http-error.js";
 import type { ModuleEgressDispatch } from "../modules/egress.js";
 import { hostAllowed } from "../connectors/executor.js";
 import {
-  connectionTokenSecretScope,
+  connectionValueSecretScope,
   decryptSecret,
   keyringFromEnv,
   type SecretKeyring,
@@ -219,9 +219,7 @@ export async function testElicitedRow(
         // Only authorization-code callbacks store tokens under the connection
         // token scope. An elicited API key may also be named accessToken and
         // must use the source-table scope used when the form encrypted it.
-        const scope = auth?.profile === "oauth2AuthorizationCode" && TOKEN_FIELDS.has(field)
-          ? connectionTokenSecretScope(input.table)
-          : elicit.sourceTable;
+        const scope = connectionValueSecretScope(input.table, elicit.sourceTable, auth?.profile, field);
         return decryptSecret(keyring, scope, field, stored);
       },
       urlSafeKeys,

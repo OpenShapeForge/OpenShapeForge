@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import {test,expect} from 'bun:test';
 import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -24,5 +25,19 @@ test('source spans refer to original YAML, histories distinguish base and patch,
  const src=doc.sources[0]!;const span=src.nodes[JSON.stringify(['fields','key=amount','osfType'])]!;
  expect(src.text.slice(span.start,span.end)).toBe('Money');expect(span.line).toBe(5);
  expect(JSON.stringify(trace)).not.toContain('do-not-export');
+ }finally{rmSync(root,{recursive:true,force:true})}
+});
+
+test('patch spans use the base merge identity when a higher-priority key is introduced',()=>{
+ const root=mkdtempSync(join(tmpdir(),'osf-inspection-identity-'));
+ try{
+  for(const layer of ['base','host'])mkdirSync(join(root,layer,'entities'),{recursive:true});
+  writeFileSync(join(root,'base/entities/item.yaml'),'kind: coreEntity\nentity: Item\ninterfaces:\n  web:\n    groups:\n      - title: General\n        fields: [name]\n');
+  writeFileSync(join(root,'host/entities/item.yaml'),'kind: entityPatch\ninterfaces:\n  web:\n    groups:\n      - title: General\n        id: general\n');
+  const doc=collectAuthoringInspection(root,{layers:['base','host']}).documents['entities/item.yaml']!;
+  const path=['interfaces','web','groups','title=General','id'];
+  expect(doc.changes).toContainEqual({path,source:1,action:'set'});
+  const source=doc.sources[1]!;const span=source.nodes[JSON.stringify(path)]!;
+  expect(source.text.slice(span.start,span.end)).toBe('general');
  }finally{rmSync(root,{recursive:true,force:true})}
 });

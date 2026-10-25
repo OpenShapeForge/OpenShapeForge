@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Core-owned services made available to reviewed runtime modules. */
-import { withAuditContext } from "../platform/audit-context.js";
+import { isControlSession } from "../control/control-session.js";
+import { systemSessionForAdministrator } from "../control/platform-admin.js";
+import { auditContext, withAuditContext } from "../platform/audit-context.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Server } from "@modelcontextprotocol/server";
 import { sql, type Transaction } from "kysely";
 import { assertSameDatabase, type OpenShapeForgeDatabase } from "../db/connection.js";
-import { withDbSession, withInvocationSavepoint } from "../db/session.js";
+import { withDbSession, withInvocationSavepoint, withSystemSession } from "../db/session.js";
 import { enqueueJob } from "../jobs/store.js";
 import { actorSessionOf, type JobActorCredential } from "../jobs/actor-session.js";
 import { appendEntityEventInTransaction } from "../platform/entity-events.js";
@@ -414,6 +416,16 @@ export class ModulePlatformRuntime {
         },
       },
       db: {
+        withControlSession: async (session, work) => {
+          const active = activeOperationSessionStorage.getStore();
+          const operationId = auditContext()?.operationId;
+          if (!active || !this.#acceptsScopedSession(session) ||
+              !isControlSession(session) || !session.roles.includes("platform-operator") || !operationId) {
+            throw new Error("Cross-tenant database work requires a live audited control Operation.");
+          }
+          return withSystemSession(this.#db,
+            systemSessionForAdministrator(session.administrator, `${operationId} plugin database access`), work);
+        },
         withSession: (session, fn) => {
           if (!this.#acceptsScopedSession(session)) {
             throw new Error("Module database work requires a live verified session.");

@@ -383,6 +383,12 @@ export type RuntimeOperationProvider = {
 
 /** The database capabilities exposed by the host to a runtime plugin. */
 export type PluginDatabase = {
+  /** Audited cross-tenant work, admitted only during a live control Operation.
+   * The host derives actor and audit reason; plugins cannot supply authority. */
+  withControlSession?<T>(
+    session: PluginSessionContext,
+    fn: (trx: Transaction<PluginDatabaseSchema>) => Promise<T>,
+  ): Promise<T>;
   withSession<T>(
     session: PluginSessionContext,
     fn: (trx: Transaction<PluginDatabaseSchema>) => Promise<T>,

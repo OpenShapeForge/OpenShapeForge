@@ -3,8 +3,6 @@ import { expect, test } from "bun:test";
 import { DummyDriver, Kysely, PostgresAdapter, PostgresIntrospector, PostgresQueryCompiler, sql,
   type CompiledQuery, type DatabaseConnection } from "kysely";
 import { controlSessionFor } from "../control/control-session.js";
-import { systemSessionForAdministrator } from "../control/platform-admin.js";
-import { withSystemSession } from "../db/session.js";
 import type { DB } from "../generated/db/types.js";
 import { bindOperationHandlers, invokeOperation, type OperationContract } from "../operations/runtime.js";
 import type { RuntimeModule } from "./contract.js";
@@ -45,8 +43,10 @@ test("a tenantless control write reaches its own audited system transaction", as
   };
   const module: RuntimeModule = { name: "test", operationHandlers: { write: async (input, context) => {
     expect(context.session?.tenantId).toBeNull();
+    await expect(context.platform!.db.withControlSession!({ ...context.session! }, async () => undefined))
+      .rejects.toThrow("live audited control Operation");
     expect(input.confirmed).toBeUndefined();
-    await withSystemSession(context.db!, systemSessionForAdministrator(administrator, operation.key), async trx => {
+    await context.platform!.db.withControlSession!(context.session!, async trx => {
       await sql`select 1 as control_write_marker`.execute(trx);
     });
     return { value: {} };
@@ -59,6 +59,8 @@ test("a tenantless control write reaches its own audited system transaction", as
     expect(statements.some(statement => statement.includes("control_write_marker"))).toBe(true);
     expect(statements.filter(statement => statement.includes("insert into platform.system_bypass_audit"))).toHaveLength(1);
     expect(statements.filter(statement => statement === "<commit>")).toHaveLength(1);
+    await expect(platform.services.db.withControlSession!(session, async () => undefined))
+      .rejects.toThrow("live audited control Operation");
     const beforeUnauthorized = statements.length;
     await expect(invokeOperation(bound, { confirmed: true }, {
       db, platform: platform.services, session: { ...session, roles: [] }, transport: "rest",

@@ -1,0 +1,71 @@
+version: 1
+summary: >-
+  OpenShapeForge: a compiler-driven core ERP platform. Entities are authored
+  as YAML; the compiler generates a Postgres schema (RLS, multi-tenant), a
+  GraphQL CRUD API, an MCP server, an entity-event journal, and derived e2e/k6
+  tests. Within this project it acts as a library: it publishes the compiler
+  and the runtime-contract packages that a host repo (an authoring config +
+  entities) depends on to generate its own API/web app.
+stack: [typescript, bun, nextjs, postgresql, graphql, keycloak]
+provides:
+  - id: openshapeforge-compiler
+    kind: package
+    name: "@openshapeforge/compiler"
+    ecosystem: npm
+    versioning: semver
+    notes: >-
+      CLI (openshapeforge-compiler) and runCompiler() API. Run against a host
+      repo's authoring.config.yaml + authored entity YAML to emit
+      schema.sql/types.ts/manifest.json, the operations catalog, keycloak
+      realm JSON, and (if apps/web exists) generated CRUD web artifacts. See
+      docs/consuming.md.
+  - id: openshapeforge-operations
+    kind: package
+    name: "@openshapeforge/operations"
+    ecosystem: npm
+    versioning: semver
+    notes: Canonical operations contract types shared by the compiler and the runtime that binds generated handlers.
+  - id: openshapeforge-interface-web
+    kind: package
+    name: "@openshapeforge/interface-web"
+    ecosystem: npm
+    versioning: semver
+    notes: Runtime contract for the generated web CRUD presentation layer.
+  - id: openshapeforge-plugin-runtime
+    kind: package
+    name: "@openshapeforge/plugin-runtime"
+    ecosystem: npm
+    versioning: semver
+    notes: Contract for compiler plugins (authoring layer + generators) and their runtime half (operations, GraphQL, workers).
+  - id: openshapeforge-documents
+    kind: package
+    name: "@openshapeforge/documents"
+    ecosystem: npm
+    versioning: semver
+  - id: openshapeforge-versioning
+    kind: package
+    name: "@openshapeforge/versioning"
+    ecosystem: npm
+    versioning: semver
+  - id: openshapeforge-workflow-layout
+    kind: package
+    name: "@openshapeforge/workflow-layout"
+    ecosystem: npm
+    versioning: semver
+consumes: []
+commands:
+  build: bun run generate
+  test: bun run test:compiler
+  lint: bun run typecheck:compiler
+notes: >-
+  Packages are published to the GitHub Packages npm registry (not
+  npmjs.com) by .github/workflows/package-compiler.yml: the `latest` tag on
+  pushes to main when the package.json version isn't published yet, and a
+  `dev.<sha>` prerelease on pushes to the hans/dev integration branch.
+  Consumers need a token with read:packages (GITHUB_TOKEN in Actions).
+  This repository also builds its own API and Keycloak Docker images and
+  deploys a Helm release to a self-managed Scaleway Kapsule cluster
+  (.github/workflows/deploy.yml, docker-api.yml, docker-keycloak.yml) for
+  OpenShapeForge's own hosted instance (api.openshapeforge.eu) — that
+  deployment is this repo's own, independent of this project's
+  preview/staging/production targets.

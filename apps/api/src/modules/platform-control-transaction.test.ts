@@ -15,6 +15,12 @@ test("a tenantless control write reaches its own audited system transaction", as
       return {
         executeQuery: async <R>(query: CompiledQuery) => {
           statements.push(query.sql);
+          if (query.sql.includes("set_config('app.user_id'")) {
+            expect(query.parameters[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+          }
+          if (query.sql.includes("insert into platform.system_bypass_audit")) {
+            expect(query.parameters).toContain("https://identity.test/realms/control#operator-subject (operator)");
+          }
           return { rows: [] as R[] };
         },
         streamQuery: async function* <R>() { yield { rows: [] as R[] }; },

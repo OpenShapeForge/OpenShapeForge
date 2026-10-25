@@ -3,6 +3,7 @@
 import { isControlSession } from "../control/control-session.js";
 import { systemSessionForAdministrator } from "../control/platform-admin.js";
 import { auditContext, withAuditContext } from "../platform/audit-context.js";
+import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Server } from "@modelcontextprotocol/server";
 import { sql, type Transaction } from "kysely";
@@ -245,6 +246,17 @@ function assertSecretFree(value: unknown, path = "payload"): void {
  * prevents a module from mutating core's session object; freezing every nested
  * authority-bearing array prevents widening the clone.
  */
+/** UUIDv5 for SQL owner helpers; the separate system audit retains the qualified identity. */
+function controlDatabaseActorId(issuer: string, subject: string): string {
+  const bytes = createHash("sha1")
+    .update(Buffer.from("6ba7b8109dad11d180b400c04fd430c8", "hex"))
+    .update(JSON.stringify(["osf-control", issuer, subject])).digest();
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.subarray(0, 16).toString("hex");
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
+
 export function createModuleSessionCapability(
   session: TrustedSessionContext,
 ): TrustedSessionContext {
@@ -424,7 +436,10 @@ export class ModulePlatformRuntime {
             throw new Error("Cross-tenant database work requires a live audited control Operation.");
           }
           return withSystemSession(this.#db,
-            systemSessionForAdministrator(session.administrator, `${operationId} plugin database access`), work);
+            {
+              ...systemSessionForAdministrator(session.administrator, `${operationId} plugin database access`),
+              databaseActorId: controlDatabaseActorId(session.administrator.issuer, session.administrator.subject),
+            }, work);
         },
         withSession: (session, fn) => {
           if (!this.#acceptsScopedSession(session)) {

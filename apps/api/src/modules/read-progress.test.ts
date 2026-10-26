@@ -42,3 +42,16 @@ test("concurrent observers are isolated and snapshots copied and bounded; failed
   }));
   const session={}; expect(await runtime.observe(session,async()=>{throw Error("offline");},()=>runtime.operation(session,read(),undefined,async()=>{expect(await runtime.report(session,{message:"loading"})).toBe(false);return "final";}))).toBe("final");
 });
+test("sibling roots remain eligible after a preliminary operation; concurrent report attempts stay bounded",async()=>{
+  const runtime=new ReadProgressRuntime<object>(value=>{if(JSON.stringify(value)?.includes("accessToken"))throw Error("secret");}),session={},seen:RuntimeReadProgress[]=[];
+  await runtime.observe(session,async x=>{seen.push(x);},async()=>{
+    await runtime.operation(session,read("preliminary"),undefined,async()=>{});
+    await Promise.all(["tasks","contacts"].map(id=>runtime.operation(session,read(id),undefined,async()=>{
+      await runtime.report(session,{data:{items:[{id}]}});
+    })));
+    await runtime.operation(session,read(),undefined,async()=>{
+      await Promise.all(Array.from({length:30},()=>runtime.report(session,{message:"reading"})));
+    });
+  });
+  expect(seen).toHaveLength(20);expect(seen.slice(0,2).map(x=>x.operationId).sort()).toEqual(["contacts","tasks"]);
+});

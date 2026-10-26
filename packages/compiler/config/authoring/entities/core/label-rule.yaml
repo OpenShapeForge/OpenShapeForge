@@ -140,7 +140,6 @@ fields:
       conditions:
         - field: entityType
           operator: isNotEmpty
-    variables: template
     suggestions:
       sourceKey: entityFields
   - key: descriptionTemplate
@@ -152,6 +151,7 @@ fields:
       en: Template with dynamic variables that produces a personalized explanation when the label is clicked.
       nl: Template met dynamische variabelen dat een gepersonaliseerde uitleg produceert wanneer op het label wordt geklikt.
     osfType: variableTemplate
+    variables: template
     validation:
       maxLength: 2000
     persisted:
@@ -161,7 +161,6 @@ fields:
       conditions:
         - field: entityType
           operator: isNotEmpty
-    variables: template
     suggestions:
       sourceKey: entityFields
   - key: priority

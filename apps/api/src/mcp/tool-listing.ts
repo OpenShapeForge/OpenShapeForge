@@ -25,7 +25,7 @@ import { connectorToolsForSession } from "../connectors/mcp-tools.js";
 import type { McpToolCallSource } from "../modules/contract.js";
 import { assertUniqueToolNames, decorateMcpTools, moduleTools } from "../modules/mcp-hooks.js";
 import { SESSION_INFO_TOOL, SESSION_INFO_TOOL_NAME } from "./session-info.js";
-import { searchableSessionOperations, searchableCoveredToolNames } from "./searchable-session-operations.js";
+import { searchableSessionOperationAvailability, searchableCoveredToolNames, type SearchableSessionAvailability } from "./searchable-session-operations.js";
 import { secureOperationTool, searchableOperationTools } from "./operation-search.js";
 import { type ProjectedRuntimeOperationTool, catalog, catalogDerivedTools } from "./catalog.js";
 import { projectRuntimeOperationTool } from "./catalog-rows.js";
@@ -95,8 +95,14 @@ export function createToolListing(scope: ServerScope) {
         : {}),
     };
   });
-  const availableTools = async (): Promise<ListedTool[]> => {
-    const runtimeOperationTools = await runtimeProviderToolsForSession();
+  const availableTools = async (availability?: SearchableSessionAvailability): Promise<ListedTool[]> => {
+    const searchable = operationToolProjection.mode === "searchable" && modulePlatform
+      ? availability ?? await searchableSessionOperationAvailability(scope)
+      : undefined;
+    const runtimeOperationTools = searchable
+      ? searchable.definitions.filter((definition) => searchable.providerIds.has(definition.id))
+        .map((definition) => projectRuntimeOperationTool(definition, locale))
+      : await runtimeProviderToolsForSession();
     const coreTools = [
       SESSION_INFO_TOOL, // session-info (whoami / osf://session): every authenticated session
       ...(canUploadArtifacts
@@ -170,12 +176,12 @@ export function createToolListing(scope: ServerScope) {
         ? searchableOperationTools(searchableOperationToolNames)
         : []),
     ] as Tool[];
-    if (operationToolProjection.mode === "searchable" && modulePlatform && searchableOperationToolNames.secureExecute) {
-      const { definitions } = await searchableSessionOperations(scope);
+    if (searchable && searchableOperationToolNames.secureExecute) {
+      const { definitions } = searchable;
       const secureIds = definitions.filter((definition) => definition.interaction?.secureInput).map((definition) => definition.id);
       const executor = coreTools.find((tool) => tool.name === searchableOperationToolNames.execute);
       if (executor && secureIds.length) coreTools.push(secureOperationTool(
-        executor, searchableOperationToolNames.secureExecute, secureIds,
+        executor, searchableOperationToolNames.secureExecute,
         supportsMcpApp(server) && publicOriginIsHttps(),
       ));
     }
@@ -230,15 +236,17 @@ export function createToolListing(scope: ServerScope) {
   };
 
   const listedTools = async (): Promise<ListedTool[]> => {
-    const available = await availableTools();
-    if (operationToolProjection.mode !== "searchable" || !modulePlatform) return available;
-    const { definitions } = await searchableSessionOperations(scope);
+    if (operationToolProjection.mode !== "searchable" || !modulePlatform) return availableTools();
+    const availability = await searchableSessionOperationAvailability(scope);
+    const available = await availableTools(availability);
+    const { definitions } = availability;
     const covered = searchableCoveredToolNames(scope, definitions);
     const ids = new Set(definitions.map((definition) => definition.id));
     for (const entry of available) {
       if (entry.runtimeOperation && ids.has(entry.runtimeOperation.id)) covered.add(entry.tool.name);
     }
-    // Exact schemas now ride on search results, including dedicated entities.
+    // Exact schemas ride on the search tool's operationId lookup,
+    // including dedicated entities, so osf_describe adds nothing here.
     covered.add(GENERIC_DESCRIBE_TOOL_NAME);
     return available.filter((entry) => !covered.has(entry.tool.name));
   };

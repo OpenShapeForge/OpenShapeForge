@@ -62,11 +62,22 @@ carry `SPDX-License-Identifier: BUSL-1.1 AND Apache-2.0`: the Keycloak-derived
 portions remain under Apache-2.0, the OpenShapeForge modifications are under
 BUSL-1.1.
 
+## Keycloak 26.7.3 OAuth consent template
+
+`theme/openshapeforge/login/login-oauth-grant.ftl` derives from
+[Keycloak 26.7.3's v2 consent template](https://github.com/keycloak/keycloak/blob/26.7.3/themes/src/main/resources/theme/keycloak.v2/login/login-oauth-grant.ftl)
+under Apache-2.0, copyright Red Hat, Inc. and contributors.
+The native consent text, requested scopes, action, code and accept/cancel
+controls are preserved. The modification suppresses the inherited organization
+switch form on this page: it belongs to browser authentication and requires a
+login action URI, which consent does not provide. The file carries the same
+dual SPDX attribution as the other derived templates.
+
 ## License texts
 
 ### Apache License 2.0
 
-Applies to `apple-identity-provider` and the two Keycloak theme files above. Reproduced here so this file is
+Applies to `apple-identity-provider` and the Keycloak theme files above. Reproduced here so this file is
 self-contained: the root notices file is generated from the JavaScript
 dependency tree and its contents change with that tree.
 
@@ -273,3 +284,7 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 ```
+
+The template rendering tests use FreeMarker 2.3.32 (Apache-2.0), the same
+version declared by the pinned Keycloak 26.7.3 parent. This is a test-only
+dependency and adds no library to the runtime image.

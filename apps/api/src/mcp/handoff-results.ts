@@ -8,7 +8,7 @@
 import { connectionFieldsOf } from "./connection-guidance.js";
 import { ENTITY_CONFIGURATION_PATH, callbackOrigin, configurationWebUrl } from "./handoff-config.js";
 import { ok, type ToolResult } from "./tool-results.js";
-import { elicitationSchemaFromDefinitions, isSecretDefinition } from "./elicitation.js";
+import { configurationFormDefinitions } from "./configuration-submission.js";
 export function configurationAppResult(
   payload: unknown,
   token: string,
@@ -18,7 +18,6 @@ export function configurationAppResult(
   configurationId?: string,
 ): ToolResult {
   const configurationUrl = `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/${token}`;
-  const { schema, elicitable } = elicitationSchemaFromDefinitions(definitions);
   // Capability advertisement does not acknowledge that the host rendered a
   // card. Keep a recovery path outside that card, without exposing its bearer
   // token. The ordinary web session must still match the pending form owner.
@@ -43,7 +42,7 @@ export function configurationAppResult(
       displayName,
       ...(configurationId ? { configurationId } : {}),
       ...(definitions !== undefined ? { configuration: {
-        fields: elicitable.map(field => ({ ...field, schema: schema.properties[String(field.key)], secret: isSecretDefinition(field) })),
+        fields: configurationFormDefinitions({ definitions: Array.isArray(definitions) ? definitions : [] }),
         ...(messagePrefix ? { messagePrefix } : {}),
       } } : {}),
     },

@@ -86,3 +86,15 @@ check it at startup.
 - set a strong, non-default `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` — *enforced*,
 - terminate TLS and require it at the identity provider — *not checked*,
 - never expose the local-dev compose ports or credentials — *not checked*.
+
+## Runtime security
+
+Bun must be at least 1.4.4: older releases contain the same vulnerable Brotli
+decoder ([upstream fix](https://github.com/oven-sh/bun/pull/46392)). Use the pinned
+`packageManager` version for development, CI and container builds.
+
+Use the exact patched Node.js version in `.nvmrc` for development and package
+publication (`nvm install && nvm use`). The `engines.node` range excludes releases
+affected by [CVE-2026-111497](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
+This metadata does not upgrade an existing process or the Node.js runtime bundled
+with GitHub Actions runners; update those runners separately.

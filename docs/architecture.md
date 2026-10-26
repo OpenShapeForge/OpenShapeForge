@@ -175,5 +175,5 @@ configs, empty table, nothing reading it.
 | Compiler plugin contract + shipped examples | [plugins.md](plugins.md) |
 | GraphQL engine, auth, RLS, events, local stack | [api.md](api.md) |
 | Proof gates, e2e suite, HTML reports, k6 | [testing.md](testing.md) |
-| The reset model: build chain, db:reset, drift | [migrations.md](migrations.md) |
+| Migrate chain: build, roll-forward, versioned migrations, db:reset, drift | [migrations.md](migrations.md) |
 | Using the compiler from a host repo | [consuming.md](consuming.md) |

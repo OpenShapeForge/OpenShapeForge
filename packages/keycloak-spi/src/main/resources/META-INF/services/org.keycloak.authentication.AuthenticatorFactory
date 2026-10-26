@@ -1,0 +1,4 @@
+com.openshapeforge.keycloak.McpResourceScopeAuthenticatorFactory
+com.openshapeforge.keycloak.BrokerAccountRetryFactory
+com.openshapeforge.keycloak.AccountChoiceCookieFactory
+com.openshapeforge.keycloak.EmailSignInFactory

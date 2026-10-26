@@ -154,11 +154,14 @@ export async function staticToolCall(
     try {
       assertParentInvocationActive?.();
       assertInterceptorActive?.();
-      const { definitions, allowedIds, canonicalText } = await searchableSessionOperations(ctx);
+      const { definitions, allowedIds, canonicalText, entityLabels, entityFields, resolveName } = await searchableSessionOperations(ctx);
       return ok(searchOperationDefinitions({
         definitions,
         allowedIds,
         canonicalText,
+        entityLabels,
+        entityFields,
+        resolveName,
         arguments: request.params.arguments ?? {},
         locale,
       }));

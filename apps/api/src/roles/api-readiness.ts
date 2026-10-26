@@ -30,8 +30,8 @@ const CORE_READINESS_CHECK_NAMES = [
 ] as const;
 
 /**
- * The schema dependency has one question in the reset model — was this
- * database built from the bundled manifest, and only from it? — so these
+ * The schema dependency has one question — has this database been built or
+ * migrated to the bundled manifest, and only to it? — so these
  * are the only codes the schema check can raise: no record, another
  * manifest's record, or objects beside the manifest.
  */
@@ -88,14 +88,16 @@ function driftBanner(
       ? "The database carries schema the bundled manifest does not declare."
       : drift.status === "unmigrated"
         ? "The database has no applied generated-schema migration record (fresh DB?)."
-        : "The database was built from another manifest than the one bundled in this build.",
+        : "The database was built or migrated from another manifest than the one bundled in this build.",
     `  recorded checksum: ${drift.recordedChecksum ?? "<none>"}`,
     `  bundled checksum:  ${drift.bundledChecksum}`,
     ...undeclared.tables.map((name) => `  - table  ${name}`),
     ...undeclared.columns.map((name) => `  - column ${name}`),
     drift.status === "unmigrated" && !foreign
       ? "Run `bun run db:migrate` to build the database."
-      : "Rebuild the database with `bun run db:reset`; a built database is never changed in place.",
+      : foreign
+        ? "Settle the undeclared schema with a versioned migration, or rebuild a disposable database with `bun run db:reset`."
+        : "Run `bun run db:migrate` to carry the database forward; a disposable development database may instead be rebuilt with `bun run db:reset`.",
     "============================================================================",
   ].join("\n");
 }

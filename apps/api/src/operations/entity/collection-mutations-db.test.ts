@@ -13,6 +13,7 @@ import rawCatalog from "../../generated/operations/catalog.json" with { type: "j
 import { getGeneratedCrudTables, projectGeneratedEntityRow, projectRows } from "./catalog.js";
 import { createGeneratedEntityForTable, updateGeneratedEntityForTable } from "./mutations.js";
 import { serializeEntityRow } from "./serialize-result.js";
+import { listGeneratedEntitiesForTable } from "./queries.js";
 import { collectionMutationError } from "./collection-policy.js";
 import { createCollectionMutationExecutor, type CollectionMutationBinding } from "./collection-mutations.js";
 import type { EntityOperationContract, GeneratedCrudColumn, GeneratedCrudTable } from "./types.js";
@@ -192,6 +193,38 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
     await restricted?.close(); await privileged?.close();
     if (created) await admin?.unsafe(`drop database "${scratchName}" with (force)`);
     await admin?.close();
+  });
+  test("a list sorted on the owning position pages one collection in authored order, not id order", async () => {
+    const { child } = fixture();
+    const parentId = randomUUID();
+    await sql`insert into erp.template_variants(id, tenant_id, title) values (${parentId}::uuid, ${tenant}::uuid, 'Synthetic parent')`.execute(privileged!.db);
+    // Ids ascending, positions descending: the primary-key default order is
+    // the reverse of the content order.
+    const ids = Array.from({ length: 5 }, () => randomUUID()).sort();
+    for (const [index, id] of ids.entries()) {
+      await sql`insert into erp.blocks(id,tenant_id,title,parent_id,parent_id_position) values (${id}::uuid, ${tenant}::uuid, ${`Part ${index}`}, ${parentId}::uuid, ${ids.length - 1 - index})`.execute(privileged!.db);
+    }
+    const walk = async (sort?: { field: string; direction: "asc" }) => {
+      const seen: { id: string; parentIdPosition: unknown }[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await listGeneratedEntitiesForTable(restricted!.db, session, child, {
+          filter: { parent: parentId }, limit: 2, ...(sort ? { sort } : {}), ...(cursor ? { cursor } : {}),
+        });
+        seen.push(...page.rows.map((row) => serializeEntityRow(child, row) as { id: string; parentIdPosition: unknown }));
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      return seen;
+    };
+    const ordered = await walk({ field: "parentIdPosition", direction: "asc" });
+    expect(ordered.map((row) => row.id)).toEqual([...ids].reverse());
+    expect(ordered.map((row) => row.parentIdPosition)).toEqual([0, 1, 2, 3, 4]);
+    expect((await walk()).map((row) => row.id)).toEqual(ids);
+    // Another tenant's session sees none of the collection, sorted or not.
+    const foreign = await listGeneratedEntitiesForTable(restricted!.db, { ...session, tenantId: otherTenant }, child, {
+      filter: { parent: parentId }, sort: { field: "parentIdPosition", direction: "asc" },
+    });
+    expect(foreign.rows).toEqual([]);
   });
   test("inserts before a sibling, preserves IDs, injects the FK and audits parent/children", async () => {
     const { execute } = fixture(), seeded = await seed();

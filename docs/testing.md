@@ -170,10 +170,10 @@ your branch — which has changed nothing.
 The preflight tells the cases apart and prints only the remedy that fits:
 
 - **The database is empty.** `bun run db:migrate` builds it.
-- **The database was built from another manifest.** Nothing in it is outside
-  what your branch declares, but a built database is never altered in place,
-  so `bun run db:reset` rebuilds it — destroying its rows, and only until the
-  next worktree rebuilds it again.
+- **The database is behind your branch.** Nothing in it is outside what your
+  branch declares, so `bun run db:migrate` carries it forward. If that refuses
+  non-additive drift, `bun run db:reset` rebuilds the disposable database —
+  destroying its rows, and only until the next worktree rebuilds it again.
 - **The database carries schema your branch does not declare.** The message
   names the offending tables and columns. That is another branch's build;
   point the suite at a scratch database instead, which leaves everyone else's

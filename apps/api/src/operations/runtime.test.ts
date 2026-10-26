@@ -1682,7 +1682,22 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
       arguments: { query: "import a notebook body", limit: 20 },
     });
     expect(searched.isError).not.toBe(true);
-    expect(searched.structuredContent).toMatchObject({
+    // The Operation matching every word first; Operations "notebook" names
+    // follow it. All of them compact summaries this session may use.
+    const hits = (searched.structuredContent as { operations: Record<string, unknown>[] }).operations;
+    expect(hits[0]).toMatchObject({ operation: { id: "notebook.import", intent: "invoke" } });
+    for (const hit of hits) {
+      expect(hit).not.toHaveProperty("inputSchema");
+      expect(hit).not.toHaveProperty("outputSchema");
+      const id = (hit.operation as { id: string }).id;
+      const available = await client.callTool({ name: "osf_search_operations", arguments: { operationId: id } });
+      expect((available.structuredContent as { operations: unknown[] }).operations).toHaveLength(1);
+    }
+    const contract = await client.callTool({
+      name: "osf_search_operations",
+      arguments: { operationId: "notebook.import" },
+    });
+    expect(contract.structuredContent).toMatchObject({
       operations: [{
         operation: { id: "notebook.import", intent: "invoke" },
         inputSchema: expect.objectContaining({
@@ -1868,7 +1883,7 @@ test("MCP projects and dispatches live runtime provider Operations canonically",
     expect(listed.tools.map((tool) => tool.name)).toContain("osf_execute_operation");
     expect(listed.tools.map((tool) => tool.name)).not.toContain("find_tickets");
     const searched = await client.callTool({
-      name: "osf_search_operations", arguments: { query: definition.id, limit: 20 },
+      name: "osf_search_operations", arguments: { operationId: definition.id },
     });
     expect(searched.isError).not.toBe(true);
     expect(searched.structuredContent).toMatchObject({ operations: [{

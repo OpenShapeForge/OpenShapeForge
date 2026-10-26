@@ -200,7 +200,7 @@ describe("published-snapshot lifecycle against PostgreSQL", () => {
     const { context } = platformFor(editor);
     const ids = await seedTemplate();
     await sql`create table if not exists erp.template_audit_log (id uuid primary key default gen_random_uuid(), tenant_id uuid not null, template_id uuid not null,
-      note markdown not null, foreign key (tenant_id, template_id) references erp.templates (tenant_id, id) on delete cascade)`.execute(privileged());
+      note text not null, foreign key (tenant_id, template_id) references erp.templates (tenant_id, id) on delete cascade)`.execute(privileged());
     await sql`insert into erp.template_audit_log (tenant_id, template_id, note) values (${tenant}::uuid, ${ids.template}::uuid, 'bookkeeping')`.execute(privileged());
     const version = await publishTemplate(context, ids.template);
     const snapshot = (await sql<{ snapshot: { head: { children: Record<string, unknown[]> } } }>`select snapshot from erp.template_versions where id = ${version}::uuid`.execute(privileged())).rows[0]!.snapshot;

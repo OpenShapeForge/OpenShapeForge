@@ -67,6 +67,12 @@ updates append nothing; a CRUD write that changes updatedAt still records that f
 journal permits delivery-cursor updates only; payload mutation and deletion are
 refused. API readiness refuses a schema without active audit triggers.
 
+Semantic events for a known stored business record use those same declared
+timeline relationships: its writer-visible current ancestry, or its last
+recorded row ancestry after removal. A metadata-only semantic signal cannot
+replace that recorded row state during a later cascade. Unknown external
+records keep their source-recorded subjects; no remote state is inferred.
+
 Every newly recorded event includes the verified actor (when one exists), actor
 kind, canonical Operation and correlation context. Verified service principals and API keys are integrations; an unrecorded principal kind remains unknown. Nested work shares its causal
 correlation. Maintenance outside an Operation is explicitly system work; it does
@@ -92,3 +98,59 @@ sequence and existing change-stream consumers retain their own purpose.
 Timeline policy is emitted separately in `operations/audit.json`. Invariant installation is atomic and readiness checks the exact producer configuration.
 
 For entities with declared retention, audit retains event metadata and changed field names, but masks row values rather than creating an indefinitely retained second copy. The live record remains governed by its existing retention and legal-hold policy.
+
+## Writer visibility and verification
+
+Ancestor lookup uses the writer's existing row permissions. If a parent is
+removed or invisible under its record ACL, the immediate parent is still a
+subject; deeper ancestry uses that parent's last recorded subjects when those
+exist. Missing deeper history stays unknown. Auditing never expands the writer's
+record access to discover an ancestor.
+
+The signed trusted-context carrier currently carries no verified principal kind.
+Its actor ID is recorded, but `actorKind` remains `unknown`, including browser
+requests forwarded by that carrier. A verified bearer principal kind or API key
+can distinguish person and integration; no client-supplied guess fills the gap.
+
+The release gate runs the canonical CRUD performance suite against an isolated
+API/database, retaining `.perf-report/index.html` and `summary.json` outside Git.
+The history integration test also measures one 1,000-row child insert through a
+three-level timeline and verifies all 1,002 events and their root subjects.
+Nested transaction tests cover correlation restoration, explicit savepoint
+recovery and the unchanged abort behavior without an explicit savepoint.
+
+## Retention and complete tenant removal
+
+Audit history has no automatic expiry. The change-delivery replay window does
+not remove history. Unclassified business values remain recorded until an
+explicitly authorized retention or complete tenant-removal procedure removes
+them; deleting a business record does not delete its history. Journal and index
+storage grow with committed row changes and semantic events, so deployments
+must monitor capacity. Retention-governed entity values remain masked as above.
+No new retention duration or end-user erasure Operation is introduced here.
+
+The database owner can remove the journal portion of an approved, complete
+tenant offboarding. This is an operator maintenance procedure, never available
+to the application role or through AuditEvent's read Operations. Stop the
+removed tenant's writers and complete its business-data removal first. Run the
+following final journal step in one owner transaction, replacing the UUID with
+the approved tenant. The exclusive lock prevents any concurrent writer from
+using the temporary trigger window; any error must roll back the transaction.
+The same transaction restores the guard before committing.
+
+```sql
+BEGIN;
+SET LOCAL app.tenant_id = '11111111-1111-4111-8111-111111111111';
+LOCK TABLE platform.entity_events IN ACCESS EXCLUSIVE MODE;
+ALTER TABLE platform.entity_events DISABLE TRIGGER audit_event_envelope;
+DELETE FROM platform.entity_events
+ WHERE tenant_id = app.current_tenant();
+ALTER TABLE platform.entity_events ENABLE TRIGGER audit_event_envelope;
+COMMIT;
+```
+
+Record the approval and removal result in the deployment operator's maintenance
+record, outside the tenant being removed. Verify that the target tenant has no
+remaining events and `/api/ready` succeeds with the audit guard enabled. The
+integration suite rehearses this procedure on its disposable tenant and checks
+that another tenant's history and the append-only guard survive.

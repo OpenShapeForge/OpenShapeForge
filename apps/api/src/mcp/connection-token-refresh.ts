@@ -57,7 +57,7 @@ export type ConnectionTableShape = {
 };
 
 /** The authored field name a physical column stores, as the generated CRUD layer spells it. */
-function fieldNameForColumn(column: ConnectionTableShape["columns"][number]): string {
+export function fieldNameForColumn(column: ConnectionTableShape["columns"][number]): string {
   return (
     column.sourceField ??
     column.name.replace(/_([a-z0-9])/g, (_match, char: string) => char.toUpperCase())
@@ -79,6 +79,10 @@ export function accessTokenNeedsRefresh(
   refreshLeewaySeconds = 60,
 ): boolean {
   const expiresAt = values.accessTokenExpiresAt;
+  // Some providers omit expires_in. With a refresh token, renew on demand;
+  // without one, let the provider judge the access token instead of inventing
+  // an expiry and demanding a new consent for a possibly valid token.
+  if (expiresAt === undefined || expiresAt === null) return Boolean(values.refreshToken);
   const expiresAtMs =
     typeof expiresAt === "string" ? Date.parse(expiresAt) : Number.NaN;
   return (
@@ -232,7 +236,9 @@ export async function refreshConnectionRowLocked(input: {
           }),
         read: async () => current,
         decode: (values): OAuthTokenSet => {
-          const expiresAt = Date.parse(String(values.accessTokenExpiresAt));
+          const expiresAt = values.accessTokenExpiresAt == null
+            ? 0
+            : Date.parse(String(values.accessTokenExpiresAt));
           if (!Number.isFinite(expiresAt) || !looksLikeStoredSecret(values.accessToken)) {
             throw new Error("Stored token state is incomplete.");
           }

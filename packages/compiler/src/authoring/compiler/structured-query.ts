@@ -32,7 +32,9 @@ export function structuredQuerySchema(fields: CompiledField[], filterFields: str
   }]));
   if (sortFields.some(key => !fields.some(field => field.key === key && field.cardinality === "single" && field.baseType !== "object"))) throw new Error("Structured query sorting requires scalar fields.");
   return { type: "object", additionalProperties: false, $defs: definitions, properties: {
-    first: { type: "integer", minimum: 1, maximum: 200, default: 50 }, after: { type: "string", maxLength: 4096 },
-    filter: { $ref: "#/$defs/filter0" }, sortField: { type: "string", enum: sortFields }, sortDirection: { type: "string", enum: ["asc", "desc"] },
+    first: { type: "integer", minimum: 1, maximum: 200, default: 50, "x-osf-i18n": { title: { en: "Page size", nl: "Paginagrootte" } } }, after: { type: "string", maxLength: 4096, "x-osf-i18n": { title: { en: "Cursor", nl: "Cursor" } } },
+    filter: { $ref: "#/$defs/filter0", "x-osf-i18n": { title: { en: "Filter", nl: "Filter" } } },
+    sortField: { type: "string", enum: sortFields, "x-osf-i18n": { title: { en: "Sort field", nl: "Sorteerveld" }, enum: Object.fromEntries(sortFields.map(key => [key, fields.find(field => field.key === key)!.label])) } },
+    sortDirection: { type: "string", enum: ["asc", "desc"], "x-osf-i18n": { title: { en: "Sort direction", nl: "Sorteerrichting" }, enum: { asc: { en: "Ascending", nl: "Oplopend" }, desc: { en: "Descending", nl: "Aflopend" } } } },
   } };
 }

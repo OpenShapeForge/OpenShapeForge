@@ -18,6 +18,8 @@ import {
   readLatestHandoffForSession,
 } from "../../mcp/handoff-store.js";
 import { keyringFromEnv } from "../../connectors/secrets.js";
+import { mintAuthorization } from "../../mcp/entity-oauth.js";
+import { mintConfiguration } from "../../mcp/configuration-handoff.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??

@@ -20,6 +20,7 @@ authorization:
     read:
       - General.All.Read
       - General.All.ReadWrite
+      - Tasks.All.Read
     create:
       - General.All.ReadWrite
     update:
@@ -763,6 +764,12 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  mcp:
+    tools: generic
+    operations:
+      create: false
+      update: false
+      delete: false
   rest: {}
   graphql: {}
   web:

@@ -21,7 +21,7 @@ export async function assertDocumentFieldsInTransaction(trx: Transaction<DB>, se
     if (!column.document || value == null) continue;
     const result = await sql<{ documentType: string; artifactId: string | null; mimeType: string | null; byteSize: number | null; hasBlocks: boolean }>`
       select d.document_type as "documentType", v.artifact_id as "artifactId", v.mime_type as "mimeType", v.byte_size::float8 as "byteSize",
-        exists(select 1 from erp.document_variants dv where dv.document_id=d.id and dv.tenant_id=d.tenant_id) as "hasBlocks"
+        exists(select 1 from erp.document_variants dv join erp.blocks b on b.document_variant_id=dv.id and b.tenant_id=dv.tenant_id where dv.document_id=d.id and dv.tenant_id=d.tenant_id) as "hasBlocks"
       from erp.documents d left join erp.document_versions v on v.id=d.current_version_id and v.tenant_id=d.tenant_id
       where d.id::text=${String(value)} and d.tenant_id=${session.tenantId}::uuid
       for share of d

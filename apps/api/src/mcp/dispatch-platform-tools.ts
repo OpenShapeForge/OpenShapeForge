@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { employeeInvitationKeycloakClient } from "./employee-invitation-keycloak.js";
-import { getGeneratedEntity } from "../operations/entity/index.js";
+import { fetchGeneratedEntityRow, getGeneratedEntity } from "../operations/entity/index.js";
+import { ownedByActingRelation } from "../db/acting-relation.js";
 import { testElicitedRow } from "./connection-test.js";
+import { prepareConnectionTest } from "./connection-test-refresh.js";
 import { discoverProviderSchema } from "./discovery.js";
 import { HttpError } from "../rest/http-error.js";
 import { callIdentityLinkTool } from "./identity-link-tools.js";
@@ -17,7 +19,7 @@ import {
 } from "./catalog.js";
 import { serializeRow } from "./catalog-rows.js";
 import { sessionMayInvoke } from "./session-projection.js";
-import { runtimeRowByFilter, runtimeRowsByFilter } from "./session-connections.js";
+import { runtimeRowByFilter } from "./session-connections.js";
 import { type ToolResult, failed, ok } from "./tool-results.js";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { DirectCallScope } from "./tool-dispatch.js";
@@ -176,12 +178,15 @@ export async function platformToolCall(
       if (typeof id !== "string") {
         throw new HttpError(400, "VALIDATION", 'Argument "id" is required.');
       }
-      const row = await getGeneratedEntity(db, session, {
-        table: table.name,
-        id,
-      });
+      // The role gate above authorizes testing; the storage read retains tenant
+      // and row-level isolation without replacing credentials by read markers.
+      // Only the verification report below may leave this internal path.
+      const row = await fetchGeneratedEntityRow(db, session, table, id);
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
       const serialized = serializeRow(table, row);
+      if (serialized.ownerUserId != null && !ownedByActingRelation(serialized.ownerUserId, session)) {
+        throw new HttpError(404, "NOT_FOUND", "Resource not found.");
+      }
       const elicit = entityForTable(testTool.table)?.elicitOnCreate;
       if (!elicit) {
         throw new HttpError(
@@ -208,42 +213,13 @@ export async function platformToolCall(
           `The ${elicit.sourceEntity} this ${testTool.entity} configures does not exist.`,
         );
       }
-      // A personal row holds only tokens; URL templates resolve from the
-      // tenant sibling's plain configuration, as they do at execution.
-      let fallbackPlainValues: Record<string, string> | undefined;
-      if (serialized.ownerUserId) {
-        const siblings = await runtimeRowsByFilter(
-          db,
-          session,
-          tables,
-          testTool.table,
-          {
-            [elicit.sourceField]: sourceId,
-          },
-        );
-        const tenantSibling = siblings.find(
-          (sibling) => !sibling.ownerUserId,
-        );
-        fallbackPlainValues = Object.fromEntries(
-          Object.entries(
-            (tenantSibling?.[elicit.into] ?? {}) as Record<string, unknown>,
-          )
-            .filter(
-              ([, value]) =>
-                value !== null &&
-                value !== undefined &&
-                typeof value !== "object",
-            )
-            .map(([key, value]) => [key, String(value)]),
-        );
-      }
+      const prepared = await prepareConnectionTest(ctx, serialized, sourceRow, elicit, testTool.table);
       return ok(
         await testElicitedRow({
-          row: serialized,
+          ...prepared,
           sourceRow,
           elicit,
           table: testTool.table,
-          fallbackPlainValues,
           egress: {
             owner: egressOwner,
             purpose: "probe",

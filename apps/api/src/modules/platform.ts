@@ -66,6 +66,7 @@ import {
 } from "../operations/capability-grants.js";
 import { CapabilityGrantNotFoundError } from "../operations/grants-operations.js";
 import { actingRelationId } from "../db/acting-relation.js";
+import { generatedCrudTools, matchNativeCrudTool } from "../mcp/native-crud-tool.js";
 
 function contractPreconditionFailure(
   definition: RuntimeOperationDefinition,
@@ -666,6 +667,18 @@ export class ModulePlatformRuntime {
   async #listOperations(
     session: TrustedSessionContext,
   ): Promise<readonly RuntimeOperationDefinition[]> {
+    return (await this.listOperationSnapshot(session)).definitions;
+  }
+
+  /**
+   * One enumeration of the session's Operations, with the ids among them that
+   * a runtime provider listed. A caller that needs both reads them from this
+   * single snapshot instead of asking the providers a second time, which could
+   * also answer differently in between.
+   */
+  async listOperationSnapshot(
+    session: TrustedSessionContext,
+  ): Promise<{ definitions: readonly RuntimeOperationDefinition[]; providerIds: ReadonlySet<string> }> {
     if (!this.#acceptsScopedSession(session)) {
       throw new Error("Module Operation listing requires a live verified session.");
     }
@@ -695,7 +708,10 @@ export class ModulePlatformRuntime {
       }
       byId.set(definition.id, definition);
     }
-    return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
+    return {
+      definitions: [...byId.values()].sort((left, right) => left.id.localeCompare(right.id)),
+      providerIds: new Set(provided.map((definition) => definition.id)),
+    };
   }
 
   /**
@@ -789,16 +805,28 @@ export class ModulePlatformRuntime {
       throw new Error("Module Operation lookup requires a live verified session.");
     }
     const controlSession = isControlRealmSession(session);
-    const entityOperation = getEntityOperationContracts().find(
-      (candidate) => candidate.id === operationId,
-    );
-    if (entityOperation) {
-      if (controlSession) return undefined;
+    const entityContract = (id: string) => {
+      const entityOperation = getEntityOperationContracts().find(
+        (candidate) => candidate.id === id,
+      );
+      if (!entityOperation) return undefined;
+      if (controlSession) return null;
       const heldRoles = new Set(session.roles);
-      if (!entityOperation.authorization.roles.some((role) => heldRoles.has(role))) {
-        return undefined;
-      }
-      return entityOperation;
+      return entityOperation.authorization.roles.some((role) => heldRoles.has(role))
+        ? entityOperation
+        : null;
+    };
+    const entityOperation = entityContract(operationId);
+    if (entityOperation !== undefined) return entityOperation ?? undefined;
+    // A generated entity tool name a native Capability may name instead of
+    // the canonical id answers with that canonical contract, under the same
+    // checks, matched exactly as native execution matches it. A name several
+    // entities share needs the entity a binding supplies, so it stays
+    // unresolved here rather than picking one.
+    const generated = matchNativeCrudTool(generatedCrudTools, operationId);
+    if (generated.kind === "shared-name") return undefined;
+    if (generated.kind === "tool" && generated.tool.operationId !== operationId) {
+      return entityContract(generated.tool.operationId) ?? undefined;
     }
     const staticOperation = this.#staticOperations.get(operationId);
     if (staticOperation) {

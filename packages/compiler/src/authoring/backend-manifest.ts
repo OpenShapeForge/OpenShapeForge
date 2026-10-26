@@ -1,5 +1,6 @@
 import { validateDefaultTemplates } from "./compiler/default-template.js";
 // SPDX-License-Identifier: BUSL-1.1
+import { sortablePositionColumn } from "./sortable-position.js";
 import { join, relative } from "node:path";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
@@ -1356,7 +1357,7 @@ function compileFieldRelationStorage(
         }
         attachReference(target.table, column, table, false, relationship.ownership === "owned" ? "CASCADE" : undefined);
         if (relationship.sortable) {
-          const positionName = `${column.name}_position`;
+          const positionName = sortablePositionColumn(column.name);
           if (Buffer.byteLength(positionName) > 63) throw new Error(`Sortable relationship column exceeds PostgreSQL's identifier limit: ${positionName}.`);
           const existingPosition = target.table.columns.find((column) => column.name === positionName);
           if (existingPosition) throw new Error(`Sortable relationship storage collides with ${tableKey(target.table)}.${positionName}.`);
@@ -1756,7 +1757,7 @@ export function compileAuthoringBackendManifest(
                   ...(normalized.through ? { through: normalized.through } : {}),
                   ...(normalized.ownership ? { ownership: normalized.ownership } : {}),
                   ...(normalized.cardinality ? { cardinality: normalized.cardinality } : {}),
-                  ...(normalized.sortable ? { sortable: true, positionColumn: `${normalized.foreignKey}_position` } : {}),
+                  ...(normalized.sortable ? { sortable: true, positionColumn: sortablePositionColumn(normalized.foreignKey!) } : {}),
                   ...(normalized.childAuthorization ? { childAuthorization: normalized.childAuthorization } : {}),
                   ...(normalized.childLock ? { childLock: normalized.childLock } : {}),
                   ...(normalized.version ? { version: normalized.version } : {}),

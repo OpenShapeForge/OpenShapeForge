@@ -138,6 +138,8 @@ export function sessionMayInvoke(identity: Identity, entity: string, operation: 
 export const MUTATION_CONTROLS = new Set([
   "blueprintId",
   "blueprintBindings",
+  "bindings",
+  "unbind",
   "expectedVersion",
   "leaseToken",
   "confirmed",
@@ -170,7 +172,7 @@ export function catalogTool(table: McpTable, operation: CrudOperation) {
  */
 /** Read the exact authorized contract through canonical discovery. */
 export async function advertisedOperation(identity: Identity, operationId: string): Promise<any> {
-  const response = await rpc(identity, "tools/call", { name: "osf_search_operations", arguments: { query: operationId, limit: 20 } });
+  const response = await rpc(identity, "tools/call", { name: "osf_search_operations", arguments: { operationId } });
   expect(toolError(response.body)).toBeUndefined();
   const row = toolPayload(response.body)?.operations?.find((row: any) => row.operation.id === operationId);
   if (!row) throw new Error(`The session was not offered Operation ${operationId}.`);

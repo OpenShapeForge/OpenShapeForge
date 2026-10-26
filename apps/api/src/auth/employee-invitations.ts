@@ -42,7 +42,7 @@ import generatedRoleComposites from "../generated/compiler/role-composites.json"
  *
  * Keycloak still creates no user and no member record until the person
  * accepts, so `platform.employee_invitations` remains the system of record
- * for WHO was invited, WITH WHAT ROLE, BY WHOM — Keycloak knows only the
+ * for WHO was invited, WITH WHICH ROLES, BY WHOM — Keycloak knows only the
  * address and the deadline.
  *
  * APPLYING THE INVITED ROLE ON FIRST SIGN-IN
@@ -476,7 +476,14 @@ export async function findPendingInvitation(
   `.execute(trx);
   const row = result.rows[0];
   if (!row) return null;
-  await validateInvitationRoles(trx, tenantId, invitationRoles(row.roles));
+  try {
+    await validateInvitationRoles(trx, tenantId, invitationRoles(row.roles));
+  } catch (error) {
+    // A retired/deleted role cannot admit this person, but must not hide their
+    // other organizations. Database/provider availability failures still surface.
+    if (error instanceof HttpError && error.status === 400 && error.code === "VALIDATION") return null;
+    throw error;
+  }
   return { id: row.id, roles: row.roles, ...(row.relation_id ? { relationId: row.relation_id } : {}) };
 }
 

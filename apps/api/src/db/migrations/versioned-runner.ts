@@ -1,0 +1,224 @@
+// SPDX-License-Identifier: BUSL-1.1
+/**
+ * Versioned migrations: an explicit, ordered registry of hand-written
+ * transformations of a BUILT database — renames, retypes, backfills, drops,
+ * data moves — applied before the generated-schema roll-forward (see
+ * ../migration-chain.ts), so a migration can transform the live schema until
+ * the remaining manifest diff is additive (or a no-op).
+ *
+ * A database built from the manifest is already at the target shape, so the
+ * build records every registered migration as applied without running it
+ * (`versionedMigrationBaseline`, written in the same transaction as the
+ * schema). A migration therefore only ever runs against a database that was
+ * built — or last migrated — before it existed.
+ *
+ * Ledger: platform.schema_migrations. Each applied migration records its
+ * version and the sha256 of the migration FILE (resolved from the entry's
+ * fileUrl, normally `import.meta.url` of the migration module). On later runs
+ * an applied version is skipped only if the file still hashes to the recorded
+ * checksum — editing an applied migration fails loudly. Scaffold new
+ * migrations with `bun run db:migration:new <kebab-name>`.
+ *
+ * The one sanctioned exception is `supersededChecksums`: a hash the file used
+ * to have, for an edit that provably could not change what the migration did.
+ * A file hash cannot tell a licence header from a DDL change, so that
+ * judgement is recorded in code and reviewed in a PR rather than inferred.
+ *
+ * `db` must be a connection-bound Kysely instance (the chain runs inside
+ * runtime.db.connection().execute): each up() runs inside an explicit
+ * BEGIN/COMMIT together with its ledger insert, and is rolled back as a unit
+ * on failure.
+ */
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { sql, type Kysely } from "kysely";
+import { GENERATED_SCHEMA_MIGRATION_VERSION } from "../schema-drift.js";
+
+export type VersionedMigration = {
+  /**
+   * "NNNN_kebab-name", numbered from FIRST_VERSIONED_MIGRATION_NUMBER and
+   * strictly ascending within the registry.
+   */
+  version: string;
+  /** file: URL of the migration source file, normally `import.meta.url`. */
+  fileUrl: string;
+  up: (db: Kysely<any>) => Promise<void>;
+  /**
+   * Checksums this file was previously recorded under, listed only for edits
+   * that CANNOT have changed what the migration did — a licence header, a
+   * comment, a formatting sweep. An environment holding one of these is
+   * reconciled to the current checksum instead of being wedged.
+   *
+   * This is not an escape hatch for changing an applied migration. If the SQL,
+   * the order of statements, or anything else the database observes changed,
+   * the correct answer is still a new migration: the ledger cannot re-run this
+   * one, so a reconciled checksum would assert an effect that never happened.
+   */
+  supersededChecksums?: readonly string[];
+};
+
+export type VersionedMigrationsResult = {
+  applied: string[];
+  skipped: string[];
+  /** Applied versions whose ledger checksum was updated to the current file. */
+  reconciled: string[];
+};
+
+/**
+ * 0001 is the generated-schema record. 0002–0015 were the versioned chain
+ * retired in e91ad87a; databases built before then still carry their ledger
+ * rows, so those numbers stay reserved and a new migration can never be
+ * mistaken for one of them.
+ */
+export const FIRST_VERSIONED_MIGRATION_NUMBER = 16;
+
+const versionPattern = /^(\d{4})_[a-z0-9][a-z0-9-]*$/;
+
+/**
+ * Validates registry shape before anything touches the database: version
+ * format, numbering after the reserved range, and strictly ascending order
+ * (which also rejects duplicates).
+ */
+export function validateVersionedRegistry(
+  migrations: readonly VersionedMigration[],
+): void {
+  let previousNumber = FIRST_VERSIONED_MIGRATION_NUMBER - 1;
+  let previousVersion: string | undefined;
+  for (const migration of migrations) {
+    const numberText = versionPattern.exec(migration.version)?.[1];
+    if (numberText === undefined) {
+      throw new Error(
+        `Versioned migration "${migration.version}" has an invalid version — expected "NNNN_kebab-name". Scaffold with: bun run db:migration:new <name>`,
+      );
+    }
+    const number = Number(numberText);
+    if (number < FIRST_VERSIONED_MIGRATION_NUMBER) {
+      throw new Error(
+        `Versioned migration "${migration.version}" uses number ${numberText} — 0001 is the generated-schema record and 0002–0015 belong to the retired chain; versioned migrations start at ${String(FIRST_VERSIONED_MIGRATION_NUMBER).padStart(4, "0")}.`,
+      );
+    }
+    if (number <= previousNumber) {
+      throw new Error(
+        `Versioned migration registry is out of order: "${migration.version}" must be numbered strictly after "${previousVersion}".`,
+      );
+    }
+    previousNumber = number;
+    previousVersion = migration.version;
+  }
+}
+
+async function migrationFileChecksum(
+  migration: VersionedMigration,
+): Promise<string> {
+  let contents: Buffer;
+  try {
+    contents = await readFile(fileURLToPath(new URL(migration.fileUrl)));
+  } catch (error) {
+    throw new Error(
+      `Versioned migration ${migration.version}: cannot read its source file (${migration.fileUrl}) to checksum it: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  return createHash("sha256").update(contents).digest("hex");
+}
+
+/**
+ * The ledger rows a fresh build records for the registry: every migration
+ * marked applied under its current file checksum, because the manifest the
+ * database is built from already has the shape they transform towards.
+ */
+export async function versionedMigrationBaseline(
+  migrations: readonly VersionedMigration[],
+): Promise<{ version: string; checksum: string }[]> {
+  validateVersionedRegistry(migrations);
+  return Promise.all(
+    migrations.map(async (migration) => ({
+      version: migration.version,
+      checksum: await migrationFileChecksum(migration),
+    })),
+  );
+}
+
+/**
+ * Run every registered migration the ledger does not hold yet, in order.
+ * A no-op on a database with no ledger: nothing is built yet, and the build
+ * that follows records the registry as its baseline.
+ */
+export async function applyVersionedMigrations(
+  db: Kysely<any>,
+  migrations: readonly VersionedMigration[],
+): Promise<VersionedMigrationsResult> {
+  validateVersionedRegistry(migrations);
+  const result: VersionedMigrationsResult = { applied: [], skipped: [], reconciled: [] };
+  if (migrations.length === 0) return result;
+
+  const ledgerPresent = await sql<{ present: boolean }>`
+    select to_regclass('platform.schema_migrations') is not null as present
+  `.execute(db);
+  if (!ledgerPresent.rows[0]?.present) return result;
+  // Only a database the chain built is transformed; anything else is the
+  // generated step's to build or refuse.
+  const built = await sql<{ present: boolean }>`
+    select exists (
+      select 1 from platform.schema_migrations
+      where version = ${GENERATED_SCHEMA_MIGRATION_VERSION}
+    ) as present
+  `.execute(db);
+  if (!built.rows[0]?.present) return result;
+
+  const versions = migrations.map((migration) => migration.version);
+  const ledger = await sql<{ version: string; checksum: string }>`
+    select version, checksum
+    from platform.schema_migrations
+    where version in (${sql.join(versions)})
+  `.execute(db);
+  const recordedChecksums = new Map(
+    ledger.rows.map((row) => [row.version, row.checksum]),
+  );
+
+  for (const migration of migrations) {
+    const fileChecksum = await migrationFileChecksum(migration);
+    const recorded = recordedChecksums.get(migration.version);
+
+    if (recorded !== undefined) {
+      if (recorded !== fileChecksum) {
+        if (!migration.supersededChecksums?.includes(recorded)) {
+          throw new Error(
+            `Versioned migration ${migration.version} was applied with checksum ${recorded}, but its file now hashes to ${fileChecksum}. Applied migrations are immutable — revert the edit and create a new migration instead (bun run db:migration:new <name>). If the edit provably cannot have changed what this migration did, record ${recorded} in its supersededChecksums instead.`,
+          );
+        }
+        // Reconcile once, so the next run takes the plain skip path and the
+        // superseded entry becomes inert rather than permanently load-bearing.
+        await sql`
+          update platform.schema_migrations
+          set checksum = ${fileChecksum}
+          where version = ${migration.version} and checksum = ${recorded}
+        `.execute(db);
+        result.reconciled.push(migration.version);
+        continue;
+      }
+      result.skipped.push(migration.version);
+      continue;
+    }
+
+    await sql`begin`.execute(db);
+    try {
+      await migration.up(db);
+      await sql`
+        insert into platform.schema_migrations (version, checksum, applied_by)
+        values (${migration.version}, ${fileChecksum}, ${"apps/api versioned"})
+      `.execute(db);
+      await sql`commit`.execute(db);
+    } catch (error) {
+      await sql`rollback`.execute(db);
+      throw new Error(
+        `Versioned migration ${migration.version} failed and was rolled back: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+    result.applied.push(migration.version);
+  }
+
+  return result;
+}

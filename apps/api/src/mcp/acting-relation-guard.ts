@@ -18,3 +18,14 @@ export function requireActingRelationId(session: ActingRelationSource, what: str
       "Ask an organization administrator to link it (link_identity), then try again.",
   );
 }
+
+/** A stable key never grants the right to rotate another person's credential. */
+export function assertConfigurationOwner(session: ActingRelationSource, owner: unknown, intendedOwner: unknown): void {
+  if ((owner ?? null) !== (intendedOwner ?? null)) {
+    throw new HttpError(409, "CONFIGURATION_BINDING_MISMATCH", "The secure form does not match this record.");
+  }
+  if (owner == null) return;
+  if (owner !== requireActingRelationId(session, "A personal connection")) {
+    throw new HttpError(409, "CONFIGURATION_BINDING_MISMATCH", "The secure form does not match this record.");
+  }
+}

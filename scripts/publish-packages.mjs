@@ -29,10 +29,12 @@
  * registry as much as `npm publish` needs a write token.
  */
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { samePublishedTar } from "./published-tar.mjs";
 
 const REGISTRY = "https://npm.pkg.github.com";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -139,6 +141,16 @@ function publishedIntegrity(name, version) {
   throw new Error(`npm view ${name}@${version} failed:\n${result.stderr}`);
 }
 
+function matchesPublishedTar(name, version, candidate, integrity) {
+  const destination = mkdtempSync(path.join(tmpdir(), "published-package-"));
+  try {
+    const packed = JSON.parse(npm(["pack", `${name}@${version}`, "--json", "--ignore-scripts", "--pack-destination", destination, `--registry=${REGISTRY}`]).stdout);
+    const filename = packed[0]?.filename;
+    if (packed.length !== 1 || typeof filename !== "string" || path.basename(filename) !== filename) throw new Error("Invalid published pack result");
+    return samePublishedTar(readFileSync(candidate), readFileSync(path.join(destination, filename)), integrity);
+  } finally { rmSync(destination, { recursive: true, force: true }); }
+}
+
 /** Copies LICENSE (and the compiler's README) into the package; returns the paths it created. */
 function stageDistributionFiles(entry) {
   const copies = [[path.join(repoRoot, "LICENSE"), path.join(entry.dir, "LICENSE")]];
@@ -180,7 +192,7 @@ function main() {
       const published = publishedIntegrity(name, version);
       if (published === null) {
         plan.push({ name, version, tarball: path.join(packDestination, packed.filename) });
-      } else if (options.channel === "main" && published.integrity !== packed.integrity) {
+      } else if (options.channel === "main" && published.integrity !== packed.integrity && !matchesPublishedTar(name, version, path.join(packDestination, packed.filename), published.integrity)) {
         throw new Error(`${name}@${version} already exists with different contents; bump its version before publishing.`);
       } else {
         console.log(`${name}@${version} is already published; nothing to do.`);

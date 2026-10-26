@@ -407,6 +407,7 @@ function buildToolsForEntity(
   table: string,
   referentiedata: CoreReferentiedataSnapshot,
   relationshipTargets: ReadonlyMap<string, EntityRelationshipTarget>,
+  contracts: readonly CompiledEntityContract[],
 ): McpToolDefinition[] {
   const mcp = contract.mcp;
   if (!mcp) return [];
@@ -432,7 +433,7 @@ function buildToolsForEntity(
   // incomplete and tries anyway; a model that reads "reviewedAt is written by
   // example.finding.review" calls that instead. The sentence is worth more
   // than the refusal it prevents.
-  const sortable = entitySortableFieldKeys(contract, mcp.elicitOnCreate?.into);
+  const sortable = entitySortableFieldKeys(contract, mcp.elicitOnCreate?.into, contracts);
   const filterField = contract.entity.filterField;
   const tools: McpToolDefinition[] = [];
   const output = entityRecordOutputSchema(
@@ -870,6 +871,7 @@ export type ExecutionCompatibilityContribution = {
 export const SEARCHABLE_OPERATION_TOOL_NAMES = {
   search: "osf_search_operations",
   execute: "osf_execute_operation",
+  secureExecute: "osf_execute_operation_secure",
 } as const;
 
 export type McpOperationToolProjection = "dedicated" | "searchable";
@@ -1403,6 +1405,7 @@ export function buildMcpCatalog(
         input.table,
         referentiedata,
         relationshipTargets,
+        inputs.map((entry) => entry.contract),
       ),
     );
 
@@ -1953,6 +1956,10 @@ export function buildMcpCatalog(
       owner: "shared searchable Operation executor",
       kind: "other",
     });
+    claimName(SEARCHABLE_OPERATION_TOOL_NAMES.secureExecute, {
+      owner: "shared secure Operation executor",
+      kind: "other",
+    });
   }
   assertAdvertisedToolBytes(
     advertisedToolSizes({
@@ -1986,7 +1993,8 @@ export function buildMcpCatalog(
     operationTools,
     operationToolProjection: {
       mode: operationToolProjection,
-      ...SEARCHABLE_OPERATION_TOOL_NAMES,
+      search: SEARCHABLE_OPERATION_TOOL_NAMES.search,
+      execute: SEARCHABLE_OPERATION_TOOL_NAMES.execute,
     },
     executionCompatibility: executionCompatibilityOperations,
   };

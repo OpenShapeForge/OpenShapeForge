@@ -1298,7 +1298,7 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
   }
 }
 
-export type AuthoringTraceSink = { document(target: string, sourcePath: string, patch: boolean): MergeObserver | undefined };
+export type AuthoringTraceSink = { document(target: string, sourcePath: string, patch: boolean, base?: JsonValue): MergeObserver | undefined };
 
 function materializeAuthoringLayers(buildDir: string, layerDirs: string[], trace?: AuthoringTraceSink): string {
   // relativePath -> { sourceLayer, contents } for plain files;
@@ -1337,7 +1337,7 @@ function materializeAuthoringLayers(buildDir: string, layerDirs: string[], trace
             readFileSync(join(target.layer, target.path), "utf8"),
           ) as JsonValue;
           const { kind: _kind, ...patchBody } = parsed as { [key: string]: JsonValue };
-          const merged = strategicMerge(baseDoc, patchBody as JsonValue, trace?.document(targetRelative, sourcePath, true));
+          const merged = strategicMerge(baseDoc, patchBody as JsonValue, trace?.document(targetRelative, sourcePath, true, baseDoc));
           assertEntitySecurityOnlyNarrows(
             baseDoc,
             merged,
@@ -1432,7 +1432,7 @@ function materializeAuthoringLayers(buildDir: string, layerDirs: string[], trace
           ) as JsonValue;
           const overlayDoc = YAML.parse(readFileSync(sourcePath, "utf8")) as JsonValue;
           assertOsfTypeCatalogOnlyAdds(baseDoc, overlayDoc, `${layerDir}/${relativePath}`, target.layer);
-          const merged = strategicMerge(baseDoc, overlayDoc, trace?.document(relativePath, sourcePath, true));
+          const merged = strategicMerge(baseDoc, overlayDoc, trace?.document(relativePath, sourcePath, true, baseDoc));
           const mergedPath = join(buildDir, relativePath);
           mkdirSync(join(mergedPath, ".."), { recursive: true });
           writeFileSync(mergedPath, YAML.stringify(merged), "utf8");

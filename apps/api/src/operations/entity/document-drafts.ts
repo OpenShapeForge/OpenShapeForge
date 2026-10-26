@@ -3,7 +3,6 @@ import { sql, type Transaction } from "kysely";
 import type { DB } from "../../generated/db/types.js";
 import { currentDbSessionDatabase, type DbSessionInput } from "../../db/session.js";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
-import { withBlueprintDocumentServices } from "../../modules/platform.js";
 import { generatedCrudError } from "./catalog.js";
 import { operationFailure } from "@openshapeforge/operations";
 import { normalizeTimestampToken } from "../../db/timestamps.js";
@@ -24,6 +23,7 @@ export async function applyDocumentContentDraft(trx:Transaction<DB>,session:DbSe
   const row=variants.rows.find(v=>v.id===item.id);
   if(!row||normalizeTimestampToken(row.updatedAt)!==normalizeTimestampToken(item.expectedVersion))throw generatedCrudError("The document has changed. Reload before saving.","VERSION_CONFLICT");
  }
+ const { withBlueprintDocumentServices } = await import("../../modules/platform.js");
  return withBlueprintDocumentServices(db,session,async(services,live)=>{
   await services.records.assertAccess(live,{entityName:"Document",id:String(original),intent:"get"});
   const operations=await services.operations.list(live);

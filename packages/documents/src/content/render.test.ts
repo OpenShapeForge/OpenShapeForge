@@ -4,7 +4,7 @@ import { hashCanonicalJson, immutableContent } from "./json.js";
 import { renderTemplateSnapshot } from "./render.js";
 
 const tenantId = "00000000-0000-4000-8000-000000000001";
-async function seal(content: Record<string, unknown>) {
+async function seal<T extends Record<string, unknown>>(content: T) {
   return immutableContent({ ...content, compositionHash: await hashCanonicalJson(content) });
 }
 async function snapshot(channel: string) {

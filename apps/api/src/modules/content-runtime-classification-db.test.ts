@@ -142,7 +142,8 @@ describe("persisted content classification through the canonical PostgreSQL runt
       const redacted = await execute(reads, "Chip.get", "get", { id: ids.chip });
       expect("data" in redacted && (redacted.data as Record<string, unknown>).value).toBe(null);
       const refused = await materialize(reads);
-      expect("error" in refused && refused.error.code).toBe("MISSING_VARIABLE");
+      // A withheld typed value violates its declared source contract.
+      expect("error" in refused && refused.error.code).toBe("DEPENDENCY_INVALID");
       expect(JSON.stringify(refused)).not.toContain(marker);
       const writer = await materialize([...new Set([...reads, ...writes])]);
       expect("error" in writer).toBe(false);

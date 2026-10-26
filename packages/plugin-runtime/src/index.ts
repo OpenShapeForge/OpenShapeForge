@@ -395,7 +395,35 @@ export type PluginDatabase = {
   ): Promise<T>;
 };
 
+/** Core-minted opaque permission; never construct or widen this grant. */
+export type RuntimeConnectionGrant = { readonly __brand: unique symbol };
+/** Resolve by a known Connection or an Adapter's available Connection. */
+export type RuntimeConnectionSelector =
+  | { connectionId: string; adapterKey?: never }
+  | { adapterKey: string; connectionId?: never };
+/** Plaintext for trusted server code only. Never log or return these values. */
+export type RuntimeConnectionValues = {
+  connectionId: string; connectionKey: string; adapterKey: string;
+  transport: string; connectionScope: "tenant" | "user";
+  ownerUserId: string | null;
+  /** Includes decrypted configuration and any live OAuth access/refresh tokens. */
+  values: Readonly<Record<string, string>>;
+  /** Adapter-classified configuration keys; the complement is NOT safe to log. */
+  secretKeys: readonly string[];
+  egressGrant: RuntimeConnectionGrant;
+};
+export type RuntimeConnectionResolution =
+  | { ok: true; connection: RuntimeConnectionValues }
+  | { ok: false; code: "NOT_FOUND" | "FORBIDDEN" | "CONNECTION_REQUIRED" |
+      "SECRET_KEYRING_MISSING" | "REAUTHORIZATION_REQUIRED" | "TOKEN_REFRESH_FAILED";
+      message: string };
+
 export type PluginPlatformServices = {
+  /** Core alone opens Connection values; retained or foreign sessions are refused.
+   * Absent on runtimes without this capability; consumers must fail closed. */
+  readonly secrets?: {
+    resolveConnectionValues(session: PluginSessionContext, selector: RuntimeConnectionSelector): Promise<RuntimeConnectionResolution>;
+  };
   /** Host-owned signing secret sealing and raw-body verification; no plaintext read API. */
   readonly webhookSecrets?: RuntimeWebhookSecretServices<PluginSessionContext>;
   readonly records: RuntimeRecordAccessServices<PluginSessionContext>;
@@ -446,7 +474,13 @@ export type PluginPlatformServices = {
     list(
       session: PluginSessionContext,
     ): Promise<readonly RuntimeOperationDefinition[]>;
-    /** Returns only a definition available to this live verified session. */
+    /**
+     * Returns only a definition available to this live verified session.
+     * `operationId` is a canonical Operation id, or a generated entity tool
+     * name this deployment includes (what a native Capability may name);
+     * the latter answers with that canonical definition, whose `id` is the
+     * canonical one. A name several entities share resolves to nothing.
+     */
     get(
       session: PluginSessionContext,
       operationId: string,

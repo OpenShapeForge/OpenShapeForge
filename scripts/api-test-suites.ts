@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 export const apiRoot = resolve(import.meta.dir, "../apps/api");
@@ -10,13 +10,14 @@ export const graphqlUnitTests = [
   "classified-query-guard.unit", "classified-nullability.unit", "description-projection.unit",
   "immutable-writability.unit", "query-hardening.unit", "list-input-allowlist.unit",
   "decimal-scalar.unit",
-].map(name => `src/graphql/__tests__/${name}.test.ts`);
+].map(name => `src/graphql/__tests__/${name}.test.ts`).concat("src/graphql/available-tenants.unit.test.ts");
 
 export function graphqlTestFiles(root = apiRoot, relative = "src/graphql/__tests__"): string[] {
-  return readdirSync(join(root, relative), { withFileTypes: true }).flatMap(entry => {
-    const path = `${relative}/${entry.name}`;
-    return entry.isDirectory() ? graphqlTestFiles(root, path) : /[._](?:test|spec)\.[cm]?[jt]sx?$/.test(entry.name) ? [path] : [];
-  }).sort();
+  const walk=(directory:string):string[]=>readdirSync(join(root,directory),{withFileTypes:true}).flatMap(entry=>{
+    const path=`${directory}/${entry.name}`;
+    return entry.isDirectory()?walk(path):/[._](?:test|spec)\.[cm]?[jt]sx?$/.test(entry.name)?[path]:[];
+  });
+  return [...walk(relative),...graphqlUnitTests.filter(file=>!file.startsWith(`${relative}/`)&&existsSync(join(root,file)))].sort();
 }
 
 export function partitionGraphqlTests(files: string[]) {

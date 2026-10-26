@@ -1,5 +1,6 @@
 import { relatedUpdateSchema } from "./related-update-schema.js";
 import { blueprintBindingsSchema } from "./blueprint-create-schema.js";
+import { sortablePositionFieldKeys } from "./authoring/sortable-position.js";
 // SPDX-License-Identifier: BUSL-1.1
 /** Concrete JSON Schemas for the canonical entity Operation executor. */
 import type {
@@ -475,18 +476,27 @@ export function entityListFilterFields(
   return [...fields, ...relationships.map((entry) => ({ key: entry.key, schema: entry.schema }))];
 }
 
-/** The fields a list may sort on: every single-valued scalar the caller may filter on. */
+/**
+ * The fields a list may sort on: every single-valued scalar the caller may
+ * filter on, then the positions that order this entity's children in another
+ * entity's sortable collection (`sortablePositionFieldKeys`), which the
+ * runtime sorts on like any column. Without `contracts` no owner is known and
+ * only the entity's own fields are offered.
+ */
 export function entitySortableFieldKeys(
   contract: CompiledEntityContract,
   excludeField?: string,
+  contracts: readonly CompiledEntityContract[] = [],
 ): string[] {
-  return contract.model.fields
+  const own = contract.model.fields
     .filter((field) =>
       field.key !== excludeField &&
       field.cardinality !== "collection" &&
       field.baseType !== "object"
     )
     .map((field) => field.key);
+  const positions = sortablePositionFieldKeys(contract.entity.name, contracts).filter((key) => !own.includes(key));
+  return [...own, ...positions];
 }
 
 /**
@@ -644,7 +654,7 @@ export function entityOperationJsonSchemas(
         filterProperties[key] = { ...presentation(schema), oneOf: [schema, exactFilter(schema)] };
       }
       Object.assign(filterProperties, relationshipAnyFilters(contract, contracts, referentiedata));
-      const sortable = entitySortableFieldKeys(contract, secureInputTarget);
+      const sortable = entitySortableFieldKeys(contract, secureInputTarget, contracts);
       return {
         inputSchema: {
           type: "object",

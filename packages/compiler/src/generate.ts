@@ -854,6 +854,11 @@ function renderManifestJson(
       required: column.required === true || column.primaryKey === true,
       primaryKey: column.primaryKey === true,
       generated: column.generated ?? null,
+      // The verbatim SQL default schema.sql renders. The migrate chain's
+      // roll-forward reads it to tell a column Postgres can add to a populated
+      // table (it has a default) from one that needs a versioned backfill, and
+      // to report a changed default as drift.
+      ...(column.default === undefined ? {} : { default: column.default }),
       ...(column.sourceField === undefined ? {} : { sourceField: column.sourceField }),
       ...(column.document ? { document: column.document } : {}),
       ...(column.fieldPolicy === undefined ? {} : { fieldPolicy: column.fieldPolicy }),

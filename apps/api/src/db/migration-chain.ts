@@ -7,8 +7,10 @@ import type { RunMaintenanceSeed } from "@openshapeforge/plugin-runtime";
  * (db/bootstrap.ts adds the advisory lock + lock_timeout around it) and by
  * the migration tests (which run it against throwaway scratch databases).
  *
- * Three phases, no ledger of hand-written history: the schema is versioned
- * by git, and a database is created from what the manifest says today.
+ * Three phases. An empty database is created from what the manifest says
+ * today; a built one is carried forward to it — by the versioned migrations
+ * it has not run yet, then by the additive roll-forward of the generated
+ * schema.
  *
  *   VERIFY
  *   0.  role contract         — every declared database role exists
@@ -22,14 +24,18 @@ import type { RunMaintenanceSeed } from "@openshapeforge/plugin-runtime";
  *      `workerAccess` policies compare `current_user` against. Its grants
  *      are enumerated rather than swept, and also land in step 4.
  *
- *   CREATE
+ *   CREATE / MIGRATE
  *   1.  app helpers           — the `app` schema and the RLS helper functions
  *      every policy references.
+ *   1a. versioned migrations  — on a built database, the hand-written
+ *      transformations it has not run yet, each in its own transaction with
+ *      its ledger row (migrations/versioned-runner.ts). A no-op on an empty
+ *      database: the build below records the registry as its baseline.
  *   2.  generated schema      — schema.sql from the ONE declaration of every
  *      table (platform-schema.yaml + the authoring layers), the runtime-owned
- *      platform bookkeeping included; on a built database, a checksum no-op —
- *      or a refusal when the checksum differs, because a database is rebuilt
- *      with db:reset rather than migrated (migrations/generated-schema.ts).
+ *      platform bookkeeping included. On a built database: a checksum no-op,
+ *      the additive roll-forward when the checksum differs, or a refusal
+ *      listing non-additive drift (migrations/generated-schema.ts).
  *   3.  core invariants       — what the manifest cannot express on manifest
  *      tables and the core owns: the org-unit closure trigger, the document
  *      authority guards and compound keys, the logical document commands,
@@ -101,6 +107,13 @@ import {
   type GeneratedSchemaMigrationResult,
 } from "./migrations/generated-schema.js";
 import {
+  applyVersionedMigrations,
+  versionedMigrationBaseline,
+  type VersionedMigration,
+  type VersionedMigrationsResult,
+} from "./migrations/versioned-runner.js";
+import { versionedMigrations } from "./migrations/versioned/index.js";
+import {
   applyGeneratedPluginMigrations,
   loadGeneratedPluginMigrations,
   type GeneratedPluginMigration,
@@ -117,6 +130,8 @@ import type { CatalogSeedResult } from "./migrations/catalog-seed.js";
 export type MigrationChainOptions = {
   /** Override compiler-plugin invariant DDL (used by tests). */
   pluginMigrations?: readonly GeneratedPluginMigration[];
+  /** Override the versioned migration registry (used by tests). */
+  versioned?: readonly VersionedMigration[];
   appliedBy?: string;
   /**
    * Seed steps contributed by runtime modules, applied in registration order
@@ -131,8 +146,12 @@ export type MigrationChainOptions = {
 };
 
 export type MigrationChainResult = GeneratedSchemaMigrationResult & {
+  /** Versioned migrations applied, skipped and reconciled during this run. */
+  versioned: VersionedMigrationsResult;
   /** Compiler-plugin invariant migrations applied during this run. */
   pluginMigrationsApplied: string[];
+  /** Plugin-owned constraints dropped because no entry renders them any more. */
+  pluginConstraintsRemoved: string[];
   /** Outcome of the entity page-config catalog seed. */
   pageConfigs: EntityPageConfigsSeedResult;
   /** Outcome of each module-contributed seed, keyed by its reporting name. */
@@ -150,7 +169,12 @@ export async function runMigrationChain(
   await applyAppRoleMigration(db);
   await applyWorkerRoleMigration(db);
   await applyAppHelpersMigration(db);
-  const generated = await applyGeneratedSchemaMigration(db, options.appliedBy);
+  const registry = options.versioned ?? versionedMigrations;
+  const versioned = await applyVersionedMigrations(db, registry);
+  const generated = await applyGeneratedSchemaMigration(db, {
+    appliedBy: options.appliedBy,
+    baseline: await versionedMigrationBaseline(registry),
+  });
   await applyCoreInvariants(db);
   await applyDocumentContentGuards(db);
   // The identity-link invariants (app.identity_subject() above all) may be
@@ -212,7 +236,9 @@ export async function runMigrationChain(
   await seedTenantOwnRelations(db);
   return {
     ...generated,
+    versioned,
     pluginMigrationsApplied: pluginMigrations.applied,
+    pluginConstraintsRemoved: pluginMigrations.removed,
     pageConfigs,
     moduleSeeds,
   };

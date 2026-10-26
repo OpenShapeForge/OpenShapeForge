@@ -145,9 +145,18 @@ describe("generated MCP server", () => {
       query: "import a notebook",
       limit: 20,
     });
-    expect(toolEnvelope(searched.body)).toMatchObject({
-      operations: [{ operation: { id: "notebook.import" } }],
-    });
+    // The Operation matching every word first; Operations "notebook" names
+    // follow it. All of them compact summaries this session may use.
+    const hits = (toolEnvelope(searched.body) as { operations: Record<string, unknown>[] }).operations;
+    expect(hits[0]).toMatchObject({ operation: { id: "notebook.import" } });
+    for (const hit of hits) {
+      expect(hit).not.toHaveProperty("inputSchema");
+      expect(hit).not.toHaveProperty("outputSchema");
+      const lookup = await callTool(notebookWriter, "osf_search_operations", {
+        operationId: (hit.operation as { id: string }).id,
+      });
+      expect((toolEnvelope(lookup.body) as { operations: unknown[] }).operations).toHaveLength(1);
+    }
 
     const called = await callTool(notebookWriter, "osf_execute_operation", {
       operationId: "notebook.import",

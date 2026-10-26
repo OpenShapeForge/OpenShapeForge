@@ -51,7 +51,7 @@ export type ParsedSubmission = {
 
 /** The exact field subset both browser renderers and submission parsing use. */
 export function configurationFormDefinitions(
-  pending: PendingConfiguration,
+  pending: Pick<PendingConfiguration, "definitions">,
 ): JsonRecord[] {
   const { schema, elicitable } = elicitationSchemaFromDefinitions(pending.definitions);
   return elicitable.map(field => ({ ...field, schema: schema.properties[String(field.key)], secret: isSecretDefinition(field) }));

@@ -10,6 +10,7 @@ import { startConfigurationForSession } from "./configuration-start.js";
 import { sql } from "kysely";
 import { isDeepStrictEqual } from "node:util";
 import { withDbSession } from "../db/session.js";
+import { assertConfigurationOwner } from "./acting-relation-guard.js";
 import { configurationOwnerPatch } from "./configuration-ownership.js";
 import type { DbSessionInput } from "../db/session.js";
 import {
@@ -119,7 +120,12 @@ export async function registerConfigurationHandoffRoutes(
         ? serializeRow(sourceTable, sourceResult.rows[0])
         : null;
       if (sourceRow) {
+        // The atomic claim holds a pooled connection during this probe. Bound
+        // the whole HTTP chain, in addition to the per-request timeout.
+        const probeDeadline = AbortSignal.timeout(20_000);
         const report = await testElicitedRow({
+          fetchImpl: Object.assign((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => fetch(input, { ...init, signal: init?.signal
+            ? AbortSignal.any([probeDeadline, init.signal]) : probeDeadline }), { preconnect: fetch.preconnect }),
           row: { [pending.elicit.into]: values[pending.elicit.into] },
           sourceRow,
           elicit: pending.elicit,
@@ -181,6 +187,7 @@ export async function registerConfigurationHandoffRoutes(
         if (!locked) throw new HttpError(404, "NOT_FOUND", "The configured record is unavailable.");
         for (const column of tableDef.columns) {
           const field = fieldNameForColumn(column);
+          if (field === "ownerUserId") assertConfigurationOwner(pending, locked[column.name], values.ownerUserId);
           if (field === pending.elicit.into) continue;
           if (!Object.hasOwn(pending.modelValues, field)) {
             if (field === pending.elicit.sourceField || (column.immutable && locked[column.name] != null)) throw new HttpError(409, "CONFIGURATION_BINDING_MISMATCH", "The secure form does not match this record.");
@@ -205,7 +212,7 @@ export async function registerConfigurationHandoffRoutes(
       return { ok: true, id: String(existing.id) };
     }
     const created = await createGeneratedEntityForTable(db, writeSession, tableDef, values);
-    return { ok: true, id: String(created[tableDef.primaryKey!]) };
+    return { ok: true, id: String(created.id) };
   };
 
   class SubmissionRejected extends Error {
@@ -252,13 +259,23 @@ export async function registerConfigurationHandoffRoutes(
       definitions: configurationFormDefinitions(found.pending),
     };
   });
+  instance.get(`${ENTITY_CONFIGURATION_PATH}/pending/:id`, async (request) => {
+    const { db, session } = await requireMcpSession(request);
+    const id = (request.params as { id: string }).id;
+    if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id)) throw new HttpError(404, "NOT_FOUND", "This configuration form is unavailable.");
+    const found = await latestConfigurationForSession(session, db, id);
+    if (!found) throw new HttpError(404, "NOT_FOUND", "This configuration form is unavailable or expired.");
+    return { id: found.id, displayName: found.pending.displayName, messagePrefix: found.pending.messagePrefix,
+      definitions: configurationFormDefinitions(found.pending) };
+  });
   instance.post(
     `${ENTITY_CONFIGURATION_PATH}/pending/:id`,
     async (request, reply) => {
       const { db, session } = await requireMcpSession(request, "configuration-form");
-      const found = await latestConfigurationForSession(session, db);
       const id = (request.params as { id?: string }).id;
-      if (!found || found.id !== id) {
+      if (!id || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id)) throw new HttpError(404, "NOT_FOUND", "This configuration form is unavailable.");
+      const found = await latestConfigurationForSession(session, db, id);
+      if (!found) {
         throw new HttpError(
           404,
           "NOT_FOUND",

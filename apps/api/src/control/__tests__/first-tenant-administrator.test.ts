@@ -261,6 +261,8 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     expect(await create('org_admin')).toMatchObject({roles:['org_admin'],delivery:'email_sent'});
     await expect(create('org_employee')).rejects.toMatchObject({code:'INVITATION_ROLE_CONFLICT'});
     expect(existingSends).toHaveLength(1);
+    await sql`update platform.identity_relations set roles=ARRAY['org_admin','org_employee']`.execute(owner.db);
+    expect(await create('org_admin')).toMatchObject({roles:['org_admin','org_employee'],delivery:'email_sent'});
   });
 
   it('keeps a provider notice addressable after local intent was revoked', async () => {

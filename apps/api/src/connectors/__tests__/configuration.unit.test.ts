@@ -162,3 +162,9 @@ describe("required secrets", () => {
     expect(validator.missingSecrets(split, new Set(), required)).toEqual([]);
   });
 });
+
+it("enforces exact numeric bounds for text and number values", () => {
+  const v = new ConnectorConfigurationValidator({ slug: "bounded", configuration: { fields: [{ key: "amount" }], secretFields: [], schema: { type: "object", properties: { amount: { type: ["integer", "string"], minimum: 1, maximum: 10, "x-osf-exact": { minimum: "1", maximum: "10" } } }, required: ["amount"] } } });
+  for (const amount of [1, 10, "1", "10"]) expect(() => v.parse({ amount })).not.toThrow();
+  for (const amount of [0, 11, "0", "11", "999999"]) expect(() => v.parse({ amount })).toThrow();
+});

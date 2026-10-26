@@ -23,7 +23,7 @@ journal, and manifest-derived e2e + load tests. Start with
 | [execution-policies.md](execution-policies.md) | Host-wide execution admission: `executionPolicies`, which Operations are governed, where it is decided (including inside the owning transaction and before a queued job's handler), the read-only decision boundary, fail-closed boot, composition, `EXECUTION_NOT_PERMITTED`, and the limits |
 | [operation-availability.md](operation-availability.md) | Current record action availability: `operationAvailabilityHandlers`, batched offers, re-evaluation inside the write |
 | [capability-grants.md](capability-grants.md) | Token-authorized Operations for recipients without an account: `auth.mode: capability`, the grant table, resolution into a grant session, attempt limits, issuing and revoking, audit |
-| [migrations.md](migrations.md) | The reset model: the build chain, db:reset and the empty-database bootstrap, the checksum refusal, drift signals, caveats |
+| [migrations.md](migrations.md) | The migrate chain: build, additive roll-forward, versioned migrations, db:reset for development, the empty-database bootstrap, drift signals, caveats |
 | [consuming.md](consuming.md) | Using the compiler from a host repo; the web app; current limitations |
 | [field-acceptance-fixture.md](field-acceptance-fixture.md) | The opt-in 48-field fixture: the numbered value catalogue, the variable mode per field, who owns each contract, and the gaps the authoring contract does not cover |
 

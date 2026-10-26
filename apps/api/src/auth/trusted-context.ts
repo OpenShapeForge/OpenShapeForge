@@ -62,6 +62,8 @@ export type TrustedSessionContext = {
   loginSessionBinding?: string;
   /** Verified tenant-local Relation label; display only, never authorization. */
   userDisplayName?: string | null;
+  /** Email only when the verified human bearer asserts email_verified=true. */
+  verifiedEmail?: string;
   /**
    * The issuer of the identity behind `userId`: the token's `iss` on the
    * bearer and API-key paths, the realm this deployment trusts for a

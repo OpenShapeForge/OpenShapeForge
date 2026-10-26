@@ -66,7 +66,7 @@ for (const table of tables) {
                   table.realtime.visibilityColumns.map((column) => [column, expect.anything()]),
                 ),
               }
-            : {}),
+            : { visibility: {} }),
         });
       }
 

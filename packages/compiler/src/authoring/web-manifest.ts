@@ -24,6 +24,7 @@ import { materializeCollectionOperations } from "./collection-operations.js";
 import { constrainedReferenceCreateOperationId, withOperationControls } from "../generate-operations.js";
 import { fieldOptionSource } from "./web-field-options.js";
 import { compileFieldValuePolicy } from "./field-value-policy.js";
+import { sortablePositionColumn } from "./sortable-position.js";
 import type {
   CompiledEntityContract,
   CompiledEntityOperation,
@@ -902,7 +903,7 @@ function projectEntity(
       ...(relationship.version ? { version: relationship.version } : {}),
       ...(relationship.childLock ? { childLock: relationship.childLock } : {}),
       ...(relationship.cardinality ? { cardinality: relationship.cardinality } : {}),
-      ...(relationship.sortable ? { sortable: true, positionColumn: `${relationship.foreignKey}_position` } : {}),
+      ...(relationship.sortable ? { sortable: true, positionColumn: sortablePositionColumn(relationship.foreignKey!) } : {}),
       ...(relationship.via ? { via: relationship.via } : {}),
       ...(relationship.through ? { through: relationship.through } : {}),
       ...(relationship.fieldKey && relationship.kind !== "belongsTo" ? { mutationSupport: Object.keys(nativeOperations).length ? "atomic" as const : "unsupported" as const } : {}),
@@ -1715,7 +1716,7 @@ export function buildWebManifest(
   if (resolved.requireTranslations) for (const operation of schemaOperations) {
     // Collection-query inputs carry field keys, not a JSON Schema; their labels
     // are covered by the entity field check above.
-    if (operation && "input" in operation && operation.input.kind === "json-schema") missing.push(...missingSchemaUiTranslations(operation.input.schema, `${operation.id}.input`));
+    if (operation && "input" in operation && operation.input?.kind === "json-schema") missing.push(...missingSchemaUiTranslations(operation.input.schema, `${operation.id}.input`));
     if (operation && "output" in operation && operation.output?.kind === "json-schema" && operation.output.schema) missing.push(...missingSchemaUiTranslations(operation.output.schema, `${operation.id}.output`));
   }
   if (missing.length) throw new Error(`Missing required UI translations: ${missing.join(", ")}`);

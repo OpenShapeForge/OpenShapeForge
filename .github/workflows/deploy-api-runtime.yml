@@ -1,0 +1,81 @@
+name: Deploy API runtime
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Published API commit tag (sha- followed by the commit)
+        required: true
+        type: string
+      image_digest:
+        description: Published immutable API digest (sha256:...)
+        required: true
+        type: string
+permissions:
+  contents: read
+  packages: read
+# Shares the existing full-deploy lock; identity and runtime upgrades cannot race.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  RELEASE: openshapeforge
+  NAMESPACE: openshapeforge
+  IMAGE_TAG: ${{ inputs.image_tag }}
+  API_IMAGE_DIGEST: ${{ inputs.image_digest }}
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: dev
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate immutable runtime selection
+        run: bash scripts/deploy-api-runtime.sh --validate-only
+      - name: Verify the published API tag matches the selected digest
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
+          actual=$(docker buildx imagetools inspect "ghcr.io/openshapeforge/openshapeforge-api:$IMAGE_TAG" --format '{{json .Manifest.Digest}}' | jq -r .)
+          [[ "$actual" == "$API_IMAGE_DIGEST" ]] || { echo "API tag digest mismatch: $actual != $API_IMAGE_DIGEST" >&2; exit 1; }
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - name: Configure Scaleway CLI
+        uses: scaleway/action-scw@2e34a1eb35cf3cac627f24643a101fea269cbd83 # v0.0.3
+        with:
+          version: v2.61.0
+          save-config: false
+          export-config: false
+          access-key: ${{ secrets.SCW_ACCESS_KEY }}
+          secret-key: ${{ secrets.SCW_SECRET_KEY }}
+          default-project-id: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+      - name: Fetch the existing cluster kubeconfig
+        env:
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+          SCW_CLUSTER_ID: ${{ secrets.SCW_CLUSTER_ID }}
+        run: |
+          set -euo pipefail
+          [[ -n "$SCW_CLUSTER_ID" && -n "$SCW_DEFAULT_PROJECT_ID" && -n "$SCW_DEFAULT_ORGANIZATION_ID" ]]
+          scw k8s kubeconfig install "$SCW_CLUSTER_ID" region=nl-ams auth-method=copy-cli-token
+      - name: Require a deployed existing release before any writes
+        run: bash scripts/deploy-api-runtime.sh --check-release
+      - name: Refresh the existing image pull credential
+        env:
+          PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          kubectl -n "$NAMESPACE" create secret docker-registry ghcr-pull \
+            --docker-server=ghcr.io --docker-username="$GITHUB_ACTOR" \
+            --docker-password="$PULL_TOKEN" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+      - name: Update the API with existing Helm values and normal migration hooks
+        run: bash scripts/deploy-api-runtime.sh
+      - name: Verify the running Brotli decoder
+        run: |
+          kubectl -n "$NAMESPACE" exec deployment/openshapeforge-openshapeforge-api -c api -- \
+            bun -e 'const a=require("node:assert/strict"),z=require("node:zlib");a.throws(()=>z.brotliDecompressSync(Buffer.from("200010414141fcffff07002228f00b60f7f41f000000","hex")),{code:"ERR__ERROR_FORMAT_BLOCK_SWITCH",errno:-17});console.log(JSON.stringify({bun:process.versions.bun,brotliRegression:"pass"}));'

@@ -203,7 +203,7 @@ test("structured source queries publish typed bounded predicates for a second en
   input.source!.query = { mode: "structured", filterFields: ["id", "label", "occurredAt"], sortFields: ["label", "occurredAt"] };
   const compiled = contract(input);
   const list = compiled.pluginOperations!.find(op => op.key === "list")!.definition.input!.schema as any;
-  expect(list.properties.filter).toEqual({ $ref: "#/$defs/filter0" });
+  expect(list.properties.filter).toEqual({ $ref: "#/$defs/filter0", "x-osf-i18n": { title: { en: "Filter", nl: "Filter" } } });
   expect(list.$defs.filter0.properties.id.properties.in.maxItems).toBe(100);
   expect(list.$defs.filter0.properties.occurredAt.properties.gte.format).toBe("date-time");
   expect(list.$defs.filter4.properties.or).toBeUndefined();

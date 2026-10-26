@@ -65,9 +65,8 @@ export async function recordConnectorAudit(
       connectorSlug: input.connectorSlug,
       instanceKey: input.instanceKey,
       actorUserId: input.userId,
-      // Sorted so the same change always journals the same bytes.
-      changedFields: [...(input.changedFields ?? [])].sort(),
-      secretFields: [...(input.secretFields ?? [])].sort(),
+      // The canonical field-name list includes secret keys, never their values.
+      changedFields: [...new Set([...(input.changedFields ?? []), ...(input.secretFields ?? [])])].sort(),
       ...(input.contractChecksum ? { contractChecksum: input.contractChecksum } : {}),
       ...(input.providerFailure ? { providerFailure: input.providerFailure } : {}),
       ...(input.correlationId ? { correlationId: input.correlationId } : {}),

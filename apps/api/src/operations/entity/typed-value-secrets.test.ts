@@ -18,6 +18,21 @@ const session={tenantId:'11111111-1111-4111-8111-111111111111'};
 const trx={} as Transaction<DB>;
 
 describe('opt-in encrypted typed values',()=>{
+ test('the public Document value projects its physical reference as the canonical value',()=>{
+  const reference='22222222-2222-4222-8222-222222222222';
+  const documentValue=column('document_value_id','uuid',{sourceField:'documentValue'});
+  const typed=column('value','jsonb',{typedBy:{...value.typedBy,documentField:'documentValue',documentColumn:'document_value_id'}});
+  const documentTable={...table,columns:[id,definition,typed,documentValue]};
+  const projected=projectTypedValues(documentTable,{definition:{key:'value',osfType:'Document',document:{content:'blocks'}},value:null,document_value_id:reference});
+  expect(projected.value).toBe(reference);
+ });
+ test('public JSON keeps envelope-shaped values and nested ciphertext keys intact',async()=>{
+  const definitionValue={key:'value',osfType:'object'};
+  const publicValue={ciphertext:'ordinary data',nested:{keyId:'example',algorithm:'example'}};
+  const row={definition:definitionValue,value:publicValue};
+  expect(projectTypedValues(table,row).value).toEqual(publicValue);
+  expect((await prepareTypedValueWrite(trx,session,table,new Map<GeneratedCrudColumn,unknown>([[value,publicValue]]),row)).get(value)).toEqual(publicValue);
+ });
  test('plaintext is sealed before storage and every projection returns only the set marker',async()=>{
   const result=await prepareTypedValueWrite(trx,session,table,new Map<GeneratedCrudColumn,unknown>([[definition,type],[value,'synthetic-only']]));
   const stored=result.get(value) as StoredSecret;
@@ -39,7 +54,7 @@ describe('opt-in encrypted typed values',()=>{
   expect(()=>assertTypedDefinitionSupported(type,'definition','submitted')).toThrow();
   expect(()=>assertTypedDefinitionSupported({...type,osfType:'object',children:[type]},'definition','submitted',value.typedBy)).toThrow();
  });
- test('partial or corrupted envelopes remain redacted even if the definition is corrupted',()=>{
-  expect(projectTypedValues(table,{definition:{key:'value',osfType:'string'},value:{ciphertext:'invalid'}}).value).toBe('__set__');
+ test('a corrupted scalar definition refuses an envelope rather than disclosing it',()=>{
+  expect(()=>projectTypedValues(table,{definition:{key:'value',osfType:'string'},value:{ciphertext:'invalid'}})).toThrow();
  });
 });

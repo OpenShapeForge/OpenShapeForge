@@ -83,3 +83,86 @@ Chromium, checks the app return and absence of an identity cookie, and refuses
 consumed, revoked, tampered, disabled-organization and foreign-return cases.
 The app return in this proof is a login-entry fixture, not an authenticated host
 journey. Reports, screenshots and video are retained under `.runtime/`.
+
+## MCP resource scopes for dynamically registered clients
+
+The opt-in `osf-mcp-resource-scopes` client-policy executor runs at two native
+Keycloak boundaries. `REGISTERED` attaches explicitly registration-enabled resource scopes as
+**optional** scopes in the DCR transaction, before its response. Explicit `registration-scopes` can also make supporting OpenID scopes available when a client registers a smaller scope set than it later requests. It changes no
+user role grants, default scopes or callbacks. Supporting scopes cannot also be the resource scope of any configured binding. They use lowercase
+names (`[a-z][a-z0-9_-]*`), excluding `openid`; they require registration opt-in.
+An organization-free binding cannot attach `organization`. The scopes may expose
+claims for roles already held by the user, but do not grant those roles. `AUTHORIZATION_REQUEST`
+validates one exact RFC 8707 `resource` and records its configured scope in a server-owned client note after native scope, redirect and PKCE validation, before login and consent. The required `osf-mcp-resource-scope-binding` authenticator must be the first browser-flow execution; it projects that note idempotently into native scope state before cookie or scope conditions run. No client mutation occurs at login.
+Resource scope names are explicit lowercase OAuth tokens (up to 150 letters, digits, colons, underscores or hyphens); standard identity scopes such as `openid`, `organization` and `roles` cannot be resource scopes. For product resources, choose a scope name such as `product-shared-mcp` outside the tenant-owned `mcp-resource:<alias>` namespace; the host provisions and reconciles that scope and its audience mappers. If clients must request it during registration, the host must also include it in its Allowed Client Scopes policy. Built-in identity scopes and the `organization:`/`org:` namespaces cannot be resource scopes. A scope belonging to another configured resource, a conflicting tenant resource scope, or a repeated resource/scope parameter fails closed.
+Requests without a resource, and resources outside this policy, retain native
+behavior. Existing clients must already have the optional scope; the executor
+never repairs them during login.
+
+Configure a realm client profile containing this executor, then reference the
+profile from an enabled `any-client` client policy. The executor configuration is:
+
+```json
+{
+  "resources": [
+    {"resource": "https://app.example.test/admin/mcp", "scope": "mcp-resource:control", "organization": false, "registration": true, "registration-scopes": ["profile", "roles"]},
+    {"resource": "https://app.example.test/acme/mcp", "scope": "mcp-resource:acme", "organization": true, "registration": false}
+  ]
+}
+```
+
+Registration attachment is opt-in per binding (`registration` defaults to false); do not enable it for a tenant audience unless that audience is deliberately available to every registering client. Membership and resource-server role checks still enforce access. A missing realm scope is skipped during registration with a warning naming the scope and its role. Requests requiring that missing scope remain denied by native validation; other supported scope requests can proceed. Resource URLs are exact HTTPS
+addresses without userinfo, query or fragment; no wildcard or prefix matching
+is performed. The host owns the scopes, audience mappers, registration callback
+policy and authentication flows. An organization-free binding removes requested
+`organization`/`organization:<alias>` scopes for that request only. The resulting
+scope can select a host's platform login flow; it grants no platform role.
+Native consent, token issuance and resource-server authorization still apply.
+
+The binding survives native KC_RESTART reconstruction because it is a dedicated client note, written by the policy (not a request parameter). The authenticator records the effective scope in the native audit event. Matching is deliberately exact, including host case and trailing slash; aliases must be listed explicitly. Invalid configuration produces a bounded OAuth policy error, not a server stack trace.
+
+### Organization-aware OAuth consent
+
+The child theme keeps native OAuth consent but disables the inherited v2
+organization-switch form on that page. Keycloak 26.7.3 supplies `oauthAction`
+for consent, while the switch form incorrectly reads the absent `loginAction`.
+This prevents a template error after broker login or multi-organization
+authentication without skipping consent or changing organization admission.
+Organization switching remains available during browser authentication.
+
+### Retry an unlinked OIDC account
+
+A first-broker-login flow may use the REQUIRED `osf-broker-account-retry`
+authenticator before Keycloak’s REQUIRED native deny-access execution. It never authenticates, creates
+or links a user. A rejected account receives a native form with retry/cancel.
+An explicit retry uses `prompt=login` by default. A provider whose upstream
+supports OSF account choice may opt in with `config["osf.account-choice"] = "true"`;
+only that reviewed capability makes retry use `prompt=select_account`,
+restoring the original client's prompt immediately after building the redirect.
+Keycloak retains the original client, state, redirect, scopes and PKCE binding.
+A linked account bypasses this first-login flow and keeps normal SSO. Only
+OIDC providers without a fixed prompt are supported; configure a reviewed
+pre-linked-identity policy, not an automatic account-linking flow.
+
+
+### Parallel accounts in one browser
+
+The image extends the native `auth-cookie` factory at a higher provider order.
+Every ordinary OIDC/SAML request delegates to Keycloak's original cookie
+authenticator. Only an interactive OIDC `prompt=select_account` skips cookie SSO.
+Requests containing `prompt=none` retain native behavior and do not expire cookies.
+It recreates a pending authorization attached to an existing user-session id
+and clears the realm's browser identity pointer without revoking the old
+server-side access or refresh sessions. Username, passkey, required actions,
+consent and token issuance remain native. The most recently selected account
+becomes the browser's SSO default; already-open applications keep their sessions.
+Cancelling account choice can leave the SSO pointer empty, while app sessions
+remain valid. Repeated choices can retain additional sessions until native SSO
+idle/max lifetimes expire them. Recreating a root authorization session can
+expire other unfinished login forms in that browser; this guarantee covers
+already authenticated app sessions, not simultaneous unfinished authorizations.
+This adds no account links, memberships or permissions.
+
+The provider registration and Keycloak internals are version-locked to the
+image. Native acceptance must prove both old-account access and refresh after
+switching, as well as ordinary correct-account SSO and unlinked denial.

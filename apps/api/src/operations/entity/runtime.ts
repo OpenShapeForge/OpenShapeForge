@@ -20,6 +20,7 @@ import rawOperationCatalog from "../../generated/operations/catalog.json" with {
 import { collectionManagedFields, collectionMutationError, withoutCollectionInputs } from "./collection-policy.js";
 import {
   generatedCrudError,
+  projectGeneratedEntityRow,
   requireEntityOperation,
 } from "./catalog.js";
 import {
@@ -68,7 +69,7 @@ import {
   assertNoForeignOperationWrittenValues,
   assertNoOperationWrittenValues,
 } from "./write-policy.js";
-import { bindableFields, prepareFieldBindings, type PreparedFieldBindings } from "./field-bindings.js";
+import { bindableFields, fieldBindingsColumn, prepareFieldBindings, type PreparedFieldBindings } from "./field-bindings.js";
 import { assertNoCallerSubtypeValues, policyEntityId, policyOperation } from "./subtype-scope.js";
 import { sessionRelation } from "../../auth/identity-link.js";
 import { sql } from "kysely";
@@ -233,6 +234,15 @@ function requireContractValues(
   assertNoCallerFieldBindings(table, values);
   assertCallerTopLevelFields(table, session, values, operation.intent as "create" | "update");
   assertEntityValuesValid(operation, table, values, options);
+}
+
+function projectBindingWriteRow(table: GeneratedCrudTable, session: DbSessionInput, row: GeneratedEntityRow | null): GeneratedEntityRow | undefined {
+  if (!row) return undefined;
+  const projected = projectGeneratedEntityRow(table, session, row);
+  // Keep the full server-owned map when projecting source values: output
+  // redaction must not silently delete an existing hidden field's binding.
+  const column = fieldBindingsColumn(table);
+  return column ? { ...projected, [column.name]: row[column.name] } : projected;
 }
 
 /**
@@ -1109,7 +1119,7 @@ async function executeEntityOperationWithContext(
         const current = bindable
           ? await fetchGeneratedEntityRow(db, session, table, requireId(request.input))
           : undefined;
-        const prepared = await prepareWriteBindings(db, session, table, request.input, supplied, current ?? undefined);
+        const prepared = await prepareWriteBindings(db, session, table, request.input, supplied, projectBindingWriteRow(table, session, current ?? null));
         const values = prepared.values;
         requireContractValues(operation, table, values, { partial: true }, session);
         const confirmation = await prepareMutationConfirmation(
@@ -1133,12 +1143,19 @@ async function executeEntityOperationWithContext(
                 : {}),
             }
           : undefined;
-        const writeParent = () => updateGeneratedEntity(db, session, {
-          table: table.name, id: requireId(request.input), values,
-          ...(prepared.bindings ? { fieldBindings: prepared.bindings } : {}),
+        const writeParent = async () => {
+          const committed = bindable
+            ? await prepareWriteBindings(db, session, table, request.input, supplied,
+                projectBindingWriteRow(table, session, await fetchGeneratedEntityRow(db, session, table, requireId(request.input), true)))
+            : prepared;
+          requireContractValues(operation, table, committed.values, { partial: true }, session);
+          return updateGeneratedEntity(db, session, {
+          table: table.name, id: requireId(request.input), values: committed.values,
+          ...(committed.bindings ? { fieldBindings: committed.bindings } : {}),
           ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
           ...(guard ? { guard } : {}),
         });
+        };
         const relatedChanges = request.input?.relatedChanges;
         if (relatedChanges !== undefined) assertOperationInputValid(operation, request.input ?? {});
         const data = await governed(() => relatedChanges === undefined ? writeParent() : withDbSession(db, session, async trx => {

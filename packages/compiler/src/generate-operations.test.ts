@@ -56,6 +56,20 @@ const operation: PluginOperationContract = {
 const context = { repoRoot: "/repo", authoringDir: "/repo/authoring", webPresent: false };
 
 describe("first-class plugin operations", () => {
+  test("embedded request schemas resolve nested filter definitions in the OpenAPI document", () => {
+    const inputSchema = { type: "object", examples: [{ data: { $ref: "#/business-value" } }], required: ["quoteId"], properties: { quoteId: { type: "string" }, filter: { $ref: "#/$defs/filter0" } }, $defs: {
+      filter0: { type: "object", properties: { and: { type: "array", items: { $ref: "#/$defs/filter1" } } } },
+      filter1: { type: "object", properties: { name: { type: "string" } } },
+    } };
+    const compiled = collectPluginOperations([{ name: "demo", operations: [{ ...operation, inputSchema, idempotency: { mode: "intrinsic" } }] }], context);
+    const spec = JSON.parse(renderOpenApiSpec({ version: 1, tables: [] }, "fixture", { operations: compiled }));
+    const body = spec.paths["/api/demo/quotes/{quoteId}/publish"].post.requestBody.content["application/json"].schema;
+    const resolve = (ref: string) => ref.slice(2).split("/").reduce((value, key) => value[key.replaceAll("~1", "/").replaceAll("~0", "~")], spec);
+    expect(resolve(body.properties.filter.$ref)).toEqual(body.$defs.filter0);
+    expect(resolve(body.$defs.filter0.properties.and.items.$ref)).toEqual(body.$defs.filter1);
+    expect((compiled[0]!.inputSchema.properties as any).filter.$ref).toBe("#/$defs/filter0");
+    expect(body.examples).toEqual(inputSchema.examples);
+  });
   test("distinguishes authenticated-session auth from an explicit deny-all role list", () => {
     const authenticated = {
       ...operation,
@@ -1082,7 +1096,7 @@ describe("first-class plugin operations", () => {
   });
 
   test("reserves the core Operation, event, lease and artifact routes", () => {
-    for (const reserved of ["artifacts", "events", "operation-leases", "operations"]) {
+    for (const reserved of ["audit-events", "artifacts", "events", "operation-leases", "operations"]) {
       expect(() => collectPluginOperations([{ name: reserved, operations: [{
         ...operation,
         key: `${reserved}.quote.publish`,
@@ -1265,6 +1279,11 @@ describe("first-class plugin operations", () => {
         60,
       )
     ).toThrow(/osf_search_operations.*plugin operation.*shared searchable Operation catalog/);
+    const secureNameCollision = genericNameCollision.map((candidate, index) => index === 0
+      ? { ...candidate, transports: { ...candidate.transports, mcp: { enabled: true as const, name: "osf_execute_operation_secure" } } }
+      : candidate);
+    expect(() => auditOperationSurfaceCollisions(secureNameCollision, { version: 1, tables: [] }, [], 60))
+      .toThrow(/osf_execute_operation_secure.*plugin operation.*shared secure Operation executor/);
   });
 
   test("rejects duplicate or invalid generated TypeScript function names", () => {

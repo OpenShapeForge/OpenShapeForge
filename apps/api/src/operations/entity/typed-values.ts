@@ -325,7 +325,12 @@ export function projectTypedValues(table: GeneratedCrudTable, row: GeneratedEnti
     const metadata=value.typedBy!;
     const stored=row[definition.name];
     if (isRecord(stored) && stored.osfType === "Document" && metadata.documentColumn) output[value.name]=row[metadata.documentColumn] ?? null;
-    if (metadata.encrypted) output=redactElicitedValues(output,value.name);
+    if (metadata.encrypted && Object.hasOwn(row,value.name) && !secretDefinition(stored)) {
+      // Validate ordinary public data rather than guessing that envelope-shaped
+      // objects are credentials. Corrupt scalar definitions still fail closed.
+      assertTypedValuesValid(table,{[fieldNameForColumn(value)]:output[value.name]},row);
+    }
+    if (metadata.encrypted && secretDefinition(stored)) output=redactElicitedValues(output,value.name);
     if (metadata.encrypted && secretDefinition(stored) && row[value.name] != null) output[value.name]=SECRET_SET_SENTINEL;
   }
   return output;

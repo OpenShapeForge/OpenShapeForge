@@ -13,7 +13,7 @@ export const inspectionPath = (parts: string[]) => JSON.stringify(parts);
 
 export function collectAuthoringInspection(repoRoot: string, config?: AuthoringConfig, sourceRoots: { prepared: string; original: string }[] = []): AuthoringInspection {
   const result: AuthoringInspection = { version: 1, documents: {} };
-  resolveAuthoringLayers(repoRoot, config, { document(target, sourcePath, patch) {
+  resolveAuthoringLayers(repoRoot, config, { document(target, sourcePath, patch, base) {
     // Never include deployment configuration, authorization, seeds or secrets.
     if (!(target.startsWith('entities/') || target === 'catalogs/osf-types.yaml' || /^contexts\/[^/]+\/osf-types.yaml$/.test(target) || target.startsWith('operations/')) || !target.endsWith('.yaml')) return;
     const text = readFileSync(sourcePath, 'utf8');
@@ -29,16 +29,16 @@ export function collectAuthoringInspection(repoRoot: string, config?: AuthoringC
     const value = ast.toJS();
     const doc = result.documents[target] ??= { kind: String(value.kind ?? 'catalog'), ...(value.entity ? { entity: value.entity } : {}), ...(value.extends ? { extends: value.extends } : {}), sources: [], changes: [] };
     const nodes: InspectionSource['nodes'] = {};
-    function visit(node: any, path: string[]) {
+    function visit(node: any, path: string[], prior: any) {
       if (!node) return;
       if (node.range) nodes[inspectionPath(path)] = { start: node.range[0], end: node.range[1], line: lines.linePos(node.range[0]).line };
-      if (isMap(node)) for (const pair of node.items) visit(pair.value, [...path, String(pair.key)]);
+      if (isMap(node)) for (const pair of node.items) visit(pair.value, [...path, String(pair.key)], prior?.[String(pair.key)]);
       if (isSeq(node)) {
-        const values = node.toJSON(); const key = arrayMergeKey(values);
-        node.items.forEach((item, i) => visit(item, [...path, key ? `${key}=${mergeKeyIdentity(values[i], key)}` : String(i)]));
+        const values = node.toJSON() as Parameters<typeof arrayMergeKey>[0]; const key = (Array.isArray(prior) ? arrayMergeKey(prior) : null) ?? arrayMergeKey(values);
+        node.items.forEach((item, i) => visit(item, [...path, key ? `${key}=${mergeKeyIdentity(values[i]!, key)}` : String(i)], key && Array.isArray(prior) ? prior.find(value => mergeKeyIdentity(value, key) === mergeKeyIdentity(values[i]!, key)) : undefined));
       }
     }
-    visit(ast.contents, []);
+    visit(ast.contents, [], base);
     let owner = dirname(sourcePath), identity: {package?: string; version?: string} = {}, path = relative(repoRoot, sourcePath);
     while (owner !== dirname(owner)) {
       const file = join(owner, 'package.json');
@@ -54,3 +54,7 @@ export function collectAuthoringInspection(repoRoot: string, config?: AuthoringC
   }});
   return result;
 }
+
+export { resolvedWebInterfaceSchema } from './web-interface-schema.js';
+export type { EntityInterfacesDefinition } from './types/authoring.js';
+export type { FieldEntry, ViewGroup } from './types/views.js';

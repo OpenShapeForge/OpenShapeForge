@@ -113,8 +113,8 @@ types:
     label: { en: Markdown, nl: Markdown }
     baseType: string
     render:
-      display: TextDisplay
-      input: MarkdownText
+      display: FieldMarkdown
+      input: FieldMarkdown
 
   email:
     label: { en: Email, nl: E-mail }

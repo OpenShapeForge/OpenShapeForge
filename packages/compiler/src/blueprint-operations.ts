@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { BLUEPRINT_THUMBNAIL_MAX_LENGTH, BLUEPRINT_THUMBNAIL_PATTERN } from '@openshapeforge/operations';
 import type { CompiledEntityInfo, CompiledPluginOperation } from "./plugins.js";
 
 export function collectBlueprintOperations(entities: readonly Pick<CompiledEntityInfo, "contract" | "slug">[]): CompiledPluginOperation[] {
@@ -12,12 +13,12 @@ export function collectBlueprintOperations(entities: readonly Pick<CompiledEntit
     const version = titled({ type: "integer", minimum: 1 }, "Blueprint version", "Blueprintversie");
     const blueprintId = titled({ type: "string" }, "Blueprint", "Blueprint");
     const expectedVersion = titled({ type: "string", format: "date-time" }, "Expected record version", "Verwachte recordversie");
-    const source = { type: "object", additionalProperties: false, required: ["blueprintId", "label", "version"], properties: { description: titled({ type: "string" }, "Description", "Beschrijving"), preview: titled({ type: "array", maxItems: 20, items: { type: "string" } }, "Preview", "Voorbeeld"), blueprintId, label: titled({ type: "string" }, "Label", "Label"), version } };
+    const source = { type: "object", additionalProperties: false, required: ["blueprintId", "label", "version"], properties: { thumbnail: titled({type:"string",maxLength:BLUEPRINT_THUMBNAIL_MAX_LENGTH,pattern:BLUEPRINT_THUMBNAIL_PATTERN},"Thumbnail","Voorbeeldafbeelding"), description: titled({ type: "string" }, "Description", "Beschrijving"), preview: titled({ type: "array", maxItems: 20, items: { type: "string" } }, "Preview", "Voorbeeld"), blueprintId, label: titled({ type: "string" }, "Label", "Label"), version } };
     const inputs = {
       list: { properties: { search: titled({ type: "string", maxLength: 200 }, "Search", "Zoeken"), limit: titled({ type: "integer", minimum: 1, maximum: 100 }, "Limit", "Limiet"), cursor: titled({ type: "string" }, "Cursor", "Cursor") }, required: [] },
       status: { properties: { id }, required: ["id"] },
       reset: { properties: { id, expectedVersion, blueprintVersion: version, confirmed: { const: true } }, required: ["id", "expectedVersion", "blueprintVersion", "confirmed"] },
-      publish: { properties: { id, expectedVersion }, required: ["id", "expectedVersion"] },
+      publish: { properties: { id, expectedVersion, thumbnail:titled({type:["string","null"],maxLength:BLUEPRINT_THUMBNAIL_MAX_LENGTH,pattern:BLUEPRINT_THUMBNAIL_PATTERN},"Thumbnail","Voorbeeldafbeelding"), retired:titled({type:"boolean"},"Retired","Ingetrokken") }, required: ["id", "expectedVersion"] },
     };
     const outputs = {
       list: { type: "object", additionalProperties: false, required: ["items", "nextCursor"], properties: { items: titled({ type: "array", items: source }, "Blueprints", "Blueprints"), nextCursor: titled({ type: ["string", "null"] }, "Next page", "Volgende pagina") } },

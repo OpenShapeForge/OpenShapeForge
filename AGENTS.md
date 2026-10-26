@@ -41,15 +41,22 @@ repository's contribution and release policy. Keep the public tree portable.
 - Prefer supported `entityPatch` and plugin extensions to copied core models.
   Check the current authoring schemas and coverage checks when adding YAML.
   Add targeted behavioral tests when manifest-derived coverage is insufficient.
-- OSF is greenfield. Development data is disposable and may be rebuilt from
-  updated seeds in the task's isolated database. Do not add data migrations,
-  compatibility shims, fallback paths or duplicate contracts merely to preserve
-  old development data. Remove existing layers that serve only those obsolete
-  contracts/data too; do not merely stop adding new ones. Retain bootstrap and
-  invariant DDL that the current model still needs. Complete code migration, update all affected consumers,
-  remove superseded code/config/tests and reseed in the same change. Do not defer
-  this cleanup as technical debt. Coordinate before resetting a shared runtime;
-  this development policy does not authorize destruction of external/customer data.
+- Development data is disposable and may be rebuilt from updated seeds in the
+  task's isolated database (`db:reset`). Do not add compatibility shims,
+  fallback paths or duplicate contracts merely to preserve old development
+  data, and remove existing layers that serve only obsolete contracts; retain
+  bootstrap and invariant DDL the current model still needs. Complete
+  code migration, update all affected consumers, remove superseded
+  code/config/tests and reseed in the same change; do not defer this cleanup.
+- Persistent databases are migrated, never reset. `db:migrate` rolls additive
+  schema changes forward. Every schema change that is not additive — a dropped,
+  renamed or retyped column or table, a required column without a default, a
+  changed default or nullability, a narrowed value set existing rows may
+  violate, a changed index or key under an existing name — ships with a
+  versioned migration (`bun run db:migration:new`) in the same change, with a
+  test that carries a database built before the change forward. See
+  [docs/migrations.md](docs/migrations.md). Coordinate before resetting a shared
+  runtime; nothing here authorizes destruction of external/customer data.
 - Reusable presentation belongs in its owning shared package; apps assemble it.
   Check current package scripts rather than assuming a web test runner is absent.
 - UI copy defaults to English; preserve explicit language selection and intentional

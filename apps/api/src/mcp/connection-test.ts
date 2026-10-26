@@ -26,7 +26,7 @@ import { HttpError } from "../rest/http-error.js";
 import type { ModuleEgressDispatch } from "../modules/egress.js";
 import { hostAllowed } from "../connectors/executor.js";
 import {
-  connectionTokenSecretScope,
+  connectionValueSecretScope,
   decryptSecret,
   keyringFromEnv,
   type SecretKeyring,
@@ -50,7 +50,7 @@ type JsonRecord = Record<string, unknown>;
 const KEYRING_ENV = "OPENSHAPEFORGE_ELICITED_SECRET_KEYS";
 const PROBE_TIMEOUT_MS = 15_000;
 
-/** Runtime-issued token fields live under the personal scope, not the elicited one. */
+/** Token-shaped fields stay out of URLs even if their classification is wrong. */
 const TOKEN_FIELDS = new Set(["accessToken", "refreshToken"]);
 
 export type ConnectionTestCheck = {
@@ -216,11 +216,10 @@ export async function testElicitedRow(
             `A stored secret needs the keyring; set ${KEYRING_ENV}.`,
           );
         }
-        // Token fields were encrypted by the sign-in callback under the
-        // connection's token scope; elicited fields under the source table.
-        const scope = TOKEN_FIELDS.has(field)
-          ? connectionTokenSecretScope(input.table)
-          : elicit.sourceTable;
+        // Only authorization-code callbacks store tokens under the connection
+        // token scope. An elicited API key may also be named accessToken and
+        // must use the source-table scope used when the form encrypted it.
+        const scope = connectionValueSecretScope(input.table, elicit.sourceTable, auth?.profile, field);
         return decryptSecret(keyring, scope, field, stored);
       },
       urlSafeKeys,

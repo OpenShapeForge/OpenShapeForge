@@ -27,7 +27,7 @@ import {
 import { assertEntityValuesValid } from "../operations/entity/input-validation.js";
 import { pluginEntityTransportInput } from "../operations/entity/transport-input.js";
 import { HttpError } from "../rest/http-error.js";
-import { guardModelTypedValueArguments } from "./typed-value-write-guard.js";
+import { guardModelTypedValueArguments, withGuardedModelTypedValueWrite } from "./typed-value-write-guard.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "../operations/session-authorization.js";
 import {
@@ -252,9 +252,9 @@ export async function invokeTool(
       );
       assertOperationWrittenFields(values, table);
       assertWritableValues(values, entity, table, session);
-      await guardModelTypedValueArguments(db, session, table, values, id);
-      await assertPublishableWrite(db, session, tables, table, values, id);
-      const result = await executeEntityOperation(db, session, {
+      const result = await withGuardedModelTypedValueWrite(db, session, table, values, id, async () => {
+        await assertPublishableWrite(db, session, tables, table, values, id);
+        return executeEntityOperation(db, session, {
         operation: operationRef("update"),
         offerIntents,
         input: {
@@ -262,6 +262,7 @@ export async function invokeTool(
           values,
           ...entityMutationControls(args),
         },
+        });
       });
       if (result.intent !== "update") throw new Error("Unexpected entity result.");
       if ("error" in result) throw new OperationFailure(result.error);

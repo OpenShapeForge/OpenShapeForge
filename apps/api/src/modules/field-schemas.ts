@@ -48,13 +48,27 @@ function createJsonSchemaCompiler() {
   return ajv;
 }
 
-let idleJsonSchemaCompiler: ReturnType<typeof createJsonSchemaCompiler> | undefined = createJsonSchemaCompiler();
+const JSON_COMPILER_VALIDATION_LIMIT = 16;
+const JSON_COMPILER_IDLE_MS = 1_000;
+let compilerGeneration = 0;
+const newJsonCompiler = () => ({ ajv: createJsonSchemaCompiler(), validations: 0, generation: ++compilerGeneration });
+let idleJsonSchemaCompiler: ReturnType<typeof newJsonCompiler> | undefined = newJsonCompiler();
+let compilerExpiry: ReturnType<typeof setTimeout> | undefined;
+
+/** Numeric lifecycle evidence only; never schemas or values. */
+export function __runtimeJsonSchemaCompilerStateForTests() {
+  return { generation: idleJsonSchemaCompiler?.generation, validations: idleJsonSchemaCompiler?.validations ?? 0,
+    validationLimit: JSON_COMPILER_VALIDATION_LIMIT, idleMs: JSON_COMPILER_IDLE_MS };
+}
 export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
   validate(schema, values) {
-    const ajv = idleJsonSchemaCompiler ?? createJsonSchemaCompiler();
+    const leased = idleJsonSchemaCompiler ?? newJsonCompiler();
+    const { ajv } = leased;
     // A synchronous validation owns this compiler until finally. A reentrant
     // call obtains a separate compiler, never another call's schema registry.
     idleJsonSchemaCompiler = undefined;
+    clearTimeout(compilerExpiry);
+    compilerExpiry = undefined;
     try {
       if (schema.$async === true) return invalidDefinition();
       const validate = ajv.compile(schema);
@@ -70,11 +84,21 @@ export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
       } };
     } catch { return invalidDefinition(); }
     finally {
-      // No dynamic form, $id/$ref registry, input or result cache. This also
-      // clears partially registered definitions when compilation fails.
+      // Clear the lookup registry, including partially registered definitions.
+      // Ajv's code-generation scope still retains references after removeSchema,
+      // so retire the whole engine after a bounded number of validations or
+      // one idle second. No compiled schema, input or result is reused.
       ajv.removeSchema();
       ajv.errors = null;
-      idleJsonSchemaCompiler = ajv;
+      if (++leased.validations < JSON_COMPILER_VALIDATION_LIMIT) {
+        idleJsonSchemaCompiler = leased;
+        clearTimeout(compilerExpiry);
+        compilerExpiry = setTimeout(() => {
+          idleJsonSchemaCompiler = undefined;
+          compilerExpiry = undefined;
+        }, JSON_COMPILER_IDLE_MS);
+        compilerExpiry.unref();
+      }
     }
   },
 });

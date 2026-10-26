@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
-import { createRuntimeFieldSchemaCompiler, runtimeJsonSchemas, storedFieldBaseType } from "../field-schemas.js";
+import { __runtimeJsonSchemaCompilerStateForTests, createRuntimeFieldSchemaCompiler, runtimeJsonSchemas, storedFieldBaseType } from "../field-schemas.js";
 import generatedCatalog from "../../generated/operations/catalog.json" with { type: "json" };
 
-test("reused JSON engines do not retain schema ids, nested refs or failed compilations", () => {
+test("JSON engines isolate schema ids, nested refs and failed compilations", () => {
   const producer = { $id: "urn:test:tenant-a", type: "object", properties: { value: { $ref: "#/$defs/value" } },
     $defs: { value: { $id: "urn:test:private-value", type: "string" } } };
   expect(runtimeJsonSchemas.validate(producer, { value: "ok" }).valid).toBe(true);
@@ -16,6 +16,22 @@ test("reused JSON engines do not retain schema ids, nested refs or failed compil
   expect(runtimeJsonSchemas.validate(invalid, {})).toMatchObject({ valid: false, error: { code: "INVALID_DEFINITION" } });
   expect(runtimeJsonSchemas.validate({ $ref: "urn:test:failed-child" }, "ok"))
     .toMatchObject({ valid: false, error: { code: "INVALID_DEFINITION" } });
+});
+
+test("JSON engine generations have a validation budget and expire after idle", async () => {
+  const generations = new Set<number>();
+  const { validationLimit, idleMs } = __runtimeJsonSchemaCompilerStateForTests();
+  for (let i = 0; i < validationLimit * 4; i++) {
+    expect(runtimeJsonSchemas.validate({ type: "integer", minimum: i }, i).valid).toBe(true);
+    const state = __runtimeJsonSchemaCompilerStateForTests();
+    if (state.generation !== undefined) generations.add(state.generation);
+    expect(state.validations).toBeLessThan(validationLimit);
+  }
+  expect(generations.size).toBeGreaterThanOrEqual(4);
+  runtimeJsonSchemas.validate({ type: "integer" }, 7);
+  expect(__runtimeJsonSchemaCompilerStateForTests().generation).toBeDefined();
+  await Bun.sleep(idleMs + 50);
+  expect(__runtimeJsonSchemaCompilerStateForTests().generation).toBeUndefined();
 });
 
 test("each JSON validation sees current constraints and keeps inputs untouched", () => {

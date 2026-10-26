@@ -265,7 +265,7 @@ export function createToolListing(scope: ServerScope) {
     if (name.includes(".") && deriveToolName(name) === null &&
         !coreOwnsStaticToolName(name, operationToolProjection)) {
       const projected = await moduleTools(runtimeModules, projectionContext());
-      await assertModuleToolNamesAvailable(projected);
+      await assertModuleToolNamesAvailable(projected, name);
       const selected = projected.find((entry) => entry.tool.name === name);
       return selected
         ? decorateMcpTools([selected], runtimeModules, projectionContext())[0] as ListedTool

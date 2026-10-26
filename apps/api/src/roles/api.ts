@@ -401,7 +401,7 @@ export function createApiApp(options: {
       : undefined;
     // Fixed generated validation belongs to startup, before the API is ready,
     // rather than to the first person's stored-field/form operation.
-    if (modulePlatform) generatedRuntimeFieldSchemas.object([]);
+    generatedRuntimeFieldSchemas.object([]);
     const moduleContext: ModuleRuntimeContext = {
       ...dbOptions,
       ...(modulePlatform ? { platform: modulePlatform.services } : {}),

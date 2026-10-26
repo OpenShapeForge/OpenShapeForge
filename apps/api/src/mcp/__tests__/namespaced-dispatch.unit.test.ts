@@ -9,6 +9,8 @@ import type { RuntimeModule } from "../../modules/contract.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
 import { __buildGeneratedMcpServerForTests, buildServer } from "../generated-mcp-server.js";
 import { createTransportSessions, requestNeedsInstructions } from "../transport-sessions.js";
+import { createDerivedDefinitionResolution } from "../derived-definitions.js";
+import { catalogDerivedTools } from "../catalog.js";
 
 function fixture(name = "reports.summary") {
   const db = {} as never;
@@ -82,6 +84,39 @@ test("unknown namespaced tools are not claimed and canonical names retain comple
     expect(f.counts().providerListings).toBe(1);
     expect(f.counts().calls).toBe(0);
   });
+});
+
+test("platform authorization of a namespaced module does not enumerate provider Operations", async () => {
+  const f = fixture();
+  f.module.mcp!.authorize = async (_session, request) => request.subject.kind === "tool" && request.subject.name === "reports.summary"
+    ? { allowed: true } : undefined;
+  f.module.mcp!.callTool = async (_name, _args, ctx) => ({ content: [], structuredContent: {
+    decision: await f.platform.services.mcp.authorize(ctx.session, { action: "call", subject: { kind: "tool", name: "reports.summary" } }),
+  } });
+  await inMemory(f, async client => {
+    const result = await client.callTool({ name: "reports.summary", arguments: {} });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual({ decision: { allowed: true } });
+    expect(f.counts().providerListings).toBe(0);
+  });
+});
+
+test("stored ownership checks use only names that the stored-key grammar can produce", async () => {
+  let lookups = 0;
+  const resolution = createDerivedDefinitionResolution({ session: fixture().session,
+    db: { transaction() { lookups++; throw Error("stored lookup"); } }, tables: new Map(),
+    operationToolProjection: { mode: "searchable", search: "osf_search_operations", execute: "osf_execute_operation" },
+  } as never);
+  catalogDerivedTools.push({ entity: "GuardFixture", table: "public.guard_fixture", roles: [], keyField: "key",
+    descriptionField: "description", inputFieldsField: "inputFields" });
+  try {
+    await resolution.assertModuleToolNamesAvailable([{ source: "module", tool: { name: "reports.summary", inputSchema: { type: "object" } } }], "reports.summary");
+    expect(await resolution.coreOwnsDerivedToolName("reports.summary")).toBe(false);
+    expect(lookups).toBe(0);
+    await expect(resolution.assertModuleToolNamesAvailable([{ source: "module", tool: { name: "reports_summary", inputSchema: { type: "object" } } }]))
+      .rejects.toThrow("stored lookup");
+    expect(lookups).toBe(1);
+  } finally { catalogDerivedTools.pop(); }
 });
 
 test("duplicate module owners and renaming decorators still fail before execution", async () => {

@@ -266,7 +266,7 @@
     },
     "packages/plugin-runtime": {
       "name": "@openshapeforge/plugin-runtime",
-      "version": "0.1.6",
+      "version": "0.1.16",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
         "fastify": "^5.8.2",

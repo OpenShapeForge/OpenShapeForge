@@ -16,6 +16,7 @@ test("MCP create/update cannot submit a confidential typed value as model argume
   expect(()=>assertPublicTypedValueArguments(table,{value:"unclassified"})).toThrow("valid FieldDefinition");
   expect(()=>assertPublicTypedValueArguments(table,{definition:confidential,value:"synthetic-secret"},{definition:plain})).toThrow("private configuration form");
   expect(()=>assertPublicTypedValueArguments(table,{definition:plain,value:"synthetic-secret"},{definition:confidential})).toThrow("private configuration form");
+  expect(()=>assertPublicTypedValueArguments(table,{definition:plain,value:SECRET_SET_SENTINEL},{definition:confidential})).toThrow("private configuration form");
   expect(()=>assertPublicTypedValueArguments(table,{definition:plain,value:"plain repair"},{definition:"invalid"})).not.toThrow();
 });
 test("plain configuration, metadata repair, private-elicited fields, clearing and an existing sentinel remain supported",()=>{

@@ -3,7 +3,7 @@ import {afterAll,beforeAll,expect,test} from "bun:test";
 import {randomUUID} from "node:crypto";
 import {sql} from "kysely";
 import {createDatabaseRuntime,readMigrateDatabaseUrl} from "../../db/connection.js";
-import {withDbSession} from "../../db/session.js";
+import {withDbSession,currentDbSessionDatabase} from "../../db/session.js";
 import {jsonbLiteral} from "../../db/sql-helpers.js";
 import {getGeneratedCrudTables} from "../../operations/entity/catalog.js";
 import {invokeTool} from "../entity-tool-invocation.js";
@@ -19,10 +19,12 @@ const original=getGeneratedCrudTables().find(t=>t.source?.authoringEntityName===
 const column=(name:string,extra:Partial<GeneratedCrudColumn>={}):GeneratedCrudColumn=>({name,sourceField:name,type:"jsonb",required:false,primaryKey:false,generated:null,...extra});
 // Reuse an existing canonical role map, adding deferred columns only to this
 // transport fixture. No generated entity or pre-existing row is modified.
+// Denials reach invokeTool; the positive transaction/lock test uses a callback
+// because canonical writes resolve the original table by its registry name.
 const table={...original,schema,table:"settings",columns:[column("id",{type:"uuid",primaryKey:true}),column("tenant_id",{type:"uuid"}),column("definition"),column("value",{typedBy:{definitionField:"definition",definitionColumn:"definition",encrypted:true}})],source:{...original.source,crud:{operations:{list:false,get:false,create:true,update:true,delete:false}}}};
 const actor={tenantId:randomUUID(),userId:randomUUID(),roles:["General.All.ReadWrite"]};
 const foreign={...actor,tenantId:randomUUID(),userId:randomUUID()};
-const id=randomUUID(),foreignId=randomUUID();
+const id=randomUUID(),foreignId=randomUUID(),secretId=randomUUID();
 const plain={key:"value",osfType:"string"};
 const secret={...plain,classification:{sensitivity:"confidential"}};
 beforeAll(async()=>{
@@ -34,6 +36,7 @@ beforeAll(async()=>{
   await sql`grant usage on schema ${sql.id(schema)} to openshapeforge_app`.execute(admin.db);
   await sql`grant select,update on ${sql.id(schema,"settings")} to openshapeforge_app`.execute(admin.db);
   for(const [row,tenant] of [[id,actor.tenantId],[foreignId,foreign.tenantId]])await sql`insert into ${sql.id(schema,"settings")} values (${row}::uuid,${tenant}::uuid,${jsonbLiteral(plain)},'"initial"'::jsonb)`.execute(admin.db);
+  await sql`insert into ${sql.id(schema,"settings")} values (${secretId}::uuid,${actor.tenantId}::uuid,${jsonbLiteral(secret)},null)`.execute(admin.db);
 });
 afterAll(async()=>{
   await sql`drop schema if exists ${sql.id(schema)} cascade`.execute(admin.db);
@@ -46,6 +49,7 @@ test("actual MCP create/update invocation refuses confidential model values befo
   await expect(invokeTool(create,undefined,table,tables,db.db,actor,{definition:secret,value:"synthetic-only"})).rejects.toMatchObject({code:"SECURE_INPUT_REQUIRED"});
   const update={operation:"update",operationId:"Task.update",inputSchema:{type:"object",properties:{id:{},values:{type:"object",properties:{definition:{},value:{}}}}}} as unknown as CatalogTool;
   await expect(invokeTool(update,undefined,table,tables,db.db,actor,{id,values:{definition:secret,value:"synthetic-only"}})).rejects.toMatchObject({code:"SECURE_INPUT_REQUIRED"});
+  await expect(invokeTool(update,undefined,table,tables,db.db,actor,{id:secretId,values:{value:"synthetic-only"}})).rejects.toMatchObject({code:"SECURE_INPUT_REQUIRED"});
   await expect(invokeTool(update,undefined,table,tables,db.db,actor,{id:foreignId,values:{value:"other tenant"}})).rejects.toMatchObject({status:404});
   await expect(invokeTool(update,undefined,table,tables,db.db,{...actor,roles:[]},{id,values:{value:"denied"}})).rejects.toMatchObject({operationError:{code:"FORBIDDEN"}});
   const row=(await sql<{value:unknown}>`select value from ${sql.id(schema,"settings")} where id=${id}::uuid`.execute(admin.db)).rows[0]!;
@@ -56,6 +60,7 @@ test("an update-only entity can write plain values; tenant/missing rows remain u
   await expect(guardModelTypedValueArguments(db.db,actor,table,{value:"plain"},foreignId)).rejects.toMatchObject({status:404});
   await expect(guardModelTypedValueArguments(db.db,actor,table,{value:"plain"},randomUUID())).rejects.toMatchObject({status:404});
   await withGuardedModelTypedValueWrite(db.db,actor,table,{value:"plain"},id,async()=>{
+    expect(currentDbSessionDatabase()).toBe(db.db);
     await withDbSession(db.db,actor,async trx=>{
       await sql`update ${sql.id(schema,"settings")} set value='"plain"'::jsonb where id=${id}::uuid`.execute(trx);
     });

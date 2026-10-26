@@ -18,12 +18,12 @@ export function assertPublicTypedValueArguments(
 ): void {
   for (const { value, definition } of typedValueColumns(table)) {
     const field = fieldNameForColumn(value);
-    if (!value.typedBy?.encrypted || !Object.hasOwn(values, field) ||
-      values[field] === null || (current && values[field] === SECRET_SET_SENTINEL)) continue;
     const definitionField = fieldNameForColumn(definition);
+    if (!value.typedBy?.encrypted || !Object.hasOwn(values, field) || values[field] === null ||
+      (current && values[field] === SECRET_SET_SENTINEL && !Object.hasOwn(values, definitionField))) continue;
     const shape = Object.hasOwn(values, definitionField) ? values[definitionField] : current?.[definition.name];
     if (!shape || typeof shape !== "object" || Array.isArray(shape)) {
-      throw new HttpError(400, "INVALID_DEFINITION", "A typed setting value requires a valid FieldDefinition.");
+      throw new HttpError(400, Object.hasOwn(values, definitionField) || !current ? "BAD_USER_INPUT" : "INVALID_DEFINITION", "A typed setting value requires a valid FieldDefinition.");
     }
     // Nested classified definitions are refused by canonical typed validation;
     // encrypted deferred values support top-level confidentiality only.
@@ -42,8 +42,7 @@ export async function guardModelTypedValueArguments(
   values: Record<string, unknown>,
   targetId?: string,
 ): Promise<void> {
-  if (!typedValueColumns(table).some(({value}) =>
-    value.typedBy?.encrypted && Object.hasOwn(values, fieldNameForColumn(value)) && values[fieldNameForColumn(value)] !== null)) return;
+  if (!hasModelTypedValue(table, values)) return;
   requireEntityOperation(table, targetId ? "update" : "create", session);
   // Update authorization is already established. Do not require an unrelated
   // get Operation or project an invalid definition before a repair can run.
@@ -52,13 +51,18 @@ export async function guardModelTypedValueArguments(
   assertPublicTypedValueArguments(table, values, current);
 }
 
-/** Retain the definition row lock until the canonical write has completed. */
+function hasModelTypedValue(table: GeneratedCrudTable, values: Record<string, unknown>): boolean {
+  return typedValueColumns(table).some(({value}) => value.typedBy?.encrypted === true &&
+    Object.hasOwn(values, fieldNameForColumn(value)) && values[fieldNameForColumn(value)] !== null);
+}
+
+/** Retain the row lock through the write; nested canonical work joins the
+ * same transaction via withDbSession's verified-session AsyncLocalStorage. */
 export async function withGuardedModelTypedValueWrite<T>(
   db: OpenShapeForgeDatabase, session: DbSessionInput, table: GeneratedCrudTable,
   values: Record<string, unknown>, targetId: string, write: () => Promise<T>,
 ): Promise<T> {
-  if (!typedValueColumns(table).some(({value}) => value.typedBy?.encrypted &&
-    Object.hasOwn(values, fieldNameForColumn(value)) && values[fieldNameForColumn(value)] !== null)) return write();
+  if (!hasModelTypedValue(table, values)) return write();
   requireEntityOperation(table, "update", session);
   return withDbSession(db, session, async () => {
     await guardModelTypedValueArguments(db, session, table, values, targetId);

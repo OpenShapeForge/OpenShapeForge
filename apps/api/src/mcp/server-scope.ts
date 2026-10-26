@@ -149,6 +149,11 @@ function createServerScopePrologue(input: {
   // stubs no longer carry the upload marker of an entity's own fields.
   const canUploadArtifacts = hasArtifactStorage && toolsForSession(session, tables).some(
     ({ tool, entity }) =>
+      // Projection may WITHHOLD an upload field; it cannot introduce one.
+      // Avoid cloning/localizing every unrelated entity schema just to find
+      // whether the session has an upload control. Still check the projected
+      // schema for every candidate, preserving classified-field policy.
+      schemaUsesArtifactUpload(tool.inputSchema) &&
       schemaUsesArtifactUpload(
         describeTool(tool, entity, tables.get(tool.table), session).inputSchema,
       ),

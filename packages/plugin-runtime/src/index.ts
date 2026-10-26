@@ -9,6 +9,8 @@ import type { Kysely, Transaction } from "kysely";
 import type { RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
 import type { RuntimeSettingsService } from "./settings.js";
 import type { RuntimeWebhookSecretServices } from "./webhook-secrets.js";
+import type { RuntimeReadProgressServices } from "./read-progress.js";
+export type { RuntimeReadProgress, RuntimeReadProgressSnapshot, RuntimeReadProgressServices } from "./read-progress.js";
 export type { RuntimeWebhookSecretServices, RuntimeWebhookSignatureInput } from "./webhook-secrets.js";
 import type { RuntimeRecordAccessServices } from "./record-access.js";
 export type { RuntimeRecordAccessServices, RuntimeRecordAccessRequest, RuntimeRecordAccessIntent, RuntimeStoredFieldProjectionRequest } from "./record-access.js";
@@ -410,6 +412,7 @@ export type RuntimeConnectionResolution =
       message: string };
 
 export type PluginPlatformServices = {
+  readonly readProgress?: RuntimeReadProgressServices<PluginSessionContext>;
   /** Core alone opens Connection values; retained or foreign sessions are refused.
    * Absent on runtimes without this capability; consumers must fail closed. */
   readonly secrets?: {
@@ -734,6 +737,8 @@ export type ModuleOperationContextContract<
   Request,
   Reply,
 > = RuntimeContext & {
+  /** Cancellation of this canonical invocation; pass it to nested reads. */
+  signal?: AbortSignal;
   transport: "rest" | "mcp" | "graphql" | "operation";
   session?: Session;
   request?: Request;

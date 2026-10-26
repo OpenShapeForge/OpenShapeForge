@@ -51,6 +51,8 @@ import { ArtifactStorageRuntime } from "./artifact-storage.js";
 import { runtimeSettings } from "./settings.js";
 import { RecordAccessRuntime } from "./record-access.js";
 import { createWebhookSecretServices } from "./webhook-secrets.js";
+import { ReadProgressRuntime } from "./read-progress.js";
+import type { RuntimeReadProgress } from "@openshapeforge/plugin-runtime";
 import {
   generatedCapabilityOperations,
   issueCapabilityGrantInTransaction,
@@ -308,6 +310,11 @@ export class ModulePlatformRuntime {
     Set<Promise<unknown>>
   >();
   readonly #operationProviders = new Map<string, RuntimeOperationProvider>();
+  readonly #readProgress = new ReadProgressRuntime<TrustedSessionContext>(assertSecretFree);
+
+  withReadProgressObserver<T>(session: TrustedSessionContext, emit: (snapshot: RuntimeReadProgress) => Promise<void>, work: () => Promise<T>): Promise<T> {
+    return this.#readProgress.observe(session, emit, work);
+  }
   readonly #staticOperations = new Map<string, ModuleStaticOperationRegistration>();
   readonly #operationCallStack = new AsyncLocalStorage<readonly string[]>();
   readonly #operationTransactionStorage = new AsyncLocalStorage<{
@@ -385,6 +392,10 @@ export class ModulePlatformRuntime {
       },
     });
     this.services = {
+      readProgress: {
+        report: (session, snapshot) => this.#acceptsScopedSession(session)
+          ? this.#readProgress.report(session, snapshot) : Promise.resolve(false),
+      },
       webhookSecrets: createWebhookSecretServices({
         acceptsSession: (session) => this.#acceptsScopedSession(session),
         serviceIdentity: (tenantId) => organizationServiceIdentities().find((entry) => entry.tenantId === tenantId)?.clientId,
@@ -838,7 +849,8 @@ export class ModulePlatformRuntime {
       }
       return this.#operationCallStack.run(
         [...staticStack, request.operation.id],
-        () => staticOperation.execute(session, request, options),
+        () => this.#readProgress.operation(session, staticOperation.definition, options.signal,
+          () => staticOperation.execute(session, request, options)),
       );
     }
     if (controlSession) {
@@ -903,7 +915,7 @@ export class ModulePlatformRuntime {
     }
     const execute = () => this.#operationCallStack.run(
       [...stack, request.operation.id],
-      () => match.provider.execute({
+      () => this.#readProgress.operation(session, match.definition, options.signal, () => match.provider.execute({
         session,
         ...(options.signal ? { signal: options.signal } : {}),
         execute: (nested, nestedOptions) => this.#executeOperation(
@@ -929,7 +941,7 @@ export class ModulePlatformRuntime {
               ? { signal: (hostOptions?.signal ?? options.signal)! }
               : {},
           ),
-      }, request),
+      }, request)),
     );
     if (match.definition.reliability.idempotency.mode !== "keyed") return execute();
     if (!request.idempotencyKey) {

@@ -16,6 +16,7 @@
     "./language": "./src/language.ts",
     "./acting-relation": "./src/acting-relation.ts",
     "./secrets": "./src/secrets.ts",
+    "./read-progress": "./src/read-progress.ts",
     "./package.json": "./package.json"
   },
   "files": [

@@ -212,16 +212,18 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       if (!locked.rows[0].matches) throw generatedCrudError("The parent changed; reload before editing its collection.", "VERSION_CONFLICT");
       // FOR UPDATE can apply stricter UPDATE RLS than a plain SELECT. Never
       // mistake those hidden siblings for an empty or smaller collection.
+      const memberScope = relation.ownership === "reference" && binding.action === "update"
+        ? sql` and id = ${request.childId}::uuid` : sql``;
       const visibleIds = (await sql<{ id: string }>`select id from ${sql.id(target.schema, target.table)}
-        where ${sql.id(foreignKey!.name)} = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid order by id`.execute(trx)).rows.map(({ id }) => id);
+        where ${sql.id(foreignKey!.name)} = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid${memberScope}${subtypeScopeWhere(target)} order by id`.execute(trx)).rows.map(({ id }) => id);
       const rows = (await sql<{ row: GeneratedEntityRow }>`select to_jsonb(${sql.id(target.table)}.*) as row from ${sql.id(target.schema, target.table)}
-        where ${sql.id(foreignKey!.name)} = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid order by id for update`.execute(trx)).rows.map(({ row }) => row);
+        where ${sql.id(foreignKey!.name)} = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid${memberScope}${subtypeScopeWhere(target)} order by id for update`.execute(trx)).rows.map(({ row }) => row);
       if (visibleIds.length !== rows.length || visibleIds.some((id, index) => rows[index]?.id !== id)) throw generatedCrudError("The complete collection cannot be locked with the current permissions.", "FORBIDDEN");
       for (const row of rows) assertAllowed(row);
       for (const row of rows) await permission(trx, session, target, String(row.id), readOp, "view");
       const cardinality = typeof relation.cardinality === "object" ? relation.cardinality : {};
       const count = rows.length + (binding.action === "insert" ? 1 : 0);
-      if (count < (cardinality.min ?? 0) || (typeof cardinality.max === "number" && count > cardinality.max)) throw generatedCrudError("The collection size would violate its cardinality.", "VALIDATION");
+      if (!(relation.ownership === "reference" && binding.action === "update") && (count < (cardinality.min ?? 0) || (typeof cardinality.max === "number" && count > cardinality.max))) throw generatedCrudError("The collection size would violate its cardinality.", "VALIDATION");
       const ordered = [...rows].sort((a, b) => (relation.sortable ? Number(a[position!.name]) - Number(b[position!.name]) : 0) || String(a.id).localeCompare(String(b.id))).map((row) => String(row.id));
       if (request.beforeId != null && !ordered.includes(request.beforeId)) invalid("beforeId is not a member of this collection.");
       if ((binding.action === "move" || editing) && !ordered.includes(request.childId!)) invalid("childId is not a member of this collection.");

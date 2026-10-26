@@ -461,3 +461,12 @@ test.each(['create', 'delete'] as const)('rejects relatedChanges on %s before op
   expect('error' in result).toBe(true);
   if ('error' in result) expect(result.error).toMatchObject({code:'VALIDATION',message:'relatedChanges is only supported when updating a record.',retryable:false});
 });
+
+// MCP is a projection of these same canonical authorization rules.
+test.each(["list", "get", "create", "update", "delete"] as const)("Employee.%s refuses a caller without organization roles", async intent => {
+  const result = await executeEntityOperation({} as never, {
+    tenantId: "11111111-1111-4111-8111-111111111111", userId: "22222222-2222-4222-8222-222222222222",
+    roles: [], groups: [], scope: "tenant",
+  }, { operation: { id: `Employee.${intent}`, intent }, input: {} });
+  expect(result).toMatchObject({ intent, error: { code: "FORBIDDEN", retryable: false } });
+});

@@ -400,6 +400,23 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
     await fails(f.execute(restricted!.db, session, { ...binding, action: "move" }, { id: seeded.id, expectedVersion: before.version, childId: seeded.children[0]!, beforeId: seeded.children[1]! }), "FORBIDDEN");
     expect(await state(seeded.id)).toEqual(before);
   });
+  test("reference update locks and authorizes only the selected member", async () => {
+    const f = fixture(), seeded = await seed();
+    Object.assign(f.parent.source!.graphql!.relationships![0]!, { ownership: "reference", sortable: false, cardinality: { min: 2, max: 2 } });
+    f.operations.find(op => op.entityName === "Block" && op.intent === "update")!.inputSchema = {
+      type: "object", properties: { values: { type: "object", properties: { title: { type: "string" } }, additionalProperties: false } },
+    };
+    const [allowed, denied] = seeded.children;
+    await sql`create policy selected_member on erp.blocks as restrictive for update using(id <> ${sql.lit(denied!)}::uuid)`.execute(privileged!.db);
+    const childVersion = async (id: string) => String((await sql<{ version: string }>`select updated_at::text as version from erp.blocks where id=${id}::uuid`.execute(privileged!.db)).rows[0]!.version);
+    try {
+      await f.execute(restricted!.db, session, { ...binding, action: "update" }, { id: seeded.id, expectedVersion: seeded.expectedVersion, childId: allowed!, childExpectedVersion: await childVersion(allowed!), values: { title: "Allowed update" } });
+      expect((await storedValue(allowed!)).title).toBe("Allowed update");
+      const before = await state(seeded.id);
+      await fails(f.execute(restricted!.db, session, { ...binding, action: "update" }, { id: seeded.id, expectedVersion: before.version, childId: denied!, childExpectedVersion: await childVersion(denied!), values: { title: "Denied" } }), "FORBIDDEN");
+      expect(await state(seeded.id)).toEqual(before);
+    } finally { await sql`drop policy selected_member on erp.blocks`.execute(privileged!.db); }
+  });
   test("UPDATE RLS cannot hide siblings from cardinality and ordering checks", async () => {
     const f = fixture(), seeded = await seed();
     f.parent.source!.graphql!.relationships![0]!.cardinality = { max: 2 };

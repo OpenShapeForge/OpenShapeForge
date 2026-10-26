@@ -70,11 +70,11 @@ function inputType(field: FieldDefinition, base: FieldValueType): string {
   return "text";
 }
 
-async function loadPending(): Promise<PendingConfiguration | null> {
+async function loadPending(formId?: string): Promise<PendingConfiguration | null> {
   const session = await getCachedSession();
   if (!session?.accessToken) return null;
   const response = await fetch(
-    buildGatewayUrl("/api/entity-configuration/pending"),
+    buildGatewayUrl(`/api/entity-configuration/pending${formId === undefined ? "" : `?formId=${encodeURIComponent(formId)}`}`),
     {
       cache: "no-store",
       headers: { authorization: `Bearer ${session.accessToken}` },
@@ -88,7 +88,7 @@ async function loadPending(): Promise<PendingConfiguration | null> {
 export default async function ConfigurationPage({
   searchParams,
 }: {
-  searchParams: Promise<{ saved?: string; error?: string }>;
+  searchParams: Promise<{ saved?: string; error?: string; formId?: string }>;
 }) {
   const query = await searchParams;
   if (query.saved === "1") {
@@ -104,7 +104,7 @@ export default async function ConfigurationPage({
     );
   }
 
-  const pending = await loadPending();
+  const pending = await loadPending(query.formId);
   const hasUnsupportedFields = pending?.definitions.some((field) => !baseType(field).ok) ?? false;
   if (pending && hasUnsupportedFields) {
     console.error("Secure configuration contains an unsupported field contract.", {

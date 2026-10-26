@@ -3,6 +3,41 @@ import { expect, test } from "bun:test";
 import { createRuntimeFieldSchemaCompiler, runtimeJsonSchemas, storedFieldBaseType } from "../field-schemas.js";
 import generatedCatalog from "../../generated/operations/catalog.json" with { type: "json" };
 
+test("reused JSON engines do not retain schema ids, nested refs or failed compilations", () => {
+  const producer = { $id: "urn:test:tenant-a", type: "object", properties: { value: { $ref: "#/$defs/value" } },
+    $defs: { value: { $id: "urn:test:private-value", type: "string" } } };
+  expect(runtimeJsonSchemas.validate(producer, { value: "ok" }).valid).toBe(true);
+  for (const ref of ["urn:test:tenant-a", "urn:test:private-value"]) {
+    expect(runtimeJsonSchemas.validate({ $ref: ref }, {})).toMatchObject({ valid: false, error: { code: "INVALID_DEFINITION" } });
+  }
+  expect(runtimeJsonSchemas.validate({ $id: "urn:test:tenant-a", type: "integer" }, 7).valid).toBe(true);
+  const invalid = { $id: "urn:test:failed", type: "object", properties: { value: { $ref: "urn:test:missing" } },
+    $defs: { value: { $id: "urn:test:failed-child", type: "string" } } };
+  expect(runtimeJsonSchemas.validate(invalid, {})).toMatchObject({ valid: false, error: { code: "INVALID_DEFINITION" } });
+  expect(runtimeJsonSchemas.validate({ $ref: "urn:test:failed-child" }, "ok"))
+    .toMatchObject({ valid: false, error: { code: "INVALID_DEFINITION" } });
+});
+
+test("each JSON validation sees current constraints and keeps inputs untouched", () => {
+  const schema = { $id: "urn:test:mutable", type: "object", properties: { value: { type: "string", minLength: 2 } }, required: ["value"] };
+  const input = { value: "ok" };
+  expect(runtimeJsonSchemas.validate(schema, input).valid).toBe(true);
+  schema.properties.value.minLength = 4;
+  expect(runtimeJsonSchemas.validate(schema, input)).toMatchObject({ valid: false, error: { code: "VALIDATION_FAILED" } });
+  expect(input).toEqual({ value: "ok" });
+  expect(runtimeJsonSchemas.validate(schema, { value: "long enough" }).valid).toBe(true);
+});
+
+test("a reentrant JSON validation obtains its own temporary schema registry", () => {
+  let nested = false;
+  const schema = { type: "object", get properties() {
+    if (!nested) { nested = true; expect(runtimeJsonSchemas.validate({ type: "integer" }, 7).valid).toBe(true); }
+    return { value: { type: "string" } };
+  } };
+  expect(runtimeJsonSchemas.validate(schema, { value: "ok" }).valid).toBe(true);
+  expect(nested).toBe(true);
+});
+
 const compiler = createRuntimeFieldSchemaCompiler({
   version: 1,
   fieldDefinitionSchema: {

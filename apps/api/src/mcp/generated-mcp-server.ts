@@ -169,10 +169,12 @@ export function buildServer(
   operationToolProjectionOverride?: OperationToolProjection,
   /** Already validated, tenant-scoped initialize presentation metadata. */
   serverIcons?: import("@modelcontextprotocol/server").Icon[],
+  /** A modern tools/call does not return discovery instructions. */
+  includeInstructions = true,
 ): Server {
   const scope = createServerScope({
     db, session, modules, modulePlatform, egressOwner, onDerivedDefinitionChanged,
-    stateful, tableOverride, opening, moduleSessionOverride, operationToolProjectionOverride, serverIcons,
+    stateful, tableOverride, opening, moduleSessionOverride, operationToolProjectionOverride, serverIcons, includeInstructions,
   });
   const { server } = scope;
 

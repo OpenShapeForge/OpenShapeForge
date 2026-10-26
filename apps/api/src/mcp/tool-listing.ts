@@ -11,7 +11,8 @@ import {
 } from "@openshapeforge/operations";
 import { GENERIC_DESCRIBE_TOOL_NAME } from "@openshapeforge/operations";
 import type { Tool } from "@modelcontextprotocol/server";
-import { derivedHelperAvailable } from "./derived-tools.js";
+import { deriveToolName, derivedHelperAvailable } from "./derived-tools.js";
+import { coreOwnsStaticToolName } from "./session-projection.js";
 import { ARTIFACT_UPLOAD_APP_URI } from "./artifact-upload.js";
 import { productName } from "../config/product-name.js";
 import { EDIT_LEASE_TOOL_NAMES, editLeaseToolsForOperationIds } from "./edit-lease-tools.js";
@@ -255,9 +256,28 @@ export function createToolListing(scope: ServerScope) {
     tools: (await listedTools()).map((entry) => toolWithFailureOutputSchema(entry.tool)),
   }));
 
+  const findTool = async (name: string): Promise<ListedTool | undefined> => {
+    // Namespaced module tools cannot be named by stored Operation/Service
+    // keys. Keep the grammar check explicit so an expanded derived namespace
+    // automatically returns to the complete resolver. Resolve the live module
+    // projection and its ownership/decorators, without constructing unrelated
+    // CRUD schemas or enumerating every provider Operation just to find it.
+    if (name.includes(".") && deriveToolName(name) === null &&
+        !coreOwnsStaticToolName(name, operationToolProjection)) {
+      const projected = await moduleTools(runtimeModules, projectionContext());
+      await assertModuleToolNamesAvailable(projected);
+      const selected = projected.find((entry) => entry.tool.name === name);
+      return selected
+        ? decorateMcpTools([selected], runtimeModules, projectionContext())[0] as ListedTool
+        : undefined;
+    }
+    return (await availableTools()).find((entry) => entry.tool.name === name);
+  };
+
   return {
     runtimeProviderToolsForSession,
     availableTools,
     listedTools,
+    findTool,
   };
 }

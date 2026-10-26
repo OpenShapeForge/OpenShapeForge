@@ -25,25 +25,36 @@ function invalidDefinition(): RuntimeSchemaValidationResult {
     detail: "De gegevens zijn niet verwerkt. Laat de formulierinstellingen controleren.", retryable: false } };
 }
 
+function createJsonSchemaCompiler() {
+  const ajv = new Ajv2020.default({ allErrors: true, strict: false, strictSchema: true, allowUnionTypes: true });
+  addFormats.default(ajv);
+  ajv.addKeyword(operationExactNumericKeyword);
+  ajv.addKeyword(operationI18nKeyword);
+  ajv.addKeyword(operationInputFieldsKeyword);
+  ajv.addKeyword(operationReferenceKeyword);
+  // Match canonical Operation validation: this is presentation metadata,
+  // never an alternative to the artifact object's actual value constraints.
+  ajv.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });
+  ajv.addKeyword({ keyword: "x-osf-default-template", schemaType: "string", valid: true });
+  ajv.addKeyword(operationChoiceKeyword);
+  ajv.addKeyword(operationTypeKeyword);
+  ajv.addKeyword(operationVariablesKeyword);
+  for (const keyword of operationFieldMetadataKeywords) ajv.addKeyword(keyword);
+  for (const keyword of valueInvariantKeywords) ajv.addKeyword(keyword);
+  // Prepare the fixed meta-schemas before readiness. Dynamic schemas are
+  // removed below; only the engine and its standard vocabulary are reused.
+  ajv.compile({});
+  ajv.removeSchema();
+  return ajv;
+}
+
+let idleJsonSchemaCompiler: ReturnType<typeof createJsonSchemaCompiler> | undefined = createJsonSchemaCompiler();
 export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
   validate(schema, values) {
-    // A short-lived compiler avoids retaining every stored/dynamic form forever.
-    // No async loader, coercion, removal or defaults: validation never rewrites input.
-    const ajv = new Ajv2020.default({ allErrors: true, strict: false, strictSchema: true, allowUnionTypes: true });
-    addFormats.default(ajv);
-    ajv.addKeyword(operationExactNumericKeyword);
-    ajv.addKeyword(operationI18nKeyword);
-    ajv.addKeyword(operationInputFieldsKeyword);
-    ajv.addKeyword(operationReferenceKeyword);
-    // Match canonical Operation validation: this is presentation metadata,
-    // never an alternative to the artifact object's actual value constraints.
-    ajv.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });
-    ajv.addKeyword({ keyword: "x-osf-default-template", schemaType: "string", valid: true });
-    ajv.addKeyword(operationChoiceKeyword);
-    ajv.addKeyword(operationTypeKeyword);
-    ajv.addKeyword(operationVariablesKeyword);
-    for (const keyword of operationFieldMetadataKeywords) ajv.addKeyword(keyword);
-    for (const keyword of valueInvariantKeywords) ajv.addKeyword(keyword);
+    const ajv = idleJsonSchemaCompiler ?? createJsonSchemaCompiler();
+    // A synchronous validation owns this compiler until finally. A reentrant
+    // call obtains a separate compiler, never another call's schema registry.
+    idleJsonSchemaCompiler = undefined;
     try {
       if (schema.$async === true) return invalidDefinition();
       const validate = ajv.compile(schema);
@@ -58,6 +69,13 @@ export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
         })),
       } };
     } catch { return invalidDefinition(); }
+    finally {
+      // No dynamic form, $id/$ref registry, input or result cache. This also
+      // clears partially registered definitions when compilation fails.
+      ajv.removeSchema();
+      ajv.errors = null;
+      idleJsonSchemaCompiler = ajv;
+    }
   },
 });
 

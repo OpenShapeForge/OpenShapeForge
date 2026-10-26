@@ -158,7 +158,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
     const childVersion = updateOp?.concurrency?.version;
     if (childVersion && (childVersion.mode !== "required" || !target.columns.some((column) => fieldNameForColumn(column) === childVersion.field && column.name === "updated_at" && column.type === "timestamptz"))) unsupported("Child version metadata is unsupported.");
     if (!request || !uuid.test(request.id) || typeof request.expectedVersion !== "string" || !Number.isFinite(Date.parse(request.expectedVersion))) invalid("A parent id and timestamp expectedVersion are required.");
-    if (Object.keys(request).some((key) => !["id", "expectedVersion", "values", "childId", "beforeId", ...(relation.ownership === "reference" ? ["childExpectedVersion", "childLeaseToken"] : [])].includes(key))) invalid("Unknown collection mutation input.");
+    if (Object.keys(request).some((key) => !["id", "expectedVersion", "values", "childId", "beforeId", ...(relation.ownership === "reference" && binding.action === "update" ? ["childExpectedVersion", "childLeaseToken"] : [])].includes(key))) invalid("Unknown collection mutation input.");
     if (request.beforeId != null && (typeof request.beforeId !== "string" || !uuid.test(request.beforeId))) invalid("beforeId must be a child UUID or null.");
     if (binding.action === "move" && (typeof request.childId !== "string" || !uuid.test(request.childId) || request.values !== undefined)) invalid("Move requires childId and does not accept values.");
     if (editing && (typeof request.childId !== "string" || !uuid.test(request.childId) || request.beforeId !== undefined)) invalid(`${binding.action} requires childId and does not accept beforeId.`);
@@ -286,7 +286,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
               if (!request.childLeaseToken) invalid("The member edit lease is required.");
               await consumeEntityEditLeaseInTransaction(trx,session,{operation:updateOp! as LeaseProtectedOperation,targetId:childId,expectedVersion:request.childExpectedVersion!,leaseToken:request.childLeaseToken!});
             }
-            const check = await sql<{matches: boolean}>`select updated_at = ${normalizeTimestampToken(request.childExpectedVersion!)}::timestamptz as matches from ${sql.id(target.schema,target.table)} where id=${childId}::uuid and tenant_id=${session.tenantId}::uuid`.execute(trx);
+            const check = await sql<{matches: boolean}>`select updated_at = ${normalizeTimestampToken(request.childExpectedVersion!)}::timestamptz as matches from ${sql.id(target.schema,target.table)} where id=${childId}::uuid and tenant_id=${session.tenantId}::uuid ${subtypeScopeWhere(target)}`.execute(trx);
             if (!check.rows[0]?.matches) throw generatedCrudError("The member changed; reload before editing.","VERSION_CONFLICT");
           }
           assertCallerTopLevelFields(target, session, request.values!, "update");

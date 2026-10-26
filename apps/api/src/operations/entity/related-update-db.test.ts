@@ -43,6 +43,8 @@ const child = {
 } as unknown as GeneratedCrudTable;
 describe("related collection atomic boundary", () => {
   beforeAll(async () => {
+    const location = new URL(url);
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(location.hostname) || location.pathname !== "/postgres") throw new Error("Scratch tests require a local postgres admin database, never an application database");
     admin = new SQL(url!);
     await admin.unsafe(`create database "${name}"`);
     const target = new URL(url!);

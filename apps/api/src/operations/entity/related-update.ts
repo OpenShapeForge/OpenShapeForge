@@ -79,7 +79,7 @@ export async function applyRelatedChanges(
       const row = await run(target, "create", {
         values: await materialize(target, { ...draft, ...bound }, depth + 1),
       });
-      values[key] = row.id;
+      values[key] = row[target.primaryKey];
     }
     return values;
   };

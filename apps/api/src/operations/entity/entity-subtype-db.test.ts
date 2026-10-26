@@ -284,6 +284,7 @@ describe("the Team subtype is served from the relation groups table", () => {
       id: "Team.insertMembership", entityId: "core.Team", entityName: "Team", intent: "invoke", concurrency: teamUpdate.concurrency!,
     });
     expect(guard.entityId).toBe("core.RelationGroup");
+    expect(policyOperation(teamTable, teamUpdate)).toBe(policyOperation(teamTable, teamUpdate));
     const executor = createCollectionMutationExecutor({ tables: getGeneratedCrudTables(), operations });
     const insert: CollectionMutationBinding = { entityName: "Team", field: "memberships", action: "insert" };
     const guarded = (binding: CollectionMutationBinding, targetId: string, request: Record<string, unknown>) =>
@@ -325,6 +326,24 @@ describe("the Team subtype is served from the relation groups table", () => {
     });
     expect(updated.childId).toBe(inserted.childId);
     expect((await sql<{ role: string }>`select role from erp.relation_group_memberships where id = ${inserted.childId}::uuid`.execute(privileged.db)).rows[0]).toEqual({ role: "chair" });
+
+    // This group now grants access: a non-administrator may still edit ordinary
+    // membership properties, but must never change access-relevant columns.
+    await sql`insert into platform.tenants (id, slug, name, status)
+      values (${actor.tenantId}::uuid, ${actor.tenantId}, 'Grant guard test', 'active')`.execute(privileged.db);
+    await withDbSession(runtime.db, { ...actor, roles: ["Organization.All.ReadWrite"] }, (trx) =>
+      sql`insert into platform.relation_group_roles (tenant_id, relation_group_id, role)
+        values (${actor.tenantId}::uuid, ${teamId}::uuid, 'org:employee')`.execute(trx));
+    for (const assignment of [sql`status = 'inactive'`, sql`start_date = current_date`, sql`end_date = current_date`]) {
+      await expect(withDbSession(runtime.db, actor, (trx) => sql`update erp.relation_group_memberships
+        set ${assignment} where id = ${inserted.childId}::uuid`.execute(trx))).rejects.toMatchObject({ errno: '42501' });
+    }
+
+    await withDbSession(runtime.db, actor, (trx) => sql`update erp.relation_group_memberships
+      set role = 'member' where id = ${inserted.childId}::uuid`.execute(trx));
+    expect((await sql<{ role: string }>`select role from erp.relation_group_memberships
+      where id = ${inserted.childId}::uuid`.execute(privileged.db)).rows[0]!.role).toBe('member');
+
 
     // A sibling of another group type is no Team parent: the lease the
     // Operation needs is refused, and the scoped parent lock finds nothing.

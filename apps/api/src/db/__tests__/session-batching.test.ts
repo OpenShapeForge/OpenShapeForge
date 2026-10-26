@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import { SQL } from "bun";
 import { sql } from "kysely";
-import { createDatabaseRuntime } from "../connection.js";
+import { createDatabaseRuntime, type DatabaseRuntime } from "../connection.js";
 import { withDbSession } from "../session.js";
 import { withAuditContext } from "../../platform/audit-context.js";
 
@@ -14,18 +14,20 @@ test("tenant sessions batch setup without retaining pooled tenant, role, relatio
   await admin.unsafe(`create database "${name}"`);
   const url = new URL(owner); url.pathname = `/${name}`;
   const statements: string[] = [];
-  const runtime = createDatabaseRuntime({ databaseUrl: url.toString(), maxConnections: 1,
-    log: event => { if (event.level === "query") statements.push(event.query.sql); },
-  });
+  let runtime: DatabaseRuntime | undefined;
   try {
+    runtime = createDatabaseRuntime({ databaseUrl: url.toString(), maxConnections: 1,
+      log: event => { if (event.level === "query") statements.push(event.query.sql); },
+    });
+    const db = runtime.db;
     // Deliberately poison this disposable pool connection. Tenant setup must
     // clear break-glass authority before the callback can access any rows.
-    await sql`select set_config('app.bypass_rls', 'true', false)`.execute(runtime.db);
+    await sql`select set_config('app.bypass_rls', 'true', false)`.execute(db);
     const first = { tenantId: crypto.randomUUID(), userId: crypto.randomUUID(),
       relationId: crypto.randomUUID(), relationGroupIds: [crypto.randomUUID()],
       roles: ["Example.Read"], groups: [], scope: "self" as const };
     statements.length = 0;
-    await withAuditContext("example.read", "bearer", () => withDbSession(runtime.db, first, async trx => {
+    await withAuditContext("example.read", "bearer", () => withDbSession(db, first, async trx => {
       const result = (await sql<{ tenant: string; user: string; relation: string; roles: string; memberships: string; bypass: string; audit: string; groups: string }>`
         select current_setting('app.tenant_id') as tenant, current_setting('app.user_id') as "user",
           current_setting('app.relation_id') as relation, current_setting('app.roles') as roles,
@@ -40,7 +42,7 @@ test("tenant sessions batch setup without retaining pooled tenant, role, relatio
     expect(statements.filter(statement => statement.includes("set_config"))).toHaveLength(2);
 
     const second = { tenantId: crypto.randomUUID(), userId: crypto.randomUUID(), roles: [], groups: [] };
-    await withDbSession(runtime.db, second, async trx => {
+    await withDbSession(db, second, async trx => {
       const result = (await sql<{ tenant: string; roles: string; relation: string; memberships: string; bypass: string; audit: string }>`
         select current_setting('app.tenant_id') as tenant, current_setting('app.roles') as roles,
           current_setting('app.relation_id') as relation, current_setting('app.relation_group_ids') as memberships,
@@ -48,9 +50,9 @@ test("tenant sessions batch setup without retaining pooled tenant, role, relatio
       `.execute(trx)).rows[0];
       expect(result).toEqual({ tenant: second.tenantId, roles: "", relation: "", memberships: "", bypass: "false", audit: "" });
     });
-    expect((await sql<{ tenant: string }>`select current_setting('app.tenant_id', true) as tenant`.execute(runtime.db)).rows[0]!.tenant).toBe("");
+    expect((await sql<{ tenant: string }>`select current_setting('app.tenant_id', true) as tenant`.execute(db)).rows[0]!.tenant).toBe("");
   } finally {
-    await runtime.close();
+    await runtime?.close();
     await admin.unsafe(`drop database "${name}" with (force)`);
     await admin.close();
   }

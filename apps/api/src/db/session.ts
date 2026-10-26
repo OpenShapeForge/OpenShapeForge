@@ -69,11 +69,17 @@ function resolveAuditSession(input: AuditContext | null | undefined = auditConte
   return input ?? { operationId: "", correlationId: crypto.randomUUID(), actorKind: "system" as const };
 }
 
-async function applyAuditSession<T>(trx: Transaction<T>, input: AuditContext | null | undefined = auditContext()): Promise<AuditContext> {
+function auditSessionSettings(audit: AuditContext) {
+  return [
+    sql`set_config('app.audit_operation', ${audit.operationId}, true)`,
+    sql`set_config('app.audit_correlation', ${audit.correlationId}, true)`,
+    sql`set_config('app.audit_actor_kind', ${audit.actorKind}, true)`,
+  ];
+}
+
+async function applyAuditSession<T>(trx: Transaction<T>, input: AuditContext | null | undefined): Promise<AuditContext> {
   const audit = resolveAuditSession(input);
-  await sql`select set_config('app.audit_operation', ${audit.operationId}, true),
-    set_config('app.audit_correlation', ${audit.correlationId}, true),
-    set_config('app.audit_actor_kind', ${audit.actorKind}, true)`.execute(trx);
+  await sql`select ${sql.join(auditSessionSettings(audit))}`.execute(trx);
   return audit;
 }
 
@@ -169,11 +175,13 @@ export async function applyDbSession<TDatabase>(
   trx: Transaction<TDatabase>,
   session: DbSessionContext,
 ) {
-  // Bound the wall-clock cost of every statement in this tenant-scoped
-  // transaction so one accepted GraphQL/REST request cannot hold a database
+  // Bound subsequent statements in this tenant-scoped transaction so an
+  // accepted GraphQL/REST request cannot hold a database
   // connection indefinitely (issue #130). Transaction-local (`set_config(...,
   // true)`), so it is scoped to this request and reset on commit/rollback; it
-  // also covers the closure-expansion queries below. 0 disables (dev/opt-out).
+  // also covers the closure-expansion queries below. The initial settings
+  // statement itself, like BEGIN, runs before this limit takes effect.
+  // 0 disables the override (dev/opt-out).
   const statementTimeoutMs = readStatementTimeoutMs();
   // A tenant session is never a continuation of a system session. Clear the
   // break-glass flag before any tenant-scoped lookup. This statement contains
@@ -187,9 +195,7 @@ export async function applyDbSession<TDatabase>(
     sql`set_config('app.bypass_rls', 'false', true)`,
     sql`set_config('app.tenant_id', ${session.tenantId}, true)`,
     sql`set_config('app.user_id', ${session.userId}, true)`,
-    sql`set_config('app.audit_operation', ${audit.operationId}, true)`,
-    sql`set_config('app.audit_correlation', ${audit.correlationId}, true)`,
-    sql`set_config('app.audit_actor_kind', ${audit.actorKind}, true)`,
+    ...auditSessionSettings(audit),
     sql`set_config('app.roles', ${session.roles.join(",")}, true)`,
     sql`set_config('app.scope', ${session.scope}, true)`,
     sql`set_config('app.relation_group_ids', ${session.relationGroupIds.join(",")}, true)`,

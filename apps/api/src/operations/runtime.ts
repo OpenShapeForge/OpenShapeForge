@@ -525,6 +525,7 @@ export function runtimeStaticOperationRegistrations(
             ...runtime,
             transport: "operation",
             session,
+            ...(options?.signal ? { signal: options.signal } : {}),
           });
           options?.signal?.throwIfAborted();
           return result.resultKind === "operation-envelope"

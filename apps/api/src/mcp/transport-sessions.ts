@@ -23,6 +23,12 @@ import { handleModernMcpRequest } from "./modern-http.js";
 import type { McpRegistrationOptions, McpRouteContext } from "./route-context.js";
 import type { BuildServer } from "./generated-mcp-server.js";
 import { resolveServerIcons } from "./server-icons.js";
+
+/** Only discovery/initialization consumes instructions; keep other shapes conservative. */
+export function requestNeedsInstructions(body: unknown): boolean {
+  return body === null || typeof body !== "object" || Array.isArray(body) ||
+    (body as { method?: unknown }).method !== "tools/call";
+}
 /**
  * The stateful transport sessions of the MCP plugin scope, keyed by the
  * SDK-issued session id and bound to the identity that initialized them,
@@ -123,10 +129,12 @@ export function createTransportSessions(input: {
     void reply.header("vary", SHORT_ADDRESS_VARY);
     const { db, session, resource } = await requireMcpSession(request);
     rememberSessionClient(session, clientInfoFromEnvelopeBody(request.body));
+    const includeInstructions = requestNeedsInstructions(request.body);
     if (await handleModernMcpRequest(request, reply, async () => buildServer(
       db, session, options.modules, options.modulePlatform, options.egressOwner,
       notifyDerivedDefinitionChanged, false, undefined,
-      await sessionOpeningSentence({ db, session }),
+      includeInstructions ? await sessionOpeningSentence({ db, session }) : null,
+      undefined, undefined, undefined, includeInstructions,
     ), (server) => options.modulePlatform?.unregisterServer(server))) return;
 
     const sessionHeader = request.headers["mcp-session-id"];

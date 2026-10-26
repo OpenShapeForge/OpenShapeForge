@@ -9,6 +9,7 @@ import type { DB } from "../generated/db/types.js";
 import { withDbSession } from "../db/session.js";
 import {
   derivedToolsFromRows,
+  deriveToolName,
   isAuthorizedInternalDerivedRow,
   sessionInAudience,
   type DerivedToolsCatalogEntry,
@@ -111,6 +112,7 @@ export function createDerivedDefinitionResolution(base: ServerScopePrologue) {
 
   const coreOwnsDerivedToolName = async (toolName: string): Promise<boolean> => {
     if (coreOwnsStaticToolName(toolName, operationToolProjection)) return true;
+    if (deriveToolName(toolName) !== toolName) return false;
     if (!session.tenantId || catalogDerivedTools.length === 0) return false;
     return withDbSession(db, session, async (trx) => {
       for (const entry of catalogDerivedTools) {
@@ -124,6 +126,7 @@ export function createDerivedDefinitionResolution(base: ServerScopePrologue) {
 
   const assertModuleToolNamesAvailable = async (
     tools: readonly SourcedTool[],
+    selectedName?: string,
   ): Promise<void> => {
     assertUniqueToolNames(tools);
     for (const { tool } of tools) {
@@ -133,11 +136,13 @@ export function createDerivedDefinitionResolution(base: ServerScopePrologue) {
         );
       }
     }
-    if (!session.tenantId || catalogDerivedTools.length === 0 || tools.length === 0) {
+    const storedCandidates = tools.filter(({ tool }) => deriveToolName(tool.name) === tool.name &&
+      (selectedName === undefined || tool.name === selectedName));
+    if (!session.tenantId || catalogDerivedTools.length === 0 || storedCandidates.length === 0) {
       return;
     }
     await withDbSession(db, session, async (trx) => {
-      for (const { tool } of tools) {
+      for (const { tool } of storedCandidates) {
         for (const entry of catalogDerivedTools) {
           if (
             (await snapshotDefinitionsByToolName(trx, entry, tool.name)).length >
@@ -162,6 +167,7 @@ export function createDerivedDefinitionResolution(base: ServerScopePrologue) {
       }
     | undefined
   > => {
+    if (deriveToolName(toolName) !== toolName) return undefined;
     if (projectedOnly) {
       const projected = (await derivedToolsForSession(db, session, tables, locale)).find(
         (tool) => tool.name === toolName,

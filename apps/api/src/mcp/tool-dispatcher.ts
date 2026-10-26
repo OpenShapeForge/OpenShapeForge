@@ -47,7 +47,7 @@ export function createDispatchTool(scope: ServerScope, surface: SessionSurface):
     sourceVault,
   } = scope;
   const {
-    availableTools,
+    findTool,
   } = surface;
   const dispatchTool = async (
     name: string,
@@ -194,9 +194,7 @@ export function createDispatchTool(scope: ServerScope, surface: SessionSurface):
               },
             }
           : await (async (): Promise<ListedTool | undefined> => {
-              const listed = (await availableTools()).find(
-                (entry) => entry.tool.name === name,
-              );
+              const listed = await findTool(name);
               if (listed || operationToolProjection.mode !== "searchable") {
                 return listed;
               }

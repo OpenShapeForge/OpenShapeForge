@@ -78,6 +78,7 @@ import {
 import type { ModuleRuntimeContext } from "../modules/contract.js";
 import type { InitializedMaintenanceOwner } from "../modules/maintenance.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
+import { generatedRuntimeFieldSchemas } from "../modules/field-schemas.js";
 import { moduleRealtimeAuthorizer } from "../modules/realtime-resources.js";
 import { composeJobHandlers } from "../jobs/handlers.js";
 import { createJobsRuntimeModule } from "../jobs/module.js";
@@ -398,6 +399,9 @@ export function createApiApp(options: {
     const modulePlatform = databaseRuntime
       ? new ModulePlatformRuntime(databaseRuntime.db)
       : undefined;
+    // Fixed generated validation belongs to startup, before the API is ready,
+    // rather than to the first person's stored-field/form operation.
+    generatedRuntimeFieldSchemas.object([]);
     const moduleContext: ModuleRuntimeContext = {
       ...dbOptions,
       ...(modulePlatform ? { platform: modulePlatform.services } : {}),

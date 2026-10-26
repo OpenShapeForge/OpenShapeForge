@@ -64,16 +64,21 @@ export function visibleAgentSkills(skills: readonly ProjectedSkill[], roles: rea
 }
 
 const cache = { ttlMs: 300_000, cacheScope: "private" as const, resultType: "complete" as const };
+// Fixed protocol schemas: compile once before readiness, not on the first
+// person’s tool call or again for every stateless request. Session visibility
+// is still resolved inside each handler; no tenant data is retained here.
+const listSkillParams = fromJsonSchema<{ cursor?: string }>({
+  type: "object", properties: { cursor: { type: "string" } }, additionalProperties: true,
+});
+const getSkillParams = fromJsonSchema<{ uri: string }>({
+  type: "object", required: ["uri"], properties: { uri: { type: "string" } }, additionalProperties: true,
+});
 export function registerAgentSkillHandlers(server: Server, skillsForSession: () => readonly ProjectedSkill[]): void {
-  server.setRequestHandler("skills/list", { params: fromJsonSchema<{ cursor?: string }>({
-    type: "object", properties: { cursor: { type: "string" } }, additionalProperties: true,
-  }) }, async (params) => {
+  server.setRequestHandler("skills/list", { params: listSkillParams }, async (params) => {
     if (params.cursor !== undefined) throw new ProtocolError(ProtocolErrorCode.InvalidParams, "Unknown skill cursor.");
     return { ...cache, skills: skillsForSession().map(({ entry }) => entry) };
   });
-  server.setRequestHandler("skills/get", { params: fromJsonSchema<{ uri: string }>({
-    type: "object", required: ["uri"], properties: { uri: { type: "string" } }, additionalProperties: true,
-  }) }, async ({ uri }) => {
+  server.setRequestHandler("skills/get", { params: getSkillParams }, async ({ uri }) => {
     const skill = skillsForSession().find(({ entry }) => entry.uri === uri);
     if (!skill) throw new ProtocolError(ProtocolErrorCode.InvalidParams, "Skill not found.");
     return { ...cache, skill: skill.entry };

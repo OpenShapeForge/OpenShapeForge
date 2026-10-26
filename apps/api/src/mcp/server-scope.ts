@@ -65,6 +65,7 @@ function createServerScopePrologue(input: {
   moduleSessionOverride: TrustedSessionContext | undefined;
   operationToolProjectionOverride: OperationToolProjection | undefined;
   serverIcons: Icon[] | undefined;
+  includeInstructions: boolean;
 }) {
   const {
     db,
@@ -125,7 +126,7 @@ function createServerScopePrologue(input: {
     // The server owns the OAuth redirect URL, so it states it rather than
     // leaving assistants to ask the person for a value only this process
     // knows; without a public origin it says that, instead of failing.
-    instructions: buildServerInstructions({
+    instructions: input.includeInstructions === false ? "" : buildServerInstructions({
       opening,
       hasConnectors: catalogDerivedTools.some((entry) => entry.connect),
       oauthCallbackUrl: oauthCallbackUrlForInstructions(),

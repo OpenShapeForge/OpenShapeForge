@@ -60,7 +60,7 @@ test("an update-only entity can write plain values; tenant/missing rows remain u
   await expect(guardModelTypedValueArguments(db.db,actor,table,{value:"plain"},foreignId)).rejects.toMatchObject({status:404});
   await expect(guardModelTypedValueArguments(db.db,actor,table,{value:"plain"},randomUUID())).rejects.toMatchObject({status:404});
   await withGuardedModelTypedValueWrite(db.db,actor,table,{value:"plain"},id,async()=>{
-    expect(currentDbSessionDatabase()).toBe(db.db);
+    expect(Object.is(currentDbSessionDatabase(),db.db)).toBe(true);
     await withDbSession(db.db,actor,async trx=>{
       await sql`update ${sql.id(schema,"settings")} set value='"plain"'::jsonb where id=${id}::uuid`.execute(trx);
     });

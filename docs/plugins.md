@@ -9,7 +9,12 @@ optional and bounded: 20 delivery attempts, 64 KiB each, 512 KiB per invocation.
 notification never replaces the final result. Providers must project data for
 the caller before reporting it, just as for their final output. This includes
 free-text messages: never include credentials. Reporting awaits delivery, so
-report between transaction-heavy stages rather than on every record.
+report between transaction-heavy stages rather than on every record. Each
+delivery waits at most 250 ms and observes read cancellation; the normal final
+result is retained when delivery fails or stalls. Clients ignore late progress
+after the original RPC finishes. Opt-in cancellation applies only to top-level
+reads and their inherited nested reads; ordinary clients and writes retain
+their existing cancellation behavior.
 
 MCP clients opt in with `_meta["openshapeforge/read-progress"]: {version: 1}`
 and a standard progress token. Snapshots travel in that namespace on standard

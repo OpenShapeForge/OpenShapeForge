@@ -30,6 +30,7 @@ export class ReadProgressRuntime<S extends object> {
 
   async operation<T>(session: S, definition: RuntimeOperationDefinition, signal: AbortSignal | undefined, work: (signal?: AbortSignal) => Promise<T>): Promise<T> {
     const observer = this.#observers.getStore();
+    if (!observer?.active || observer.session !== session) return work(signal);
     const parent = this.#frames.getStore();
     const topLevel = !parent || parent.observer !== observer;
     const read = definition.effects.data === "read" && ["none", "read"].includes(definition.effects.external);

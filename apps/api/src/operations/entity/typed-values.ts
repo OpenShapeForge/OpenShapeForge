@@ -230,7 +230,7 @@ export function assertStoredTypedValuesSupported(
 }
 
 
-function secretDefinition(definition: unknown): boolean {
+export function secretDefinition(definition: unknown): boolean {
   return isRecord(definition) && isRecord(definition.classification) && definition.classification.sensitivity === "confidential";
 }
 function secretKeys() {

@@ -51,6 +51,8 @@ import { ArtifactStorageRuntime } from "./artifact-storage.js";
 import { runtimeSettings } from "./settings.js";
 import { RecordAccessRuntime } from "./record-access.js";
 import { createWebhookSecretServices } from "./webhook-secrets.js";
+import { ReadProgressRuntime } from "./read-progress.js";
+import type { RuntimeReadProgress } from "@openshapeforge/plugin-runtime";
 import {
   generatedCapabilityOperations,
   issueCapabilityGrantInTransaction,
@@ -308,6 +310,8 @@ export class ModulePlatformRuntime {
     Set<Promise<unknown>>
   >();
   readonly #operationProviders = new Map<string, RuntimeOperationProvider>();
+  readonly #readProgress = new ReadProgressRuntime<TrustedSessionContext>(assertSecretFree);
+
   readonly #staticOperations = new Map<string, ModuleStaticOperationRegistration>();
   readonly #operationCallStack = new AsyncLocalStorage<readonly string[]>();
   readonly #operationTransactionStorage = new AsyncLocalStorage<{
@@ -344,6 +348,15 @@ export class ModulePlatformRuntime {
   #hostOperationExecutor: ModuleHostOperationExecutor | undefined;
 
   readonly #capabilityOperations: ReadonlySet<string> | undefined;
+
+  withReadProgressObserver<T>(
+    session: TrustedSessionContext,
+    emit: (snapshot: RuntimeReadProgress) => Promise<void>,
+    work: () => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    return this.#readProgress.observe(session, emit, work, signal);
+  }
 
   constructor(
     db: OpenShapeForgeDatabase,
@@ -385,6 +398,10 @@ export class ModulePlatformRuntime {
       },
     });
     this.services = {
+      readProgress: {
+        report: (session, snapshot) => this.#acceptsScopedSession(session)
+          ? this.#readProgress.report(session, snapshot) : Promise.resolve(false),
+      },
       webhookSecrets: createWebhookSecretServices({
         acceptsSession: (session) => this.#acceptsScopedSession(session),
         serviceIdentity: (tenantId) => organizationServiceIdentities().find((entry) => entry.tenantId === tenantId)?.clientId,
@@ -838,7 +855,8 @@ export class ModulePlatformRuntime {
       }
       return this.#operationCallStack.run(
         [...staticStack, request.operation.id],
-        () => staticOperation.execute(session, request, options),
+        () => this.#readProgress.operation(session, staticOperation.definition, options.signal,
+          signal => staticOperation.execute(session, request, signal ? {signal} : options)),
       );
     }
     if (controlSession) {
@@ -903,33 +921,33 @@ export class ModulePlatformRuntime {
     }
     const execute = () => this.#operationCallStack.run(
       [...stack, request.operation.id],
-      () => match.provider.execute({
+      () => this.#readProgress.operation(session, match.definition, options.signal, signal => match.provider.execute({
         session,
-        ...(options.signal ? { signal: options.signal } : {}),
+        ...(signal ? { signal } : {}),
         execute: (nested, nestedOptions) => this.#executeOperation(
           session,
           nested,
-          nestedOptions?.signal ?? options.signal
-            ? { signal: (nestedOptions?.signal ?? options.signal)! }
+          nestedOptions?.signal ?? signal
+            ? { signal: (nestedOptions?.signal ?? signal)! }
             : {},
         ),
         invokeDeclarativeService: (declarative, declarativeOptions) =>
           this.invokeDeclarativeService(
             session,
             declarative,
-            declarativeOptions?.signal ?? options.signal
-              ? { signal: (declarativeOptions?.signal ?? options.signal)! }
+            declarativeOptions?.signal ?? signal
+              ? { signal: (declarativeOptions?.signal ?? signal)! }
               : {},
           ),
         invokeHostOperation: (hostRequest, hostOptions) =>
           this.invokeHostOperation(
             session,
             hostRequest,
-            hostOptions?.signal ?? options.signal
-              ? { signal: (hostOptions?.signal ?? options.signal)! }
+            hostOptions?.signal ?? signal
+              ? { signal: (hostOptions?.signal ?? signal)! }
               : {},
           ),
-      }, request),
+      }, request)),
     );
     if (match.definition.reliability.idempotency.mode !== "keyed") return execute();
     if (!request.idempotencyKey) {

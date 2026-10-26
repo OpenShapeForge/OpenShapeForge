@@ -62,6 +62,7 @@ export const SCHEMA_BY_KIND: Readonly<Record<string, string>> = Object.freeze({
   settingsDefinition: "settings-definition.schema.json",
   settingsProvider: "settings-provider.schema.json",
   entityProfile: "entity-profile.schema.json",
+  entitySubtype: "entity-subtype.schema.json",
   entityMapping: "entity-mapping.schema.json",
   view: "view.schema.json",
   workflowNode: "workflow-node.schema.json",
@@ -106,6 +107,12 @@ export type AuthoringValidator = {
    * differently from how it was validated.
    */
   validateFile(path: string, origin: string): { document: unknown; schema: string | null };
+  /**
+   * Validates a composed value against one definition of a shipped schema,
+   * e.g. `core-entity.schema.json#/$defs/entityInterfacesV2` for the merged
+   * interfaces of a subtype. Throws on a violation or an unknown reference.
+   */
+  validateFragment(schemaRef: string, value: unknown, origin: string): void;
 };
 
 function formatErrors(errors: readonly object[] | null | undefined): string {
@@ -231,6 +238,17 @@ export function createAuthoringValidator(
         );
       }
       return schemaFile;
+    },
+    validateFragment(schemaRef: string, value: unknown, origin: string): void {
+      const validate = ajv.getSchema(schemaRef);
+      if (!validate) {
+        throw new Error(`Schema reference ${schemaRef} is not in ${schemasDir}.`);
+      }
+      if (!validate(value)) {
+        throw new Error(
+          `${origin} does not match ${schemaRef}:\n${formatErrors(validate.errors)}`,
+        );
+      }
     },
   };
   return validator;

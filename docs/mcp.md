@@ -808,6 +808,34 @@ codes (`401`, `503`) with the REST error body shape.
 like every generated artifact). It is hashed by `bun run check:generated` for
 determinism, staleness, and orphans along with everything else.
 
+## Static product prompts
+
+A runtime module may contribute `mcpPrompts` request starters:
+
+```ts
+const module = {
+  name: "sales",
+  mcpPrompts: [{
+    name: "sales.prepare-meeting",
+    title: "Prepare a customer meeting",
+    description: "Review accessible customer context and open commitments.",
+    text: "Prepare my next customer meeting using accessible records and source links.",
+    roles: ["Sales.Read"],
+  }],
+};
+```
+
+The existing compiler plugin registry loads the runtime module; no additional
+authoring syntax or database is involved. Names must be unique across all
+modules, including hidden contributions. Omit `roles` to show a prompt to every
+admitted application session; an empty role list hides it from everyone.
+`prompts/list` exposes metadata and `prompts/get` returns one user text message.
+Both enforce visibility. Static prompts accept no arguments or pagination
+cursors; unknown prompts and unsupported inputs fail with invalid parameters.
+Retrieving a prompt performs no reads or writes in the business domain.
+Any subsequent tool use retains canonical authorization. Hosts without prompt
+contributions continue to list zero prompts.
+
 ## See also
 
 - [api.md](api.md) — the CRUD engine, RLS, auth, and the REST surface

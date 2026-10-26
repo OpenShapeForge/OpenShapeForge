@@ -8,6 +8,7 @@ import type { OperationContract } from "./runtime.js";
 import { getGeneratedCrudTables } from "./entity/catalog.js";
 import { serializeEntityRow } from "./entity/serialize-result.js";
 import type { LeaseProtectedOperation } from "./entity/edit-leases.js";
+import { policyOperation } from "./entity/subtype-scope.js";
 
 /** Validate compiler-owned bindings once at boot, never choose them from input. */
 export function nativeCollectionBinding(operation: OperationContract): Readonly<CollectionMutationBinding> {
@@ -38,10 +39,12 @@ export function nativeCollectionHandler(operation: OperationContract): ModuleOpe
     const parents = getGeneratedCrudTables().filter((table) => table.source?.authoringEntityName === binding.entityName);
     if (parents.length !== 1) throw operationFailure({ code: "INVALID_DEFINITION", message: "The collection owner has no unambiguous record projection." });
     const value = await withModuleOperationTransaction(context.platform, context.session, async (trx) => {
-      const guard: LeaseProtectedOperation = {
+      // A subtype parent's lease is the base record's (subtype-scope.ts), the
+      // same identity the canonical runtime consumed it under.
+      const guard: LeaseProtectedOperation = policyOperation(parents[0]!, {
         id: operation.key, entityId: operation.target!.entityId!, entityName: binding.entityName,
         intent: "invoke", concurrency: operation.concurrency!,
-      };
+      });
       // Host execution admission belongs after this owner's parent and
       // sibling locks, not before them: bind the decision to this transaction
       // and let the collection owner take it immediately before it writes

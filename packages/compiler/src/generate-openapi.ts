@@ -419,7 +419,8 @@ export function renderOpenApiSpec(
   // Entity routes are projected from the compiled contracts; a render without
   // contracts documents only the transports every host has. A REST table whose
   // contract is missing from a non-empty set is a mismatch, not an omission.
-  const restTables = manifest.tables
+  // Subtype projections are REST resources of their own, on their base table.
+  const restTables = [...manifest.tables, ...(manifest.entitySubtypes ?? [])]
     .filter(
       (table) =>
         isGeneratedCrudEligible(table) && table.source?.rest !== undefined,

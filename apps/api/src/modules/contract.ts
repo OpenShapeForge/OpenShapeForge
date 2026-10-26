@@ -273,6 +273,10 @@ export type ModulePlatformServices = {
     organizationServiceIdentity(session: TrustedSessionContext): Promise<{ serviceIdentityId: string }>;
   };
   db: {
+    withControlSession?<T>(
+      session: TrustedSessionContext,
+      fn: (trx: Transaction<DB>) => Promise<T>,
+    ): Promise<T>;
     withSession<T>(
       session: TrustedSessionContext,
       fn: (trx: Transaction<DB>) => Promise<T>,

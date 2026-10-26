@@ -58,6 +58,7 @@ import {
   type LeaseProtectedOperation,
   validateEntityVersionInTransaction,
 } from "./entity/edit-leases.js";
+import { policyOperation } from "./entity/subtype-scope.js";
 import { withConsumedCollectionLeaseInTransaction } from "./entity/collection-lease-context.js";
 import { getGeneratedCrudTables } from "./entity/catalog.js";
 import { applyOwnedEntityFields, assertOwnedTarget, captureOwnedTarget } from "./entity/owned-fields.js";
@@ -1004,7 +1005,6 @@ async function invokeGuardedCustomOperation(
       }],
     });
   }
-  const protectedOperation = protectedCustomOperation(operation);
   const expectedVersion = operation.concurrency?.version
     ? requireStringControl(input, "expectedVersion")
     : undefined;
@@ -1031,6 +1031,11 @@ async function invokeGuardedCustomOperation(
   const table = recordPermissions.length > 0 || expectedVersion || confirmation.mode === "challenge"
     ? targetTable(operation)
     : undefined;
+  // A subtype target's leases and challenges are the base record's
+  // (entity/subtype-scope.ts), so the protected contract carries that identity.
+  const protectedOperation = table
+    ? policyOperation(table, protectedCustomOperation(operation))
+    : protectedCustomOperation(operation);
   for (const permission of recordPermissions) {
     await assertRecordPermission(
       context.db,

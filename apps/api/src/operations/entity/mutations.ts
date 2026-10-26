@@ -53,6 +53,7 @@ import {
 } from "./derive-on-create.js";
 import { assertRelationshipConstraintsInTransaction } from "./relationship-constraints.js";
 import { assertPublishableRelatedMutationInTransaction } from "./derived-execution-guards.js";
+import { subtypeScopeInsertColumns, subtypeScopeWhere } from "./subtype-scope.js";
 import { assertHardDeleteAllowedInTransaction } from "./deletion-guards.js";
 import { assertAdmittedBeforeEffects } from "../execution-policy.js";
 import { assertCallerTopLevelFields, prepareProtectedFieldWrites } from "./field-policy.js";
@@ -74,6 +75,7 @@ async function fetchGeneratedRowInTransaction(
     from ${sql.id(table.schema, table.table)}
     where ${sql.id(table.primaryKey!)}::text = ${id}
       ${tenantWhere}
+      ${subtypeScopeWhere(table)}
     limit 1
     ${lock ? sql`for update` : sql``}
   `.execute(trx);
@@ -316,6 +318,12 @@ async function insertGeneratedRowInTransaction(
       columns.push(tenantColumn);
       sqlValues.push(session.tenantId);
     }
+    // A subtype's discriminators are the runtime's values, like the tenant:
+    // the caller was refused them above, so none is in `prepared`.
+    for (const scope of subtypeScopeInsertColumns(table)) {
+      columns.push(scope.column);
+      sqlValues.push(scope.value);
+    }
     const conflict = derivation
       ? sql`on conflict (${sql.join(derivation.conflictColumns.map((column) => sql.id(column)))}) do nothing`
       : sql``;
@@ -464,8 +472,9 @@ async function applyGeneratedRowUpdate(
         confirmationAnswer: guard.confirmationAnswer,
       });
     }
-    const tenantWhere =
-      table.tenantScoped ? sql`and ${sql.id("tenant_id")} = ${session.tenantId}` : sql``;
+    const tenantWhere = sql`${
+      table.tenantScoped ? sql`and ${sql.id("tenant_id")} = ${session.tenantId}` : sql``
+    }${subtypeScopeWhere(table)}`;
     const versionField = guard?.operation.concurrency?.version?.field;
     const versionColumn = versionField
       ? table.columns.find((column) => fieldNameForColumn(column) === versionField)
@@ -646,8 +655,9 @@ export async function deleteGeneratedEntity(
         confirmationAnswer: input.guard.confirmationAnswer,
       });
     }
-    const tenantWhere =
-      table.tenantScoped ? sql`and ${sql.id("tenant_id")} = ${session.tenantId}` : sql``;
+    const tenantWhere = sql`${
+      table.tenantScoped ? sql`and ${sql.id("tenant_id")} = ${session.tenantId}` : sql``
+    }${subtypeScopeWhere(table)}`;
     const versionField = input.guard?.operation.concurrency?.version?.field;
     const versionColumn = versionField
       ? table.columns.find((column) => fieldNameForColumn(column) === versionField)

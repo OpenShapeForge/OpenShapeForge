@@ -11,6 +11,7 @@ import { assertEntityValueInput, entityValuePhysicalColumns } from "./entity-val
 import { generatedEntityValues } from "../../modules/entity-value-registry.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable } from "./types.js";
 import { assertNoDerivedOnCreateValues } from "./derive-on-create.js";
+import { assertNoCallerSubtypeValues, isSubtypeScopeColumn } from "./subtype-scope.js";
 
 /**
  * The single storage-writability rule shared by generated CRUD. Caller-facing
@@ -61,6 +62,9 @@ export function isCallerWritableColumn(
   return (
     isWritableColumn(column, operation) &&
     !isElicitedOutputColumn(table, column) &&
+    // A subtype's discriminator is the runtime's value on create and fixed
+    // thereafter; no transport offers it (subtype-scope.ts).
+    !isSubtypeScopeColumn(table, column) &&
     !entityValuePhysicalColumns(table).has(column.name) &&
     !collectionManagedFields(table, getGeneratedCrudTables()).has(column.name) &&
     !isOperationWrittenColumn(column) &&
@@ -221,6 +225,7 @@ export function normalizeWritableValues(
   entityValues = generatedEntityValues,
 ) {
   assertNoDerivedOnCreateValues(table, input);
+  assertNoCallerSubtypeValues(table, input);
   assertEntityValueInput(table, input, operation, entityValues);
   const writable = writableColumnMap(table, operation);
   const values = new Map<GeneratedCrudColumn, unknown>();
@@ -229,7 +234,7 @@ export function normalizeWritableValues(
       continue;
     }
     const column = writable.get(field);
-    if (!column || value === undefined) {
+    if (!column || value === undefined || isSubtypeScopeColumn(table, column)) {
       continue;
     }
     values.set(column, value);

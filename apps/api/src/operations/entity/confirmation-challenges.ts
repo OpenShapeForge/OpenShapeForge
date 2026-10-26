@@ -25,6 +25,7 @@ import {
   type VersionRequirement,
 } from "./edit-leases.js";
 import type { GeneratedCrudTable } from "./types.js";
+import { subtypeScopeWhere } from "./subtype-scope.js";
 
 type ChallengeConfirmation = Extract<OperationConfirmation, { mode: "challenge" }>;
 
@@ -137,6 +138,7 @@ export async function issueEntityConfirmationChallenge(
       from ${sql.id(input.table.schema, input.table.table)}
       where ${sql.id(input.table.primaryKey!)}::text = ${input.targetId}
         ${tenantWhere}
+        ${subtypeScopeWhere(input.table)}
     `.execute(trx);
     const row = record.rows[0];
     if (!row) {

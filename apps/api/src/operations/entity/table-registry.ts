@@ -6,8 +6,41 @@ export function isGeneratedCrudTableEligible(table: GeneratedCrudTable): boolean
   return !table.domainInternal && table.generatedCrudEligible === true;
 }
 
+const physicalTables = manifest.tables as GeneratedCrudTable[];
+const subtypeTables = ((manifest as { entitySubtypes?: GeneratedCrudTable[] }).entitySubtypes ?? []);
+
+/**
+ * A subtype projection is served only when its binding is sound: it names a
+ * served base table, its discriminator and hidden columns are columns of that
+ * table, and it offers nothing the base does not store. Anything else is a
+ * stale or forged manifest and fails at import rather than at the first call.
+ */
+function assertSubtypeTable(table: GeneratedCrudTable): void {
+  const binding = table.subtype;
+  if (!binding) throw new Error(`Manifest entitySubtypes entry ${table.name} carries no subtype binding.`);
+  const base = physicalTables.find((candidate) => candidate.name === binding.base.table);
+  if (!base || base.source?.authoringEntityName !== binding.base.entityName || base.schema !== table.schema || base.table !== table.table) {
+    throw new Error(`Subtype ${table.name} is bound to ${binding.base.table}, which the manifest does not serve as ${binding.base.entityName}.`);
+  }
+  if (physicalTables.some((candidate) => candidate.name === table.name) || table.name === base.name) {
+    throw new Error(`Subtype ${table.name} collides with a physical table name.`);
+  }
+  const baseColumns = new Set(base.columns.map((column) => column.name));
+  for (const scope of binding.scope) {
+    if (!baseColumns.has(scope.column)) throw new Error(`Subtype ${table.name} scopes on ${scope.column}, which ${base.name} does not store.`);
+  }
+  for (const hidden of binding.hiddenColumns) {
+    if (!baseColumns.has(hidden.column)) throw new Error(`Subtype ${table.name} hides ${hidden.column}, which ${base.name} does not store.`);
+    if (table.columns.some((column) => column.name === hidden.column)) throw new Error(`Subtype ${table.name} both serves and hides ${hidden.column}.`);
+  }
+  for (const column of table.columns) {
+    if (!baseColumns.has(column.name)) throw new Error(`Subtype ${table.name} serves ${column.name}, which ${base.name} does not store.`);
+  }
+}
+for (const table of subtypeTables) assertSubtypeTable(table);
+
 export const generatedCrudTables = new Map(
-  (manifest.tables as GeneratedCrudTable[])
+  [...physicalTables, ...subtypeTables]
     .filter((table) => isGeneratedCrudTableEligible(table) && table.primaryKey)
     .map((table) => [table.name, table]),
 );

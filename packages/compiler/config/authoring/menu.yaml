@@ -21,6 +21,13 @@ navigation:
           icon: UsersThree
           entity: relation-group
 
+        # A subtype of RelationGroup (entities/core/team.yaml): its own route,
+        # label and Operations over the same stored groups.
+        - key: teams
+          label: { en: Teams, nl: Teams }
+          icon: Users
+          entity: team
+
     # A literal `route:` rather than `entity:`/`view:`, for the same reason the
     # workflow plugin's appShellPatch uses one: this is not an entity page. It
     # is a single screen over the connector catalog, hand-written under

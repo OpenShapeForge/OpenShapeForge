@@ -238,6 +238,7 @@ export async function crudToolCall(
             String(sourceRow.name ?? entity?.entity ?? "this record"),
             definitions,
             messagePrefix,
+            minted.id,
           );
         }
 

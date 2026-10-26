@@ -282,7 +282,7 @@ test("entityValue insert derives logical own values and named UUID references fr
 
 test("fails closed on unsupported ownership, sorting, actions and child guard combinations", () => {
   expect(() => compile(fixture((_owner, child) => { children(child).sortable = false; }))).toThrow("sortable");
-  expect(() => compile(fixture((_owner, child) => { children(child).ownership = "reference"; }))).toThrow("owned");
+  expect(() => compile(fixture((_owner, child) => { children(child).ownership = "reference"; }))).toThrow("Reference collections");
   expect(() => fixture((owner) => { Object.assign(owner.operations!.insertChild!.implementation, { action: "link" }); })).toThrow();
   expect(() => fixture((owner) => { owner.operations!.insertChild!.auth = { mode: "session", roles: ["Other"] }; })).toThrow();
   expect(() => compile(fixture((owner) => { owner.operations!.insertAgain = native("insert"); }))).toThrow("one collection Operation");
@@ -294,6 +294,30 @@ test("authoring schema accepts identityless baseEntity false and object semantic
   const document = entity("Example", [{ key: "label", osfType: "string" }]);
   expect(() => authoringValidator().validate(document, "/authoring/entities/core/example.yaml")).not.toThrow();
   expect(() => authoringValidator().validate({ kind: "osfTypeCatalog", schemaVersion: 1, types: { entityValue: { kind: "object", baseType: "object", label: { en: "Entity value" } } } }, "/authoring/catalogs/osf-types.yaml")).not.toThrow();
+});
+
+test('reference collection preserves child permissions and exposes bounded atomic related updates',()=>{
+ const entries=fixture((owner,child)=>{
+  delete owner.operations!.moveChild;
+  owner.operations!.updateChild={...native('insert'),implementation:{type:'collection',action:'update',field:'children'}} as any;
+  Object.assign(children(child),{ownership:'reference',sortable:false});
+ });
+ const ops=compile(entries);
+ const update=ops.find(op=>op.id==='Owner.updateChild')!;
+ expect(update.inputSchema).toBeDefined();
+ const props=update.inputSchema.properties as any;
+ expect(props.childExpectedVersion).toMatchObject({type:'string',format:'date-time'});
+ const {entityOperationJsonSchemas}=require('../entity-operation-json-schema.js');
+ const owner=entries.find(e=>e.contract.entity.name==='Owner')!.contract;
+ const schema=entityOperationJsonSchemas(owner,owner.entityOperations.update,entries.map(e=>e.contract),{}).inputSchema;
+ const related=(schema.properties as any).relatedChanges;
+ expect(related.maxItems).toBe(10);
+ expect(related.items.oneOf[0].properties.relationship.const).toBe('children');
+ expect(related.items.oneOf[0].properties.create.items.properties.owner).toBeUndefined();
+ expect(related.items.oneOf[0].properties.update.items.required).toContain('expectedVersion');
+ expect(()=>compile(fixture((owner,child)=>{
+  delete owner.operations!.moveChild;Object.assign(children(child),{ownership:'reference',sortable:false,childAuthorization:'owner'});
+ }))).toThrow('childAuthorization requires an owned collection');
 });
 
 test("list contracts sort a sortable collection's children by their authored position", () => {

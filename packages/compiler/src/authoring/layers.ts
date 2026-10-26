@@ -1182,7 +1182,7 @@ function assertOperationsOnlyNarrow(base: JsonObject, merged: JsonObject, origin
  * stay structurally equal. New plugin operations remain valid extension
  * points; these checks protect only contracts an earlier owner already set.
  */
-function assertEntitySecurityOnlyNarrows(baseValue: JsonValue, mergedValue: JsonValue, origin: string): void {
+export function assertEntitySecurityOnlyNarrows(baseValue: JsonValue, mergedValue: JsonValue, origin: string): void {
   if (!isPlainObject(baseValue) || !isPlainObject(mergedValue)) return;
   const base = baseValue;
   const merged = mergedValue;

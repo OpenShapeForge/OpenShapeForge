@@ -65,6 +65,7 @@ const RESERVED_LIST_PARAMS = new Set([
 const MUTATION_CONTROL_FIELDS = new Set([
   "blueprintId",
   "blueprintBindings",
+  "relatedChanges",
   // The field-binding controls: what to bind to a variable, and what to
   // freeze back into a literal. Controls, not values — the bindings map is
   // server-owned and is written only from what the runtime resolved.
@@ -80,6 +81,7 @@ const MUTATION_CONTROL_FIELDS = new Set([
 type MutationControlField =
   | "blueprintId"
   | "blueprintBindings"
+  | "relatedChanges"
   | "bindings"
   | "unbind"
   | "expectedVersion"
@@ -98,7 +100,7 @@ function expectedMutationControlType(
   field: MutationControlField,
 ): "string" | "boolean" | "object" | "array" {
   if (field === "blueprintBindings" || field === "bindings") return "object";
-  if (field === "unbind") return "array";
+  if (field === "unbind" || field === "relatedChanges") return "array";
   return field === "confirmed" ? "boolean" : "string";
 }
 
@@ -124,6 +126,7 @@ function splitMutationBody(body: unknown): {
       if (field === "blueprintId") throw new HttpError(400, "BAD_USER_INPUT", "blueprintId must be a string.");
       if (field === "blueprintBindings") throw new HttpError(400, "BAD_USER_INPUT", "blueprintBindings must be an object.");
       if (field === "bindings") throw new HttpError(400, "BAD_USER_INPUT", "bindings must be an object of field bindings.");
+      if (field === "relatedChanges") throw new HttpError(400, "BAD_USER_INPUT", "relatedChanges must be an array.");
       if (field === "unbind") throw new HttpError(400, "BAD_USER_INPUT", "unbind must be an array of field names.");
       throw invalidMutationControlTypeFailure(field as "expectedVersion" | "leaseToken" | "confirmed" | "confirmationToken" | "confirmationAnswer", expectedType as "string" | "boolean");
     }

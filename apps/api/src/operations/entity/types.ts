@@ -94,10 +94,22 @@ export type GeneratedCrudRelationship = {
   >;
 };
 
+/**
+ * A subtype's binding to the base table it shares (manifest `entitySubtypes`).
+ * Its `name` is the registry name (`<schema>.<table>@<Entity>`); `schema` and
+ * `table` are the base's physical table.
+ */
+export type GeneratedCrudSubtype = {
+  base: { entityName: string; entityId: string; slug: string; table: string };
+  scope: Array<{ field: string; column: string; value: string | number | boolean }>;
+  hiddenColumns: Array<{ field: string; column: string }>;
+};
+
 export type GeneratedCrudTable = {
   name: string;
   schema: string;
   table: string;
+  subtype?: GeneratedCrudSubtype;
   tenantScoped: boolean;
   domainInternal: boolean;
   generatedCrudEligible: boolean;

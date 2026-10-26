@@ -10,6 +10,7 @@
  * buildServer, verbatim.
  */
 import { createDerivedDefinitionResolution } from "./derived-definitions.js";
+import { projectPrompts } from "./prompts.js";
 import { createInvocationSourceResolution } from "./invocation-source-resolution.js";
 import {
   type GeneratedTable,
@@ -104,6 +105,7 @@ function createServerScopePrologue(input: {
   // fails projection rather than shadowing it; it carries no roles, so it is
   // visible to an ordinary, a guest and a server-to-server session alike.
   const allAgentSkills = projectAgentSkills([BUILTIN_AGENT_SKILL_MODULE, ...runtimeModules]);
+  const prompts = projectPrompts(runtimeModules);
   const skillsForSession = () => visibleAgentSkills(allAgentSkills, session.roles);
   const server = new Server({ ...SERVER_INFO, ...(input.serverIcons ? { icons: input.serverIcons } : {}) }, {
     capabilities: {
@@ -218,6 +220,7 @@ function createServerScopePrologue(input: {
 
   return {
     skillsForSession,
+    prompts,
     db,
     session,
     modulePlatform,

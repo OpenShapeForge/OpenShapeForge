@@ -22,7 +22,9 @@ const webPresent = existsSync(join(repoRoot, "apps/web"));
 // retain their generated pages; partial contracts use the Web manifest only.
 // Account now uses canonical account Operations rather than generated CRUD.
 // Chip now exposes its explicit complete CRUD/Web contract for typed variables.
-const expectedGeneratedCrudEntityCount = 116;
+// Team is a subtype projection of RelationGroup (entities/core/team.yaml): no
+// table of its own, but a complete CRUD and Web contract, so a shard of its own.
+const expectedGeneratedCrudEntityCount = 117;
 
 /**
  * The realms this repository authors, by name.

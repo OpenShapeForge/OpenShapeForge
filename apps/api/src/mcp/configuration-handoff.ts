@@ -106,9 +106,9 @@ export async function mintConfiguration(
   },
 ): Promise<{ id: string; token: string; expiresInSeconds: number }> {
   sweep();
+  const id = randomUUID();
   const expiresAtMs = Date.now() + TOKEN_TTL_MS;
   const { db, session, ...payload } = input;
-  const id = randomUUID();
   let token: string;
   if (db) {
     const keyring = keyringFromEnv(process.env[KEYRING_ENV]);

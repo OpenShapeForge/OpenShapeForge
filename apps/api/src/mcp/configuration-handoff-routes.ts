@@ -244,7 +244,8 @@ export async function registerConfigurationHandoffRoutes(
   instance.get(`${ENTITY_CONFIGURATION_PATH}/pending`, async (request) => {
     const { db, session } = await requireMcpSession(request);
     const found = await latestConfigurationForSession(session, db);
-    if (!found) {
+    const requestedId = (request.query as { formId?: unknown })?.formId;
+    if (!found || requestedId !== undefined && requestedId !== found.id) {
       throw new HttpError(
         404,
         "NOT_FOUND",

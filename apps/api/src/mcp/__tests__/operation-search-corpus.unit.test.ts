@@ -176,4 +176,3 @@ describe("a classified field's label is searched exactly where its tool schema s
     expect(ids(writer, null).some((id) => id.startsWith(`${entity.entity}.`))).toBe(false);
   });
 });
-

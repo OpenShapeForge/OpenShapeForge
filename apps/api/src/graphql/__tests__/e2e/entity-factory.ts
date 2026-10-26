@@ -33,7 +33,10 @@ import { isEntityBackedCreate, operationContractFor } from "./operations.js";
 
 export type Column = GeneratedTable["columns"][number];
 
-export const eligibleTables = getGeneratedCrudTables().filter((table) => table.source?.graphql);
+// Subtype projections share a base table and are proven by their own suite
+// (operations/entity/entity-subtype-db.test.ts); the generic lifecycle here
+// runs once per stored entity.
+export const eligibleTables = getGeneratedCrudTables().filter((table) => table.source?.graphql && !table.subtype);
 export const tables = eligibleTables.filter((table) =>
   (["list", "get", "create", "update", "delete"] as const).every((operation) =>
     isGeneratedCrudOperationEnabled(table, operation),
@@ -97,6 +100,7 @@ export function isMutableColumn(
 export async function referencingRows(table: GeneratedTable, id: string, identity: Identity): Promise<string[]> {
   const found: string[] = [];
   for (const candidate of getGeneratedCrudTables()) {
+    if (candidate.subtype) continue;
     for (const [column, target] of foreignKeyTargets(candidate)) {
       if (target !== table.name) continue;
       const tenantWhere = candidate.tenantScoped ? sql`and tenant_id = ${identity.tenantId}::uuid` : sql``;

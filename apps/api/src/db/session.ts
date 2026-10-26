@@ -65,8 +65,12 @@ const activeDbSession = new AsyncLocalStorage<{
   audit: AuditContext;
 }>();
 
+function resolveAuditSession(input: AuditContext | null | undefined = auditContext()): AuditContext {
+  return input ?? { operationId: "", correlationId: crypto.randomUUID(), actorKind: "system" as const };
+}
+
 async function applyAuditSession<T>(trx: Transaction<T>, input: AuditContext | null | undefined = auditContext()): Promise<AuditContext> {
-  const audit = input ?? { operationId: "", correlationId: crypto.randomUUID(), actorKind: "system" as const };
+  const audit = resolveAuditSession(input);
   await sql`select set_config('app.audit_operation', ${audit.operationId}, true),
     set_config('app.audit_correlation', ${audit.correlationId}, true),
     set_config('app.audit_actor_kind', ${audit.actorKind}, true)`.execute(trx);
@@ -171,23 +175,26 @@ export async function applyDbSession<TDatabase>(
   // true)`), so it is scoped to this request and reset on commit/rollback; it
   // also covers the closure-expansion queries below. 0 disables (dev/opt-out).
   const statementTimeoutMs = readStatementTimeoutMs();
-  if (statementTimeoutMs > 0) {
-    await sql`select set_config('statement_timeout', ${String(statementTimeoutMs)}, true)`.execute(
-      trx,
-    );
-  }
-
   // A tenant session is never a continuation of a system session. Clear the
-  // break-glass flag explicitly before any tenant-scoped lookup so a pooled
-  // connection cannot carry broader authority into an ordinary request.
-  await sql`select set_config('app.bypass_rls', 'false', true)`.execute(trx);
-  await sql`select set_config('app.tenant_id', ${session.tenantId}, true)`.execute(trx);
-  await sql`select set_config('app.user_id', ${session.userId}, true)`.execute(trx);
-  const audit = await applyAuditSession(trx);
-  await sql`select set_config('app.roles', ${session.roles.join(",")}, true)`.execute(trx);
-  await sql`select set_config('app.scope', ${session.scope}, true)`.execute(trx);
-  await sql`select set_config('app.relation_group_ids', ${session.relationGroupIds.join(",")}, true)`.execute(trx);
-  await sql`select set_config('app.relation_id', ${session.relationId ?? ""}, true)`.execute(trx);
+  // break-glass flag before any tenant-scoped lookup. This statement contains
+  // only transaction-local settings: no row access runs until ALL have been
+  // applied. Batch the round trips, not the authorization or audit checks.
+  const audit = resolveAuditSession();
+  await sql`select ${sql.join([
+    ...(statementTimeoutMs > 0
+      ? [sql`set_config('statement_timeout', ${String(statementTimeoutMs)}, true)`]
+      : []),
+    sql`set_config('app.bypass_rls', 'false', true)`,
+    sql`set_config('app.tenant_id', ${session.tenantId}, true)`,
+    sql`set_config('app.user_id', ${session.userId}, true)`,
+    sql`set_config('app.audit_operation', ${audit.operationId}, true)`,
+    sql`set_config('app.audit_correlation', ${audit.correlationId}, true)`,
+    sql`set_config('app.audit_actor_kind', ${audit.actorKind}, true)`,
+    sql`set_config('app.roles', ${session.roles.join(",")}, true)`,
+    sql`set_config('app.scope', ${session.scope}, true)`,
+    sql`set_config('app.relation_group_ids', ${session.relationGroupIds.join(",")}, true)`,
+    sql`set_config('app.relation_id', ${session.relationId ?? ""}, true)`,
+  ])}`.execute(trx);
 
   // Group expansion (§E.1/E.3). The user's DIRECT org-unit UUIDs
   // (session.groups — already UUID-filtered and capped at MAX_SESSION_GROUPS by
@@ -235,9 +242,9 @@ export async function applyDbSession<TDatabase>(
     assertExpandedGroupsWithinCap(ancestors, "app.user_groups_ancestors (ancestors)");
   }
 
-  await sql`select set_config('app.user_groups', ${descendants.join(",")}, true)`.execute(trx);
-  await sql`select set_config('app.user_groups_exact', ${exact.join(",")}, true)`.execute(trx);
-  await sql`select set_config('app.user_groups_ancestors', ${ancestors.join(",")}, true)`.execute(trx);
+  await sql`select set_config('app.user_groups', ${descendants.join(",")}, true),
+    set_config('app.user_groups_exact', ${exact.join(",")}, true),
+    set_config('app.user_groups_ancestors', ${ancestors.join(",")}, true)`.execute(trx);
   return audit;
 }
 

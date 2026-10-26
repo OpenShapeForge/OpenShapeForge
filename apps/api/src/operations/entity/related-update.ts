@@ -60,7 +60,7 @@ export async function applyRelatedChanges(
       const target = tables.find(
         (t) => t.source?.graphql?.typeName === relation?.target,
       );
-      if (!target || !relation)
+      if (!target || !relation || !target.primaryKey)
         fail("This field does not support reference creation.");
       const draft = (value as { create: Values }).create;
       if (!draft || typeof draft !== "object" || Array.isArray(draft))

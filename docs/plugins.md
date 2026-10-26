@@ -5,9 +5,11 @@ to publish provisional evidence while the original request is still running.
 The ordinary final result remains mandatory and unchanged. Core accepts only
 the current verified session and the root read operation (data read, external
 none/read); nested operations and writes cannot publish snapshots. Delivery is
-optional and bounded: 20 snapshots, 64 KiB each, 512 KiB per invocation. A failed
+optional and bounded: 20 delivery attempts, 64 KiB each, 512 KiB per invocation. A failed
 notification never replaces the final result. Providers must project data for
-the caller before reporting it, just as for their final output.
+the caller before reporting it, just as for their final output. This includes
+free-text messages: never include credentials. Reporting awaits delivery, so
+report between transaction-heavy stages rather than on every record.
 
 MCP clients opt in with `_meta["openshapeforge/read-progress"]: {version: 1}`
 and a standard progress token. Snapshots travel in that namespace on standard

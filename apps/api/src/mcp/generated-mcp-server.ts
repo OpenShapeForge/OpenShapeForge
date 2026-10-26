@@ -69,6 +69,7 @@ import { registerSessionWithPlatform } from "./platform-registration.js";
 import { registerSessionExecutors } from "./session-executors.js";
 import { createDispatchTool } from "./tool-dispatcher.js";
 import { Server } from "@modelcontextprotocol/server";
+import { READ_PROGRESS_META_KEY } from "@openshapeforge/plugin-runtime/read-progress";
 import type { FastifyInstance } from "fastify";
 import { buildAuthenticateChallenge } from "./protected-resource-metadata.js";
 import { MCP_MOUNT_PATH, ORGANIZATION_MCP_ROUTES } from "./organization-resource.js";
@@ -180,12 +181,27 @@ export function buildServer(
   const dispatchTool = createDispatchTool(scope, surface);
 
   server.setRequestHandler('tools/call', async (request, ctx) => {
-    const outcome = await dispatchTool(
+    const dispatch = () => dispatchTool(
       request.params.name,
       (request.params.arguments ?? {}) as Record<string, unknown>,
       ctx.mcpReq.id,
       false,
+      undefined,
+      undefined,
+      ctx.mcpReq.signal,
     );
+    const meta = request.params._meta;
+    const optIn = meta?.[READ_PROGRESS_META_KEY] as {version?: unknown} | undefined;
+    const progressToken = meta?.progressToken;
+    const outcome = modulePlatform && optIn?.version === 1 &&
+      (typeof progressToken === "string" || (typeof progressToken === "number" && Number.isFinite(progressToken)))
+      ? await modulePlatform.withReadProgressObserver(scope.moduleSession, async snapshot => {
+          await ctx.mcpReq.notify({method: "notifications/progress", params: {
+            progressToken, progress: snapshot.sequence, ...(snapshot.message ? {message: snapshot.message} : {}),
+            _meta: {[READ_PROGRESS_META_KEY]: {...snapshot, toolName: request.params.name}},
+          }});
+        }, dispatch)
+      : await dispatch();
     return outcome.result;
   });
 

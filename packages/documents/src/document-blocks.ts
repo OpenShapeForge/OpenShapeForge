@@ -181,4 +181,3 @@ export function templateParameterFields(snapshot: PublishedSnapshot): readonly R
   const fields = snapshot.head.row.parameters;
   return Array.isArray(fields) ? fields.filter((field): field is Record<string, unknown> => Boolean(field && typeof field === "object")) : [];
 }
-

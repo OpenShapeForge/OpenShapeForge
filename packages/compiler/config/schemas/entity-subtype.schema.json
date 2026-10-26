@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openshapeforge.example/schema-phase0/entity-subtype.schema.json",
+  "title": "Entity Subtype Schema",
+  "description": "A scoped projection of one base coreEntity: it shares the base's table and record identities, adds no field, relationship or storage, and may only restate text, narrow authorization and validation, hide base fields and choose its own interface routes and presentation. Composed by the loader after every layer's entityPatch has been applied to the base.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "kind", "entity", "extends", "scope"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 3 },
+    "kind": { "type": "string", "const": "entitySubtype" },
+    "entity": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" },
+    "extends": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Za-z0-9]*$",
+      "description": "The base coreEntity; a base that is itself a subtype is refused."
+    },
+    "scope": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Base field -> the value every record of this subtype carries. The runtime fixes it on create and filters every read and write by it; callers cannot supply or change it.",
+      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "additionalProperties": {
+        "anyOf": [
+          { "type": "string", "minLength": 1 },
+          { "type": "number" },
+          { "type": "boolean" }
+        ]
+      }
+    },
+    "title": { "type": "string", "minLength": 1 },
+    "description": { "$ref": "core-entity.schema.json#/$defs/localizedOrString" },
+    "language": { "type": "string", "enum": ["en", "nl"] },
+    "labels": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+    "pluralLabels": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+    "displayTemplate": { "type": "string", "minLength": 1 },
+    "filterField": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+    "domains": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    },
+    "fields": {
+      "type": "array",
+      "description": "Overrides of existing base fields only; every key must exist on the base.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key"],
+        "properties": {
+          "key": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+          "hidden": {
+            "type": "boolean",
+            "const": true,
+            "description": "Exclude the field from this subtype's reads, writes and every public schema. The base keeps it; a required hidden column must have a server-owned value."
+          },
+          "label": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/localizedText" },
+          "description": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/localizedText" },
+          "help": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/localizedText" },
+          "required": { "type": "boolean", "const": true },
+          "validation": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/validation" },
+          "permissions": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/fieldDefinitionProperties/properties/permissions" },
+          "authorization": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/fieldDefinitionProperties/properties/authorization" }
+        }
+      }
+    },
+    "authorization": {
+      "description": "Role lists may only narrow the base's. The row policy (rowAccess) is the base table's row-level security and is inherited exactly.",
+      "allOf": [
+        { "$ref": "core-entity.schema.json#/properties/authorization" },
+        { "properties": { "rowAccess": false } }
+      ]
+    },
+    "operations": {
+      "type": "object",
+      "description": "Text of inherited Operations, restated for the subtype. Keys must exist on the base; behaviour, effects and controls are inherited.",
+      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "core-entity.schema.json#/$defs/localizedOrString" },
+          "description": { "$ref": "core-entity.schema.json#/$defs/localizedOrString" },
+          "guidance": { "$ref": "core-entity.schema.json#/$defs/entityOperationV2/properties/guidance" }
+        }
+      }
+    },
+    "interfaces": {
+      "type": "object",
+      "description": "A strategic-merge fragment over the base's interfaces (the same semantics as kind: entityPatch): it restates only what differs, so view blocks need not be complete here. The loader validates the MERGED interfaces against core-entity.schema.json#/$defs/entityInterfacesV2.",
+      "additionalProperties": false,
+      "properties": {
+        "rest": { "$ref": "core-entity.schema.json#/$defs/entityInterfacesV2/properties/rest" },
+        "graphql": { "$ref": "core-entity.schema.json#/$defs/entityInterfacesV2/properties/graphql" },
+        "mcp": { "$ref": "core-entity.schema.json#/$defs/entityInterfacesV2/properties/mcp" },
+        "web": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fields": { "$ref": "core-entity.schema.json#/$defs/entityInterfacesV2/properties/web/properties/fields" },
+            "operations": { "$ref": "core-entity.schema.json#/$defs/entityInterfacesV2/properties/web/properties/operations" },
+            "views": { "type": "object" }
+          }
+        }
+      }
+    }
+  }
+}

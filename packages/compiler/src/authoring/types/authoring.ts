@@ -623,6 +623,75 @@ export interface CoreEntity {
   operations?: Record<string, EntityOperationDefinition>;
   /** Thin interface projections (REST, GraphQL, MCP, web). */
   interfaces?: EntityInterfacesDefinition;
+  /**
+   * Set by the loader when this entity was composed from a `kind:
+   * entitySubtype` document (entity-subtype.ts); never authored on a
+   * coreEntity. The base entity keeps the physical table and the complete
+   * storage model; this entity is its scoped, narrowed projection.
+   */
+  subtype?: EntitySubtypeComposition;
+}
+
+/** A scope discriminator value: one stored scalar the subtype's rows all carry. */
+export type EntitySubtypeScopeValue = string | number | boolean;
+
+/** What the loader records on a composed subtype entity. */
+export interface EntitySubtypeComposition {
+  /** The base entity name (`extends`). */
+  base: string;
+  /** The base entity's file stem, for provenance and the manifest binding. */
+  baseSlug: string;
+  /** Field key -> fixed value every record of this subtype carries. */
+  scope: Record<string, EntitySubtypeScopeValue>;
+  /** Base field keys excluded from this subtype's public contract, sorted. */
+  hidden: string[];
+}
+
+/** One field of the base, narrowed or hidden by a subtype. */
+export interface EntitySubtypeFieldOverride {
+  key: string;
+  /** Exclude the field from every public projection of the subtype. */
+  hidden?: true;
+  label?: LocalizedText;
+  description?: LocalizedText;
+  help?: LocalizedText;
+  /** Only `true`: a subtype may require what the base leaves optional, never the reverse. */
+  required?: true;
+  validation?: FieldValidation;
+  permissions?: FieldDefinition["permissions"];
+  authorization?: FieldDefinition["authorization"];
+}
+
+/** LLM- and person-facing text of an inherited Operation, restated for the subtype. */
+export interface EntitySubtypeOperationOverride {
+  name?: string | LocalizedText;
+  description?: string | LocalizedText;
+  guidance?: EntityOperationDefinition["guidance"];
+}
+
+/**
+ * The authored `kind: entitySubtype` document: a scoped projection of one
+ * base `coreEntity`, composed by the loader after every layer's entityPatch
+ * has been applied to that base. See docs/authoring.md, "Entity subtypes".
+ */
+export interface EntitySubtypeDocument {
+  schemaVersion: 3;
+  kind: "entitySubtype";
+  entity: string;
+  extends: string;
+  scope: Record<string, EntitySubtypeScopeValue>;
+  title?: string;
+  description?: string | LocalizedText;
+  language?: string;
+  labels?: LocalizedText;
+  pluralLabels?: LocalizedText;
+  displayTemplate?: string;
+  filterField?: string;
+  domains?: string[];
+  fields?: EntitySubtypeFieldOverride[];
+  authorization?: AuthorizationConfig;
+  operations?: Record<string, EntitySubtypeOperationOverride>;
+  interfaces?: EntityInterfacesDefinition;
 }
 
 export interface ThirdPartyApiEndpoint {

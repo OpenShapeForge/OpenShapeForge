@@ -85,6 +85,8 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   // whole failure this map exists to close.
   "entity-mapping.schema.json": 0,
   "entity-profile.schema.json": 0,
+  // The shipped Team subtype of RelationGroup (entities/core/team.yaml).
+  "entity-subtype.schema.json": 1,
   "view.schema.json": 0,
   "workflow-node.schema.json": 0,
 });

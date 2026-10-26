@@ -11,7 +11,7 @@ import type {
   ScalarType,
   TableDefinition,
 } from "./schema.js";
-import { isGeneratedCrudEligible } from "./schema.js";
+import { isGeneratedCrudEligible, tableRegistryName } from "./schema.js";
 import { SCALAR_PROJECTION } from "@openshapeforge/operations";
 import { assertTenantBoundReferences, renderOnDeleteSql, renderTenantRegistryWritePolicies } from "./tenant-bound-references.js";
 
@@ -810,21 +810,28 @@ function renderManifestJson(
   }
   const defaultNames = databaseRoles.every((role, index) => role.name === DATABASE_ROLES[index]!.name);
   // Creation interpolation is runtime metadata, not a database definition.
-  // Keep the storage fingerprint stable when only this policy changes.
-  const schemaManifest = {...manifest, tables:manifest.tables.map(table => ({...table,
+  // Keep the storage fingerprint stable when only this policy changes. A
+  // subtype projection owns no storage either, so it stays out of the
+  // fingerprint too.
+  const { entitySubtypes: _projections, ...storageManifest } = manifest;
+  const schemaManifest = {...storageManifest, tables:manifest.tables.map(table => ({...table,
     columns:table.columns.map(({defaultTemplate: _runtimeDefault, ...column}) => column),
   }))};
   const checksum = createHash("sha256")
     .update(JSON.stringify(defaultNames ? schemaManifest : { manifest:schemaManifest, databaseRoles }))
     .digest("hex");
-  const tables = manifest.tables.map((table) => ({
-    name: `${table.schema}.${table.name}`,
+  const physicalTables = new Map(manifest.tables.map((table) => [`${table.schema}.${table.name}`, table]));
+  const renderTable = (table: TableDefinition) => ({
+    name: tableRegistryName(table),
     schema: table.schema,
     table: table.name,
     tenantScoped: table.tenantScoped,
     domainInternal: table.domainInternal === true,
+    ...(table.subtype ? { subtype: table.subtype } : {}),
     ...(table.relationStorage ? { relationStorage: table.relationStorage } : {}),
-    ...(table.tenantScoped && isGeneratedCrudEligible(table) && !table.domainInternal ? {
+    // A subtype has no change stream of its own: its rows' events belong to
+    // the base aggregate, whose stream is filtered by the base's policy.
+    ...(!table.subtype && table.tenantScoped && isGeneratedCrudEligible(table) && !table.domainInternal ? {
       realtime: {
         readPredicate: renderRowScopePredicate(table, "") ?? '"tenant_id" = app.current_tenant()',
         visibilityColumns: [...new Set([
@@ -861,9 +868,12 @@ function renderManifestJson(
       ...(column.immutable === undefined ? {} : { immutable: column.immutable }),
       // Authored `writtenBy: [...]` — no transport offers the column on create
       // or update, and the CRUD layer refuses it while naming these routes.
+      // A subtype inherits the base's writer contract, so the route named is
+      // the base's: the Operation that writes the column lives there.
       ...(column.writtenBy === undefined
         ? {}
-        : { writtenBy: resolveColumnWriters(table, column, operations) }),
+        : { writtenBy: resolveColumnWriters(
+          table.subtype ? physicalTables.get(table.subtype.base.table) ?? table : table, column, operations) }),
       ...(column.defaultTemplate === undefined ? {} : { defaultTemplate: column.defaultTemplate }),
       ...(column.deriveOnCreate === undefined
         ? {}
@@ -889,7 +899,12 @@ function renderManifestJson(
     ...(table.pluginOwner === undefined ? {} : { pluginOwner: table.pluginOwner }),
     ...(table.constraints === undefined ? {} : { constraints: table.constraints }),
     ...(table.source === undefined ? {} : { source: table.source }),
-  }));
+  });
+  const tables = manifest.tables.map(renderTable);
+  const entitySubtypes = (manifest.entitySubtypes ?? []).map(renderTable);
+  // The manifest-derived suites enumerate this list; a subtype projection is
+  // served by the runtime but is not a storage entity, so it is published
+  // under `entitySubtypes` only.
   const generatedEntities = tables
     .filter((table) =>
       isGeneratedCrudEligible(table) &&
@@ -954,6 +969,7 @@ function renderManifestJson(
       },
       ...(manifest.entityValues ? { entityValues: manifest.entityValues } : {}),
       tables,
+      ...(entitySubtypes.length > 0 ? { entitySubtypes } : {}),
     },
     null,
     2,

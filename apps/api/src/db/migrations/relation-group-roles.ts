@@ -36,6 +36,15 @@ export async function applyRelationGroupRolesMigration(db: OpenShapeForgeDatabas
         if tg_op <> 'INSERT' then old_group := old.relation_group_id; selected_tenant := old.tenant_id; end if;
         if tg_op <> 'DELETE' then new_group := new.relation_group_id; selected_tenant := new.tenant_id; end if;
       end if;
+      -- Only access-affecting membership changes need organization administration.
+      -- Keep this column set aligned with auth/relation-group-memberships.ts access derivation.
+      -- Ordinary entity and field permissions still govern every other write.
+      if tg_table_name = 'relation_group_memberships' and tg_op = 'UPDATE' then
+        if row(new.tenant_id,new.relation_id,new.relation_group_id,new.status,new.start_date,new.end_date)
+           is not distinct from row(old.tenant_id,old.relation_id,old.relation_group_id,old.status,old.start_date,old.end_date) then
+          return new;
+        end if;
+      end if;
       -- Serialize membership and grant changes for each group, in stable order.
       perform id from erp.relation_groups
         where tenant_id = selected_tenant and (id = old_group or id = new_group)

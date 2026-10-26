@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { classifyDatabaseError } from "../../db/database-refusals.js";
+import { applyRelatedChanges } from "./related-update.js";
 import { getGeneratedCrudTables } from "./table-registry.js";
 import { withAuditContext } from "../../platform/audit-context.js";
 import { createFromBlueprint } from "./blueprints.js";
@@ -68,6 +70,7 @@ import {
   assertNoOperationWrittenValues,
 } from "./write-policy.js";
 import { bindableFields, fieldBindingsColumn, prepareFieldBindings, type PreparedFieldBindings } from "./field-bindings.js";
+import { assertNoCallerSubtypeValues, policyEntityId, policyOperation } from "./subtype-scope.js";
 import { sessionRelation } from "../../auth/identity-link.js";
 import { sql } from "kysely";
 
@@ -159,7 +162,7 @@ async function leaseUnavailabilityByTarget(
   ];
   if (protectedOperations.length === 0) return new Map();
   const byTarget = await editLeaseErrorsByTarget(db, session, {
-    entityId: protectedOperations[0]!.entityId,
+    entityId: policyEntityId(table, protectedOperations[0]!),
     targetIds,
   });
   return new Map(
@@ -227,6 +230,7 @@ function requireContractValues(
 ): void {
   assertNoCallerElicitedOutput(table, values);
   assertNoOperationWrittenValues(table, values);
+  assertNoCallerSubtypeValues(table, values);
   assertNoCallerFieldBindings(table, values);
   assertCallerTopLevelFields(table, session, values, operation.intent as "create" | "update");
   assertEntityValuesValid(operation, table, values, options);
@@ -658,13 +662,13 @@ export async function acquireEditLeaseForEntityOperation(
       );
     }
     return acquireEntityEditLease(db, session, {
-      operation: {
+      operation: policyOperation(table, {
         id: custom.key,
         entityId: custom.target.entityId,
         entityName: custom.target.entityName,
-        intent: "invoke",
+        intent: "invoke" as const,
         concurrency: custom.concurrency,
-      },
+      }),
       table,
       targetId: input.targetId,
     });
@@ -682,7 +686,7 @@ export async function acquireEditLeaseForEntityOperation(
     await assertRecordPermission(db, session, table, input.targetId, permission);
   }
   return acquireEntityEditLease(db, session, {
-    operation: operation as LeaseProtectedOperation,
+    operation: policyOperation(table, operation as LeaseProtectedOperation),
     table,
     targetId: input.targetId,
   });
@@ -899,7 +903,9 @@ async function executeEntityOperationWithContext(
     // even though the underlying mutation still refuses the write later.
     requireEntityOperation(table, request.operation.intent, session);
     const entityName = authoredEntityId(table);
-    const operation = entityOperationContract(request.operation.id);
+    // A subtype's leases and challenges are the base record's, so the
+    // contract this request runs under carries the base's identity.
+    const operation = policyOperation(table, entityOperationContract(request.operation.id));
     const admit = () => assertOperationAdmitted(db, session, {
       id: operation.id,
       intent: operation.intent,
@@ -982,6 +988,9 @@ async function executeEntityOperationWithContext(
         operations: await currentRecordOffers(db, session, entityName, table, offerTarget(data, table),
           projectedOfferIntents(request, RECORD_OFFER_INTENTS)),
       };
+    }
+    if (request.operation.intent !== "update" && Object.hasOwn(request.input ?? {}, "relatedChanges")) {
+      throw operationFailure({ code: "VALIDATION", message: "relatedChanges is only supported when updating a record.", retryable: false });
     }
     const collectionError = collectionMutationError(table, request.operation.intent, getGeneratedCrudTables(), request.input?.values);
     if (collectionError) throw operationFailure(collectionError);
@@ -1116,6 +1125,8 @@ async function executeEntityOperationWithContext(
         const prepared = await prepareWriteBindings(db, session, table, request.input, supplied, projectBindingWriteRow(table, session, current ?? null));
         const values = prepared.values;
         requireContractValues(operation, table, values, { partial: true }, session);
+        const relatedChanges = request.input?.relatedChanges;
+        if (relatedChanges !== undefined) assertOperationInputValid(operation, request.input ?? {});
         const confirmation = await prepareMutationConfirmation(
           db,
           session,
@@ -1137,23 +1148,32 @@ async function executeEntityOperationWithContext(
                 : {}),
             }
           : undefined;
-        const data = await governed(async () => {
-          // Revalidate against the row locked in this write transaction. The
-          // earlier preflight prevents invalid inputs from starting challenges.
+        const writeParent = async () => {
           const committed = bindable
             ? await prepareWriteBindings(db, session, table, request.input, supplied,
                 projectBindingWriteRow(table, session, await fetchGeneratedEntityRow(db, session, table, requireId(request.input), true)))
             : prepared;
           requireContractValues(operation, table, committed.values, { partial: true }, session);
           return updateGeneratedEntity(db, session, {
-            table: table.name,
-            id: requireId(request.input),
-            values: committed.values,
-            ...(committed.bindings ? { fieldBindings: committed.bindings } : {}),
-            ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
-            ...(guard ? { guard } : {}),
-          });
+          table: table.name, id: requireId(request.input), values: committed.values,
+          ...(committed.bindings ? { fieldBindings: committed.bindings } : {}),
+          ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
+          ...(guard ? { guard } : {}),
         });
+        };
+        const data = await governed(() => relatedChanges === undefined ? writeParent() : withDbSession(db, session, async trx => {
+          const parent = await writeParent();
+          if (!parent) throw operationFailure({code:"NOT_FOUND",message:"Record not found.",retryable:false});
+          await applyRelatedChanges(trx, session, table, requireId(request.input), relatedChanges as never, getGeneratedCrudTables(), async (child, intent, input) => {
+            const childOp = entityOperationContract(entityOperationRef(child, intent).id);
+            if (childOp.implementation?.type !== "entity" || childOp.effects.external !== "none" || childOp.interaction.secureInput || childOp.prerequisites?.length || childOp.interaction.confirmation.mode !== "none" || (intent === "create" && childOp.concurrency?.editLease) || childOp.reliability.idempotency.mode === "keyed") throw operationFailure({code:"VALIDATION",message:"This related write requires its own guarded Operation.",retryable:false});
+            const result = await executeEntityOperation(db, session, {operation:entityOperationRef(child,intent),input});
+            if ("error" in result) throw operationFailure(result.error);
+            if (!result.data) throw operationFailure({code:"NOT_FOUND",message:"Related record not found.",retryable:false});
+            return result.data as never;
+          });
+          return parent;
+        }));
         return {
           intent: "update",
           data,
@@ -1212,7 +1232,8 @@ async function executeEntityOperationWithContext(
       }
     }
   } catch (error) {
-    const operationError = operationErrorOf(error);
+    const refusal = request.input?.relatedChanges ? classifyDatabaseError(error) : undefined;
+    const operationError = operationErrorOf(error) ?? (refusal ? {code:refusal.code,message:refusal.message,retryable:false} : undefined);
     // A canonical failure is the answer; anything else is a defect. Report it
     // before it collapses into the opaque internal error the caller sees, so
     // the server log holds the cause (#471). Message only — no input, no session.

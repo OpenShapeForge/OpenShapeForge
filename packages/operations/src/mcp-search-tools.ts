@@ -8,6 +8,7 @@ export const DEFAULT_OPERATION_SEARCH_RESULTS = 10;
 export type SearchableOperationToolNames = {
   search: string;
   execute: string;
+  secureExecute?: string;
 };
 
 export function searchableOperationToolDefinitions(

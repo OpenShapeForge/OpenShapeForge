@@ -13,7 +13,7 @@ import { ENTITY_CONFIGURATION_APP_URI } from "./handoff-config.js";
 import { HttpError } from "../rest/http-error.js";
 import { localizedText, type ResolvedLocale } from "./locale.js";
 
-export type SearchableOperationToolNames = CoreSearchableOperationToolNames & { secureExecute?: string };
+export type SearchableOperationToolNames = CoreSearchableOperationToolNames;
 
 export type OperationSearchArguments =
   | { operationId: string }

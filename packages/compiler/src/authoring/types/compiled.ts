@@ -702,6 +702,17 @@ export interface CompiledTransitionField {
   }>;
 }
 
+/** The binding of a subtype contract to the base entity whose storage it shares. */
+export interface CompiledEntitySubtype {
+  base: { name: string; id: string; slug: string };
+  /** Discriminator fields the runtime fixes on every row of this subtype. */
+  scope: Array<{ field: string; column: string; value: string | number | boolean }>;
+  /** Base field keys absent from this projection (reads, writes, every schema). */
+  hiddenFields: string[];
+  /** The physical columns of those fields that are persisted. */
+  hiddenColumns: Array<{ field: string; column: string }>;
+}
+
 export interface CompiledEntityContract {
   audit?: { timeline?: { include?: string[]; parents?: string[] } };
   source?: { kind: "operations"; query?: { mode?: "structured"; filterFields: string[]; sortFields: string[] } };
@@ -748,6 +759,13 @@ export interface CompiledEntityContract {
     onEdit: { field: string; value: string };
   };
   hardDelete?: { requireNeverPublished: true };
+  /**
+   * Present when this contract is a subtype projection of another entity.
+   * `storage`, `model`, `graphql` and `views` above already exclude the
+   * hidden fields; the base entity owns the physical table and the complete
+   * storage model this projection shares.
+   */
+  subtype?: CompiledEntitySubtype;
   /** Common upper bound for generated CRUD across every transport. */
   crud: CrudSection;
   /** Canonical generated operations projected by REST, MCP, web and GraphQL. */

@@ -18,7 +18,6 @@ import { expect } from "bun:test";
 import { randomUUID } from "node:crypto";
 import catalog from "../../generated/mcp/tools.json" with { type: "json" };
 import {
-  eligibleTables,
   fieldName,
   foreignKeyTargets,
   nextMarker,
@@ -335,8 +334,10 @@ describe("generated MCP server", () => {
     // The listing is authorized: an entity whose read roles the session does
     // not hold (a read-only projection outside the write vocabulary) is not
     // advertised, so the expectation is the catalog filtered by the same rule.
+    // Use all served projections: row-factory eligibleTables intentionally
+    // excludes subtypes because they share storage with their base entity.
     const readable = catalog.entities.filter((entity) => {
-      const roles = eligibleTables.find(
+      const roles = getGeneratedCrudTables().find(
         (table) => table.source?.authoringEntityName === entity.entity,
       )?.source?.authorization?.roles?.read;
       return roles?.some((role) => tenantA.roles.includes(role)) === true;

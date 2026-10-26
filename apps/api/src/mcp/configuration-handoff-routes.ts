@@ -243,7 +243,11 @@ export async function registerConfigurationHandoffRoutes(
   // The URL exposed to the assistant therefore carries no handoff credential.
   instance.get(`${ENTITY_CONFIGURATION_PATH}/pending`, async (request) => {
     const { db, session } = await requireMcpSession(request);
-    const found = await latestConfigurationForSession(session, db);
+    const requestedId = (request.query as { formId?: unknown })?.formId;
+    if (requestedId !== undefined && (typeof requestedId !== "string" || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(requestedId))) {
+      throw new HttpError(404, "NOT_FOUND", "This configuration form is unavailable.");
+    }
+    const found = await latestConfigurationForSession(session, db, requestedId as string | undefined);
     if (!found) {
       throw new HttpError(
         404,

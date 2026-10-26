@@ -2,6 +2,8 @@ import { validateDefaultTemplates } from "./compiler/default-template.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { sortablePositionColumn } from "./sortable-position.js";
 import { join, relative } from "node:path";
+import Ajv2020 from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
 import { compile } from "./compiler/index.js";
 import type { CompiledEntityContract } from "./types/compiled.js";
 import {
@@ -840,6 +842,139 @@ function pickEmbeddedDefaultSort(
   return undefined;
 }
 
+/** The runtime value policy a column carries for its field: roles, immutability, nested item rules. */
+function columnFieldPolicy(field: CompiledField, referentiedata: CoreReferentiedataSnapshot) {
+  const policy = compileFieldValuePolicy(field);
+  return policy && (policy.children || policy.item)
+    ? { ...policy, valueSchema: fieldValuePolicySchema(
+      compiledFieldSchema(field, referentiedata, { includeDefault: false }), policy,
+    ) } : policy;
+}
+
+/**
+ * The virtual table a subtype is served from: the base table's storage, minus
+ * the hidden columns, under the subtype's own source identity (names, roles,
+ * routes, tools). It carries no DDL-bearing section — no indexes, constraints,
+ * row scope or retention — because the base table owns all of those.
+ */
+function buildSubtypeTable(
+  candidate: CompiledCandidate,
+  base: CompiledCandidate,
+  tables: readonly TableDefinition[],
+  referentiedata: CoreReferentiedataSnapshot,
+  eligibility: { generatedCrudAllowlist: ReadonlySet<string>; domainInternalEntities: ReadonlySet<string> },
+): TableDefinition {
+  const contract = candidate.contract;
+  const subtype = contract.subtype!;
+  const baseTable = tables.find((table) => table.source?.authoringEntityName === subtype.base.name);
+  if (!baseTable?.source) {
+    throw new Error(`${describeCandidateOrigin(candidate)}: subtype base ${subtype.base.name} has no physical table in this manifest.`);
+  }
+  const hiddenColumns = new Set(subtype.hiddenColumns.map((column) => column.column));
+  const fieldByKey = new Map(contract.model.fields.map((field) => [field.key, field]));
+  // The fixed value must be one the base would accept from a caller: its
+  // whole effective value contract, reference data included. A subtype
+  // whose every create the database or validation would refuse is a build
+  // failure, not a tool that never works.
+  const scopeValidator = new Ajv2020.default({ allErrors: true, strict: false });
+  (addFormats as unknown as (instance: typeof scopeValidator) => unknown)(scopeValidator);
+  for (const scope of subtype.scope) {
+    if (!baseTable.columns.some((column) => column.name === scope.column)) {
+      throw new Error(`${describeCandidateOrigin(candidate)}: scope column ${scope.column} is not a column of ${baseTable.schema}.${baseTable.name}.`);
+    }
+    const field = base.contract.model.fields.find((candidateField) => candidateField.key === scope.field);
+    if (!field) throw new Error(`${describeCandidateOrigin(candidate)}: scope field ${scope.field} is not a field of ${subtype.base.name}.`);
+    const validate = scopeValidator.compile(compiledFieldSchema(field, referentiedata, { includeDefault: false }));
+    if (!validate(scope.value)) {
+      const reasons = (validate.errors ?? []).map((error) => error.message ?? "is invalid").join("; ");
+      throw new Error(
+        `${describeCandidateOrigin(candidate)}: scope.${scope.field} value ${JSON.stringify(scope.value)} does not satisfy ` +
+          `${subtype.base.name}.${scope.field}'s value contract (${reasons}); every create of this subtype would be refused.`,
+      );
+    }
+  }
+  const columns = baseTable.columns
+    .filter((column) => !hiddenColumns.has(column.name))
+    .map((column) => {
+      const field = column.sourceField ? fieldByKey.get(column.sourceField) : undefined;
+      if (!field) return column;
+      // Narrowed field rights apply through this projection; the storage
+      // shape, defaults and derivations stay the base's.
+      const policy = columnFieldPolicy(field, referentiedata);
+      const { fieldPolicy: _base, ...rest } = column;
+      return policy && (policy.readRoles || policy.children || policy.item) ? { ...rest, fieldPolicy: policy } : rest;
+    });
+  const domainInternal = eligibility.domainInternalEntities.has(candidate.slug);
+  const crudOperations = contract.crud.operations;
+  const generatedCrudEligible = eligibility.generatedCrudAllowlist.has(candidate.origin.slug) &&
+    Object.values(crudOperations).some(Boolean) && !domainInternal;
+  if ((contract.rest || contract.mcp) && !generatedCrudEligible) {
+    throw new Error(`Entity ${describeCandidateOrigin(candidate)} declares rest or mcp interfaces but is not generated-CRUD enabled.`);
+  }
+  const hiddenRelationships = new Set(subtype.hiddenFields);
+  const baseGraphql = baseTable.source.graphql!;
+  const defaultSort = pickEmbeddedDefaultSort(contract.views);
+  return {
+    schema: baseTable.schema,
+    name: baseTable.name,
+    subtype: {
+      base: {
+        entityName: subtype.base.name,
+        entityId: subtype.base.id,
+        slug: subtype.base.slug,
+        table: `${baseTable.schema}.${baseTable.name}`,
+      },
+      scope: subtype.scope.map((scope) => ({ ...scope })),
+      hiddenColumns: subtype.hiddenColumns.map((column) => ({ ...column })),
+    },
+    tenantScoped: baseTable.tenantScoped,
+    domainInternal,
+    generatedCrudEligible,
+    columns,
+    // The base's retention clocks, minimum periods and legal hold guard the
+    // shared rows: the delete path reads them from the table it serves, so
+    // they travel with the projection even when it hides the clock fields.
+    ...(baseTable.retention ? { retention: structuredClone(baseTable.retention) } : {}),
+    source: {
+      path: candidate.path,
+      authoringEntityName: contract.entity.name,
+      authoringEntitySlug: candidate.slug,
+      generatedCrudEligibility: generatedCrudEligible ? "explicitly_enabled" : "explicitly_disabled",
+      crud: { operations: crudOperations },
+      ...(baseTable.source.secureInputOnCreate ? { secureInputOnCreate: baseTable.source.secureInputOnCreate } : {}),
+      ...(contract.entity.labels ? { labels: contract.entity.labels } : {}),
+      ...(contract.entity.displayTemplate ? { displayTemplate: contract.entity.displayTemplate } : {}),
+      ...(baseTable.source.computedFields
+        ? { computedFields: baseTable.source.computedFields.filter((computed) => !hiddenRelationships.has(computed.field)) }
+        : {}),
+      graphql: {
+        typeName: contract.graphql.typeName,
+        singleQueryName: contract.graphql.queries.single.name,
+        listQueryName: contract.graphql.queries.list.name,
+        createMutationName: contract.graphql.mutations.create.name,
+        updateMutationName: contract.graphql.mutations.update.name,
+        deleteMutationName: contract.graphql.mutations.delete.name,
+        ...(contract.graphql.operations ? { operations: contract.graphql.operations } : {}),
+        relationships: baseGraphql.relationships.filter((relationship) => !hiddenRelationships.has(relationship.name)),
+        ...(defaultSort ? { defaultSort } : {}),
+      },
+      ...(contract.rest ? { rest: contract.rest } : {}),
+      ...(contract.mcp ? { mcp: contract.mcp } : {}),
+      ...(contract.authorization
+        ? {
+            authorization: {
+              roles: bridgeAuthorizationRoles(contract.authorization.roles),
+              ...(contract.authorization.rowAccess?.recordPermissions
+                ? { recordPermissions: { ...contract.authorization.rowAccess.recordPermissions } }
+                : {}),
+            },
+          }
+        : {}),
+      relationshipStatus: baseTable.source.relationshipStatus ?? { emittedReferences: [], skippedReferences: [] },
+    },
+  };
+}
+
 function compileCoreCandidate(
   authoringDir: string,
   slug: string,
@@ -888,7 +1023,19 @@ function detectCandidateCollisions(candidates: CompiledCandidate[], schemaByModu
     "candidate slug": new Map(),
     "REST base path": new Map(),
     "MCP tool prefix": new Map(),
+    "MCP resource URI": new Map(),
+    "web collection route": new Map(),
+    "web record route": new Map(),
   };
+
+  // A plain route applies in every locale authored by this manifest.
+  const routeLocales = new Set<string>();
+  for (const candidate of candidates) {
+    for (const route of Object.values(candidate.contract.views.core?.routes ?? {})) {
+      if (route && typeof route === "object") for (const locale of Object.keys(route)) routeLocales.add(locale);
+    }
+  }
+  if (!routeLocales.size) routeLocales.add("*");
 
   function record(bucket: string, key: string, candidate: CompiledCandidate) {
     const map = buckets[bucket]!;
@@ -911,7 +1058,11 @@ function detectCandidateCollisions(candidates: CompiledCandidate[], schemaByModu
 
     const moduleName = candidate.contract.entity.module;
     const schema = schemaByModule[moduleName] ?? snakeCase(moduleName);
-    record("physical table", `${schema}.${candidate.contract.storage.table}`, candidate);
+    // A subtype shares its base's table by design; its own identities below
+    // must still be distinct from every other candidate's.
+    if (!candidate.contract.subtype) {
+      record("physical table", `${schema}.${candidate.contract.storage.table}`, candidate);
+    }
 
     const slugKey = `core:${candidate.origin.slug}`;
     record("candidate slug", slugKey, candidate);
@@ -924,6 +1075,21 @@ function detectCandidateCollisions(candidates: CompiledCandidate[], schemaByModu
     // the first and silently route an agent's writes at the wrong table.
     if (candidate.contract.mcp) {
       record("MCP tool prefix", candidate.contract.mcp.toolPrefix, candidate);
+      if (candidate.contract.mcp.resource) {
+        record("MCP resource URI", candidate.contract.mcp.resource.uri, candidate);
+      }
+    }
+    // Web routes dispatch by pattern, first match wins: two entities on one
+    // route would silently serve the wrong one.
+    const routes = candidate.contract.views.core?.routes;
+    const localized = (route: unknown): Array<[string, string]> =>
+      typeof route === "string" ? [...routeLocales].map((locale): [string, string] => [locale, route])
+        : route && typeof route === "object"
+          ? Object.entries(route as Record<string, string>).filter(([, value]) => typeof value === "string")
+          : [];
+    for (const [locale, route] of localized(routes?.list)) record("web collection route", `${locale} ${route}`, candidate);
+    for (const key of ["detail", "create"] as const) {
+      for (const [locale, route] of localized(routes?.[key])) record("web record route", `${locale} ${route}`, candidate);
     }
   }
 
@@ -1253,8 +1419,9 @@ export function compileAuthoringBackendManifest(
     if (!definition) throw new Error(`Allowed entity-value definition ${name} is absent from the compiled entity corpus.`);
     assertEntityValueDefinition(definition);
   }
+  const subtypeCandidates = candidates.filter((candidate) => candidate.contract.subtype !== undefined);
   const physicalCandidates = candidates.filter((candidate) => {
-    if (candidate.contract.source) return false;
+    if (candidate.contract.source || candidate.contract.subtype) return false;
     if (!candidate.contract.entity.valueDefinition) return true;
     if (!definitionNames.has(candidate.contract.entity.name)) {
       throw new Error(`${candidate.contract.entity.name}: identity-less entities must be used as entityValue definitions.`);
@@ -1360,13 +1527,7 @@ export function compileAuthoringBackendManifest(
     // the operation that may set them.
     const fieldWriters = collectFieldWriters(candidate.contract.model.fields);
     const fieldPolicies = new Map(candidate.contract.model.fields.map((field) =>
-      [field.key, (() => {
-        const policy = compileFieldValuePolicy(field);
-        return policy && (policy.children || policy.item)
-          ? { ...policy, valueSchema: fieldValuePolicySchema(
-            compiledFieldSchema(field, options.referentiedata ?? {}, { includeDefault: false }), policy,
-          ) } : policy;
-      })()]));
+      [field.key, columnFieldPolicy(field, options.referentiedata ?? {})]));
 
     for (const storageColumn of candidate.contract.storage.columns) {
       const field = candidate.fieldsByKey.get(storageColumn.field);
@@ -1673,11 +1834,22 @@ export function compileAuthoringBackendManifest(
     }
   }
 
+  // Bound last, so the virtual tables copy the base tables' final columns,
+  // relation storage and enriched relationship metadata.
+  const entitySubtypes = subtypeCandidates
+    .map((candidate) => {
+      const base = physicalCandidates.find((physical) => physical.contract.entity.name === candidate.contract.subtype!.base.name);
+      if (!base) throw new Error(`${describeCandidateOrigin(candidate)}: subtype base ${candidate.contract.subtype!.base.name} is not a stored entity of this manifest.`);
+      return buildSubtypeTable(candidate, base, tables, options.referentiedata ?? {}, { generatedCrudAllowlist, domainInternalEntities });
+    })
+    .sort((left, right) => left.source!.authoringEntityName!.localeCompare(right.source!.authoringEntityName!));
+
   return {
     version: 1,
     description: "Candidate backend manifest compiled from restored authoring catalog.",
     relationshipRegister: filterRelationshipRegisterForTables(tables, relationshipRegister),
     tables: sortTablesByDependencies(tables),
+    ...(entitySubtypes.length > 0 ? { entitySubtypes } : {}),
     ...(entityValues ? { entityValues } : {}),
   };
 }

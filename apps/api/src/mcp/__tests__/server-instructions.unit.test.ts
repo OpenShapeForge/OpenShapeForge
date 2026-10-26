@@ -154,3 +154,15 @@ describe("working efficiently, and people and access", () => {
     expect(text.indexOf(EFFICIENCY_GUIDANCE)).toBeLessThan(text.indexOf(PEOPLE_AND_ACCESS_GUIDANCE));
   });
 });
+
+
+describe("plugin skill instructions", () => {
+  it("uses the supplied skill description without private operation knowledge", () => {
+    const input = { opening: null, hasConnectors: false, oauthCallbackUrl: null, locale: nl, client };
+    const description = "Read this skill when a service returns an error.";
+    const instructions = buildServerInstructions({ ...input, skills: [{ uri: "osf://skills/example/SKILL.md", description }] });
+    expect(instructions).toContain(description);
+    expect(instructions).toContain("resources/read");
+    expect(instructions).not.toContain("osf-integration.support.report");
+  });
+});

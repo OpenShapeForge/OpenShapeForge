@@ -15,13 +15,32 @@ export function configurationAppResult(
   displayName: string,
   definitions?: unknown,
   messagePrefix?: string,
+  configurationId?: string,
 ): ToolResult {
   const configurationUrl = `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/${token}`;
+  // Capability advertisement does not acknowledge that the host rendered a
+  // card. Keep a recovery path outside that card, without exposing its bearer
+  // token. The ordinary web session must still match the pending form owner.
+  const webUrl = configurationWebUrl();
+  const externalUrl = webUrl && configurationId ? `${webUrl}?formId=${encodeURIComponent(configurationId)}` : undefined;
+  const result = ok(externalUrl && payload && typeof payload === "object" && !Array.isArray(payload)
+    ? { ...payload, externalUrl }
+    : payload);
   return {
-    ...ok(payload),
+    ...result,
+    content: [
+      ...result.content,
+      ...(externalUrl ? [{
+        type: "text" as const,
+        text: `If the secure form is not visible, open ${externalUrl} in a browser. ` +
+          "Sign in as the same person in the same organization to complete the pending form. " +
+          "Enter credentials only in that form, never in chat.",
+      }] : []),
+    ],
     _meta: {
       configurationUrl,
       displayName,
+      ...(configurationId ? { configurationId } : {}),
       ...(definitions !== undefined ? { configuration: {
         fields: configurationFormDefinitions({ definitions: Array.isArray(definitions) ? definitions : [] }),
         ...(messagePrefix ? { messagePrefix } : {}),

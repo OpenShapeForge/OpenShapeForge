@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
 import { missingSchemaUiTranslations } from "@openshapeforge/interface-web";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Ajv from "ajv/dist/2020.js";
 import { operationFieldMetadataKeywords, operationTypeKeyword } from "@openshapeforge/operations";
@@ -19,50 +17,9 @@ import type { CompiledEntityInfo, PluginOperationContract } from "../plugins.js"
 import { buildMcpCatalog } from "../generate-mcp.js";
 import { entityOperationJsonSchemas } from "../entity-operation-json-schema.js";
 
+import { native, entity, fixture } from "./collection-operations.fixtures.js";
+
 const context = { repoRoot: "/repo", authoringDir: "/repo/authoring", webPresent: true };
-const native = (action: "insert" | "move") => ({
-  name: action, description: action, implementation: { type: "collection" as const, action, field: "children" },
-  effects: { data: "write" as const, external: "none" as const },
-  reliability: { idempotency: { mode: "none" as const } }, confirmation: { mode: "none" as const },
-  concurrency: { version: { mode: "required" as const, field: "updatedAt" as const } },
-});
-function entity(name: string, fields: Field[]): CoreEntity {
-  return {
-    schemaVersion: 3, kind: "coreEntity", module: "core", entity: name, title: name, labels: { en: name, nl: name },
-    language: "en", domains: ["example"], baseEntity: false,
-    authorization: { roles: { read: ["Example.Read"], create: ["Example.Create"], update: ["Example.Update"] } },
-    fields: [
-      { key: "id", osfType: "string", required: true, validation: { format: "uuid" }, persisted: { column: "id", storageClass: "core" } },
-      { key: "updatedAt", osfType: "datetime", readOnly: true, required: true, persisted: { column: "updated_at", storageClass: "core" } },
-      ...fields,
-    ],
-    operations: Object.fromEntries(["list", "get", "create", "update"].map((action) => [action, {
-      name: action, description: action, implementation: { type: "entity", action },
-      effects: { data: ["get", "list"].includes(action) ? "read" : "write", external: "none" },
-      reliability: { idempotency: { mode: ["get", "list"].includes(action) ? "natural" : "none" } },
-      confirmation: { mode: "none" }, ...(action === "update" ? { concurrency: { version: { mode: "required", field: "updatedAt" } } } : {}),
-    }])),
-    interfaces: { rest: {}, graphql: {}, mcp: { tools: "generic" }, web: { views: {
-      collection: { route: `/${name.toLowerCase()}s`, title: { en: name, nl: name }, columns: [{ key: "id" }] },
-    } } },
-  } as CoreEntity;
-}
-function fixture(mutate: (owner: CoreEntity, child: CoreEntity) => void = () => {}, extra: CoreEntity[] = []): CompiledEntityInfo[] {
-  const owner = entity("Owner", []);
-  Object.assign(owner.operations!, { insertChild: native("insert"), moveChild: native("move") });
-  const child = entity("Child", [{ key: "owner", osfType: "Owner", required: true, relationship: { inverse: { key: "children", ownership: "owned", sortable: true } } }, { key: "body", osfType: "string", required: true, validation: { maxLength: 12 }, persisted: { column: "body", storageClass: "core" } }]);
-  mutate(owner, child);
-  const dir = mkdtempSync(join(tmpdir(), "native-collections-"));
-  const entries: CompiledEntityInfo[] = [];
-  try {
-    mkdirSync(join(dir, "entities")); mkdirSync(join(dir, "catalogs"));
-    for (const [file, value] of Object.entries({ "catalogs/components.yaml": { defaults: {}, components: {}, viewDefaults: {} }, "catalogs/transforms.yaml": { transforms: {} }, "catalogs/osf-types.yaml": { types: { entityValue: { kind: "object", baseType: "object" } } }, "entities/owner.yaml": owner, "entities/child.yaml": child, ...Object.fromEntries(extra.map((entity) => [`entities/${entity.entity.toLowerCase()}.yaml`, entity])) })) {
-      writeFileSync(join(dir, file), JSON.stringify(value));
-    }
-    compileAuthoringBackendManifest(dir, { mode: "promote", entityAllowlist: ["owner", "child", ...extra.map((entity) => entity.entity.toLowerCase())], generatedCrudAllowlist: ["owner", "child", ...extra.map((entity) => entity.entity.toLowerCase())], onCandidate: (candidate) => entries.push(candidate as CompiledEntityInfo) });
-    return entries;
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-}
 const compile = (entries = fixture()) => collectAuthoredEntityPluginOperations(entries, context);
 /** The derived `Owner.children` collection is shaped on `Child.owner`. */
 const children = (child: CoreEntity) => child.fields.find((field) => field.key === "owner")!.relationship!.inverse as FieldDefinitionInverseCollection;
@@ -282,7 +239,7 @@ test("entityValue insert derives logical own values and named UUID references fr
 
 test("fails closed on unsupported ownership, sorting, actions and child guard combinations", () => {
   expect(() => compile(fixture((_owner, child) => { children(child).sortable = false; }))).toThrow("sortable");
-  expect(() => compile(fixture((_owner, child) => { children(child).ownership = "reference"; }))).toThrow("owned");
+  expect(() => compile(fixture((_owner, child) => { children(child).ownership = "reference"; }))).toThrow("Reference collections");
   expect(() => fixture((owner) => { Object.assign(owner.operations!.insertChild!.implementation, { action: "link" }); })).toThrow();
   expect(() => fixture((owner) => { owner.operations!.insertChild!.auth = { mode: "session", roles: ["Other"] }; })).toThrow();
   expect(() => compile(fixture((owner) => { owner.operations!.insertAgain = native("insert"); }))).toThrow("one collection Operation");
@@ -294,6 +251,30 @@ test("authoring schema accepts identityless baseEntity false and object semantic
   const document = entity("Example", [{ key: "label", osfType: "string" }]);
   expect(() => authoringValidator().validate(document, "/authoring/entities/core/example.yaml")).not.toThrow();
   expect(() => authoringValidator().validate({ kind: "osfTypeCatalog", schemaVersion: 1, types: { entityValue: { kind: "object", baseType: "object", label: { en: "Entity value" } } } }, "/authoring/catalogs/osf-types.yaml")).not.toThrow();
+});
+
+test('reference collection preserves child permissions and exposes bounded atomic related updates',()=>{
+ const entries=fixture((owner,child)=>{
+  delete owner.operations!.moveChild;
+  owner.operations!.updateChild={...native('insert'),implementation:{type:'collection',action:'update',field:'children'}} as any;
+  Object.assign(children(child),{ownership:'reference',sortable:false});
+ });
+ const ops=compile(entries);
+ const update=ops.find(op=>op.id==='Owner.updateChild')!;
+ expect(update.inputSchema).toBeDefined();
+ const props=update.inputSchema.properties as any;
+ expect(props.childExpectedVersion).toMatchObject({type:'string',format:'date-time'});
+ const {entityOperationJsonSchemas}=require('../entity-operation-json-schema.js');
+ const owner=entries.find(e=>e.contract.entity.name==='Owner')!.contract;
+ const schema=entityOperationJsonSchemas(owner,owner.entityOperations.update,entries.map(e=>e.contract),{}).inputSchema;
+ const related=(schema.properties as any).relatedChanges;
+ expect(related.maxItems).toBe(10);
+ expect(related.items.oneOf[0].properties.relationship.const).toBe('children');
+ expect(related.items.oneOf[0].properties.create.items.properties.owner).toBeUndefined();
+ expect(related.items.oneOf[0].properties.update.items.required).toContain('expectedVersion');
+ expect(()=>compile(fixture((owner,child)=>{
+  delete owner.operations!.moveChild;Object.assign(children(child),{ownership:'reference',sortable:false,childAuthorization:'owner'});
+ }))).toThrow('childAuthorization requires an owned collection');
 });
 
 test("list contracts sort a sortable collection's children by their authored position", () => {

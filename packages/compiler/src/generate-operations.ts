@@ -558,8 +558,8 @@ export function auditOperationSurfaceCollisions(
     rest.push(route);
   };
 
-  for (const table of manifest.tables) {
-    const owner = `entity ${table.schema}.${table.name}`;
+  for (const table of [...manifest.tables, ...(manifest.entitySubtypes ?? [])]) {
+    const owner = `entity ${table.schema}.${table.name}${table.subtype ? ` (${table.source?.authoringEntityName})` : ""}`;
     const entityRest = isGeneratedCrudEligible(table) ? table.source?.rest : undefined;
     if (entityRest) {
       const collectionPath = `/api/rest/v1/${entityRest.basePath}`;

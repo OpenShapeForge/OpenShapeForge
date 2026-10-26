@@ -22,7 +22,9 @@ import { assertEntityValueInput, entityValueCarriers, prepareEntityValueWriteInT
 import { assertRelationshipConstraintsInTransaction } from "./relationship-constraints.js";
 import type { EntityOperationContract, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
 import type { LeaseProtectedOperation } from "./edit-leases.js";
+import { consumeEntityEditLeaseInTransaction } from "./edit-leases.js";
 import { hasConsumedCollectionLease } from "./collection-lease-context.js";
+import { subtypeScopeWhere } from "./subtype-scope.js";
 import { assertAdmittedBeforeEffects, assertEffectsWereAdmitted } from "../execution-policy.js";
 
 /** Compiler/boot-owned binding, never a request-selected table or FK. */
@@ -30,6 +32,8 @@ export type CollectionMutationBinding = { entityName: string; field: string; act
 export type CollectionMutationRequest = {
   id: string;
   expectedVersion: string;
+  childExpectedVersion?: string;
+  childLeaseToken?: string;
   values?: Record<string, unknown>;
   childId?: string;
   beforeId?: string | null;
@@ -106,9 +110,11 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
     const parent = parents.length === 1 ? parents[0] : undefined;
     const rels = parent?.source?.graphql?.relationships?.filter((rel) => rel.fieldKey === binding.field) ?? [];
     const rel = rels.length === 1 ? rels[0] : undefined;
-    if (!parent || !rel || rel.kind !== "hasMany" || rel.resolve !== "hasMany" || rel.ownership !== "owned" || rel.via || !rel.inverse || !rel.foreignKey) unsupported("A canonical owned inverse collection is required.");
+    if (!parent || !rel || rel.kind !== "hasMany" || rel.resolve !== "hasMany" || !["owned", "reference"].includes(rel.ownership ?? "") || rel.via || !rel.inverse || !rel.foreignKey) unsupported("A canonical owned inverse collection is required.");
     const owner = parent!;
     const relation = rel!;
+    if (relation.ownership === "reference" && (relation.sortable || relation.childAuthorization === "owner" || !["insert", "update"].includes(binding.action))) unsupported("Reference collections retain child permissions and support insert/update only.");
+    if (relation.ownership === "reference" && binding.action === "update" && (typeof request.childExpectedVersion !== "string" || !Number.isFinite(Date.parse(request.childExpectedVersion)))) invalid("A member expected version is required.");
     if (binding.action === "move" && !relation.sortable) unsupported("Move requires a sortable collection.");
     if (!relation.sortable && request.beforeId !== undefined) invalid("beforeId is not accepted for a non-sortable collection.");
     const targets = catalog.tables.filter((table) => table.source?.graphql?.typeName === relation.target);
@@ -129,7 +135,9 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
     const foreignKey = target.columns.find((column) => column.name === relation.foreignKey);
     const position = target.columns.find((column) => column.name === relation.positionColumn);
     const inverse = target.source?.graphql?.relationships?.find((item) => item.fieldKey === relation.inverse);
-    if (!foreignKey || foreignKey.type !== "uuid" || foreignKey.writtenBy?.length || inverse?.resolve !== "belongsTo" || inverse.target !== owner.source?.graphql?.typeName || inverse.foreignKey !== foreignKey.name || (relation.sortable && (!position || position.type !== "integer" || position.immutable || position.writtenBy?.length || !target.columns.some((column) => column.name === "updated_at" && column.type === "timestamptz")))) unsupported("Inverse or position metadata is inconsistent.");
+    // The child points at the stored entity: the base, when the owner is a subtype projection.
+    const storedOwnerType = owner.subtype?.base.entityName ?? owner.source?.graphql?.typeName;
+    if (!foreignKey || foreignKey.type !== "uuid" || foreignKey.writtenBy?.length || inverse?.resolve !== "belongsTo" || inverse.target !== storedOwnerType || inverse.foreignKey !== foreignKey.name || (relation.sortable && (!position || position.type !== "integer" || position.immutable || position.writtenBy?.length || !target.columns.some((column) => column.name === "updated_at" && column.type === "timestamptz")))) unsupported("Inverse or position metadata is inconsistent.");
     if (target.realtime?.readPredicate !== '"tenant_id" = app.current_tenant()' || target.realtime.visibilityColumns.length !== 1 || target.realtime.visibilityColumns[0] !== "tenant_id") unsupported("The collection must have complete tenant-level read visibility.");
     const guardedOwnerLease = guard?.entityName === binding.entityName && guard.intent === "invoke" &&
       hasConsumedCollectionLease(transaction, session, guard, request.id, request.expectedVersion);
@@ -142,7 +150,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
     const via = relation.childAuthorization === "owner" ? parentOp : undefined;
     const readOp = safeOperation(catalog.operations, target, "list", session, via);
     const editing = binding.action === "update" || binding.action === "remove";
-    const updateOp = relation.sortable || editing ? safeOperation(catalog.operations, target, "update", session, via) : undefined;
+    const updateOp = relation.sortable || editing ? safeOperation(catalog.operations, target, "update", session, via, relation.ownership === "reference") : undefined;
     const createOp = binding.action === "insert" ? safeOperation(catalog.operations, target, "create", session, via) : undefined;
     const versionField = parentOp.concurrency?.version?.field;
     const version = owner.columns.find((column) => fieldNameForColumn(column) === versionField);
@@ -150,7 +158,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
     const childVersion = updateOp?.concurrency?.version;
     if (childVersion && (childVersion.mode !== "required" || !target.columns.some((column) => fieldNameForColumn(column) === childVersion.field && column.name === "updated_at" && column.type === "timestamptz"))) unsupported("Child version metadata is unsupported.");
     if (!request || !uuid.test(request.id) || typeof request.expectedVersion !== "string" || !Number.isFinite(Date.parse(request.expectedVersion))) invalid("A parent id and timestamp expectedVersion are required.");
-    if (Object.keys(request).some((key) => !["id", "expectedVersion", "values", "childId", "beforeId"].includes(key))) invalid("Unknown collection mutation input.");
+    if (Object.keys(request).some((key) => !["id", "expectedVersion", "values", "childId", "beforeId", ...(relation.ownership === "reference" && binding.action === "update" ? ["childExpectedVersion", "childLeaseToken"] : [])].includes(key))) invalid("Unknown collection mutation input.");
     if (request.beforeId != null && (typeof request.beforeId !== "string" || !uuid.test(request.beforeId))) invalid("beforeId must be a child UUID or null.");
     if (binding.action === "move" && (typeof request.childId !== "string" || !uuid.test(request.childId) || request.values !== undefined)) invalid("Move requires childId and does not accept values.");
     if (editing && (typeof request.childId !== "string" || !uuid.test(request.childId) || request.beforeId !== undefined)) invalid(`${binding.action} requires childId and does not accept beforeId.`);
@@ -198,22 +206,24 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       if (!context?.matches) throw generatedCrudError("The transaction must use the same verified session as the collection Operation.", "FORBIDDEN");
       const locked = await sql<{ row: GeneratedEntityRow; matches: boolean }>`select to_jsonb(${sql.id(owner.table)}.*) as row,
         ${sql.id("updated_at")} = ${normalizeTimestampToken(request.expectedVersion)}::timestamptz as matches
-        from ${sql.id(owner.schema, owner.table)} where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid for update`.execute(trx);
+        from ${sql.id(owner.schema, owner.table)} where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid${subtypeScopeWhere(owner)} for update`.execute(trx);
       if (!locked.rows[0]) throw generatedCrudError("Parent not found or not visible.", "NOT_FOUND");
       await permission(trx, session, owner, request.id, parentOp, "edit");
       if (!locked.rows[0].matches) throw generatedCrudError("The parent changed; reload before editing its collection.", "VERSION_CONFLICT");
       // FOR UPDATE can apply stricter UPDATE RLS than a plain SELECT. Never
       // mistake those hidden siblings for an empty or smaller collection.
+      const memberScope = relation.ownership === "reference" && binding.action === "update"
+        ? sql` and id = ${request.childId}::uuid` : sql``;
       const visibleIds = (await sql<{ id: string }>`select id from ${sql.id(target.schema, target.table)}
-        where ${sql.id(foreignKey!.name)} = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid order by id`.execute(trx)).rows.map(({ id }) => id);
+        where ${sql.id(foreignKey!.name)} = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid${memberScope}${subtypeScopeWhere(target)} order by id`.execute(trx)).rows.map(({ id }) => id);
       const rows = (await sql<{ row: GeneratedEntityRow }>`select to_jsonb(${sql.id(target.table)}.*) as row from ${sql.id(target.schema, target.table)}
-        where ${sql.id(foreignKey!.name)} = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid order by id for update`.execute(trx)).rows.map(({ row }) => row);
+        where ${sql.id(foreignKey!.name)} = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid${memberScope}${subtypeScopeWhere(target)} order by id for update`.execute(trx)).rows.map(({ row }) => row);
       if (visibleIds.length !== rows.length || visibleIds.some((id, index) => rows[index]?.id !== id)) throw generatedCrudError("The complete collection cannot be locked with the current permissions.", "FORBIDDEN");
       for (const row of rows) assertAllowed(row);
       for (const row of rows) await permission(trx, session, target, String(row.id), readOp, "view");
       const cardinality = typeof relation.cardinality === "object" ? relation.cardinality : {};
       const count = rows.length + (binding.action === "insert" ? 1 : 0);
-      if (count < (cardinality.min ?? 0) || (typeof cardinality.max === "number" && count > cardinality.max)) throw generatedCrudError("The collection size would violate its cardinality.", "VALIDATION");
+      if (!(relation.ownership === "reference" && binding.action === "update") && (count < (cardinality.min ?? 0) || (typeof cardinality.max === "number" && count > cardinality.max))) throw generatedCrudError("The collection size would violate its cardinality.", "VALIDATION");
       const ordered = [...rows].sort((a, b) => (relation.sortable ? Number(a[position!.name]) - Number(b[position!.name]) : 0) || String(a.id).localeCompare(String(b.id))).map((row) => String(row.id));
       if (request.beforeId != null && !ordered.includes(request.beforeId)) invalid("beforeId is not a member of this collection.");
       if ((binding.action === "move" || editing) && !ordered.includes(request.childId!)) invalid("childId is not a member of this collection.");
@@ -271,6 +281,14 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
         await permission(trx, session, target, childId, updateOp!, "edit");
         const current = rows.find((row) => row.id === childId)!;
         if (binding.action === "update") {
+          if (relation.ownership === "reference") {
+            if (updateOp!.concurrency?.editLease) {
+              if (!request.childLeaseToken) invalid("The member edit lease is required.");
+              await consumeEntityEditLeaseInTransaction(trx,session,{operation:updateOp! as LeaseProtectedOperation,targetId:childId,expectedVersion:request.childExpectedVersion!,leaseToken:request.childLeaseToken!});
+            }
+            const check = await sql<{matches: boolean}>`select updated_at = ${normalizeTimestampToken(request.childExpectedVersion!)}::timestamptz as matches from ${sql.id(target.schema,target.table)} where id=${childId}::uuid and tenant_id=${session.tenantId}::uuid ${subtypeScopeWhere(target)}`.execute(trx);
+            if (!check.rows[0]?.matches) throw generatedCrudError("The member changed; reload before editing.","VERSION_CONFLICT");
+          }
           assertCallerTopLevelFields(target, session, request.values!, "update");
           const protectedValues = prepareProtectedFieldWrites(target, session,
             normalizeWritableValues(target, request.values!, "update", entityValues), "update", current);
@@ -322,8 +340,22 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
         if (!row) throw generatedCrudError("Child update was refused.", "FORBIDDEN");
         changed = true;
       }
+      // Reference updates lock only the edited member, but their result still
+      // describes the full readable collection. Siblings need view, never edit,
+      // permission here; the query retains SELECT RLS and subtype scope.
+      let orderedIds = relation.sortable ? ordered : [...ordered].sort();
+      if (relation.ownership === "reference" && binding.action === "update") {
+        orderedIds = [];
+        const members = (await sql<{ id: string }>`select id from ${sql.id(target.schema, target.table)}
+          where ${sql.id(foreignKey!.name)} = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid${subtypeScopeWhere(target)} order by id`.execute(trx)).rows;
+        for (const { id } of members) {
+          try { await permission(trx, session, target, id, readOp, "view"); }
+          catch (error) { if (operationErrorOf(error)?.code === "FORBIDDEN") continue; throw error; }
+          orderedIds.push(id);
+        }
+      }
       if (!changed) {
-        return { parent: projectGeneratedEntityRow(owner, session, locked.rows[0].row, entityValues), childId, orderedIds: relation.sortable ? ordered : [...ordered].sort() };
+        return { parent: projectGeneratedEntityRow(owner, session, locked.rows[0].row, entityValues), childId, orderedIds };
       }
       // Something was written, so one of the paths above must have taken the
       // decision. Refuse rather than touch the parent if a write path ever
@@ -331,14 +363,14 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       // silently ungoverned change.
       assertEffectsWereAdmitted(trx, session, "collection mutation");
       const touched = await sql<{ row: GeneratedEntityRow }>`update ${sql.id(owner.schema, owner.table)} set updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')
-        where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid returning to_jsonb(${sql.id(owner.table)}.*) as row`.execute(trx);
+        where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid${subtypeScopeWhere(owner)} returning to_jsonb(${sql.id(owner.table)}.*) as row`.execute(trx);
       const parentRow = touched.rows[0]?.row;
       if (!parentRow) throw generatedCrudError("Parent update was refused.", "FORBIDDEN");
       // The draft rule from the manifest: the owner is a versioned head, or one owns it.
       const draft = draftRule(owner);
       if (draft) await sql`update ${sql.id(owner.schema, owner.table)} set ${sql.id(draft.column)} = ${draft.value} where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid`.execute(trx);
       else await draftOwningHead(trx, catalog.tables, owner, parentRow);
-      return { parent: projectGeneratedEntityRow(owner, session, draft ? { ...parentRow, [draft.column]: draft.value } : parentRow, entityValues), childId, orderedIds: relation.sortable ? ordered : [...ordered].sort() };
+      return { parent: projectGeneratedEntityRow(owner, session, draft ? { ...parentRow, [draft.column]: draft.value } : parentRow, entityValues), childId, orderedIds };
     };
     return (transaction ? run(transaction) : withDbSession(db!, session, run)).catch((error) => { throw translateDatabaseError(owner, error); });
   }

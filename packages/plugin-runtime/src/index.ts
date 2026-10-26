@@ -385,6 +385,12 @@ export type RuntimeOperationProvider = {
 
 /** The database capabilities exposed by the host to a runtime plugin. */
 export type PluginDatabase = {
+  /** Audited cross-tenant work, admitted only during a live control Operation.
+   * The host derives actor and audit reason; plugins cannot supply authority. */
+  withControlSession?<T>(
+    session: PluginSessionContext,
+    fn: (trx: Transaction<PluginDatabaseSchema>) => Promise<T>,
+  ): Promise<T>;
   withSession<T>(
     session: PluginSessionContext,
     fn: (trx: Transaction<PluginDatabaseSchema>) => Promise<T>,
@@ -820,6 +826,17 @@ export type ModuleReadinessCheck = {
   check(): Promise<void> | void;
 };
 
+/** Static user-invoked MCP request starters. Retrieving one has no side effects. */
+export type RuntimeMcpPrompt = {
+  /** Unique across the composed application's modules. */
+  name: string;
+  title: string;
+  description: string;
+  text: string;
+  /** Omit for all admitted sessions; otherwise at least one role must match. */
+  roles?: readonly string[];
+};
+
 /** Static Agent Skills shipped with a plugin; never tenant-authored instructions. */
 export type RuntimeAgentSkill = {
   /** Slash-separated namespace ending in the SKILL.md frontmatter name. */
@@ -848,6 +865,8 @@ export type RuntimeModuleContract<
   name: string;
   /** Server-owned documentation, projected as MCP skills and ordinary resources. */
   agentSkills?: readonly RuntimeAgentSkill[];
+  /** Product-owned request starters; tools retain their canonical authorization. */
+  mcpPrompts?: readonly RuntimeMcpPrompt[];
   /** Journal hints for private module resources, authorized by a live canonical read. */
   realtimeResources?: readonly {entity: string; readOperationId: string; idInputField: string}[];
   init?(context: RuntimeContext): Promise<void>;

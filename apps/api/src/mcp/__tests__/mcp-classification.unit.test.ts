@@ -197,8 +197,9 @@ describe("MCP App capability negotiation", () => {
   it("keeps both model-visible fallback paths adopter-neutral", () => {
     expect(configurationFallbackLead("declined", "app")).toBe(
       "The secure form could not be completed in this client. " +
-        "The client has received a private MCP App for the secure form; the " +
-        "URL is not exposed to this chat. The app also offers an external-browser fallback.",
+        "A private secure form has been offered to this client; its display is not confirmed. " +
+        "If no form is visible, use externalUrl when provided and sign in as the same " +
+        "person in the same organization. The private handoff URL is not exposed to this chat.",
     );
     expect(configurationFallbackLead("unsupported", "external")).toBe(
       "The secure form could not be completed in this client. " +

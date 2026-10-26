@@ -322,3 +322,22 @@ nothing is not a milestone) the amount is computed from a positive
 lives in the module,
 and the Operation is projected as the entity's ordinary create on REST,
 MCP and GraphQL.
+
+### Employee management through MCP
+
+The integrated employee/team workflow exposes `Employee` through the generic
+MCP projection of its canonical Operations. This is an intentional interface
+addition to preserve the employee-management workflow when shared packages are
+released together. It introduces no new role grants: reads require
+`Organization.All.Read` or `Organization.All.ReadWrite`; creates, updates and
+deletes require `Organization.All.ReadWrite`. Tenant isolation, record access,
+field policies and concurrency controls remain the same as other interfaces.
+The runtime regression suite denies every Employee intent without these roles.
+
+Atomic related saves are offered only for authored reference-collection
+Operations. Each child re-enters its canonical Operation in the parent's
+transaction, retaining its own authorization, version and edit lease. A failure
+in any child rolls back the parent, earlier children and audit effects. The
+scratch database regression compiles a reference-collection fixture and runs
+successful updates/creates plus denied, cross-tenant, stale-version and invalid
+lease cases through `executeEntityOperation`.

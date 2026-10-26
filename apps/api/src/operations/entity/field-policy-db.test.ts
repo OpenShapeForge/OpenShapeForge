@@ -368,8 +368,9 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
     process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = keyringText;
     try {
       const routes = new Map<string, (...args: any[]) => Promise<unknown>>();
+      const gets = new Map<string, (...args: any[]) => Promise<any>>();
       await registerConfigurationHandoffRoutes({
-        instance: { addContentTypeParser() {}, get() {}, post: (path: string, handler: (...args: any[]) => Promise<unknown>) => routes.set(path, handler) },
+        instance: { addContentTypeParser() {}, get: (path: string, handler: (...args: any[]) => Promise<any>) => gets.set(path, handler), post: (path: string, handler: (...args: any[]) => Promise<unknown>) => routes.set(path, handler) },
         options: { db: runtime.db }, requireMcpSession: async () => ({ db: runtime.db, session: writer, resource: "fixture" }),
       } as never);
       const post = routes.get("/api/entity-configuration/:token")!;
@@ -417,6 +418,18 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       // One pending form is one transaction: a second parallel authenticated
       // POST must lose before it can change either storage or event history.
       const { latestConfigurationForSession } = await import("../../mcp/configuration-handoff.js");
+      await mint(writer.tenantId);
+      const older = (await latestConfigurationForSession(writer, runtime.db))!;
+      await mint(writer.tenantId);
+      const newer = (await latestConfigurationForSession(writer, runtime.db))!;
+      const getPending = gets.get("/api/entity-configuration/pending")!;
+      expect(older.id).not.toBe(newer.id);
+      expect((await getPending({ query: { formId: older.id } })).id).toBe(older.id);
+      expect((await getPending({ query: {} })).id).toBe(newer.id);
+      await expect(getPending({ query: { formId: randomUUID() } })).rejects.toMatchObject({ status: 404 });
+      await expect(getPending({ query: { formId: [older.id] } })).rejects.toMatchObject({ status: 404 });
+      expect(await latestConfigurationForSession({ ...writer, userId: randomUUID() }, runtime.db, older.id)).toBeNull();
+      expect(await latestConfigurationForSession({ ...writer, tenantId: randomUUID() }, runtime.db, older.id)).toBeNull();
       const parallelPending = await mint(writer.tenantId);
       const parallelId = (await latestConfigurationForSession(writer, runtime.db))!.id;
       const beforeParallelEvents = await events(String(created.id));

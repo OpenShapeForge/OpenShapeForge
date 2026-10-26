@@ -13,6 +13,7 @@ import {
 } from "./catalog.js";
 import { fieldColumnMap, fieldNameForColumn, primaryKeyEquals } from "./columns.js";
 import { listGeneratedEntitiesForTable } from "./queries.js";
+import { subtypeScopeWhere } from "./subtype-scope.js";
 import type {
   CountedEntityConnection,
   GeneratedCrudRelationship,
@@ -73,8 +74,11 @@ export async function listGeneratedEntityRelation(
   const parent = input.parentTable;
   const target = input.targetTable;
   if (!parent.primaryKey || !target.primaryKey) throw generatedCrudError("Relationship requires primary keys.", "INTERNAL_SERVER_ERROR");
+  // A subtype parent traverses from its own rows only; the target side is
+  // scoped by the list below when the target is a subtype itself.
   const parentPredicate = sql`${primaryKeyEquals(parent, String(parentId), "relation_parent")}
-    ${parent.tenantScoped ? sql`and relation_parent.tenant_id = ${session.tenantId}` : sql``}`;
+    ${parent.tenantScoped ? sql`and relation_parent.tenant_id = ${session.tenantId}` : sql``}
+    ${subtypeScopeWhere(parent, "relation_parent")}`;
   let where;
   let orderBy;
   if (relationship.via) {

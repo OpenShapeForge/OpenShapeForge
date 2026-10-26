@@ -21,7 +21,7 @@ export async function collectLocalWebAuthoring(repoRoot:string,entityIds:string[
   const entity=loadEntity(authoringDir,source.slug).coreEntity;
   if(!entity.interfaces?.web)continue;
   const target=targets.get(basename(source.path));
-  authoring[entityId]={path:source.path,web:entity.interfaces.web,targetPath:target?relative(repoRoot,target):`${targetDir}/design-mode/${basename(source.path)}`,sourceYaml:target?readFileSync(target,'utf8'):'kind: entityPatch\n'};
+  authoring[entityId]={path:source.path,web:entity.interfaces.web,targetPath:target?relative(repoRoot,target):`${targetDir}/design-mode/${basename(source.path)}`,sourceYaml:target?readFileSync(target,'utf8'):'kind: entityPatch\n',...(entity.subtype?{subtype:{base:entity.subtype.base,baseSlug:entity.subtype.baseSlug,hidden:entity.subtype.hidden}}:{})};
  }
  const catalog=Bun.YAML.parse(readFileSync(join(authoringDir,'catalogs/components.yaml'),'utf8')) as {components?:Record<string,{kind?:string;description?:string}>};
  const components=Object.entries(catalog.components??{}).filter(([,c])=>c.kind==='field').map(([name,c])=>({name,description:c.description??''}));

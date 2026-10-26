@@ -18,6 +18,7 @@ import { normalizeEntityStorageRow } from "./serialize-result.js";
 import { entityValueCarriers, projectEntityValueRow } from "./entity-value-io.js";
 import { assertStoredTypedValuesSupported, projectTypedValues } from "./typed-values.js";
 import { projectVisibleFieldBindings } from "./field-binding-policy.js";
+import { withoutHiddenColumns } from "./subtype-scope.js";
 import { generatedEntityValues } from "../../modules/entity-value-registry.js";
 import type {
   GeneratedCrudColumn,
@@ -152,7 +153,8 @@ export function projectRows(
   const hasBigint = table.columns.some((column) => column.type === "bigint");
   const hasTypedValue = table.columns.some((column) => column.typedBy);
   const hasBindings = table.columns.some((column) => column.fieldBindings);
-  if (!hasClassification && !hasElicitedOutput && !hasBigint && !hasTypedValue && !hasBindings && !entityValueCarriers(table, entityValues).length) {
+  const hasHidden = (table.subtype?.hiddenColumns.length ?? 0) > 0;
+  if (!hasClassification && !hasElicitedOutput && !hasBigint && !hasTypedValue && !hasBindings && !hasHidden && !entityValueCarriers(table, entityValues).length) {
     return rows;
   }
   return rows.map((row) => projectGeneratedEntityRow(table, session, row, entityValues));
@@ -189,7 +191,9 @@ export function projectGeneratedEntityRow(
   row: GeneratedEntityRow,
   entityValues = generatedEntityValues,
 ): GeneratedEntityRow {
-  const normalized = projectTypedValues(table, normalizeEntityStorageRow(table, projectEntityValueRow(table, row, entityValues)));
+  // A subtype's hidden columns leave first: nothing below, redaction
+  // included, may hand them to a reader of this projection.
+  const normalized = projectTypedValues(table, normalizeEntityStorageRow(table, projectEntityValueRow(table, withoutHiddenColumns(table, row), entityValues)));
   const classified = redactRow(
     normalized,
     table.columns,

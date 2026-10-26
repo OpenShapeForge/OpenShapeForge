@@ -2,7 +2,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { RuntimeOperationDefinition, RuntimeReadProgress, RuntimeReadProgressSnapshot } from "@openshapeforge/plugin-runtime";
 
-type Frame<S> = { session: S; definition: RuntimeOperationDefinition; active: boolean; signal?: AbortSignal; observer: Observer<S> | undefined; topLevel: boolean };
+export type ReadProgressDefinition = Pick<RuntimeOperationDefinition, "id" | "effects">;
+type Frame<S> = { session: S; definition: ReadProgressDefinition; active: boolean; signal?: AbortSignal; observer: Observer<S> | undefined; topLevel: boolean };
 type Observer<S> = { session: S; emit: (snapshot: RuntimeReadProgress) => Promise<void>; active: boolean; sequence: number; bytes: number; signal?: AbortSignal };
 
 function validSnapshot(snapshot: RuntimeReadProgressSnapshot): boolean {
@@ -28,7 +29,7 @@ export class ReadProgressRuntime<S extends object> {
     finally { observer.active = false; }
   }
 
-  async operation<T>(session: S, definition: RuntimeOperationDefinition, signal: AbortSignal | undefined, work: (signal?: AbortSignal) => Promise<T>): Promise<T> {
+  async operation<T>(session: S, definition: ReadProgressDefinition, signal: AbortSignal | undefined, work: (signal?: AbortSignal) => Promise<T>): Promise<T> {
     const observer = this.#observers.getStore();
     if (!observer?.active || observer.session !== session) return work(signal);
     const parent = this.#frames.getStore();

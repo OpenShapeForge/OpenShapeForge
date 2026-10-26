@@ -256,16 +256,24 @@ export async function staticToolCall(
     try {
       assertParentInvocationActive?.();
       assertInterceptorActive?.();
-      const result = await invokeOperation(
-        operations.get(operationTool.key)!,
+      const bound = operations.get(operationTool.key)!;
+      const invoke = (effectiveSignal?: AbortSignal) => invokeOperation(
+        bound,
         request.params.arguments ?? {},
         {
           db,
           session: moduleSession,
           transport: "mcp",
           ...(modulePlatform ? { platform: modulePlatform.services } : {}),
+          ...(effectiveSignal ? { signal: effectiveSignal } : {}),
         },
       );
+      // Preserve the dedicated tool's original result projection while giving
+      // it the same root/read/cancellation boundary as the general executor.
+      const result = modulePlatform
+        ? await modulePlatform.withReadProgressOperation(moduleSession,
+            {id: bound.operation.key, effects: bound.operation.effects}, signal, invoke)
+        : await invoke(signal);
       return operationToolResult(result);
     } catch (error) {
       return failed(error);

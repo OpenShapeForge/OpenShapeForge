@@ -2,6 +2,7 @@
 import { sql, type Transaction } from 'kysely';
 import { operationFailure } from '@openshapeforge/operations';
 import type { DB } from '../../generated/db/types.js';
+import { subtypeScopeWhere } from './subtype-scope.js';
 import { fieldNameForColumn } from './columns.js';
 import type { GeneratedCrudTable, GeneratedEntityRow } from './types.js';
 
@@ -44,11 +45,11 @@ export async function applyRelatedChanges(trx: Transaction<DB>, session: {tenant
     if (relation.sortable || relation.childAuthorization === 'owner' || (typeof relation.cardinality === 'object' && ((relation.cardinality.min ?? 0)>0 || typeof relation.cardinality.max === 'number'))) fail('This collection requires its dedicated guarded Operation.');
     const target = tables.find(t=>t.source?.graphql?.typeName===relation.target);
     const parentColumn=target?.columns.find(c=>c.name===relation.foreignKey);
-    if (!target || !parentColumn) fail('Related storage is unavailable.');
+    if (!target || !parentColumn || !target.primaryKey) fail('Related storage is unavailable.');
     const field=fieldNameForColumn(parentColumn);
     for (const item of change.update ?? []) {
       if (Object.hasOwn(item.values,field)) fail('The parent relationship cannot be changed here.');
-      const result=await sql`select ${sql.id(parentColumn.name)} as parent from ${sql.id(target.schema,target.table)} where id=${item.id}::uuid and tenant_id=${session.tenantId}::uuid for update`.execute(trx);
+      const result=await sql`select ${sql.id(parentColumn.name)} as parent from ${sql.id(target.schema,target.table)} where ${sql.id(target.primaryKey)}::text=${item.id} ${target.tenantScoped ? sql`and tenant_id=${session.tenantId}` : sql``}${subtypeScopeWhere(target)} for update`.execute(trx);
       if (result.rows.length!==1 || (result.rows[0] as {parent:string}).parent!==parentId) fail('The selected record is not in this collection.');
       await run(target,'update',{id:item.id,expectedVersion:item.expectedVersion,...(item.leaseToken ? {leaseToken:item.leaseToken} : {}),values:item.values});
     }

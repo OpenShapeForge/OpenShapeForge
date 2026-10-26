@@ -55,7 +55,7 @@ for (const table of tables) {
       // A realtime-projected entity also journals the columns its channel
       // filters on; the manifest says which, so the assertion follows it.
       if (created.length > 0) {
-        expect(afterCreate[0]!.payload).toMatchObject({
+        expect(afterCreate[0]!.payload).toEqual({
           table: table.name,
           schema: table.schema,
           operation: "created",

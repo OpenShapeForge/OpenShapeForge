@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { classifyDatabaseError } from "../../db/database-refusals.js";
 import { applyRelatedChanges } from "./related-update.js";
-// SPDX-License-Identifier: BUSL-1.1
 import { getGeneratedCrudTables } from "./table-registry.js";
 import { withAuditContext } from "../../platform/audit-context.js";
 import { createFromBlueprint } from "./blueprints.js";
@@ -988,6 +988,9 @@ async function executeEntityOperationWithContext(
         operations: await currentRecordOffers(db, session, entityName, table, offerTarget(data, table),
           projectedOfferIntents(request, RECORD_OFFER_INTENTS)),
       };
+    }
+    if (request.operation.intent !== "update" && Object.hasOwn(request.input ?? {}, "relatedChanges")) {
+      throw operationFailure({ code: "VALIDATION", message: "relatedChanges is only supported when updating a record.", retryable: false });
     }
     const collectionError = collectionMutationError(table, request.operation.intent, getGeneratedCrudTables(), request.input?.values);
     if (collectionError) throw operationFailure(collectionError);

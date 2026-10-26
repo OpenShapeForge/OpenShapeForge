@@ -186,9 +186,6 @@ export function buildServer(
       (request.params.arguments ?? {}) as Record<string, unknown>,
       ctx.mcpReq.id,
       false,
-      undefined,
-      undefined,
-      ctx.mcpReq.signal,
     );
     const meta = request.params._meta;
     const optIn = meta?.[READ_PROGRESS_META_KEY] as {version?: unknown} | undefined;
@@ -200,7 +197,7 @@ export function buildServer(
             progressToken, progress: snapshot.sequence, ...(snapshot.message ? {message: snapshot.message} : {}),
             _meta: {[READ_PROGRESS_META_KEY]: {...snapshot, toolName: request.params.name}},
           }});
-        }, dispatch)
+        }, dispatch, ctx.mcpReq.signal)
       : await dispatch();
     return outcome.result;
   });

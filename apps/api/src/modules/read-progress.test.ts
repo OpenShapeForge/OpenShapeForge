@@ -55,3 +55,29 @@ test("sibling roots remain eligible after a preliminary operation; concurrent re
   });
   expect(seen).toHaveLength(20);expect(seen.slice(0,2).map(x=>x.operationId).sort()).toEqual(["contacts","tasks"]);
 });
+test("abort releases a stalled delivery and serialization cannot change the data contract",async()=>{
+  const runtime=new ReadProgressRuntime<object>(()=>{}),session={},abort=new AbortController();
+  await runtime.observe(session,async()=>new Promise(()=>{}),()=>runtime.operation(session,read(),abort.signal,async()=>{
+    const pending=runtime.report(session,{data:{items:[]}});abort.abort();expect(await pending).toBe(false);
+  }));
+  await runtime.observe(session,async()=>{throw Error("must not emit");},()=>runtime.operation(session,read(),undefined,async()=>{
+    expect(await runtime.report(session,{data:{toJSON:()=>[]}})).toBe(false);
+    expect(await runtime.report(session,{data:{toJSON:()=>null}})).toBe(false);
+  }));
+});
+test("observer cancellation is inherited only by a top-level read, never an enclosing write",async()=>{
+  const runtime=new ReadProgressRuntime<object>(()=>{}),session={},abort=new AbortController();
+  await runtime.observe(session,async()=>{},async()=>{
+    await runtime.operation(session,read(),undefined,async signal=>expect(signal).toBe(abort.signal));
+    await runtime.operation(session,{...read(),effects:{data:"write",external:"none"}},undefined,async signal=>{
+      expect(signal).toBeUndefined();
+      await runtime.operation(session,read("nested"),signal,async nestedSignal=>expect(nestedSignal).toBeUndefined());
+    });
+  },abort.signal);
+});
+test("a stalled optional notification cannot delay the final read indefinitely",async()=>{
+  const runtime=new ReadProgressRuntime<object>(()=>{},5),session={};
+  expect(await runtime.observe(session,async()=>new Promise(()=>{}),()=>runtime.operation(session,read(),undefined,async()=>{
+    expect(await runtime.report(session,{data:{items:[]}})).toBe(false);return "final";
+  }))).toBe("final");
+});

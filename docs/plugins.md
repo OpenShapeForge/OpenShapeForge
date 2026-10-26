@@ -1,5 +1,21 @@
 # Plugins
 
+Canonical read handlers can call `platform.readProgress?.report(session, {data, message})`
+to publish provisional evidence while the original request is still running.
+The ordinary final result remains mandatory and unchanged. Core accepts only
+the current verified session and the root read operation (data read, external
+none/read); nested operations and writes cannot publish snapshots. Delivery is
+optional and bounded: 20 snapshots, 64 KiB each, 512 KiB per invocation. A failed
+notification never replaces the final result. Providers must project data for
+the caller before reporting it, just as for their final output.
+
+MCP clients opt in with `_meta["openshapeforge/read-progress"]: {version: 1}`
+and a standard progress token. Snapshots travel in that namespace on standard
+progress notifications, with core-issued operation ID, sequence and read-only
+marker. A client may display available evidence and later reconcile the final
+result of the same RPC. Other clients simply await that final result. This
+capability stores no source data and does not repeat provider reads.
+
 A plugin extends the platform without living in it. It has two halves, loaded at
 two different times by two different processes:
 

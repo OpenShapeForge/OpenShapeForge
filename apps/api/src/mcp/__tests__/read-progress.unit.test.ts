@@ -29,3 +29,25 @@ test("generated MCP bridge delivers opt-in read snapshots on the original reques
     }finally{release();platform.unregisterServer(server);await client.close();await server.close();}
   }
 });
+
+test("authored dedicated MCP tools report on the same request without changing their final projection",async()=>{
+  for(const optIn of [true,false]){
+    const db={} as OpenShapeForgeDatabase,platform=new ModulePlatformRuntime(db),updates:unknown[]=[];
+    let calls=0;
+    const fixture={...documents,operationHandlers:{...documents.operationHandlers,materializeTemplate:async(_input:unknown,context:any)=>{
+      calls++;
+      expect(Boolean(context.signal)).toBe(optIn);
+      expect(await context.platform.readProgress.report(context.session,{data:{items:[{id:"first"}]}})).toBe(optIn);
+      return {value:{items:[{id:"first"},{id:"last"}]}};
+    }}} as unknown as RuntimeModule;
+    const server=__buildGeneratedMcpServerForTests({db,modulePlatform:platform,session:{tenantId:"11111111-1111-4111-8111-111111111111",userId:"22222222-2222-4222-8222-222222222222",roles:["General.All.Read"],groups:[],scope:"self",credential:"bearer"},modules:[accounts,fixture,versioning as unknown as RuntimeModule,{name:"notebook",operationHandlers:{importNotebook:async()=>({value:undefined})}}],operationToolProjection:{mode:"dedicated",search:"osf_search_operations",execute:"osf_execute_operation"}});
+    const client=new Client({name:"direct-read-progress-test",version:"1"}),[a,b]=InMemoryTransport.createLinkedPair();
+    try{
+      await server.connect(b);await client.connect(a);
+      const result=await client.callTool({name:"template_version_materialize",arguments:{templateVersionId:"33333333-3333-4333-8333-333333333333",channel:"document",locale:"en"},...(optIn?{_meta:{[KEY]:{version:1}}}:{})},{onprogress:p=>{updates.push(p);}});
+      expect(result.isError).toBeFalsy();expect(result.structuredContent).toEqual({items:[{id:"first"},{id:"last"}]});expect(calls).toBe(1);
+      expect(updates).toHaveLength(optIn?1:0);
+      if(optIn)expect(updates[0]).toMatchObject({_meta:{[KEY]:{operationId:"TemplateVersion.materialize",toolName:"template_version_materialize",readOnly:true}}});
+    }finally{platform.unregisterServer(server);await client.close();await server.close();}
+  }
+});

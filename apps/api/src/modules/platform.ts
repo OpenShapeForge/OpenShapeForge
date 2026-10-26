@@ -55,7 +55,7 @@ import { ArtifactStorageRuntime } from "./artifact-storage.js";
 import { runtimeSettings } from "./settings.js";
 import { RecordAccessRuntime } from "./record-access.js";
 import { createWebhookSecretServices } from "./webhook-secrets.js";
-import { ReadProgressRuntime } from "./read-progress.js";
+import { ReadProgressRuntime, type ReadProgressDefinition } from "./read-progress.js";
 import type { RuntimeReadProgress } from "@openshapeforge/plugin-runtime";
 import {
   generatedCapabilityOperations,
@@ -363,6 +363,14 @@ export class ModulePlatformRuntime {
     signal?: AbortSignal,
   ): Promise<T> {
     return this.#readProgress.observe(session, emit, work, signal);
+  }
+
+  /** Core transport adapter for authored Operations invoked directly. */
+  withReadProgressOperation<T>(
+    session: TrustedSessionContext, definition: ReadProgressDefinition,
+    signal: AbortSignal | undefined, work: (signal?: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    return this.#readProgress.operation(session, definition, signal, work);
   }
 
   constructor(

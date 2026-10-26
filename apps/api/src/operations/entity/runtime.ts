@@ -1125,6 +1125,8 @@ async function executeEntityOperationWithContext(
         const prepared = await prepareWriteBindings(db, session, table, request.input, supplied, projectBindingWriteRow(table, session, current ?? null));
         const values = prepared.values;
         requireContractValues(operation, table, values, { partial: true }, session);
+        const relatedChanges = request.input?.relatedChanges;
+        if (relatedChanges !== undefined) assertOperationInputValid(operation, request.input ?? {});
         const confirmation = await prepareMutationConfirmation(
           db,
           session,
@@ -1159,8 +1161,6 @@ async function executeEntityOperationWithContext(
           ...(guard ? { guard } : {}),
         });
         };
-        const relatedChanges = request.input?.relatedChanges;
-        if (relatedChanges !== undefined) assertOperationInputValid(operation, request.input ?? {});
         const data = await governed(() => relatedChanges === undefined ? writeParent() : withDbSession(db, session, async trx => {
           const parent = await writeParent();
           if (!parent) throw operationFailure({code:"NOT_FOUND",message:"Record not found.",retryable:false});

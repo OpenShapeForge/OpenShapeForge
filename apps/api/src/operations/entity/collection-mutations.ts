@@ -340,8 +340,22 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
         if (!row) throw generatedCrudError("Child update was refused.", "FORBIDDEN");
         changed = true;
       }
+      // Reference updates lock only the edited member, but their result still
+      // describes the full readable collection. Siblings need view, never edit,
+      // permission here; the query retains SELECT RLS and subtype scope.
+      let orderedIds = relation.sortable ? ordered : [...ordered].sort();
+      if (relation.ownership === "reference" && binding.action === "update") {
+        orderedIds = [];
+        const members = (await sql<{ id: string }>`select id from ${sql.id(target.schema, target.table)}
+          where ${sql.id(foreignKey!.name)} = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid${subtypeScopeWhere(target)} order by id`.execute(trx)).rows;
+        for (const { id } of members) {
+          try { await permission(trx, session, target, id, readOp, "view"); }
+          catch (error) { if (operationErrorOf(error)?.code === "FORBIDDEN") continue; throw error; }
+          orderedIds.push(id);
+        }
+      }
       if (!changed) {
-        return { parent: projectGeneratedEntityRow(owner, session, locked.rows[0].row, entityValues), childId, orderedIds: relation.sortable ? ordered : [...ordered].sort() };
+        return { parent: projectGeneratedEntityRow(owner, session, locked.rows[0].row, entityValues), childId, orderedIds };
       }
       // Something was written, so one of the paths above must have taken the
       // decision. Refuse rather than touch the parent if a write path ever
@@ -356,7 +370,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       const draft = draftRule(owner);
       if (draft) await sql`update ${sql.id(owner.schema, owner.table)} set ${sql.id(draft.column)} = ${draft.value} where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid`.execute(trx);
       else await draftOwningHead(trx, catalog.tables, owner, parentRow);
-      return { parent: projectGeneratedEntityRow(owner, session, draft ? { ...parentRow, [draft.column]: draft.value } : parentRow, entityValues), childId, orderedIds: relation.sortable ? ordered : [...ordered].sort() };
+      return { parent: projectGeneratedEntityRow(owner, session, draft ? { ...parentRow, [draft.column]: draft.value } : parentRow, entityValues), childId, orderedIds };
     };
     return (transaction ? run(transaction) : withDbSession(db!, session, run)).catch((error) => { throw translateDatabaseError(owner, error); });
   }

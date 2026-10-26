@@ -106,7 +106,7 @@ if (process.env.OSF_RELATED_RUNTIME_ISOLATED !== "1") {
         ),
       });
     }
-  const { executeEntityOperation, acquireEditLeaseForEntityOperation } =
+  const { executeEntityOperation, acquireEditLeaseForEntityOperation, entityOperationContract } =
     await import("./runtime.js");
   const { runMigrationChain } = await import("../../db/migration-chain.js");
   const { applyAuditHistory } =
@@ -256,4 +256,26 @@ if (process.env.OSF_RELATED_RUNTIME_ISOLATED !== "1") {
     ).toHaveProperty("error");
     expect(await stored("owners", owner.id)).toEqual(before);
   });
+  test("invalid related input cannot create a confirmation challenge", async () => {
+    const owner = record(await run("Owner.create", { values: { name: "Guarded" } }));
+    const operation = entityOperationContract("Owner.update");
+    const original = operation.interaction.confirmation;
+    operation.interaction.confirmation = { mode: "challenge", challenge: {
+      kind: "type-current-field", field: "name", issuedBy: "server",
+      bindTo: ["subject", "tenant", "operation", "target.id", "target.version"],
+      expiresAfter: "PT5M", singleUse: true,
+    } };
+    const challenges = async () => (await sql<{ count: number }>`select count(*)::int as count from platform.operation_confirmation_challenges`.execute(privileged.db)).rows[0]!.count;
+    try {
+      const before = await challenges();
+      const result = await run("Owner.update", { id: owner.id,
+        expectedVersion: (await stored("owners", owner.id)).version,
+        values: { name: "After" }, relatedChanges: [{ relationship: "undeclared", update: [] }],
+      });
+      expect(result).toMatchObject({ error: { code: "VALIDATION" } });
+      expect(await challenges()).toBe(before);
+      expect((await stored("owners", owner.id)).row.name).toBe("Guarded");
+    } finally { operation.interaction.confirmation = original; }
+  });
+
 }

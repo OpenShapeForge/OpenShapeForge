@@ -9,8 +9,9 @@ import { describe, expect, it } from "bun:test";
 import { ProviderOutcomeError } from "../../connectors/provider-outcome.js";
 import {
   composeBindingRequest,
-  describeAuthHeaders,
-  acquireAuthHeaders,
+  describeRequestAuth,
+  acquireRequestAuth,
+  forgetSession,
   applyMapping,
   bindingSelected,
   buildAuthHeaders,
@@ -1324,10 +1325,11 @@ describe("oauth2ClientCredentials", () => {
       egress: ["auth.example.com"],
       fetchImpl: impl,
     };
-    const first = await acquireAuthHeaders(context);
-    const second = await acquireAuthHeaders(context);
-    expect(first.authorization).toBe("Bearer cc-tok");
-    expect(second.authorization).toBe("Bearer cc-tok");
+    const first = await acquireRequestAuth(context);
+    const second = await acquireRequestAuth(context);
+    expect(first.headers.authorization).toBe("Bearer cc-tok");
+    expect(second.headers.authorization).toBe("Bearer cc-tok");
+    expect(first.query).toEqual({});
     expect(calls.length).toBe(1);
     expect(calls[0]?.body).toContain("grant_type=client_credentials");
     expect(calls[0]?.body).toContain("scope=read");
@@ -1444,7 +1446,7 @@ describe("oauth2ClientCredentials", () => {
 
   it("refuses a token endpoint outside the egress allow-list", async () => {
     await expect(
-      acquireAuthHeaders({
+      acquireRequestAuth({
         auth: {
           scheme: "oauth2ClientCredentials",
           tokenUrl: "https://evil.example.net/token",
@@ -1634,29 +1636,42 @@ describe("composeBindingRequest (describe mode)", () => {
   });
 });
 
-describe("describeAuthHeaders", () => {
+describe("describeRequestAuth", () => {
   it("describes each scheme without values", () => {
     expect(
-      describeAuthHeaders({ scheme: "bearer", tokenFrom: "apiToken" }),
+      describeRequestAuth({ scheme: "bearer", tokenFrom: "apiToken" }),
     ).toEqual({
-      authorization: 'Bearer <value of "apiToken" from the connection>',
+      headers: {
+        authorization: 'Bearer <value of "apiToken" from the connection>',
+      },
+      query: {},
     });
     expect(
-      describeAuthHeaders({
+      describeRequestAuth({
         scheme: "header",
         headerName: "  X-Key  ",
         tokenFrom: "k",
-      }),
+      }).headers,
     ).toEqual({
       "x-key": '<value of "k" from the connection>',
     });
     expect(
-      describeAuthHeaders({
+      describeRequestAuth({
         scheme: "oauth2ClientCredentials",
         tokenUrl: "https://t/token",
-      }),
+      }).headers,
     ).toEqual({ authorization: "Bearer <token from https://t/token>" });
-    expect(describeAuthHeaders(undefined)).toEqual({});
+    expect(
+      describeRequestAuth({
+        scheme: "session",
+        loginUrl: "https://ws.example.com/Authenticate",
+        sessionParam: "sessionID",
+      }),
+    ).toEqual({
+      headers: {},
+      query: { sessionID: "<session from https://ws.example.com/Authenticate>" },
+    });
+    expect(describeRequestAuth(undefined)).toEqual({ headers: {}, query: {} });
   });
 });
 
@@ -2129,5 +2144,277 @@ describe("mapOperationResponse over collections", () => {
     expect(() =>
       mapOperationResponse(binding, operationRow, { items: [{ summary: "x" }] }),
     ).toThrow(/none of its field paths/);
+  });
+});
+
+describe("session scheme", () => {
+  // Sessions are cached process-wide, so each case logs in with its own
+  // credential and cannot observe another case's session.
+  const loginUrl = "https://ws.example.com/ws/Info.asmx/Authenticate";
+  const auth = {
+    profile: "apiKey",
+    scheme: "session",
+    loginUrl,
+    loginParam: "accessKey",
+    credentialFrom: "accessKey",
+    loginResponseFormat: "xml",
+    sessionPath: "string",
+    sessionParam: "sessionID",
+  };
+  const provider = {
+    transport: "rest",
+    baseUrlTemplate: "https://ws.example.com/ws",
+    egressHosts: ["ws.example.com"],
+    auth,
+  };
+  const operation = {
+    key: "gl-scheme",
+    operation: {
+      method: "GET",
+      pathTemplate: "/Info.asmx/GetScheme?administrationID={administrationId}",
+    },
+    responseMapping: { format: "xml", rootPath: "Scheme", fieldPaths: [{ field: "accounts", path: "$" }] },
+  };
+  const loginXml = (session: string) =>
+    `<?xml version="1.0" encoding="utf-8"?><string xmlns="http://www.example.com/">${session}</string>`;
+
+  function recorder(answer: (url: URL, init?: RequestInit) => Response) {
+    const calls: { url: URL; init?: RequestInit }[] = [];
+    const impl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      calls.push({ url, ...(init ? { init } : {}) });
+      return answer(url, init);
+    }) as typeof fetch;
+    return { calls, impl };
+  }
+
+  it("logs in once with the credential in a form body and caches the session", async () => {
+    const { calls, impl } = recorder(() => new Response(loginXml("sess-1")));
+    const context = {
+      auth,
+      plain: {},
+      secret: { accessKey: "key-cache" },
+      egress: ["ws.example.com"],
+      fetchImpl: impl,
+    };
+    const first = await acquireRequestAuth(context);
+    const second = await acquireRequestAuth(context);
+    expect(first).toMatchObject({ headers: {}, query: { sessionID: "sess-1" } });
+    expect(second.query).toEqual({ sessionID: "sess-1" });
+    expect(first.sessionKey).toMatch(/^[a-f0-9]{64}$/);
+    expect(first.sessionKey).not.toContain("key-cache");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url.href).toBe(loginUrl);
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(String(calls[0]?.init?.body)).toBe("accessKey=key-cache");
+  });
+
+  it("places the session as the last query parameter and never the credential", async () => {
+    const { calls, impl } = recorder((url) =>
+      url.pathname.endsWith("/Authenticate")
+        ? new Response(loginXml("sess-2"))
+        : new Response(
+            '<Scheme xmlns="http://www.example.com/"><GLAccount><Code>0100</Code></GLAccount></Scheme>',
+          ),
+    );
+    const output = await executeBinding({
+      binding: {},
+      operationRow: operation,
+      providerRow: provider,
+      connectionValues: { accessKey: "key-place", administrationId: "adm-1" },
+      serviceInputs: {},
+      fetchImpl: impl,
+      secretScope: "unused",
+    });
+    expect(output).toEqual({ accounts: { GLAccount: { Code: "0100" } } });
+    const call = calls[1]!;
+    expect(call.url.searchParams.get("administrationID")).toBe("adm-1");
+    expect(call.url.searchParams.get("sessionID")).toBe("sess-2");
+    expect(call.url.href).not.toContain("key-place");
+    expect(new Headers(call.init?.headers).get("accept")).toContain("application/xml");
+  });
+
+  it("refuses an operation that sets the session parameter itself", async () => {
+    const { impl } = recorder(() => new Response(loginXml("sess-3")));
+    await expect(
+      composeBindingRequest({
+        binding: {},
+        operationRow: operation,
+        providerRow: provider,
+        connectionValues: { accessKey: "key-collide", administrationId: "adm-1" },
+        serviceInputs: { sessionID: "forged" },
+        fetchImpl: impl,
+        secretScope: "unused",
+      }),
+    ).rejects.toThrow(/carries the provider session/);
+  });
+
+  it("logs in again after the provider rejects a call", async () => {
+    let logins = 0;
+    let reject = true;
+    const { impl } = recorder((url) => {
+      if (url.pathname.endsWith("/Authenticate")) {
+        logins += 1;
+        return new Response(loginXml(`sess-r${logins}`));
+      }
+      if (reject) {
+        reject = false;
+        return new Response("Session expired", { status: 500 });
+      }
+      return new Response("<Scheme />");
+    });
+    const run = () =>
+      executeBinding({
+        binding: {},
+        operationRow: operation,
+        providerRow: provider,
+        connectionValues: { accessKey: "key-expire", administrationId: "adm-1" },
+        serviceInputs: {},
+        fetchImpl: impl,
+        secretScope: "unused",
+      });
+    await expect(run()).rejects.toBeInstanceOf(ProviderOutcomeError);
+    await run();
+    expect(logins).toBe(2);
+  });
+
+  it("describes the session placement without logging in", async () => {
+    const composed = await composeBindingRequest({
+      binding: {},
+      operationRow: operation,
+      providerRow: provider,
+      connectionValues: { administrationId: "adm-1" },
+      serviceInputs: {},
+      fetchImpl: (() => {
+        throw new Error("describe mode must not call out");
+      }) as unknown as typeof fetch,
+      secretScope: "unused",
+      mode: "describe",
+    });
+    expect(composed.url.searchParams.get("sessionID")).toBe(
+      `<session from ${loginUrl}>`,
+    );
+    expect(composed.sessionKey).toBeUndefined();
+  });
+
+  it("refuses unsafe or unusable login endpoints and answers", async () => {
+    const base = {
+      plain: {},
+      secret: { accessKey: "key-refuse" },
+      egress: ["ws.example.com"],
+    };
+    await expect(
+      acquireRequestAuth({
+        ...base,
+        auth: { ...auth, loginUrl: "https://evil.example.net/Authenticate" },
+        fetchImpl: fetch,
+      }),
+    ).rejects.toThrow(/egress allow-list/);
+    await expect(
+      acquireRequestAuth({
+        ...base,
+        auth: { ...auth, loginUrl: "http://ws.example.com/Authenticate" },
+        fetchImpl: fetch,
+      }),
+    ).rejects.toThrow(/must use HTTPS/);
+    await expect(
+      acquireRequestAuth({
+        ...base,
+        auth: { ...auth, sessionParam: "session id" },
+        fetchImpl: fetch,
+      }),
+    ).rejects.toThrow(/parameter name/);
+    await expect(
+      acquireRequestAuth({
+        ...base,
+        auth,
+        fetchImpl: (async () => new Response("Invalid access key", { status: 500 })) as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/Login endpoint answered 500/);
+    await expect(
+      acquireRequestAuth({
+        ...base,
+        auth,
+        fetchImpl: (async () => new Response("<string />")) as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/no session at the configured sessionPath/);
+    await expect(
+      acquireRequestAuth({ ...base, secret: {}, auth, fetchImpl: fetch }),
+    ).rejects.toThrow(/"accessKey", which is not set/);
+  });
+
+  it("forgets a session on request", async () => {
+    let logins = 0;
+    const impl = (async () => {
+      logins += 1;
+      return new Response(loginXml(`sess-f${logins}`));
+    }) as unknown as typeof fetch;
+    const context = {
+      auth,
+      plain: {},
+      secret: { accessKey: "key-forget" },
+      egress: ["ws.example.com"],
+      fetchImpl: impl,
+    };
+    const first = await acquireRequestAuth(context);
+    forgetSession(first.sessionKey!);
+    const second = await acquireRequestAuth(context);
+    expect(second.query.sessionID).toBe("sess-f2");
+  });
+});
+
+describe("xml responses", () => {
+  const provider = {
+    transport: "rest",
+    baseUrlTemplate: "https://xml.example.com",
+    egressHosts: ["xml.example.com"],
+  };
+  const respond = (body: string) =>
+    (async () => new Response(body, { headers: { "content-type": "text/xml" } })) as unknown as typeof fetch;
+
+  it("maps declared collections as arrays, keeps string values and drops namespaces", async () => {
+    const output = await executeBinding({
+      binding: {},
+      operationRow: {
+        operation: { method: "GET", pathTemplate: "/accounts" },
+        responseMapping: {
+          format: "xml",
+          xml: { arrays: ["Scheme.Account"] },
+          rootPath: "Scheme.Account",
+          fieldPaths: [{ field: "records", path: "$" }],
+        },
+      },
+      providerRow: provider,
+      connectionValues: {},
+      serviceInputs: {},
+      fetchImpl: respond(
+        '<?xml version="1.0"?><y:Scheme xmlns:y="urn:y"><y:Account kind="asset"><Code>0100</Code><Active>true</Active></y:Account></y:Scheme>',
+      ),
+      secretScope: "unused",
+    });
+    expect(output).toEqual({
+      records: [{ "@kind": "asset", Code: "0100", Active: "true" }],
+    });
+  });
+
+  it("refuses a document type declaration and malformed XML", async () => {
+    const run = (body: string) =>
+      executeBinding({
+        binding: {},
+        operationRow: {
+          key: "accounts",
+          operation: { method: "GET", pathTemplate: "/accounts" },
+          responseMapping: { format: "xml" },
+        },
+        providerRow: provider,
+        connectionValues: {},
+        serviceInputs: {},
+        fetchImpl: respond(body),
+        secretScope: "unused",
+      });
+    await expect(
+      run('<!DOCTYPE a [<!ENTITY x "boom">]><a>&x;</a>'),
+    ).rejects.toThrow(/returned an invalid response/);
+    await expect(run("<a><b></a>")).rejects.toThrow(/returned an invalid response/);
   });
 });

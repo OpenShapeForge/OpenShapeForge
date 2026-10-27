@@ -87,6 +87,10 @@ export function requiredAuthValueKeys(auth: unknown): string[] {
         typeof config.clientSecretFrom === "string" ? config.clientSecretFrom : "clientSecret",
       );
       break;
+    case "session":
+      if (typeof config.credentialFrom === "string") keys.add(config.credentialFrom);
+      for (const key of placeholderKeys(config.loginUrl)) keys.add(key);
+      break;
     default:
       break;
   }

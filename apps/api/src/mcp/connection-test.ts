@@ -11,9 +11,10 @@
  * Three checks, in order:
  *   1. required-values — every definition the source row requires, plus every
  *      credential key its auth block references, has a stored value.
- *   2. credentials — the auth headers actually resolve. For the OAuth
- *      client-credentials scheme this performs a REAL token round-trip
- *      (egress-gated); for local schemes it is a resolution check only.
+ *   2. credentials — the request authentication actually resolves. For
+ *      the OAuth client-credentials and session schemes this performs a REAL
+ *      token or login round-trip (egress-gated); for local schemes it is a
+ *      resolution check only.
  *   3. probe — when the source row declares a `probe` request (canonical
  *      fields `method`, `pathTemplate`), it is sent with the resolved
  *      credentials against the resolved base URL, egress-gated, and judged by
@@ -33,8 +34,9 @@ import {
   type StoredSecret,
 } from "../connectors/secrets.js";
 import {
-  acquireAuthHeaders,
+  acquireRequestAuth,
   definitionFieldKeys,
+  type RequestAuth,
   providerUrlTemplates,
   resolveTemplate,
   fetchWithAllowedRedirects,
@@ -184,7 +186,7 @@ export async function testElicitedRow(
   // 3 + 4 share the resolved credentials, so a decryption or resolution
   // failure fails the credentials check and skips the probe.
   let plain: Record<string, string> = {};
-  let headers: Record<string, string> | undefined;
+  let requestAuth: RequestAuth | undefined;
   const egress = Array.isArray(sourceRow.egressHosts)
     ? (sourceRow.egressHosts as string[])
     : [];
@@ -234,7 +236,7 @@ export async function testElicitedRow(
           "after they approve at the provider, so there is nothing to exercise yet.",
       });
     } else {
-      headers = await acquireAuthHeaders({
+      requestAuth = await acquireRequestAuth({
         auth: effectiveAuth,
         plain,
         secret: split.secret,
@@ -249,7 +251,9 @@ export async function testElicitedRow(
           (effectiveAuth as JsonRecord | null)?.scheme ===
           "oauth2ClientCredentials"
             ? "The token endpoint accepted the client credentials and issued a token."
-            : "The credentials resolve into request authentication.",
+            : (effectiveAuth as JsonRecord | null)?.scheme === "session"
+              ? "The login endpoint accepted the credential and issued a session."
+              : "The credentials resolve into request authentication.",
       });
     }
   } catch (error) {
@@ -276,7 +280,7 @@ export async function testElicitedRow(
         `exercised against the provider. Declare probe { method, pathTemplate } on it ` +
         `for a full check.`,
     });
-  } else if (headers === undefined) {
+  } else if (requestAuth === undefined) {
     checks.push({
       check: "probe",
       outcome: "skipped",
@@ -314,13 +318,16 @@ export async function testElicitedRow(
           `Probe host ${url.hostname} is not in the egress allow-list.`,
         );
       }
+      for (const [param, value] of Object.entries(requestAuth.query)) {
+        url.searchParams.set(param, value);
+      }
       const method =
         typeof probe.method === "string" ? probe.method.toUpperCase() : "GET";
       const response = await fetchWithAllowedRedirects(
         url,
         {
           method,
-          headers: { accept: "application/json", ...headers },
+          headers: { accept: "application/json", ...requestAuth.headers },
           signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
         },
         egress,

@@ -2,6 +2,7 @@
 import { operationFailure } from "@openshapeforge/operations";
 import type {
   RuntimeRecordAccessRequest,
+  RuntimeRecordAccessBatchRequest,
   RuntimeRecordAccessServices,
   RuntimeStoredFieldProjectionRequest,
 } from "@openshapeforge/plugin-runtime";
@@ -10,7 +11,8 @@ import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { DB } from "../generated/db/types.js";
 import { requireEntityOperation } from "../operations/entity/catalog.js";
 import { redactRow } from "../graphql/generated-authz.js";
-import { fieldNameForColumn } from "../operations/entity/columns.js";
+import { subtypeScopeWhere } from "../operations/entity/subtype-scope.js";
+import { primaryKeyEquals, fieldNameForColumn } from "../operations/entity/columns.js";
 import { assertRecordPermissionInTransaction } from "../operations/entity/record-permissions.js";
 import {
   getEntityOperationContracts,
@@ -125,8 +127,9 @@ async function assertVisibleRecord(
   const result = await sql<{ present: number }>`
     select 1 as present
     from ${sql.id(table.schema, table.table)} as row_source
-    where ${sql.id("row_source", table.primaryKey!)}::text = ${id}
+    where ${primaryKeyEquals(table, id, "row_source")}
       ${tenantWhere}
+      ${subtypeScopeWhere(table, "row_source")}
     limit 1
   `.execute(trx);
   if (result.rows[0]?.present !== 1) refusal("Not authorized to access this record.");
@@ -163,6 +166,47 @@ export class RecordAccessRuntime {
         const stored = Object.fromEntries(fields.map(([key, value]) => [columns.get(key)!.name, value]));
         const redacted = redactRow(stored, table.columns, table.source?.authorization, session);
         return Object.freeze(Object.fromEntries(fields.map(([key]) => [key, redacted[columns.get(key)!.name]])));
+      },
+      assertAccessMany: async (session: TrustedSessionContext, input: RuntimeRecordAccessBatchRequest): Promise<void> => {
+        if (!options.acceptsSession(session)) refusal("Record access requires the live verified session.");
+        if (!input || !Array.isArray(input.ids) || input.ids.length > 10000) {
+          throw operationFailure({ code: "VALIDATION", message: "The record access batch is invalid.", retryable: false });
+        }
+        // Validate even an empty batch's entity and intent, and resolve policy once.
+        request({ entityName: input.entityName, intent: input.intent, id: "batch" });
+        const ids = [...new Set(input.ids)];
+        for (const id of ids) request({ entityName: input.entityName, intent: input.intent, id });
+        const operation = operationFor({ ...input, id: "batch" });
+        const table = tableForEntityOperation({ id: operation.id, intent: operation.intent });
+        if (session.credential === "grant") {
+          for (const id of ids) requireGrantedRecord(session, { ...input, id });
+        } else {
+          requireEntityOperation(table, input.intent, session);
+          requireCanonicalRoles(operation, session);
+        }
+        const authorize = async (trx: Transaction<DB>) => {
+          const permissions = session.credential === "grant" ? [] : (operation.authorization.recordPermissions ?? []);
+          if (permissions.length) {
+            for (const id of ids) for (const permission of permissions) {
+              await assertRecordPermissionInTransaction(trx, session, table, id, permission);
+            }
+            return;
+          }
+          // The same live RLS transaction and tenant/subtype fences as a single record.
+          // Every requested identity must be visible; a missing or hidden one refuses the batch.
+          for (let offset = 0; offset < ids.length; offset += 500) {
+            const chunk = ids.slice(offset, offset + 500);
+            const tenantWhere = table.tenantScoped ? sql`and ${sql.id("row_source", "tenant_id")} = ${session.tenantId}` : sql``;
+            const result = await sql<{ count: string }>`select count(*)::text as count
+              from ${sql.id(table.schema, table.table)} as row_source
+              where (${sql.join(chunk.map(id => primaryKeyEquals(table, id, "row_source")), sql` or `)})
+              ${tenantWhere} ${subtypeScopeWhere(table, "row_source")}`.execute(trx);
+            if (Number(result.rows[0]?.count) !== chunk.length) refusal("Not authorized to access these records.");
+          }
+        };
+        const active = options.currentTransaction(session);
+        if (active) await authorize(active);
+        else await options.withSession(session, authorize);
       },
       assertAccess: async (
         session: TrustedSessionContext,

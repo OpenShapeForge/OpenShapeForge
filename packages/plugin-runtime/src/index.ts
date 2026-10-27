@@ -11,7 +11,7 @@ import type { RuntimeSettingsService } from "./settings.js";
 import type { RuntimeWebhookSecretServices } from "./webhook-secrets.js";
 export type { RuntimeWebhookSecretServices, RuntimeWebhookSignatureInput } from "./webhook-secrets.js";
 import type { RuntimeRecordAccessServices } from "./record-access.js";
-export type { RuntimeRecordAccessServices, RuntimeRecordAccessRequest, RuntimeRecordAccessIntent, RuntimeStoredFieldProjectionRequest } from "./record-access.js";
+export type { RuntimeRecordAccessServices, RuntimeRecordAccessRequest, RuntimeRecordAccessBatchRequest, RuntimeRecordAccessIntent, RuntimeStoredFieldProjectionRequest } from "./record-access.js";
 import type { RuntimeExecutionPolicy } from "./execution-policy.js";
 export type { RuntimeExecutionPolicy, RuntimeExecutionPolicyContract, RuntimeExecutionPolicyRequest,
   RuntimeExecutionOperation, RuntimeExecutionAdmission, RuntimeExecutionRefusal } from "./execution-policy.js";

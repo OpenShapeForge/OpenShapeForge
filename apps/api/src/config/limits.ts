@@ -139,6 +139,13 @@ export const DEFAULT_TRUST_PROXY: TrustProxySetting = 1;
 // because that path is independent of the Fastify server. 0 disables.
 export const STATEMENT_TIMEOUT_ENV = "DB_STATEMENT_TIMEOUT_MS";
 export const DEFAULT_STATEMENT_TIMEOUT_MS = 15_000;
+export const SHARED_READ_TRANSACTION_TIMEOUT_ENV = "DB_SHARED_READ_TRANSACTION_TIMEOUT_MS";
+export function readSharedReadTransactionTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  return readPositiveIntEnv(SHARED_READ_TRANSACTION_TIMEOUT_ENV, 1_000, env);
+}
+export function readMaintenanceAdmissionTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  return readPositiveIntEnv("DB_MAINTENANCE_ADMISSION_TIMEOUT_MS", 1_000, env);
+}
 
 export function readApiLimits(env: NodeJS.ProcessEnv = process.env): ApiLimits {
   const anonymous = readPositiveIntEnv(

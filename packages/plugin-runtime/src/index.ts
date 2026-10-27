@@ -385,6 +385,32 @@ export type RuntimeOperationProvider = {
 
 /** The database capabilities exposed by the host to a runtime plugin. */
 export type PluginDatabase = {
+  /** Keep definition writers behind concurrent reads without holding a tenant
+   * transaction across external I/O. The tenant is derived from this live
+   * session. Writers must take the matching transaction advisory lock:
+   * (hashtext('osf.read-barrier:' || namespace), hashtext(tenantId)).
+   * A host with one connection, or an already active transaction, retains a
+   * transaction lock instead. This does not authorize reads or cache data.
+   * Reentry for the same namespace is allowed; nested acquisition of another
+   * namespace is refused to avoid distributed lock-order deadlocks.
+   * Short tenant DB sessions may share the reserved connection. These sessions
+   * have a whole-transaction budget; expired callbacks cannot execute more SQL
+   * and their outstanding I/O drains before the Service fence is released.
+   * The transaction-local `app.shared_read_barrier` GUC contains the current
+   * namespace/tenant JSON only in this shared mode. The reserved backend also
+   * holds a session ShareLock on (hashtext('osf.read-barrier:shared-backend'), 0),
+   * which guards can inspect even if the metadata marker is cleared. Writers must
+   * refuse writes when it is nonempty, preventing own-backend lock upgrades
+   * for every namespace. Independent nested transactions and SQL streams are
+   * refused. Keyed external writes must start outside the shared read barrier
+   * and are refused before their receipt claim or provider effects inside it.
+   */
+  withSharedReadBarrier?<T>(
+    session: PluginSessionContext,
+    namespace: string,
+    work: () => Promise<T>,
+    options?: { signal?: AbortSignal },
+  ): Promise<T>;
   /** Audited cross-tenant work, admitted only during a live control Operation.
    * The host derives actor and audit reason; plugins cannot supply authority. */
   withControlSession?<T>(

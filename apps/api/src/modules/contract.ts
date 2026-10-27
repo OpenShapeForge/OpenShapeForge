@@ -275,6 +275,12 @@ export type ModulePlatformServices = {
     organizationServiceIdentity(session: TrustedSessionContext): Promise<{ serviceIdentityId: string }>;
   };
   db: {
+    withSharedReadBarrier?<T>(
+      session: TrustedSessionContext,
+      namespace: string,
+      work: () => Promise<T>,
+      options?: { signal?: AbortSignal },
+    ): Promise<T>;
     withControlSession?<T>(
       session: TrustedSessionContext,
       fn: (trx: Transaction<DB>) => Promise<T>,

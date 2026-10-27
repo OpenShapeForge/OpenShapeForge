@@ -5,6 +5,7 @@ import { operationFailure } from "@openshapeforge/operations";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
+import { hasSharedReadBarrier } from "../db/read-barrier.js";
 import {
   applyDbSession,
   createDbSessionContext,
@@ -351,7 +352,9 @@ async function markUnknown(trx: Transaction<DB>, identity: ReceiptIdentity): Pro
  * External effects require a committed claim before authored code can run.
  * Deliberately do not reuse activeDbSession here: a nested Operation may be
  * invoked from an outer plugin transaction which can still roll back after an
- * external request has escaped the process.
+ * external request has escaped the process. Keyed external writes are refused
+ * before claiming or dispatching within a shared read barrier; their command
+ * must execute outside that read-only lifetime.
  */
 async function withCommittedReceiptTransaction<T>(
   db: OpenShapeForgeDatabase,
@@ -379,6 +382,11 @@ export async function executeKeyedOperation<T>(
   session: TrustedSessionContext,
   options: KeyedOperationExecutionOptions<T>,
 ): Promise<T> {
+  if (options.externalWrite && hasSharedReadBarrier(db)) throw operationFailure({
+    code: "FORBIDDEN",
+    message: "External writes must execute outside a shared read barrier.",
+    retryable: false,
+  });
   const testExecutor = testReceiptExecutors.get(db);
   if (testExecutor) return testExecutor(session, options);
   const identity = keyedOperationReceiptIdentity(session, options);

@@ -22,7 +22,9 @@ export function applicationSearchSources(entities: readonly Pick<CompiledEntityI
     const field=c.entity.filterField ?? c.entity.displayTemplate?.match(/^\{\{\s*(\w+)\s*\}\}$/)?.[1]
       ?? ['name','title','label','displayName','key'].find(key=>c.model.fields.some(f=>f.key===key&&f.baseType==='string'));
     const description=c.model.fields.find(f=>f.key==='description'&&f.baseType==='string'&&f.cardinality!=='collection');
-    return [{entity:c.entity.name,labels:{...(c.entity.labels??{en:c.entity.title,nl:c.entity.title})},description:typeof c.entity.description==='object'?{...c.entity.description}:c.entity.description??'',
+    const viewTitle=Object.values(c.views??{}).find(view=>view.list?.title)?.list?.title;
+    const labels=typeof viewTitle==='object'?viewTitle:c.entity.labels??{en:c.entity.title,nl:c.entity.title};
+    return [{entity:c.entity.name,labels:{...labels},description:typeof c.entity.description==='object'?{...c.entity.description}:c.entity.description??'',
       list,...(get?{get}:{}),...(field?{field}:{}),...(description?{descriptionField:description.key}:{})}];
   });
 }

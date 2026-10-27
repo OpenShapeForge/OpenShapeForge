@@ -16,3 +16,13 @@ test("entity type discovery is a trusted canonical native read operation with au
   expect(() => assertOperationRuntimeModules(operations, [])).not.toThrow();
   expect(() => assertOperationRuntimeModules([{ ...operations[0]! }], [])).toThrow("unverified");
 });
+
+test('application search is a verified core read with compiler-owned searchable fields',()=>{
+ const entities=[{contract:{entity:{name:'Example',title:'Example',labels:{en:'Examples',nl:'Voorbeelden'},filterField:'name'},
+ authorization:{roles:{read:['Example.Read']}},entityOperations:{list:{id:'Example.list'},get:{id:'Example.get'}},
+ model:{fields:[{key:'name',baseType:'string'},{key:'description',baseType:'string'}],relationships:[]}}}] as any;
+ const operations=collectAuthoredEntityPluginOperations(entities,context);
+ const search=operations.find(op=>op.key==='application.search')!;
+ expect(search.implementation).toMatchObject({type:'application-search',sources:[{entity:'Example',field:'name',descriptionField:'description'}]});
+ expect(()=>assertOperationRuntimeModules(operations,[])).not.toThrow();
+});

@@ -1228,7 +1228,7 @@ export function assertOperationRuntimeModules(
 ): void {
   const available = new Set(runtimeModuleNames);
   for (const operation of operations) {
-    if (operation.implementation && (operation.plugin !== "core" || !["collectionMutation", "listEntityTypes", "constrainedReferenceCreate"].includes(operation.handler) ||
+    if (operation.implementation && (operation.plugin !== "core" || !["collectionMutation", "listEntityTypes", "constrainedReferenceCreate", "searchApplication"].includes(operation.handler) ||
       verifiedNativeOperations.get(operation) !== JSON.stringify(operation.implementation))) {
       throw new Error(`Operation ${operation.id} has unverified native implementation metadata.`);
     }

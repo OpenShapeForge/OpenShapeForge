@@ -657,12 +657,12 @@ export function entityOperationJsonSchemas(
         filterProperties[key] = { ...presentation(schema), oneOf: [schema, exactFilter(schema), ...(text ? [match] : [])] };
       }
       Object.assign(filterProperties, relationshipAnyFilters(contract, contracts, referentiedata));
-      const filterDefinitions = Object.fromEntries(Array.from({length:5}, (_,depth)=>[`entityFilter${depth}`, {
+      const filterDefinitions = {entityFilter: {
         type:"object", additionalProperties:false, maxProperties:30,
-        properties:{...filterProperties, ...(depth<4 ? Object.fromEntries(["and","or"].map(key=>[key,{
-          type:"array",minItems:1,maxItems:20,items:{$ref:`#/$defs/entityFilter${depth+1}`}
-        }])) : {})}
-      }]));
+        properties:{...filterProperties, ...Object.fromEntries(["and","or"].map(key=>[key,{
+          type:"array",minItems:1,maxItems:20,items:{$ref:"#/$defs/entityFilter"}
+        }]))}
+      }};
       const sortable = entitySortableFieldKeys(contract, secureInputTarget, contracts);
       return {
         inputSchema: {
@@ -676,7 +676,7 @@ export function entityOperationJsonSchemas(
               default: operation.input.pagination.defaultLimit,
             },
             cursor: { type: "string", description: "Opaque cursor from a previous page." },
-            filter: filterDefinitions.entityFilter0,
+            filter: { $ref: "#/$defs/entityFilter" },
             sort: {
               type: "object",
               properties: {

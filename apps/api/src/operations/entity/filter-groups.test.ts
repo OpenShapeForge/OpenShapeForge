@@ -11,8 +11,8 @@ test('nested OR never hides a restricted field from the existing policy',()=>{
  const filter={or:[{name:{contains:'needle'}},{and:[{description:{contains:'needle'}}]}]};
  expect(filterFieldNames(filter)).toContain('description');
  const column={name:'description',type:'text',fieldPolicy:{readRoles:['Secret.Read']}} as any;
- expect(()=>assertClassifiedQueryFieldsAllowed([column],{roles:{read:['Read']}},{roles:['Read']},'Example',filter)).toThrow('Not authorized');
- expect(()=>assertClassifiedQueryFieldsAllowed([column],{roles:{read:['Read']}},{roles:['Read','Secret.Read']},'Example',filter)).not.toThrow();
+ expect(()=>assertClassifiedQueryFieldsAllowed([column],{roles:{read:['Read'],create:[],update:[],delete:[]}},{roles:['Read']},'Example',filter)).toThrow('Not authorized');
+ expect(()=>assertClassifiedQueryFieldsAllowed([column],{roles:{read:['Read'],create:[],update:[],delete:[]}},{roles:['Read','Secret.Read']},'Example',filter)).not.toThrow();
  expect(()=>assertElicitedQueryAllowed({columns:[{...column,typedBy:{encrypted:true}}]} as any,{filter})).toThrow();
  expect(()=>assertBoundFieldQueryAllowed({columns:[column,{name:'__osf_field_bindings',type:'jsonb',fieldBindings:{fields:[{field:'description',column:'description',variables:'whole'}]}}]} as any,{filter})).toThrow();
 });

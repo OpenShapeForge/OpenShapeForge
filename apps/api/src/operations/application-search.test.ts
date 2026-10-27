@@ -14,9 +14,9 @@ test('only available sources are read, using canonical OR predicates and paginat
  execute:async(s:any,request:any)=>{expect(s).toBe(session);calls.push(request);return {data:{items:[{id:'one',name:'Result'}],nextCursor:'next'}}}
  }}} as any);
  expect(calls).toHaveLength(1);expect(calls[0].input).toEqual({first:3,filter:{or:[{name:{contains:'needle'}},{description:{contains:'needle'}}]}});
- expect(result.value).toMatchObject({groups:[{entity:'Example',items:[{id:'one',label:'Result'}],nextCursor:'next'}],incomplete:false});
+ expect(('value' in result)?result.value:null).toMatchObject({groups:[{entity:'Example',items:[{id:'one',label:'Result'}],nextCursor:'next'}],incomplete:false});
 });
 test('empty input lists readable catalogue without reading records',async()=>{
  const result=await nativeApplicationSearchHandler(operation as any)({locale:'nl'},{session:{tenantId:'t'},platform:{operations:{list:async()=>[{id:'Example.list'}],execute:()=>{throw Error('Must not read')}}}} as any);
- expect(result.value).toEqual({entities:[{entity:'Example',label:'Voorbeelden'}],groups:[],incomplete:false});
+ expect(('value' in result)?result.value:null).toEqual({entities:[{entity:'Example',label:'Voorbeelden'}],groups:[],incomplete:false});
 });

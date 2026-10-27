@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { readStatementTimeoutMs } from "../config/limits.js";
 import { actingRelationId, type ActingRelationSource } from "./acting-relation.js";
+import { withReadBarrierDatabase } from "./read-barrier.js";
 
 export type DbSessionScope = "tenant" | "group" | "self";
 
@@ -300,10 +301,10 @@ export async function withDbSession<TDatabase, TResult>(
   }
   const hooks = { afterCommit: [] as DbSessionAfterCommitHook[] };
 
-  const result = await withRuntimeSpan("database.session", () => dbSessionHooks.run(hooks, () => {
+  const result = await withRuntimeSpan("database.session", () => dbSessionHooks.run(hooks, () => withReadBarrierDatabase(db, session.tenantId, database => {
     const transaction = options.isolationLevel
-      ? db.transaction().setIsolationLevel(options.isolationLevel)
-      : db.transaction();
+      ? database.transaction().setIsolationLevel(options.isolationLevel)
+      : database.transaction();
     return transaction.execute(async (trx) => {
       const audit = await applyDbSession(trx, session);
       return runWithAuditContext(audit, () => activeDbSession.run(
@@ -316,7 +317,7 @@ export async function withDbSession<TDatabase, TResult>(
         () => callback(trx, session),
       ));
     });
-  }));
+  })));
 
   for (const hook of hooks.afterCommit) {
     await hook();

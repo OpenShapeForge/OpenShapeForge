@@ -393,6 +393,10 @@ export type PluginDatabase = {
    * transaction lock instead. This does not authorize reads or cache data.
    * Reentry for the same namespace is allowed; nested acquisition of another
    * namespace is refused to avoid distributed lock-order deadlocks.
+   * Work must not modify protected definitions. Short tenant DB sessions may
+   * share the reserved connection; writers must refuse an upgrade when their
+   * own backend holds a matching shared lock. Independent nested transactions
+   * are refused; use a command Operation when atomic writes are needed.
    */
   withSharedReadBarrier?<T>(
     session: PluginSessionContext,

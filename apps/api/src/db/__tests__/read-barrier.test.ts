@@ -5,6 +5,8 @@ import { sql } from "kysely";
 import { createDatabaseRuntime, databasePoolLimit } from "../connection.js";
 import { sharedReadBarriers } from "../read-barrier.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
+import { withDbSession } from "../session.js";
+import { withAuditContext } from "../../platform/audit-context.js";
 
 const owner = process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; };
@@ -34,6 +36,80 @@ test("one-connection hosts retain a transaction fence; only the live exact sessi
       }, { signal: abort.signal })).rejects.toThrow();
     });
     await expect(platform.services.db.withSharedReadBarrier!(expired as never, "test.one", async () => {})).rejects.toThrow("live verified");
+  } finally { await runtime.close(); }
+}, 10_000);
+
+test.each([2, 3])("reader DB work completes when writers occupy every ordinary slot in a pool of %p", async maxConnections => {
+  const admin = new SQL(owner, { max: 2 });
+  const name = `barrier_pressure_${crypto.randomUUID().replaceAll("-", "")}`;
+  await admin.unsafe(`create database "${name}"`);
+  const url = new URL(owner); url.pathname = `/${name}`;
+  const runtime = createDatabaseRuntime({ databaseUrl: url.toString(), maxConnections });
+  const platform = new ModulePlatformRuntime(runtime.db);
+  const tenantId = crypto.randomUUID(), namespace = "test.pressure";
+  const session = { tenantId, userId: crypto.randomUUID(), roles: [], groups: [], credential: "bearer", scope: "self" };
+  const entered = deferred(), httpDone = deferred();
+  const writers: Promise<unknown>[] = []; let read: Promise<unknown> | undefined;
+  let finished = false;
+  try {
+    read = platform.withActiveOperationSession(session as never, live => platform.services.db.withSharedReadBarrier!(live, namespace, async () => {
+      const first = await platform.services.db.withSession(live, async trx =>
+        (await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(trx)).rows[0]!.pid);
+      await expect(platform.services.db.withSharedReadBarrier!(live, "test.other", async () => {})).rejects.toThrow("another namespace");
+      await expect(sharedReadBarriers(runtime.db).run(namespace, crypto.randomUUID(), async () => {})).rejects.toThrow("another tenant");
+      await expect(withDbSession(runtime.db, { ...live, tenantId: crypto.randomUUID() }, async () => {})).rejects.toThrow("another tenant");
+      entered.resolve(); await httpDone.promise;
+      // Engine-internal sessions must use the same reserved connection too,
+      // not attempt to borrow a pool slot held by our waiting writers.
+      await withDbSession(runtime.db, live, async trx => {
+        const row = (await sql<{ pid: number; tenant: string }>`select pg_backend_pid() as pid, current_setting('app.tenant_id') as tenant`.execute(trx)).rows[0]!;
+        expect(row.pid).toBe(first); expect(row.tenant).toBe(tenantId);
+        await platform.services.db.withSharedReadBarrier!(live, namespace, async () => {
+          const nested = await platform.services.db.withSession(live, async inner => (await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(inner)).rows[0]!.pid);
+          expect(nested).toBe(first);
+        });
+        await expect(withDbSession(runtime.db, live, async () => {}, { independent: true })).rejects.toThrow("independent transaction");
+      });
+      finished = true;
+    }));
+    await entered.promise;
+    for (let index = 0; index < maxConnections - 1; index++) writers.push(runtime.db.transaction().execute(trx =>
+      sql`select pg_advisory_xact_lock(hashtext(${'osf.read-barrier:' + namespace}), hashtext(${tenantId}))`.execute(trx)).catch(() => null));
+    await waitFor(async () => (await admin.unsafe("select count(*)::int as n from pg_locks where locktype='advisory' and not granted and database=(select oid from pg_database where datname=$1)", [name]))[0].n === maxConnections - 1);
+    httpDone.resolve();
+    const until = Date.now() + 1500;
+    while (!finished && Date.now() < until) await Bun.sleep(10);
+    expect(finished).toBe(true);
+    await read; await Promise.all(writers);
+    const clean = await Promise.all(Array.from({ length: maxConnections }, () => sql<{ tenant: string }>`select coalesce(current_setting('app.tenant_id',true),'') as tenant, pg_sleep(0.02)`.execute(runtime.db)));
+    expect(clean.every(result => result.rows[0]!.tenant === "")).toBe(true);
+  } finally {
+    httpDone.resolve();
+    await admin.unsafe("select pg_cancel_backend(pid) from pg_locks where locktype='advisory' and not granted and database=(select oid from pg_database where datname=$1)", [name]);
+    await Promise.allSettled([read, ...writers].filter(Boolean));
+    await runtime.close(); await admin.unsafe(`drop database "${name}" with (force)`); await admin.close();
+  }
+}, 10_000);
+
+test("serialized metadata keeps each tenant, actor, roles, relation and audit authority distinct", async () => {
+  const runtime = createDatabaseRuntime({ databaseUrl: owner, maxConnections: 3 });
+  const platform = new ModulePlatformRuntime(runtime.db);
+  const sessions = ["A", "B"].map(key => ({ tenantId: crypto.randomUUID(), userId: crypto.randomUUID(), roles: [`Example.${key}.Read`], groups: [],
+    relation: { status: "linked", relationId: crypto.randomUUID() }, relationGroupIds: [crypto.randomUUID()], credential: "bearer", scope: "self", operation: `test.isolation.${key}` }));
+  try {
+    const rows = await Promise.all(sessions.map(session => withAuditContext(session.operation, "bearer", () =>
+      platform.withActiveOperationSession(session as never, live => platform.services.db.withSharedReadBarrier!(live, "test.isolation", async () =>
+        platform.services.db.withSession(live, async trx => (await sql<{ pid: number; tenant: string; actor: string; roles: string; relation: string; groups: string; operation: string; bypass: string }>`select pg_backend_pid() as pid,
+          current_setting('app.tenant_id') as tenant, current_setting('app.user_id') as actor, current_setting('app.roles') as roles,
+          current_setting('app.relation_id') as relation, current_setting('app.relation_group_ids') as groups,
+          current_setting('app.audit_operation') as operation, current_setting('app.bypass_rls') as bypass`.execute(trx)).rows[0]!)
+      )))));
+    expect(rows[0]!.pid).toBe(rows[1]!.pid);
+    for (let index = 0; index < sessions.length; index++) {
+      const session = sessions[index]!, { pid: _pid, ...row } = rows[index]!;
+      expect(row).toEqual({ tenant: session.tenantId, actor: session.userId, roles: session.roles[0]!, relation: session.relation.relationId,
+        groups: session.relationGroupIds[0]!, operation: session.operation, bypass: "false" });
+    }
   } finally { await runtime.close(); }
 }, 10_000);
 
@@ -158,6 +234,22 @@ test("a lost lock connection fails closed and subsequent calls can recover", asy
     const settled = escaped.then(() => null, error => error as Error);
     resume.resolve();
     expect((await settled)?.message).toContain("no longer active");
+    const late = deferred(); let detached!: Promise<unknown>;
+    await barrier.run("test.loss", tenant, async () => {
+      detached = barrier.run("test.loss", tenant, async () => { await late.promise; return "must not escape"; });
+    });
+    const detachedResult = detached.then(() => null, error => error as Error);
+    late.resolve(); expect((await detachedResult)?.message).toContain("no longer active");
+    let providerStarted = false;
+    await expect(barrier.run("test.loss", tenant, async () => {
+      await withDbSession(runtime.db, { tenantId: tenant, userId: crypto.randomUUID(), roles: [], groups: [] }, async trx => {
+        const pid = (await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(trx)).rows[0]!.pid;
+        await admin.unsafe("select pg_terminate_backend($1)", [pid]);
+      });
+      providerStarted = true;
+    })).rejects.toThrow();
+    expect(providerStarted).toBe(false);
+    expect(await barrier.run("test.loss", tenant, async () => "after metadata failure")).toBe("after metadata failure");
   } finally {
     await runtime.close(); await admin.unsafe(`drop database "${name}" with (force)`); await admin.close();
   }

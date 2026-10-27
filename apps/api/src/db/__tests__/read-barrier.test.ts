@@ -57,20 +57,20 @@ test.each([2, 3])("reader DB work completes when writers occupy every ordinary s
   let finished = false;
   try {
     read = platform.withActiveOperationSession(session as never, live => platform.services.db.withSharedReadBarrier!(live, namespace, async () => {
-      const first = await platform.services.db.withSession(live, async trx =>
-        (await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(trx)).rows[0]!.pid);
+      await platform.services.db.withSession(live, async trx =>
+        sql`select pg_backend_pid()`.execute(trx));
       await expect(platform.services.db.withSharedReadBarrier!(live, "test.other", async () => {})).rejects.toThrow("another namespace");
       await expect(sharedReadBarriers(runtime.db).run(namespace, crypto.randomUUID(), async () => {})).rejects.toThrow("another tenant");
       await expect(withDbSession(runtime.db, { ...live, tenantId: crypto.randomUUID() }, async () => {})).rejects.toThrow("another tenant");
       entered.resolve(); await httpDone.promise;
-      // Engine-internal sessions must use the same reserved connection too,
-      // not attempt to borrow a pool slot held by our waiting writers.
+      // A full ordinary pool must fall back to the reserved fence backend.
       await withDbSession(runtime.db, live, async trx => {
-        const row = (await sql<{ pid: number; tenant: string }>`select pg_backend_pid() as pid, current_setting('app.tenant_id') as tenant`.execute(trx)).rows[0]!;
-        expect(row.pid).toBe(first); expect(row.tenant).toBe(tenantId);
+        const row = (await sql<{ pid: number; tenant: string; owns_fence: boolean }>`select pg_backend_pid() as pid, current_setting('app.tenant_id') as tenant,
+          exists(select 1 from pg_locks where pid=pg_backend_pid() and locktype='advisory' and classid=(hashtext(${'osf.read-barrier:' + namespace})::bigint & 4294967295)::oid and objid=(hashtext(${tenantId})::bigint & 4294967295)::oid and objsubid=2 and mode='ShareLock' and granted) as owns_fence`.execute(trx)).rows[0]!;
+        expect(row.owns_fence).toBe(true); expect(row.tenant).toBe(tenantId);
         await platform.services.db.withSharedReadBarrier!(live, namespace, async () => {
           const nested = await platform.services.db.withSession(live, async inner => (await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(inner)).rows[0]!.pid);
-          expect(nested).toBe(first);
+          expect(nested).toBe(row.pid);
         });
         await expect(withDbSession(runtime.db, live, async () => {}, { independent: true })).rejects.toThrow("independent transaction");
       });
@@ -95,12 +95,46 @@ test.each([2, 3])("reader DB work completes when writers occupy every ordinary s
   }
 }, 10_000);
 
+test("independent metadata uses free pool slots concurrently without releasing the read fence", async () => {
+  const runtime = createDatabaseRuntime({ databaseUrl: owner, maxConnections: 3 });
+  const platform = new ModulePlatformRuntime(runtime.db);
+  const session = { tenantId: crypto.randomUUID(), userId: crypto.randomUUID(), roles: [], groups: [], credential: "bearer", scope: "self" };
+  const finish = deferred(); let started = 0;
+  const pids = new Set<number>();
+  let result: Promise<{ error?: unknown }> | undefined;
+  try {
+    // Warm the existing pool: this case tests parallel admission, not TCP setup.
+    await Promise.all([1,2,3].map(() => sql`select pg_sleep(0.02)`.execute(runtime.db)));
+    result = platform.withActiveOperationSession(session as never, live => platform.services.db.withSharedReadBarrier!(live, "test.parallel-metadata", async () => {
+      await Promise.all([1,2].map(() => platform.services.db.withSession(live, async trx => {
+        const row = (await sql<{pid:number}>`select pg_backend_pid() as pid`.execute(trx)).rows[0]!;
+        pids.add(row.pid); started++; await finish.promise;
+      })));
+    })).then(() => ({}), error => ({error}));
+    await waitFor(async () => started === 2);
+    expect(pids.size).toBe(2);
+    finish.resolve();
+    expect((await result).error).toBeUndefined();
+    let invoked = 0;
+    await expect(platform.withActiveOperationSession(session as never, live => platform.services.db.withSharedReadBarrier!(live, "test.no-replay", () =>
+      platform.services.db.withSession(live, async () => {
+        invoked++; await Bun.sleep(15); throw new DOMException("callback timeout", "TimeoutError");
+      })
+    ))).rejects.toThrow("callback timeout");
+    expect(invoked).toBe(1);
+
+  } finally { finish.resolve(); await result; await runtime.close(); }
+}, 10_000);
+
 test("serialized metadata keeps each tenant, actor, roles, relation and audit authority distinct", async () => {
   const runtime = createDatabaseRuntime({ databaseUrl: owner, maxConnections: 3 });
   const platform = new ModulePlatformRuntime(runtime.db);
   const sessions = ["A", "B"].map(key => ({ tenantId: crypto.randomUUID(), userId: crypto.randomUUID(), roles: [`Example.${key}.Read`], groups: [],
     relation: { status: "linked", relationId: crypto.randomUUID() }, relationGroupIds: [crypto.randomUUID()], credential: "bearer", scope: "self", operation: `test.isolation.${key}` }));
+  const releaseSlots = deferred(), slotsReady = deferred(); let occupied = 0;
+  const holds = [1,2].map(() => runtime.db.connection().execute(async () => { if (++occupied === 2) slotsReady.resolve(); await releaseSlots.promise; }));
   try {
+    await slotsReady.promise;
     const rows = await Promise.all(sessions.map(session => withAuditContext(session.operation, "bearer", () =>
       platform.withActiveOperationSession(session as never, live => platform.services.db.withSharedReadBarrier!(live, "test.isolation", async () =>
         platform.services.db.withSession(live, async trx => (await sql<{ pid: number; tenant: string; actor: string; roles: string; relation: string; groups: string; operation: string; bypass: string }>`select pg_backend_pid() as pid,
@@ -114,10 +148,10 @@ test("serialized metadata keeps each tenant, actor, roles, relation and audit au
       expect(row).toEqual({ tenant: session.tenantId, actor: session.userId, roles: session.roles[0]!, relation: session.relation.relationId,
         groups: session.relationGroupIds[0]!, operation: session.operation, bypass: "false" });
     }
-  } finally { await runtime.close(); }
+  } finally { releaseSlots.resolve(); await Promise.all(holds); await runtime.close(); }
 }, 10_000);
 
-test("expired metadata frees other tenants while retaining its own fence until callback I/O drains", async () => {
+test.each(["ordinary", "reserved"] as const)("expired %s metadata frees other tenants while retaining its own fence until callback I/O drains", async mode => {
   const previous = process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS;
   process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS = "250";
   const admin = new SQL(owner, { max: 2 });
@@ -125,16 +159,24 @@ test("expired metadata frees other tenants while retaining its own fence until c
   await admin.unsafe(`create database "${name}"`);
   const url = new URL(owner); url.pathname = `/${name}`;
   const runtime = createDatabaseRuntime({ databaseUrl: url.toString(), maxConnections: 3 });
+  const writerDb = new SQL(url.toString(), { max: 1 });
+  const releaseSlots = deferred(), slotsReady = deferred(); let occupied = 0;
+  const holds: Promise<unknown>[] = [];
   const platform = new ModulePlatformRuntime(runtime.db), namespace = "test.budget";
   const actor = () => ({ tenantId: crypto.randomUUID(), userId: crypto.randomUUID(), roles: [], groups: [], credential: "bearer", scope: "self" });
   const first = actor(), slow = actor(), firstEntered = deferred(), slowEntered = deferred(), finishFirst = deferred(), finishSlow = deferred();
   let captured!: Transaction<unknown>, borrowed!: DatabaseConnection, rawRejected = false, cloneRejected = false, connectionRejected = false, slowSettled = false;
   let firstRead: Promise<unknown> | undefined, slowRead: Promise<unknown> | undefined, writer: Promise<unknown> | undefined;
   try {
+    await Promise.all([1,2,3].map(() => sql`select pg_sleep(0.02)`.execute(runtime.db)));
     firstRead = platform.withActiveOperationSession(first as never, live => platform.services.db.withSharedReadBarrier!(live, namespace, async () => {
       firstEntered.resolve(); await finishFirst.promise; return "first";
     }));
     await firstEntered.promise;
+    if (mode === "reserved") {
+      holds.push(...[1,2].map(() => runtime.db.connection().execute(async () => { if (++occupied === 2) slotsReady.resolve(); await releaseSlots.promise; })));
+      await slotsReady.promise;
+    }
     slowRead = platform.withActiveOperationSession(slow as never, live => platform.services.db.withSharedReadBarrier!(live, namespace, async () =>
       platform.services.db.withSession(live, async trx => {
         captured = trx as Transaction<unknown>;
@@ -149,13 +191,16 @@ test("expired metadata frees other tenants while retaining its own fence until c
     const slowResult = slowRead.then(value => { slowSettled = true; return { value }; }, error => { slowSettled = true; return { error: error as Error }; });
     await Promise.race([slowEntered.promise, slowResult.then(() => { throw new Error("Slow callback did not start"); })]);
     let written = false;
-    writer = runtime.db.transaction().execute(async trx => {
-      await sql`select pg_advisory_xact_lock(hashtext(${'osf.read-barrier:' + namespace}), hashtext(${first.tenantId}))`.execute(trx);
+    writer = writerDb.begin(async trx => {
+      await trx.unsafe("select pg_advisory_xact_lock(hashtext($1),hashtext($2))", ["osf.read-barrier:"+namespace, first.tenantId]);
       written = true;
     });
     finishFirst.resolve();
     await waitFor(async () => written);
     expect(await firstRead).toBe("first");
+    // Parallel ordinary metadata lets the unrelated writer finish even before
+    // this callback expires. Observe rollback rather than relying on queue order.
+    await waitFor(async () => (await admin.unsafe("select count(*)::int as n from pg_stat_activity where datname=$1 and state='idle in transaction'", [name]))[0].n === 0);
     expect(slowSettled).toBe(false);
     // The expired metadata transaction is gone, but its session read fence
     // remains until the original callback has really finished its I/O.
@@ -174,8 +219,9 @@ test("expired metadata frees other tenants while retaining its own fence until c
     expect(connectionRejected).toBe(true);
     await writer;
   } finally {
-    finishFirst.resolve(); finishSlow.resolve();
+    finishFirst.resolve(); finishSlow.resolve(); releaseSlots.resolve();
     await Promise.allSettled([firstRead, slowRead, writer].filter(Boolean));
+    await Promise.all(holds); await writerDb.close();
     await runtime.close(); await admin.unsafe(`drop database "${name}" with (force)`); await admin.close();
     if (previous === undefined) delete process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS;
     else process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS = previous;
@@ -372,12 +418,14 @@ test("a lost lock connection fails closed and subsequent calls can recover", asy
   const runtime = createDatabaseRuntime({ databaseUrl: url.toString(), maxConnections: 3 });
   const barrier = sharedReadBarriers(runtime.db), tenant = crypto.randomUUID();
   try {
+    let terminated = false;
     await expect(barrier.run("test.loss", tenant, async () => {
-      const rows = await admin.unsafe("select pid from pg_locks where locktype='advisory' and database=(select oid from pg_database where datname=$1)", [name]);
+      const rows = await admin.unsafe("select distinct pid from pg_locks where locktype='advisory' and database=(select oid from pg_database where datname=$1)", [name]);
       expect(rows).toHaveLength(1);
-      await admin.unsafe("select pg_terminate_backend($1)", [rows[0].pid]);
+      await admin.unsafe("select pg_terminate_backend($1)", [rows[0].pid]); terminated = true;
       return "must not be returned";
     })).rejects.toThrow();
+    expect(terminated).toBe(true);
     expect(await barrier.run("test.loss", tenant, async () => "recovered")).toBe("recovered");
     const providerFailure = new Error("provider failed too");
     let combined: unknown;
@@ -406,8 +454,9 @@ test("a lost lock connection fails closed and subsequent calls can recover", asy
     let providerStarted = false;
     await expect(barrier.run("test.loss", tenant, async () => {
       await withDbSession(runtime.db, { tenantId: tenant, userId: crypto.randomUUID(), roles: [], groups: [] }, async trx => {
-        const pid = (await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(trx)).rows[0]!.pid;
-        await admin.unsafe("select pg_terminate_backend($1)", [pid]);
+        await sql`select 1`.execute(trx);
+        const [fence] = await admin.unsafe("select distinct pid from pg_locks where locktype='advisory' and database=(select oid from pg_database where datname=$1) and classid=(hashtext('osf.read-barrier:test.loss')::bigint & 4294967295)::oid and objid=(hashtext($2)::bigint & 4294967295)::oid and objsubid=2 and mode='ShareLock' and granted", [name,tenant]);
+        await admin.unsafe("select pg_terminate_backend($1)", [fence.pid]);
       });
       providerStarted = true;
     })).rejects.toThrow();

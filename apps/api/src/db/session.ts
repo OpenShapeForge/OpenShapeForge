@@ -193,7 +193,7 @@ export async function applyDbSession<TDatabase>(
   // applied. Batch the round trips, not the authorization or audit checks.
   const audit = resolveAuditSession();
   const exact = [...session.groups];
-  await sql`select ${sql.join([
+  const settings = await sql<{ shared_read_marker?: boolean }>`select ${sql.join([
     ...(statementTimeoutMs > 0
       ? [sql`set_config('statement_timeout', ${String(statementTimeoutMs)}, true)`]
       : []),
@@ -209,7 +209,10 @@ export async function applyDbSession<TDatabase>(
     sql`set_config('app.user_groups', '', true)`,
     sql`set_config('app.user_groups_exact', '', true)`,
     sql`set_config('app.user_groups_ancestors', '', true)`,
-  ])}`.execute(trx);
+  ])}${options.sharedReadBarrier ? sql`, pg_try_advisory_xact_lock_shared(hashtext('osf.read-barrier:shared-backend'), 0) as shared_read_marker` : sql``}`.execute(trx);
+  if (options.sharedReadBarrier && !settings.rows[0]?.shared_read_marker) {
+    throw new Error("Shared read metadata marker is unavailable.");
+  }
 
   // Group expansion (§E.1/E.3). The user's DIRECT org-unit UUIDs
   // (session.groups — already UUID-filtered and capped at MAX_SESSION_GROUPS by

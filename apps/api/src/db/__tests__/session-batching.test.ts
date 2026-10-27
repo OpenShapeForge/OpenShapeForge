@@ -22,24 +22,28 @@ test("tenant sessions batch setup without retaining pooled tenant, role, relatio
     const db = runtime.db;
     // Deliberately poison this disposable pool connection. Tenant setup must
     // clear break-glass authority before the callback can access any rows.
-    await sql`select set_config('app.bypass_rls', 'true', false)`.execute(db);
+    await sql`select set_config('app.bypass_rls', 'true', false),
+      set_config('app.user_groups', 'poison', false),
+      set_config('app.user_groups_exact', 'poison', false),
+      set_config('app.user_groups_ancestors', 'poison', false)`.execute(db);
     const first = { tenantId: crypto.randomUUID(), userId: crypto.randomUUID(),
       relationId: crypto.randomUUID(), relationGroupIds: [crypto.randomUUID()],
       roles: ["Example.Read"], groups: [], scope: "self" as const };
     statements.length = 0;
     await withAuditContext("example.read", "bearer", () => withDbSession(db, first, async trx => {
-      const result = (await sql<{ tenant: string; user: string; relation: string; roles: string; memberships: string; bypass: string; audit: string; groups: string }>`
+      const result = (await sql<{ tenant: string; user: string; relation: string; roles: string; memberships: string; bypass: string; audit: string; groups: string; exact: string; ancestors: string }>`
         select current_setting('app.tenant_id') as tenant, current_setting('app.user_id') as "user",
           current_setting('app.relation_id') as relation, current_setting('app.roles') as roles,
           current_setting('app.relation_group_ids') as memberships, current_setting('app.bypass_rls') as bypass,
-          current_setting('app.audit_operation') as audit, current_setting('app.user_groups') as groups
+          current_setting('app.audit_operation') as audit, current_setting('app.user_groups') as groups,
+          current_setting('app.user_groups_exact') as exact, current_setting('app.user_groups_ancestors') as ancestors
       `.execute(trx)).rows[0];
       expect(result).toEqual({ tenant: first.tenantId, user: first.userId, relation: first.relationId,
-        roles: "Example.Read", memberships: first.relationGroupIds[0]!, bypass: "false", audit: "example.read", groups: "" });
+        roles: "Example.Read", memberships: first.relationGroupIds[0]!, bypass: "false", audit: "example.read", groups: "", exact: "", ancestors: "" });
     }));
-    // One initial settings statement and one expanded-group statement,
-    // irrespective of the number of authority-bearing settings applied.
-    expect(statements.filter(statement => statement.includes("set_config"))).toHaveLength(2);
+    // Empty direct groups require no closure reads: clear every group GUC
+    // in the initial authority batch instead of another round trip.
+    expect(statements.filter(statement => statement.includes("set_config"))).toHaveLength(1);
 
     const second = { tenantId: crypto.randomUUID(), userId: crypto.randomUUID(), roles: [], groups: [] };
     await withDbSession(db, second, async trx => {

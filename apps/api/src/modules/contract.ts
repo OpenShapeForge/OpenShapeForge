@@ -414,6 +414,10 @@ export type RuntimeMcpContribution = {
     request: ModuleAuthorizationRequest,
   ): Promise<ModuleAuthorizationDecision | undefined>;
   tools?(ctx: McpProjectionContext): Promise<Tool[]>;
+  /** Complete, live lookup for this module's own tool name. Must apply the
+   * same availability and contract as tools(); undefined means absent, not a
+   * request to enumerate tools(). Discovery still calls tools(). */
+  getTool?(name: string, ctx: McpProjectionContext): Promise<Tool | undefined>;
   callTool?(
     name: string,
     args: Record<string, unknown>,

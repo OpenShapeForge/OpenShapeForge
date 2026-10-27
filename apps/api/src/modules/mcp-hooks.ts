@@ -253,11 +253,20 @@ async function projectModuleResources(
 export async function moduleTools(
   modules: readonly RuntimeModule[],
   context: McpProjectionContext,
+  requestedName?: string,
 ): Promise<SourcedTool[]> {
   const result: SourcedTool[] = [];
   for (const module of modules) {
-    for (const tool of (await module.mcp?.tools?.(context)) ?? []) {
-      result.push({ tool, source: "module", owner: module });
+    if (requestedName !== undefined && module.mcp?.getTool) {
+      const tool = await module.mcp.getTool(requestedName, context);
+      if (tool && tool.name !== requestedName) {
+        throw new Error("A module exact tool projection returned a different name.");
+      }
+      if (tool) result.push({ tool, source: "module", owner: module });
+    } else {
+      for (const tool of (await module.mcp?.tools?.(context)) ?? []) {
+        result.push({ tool, source: "module", owner: module });
+      }
     }
   }
   return result;
@@ -268,7 +277,7 @@ export async function moduleToolAuthorizationOwner(
   name: string,
   context: McpProjectionContext,
 ): Promise<RuntimeModule | undefined> {
-  const tools = await moduleTools(modules, context);
+  const tools = await moduleTools(modules, context, name);
   assertUniqueToolNames(tools);
   return tools.find((entry) => entry.tool.name === name)?.owner;
 }

@@ -242,7 +242,7 @@ describe("canonical entity Operation JSON Schemas", () => {
     const filter = (list.inputSchema.$defs as Record<string, any>).entityFilter;
     expect(filter.properties.title.oneOf).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "string" }),
-      expect.objectContaining({ type: "object", additionalProperties: false, required: ["eq"], properties: { eq: expect.objectContaining({ type: "string" }) } }),
+      expect.objectContaining({ type: "object", additionalProperties: false, minProperties: 1, properties: expect.objectContaining({ eq: expect.objectContaining({ type: "string" }), in: expect.objectContaining({ type: "array" }), contains: expect.objectContaining({ type: "string" }) }) }),
     ]));
     expect(filter.properties.memberships).toMatchObject({
       properties: { any: { properties: { groupId: { properties: { eq: { type: "string" } } } } } },

@@ -5,7 +5,8 @@ export function collectionOptionSources(entities:Entities){return entities.flatM
  const list=c.entityOperations?.list?.id??c.pluginOperations?.find(op=>op.key==='list')?.id;
  if(!list)return [];
  const allowed=c.source?.query?.filterFields;
- return [{entity:c.entity.name,list,fields:Object.fromEntries(c.model.fields.filter(f=>f.baseType!=='object'&&(!allowed||allowed.includes(f.key))).map(f=>[f.key,{type:f.baseType,many:f.cardinality==='collection'}]))}];
+ const get=c.entityOperations?.get?.id??c.pluginOperations?.find(op=>op.key==='get')?.id;
+ return [{entity:c.entity.name,list,...(get?{get}:{}),...(c.entity.filterField?{labelField:c.entity.filterField}:{}),fields:Object.fromEntries(c.model.fields.filter(f=>f.baseType!=='object'&&(!allowed||allowed.includes(f.key))).map(f=>[f.key,{type:f.baseType,many:f.cardinality==='collection'}]))}];
 });}
 export function collectionOptionsDefinition(entities:Entities):PluginOperationContract{return {
  key:'collection.options',title:'List filter options',description:'Find authorized existing collection values and resolve reference choices without reconstructing missing historical labels.',handler:'listCollectionOptions',

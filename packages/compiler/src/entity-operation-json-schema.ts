@@ -652,8 +652,9 @@ export function entityOperationJsonSchemas(
       const filterProperties: JsonObject = {};
       for (const { key, schema } of entityListFilterFields(contract, relationships, referentiedata, { excludeField: secureInputTarget })) {
         const field=contract.model.fields.find(field=>field.key===key);
-        const properties:JsonObject={eq:schema,ne:schema,in:{type:"array",minItems:1,maxItems:100,items:schema},isNull:{type:"boolean"}};
-        if(field&&["string","date","datetime","integer","number"].includes(field.baseType))for(const operator of ["gt","gte","lt","lte"])properties[operator]=schema;
+        const operand=Object.fromEntries(Object.entries(schema).filter(([key])=>!key.startsWith("x-")&&key!=="description"&&key!=="title"));
+        const properties:JsonObject={eq:operand,ne:operand,in:{type:"array",minItems:1,maxItems:100,items:operand},isNull:{type:"boolean"}};
+        if(field&&["string","date","datetime","integer","number"].includes(field.baseType))for(const operator of ["gt","gte","lt","lte"])properties[operator]=operand;
         if(field?.baseType==="string"&&field.validation?.format!=="uuid")Object.assign(properties,{contains:{type:"string",maxLength:500},startsWith:{type:"string",maxLength:500}});
         filterProperties[key]={...presentation(schema),oneOf:[schema,{type:"object",additionalProperties:false,minProperties:1,properties}]};
       }

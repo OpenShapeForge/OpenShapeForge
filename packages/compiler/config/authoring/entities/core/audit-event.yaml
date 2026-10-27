@@ -22,7 +22,7 @@ authorization:
 fields:
   - { key: id, osfType: string, required: true, readOnly: true, validation: { format: uuid }, label: { en: Event, nl: Gebeurtenis } }
   - { key: entityType, osfType: string, required: true, readOnly: true, label: { en: Entity type, nl: Entiteitstype }, options: { type: dynamic, source: entityTypes.list } }
-  - { key: recordId, osfType: string, required: true, readOnly: true, label: { en: Record, nl: Record }, options: { type: dynamic, source: collection.options, parameters: { entity: AuditEvent, field: recordId }, bindings: { referenceEntity: entityType } } }
+  - { key: recordId, osfType: string, required: true, readOnly: true, label: { en: Record, nl: Record }, options: { type: dynamic, source: collection.options, parameters: { entity: AuditEvent, field: recordId }, bindings: { referenceEntity: entityType, filter.entityType.eq: entityType } } }
   - { key: eventType, osfType: string, required: true, readOnly: true, label: { en: Event type, nl: Gebeurtenistype }, options: { type: dynamic, source: collection.options, parameters: { entity: AuditEvent, field: eventType } } }
   - { key: occurredAt, osfType: datetime, required: true, readOnly: true, label: { en: Time, nl: Tijdstip } }
   - { key: actorId, osfType: string, readOnly: true, label: { en: Actor, nl: Actor }, options: { type: dynamic, source: collection.options, parameters: { entity: AuditEvent, field: actorId, referenceEntity: Account } } }

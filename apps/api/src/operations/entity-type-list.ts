@@ -43,6 +43,15 @@ export function nativeEntityTypeListHandler(operation: OperationContract): Modul
   const labels = operation.implementation.labels;
   return async (input, context) => {
     if (!context.session) throw operationFailure({ code: "UNAUTHENTICATED", message: "Entity types require a verified session." });
-    return { value: listReadableEntityTypes(context.session, input as EntityTypeListInput, labels) };
+    if(!context.platform)throw operationFailure({code:"OPERATION_UNAVAILABLE",message:"Entity catalogue is unavailable."});
+    const result=await context.platform.operations.execute(context.session,{operation:{id:"application.search",intent:"invoke"},input:{query:"",locale:input.locale??"en"}});
+    if("error" in result)throw operationFailure(result.error);
+    const first=typeof input.first==="number"?input.first:25;
+    const search=typeof input.search==="string"?input.search.toLocaleLowerCase():"";
+    const entries=(result.data as {entities:Array<{entity:string;label:string}>}).entities
+      .filter(item=>[item.entity,...Object.values(labels[item.entity]??{})].some(label=>label.toLocaleLowerCase().includes(search)))
+      .sort((a,b)=>a.entity.localeCompare(b.entity)).filter(item=>!input.after||item.entity>String(input.after));
+    const items=entries.slice(0,first).map(item=>({value:item.entity,label:item.label}));
+    return {value:{items,pageInfo:{hasNextPage:entries.length>first,endCursor:items.at(-1)?.value??null}}};
   };
 }

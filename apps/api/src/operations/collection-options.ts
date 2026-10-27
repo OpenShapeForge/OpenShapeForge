@@ -3,6 +3,7 @@ import {operationFailure} from '@openshapeforge/operations';
 import type {ModuleOperationHandler} from '../modules/contract.js';
 import type {OperationContract} from './runtime.js';
 import {getGeneratedCrudTables,assertClassifiedQueryAllowed,assertElicitedQueryAllowed} from './entity/catalog.js';
+import {fieldColumnMap} from './entity/columns.js';
 import {assertBoundFieldQueryAllowed} from './entity/field-bindings.js';
 export function nativeCollectionOptionsHandler(operation:OperationContract):ModuleOperationHandler {
  if(operation.key!=='collection.options'||operation.plugin!=='core'||operation.implementation?.type!=='collection-options'||operation.auth.mode!=='session'||operation.tenancy.mode!=='required'||operation.effects?.data!=='read')throw Error('Invalid collection options binding.');
@@ -30,18 +31,31 @@ export function nativeCollectionOptionsHandler(operation:OperationContract):Modu
     for(const group of (response.data as any).groups??[])for(const item of group.items)candidates.set(item.id,item.label);
    }
   }
-  if(!input.after&&input.catalog==='operations')for(const d of definitions){
-   const title=typeof d.name==='string'?d.name:d.name?.[input.locale==='nl'?'nl':'en']??d.id;
-   if(!search||`${d.id} ${title}`.toLowerCase().includes(search.toLowerCase()))candidates.set(d.id,title);
-  }
+  const catalogue=new Map<string,string>();
+  if(input.catalog==='operations')for(const d of definitions){const label=typeof d.name==='string'?d.name:d.name?.[input.locale==='nl'?'nl':'en']??d.id;catalogue.set(d.id,label);}
   const spec=source.fields[field]!;
-  const typedFilter=search?(spec.many?{[field]:{contains:search}}:spec.type==='string'?{[field]:{contains:search}}:{[field]:{eq:search}}):undefined;
+  const uuid=table&&fieldColumnMap(table).get(field)?.type==='uuid';
+  const uuidSearch=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(search);
+  if(search&&uuid&&!uuidSearch)return {value:{items:[...candidates].map(([value,label])=>({value,label})),nextCursor:null}};
+  let typedFilter:Record<string,unknown>|undefined=search?(spec.many?{[field]:{contains:search}}:spec.type==='string'&&!uuid?{[field]:{contains:search}}:{[field]:{eq:search}}):undefined;
+  if(search&&catalogue.size){const matched=[...catalogue].filter(([id,label])=>`${id} ${label}`.toLowerCase().includes(search.toLowerCase())).map(([id])=>id);if(matched.length)typedFilter={or:[typedFilter!,{[field]:{in:matched.slice(0,100)}}]};}
   const clauses=[input.filter,typedFilter].filter(Boolean);
   const params={...(clauses.length?{filter:clauses.length===1?clauses[0]:{and:clauses}}:{}),...(table?{limit:first,cursor:input.after}:{first,after:input.after})};
   const response=await platform.operations.execute(session,{operation:{id:source.list,intent:definition.intent??'list'},input:Object.fromEntries(Object.entries(params).filter(([,v])=>v!==undefined))});
   if('error'in response)throw operationFailure(response.error);
   const data=response.data as any;
-  for(const row of data.items??[]){const value=(row.data??row)[field];for(const entry of Array.isArray(value)?value:[value])if(['string','number','boolean'].includes(typeof entry))candidates.set(String(entry),candidates.get(String(entry))??String(entry));}
+  for(const row of data.items??[]){const value=(row.data??row)[field];for(const entry of Array.isArray(value)?value:[value])if(['string','number','boolean'].includes(typeof entry))candidates.set(String(entry),candidates.get(String(entry))??catalogue.get(String(entry))??String(entry));}
+  const reference=sources.find(s=>s.entity===input.referenceEntity&&s.get&&s.labelField&&available.has(s.get));
+  if(reference){
+   const pending=[...candidates].filter(([value,label])=>value===label);let index=0;
+   await Promise.all(Array.from({length:Math.min(4,pending.length)},async()=>{while(index<pending.length){
+    const [value]=pending[index++]!;
+    const result=await platform.operations.execute(session,{operation:{id:reference.get!,intent:available.get(reference.get!)!.intent??'get'},input:{id:value}});
+    if('error'in result)continue;
+    const record=(result.data as any)?.data??result.data;const label=record?.[reference.labelField!];
+    if(typeof label==='string'&&label)candidates.set(value,label);
+   }}));
+  }
   return {value:{items:[...candidates].map(([value,label])=>({value,label})),nextCursor:data.nextCursor??null}};
  };
 }

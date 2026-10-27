@@ -322,3 +322,44 @@ describe("RecordAccessRuntime", () => {
     }
   });
 });
+
+
+test("batch access is bounded, deduplicated and indexable, and fails closed for a hidden identity", async () => {
+  let visible = 2;
+  const state = harness(() => [{ count: String(visible) }]);
+  state.live.add(session);state.activate(session);
+  const otherId = "44444444-4444-4444-8444-444444444444";
+  try {
+    await state.services.assertAccessMany(session, { entityName: "Relation", ids: [recordId, otherId, recordId], intent: "get" });
+    expect(state.queries).toHaveLength(1);
+    expect(state.queries[0]!.sql).toContain('"row_source"."id" = $1::uuid');
+    expect(state.queries[0]!.sql).not.toContain('"id"::text');
+    expect(state.queries[0]!.parameters).toEqual([recordId, otherId, tenantId]);
+    visible = 1;
+    await expectFailure(state.services.assertAccessMany(session, { entityName: "Relation", ids: [recordId, otherId], intent: "get" }), "FORBIDDEN");
+    await expectFailure(state.services.assertAccessMany({ ...session }, { entityName: "Relation", ids: [recordId], intent: "get" }), "FORBIDDEN");
+    const unprivileged = { ...session, roles: [] };state.live.add(unprivileged);
+    await expectFailure(state.services.assertAccessMany(unprivileged, { entityName: "Relation", ids: [recordId], intent: "get" }), "FORBIDDEN");
+    await expectFailure(state.services.assertAccessMany(session, { entityName: "Relation", ids: [""], intent: "get" }), "VALIDATION");
+    expect(state.withSessionCalls()).toBe(0);
+  } finally { await state.db.destroy(); }
+});
+
+test("batch access enforces every record permission instead of substituting visibility", async () => {
+  const operation = getEntityOperationContracts().find(item => item.entityName === "Relation" && item.intent === "get")!;
+  const table = tableForEntityOperation({id: operation.id, intent: operation.intent});
+  const previous = operation.authorization.recordPermissions;
+  const oldPolicy = table.source!.authorization!.recordPermissions;
+  operation.authorization.recordPermissions = ["view"];
+  table.source!.authorization!.recordPermissions = {field:"authorization",column:"authorization",empty:"restricted",createRequires:["view"]};
+  let count = 0;
+  const state = harness(() => [{allowed: ++count === 1}]);state.live.add(session);
+  try {
+    await expectFailure(state.services.assertAccessMany(session,{entityName:"Relation",ids:[recordId,"44444444-4444-4444-8444-444444444444"],intent:"get"}),"FORBIDDEN");
+    expect(count).toBe(2);expect(state.withSessionCalls()).toBe(1);
+  } finally {
+    if(previous)operation.authorization.recordPermissions=previous;else delete operation.authorization.recordPermissions;
+    if(oldPolicy)table.source!.authorization!.recordPermissions=oldPolicy;else delete table.source!.authorization!.recordPermissions;
+    await state.db.destroy();
+  }
+});

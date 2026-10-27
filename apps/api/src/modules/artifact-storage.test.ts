@@ -58,6 +58,9 @@ function harness(options: { refuse?: boolean; independent?: boolean } = {}) {
   const access: { session: Session; request: RuntimeRecordAccessRequest }[] = [];
   const runtime = new ArtifactStorageRuntime<Session, Transaction>({
     records: {
+      async assertAccessMany(session, request) {
+        for (const id of request.ids) await this.assertAccess(session, {entityName: request.entityName, intent: request.intent, id});
+      },
       projectStoredFields(_session, request) {
         return request.fields;
       },

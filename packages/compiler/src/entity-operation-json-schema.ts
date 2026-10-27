@@ -651,12 +651,22 @@ export function entityOperationJsonSchemas(
       }
       const filterProperties: JsonObject = {};
       for (const { key, schema } of entityListFilterFields(contract, relationships, referentiedata, { excludeField: secureInputTarget })) {
-        filterProperties[key] = { ...presentation(schema), oneOf: [schema, exactFilter(schema)] };
+        const text = contract.model.fields.find(field => field.key === key)?.baseType === "string";
+        const match = {type:"object", additionalProperties:false, minProperties:1,
+          properties:{contains:{type:"string",maxLength:500},startsWith:{type:"string",maxLength:500}}};
+        filterProperties[key] = { ...presentation(schema), oneOf: [schema, exactFilter(schema), ...(text ? [match] : [])] };
       }
       Object.assign(filterProperties, relationshipAnyFilters(contract, contracts, referentiedata));
+      const filterDefinitions = {entityFilter: {
+        type:"object", additionalProperties:false, maxProperties:30,
+        properties:{...filterProperties, ...Object.fromEntries(["and","or"].map(key=>[key,{
+          type:"array",minItems:1,maxItems:20,items:{$ref:"#/$defs/entityFilter"}
+        }]))}
+      }};
       const sortable = entitySortableFieldKeys(contract, secureInputTarget, contracts);
       return {
         inputSchema: {
+          $defs: filterDefinitions,
           type: "object",
           properties: {
             limit: {
@@ -666,11 +676,7 @@ export function entityOperationJsonSchemas(
               default: operation.input.pagination.defaultLimit,
             },
             cursor: { type: "string", description: "Opaque cursor from a previous page." },
-            filter: {
-              type: "object",
-              properties: filterProperties,
-              additionalProperties: false,
-            },
+            filter: { $ref: "#/$defs/entityFilter" },
             sort: {
               type: "object",
               properties: {

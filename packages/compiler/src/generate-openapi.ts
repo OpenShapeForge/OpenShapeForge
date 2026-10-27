@@ -57,6 +57,7 @@ const FIELD_DEFINITION_COMPONENT = "OpenShapeForgeFieldDefinition";
 const FIELD_DEFINITION_DEFS_BASE =
   `#/components/schemas/${FIELD_DEFINITION_COMPONENT}/$defs/`;
 const RESERVED_LIST_PARAMETER_NAMES = new Set([
+  "filter",
   "first",
   "after",
   "sortField",
@@ -252,6 +253,7 @@ function listParameters(
     ? fieldNameForColumn(primaryKey)
     : undefined;
   const parameters: JsonObject[] = [
+    {name:"filter",in:"query",description:"JSON-encoded canonical record filter. Supports bounded and/or groups, exact scalar predicates and text contains/startsWith. All field and record permissions apply.",schema:{type:"string",maxLength:20000}},
     {
       name: "first",
       in: "query",

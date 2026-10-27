@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { structuredFilter } from "../../platform/structured-filter.js";
+import { filterLeaves } from "./filter-groups.js";
 import { sql, type RawBuilder } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
@@ -124,6 +126,7 @@ function buildFilterConditions(
   filter?: Record<string, unknown> | null,
   fixedWhere: Array<{ column: string; value: unknown }> = [],
 ) {
+  filterLeaves(filter);
   const fields = fieldColumnMap(table);
   const columns = tableColumnMap(table);
   const conditions = fixedWhere.map((condition) => {
@@ -150,6 +153,11 @@ function buildFilterConditions(
       continue;
     }
 
+    if (key === "and" || key === "or") {
+      conditions.push(sql`(${sql.join((value as Record<string, unknown>[]).map(child =>
+        buildFilterConditions(table, session, child)), key === "and" ? sql` and ` : sql` or `)})`);
+      continue;
+    }
     const relationship = table.source?.graphql?.relationships?.find((candidate) => candidate.name === key);
     if (relationship && value && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, "any")) {
       if (relationship.resolve !== "hasMany" || !relationship.foreignKey || !table.primaryKey) {
@@ -221,6 +229,11 @@ function buildFilterConditions(
       continue;
     }
 
+    if (column.type === "text" && value && typeof value === "object" && !Array.isArray(value)
+      && (Object.hasOwn(value, "contains") || Object.hasOwn(value, "startsWith"))) {
+      conditions.push(structuredFilter({[fieldName]:value}, {[fieldName]: {sql:sql.id("row_source",column.name),kind:"text"}}));
+      continue;
+    }
     const exact = value && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, "eq")
       ? (value as { eq?: unknown }).eq : undefined;
     if (exact !== undefined) {

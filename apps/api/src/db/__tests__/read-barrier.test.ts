@@ -224,7 +224,7 @@ test("atomic maintenance survives the metadata budget and never starts when the 
       const failure = await executeKeyedOperation(runtime.db, live as never, {
         operation: { id: "test.external", intent: "invoke" }, idempotencyKey: "never-claim",
         contractFingerprint: "test", input: {}, externalWrite: true,
-        execute: async () => { effects++; return "must not dispatch"; }, encode: value => value, decode: value => value,
+        execute: async () => { effects++; return "must not dispatch"; }, encode: value => value, decode: value => String(value),
       }).catch(error => error);
       expect(operationErrorOf(failure)?.code).toBe("FORBIDDEN");
       expect(effects).toBe(0);
@@ -247,7 +247,7 @@ test("atomic maintenance survives the metadata budget and never starts when the 
         expectedProviderId: crypto.randomUUID(), expectedOwnerUserId: null,
         audit: { sourceTable: "fixture", connectionId: crypto.randomUUID(), scope: "tenant", correlationId: "fixture" },
         tokenUrl: "https://provider.example/token", clientId: "fixture", clientSecret: "fixture", egress: ["https://provider.example"], keyring: {} as never, secretScope: "fixture",
-        fetchImpl: async () => { exchangeStarted = true; throw new Error("must not exchange"); },
+        fetchImpl: Object.assign(async () => { exchangeStarted = true; throw new Error("must not exchange"); }, { preconnect() {} }),
       }).catch(error => error);
       expect(toHttpError(failure)).toMatchObject({ status: 503, body: { error: { code: "DATABASE_BUSY", retryable: true } } });
 

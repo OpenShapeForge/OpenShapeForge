@@ -395,6 +395,18 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
       `${where} recordPermission requires a record target with inputField.`,
     );
   }
+  if (operation.auth.mode === "session" && operation.auth.recordAction !== undefined) {
+    if (operation.target?.scope !== "record" || !operation.target.inputField) {
+      throw new Error(`${where} recordAction requires a record target with inputField.`);
+    }
+    if (!/^[a-z][A-Za-z0-9]*$/.test(operation.auth.recordAction) ||
+      ["view", "edit", "delete"].includes(operation.auth.recordAction)) {
+      throw new Error(
+        `${where} recordAction "${operation.auth.recordAction}" must be a lowerCamel name and ` +
+          "must not restate view, edit or delete — a named action is independent of the record permissions.",
+      );
+    }
+  }
   if (operation.auth.mode === "session") {
     const restricted = operation.auth.roles !== undefined || operation.auth.roleGroups !== undefined;
     if (operation.auth.anyAuthenticatedSession !== undefined &&

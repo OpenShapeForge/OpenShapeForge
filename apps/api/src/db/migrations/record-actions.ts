@@ -101,7 +101,7 @@ function fieldNameForColumn(column: { name: string; sourceField?: string }): str
     column.name.replace(/_([a-z0-9])/g, (_match, char: string) => char.toUpperCase());
 }
 
-type ManifestRecordActionTable = {
+export type ManifestRecordActionTable = {
   schema: string;
   name: string;
   tenantScoped?: boolean;

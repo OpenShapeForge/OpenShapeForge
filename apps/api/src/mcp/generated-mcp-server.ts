@@ -321,7 +321,9 @@ export function registerGeneratedMcpServer(
     instance.route({
       url: MCP_MOUNT_PATH,
       method: ["GET", "POST", "DELETE"],
-      handler: (request, reply) => withRuntimeSpan("mcp.request", () => handleMcpRequest(request, reply)),
+      handler: (request, reply) => request.method === "POST"
+        ? withRuntimeSpan("mcp.request", () => handleMcpRequest(request, reply))
+        : handleMcpRequest(request, reply),
     });
     // One resource per Keycloak Organization, same server, same handler;
     // what differs is how the session is admitted (requireMcpSession). Both
@@ -331,7 +333,9 @@ export function registerGeneratedMcpServer(
       instance.route({
         url,
         method: ["GET", "POST", "DELETE"],
-        handler: (request, reply) => withRuntimeSpan("mcp.request", () => handleMcpRequest(request, reply)),
+        handler: (request, reply) => request.method === "POST"
+        ? withRuntimeSpan("mcp.request", () => handleMcpRequest(request, reply))
+        : handleMcpRequest(request, reply),
       });
     }
   });

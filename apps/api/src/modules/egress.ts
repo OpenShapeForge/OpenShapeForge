@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { isOpenTelemetryEnabled, withRuntimeSpan } from "@openshapeforge/observability";
 /** Canonical protocol/allowlist gate and optional runtime-module egress owner. */
+import { withRuntimeSpan } from "@openshapeforge/observability";
 import type {
   ModuleEgressFailureKind,
   ModuleEgressInvocationSource,
@@ -228,18 +228,7 @@ export function hostAllowed(host: string, allowlist: readonly string[]): boolean
   });
 }
 
-export function fetchValidatedOutbound(input: Parameters<typeof fetchValidatedOutboundInternal>[0]): Promise<Response> {
-  if (!isOpenTelemetryEnabled()) return fetchValidatedOutboundInternal(input);
-  let provider: "jira" | "hubspot" | "other" = "other";
-  try {
-    const host = new URL(input.target instanceof Request ? input.target.url : input.target).hostname;
-    if (host === "api.hubapi.com") provider = "hubspot";
-    else if (host === "api.atlassian.com" || host.endsWith(".atlassian.net")) provider = "jira";
-  } catch { /* The owner below preserves the canonical invalid-URL failure. */ }
-  return withRuntimeSpan("external.headers", () => fetchValidatedOutboundInternal(input), { provider });
-}
-
-async function fetchValidatedOutboundInternal(input: {
+export async function fetchValidatedOutbound(input: {
   target: string | URL | Request;
   init: RequestInit;
   allowlist: readonly string[];
@@ -261,14 +250,17 @@ async function fetchValidatedOutboundInternal(input: {
     throw input.denied(url, "host");
   }
   throwIfAborted(input.init.signal ?? undefined);
-  if (!input.dispatch?.owner) {
-    return input.fallback(input.target, input.init);
+  const provider = input.dispatch?.scope.provider;
+  const owner = input.dispatch?.owner;
+  if (!input.dispatch || !owner) {
+    return withRuntimeSpan("external.headers", () => input.fallback(input.target, input.init), { ...(provider ? { provider } : {}) });
   }
 
+  const dispatch = input.dispatch;
   const allowlist = Object.freeze([...input.allowlist]);
-  const scope = Object.freeze({ ...input.dispatch.scope });
-  const source = input.dispatch.purpose === "provider" && input.dispatch.source
-    ? Object.freeze({ ...input.dispatch.source })
+  const scope = Object.freeze({ ...dispatch.scope });
+  const source = dispatch.purpose === "provider" && dispatch.source
+    ? Object.freeze({ ...dispatch.source })
     : undefined;
   const normalizedInit = { ...input.init } as RequestInit & {
     duplex?: "half";
@@ -310,19 +302,19 @@ async function fetchValidatedOutboundInternal(input: {
     ...(ownerSignal ? { signal: ownerSignal } : {}),
   };
   const init = Object.freeze(hookInit);
-  const invocation = moduleEgressInvocation.get(input.dispatch);
+  const invocation = moduleEgressInvocation.get(dispatch);
   const createFailure = createModuleEgressFailureFactory(invocation);
   try {
-    const response = await input.dispatch.owner.fetch({
+    const response = await withRuntimeSpan("external.headers", () => owner.fetch({
       url: new URL(url),
       init,
       allowlist,
-      purpose: input.dispatch.purpose,
+      purpose: dispatch.purpose,
       scope,
       ...(source ? { source } : {}),
       ...(ownerSignal ? { signal: ownerSignal } : {}),
       createFailure,
-    });
+    }), { ...(provider ? { provider } : {}) });
     // A buggy or hostile owner can ignore AbortSignal. Core still owns the
     // cancellation outcome and must not accept a response that arrived after
     // the caller or bounded request cancelled.

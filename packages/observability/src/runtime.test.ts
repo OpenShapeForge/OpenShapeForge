@@ -17,7 +17,7 @@ test("runtime spans retain timing and nesting without SQL, operation names or fa
     await withRuntimeSpan('mcp.request', async () => {
       await Promise.all(['secret-service-A','secret-service-B'].map(operationId => withRuntimeSpan('operation.execute', async () => {
         await new Promise(r => setTimeout(r, 5));
-        recordDatabaseQuery(4.5, "select secret_personal_field from integration.services where token='sql-secret'");
+        recordDatabaseQuery(4.5, ${JSON.stringify('select secret_personal_field from "platform"."services" where token=\'sql-secret\'')});
         recordDatabaseQuery(NaN, 'select bad');
         recordDatabaseQuery(-1, 'select bad');
       }, {operationId})));
@@ -42,7 +42,7 @@ test("runtime spans retain timing and nesting without SQL, operation names or fa
   for (const operation of operations) {
     expect(operation.parent).toBe(root.id);
     expect(operation.events).toHaveLength(1);
-    expect(operation.events[0].attributes).toEqual({"db.operation.name":"select","osf.db.area":"integration","osf.db.duration_ms":4.5});
+    expect(operation.events[0].attributes).toEqual({"db.operation.name":"select","osf.db.area":"platform","osf.db.duration_ms":4.5,"osf.db.failed":false});
   }
   expect(collected.find((s: {name: string}) => s.name === "external.headers").status).toEqual({code:2});
   for (const secret of ["secret-service-A","secret-service-B","secret_personal_field","sql-secret","credential-secret-in-error"]) expect(stdout).not.toContain(secret);

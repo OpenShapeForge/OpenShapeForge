@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { withRuntimeSpan } from "@openshapeforge/observability";
 /**
  * The host-wide execution admission guard.
  *
@@ -50,6 +49,7 @@ import { withRuntimeSpan } from "@openshapeforge/observability";
  * cannot impersonate a declared Operation failure, and cannot smuggle an
  * internal cause, SQL text or another tenant's data into a caller's answer.
  */
+import { withRuntimeSpan } from "@openshapeforge/observability";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { operationFailure, type OperationError } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";

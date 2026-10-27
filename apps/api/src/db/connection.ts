@@ -2,7 +2,7 @@
 import { SQL } from "bun";
 import { Kysely, sql, type KyselyConfig } from "kysely";
 import { PostgresJSDialect } from "kysely-postgres-js";
-import { isOpenTelemetryEnabled, recordDatabaseQuery, withRuntimeSpan } from "@openshapeforge/observability";
+import { databaseDiagnosticConfig } from "./diagnostics.js";
 import type { DB } from "../generated/db/types.js";
 
 export type OpenShapeForgeDatabase = Kysely<DB>;
@@ -91,24 +91,7 @@ export function createDatabaseRuntime(
   });
 
   const dialect = new PostgresJSDialect({ postgres });
-  const diagnostic = isOpenTelemetryEnabled();
-  const db = new Kysely<DB>({
-    dialect: diagnostic ? {
-      createAdapter: () => dialect.createAdapter(),
-      createIntrospector: database => dialect.createIntrospector(database),
-      createQueryCompiler: () => dialect.createQueryCompiler(),
-      createDriver: () => new Proxy(dialect.createDriver(), {
-        get(target, property) {
-          if (property === "acquireConnection") return () => withRuntimeSpan("database.acquire", () => target.acquireConnection());
-          const value = Reflect.get(target, property, target) as unknown;
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      }),
-    } : dialect,
-    ...(options.log ? { log: options.log } : diagnostic ? {
-      log: event => recordDatabaseQuery(event.queryDurationMillis, event.query.sql),
-    } : {}),
-  });
+  const db = new Kysely<DB>(databaseDiagnosticConfig(dialect, options.log));
 
   return {
     db,

@@ -89,12 +89,16 @@ are replaced with fixed values. Automatic GraphQL document/resolver and SQL
 instrumentation remain disabled. Explicit runtime spans describe MCP admission,
 credential/relation/member checks, Operation resolution/execution, policy
 admission, database acquisition/session lifetime and outbound HTTP headers.
-Operation names are SHA-256 fingerprints; providers use the closed labels
-`jira`, `hubspot` and `other`. Query events retain only duration, a fixed SQL
-verb and one of three schema categories. SQL text, parameters, inputs, URLs,
+Operation and module-supplied provider identifiers are SHA-256 fingerprints.
+Query events retain only duration, a failure flag, a fixed SQL verb and one of
+four schema categories (`erp`, `integration`, `platform`, `notebook`, otherwise `other`). SQL text, parameters, inputs, URLs,
 identity values and exception messages/stacks are never exported by these
 runtime spans. An explicitly supplied database logger retains its existing
 behavior rather than being replaced by diagnostics.
+
+Only MCP POST requests receive `mcp.request` spans; streaming GET lifetimes
+are excluded. ERROR marks an unsuccessful span, including an expected policy
+refusal, and must not be interpreted as an unexpected server fault rate.
 
 Spans are inclusive: a database session can contain an HTTP call, and parallel
 Operation spans overlap. Do not add their elapsed times to a request total.

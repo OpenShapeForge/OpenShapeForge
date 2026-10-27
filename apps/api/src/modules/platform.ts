@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { withRuntimeSpan } from "@openshapeforge/observability";
 /** Core-owned services made available to reviewed runtime modules. */
+import { withRuntimeSpan } from "@openshapeforge/observability";
 import { isControlSession } from "../control/control-session.js";
 import { systemSessionForAdministrator } from "../control/platform-admin.js";
 import { auditContext, withAuditContext } from "../platform/audit-context.js";

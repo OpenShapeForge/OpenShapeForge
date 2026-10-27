@@ -21,15 +21,15 @@ authorization:
     read: [Audit.Logs.All, Audit.Logs.ReadAll]
 fields:
   - { key: id, osfType: string, required: true, readOnly: true, validation: { format: uuid }, label: { en: Event, nl: Gebeurtenis } }
-  - { key: entityType, osfType: string, required: true, readOnly: true, label: { en: Entity type, nl: Entiteitstype } }
-  - { key: recordId, osfType: string, required: true, readOnly: true, label: { en: Record, nl: Record } }
-  - { key: eventType, osfType: string, required: true, readOnly: true, label: { en: Event type, nl: Gebeurtenistype } }
+  - { key: entityType, osfType: string, required: true, readOnly: true, label: { en: Entity type, nl: Entiteitstype }, options: { type: dynamic, source: entityTypes.list } }
+  - { key: recordId, osfType: string, required: true, readOnly: true, label: { en: Record, nl: Record }, options: { type: dynamic, source: collection.options, parameters: { entity: AuditEvent, field: recordId }, bindings: { referenceEntity: entityType } } }
+  - { key: eventType, osfType: string, required: true, readOnly: true, label: { en: Event type, nl: Gebeurtenistype }, options: { type: dynamic, source: collection.options, parameters: { entity: AuditEvent, field: eventType } } }
   - { key: occurredAt, osfType: datetime, required: true, readOnly: true, label: { en: Time, nl: Tijdstip } }
-  - { key: actorId, osfType: string, readOnly: true, label: { en: Actor, nl: Actor } }
-  - { key: actorKind, osfType: string, readOnly: true, label: { en: Actor kind, nl: Actorsoort } }
-  - { key: operationId, osfType: string, readOnly: true, label: { en: Operation, nl: Operation } }
-  - { key: correlationId, osfType: string, readOnly: true, label: { en: Correlation, nl: Samenhang } }
-  - { key: changedFields, osfType: string, cardinality: collection, required: true, readOnly: true, label: { en: Changed fields, nl: Gewijzigde velden } }
+  - { key: actorId, osfType: string, readOnly: true, label: { en: Actor, nl: Actor }, options: { type: dynamic, source: collection.options, parameters: { entity: AuditEvent, field: actorId, referenceEntity: Account } } }
+  - { key: actorKind, osfType: string, readOnly: true, label: { en: Actor kind, nl: Actorsoort }, options: { type: dynamic, source: collection.options, parameters: { entity: AuditEvent, field: actorKind } } }
+  - { key: operationId, osfType: string, readOnly: true, label: { en: Operation, nl: Operation }, options: { type: dynamic, source: collection.options, parameters: { entity: AuditEvent, field: operationId, catalog: operations } } }
+  - { key: correlationId, osfType: string, readOnly: true, label: { en: Correlation, nl: Samenhang }, options: { type: dynamic, source: collection.options, parameters: { entity: AuditEvent, field: correlationId } } }
+  - { key: changedFields, osfType: string, cardinality: collection, required: true, readOnly: true, label: { en: Changed fields, nl: Gewijzigde velden }, options: { type: dynamic, source: collection.options, parameters: { entity: AuditEvent, field: changedFields } } }
   - key: subjects
     osfType: object
     cardinality: collection
@@ -69,3 +69,27 @@ interfaces:
       list: { method: POST, path: /api/audit-events/list }
       get: { method: GET, path: /api/audit-events/:id }
   mcp: {}
+  web:
+    views:
+      collection:
+        route: /audit-events
+        title: { en: Audit log, nl: Auditlog }
+        columns:
+          - { key: occurredAt, sortable: true }
+          - { key: eventType, sortable: true }
+          - { key: entityType, sortable: true }
+          - { key: recordId }
+          - { key: actorId, sortable: true }
+        defaultSort: { key: occurredAt, direction: desc }
+      record:
+        routes: { read: /audit-events/:id }
+        title: "{{eventType}}"
+        subtitle: "{{entityType}}"
+        layout:
+          tabs:
+            - id: overview
+              label: { en: Event, nl: Gebeurtenis }
+              fields: [occurredAt, eventType, entityType, recordId, actorId, actorKind, operationId, correlationId, changedFields]
+            - id: changes
+              label: { en: Recorded changes, nl: Vastgelegde wijzigingen }
+              fields: [beforeValues, afterValues, subjects, rawData]

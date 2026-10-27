@@ -1324,7 +1324,10 @@ function operationEntityCollectionQuery(
     throw new Error(`Operation-backed list "${operationId}" must declare integer first.default and first.maximum bounds.`);
   }
   const allowedFields = new Set(fields);
-  const filterFields = fields.filter((field) => field in input);
+  const ref = input.filter?.$ref;
+  const root = inputSchema as Record<string, any>;
+  const structuredFields = objectProperties(typeof ref === "string" && ref.startsWith("#/$defs/") ? root.$defs?.[ref.slice(8)] : input.filter);
+  const filterFields = fields.filter((field) => field in input || field in structuredFields);
   const sortFields = Array.isArray(input.sortField!.enum)
     ? input.sortField!.enum.filter((field): field is string => typeof field === "string" && allowedFields.has(field))
     : [];
@@ -1344,6 +1347,7 @@ function operationEntityCollectionQuery(
   return {
     input: {
       kind: "collection-query",
+      ...(input.filter ? { filterMode: "structured" as const } : {}),
       filterFields,
       sortFields,
       pagination: { kind: "cursor", defaultLimit: Number(defaultLimit), maxLimit: Number(maxLimit) },

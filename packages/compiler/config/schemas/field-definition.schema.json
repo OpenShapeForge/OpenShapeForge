@@ -12,18 +12,40 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "en": { "type": "string" },
-        "nl": { "type": "string" },
-        "fr": { "type": "string" }
+        "en": {
+          "type": "string"
+        },
+        "nl": {
+          "type": "string"
+        },
+        "fr": {
+          "type": "string"
+        }
       }
     },
     "validationRule": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["value"],
+      "required": [
+        "value"
+      ],
       "properties": {
-        "value": { "anyOf": [{ "type": "number" }, { "type": "string" }, { "type": "boolean" }] },
-        "message": { "$ref": "#/$defs/localizedText" }
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
+        },
+        "message": {
+          "$ref": "#/$defs/localizedText"
+        }
       }
     },
     "validation": {
@@ -31,33 +53,111 @@
       "additionalProperties": false,
       "properties": {
         "required": {
-          "oneOf": [{ "type": "boolean" }, { "$ref": "#/$defs/validationRule" }]
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/$defs/validationRule"
+            }
+          ]
         },
         "minLength": {
-          "oneOf": [{ "type": "integer", "minimum": 0 }, { "$ref": "#/$defs/validationRule" }]
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "$ref": "#/$defs/validationRule"
+            }
+          ]
         },
         "maxLength": {
-          "oneOf": [{ "type": "integer", "minimum": 0 }, { "$ref": "#/$defs/validationRule" }]
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "$ref": "#/$defs/validationRule"
+            }
+          ]
         },
         "minItems": {
-          "oneOf": [{ "type": "integer", "minimum": 0 }, { "$ref": "#/$defs/validationRule" }]
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "$ref": "#/$defs/validationRule"
+            }
+          ]
         },
-        "uniqueBy": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$", "not": { "enum": ["constructor", "prototype", "__proto__"] } },
+        "uniqueBy": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "not": {
+            "enum": [
+              "constructor",
+              "prototype",
+              "__proto__"
+            ]
+          }
+        },
         "min": {
-          "oneOf": [{ "type": "number" }, { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$", "maxLength": 1024 }, { "$ref": "#/$defs/validationRule" }]
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+              "maxLength": 1024
+            },
+            {
+              "$ref": "#/$defs/validationRule"
+            }
+          ]
         },
         "max": {
-          "oneOf": [{ "type": "number" }, { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$", "maxLength": 1024 }, { "$ref": "#/$defs/validationRule" }]
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+              "maxLength": 1024
+            },
+            {
+              "$ref": "#/$defs/validationRule"
+            }
+          ]
         },
         "pattern": {
-          "oneOf": [{ "type": "string" }, { "$ref": "#/$defs/validationRule" }]
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/validationRule"
+            }
+          ]
         },
-        "format": { "type": "string", "minLength": 1 },
+        "format": {
+          "type": "string",
+          "minLength": 1
+        },
         "requires": {
           "type": "array",
           "uniqueItems": true,
           "minItems": 1,
-          "items": { "type": "string", "minLength": 1 },
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
           "description": "Persisted single fields of this entity that must hold a value whenever this field does; a database CHECK on the row."
         },
         "custom": {
@@ -65,11 +165,20 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name"],
+            "required": [
+              "name"
+            ],
             "properties": {
-              "name": { "type": "string", "minLength": 1 },
-              "message": { "$ref": "#/$defs/localizedText" },
-              "params": { "type": "object" }
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "$ref": "#/$defs/localizedText"
+              },
+              "params": {
+                "type": "object"
+              }
             }
           }
         }
@@ -78,70 +187,177 @@
     "fieldOptions": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type"],
+      "required": [
+        "type"
+      ],
       "properties": {
-        "type": { "type": "string", "enum": ["static", "referentiedata", "remote", "dynamic", "entity"] },
+        "type": {
+          "type": "string",
+          "enum": [
+            "static",
+            "referentiedata",
+            "remote",
+            "dynamic",
+            "entity"
+          ]
+        },
         "items": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["value", "label"],
+            "required": [
+              "value",
+              "label"
+            ],
             "properties": {
-              "value": { "type": "string" },
-              "label": { "$ref": "#/$defs/localizedText" },
+              "value": {
+                "type": "string"
+              },
+              "label": {
+                "$ref": "#/$defs/localizedText"
+              },
               "icon": {
-                "type": "string", "pattern": "^[a-z][a-z0-9-]*$",
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$",
                 "description": "Icon key shown with the option, e.g. on a tile; the host resolves it."
               }
             }
           }
         },
         "presentation": {
-          "type": "string", "enum": ["tiles"],
+          "type": "string",
+          "enum": [
+            "tiles"
+          ],
           "description": "Render static options as icon tiles instead of a select. Only for type static."
         },
-        "source": { "type": "string" },
-        "referentieGroep": { "type": "string" },
-        "remoteUrl": { "type": "string" },
-        "valueField": { "type": "string" },
-        "labelField": { "type": "string" }
-      },
-      "allOf": [{
-        "if": { "properties": { "type": { "not": { "const": "static" } } }, "required": ["type"] },
-        "then": { "properties": { "presentation": false } }
-      }, {
-        "if": { "properties": { "type": { "const": "entity" } }, "required": ["type"] },
-        "then": {
-          "required": ["source"],
-          "properties": {
-            "source": { "type": "string", "minLength": 1 },
-            "valueField": { "type": "string", "minLength": 1 },
-            "items": false,
-            "referentieGroep": false,
-            "remoteUrl": false,
-            "labelField": false
+        "source": {
+          "type": "string"
+        },
+        "referentieGroep": {
+          "type": "string"
+        },
+        "remoteUrl": {
+          "type": "string"
+        },
+        "valueField": {
+          "type": "string"
+        },
+        "labelField": {
+          "type": "string"
+        },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        },
+        "bindings": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
           }
         }
-      }]
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "not": {
+                  "const": "static"
+                }
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "presentation": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "entity"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "source"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "minLength": 1
+              },
+              "valueField": {
+                "type": "string",
+                "minLength": 1
+              },
+              "items": false,
+              "referentieGroep": false,
+              "remoteUrl": false,
+              "labelField": false
+            }
+          }
+        }
+      ]
     },
     "inverseCollection": {
       "type": "object",
       "additionalProperties": false,
       "description": "How a single entity reference shapes the collection the compiler derives for it on the target entity. Every property is optional: the key defaults to the lower-camel plural of the referencing entity and the label to that entity's pluralLabels (absent: the English label pluralised, other locales keep their singular).",
       "properties": {
-        "key": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
-        "label": { "$ref": "#/$defs/localizedText" },
-        "ownership": { "enum": ["owned", "reference"] },
-        "sortable": { "type": "boolean" },
-        "childAuthorization": { "type": "string", "enum": ["owner"] },
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][A-Za-z0-9]*$"
+        },
+        "label": {
+          "$ref": "#/$defs/localizedText"
+        },
+        "ownership": {
+          "enum": [
+            "owned",
+            "reference"
+          ]
+        },
+        "sortable": {
+          "type": "boolean"
+        },
+        "childAuthorization": {
+          "type": "string",
+          "enum": [
+            "owner"
+          ]
+        },
         "childLock": {
-          "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$",
+          "type": "string",
+          "pattern": "^[a-z][A-Za-z0-9]*$",
           "description": "Key of a boolean field on the referencing (owned) entity. The owner's collection update, move and remove Operations refuse a child whose flag is set with INVALID_STATE; insert is unaffected."
         },
         "allowedDefinitions": {
-          "type": "array", "minItems": 1, "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" }
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Za-z0-9]*$"
+          }
         }
       }
     },
@@ -152,76 +368,153 @@
         "inverse": {
           "description": "On a single reference: the derived inverse collection, or false to decline one. On a via traversal collection: the key of the referencing field on the target entity.",
           "oneOf": [
-            { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
-            { "$ref": "#/$defs/inverseCollection" },
-            { "const": false }
+            {
+              "type": "string",
+              "pattern": "^[a-z][A-Za-z0-9]*$"
+            },
+            {
+              "$ref": "#/$defs/inverseCollection"
+            },
+            {
+              "const": false
+            }
           ]
         },
-        "via": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
-        "ownership": { "enum": ["owned", "reference"] },
+        "via": {
+          "type": "string",
+          "pattern": "^[a-z][A-Za-z0-9]*$"
+        },
+        "ownership": {
+          "enum": [
+            "owned",
+            "reference"
+          ]
+        },
         "version": {
-          "type": "string", "enum": ["pinned", "current"],
+          "type": "string",
+          "enum": [
+            "pinned",
+            "current"
+          ],
           "description": "How a single reference relates to a versioned target. current (the default): the reference means the target's editable head. pinned: the reference names one immutable version and moves only through an authored command, never by itself."
         },
-        "displayField": { "type": "string", "minLength": 1 },
-        "constraints": { "$ref": "#/$defs/relationshipConstraints" }
+        "displayField": {
+          "type": "string",
+          "minLength": 1
+        },
+        "constraints": {
+          "$ref": "#/$defs/relationshipConstraints"
+        }
       }
     },
     "constraintScalar": {
       "oneOf": [
-        { "type": "string" },
-        { "type": "number" },
-        { "type": "boolean" }
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        }
       ]
     },
     "equalityConstraint": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["eq"],
-      "properties": { "eq": { "$ref": "#/$defs/constraintScalar" } }
+      "required": [
+        "eq"
+      ],
+      "properties": {
+        "eq": {
+          "$ref": "#/$defs/constraintScalar"
+        }
+      }
     },
     "relationshipAnyConstraint": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["any"],
+      "required": [
+        "any"
+      ],
       "properties": {
         "any": {
           "type": "object",
           "minProperties": 1,
-          "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
-          "additionalProperties": { "$ref": "#/$defs/equalityConstraint" }
+          "propertyNames": {
+            "pattern": "^[a-z][A-Za-z0-9]*$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/equalityConstraint"
+          }
         }
       }
     },
     "relationshipConstraints": {
       "type": "object",
       "minProperties": 1,
-      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "propertyNames": {
+        "pattern": "^[a-z][A-Za-z0-9]*$"
+      },
       "additionalProperties": {
         "oneOf": [
-          { "$ref": "#/$defs/equalityConstraint" },
-          { "$ref": "#/$defs/relationshipAnyConstraint" }
+          {
+            "$ref": "#/$defs/equalityConstraint"
+          },
+          {
+            "$ref": "#/$defs/relationshipAnyConstraint"
+          }
         ]
       }
     },
     "cardinality": {
       "oneOf": [
-        { "type": "string", "enum": ["single", "collection"] },
+        {
+          "type": "string",
+          "enum": [
+            "single",
+            "collection"
+          ]
+        },
         {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "min": { "type": "integer", "minimum": 0 },
+            "min": {
+              "type": "integer",
+              "minimum": 0
+            },
             "max": {
               "oneOf": [
-                { "type": "integer", "minimum": 0 },
-                { "type": "string", "const": "unbounded" }
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "const": "unbounded"
+                }
               ]
             }
           },
           "anyOf": [
-            { "properties": { "min": {} }, "required": ["min"] },
-            { "properties": { "max": {} }, "required": ["max"] }
+            {
+              "properties": {
+                "min": {}
+              },
+              "required": [
+                "min"
+              ]
+            },
+            {
+              "properties": {
+                "max": {}
+              },
+              "required": [
+                "max"
+              ]
+            }
           ]
         }
       ]
@@ -230,88 +523,247 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "profile": { "type": "string", "minLength": 1 },
-        "pinned": { "type": "boolean" },
-        "locked": { "type": "boolean" },
-        "lockedKeys": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1, "not": { "enum": ["__proto__", "prototype", "constructor"] } } },
-        "singleton": { "type": "boolean" },
+        "profile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "lockedKeys": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "not": {
+              "enum": [
+                "__proto__",
+                "prototype",
+                "constructor"
+              ]
+            }
+          }
+        },
+        "singleton": {
+          "type": "boolean"
+        },
         "visibleProperties": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
     "render": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["component"],
+      "required": [
+        "component"
+      ],
       "properties": {
         "component": {
           "type": "string",
           "minLength": 1,
-          "x-osf-i18n": { "title": { "en": "Component", "nl": "Component" } },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Component",
+              "nl": "Component"
+            }
+          },
           "x-osf-choice": "component"
         },
-        "props": { "type": "object", "properties": { "decimalPlaces": { "type": "integer", "minimum": 0, "maximum": 20 }, "scale": { "type": "string", "enum": ["units", "thousands", "millions"] } }, "x-osf-i18n": { "title": { "en": "Properties", "nl": "Eigenschappen" } } }
+        "props": {
+          "type": "object",
+          "properties": {
+            "decimalPlaces": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20
+            },
+            "scale": {
+              "type": "string",
+              "enum": [
+                "units",
+                "thousands",
+                "millions"
+              ]
+            }
+          },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Properties",
+              "nl": "Eigenschappen"
+            }
+          }
+        }
       }
     },
     "fieldDefinition": {
       "type": "object",
-      "description": "The canonical closed FieldDefinition shape — what to $ref when a field is used as-is. unevaluatedProperties rather than additionalProperties because only the former sees an allOf branch beside it, which is what lets a use site extend the shape (connector configuration fields add `secret`) without the closure rejecting the addition.",
-      "allOf": [{ "$ref": "#/$defs/fieldDefinitionProperties" }],
+      "description": "The canonical closed FieldDefinition shape \u2014 what to $ref when a field is used as-is. unevaluatedProperties rather than additionalProperties because only the former sees an allOf branch beside it, which is what lets a use site extend the shape (connector configuration fields add `secret`) without the closure rejecting the addition.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/fieldDefinitionProperties"
+        }
+      ],
       "unevaluatedProperties": false
     },
     "fieldDefinitionProperties": {
-      "description": "The canonical FieldDefinition property set, left OPEN so a use site can extend it. Extend this one only alongside your own unevaluatedProperties: false — on its own it closes nothing.",
+      "description": "The canonical FieldDefinition property set, left OPEN so a use site can extend it. Extend this one only alongside your own unevaluatedProperties: false \u2014 on its own it closes nothing.",
       "type": "object",
-      "required": ["key", "osfType"],
+      "required": [
+        "key",
+        "osfType"
+      ],
       "properties": {
-        "key": { "type": "string", "minLength": 1, "not": { "enum": ["__proto__", "prototype", "constructor"] } },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "not": {
+            "enum": [
+              "__proto__",
+              "prototype",
+              "constructor"
+            ]
+          }
+        },
         "osfType": {
           "type": "string",
           "minLength": 1,
           "description": "The one type axis: a base type (string, integer, number, boolean, date, datetime, object), a camelCase osf-type catalog key, or a PascalCase entity name. The compiler derives the base type from the catalog."
         },
         "document": {
-          "type": "object", "additionalProperties": false, "required": ["content"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "content"
+          ],
           "properties": {
-            "content": { "enum": ["file", "blocks"] },
-            "mimeTypes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9.+-]+/[a-z0-9.+-]+$" } },
-            "maxBytes": { "type": "integer", "minimum": 1 },
-            "documentType": { "type": "string", "minLength": 1 }
+            "content": {
+              "enum": [
+                "file",
+                "blocks"
+              ]
+            },
+            "mimeTypes": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9.+-]+/[a-z0-9.+-]+$"
+              }
+            },
+            "maxBytes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "documentType": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         "transform": {
-          "type": "array", "minItems": 1, "maxItems": 8,
-          "items": { "type": "object", "additionalProperties": false, "required": ["use"],
-            "properties": { "use": { "type": "string", "minLength": 1 }, "profile": { "type": "string", "minLength": 1 } } }
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "use"
+            ],
+            "properties": {
+              "use": {
+                "type": "string",
+                "minLength": 1
+              },
+              "profile": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
         },
-        "cardinality": { "$ref": "#/$defs/cardinality" },
+        "cardinality": {
+          "$ref": "#/$defs/cardinality"
+        },
         "entityValue": {
-          "type": "object", "additionalProperties": false, "required": ["definitionField"],
-          "properties": { "definitionField": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" }, "parameterBindings": { "type": "boolean" } }
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "definitionField"
+          ],
+          "properties": {
+            "definitionField": {
+              "type": "string",
+              "pattern": "^[a-z][A-Za-z0-9]*$"
+            },
+            "parameterBindings": {
+              "type": "boolean"
+            }
+          }
         },
         "typedBy": {
-          "type": "object", "additionalProperties": false, "required": ["definitionField"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "definitionField"
+          ],
           "description": "This field's value contract is the FieldDefinition stored in the named sibling field, compiled through the field-schema service. Requires osfType: typedValue, a single value, and a required single fieldDefinition sibling; both persist as jsonb. The shared entity write path validates the value against the stored definition on every create and update.",
-          "properties": { "definitionField": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
-            "documentField": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
-            "encrypted": { "type": "boolean" } }
+          "properties": {
+            "definitionField": {
+              "type": "string",
+              "pattern": "^[a-z][A-Za-z0-9]*$"
+            },
+            "documentField": {
+              "type": "string",
+              "pattern": "^[a-z][A-Za-z0-9]*$"
+            },
+            "encrypted": {
+              "type": "boolean"
+            }
+          }
         },
         "allowedDefinitions": {
-          "type": "array", "minItems": 1, "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" }
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Za-z0-9]*$"
+          }
         },
         "childAuthorization": {
-          "type": "string", "enum": ["owner"],
+          "type": "string",
+          "enum": [
+            "owner"
+          ],
           "description": "owner: the owner's collection Operations on this field authorize its owned children through the owner's update roles instead of the child entity's own roles."
         },
         "childLock": {
-          "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$",
+          "type": "string",
+          "pattern": "^[a-z][A-Za-z0-9]*$",
           "description": "Key of a boolean field on the owned child entity. The owner's collection update, move and remove Operations on this field refuse a child whose flag is set with INVALID_STATE; insert is unaffected."
         },
-        "variables": { "type": "string", "enum": ["none", "whole", "template", "both"], "default": "none" },
+        "variables": {
+          "type": "string",
+          "enum": [
+            "none",
+            "whole",
+            "template",
+            "both"
+          ],
+          "default": "none"
+        },
         "suggestions": {
           "type": "object",
           "additionalProperties": false,
@@ -330,11 +782,15 @@
             }
           }
         },
-        "sortable": { "type": "boolean" },
-        "required": { "type": "boolean" },
+        "sortable": {
+          "type": "boolean"
+        },
+        "required": {
+          "type": "boolean"
+        },
         "readOnly": {
           "type": "boolean",
-          "description": "Presentation only: render the field with its display component instead of its input component. Not an API contract — use `immutable` for that."
+          "description": "Presentation only: render the field with its display component instead of its input component. Not an API contract \u2014 use `immutable` for that."
         },
         "writeSource": {
           "const": "caller",
@@ -348,37 +804,91 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 },
-          "description": "API contract: operation contract keys (e.g. `advies.finding.review`) that are the only writers of this field. The field is absent from the generated create AND update schemas on every transport, and a caller sending it anyway is refused with a message naming these operations. Use it for fields that record that a process took place — a review signed off, a scope approved, a retest concluded — where the operation is the only place the preconditions are checked. Not to be confused with `readOnly`, which selects a display component and enforces nothing. A key no compiled operation answers to fails the build."
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "API contract: operation contract keys (e.g. `advies.finding.review`) that are the only writers of this field. The field is absent from the generated create AND update schemas on every transport, and a caller sending it anyway is refused with a message naming these operations. Use it for fields that record that a process took place \u2014 a review signed off, a scope approved, a retest concluded \u2014 where the operation is the only place the preconditions are checked. Not to be confused with `readOnly`, which selects a display component and enforces nothing. A key no compiled operation answers to fails the build."
         },
         "transitions": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["initial", "rules"],
+          "required": [
+            "initial",
+            "rules"
+          ],
           "description": "Declares this status field as a state machine. Requires `options.type: static`. Every rule compiles to an Operation `<Entity>.<rule.key>` (REST POST .../{id}/<key>, MCP tool, GraphQL mutation, web record action) offered only while the record's status is in `from`; the field becomes `writtenBy` those Operations, so generic create admits no value (the column defaults to `initial`) and generic update refuses it.",
           "properties": {
-            "initial": { "type": "string", "minLength": 1, "description": "The option value every record starts in; must equal `defaultValue`." },
+            "initial": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The option value every record starts in; must equal `defaultValue`."
+            },
             "rules": {
               "type": "array",
               "minItems": 1,
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["key", "from", "to"],
+                "required": [
+                  "key",
+                  "from",
+                  "to"
+                ],
                 "properties": {
-                  "key": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$", "description": "Operation key; `<Entity>.<key>` must not collide with another operation of the entity." },
-                  "from": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
-                  "to": { "type": "string", "minLength": 1 },
-                  "label": { "$ref": "#/$defs/localizedText" },
-                  "description": { "$ref": "#/$defs/localizedText" },
+                  "key": {
+                    "type": "string",
+                    "pattern": "^[a-z][A-Za-z0-9]*$",
+                    "description": "Operation key; `<Entity>.<key>` must not collide with another operation of the entity."
+                  },
+                  "from": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "to": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "label": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "description": {
+                    "$ref": "#/$defs/localizedText"
+                  },
                   "auth": {
                     "type": "object",
                     "additionalProperties": false,
                     "minProperties": 1,
                     "properties": {
-                      "roles": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
-                      "alsoRequire": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "description": "A second, conjunctive role gate: the caller holds one of `roles` (default: the entity's update roles) AND one of these. `roles` alone replaces the update roles." },
-                      "recordPermission": { "type": "string", "enum": ["edit"], "description": "A transition writes the record: on an entity with record-level permissions it always requires `edit` (this may only restate it); refused on an entity without record permissions." }
+                      "roles": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "alsoRequire": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "description": "A second, conjunctive role gate: the caller holds one of `roles` (default: the entity's update roles) AND one of these. `roles` alone replaces the update roles."
+                      },
+                      "recordPermission": {
+                        "type": "string",
+                        "enum": [
+                          "edit"
+                        ],
+                        "description": "A transition writes the record: on an entity with record-level permissions it always requires `edit` (this may only restate it); refused on an entity without record permissions."
+                      }
                     }
                   },
                   "preconditions": {
@@ -389,45 +899,94 @@
                         {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["field", "present"],
+                          "required": [
+                            "field",
+                            "present"
+                          ],
                           "properties": {
-                            "field": { "type": "string", "minLength": 1 },
-                            "present": { "type": "boolean" },
-                            "refusal": { "$ref": "#/$defs/localizedText", "description": "What a person reads when this precondition refuses the transition, in plain product language per locale. Without it the refusal names the field." }
+                            "field": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "present": {
+                              "type": "boolean"
+                            },
+                            "refusal": {
+                              "$ref": "#/$defs/localizedText",
+                              "description": "What a person reads when this precondition refuses the transition, in plain product language per locale. Without it the refusal names the field."
+                            }
                           }
                         },
                         {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["via", "field", "present"],
+                          "required": [
+                            "via",
+                            "field",
+                            "present"
+                          ],
                           "properties": {
-                            "via": { "type": "string", "minLength": 1, "description": "Single entity reference field on this row." },
-                            "field": { "type": "string", "minLength": 1, "description": "Persisted single field on the referenced entity." },
-                            "present": { "type": "boolean" },
-                            "refusal": { "$ref": "#/$defs/localizedText", "description": "What a person reads when this precondition refuses the transition, in plain product language per locale. Without it the refusal names the field." }
+                            "via": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Single entity reference field on this row."
+                            },
+                            "field": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Persisted single field on the referenced entity."
+                            },
+                            "present": {
+                              "type": "boolean"
+                            },
+                            "refusal": {
+                              "$ref": "#/$defs/localizedText",
+                              "description": "What a person reads when this precondition refuses the transition, in plain product language per locale. Without it the refusal names the field."
+                            }
                           }
                         },
                         {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["via", "field", "in"],
+                          "required": [
+                            "via",
+                            "field",
+                            "in"
+                          ],
                           "properties": {
-                            "via": { "type": "string", "minLength": 1, "description": "Single entity reference field on this row." },
-                            "field": { "type": "string", "minLength": 1, "description": "Persisted single comparable field on the referenced entity." },
+                            "via": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Single entity reference field on this row."
+                            },
+                            "field": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Persisted single comparable field on the referenced entity."
+                            },
                             "in": {
                               "type": "array",
                               "uniqueItems": true,
                               "minItems": 1,
                               "items": {
                                 "anyOf": [
-                                  { "type": "string" },
-                                  { "type": "number" },
-                                  { "type": "boolean" }
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  }
                                 ]
                               },
                               "description": "Closed set of values the referenced field must hold. When that field has static options, each value must be one of them."
                             },
-                            "refusal": { "$ref": "#/$defs/localizedText", "description": "What a person reads when this precondition refuses the transition, in plain product language per locale. Without it the refusal names the field." }
+                            "refusal": {
+                              "$ref": "#/$defs/localizedText",
+                              "description": "What a person reads when this precondition refuses the transition, in plain product language per locale. Without it the refusal names the field."
+                            }
                           }
                         }
                       ]
@@ -438,15 +997,35 @@
                     "uniqueItems": true,
                     "items": {
                       "oneOf": [
-                        { "type": "string", "minLength": 1 },
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
                         {
                           "type": "object",
                           "additionalProperties": false,
-                          "required": ["field"],
+                          "required": [
+                            "field"
+                          ],
                           "properties": {
-                            "field": { "type": "string", "minLength": 1 },
-                            "required": { "type": "boolean", "description": "The rule refuses to run without this input." },
-                            "agreesOn": { "type": "array", "uniqueItems": true, "minItems": 1, "items": { "type": "string", "minLength": 1 }, "description": "On a single entity reference: fields, present on both entities, on which the referenced record must equal this record. Checked inside the transaction; a mismatch is a VALIDATION refusal." }
+                            "field": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "required": {
+                              "type": "boolean",
+                              "description": "The rule refuses to run without this input."
+                            },
+                            "agreesOn": {
+                              "type": "array",
+                              "uniqueItems": true,
+                              "minItems": 1,
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "description": "On a single entity reference: fields, present on both entities, on which the referenced record must equal this record. Checked inside the transaction; a mismatch is a VALIDATION refusal."
+                            }
                           }
                         }
                       ]
@@ -458,10 +1037,23 @@
                     "items": {
                       "type": "object",
                       "additionalProperties": false,
-                      "required": ["field", "value"],
+                      "required": [
+                        "field",
+                        "value"
+                      ],
                       "properties": {
-                        "field": { "type": "string", "minLength": 1 },
-                        "value": { "type": "string", "enum": ["now", "actor"], "description": "`now` stamps a datetime field with the transaction time; `actor` stamps a Relation reference with the session's linked Relation, or a string field with the user id." }
+                        "field": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "value": {
+                          "type": "string",
+                          "enum": [
+                            "now",
+                            "actor"
+                          ],
+                          "description": "`now` stamps a datetime field with the transaction time; `actor` stamps a Relation reference with the session's linked Relation, or a string field with the user id."
+                        }
                       }
                     },
                     "description": "Server-derived writes: fields this transition, and only this transition, sets; `writtenBy` it and never part of its input."
@@ -469,8 +1061,18 @@
                   "confirmation": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["mode"],
-                    "properties": { "mode": { "type": "string", "enum": ["none", "acknowledgement"] } }
+                    "required": [
+                      "mode"
+                    ],
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "acknowledgement"
+                        ]
+                      }
+                    }
                   }
                 }
               }
@@ -480,7 +1082,11 @@
         "deriveOnCreate": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["from", "transform", "onConflict"],
+          "required": [
+            "from",
+            "transform",
+            "onConflict"
+          ],
           "properties": {
             "from": {
               "type": "string",
@@ -498,60 +1104,119 @@
           },
           "description": "Persist this server-owned field once at create time. Generated create and update inputs omit it on every interface."
         },
-        "label": { "$ref": "#/$defs/localizedText" },
-        "description": { "$ref": "#/$defs/localizedText" },
-        "placeholder": { "$ref": "#/$defs/localizedText" },
-        "help": { "$ref": "#/$defs/localizedText" },
-        "unit": { "type": "string" },
-        "currency": { "type": "string" },
+        "label": {
+          "$ref": "#/$defs/localizedText"
+        },
+        "description": {
+          "$ref": "#/$defs/localizedText"
+        },
+        "placeholder": {
+          "$ref": "#/$defs/localizedText"
+        },
+        "help": {
+          "$ref": "#/$defs/localizedText"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        },
         "value": {},
         "defaultValue": {},
-        "defaultTemplate": { "type": "string", "minLength": 1, "maxLength": 2000 },
-        "validation": { "$ref": "#/$defs/validation" },
-        "relationship": { "$ref": "#/$defs/relationship" },
+        "defaultTemplate": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "validation": {
+          "$ref": "#/$defs/validation"
+        },
+        "relationship": {
+          "$ref": "#/$defs/relationship"
+        },
         "provider": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["bindings"],
+          "required": [
+            "bindings"
+          ],
           "properties": {
             "bindings": {
               "type": "object",
               "minProperties": 1,
-              "additionalProperties": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[a-z][A-Za-z0-9]*$"
+              },
               "description": "Operation input field of the provider-backed entity -> field of this entity whose value fills it."
             }
           },
           "description": "A reference to a provider-backed entity (declared by an Operation catalog, no storage). The target's Operations resolve it from this record; the field itself is never stored."
         },
-        "options": { "$ref": "#/$defs/fieldOptions" },
+        "options": {
+          "$ref": "#/$defs/fieldOptions"
+        },
         "persisted": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "column": { "type": "string" },
-            "storageClass": { "type": "string", "enum": ["core", "profile"] }
+            "column": {
+              "type": "string"
+            },
+            "storageClass": {
+              "type": "string",
+              "enum": [
+                "core",
+                "profile"
+              ]
+            }
           }
         },
-        "render": { "$ref": "#/$defs/render" },
+        "render": {
+          "$ref": "#/$defs/render"
+        },
         "permissions": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "read": { "type": "array", "items": { "type": "string" } },
-            "write": { "type": "array", "items": { "type": "string" } }
+            "read": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "write": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           }
         },
         "authorization": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["roles"],
+          "required": [
+            "roles"
+          ],
           "properties": {
             "roles": {
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "read": { "type": "array", "items": { "type": "string" } },
-                "write": { "type": "array", "items": { "type": "string" } }
+                "read": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "write": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
               }
             }
           }
@@ -559,20 +1224,40 @@
         "classification": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["sensitivity"],
+          "required": [
+            "sensitivity"
+          ],
           "properties": {
             "sensitivity": {
               "type": "string",
-              "enum": ["public", "internal", "confidential", "pii", "bsn"]
+              "enum": [
+                "public",
+                "internal",
+                "confidential",
+                "pii",
+                "bsn"
+              ]
             },
-            "category": { "type": "string" }
+            "category": {
+              "type": "string"
+            }
           }
         },
-        "retention": { "type": "object" },
-        "audit": { "type": "boolean" },
-        "hints": { "type": "object" },
-        "visibility": { "type": "object" },
-        "computed": { "type": "object" },
+        "retention": {
+          "type": "object"
+        },
+        "audit": {
+          "type": "boolean"
+        },
+        "hints": {
+          "type": "object"
+        },
+        "visibility": {
+          "type": "object"
+        },
+        "computed": {
+          "type": "object"
+        },
         "runtime": {
           "type": "object",
           "additionalProperties": false,
@@ -580,26 +1265,45 @@
             "aliases": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "type": "string", "minLength": 1 }
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
             },
-            "required": { "type": "boolean" }
+            "required": {
+              "type": "boolean"
+            }
           }
         },
         "workflowInspector": {
           "$ref": "https://openshapeforge.example/schema-common/workflow-inspector.schema.json"
         },
-        "layoutFraction": { "type": "number", "minimum": 0, "maximum": 1 },
-        "localized": { "type": "boolean" },
+        "layoutFraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "localized": {
+          "type": "boolean"
+        },
         "shape": {
           "type": "array",
-          "items": { "$ref": "#/$defs/fieldDefinition" }
+          "items": {
+            "$ref": "#/$defs/fieldDefinition"
+          }
         },
-        "authoring": { "$ref": "#/$defs/fieldAuthoring" },
+        "authoring": {
+          "$ref": "#/$defs/fieldAuthoring"
+        },
         "children": {
           "type": "array",
-          "items": { "$ref": "#/$defs/fieldDefinition" }
+          "items": {
+            "$ref": "#/$defs/fieldDefinition"
+          }
         },
-        "item": { "$ref": "#/$defs/fieldDefinition" }
+        "item": {
+          "$ref": "#/$defs/fieldDefinition"
+        }
       },
       "allOf": [
         {
@@ -610,34 +1314,93 @@
                 "properties": {
                   "max": {
                     "oneOf": [
-                      { "type": "integer", "minimum": 2 },
-                      { "const": "unbounded" }
+                      {
+                        "type": "integer",
+                        "minimum": 2
+                      },
+                      {
+                        "const": "unbounded"
+                      }
                     ]
                   }
                 },
-                "required": ["max"]
+                "required": [
+                  "max"
+                ]
               }
             },
-            "required": ["cardinality"]
+            "required": [
+              "cardinality"
+            ]
           },
           "then": {
             "anyOf": [
-              { "properties": { "item": {} }, "required": ["item"] },
-              { "properties": { "shape": {} }, "required": ["shape"] },
-              { "properties": { "osfType": { "not": { "enum": ["string", "integer", "number", "boolean", "date", "datetime", "object"] } } } },
-              { "properties": { "relationship": {} }, "required": ["relationship"] }
+              {
+                "properties": {
+                  "item": {}
+                },
+                "required": [
+                  "item"
+                ]
+              },
+              {
+                "properties": {
+                  "shape": {}
+                },
+                "required": [
+                  "shape"
+                ]
+              },
+              {
+                "properties": {
+                  "osfType": {
+                    "not": {
+                      "enum": [
+                        "string",
+                        "integer",
+                        "number",
+                        "boolean",
+                        "date",
+                        "datetime",
+                        "object"
+                      ]
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "relationship": {}
+                },
+                "required": [
+                  "relationship"
+                ]
+              }
             ]
           }
         },
         {
-          "if": { "properties": { "sortable": {} }, "required": ["sortable"] },
+          "if": {
+            "properties": {
+              "sortable": {}
+            },
+            "required": [
+              "sortable"
+            ]
+          },
           "then": {
-            "properties": { "cardinality": {} },
-            "required": ["cardinality"],
+            "properties": {
+              "cardinality": {}
+            },
+            "required": [
+              "cardinality"
+            ],
             "anyOf": [
               {
                 "properties": {
-                  "cardinality": { "const": "collection" }
+                  "cardinality": {
+                    "const": "collection"
+                  }
                 }
               },
               {
@@ -647,12 +1410,19 @@
                     "properties": {
                       "max": {
                         "oneOf": [
-                          { "type": "integer", "minimum": 2 },
-                          { "const": "unbounded" }
+                          {
+                            "type": "integer",
+                            "minimum": 2
+                          },
+                          {
+                            "const": "unbounded"
+                          }
                         ]
                       }
                     },
-                    "required": ["max"]
+                    "required": [
+                      "max"
+                    ]
                   }
                 }
               }
@@ -663,15 +1433,33 @@
           "description": "A fieldDefinition semantic value already supplies the complete recursive value contract; children and item would define a second, ambiguous shape.",
           "if": {
             "properties": {
-              "osfType": { "const": "fieldDefinition" }
+              "osfType": {
+                "const": "fieldDefinition"
+              }
             },
-            "required": ["osfType"]
+            "required": [
+              "osfType"
+            ]
           },
           "then": {
             "not": {
               "anyOf": [
-                { "properties": { "children": {} }, "required": ["children"] },
-                { "properties": { "item": {} }, "required": ["item"] }
+                {
+                  "properties": {
+                    "children": {}
+                  },
+                  "required": [
+                    "children"
+                  ]
+                },
+                {
+                  "properties": {
+                    "item": {}
+                  },
+                  "required": [
+                    "item"
+                  ]
+                }
               ]
             }
           }
@@ -679,16 +1467,43 @@
         {
           "if": {
             "properties": {
-              "osfType": { "const": "fieldDefinition" },
-              "authoring": { "type": "object", "properties": { "profile": {} }, "required": ["profile"] }
+              "osfType": {
+                "const": "fieldDefinition"
+              },
+              "authoring": {
+                "type": "object",
+                "properties": {
+                  "profile": {}
+                },
+                "required": [
+                  "profile"
+                ]
+              }
             },
-            "required": ["osfType", "authoring"]
+            "required": [
+              "osfType",
+              "authoring"
+            ]
           },
           "then": {
             "not": {
               "anyOf": [
-                { "properties": { "children": {} }, "required": ["children"] },
-                { "properties": { "item": {} }, "required": ["item"] }
+                {
+                  "properties": {
+                    "children": {}
+                  },
+                  "required": [
+                    "children"
+                  ]
+                },
+                {
+                  "properties": {
+                    "item": {}
+                  },
+                  "required": [
+                    "item"
+                  ]
+                }
               ]
             }
           }

@@ -206,7 +206,7 @@ test("structured source queries publish typed bounded predicates for a second en
   expect(list.properties.filter).toEqual({ $ref: "#/$defs/filter0", "x-osf-i18n": { title: { en: "Filter", nl: "Filter" } } });
   expect(list.$defs.filter0.properties.id.properties.in.maxItems).toBe(100);
   expect(list.$defs.filter0.properties.occurredAt.properties.gte.format).toBe("date-time");
-  expect(list.$defs.filter4.properties.or).toBeUndefined();
+  expect(list.$defs.filter0.properties.or.items.$ref).toBe("#/$defs/filter0");
   expect(list.$defs.filter0.properties.email).toBeUndefined();
   expect(compiled.entityOperations.create).toBeUndefined();
   const invalid = entity(); invalid.source!.query = { mode: "structured", filterFields: ["missing"], sortFields: ["label"] };

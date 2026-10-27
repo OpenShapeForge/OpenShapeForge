@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
 import { SQL } from "bun";
-import { sql } from "kysely";
+import { CompiledQuery, sql, type DatabaseConnection, type Transaction } from "kysely";
 import { createDatabaseRuntime, databasePoolLimit } from "../connection.js";
 import { sharedReadBarriers } from "../read-barrier.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
@@ -111,6 +111,71 @@ test("serialized metadata keeps each tenant, actor, roles, relation and audit au
         groups: session.relationGroupIds[0]!, operation: session.operation, bypass: "false" });
     }
   } finally { await runtime.close(); }
+}, 10_000);
+
+test("expired metadata frees other tenants while retaining its own fence until callback I/O drains", async () => {
+  const previous = process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS;
+  process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS = "250";
+  const admin = new SQL(owner, { max: 2 });
+  const name = `barrier_budget_${crypto.randomUUID().replaceAll("-", "")}`;
+  await admin.unsafe(`create database "${name}"`);
+  const url = new URL(owner); url.pathname = `/${name}`;
+  const runtime = createDatabaseRuntime({ databaseUrl: url.toString(), maxConnections: 3 });
+  const platform = new ModulePlatformRuntime(runtime.db), namespace = "test.budget";
+  const actor = () => ({ tenantId: crypto.randomUUID(), userId: crypto.randomUUID(), roles: [], groups: [], credential: "bearer", scope: "self" });
+  const first = actor(), slow = actor(), firstEntered = deferred(), slowEntered = deferred(), finishFirst = deferred(), finishSlow = deferred();
+  let captured!: Transaction<unknown>, borrowed!: DatabaseConnection, rawRejected = false, cloneRejected = false, connectionRejected = false, slowSettled = false;
+  let firstRead: Promise<unknown> | undefined, slowRead: Promise<unknown> | undefined, writer: Promise<unknown> | undefined;
+  try {
+    firstRead = platform.withActiveOperationSession(first as never, live => platform.services.db.withSharedReadBarrier!(live, namespace, async () => {
+      firstEntered.resolve(); await finishFirst.promise; return "first";
+    }));
+    await firstEntered.promise;
+    slowRead = platform.withActiveOperationSession(slow as never, live => platform.services.db.withSharedReadBarrier!(live, namespace, async () =>
+      platform.services.db.withSession(live, async trx => {
+        captured = trx as Transaction<unknown>;
+        borrowed = await trx.getExecutor().provideConnection(async connection => connection);
+        slowEntered.resolve(); await finishSlow.promise;
+        try { await captured.executeQuery(CompiledQuery.raw("select 1")); } catch { rawRejected = true; }
+        try { await captured.withoutPlugins().selectNoFrom(sql`1`.as("value")).execute(); } catch { cloneRejected = true; }
+        try { await borrowed.executeQuery(CompiledQuery.raw("select 1")); } catch { connectionRejected = true; }
+        return "must not escape";
+      })
+    ));
+    const slowResult = slowRead.then(value => { slowSettled = true; return { value }; }, error => { slowSettled = true; return { error: error as Error }; });
+    await Promise.race([slowEntered.promise, slowResult.then(() => { throw new Error("Slow callback did not start"); })]);
+    let written = false;
+    writer = runtime.db.transaction().execute(async trx => {
+      await sql`select pg_advisory_xact_lock(hashtext(${'osf.read-barrier:' + namespace}), hashtext(${first.tenantId}))`.execute(trx);
+      written = true;
+    });
+    finishFirst.resolve();
+    await waitFor(async () => written);
+    expect(await firstRead).toBe("first");
+    expect(slowSettled).toBe(false);
+    // The expired metadata transaction is gone, but its session read fence
+    // remains until the original callback has really finished its I/O.
+    expect((await admin.unsafe("select count(*)::int as n from pg_stat_activity where datname=$1 and state='idle in transaction'", [name]))[0].n).toBe(0);
+    expect((await admin.unsafe("select exists(select 1 from pg_locks where locktype='advisory' and objid=(hashtext($1)::bigint & 4294967295)::oid and objsubid=2 and mode='ShareLock' and granted) as held", [slow.tenantId]))[0].held).toBe(true);
+    const next = actor();
+    const marker = await platform.withActiveOperationSession(next as never, live => platform.services.db.withSharedReadBarrier!(live, "test.other-namespace", () =>
+      platform.services.db.withSession(live, async trx => (await sql<{ marker: string; tenant: string }>`select current_setting('app.shared_read_barrier') as marker,current_setting('app.tenant_id') as tenant`.execute(trx)).rows[0]!)
+    ));
+    expect(JSON.parse(marker.marker)).toEqual({ namespace: "test.other-namespace", tenantId: next.tenantId });
+    expect(marker.tenant).toBe(next.tenantId);
+    finishSlow.resolve();
+    const result = await slowResult;
+    expect("error" in result && result.error.message.includes("metadata transaction timed out")).toBe(true);
+    expect(rawRejected).toBe(true); expect(cloneRejected).toBe(true);
+    expect(connectionRejected).toBe(true);
+    await writer;
+  } finally {
+    finishFirst.resolve(); finishSlow.resolve();
+    await Promise.allSettled([firstRead, slowRead, writer].filter(Boolean));
+    await runtime.close(); await admin.unsafe(`drop database "${name}" with (force)`); await admin.close();
+    if (previous === undefined) delete process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS;
+    else process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS = previous;
+  }
 }, 10_000);
 
 test("an ambient tenant transaction keeps its own connection and fence until commit", async () => {

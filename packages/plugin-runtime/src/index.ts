@@ -393,10 +393,14 @@ export type PluginDatabase = {
    * transaction lock instead. This does not authorize reads or cache data.
    * Reentry for the same namespace is allowed; nested acquisition of another
    * namespace is refused to avoid distributed lock-order deadlocks.
-   * Work must not modify protected definitions. Short tenant DB sessions may
-   * share the reserved connection; writers must refuse an upgrade when their
-   * own backend holds a matching shared lock. Independent nested transactions
-   * are refused; use a command Operation when atomic writes are needed.
+   * Short tenant DB sessions may share the reserved connection. These sessions
+   * have a whole-transaction budget; expired callbacks cannot execute more SQL
+   * and their outstanding I/O drains before the Service fence is released.
+   * The transaction-local `app.shared_read_barrier` GUC contains the current
+   * namespace/tenant JSON only in this shared mode. Definition writers must
+   * refuse writes when it is nonempty, preventing own-backend lock upgrades
+   * for every namespace. Independent nested transactions and SQL streams are
+   * refused; use a command Operation when atomic writes are needed.
    */
   withSharedReadBarrier?<T>(
     session: PluginSessionContext,

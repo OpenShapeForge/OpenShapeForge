@@ -2,7 +2,7 @@
 import { sql, type Kysely } from "kysely";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { setTimeout as delay } from "node:timers/promises";
-import { readStatementTimeoutMs } from "../config/limits.js";
+import { readStatementTimeoutMs, readSharedReadTransactionTimeoutMs } from "../config/limits.js";
 import type { OpenShapeForgeDatabase } from "./connection.js";
 
 type Reservation = {
@@ -25,16 +25,19 @@ export function sharedReadBarriers(db: OpenShapeForgeDatabase): SharedReadBarrie
 /** Reader metadata must remain able to finish even when every ordinary pool
  * slot is occupied by writers waiting on the read fence. Serialize its short
  * tenant transactions on the already reserved connection instead. */
-export function withReadBarrierDatabase<Database, Result>(db: Kysely<Database>, tenantId: string, work: (database: Kysely<Database>) => Promise<Result>): Promise<Result> {
+export type ReadBarrierDatabaseContext = { marker: string; budgetMs: number; isActive: () => boolean; retain: (pending: Promise<unknown>) => void };
+export function withReadBarrierDatabase<Database, Result>(db: Kysely<Database>, tenantId: string, work: (database: Kysely<Database>, context?: ReadBarrierDatabaseContext) => Promise<Result>): Promise<Result> {
   const manager = managers.get(db as unknown as OpenShapeForgeDatabase);
   return manager?.hasScope()
-    ? manager.databaseWork(tenantId, connection => work(connection as unknown as Kysely<Database>))
+    ? manager.databaseWork(tenantId, (connection, context) => work(connection as unknown as Kysely<Database>, context))
     : work(db);
 }
 
 /** Session advisory locks share ONE pooled connection across concurrent reads.
  * Short tenant transactions are serialized here, with local GUCs cleared on
- * commit. During provider I/O only the session locks remain. Writers
+ * commit. Provider I/O belongs outside DB callbacks; a whole-transaction
+ * budget rolls back accidentally slow callbacks without releasing their
+ * Service fence before their remaining work has drained. Writers
  * use the matching transaction advisory lock before changing protected data.
  * Hash collisions conservatively serialize unrelated work, never grant access.
  */
@@ -42,7 +45,7 @@ export class SharedReadBarriers {
   readonly #db: OpenShapeForgeDatabase;
   #reservation: Reservation | undefined;
   #queue: Promise<unknown> = Promise.resolve();
-  readonly #scope = new AsyncLocalStorage<{ key: string; tenantId: string; namespace: string; active: boolean; reservation: Reservation }>();
+  readonly #scope = new AsyncLocalStorage<{ tenantId: string; namespace: string; active: boolean; reservation: Reservation; pending: Set<Promise<unknown>>; signal: AbortSignal | undefined }>();
   readonly #databaseScope = new AsyncLocalStorage<boolean>();
 
   constructor(db: OpenShapeForgeDatabase) { this.#db = db; }
@@ -59,17 +62,26 @@ export class SharedReadBarriers {
     } catch (error) { reservation.failure = error; throw error; }
   }
 
-  async databaseWork<T>(tenantId: string, work: (connection: OpenShapeForgeDatabase) => Promise<T>): Promise<T> {
+  async databaseWork<T>(tenantId: string, work: (connection: OpenShapeForgeDatabase, context: ReadBarrierDatabaseContext) => Promise<T>): Promise<T> {
     const current = this.#scope.getStore();
     if (!current?.active) throw new Error("Read barrier scope is no longer active.");
     if (current.tenantId !== tenantId.toLowerCase()) throw new Error("Read barrier database work belongs to another tenant.");
     if (this.#databaseScope.getStore()) throw new Error("An independent transaction cannot nest inside read barrier database work.");
-    return this.#serialize(async () => {
+    const retain = (pending: Promise<unknown>) => {
+      const drain = pending.then(() => {}, () => {});
+      current.pending.add(drain);
+      void drain.then(() => current.pending.delete(drain));
+    };
+    const job = this.#serialize(async () => {
       if (!current.active) throw new Error("Read barrier scope is no longer active.");
+      current.signal?.throwIfAborted();
       if (current.reservation.failure) throw current.reservation.failure;
       await this.#assertHeld(current.reservation, current.namespace, current.tenantId);
       let result: T;
-      try { result = await this.#databaseScope.run(true, () => work(current.reservation.connection)); }
+      try { result = await this.#databaseScope.run(true, () => work(current.reservation.connection, {
+        marker: JSON.stringify({ namespace: current.namespace, tenantId: current.tenantId }),
+        budgetMs: readSharedReadTransactionTimeoutMs(), isActive: () => current.active, retain,
+      })); }
       catch (error) {
         try { await this.#assertHeld(current.reservation, current.namespace, current.tenantId); }
         catch (lockError) { throw new AggregateError([error, lockError], "Database work and read barrier both failed."); }
@@ -80,6 +92,8 @@ export class SharedReadBarriers {
       if (current.reservation.failure) throw current.reservation.failure;
       return result;
     });
+    retain(job);
+    return job;
   }
 
   #serialize<T>(work: () => Promise<T>): Promise<T> {
@@ -106,8 +120,10 @@ export class SharedReadBarriers {
     return available;
   }
 
-  async #acquire(namespace: string, tenantId: string): Promise<Reservation | undefined> {
+  async #acquire(namespace: string, tenantId: string, deadline: number, signal?: AbortSignal): Promise<Reservation | undefined> {
     return this.#serialize(async () => {
+      signal?.throwIfAborted();
+      if (Date.now() >= deadline) throw new Error("Read barrier acquisition timed out.");
       const reservation = await this.#reserve();
       if (reservation.failure) throw reservation.failure;
       const key = JSON.stringify([namespace, tenantId]);
@@ -188,7 +204,6 @@ export class SharedReadBarriers {
 
   async run<T>(namespace: string, tenantId: string, work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     tenantId = tenantId.toLowerCase();
-    const key = JSON.stringify([namespace, tenantId]);
     const current = this.#scope.getStore();
     if (current) {
       // Detached work must enter through a fresh verified invocation, rather
@@ -210,13 +225,13 @@ export class SharedReadBarriers {
     while (!reservation) {
       signal?.throwIfAborted();
       if (Date.now() >= deadline) throw new Error("Read barrier acquisition timed out.");
-      reservation = await this.#acquire(namespace, tenantId);
+      reservation = await this.#acquire(namespace, tenantId, deadline, signal);
       if (!reservation) {
         await delay(Math.min(retryMs + Math.floor(Math.random() * 15), Math.max(1, deadline - Date.now())), undefined, { signal });
         retryMs = Math.min(250, retryMs * 2);
       }
     }
-    const scope = { key, tenantId, namespace, active: true, reservation };
+    const scope = { tenantId, namespace, active: true, reservation, pending: new Set<Promise<unknown>>(), signal };
     let failed = false, failure: unknown;
     try {
       signal?.throwIfAborted();
@@ -228,6 +243,7 @@ export class SharedReadBarriers {
       throw error;
     } finally {
       scope.active = false;
+      while (scope.pending.size) await Promise.allSettled([...scope.pending]);
       // Validate ownership before returning a result, including read failures.
       try { await this.#release(reservation, namespace, tenantId); }
       catch (error) {

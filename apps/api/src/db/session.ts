@@ -7,6 +7,7 @@ import { sql, type Kysely, type Transaction } from "kysely";
 import { readStatementTimeoutMs } from "../config/limits.js";
 import { actingRelationId, type ActingRelationSource } from "./acting-relation.js";
 import { withReadBarrierDatabase } from "./read-barrier.js";
+import { boundedReadTransaction } from "./bounded-read-transaction.js";
 
 export type DbSessionScope = "tenant" | "group" | "self";
 
@@ -176,6 +177,7 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
 export async function applyDbSession<TDatabase>(
   trx: Transaction<TDatabase>,
   session: DbSessionContext,
+  options: { statementTimeoutMs?: number; sharedReadBarrier?: string } = {},
 ) {
   // Bound subsequent statements in this tenant-scoped transaction so an
   // accepted GraphQL/REST request cannot hold a database
@@ -184,7 +186,7 @@ export async function applyDbSession<TDatabase>(
   // also covers the closure-expansion queries below. The initial settings
   // statement itself, like BEGIN, runs before this limit takes effect.
   // 0 disables the override (dev/opt-out).
-  const statementTimeoutMs = readStatementTimeoutMs();
+  const statementTimeoutMs = options.statementTimeoutMs ?? readStatementTimeoutMs();
   // A tenant session is never a continuation of a system session. Clear the
   // break-glass flag before any tenant-scoped lookup. This statement contains
   // only transaction-local settings: no row access runs until ALL have been
@@ -196,6 +198,7 @@ export async function applyDbSession<TDatabase>(
       ? [sql`set_config('statement_timeout', ${String(statementTimeoutMs)}, true)`]
       : []),
     sql`set_config('app.bypass_rls', 'false', true)`,
+    sql`set_config('app.shared_read_barrier', ${options.sharedReadBarrier ?? ''}, true)`,
     sql`set_config('app.tenant_id', ${session.tenantId}, true)`,
     sql`set_config('app.user_id', ${session.userId}, true)`,
     ...auditSessionSettings(audit),
@@ -301,12 +304,16 @@ export async function withDbSession<TDatabase, TResult>(
   }
   const hooks = { afterCommit: [] as DbSessionAfterCommitHook[] };
 
-  const result = await withRuntimeSpan("database.session", () => dbSessionHooks.run(hooks, () => withReadBarrierDatabase(db, session.tenantId, database => {
+  const result = await withRuntimeSpan("database.session", () => dbSessionHooks.run(hooks, () => withReadBarrierDatabase(db, session.tenantId, (database, barrier) => {
     const transaction = options.isolationLevel
       ? database.transaction().setIsolationLevel(options.isolationLevel)
       : database.transaction();
-    return transaction.execute(async (trx) => {
-      const audit = await applyDbSession(trx, session);
+    return transaction.execute(async (original) => {
+      const execute = async (trx: Transaction<TDatabase>) => {
+      const audit = await applyDbSession(trx, session, barrier ? {
+        statementTimeoutMs: Math.min(readStatementTimeoutMs() || barrier.budgetMs, barrier.budgetMs),
+        sharedReadBarrier: barrier.marker,
+      } : {});
       return runWithAuditContext(audit, () => activeDbSession.run(
         {
           db: db as Kysely<unknown>,
@@ -316,6 +323,8 @@ export async function withDbSession<TDatabase, TResult>(
         },
         () => callback(trx, session),
       ));
+      };
+      return barrier ? boundedReadTransaction(original, barrier.budgetMs, barrier.isActive, barrier.retain, execute) : execute(original);
     });
   })));
 
@@ -495,7 +504,7 @@ export async function withSystemSession<TDatabase, TResult>(
       const audit = auditContext();
       const appliedAudit = await applyAuditSession(trx, audit ? { ...audit, actorKind: "system" } : null);
       await sql`select set_config('app.roles', ${input.roles.join(",")}, true)`.execute(trx);
-      await sql`select set_config('app.bypass_rls', 'true', true)`.execute(trx);
+      await sql`select set_config('app.bypass_rls', 'true', true), set_config('app.shared_read_barrier', '', true)`.execute(trx);
 
       await sql`
         insert into platform.system_bypass_audit

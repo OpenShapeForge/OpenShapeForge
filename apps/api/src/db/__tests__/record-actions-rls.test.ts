@@ -33,6 +33,9 @@ import {
 } from "../migrations/record-actions.js";
 import { databaseRole } from "../database-roles.js";
 import { withDbSession, type DbSessionInput } from "../session.js";
+import { mintApiKey } from "../../auth/api-key/format.js";
+import { resolveApiKeySession } from "../../auth/api-key/resolve.js";
+import { encryptSecret, type SecretKeyring } from "../../platform/secrets.js";
 
 const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL ??
   "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
@@ -330,6 +333,99 @@ describe("verified principal class decides which subjects apply", () => {
       `.execute(trx)).rows[0]!);
     expect(next).toEqual({ class: "service", principal: null });
     expect(await allows(app.db, withoutPrincipal, RUN, runRow, "start")).toBe(false);
+  }, TEST_TIMEOUT);
+});
+
+
+/**
+ * The application principal through the REAL credential path.
+ *
+ * The integration rows, the key rows, the secret comparison, the role
+ * intersection and the session assembly are all the shipped code; only the
+ * token exchange and the JWKS verification are stubbed, because a realm is
+ * not what is under test. This is what says the `integrations` subject of an
+ * ACL is matched against a value that came out of `platform.api_keys`, and not
+ * out of anything a holder presented.
+ */
+describe("an API-key credential resolves to the integration it names", () => {
+  const keyring: SecretKeyring = {
+    activeKeyId: "k1", keys: new Map([["k1", Buffer.alloc(32, 7)]]),
+  };
+  const serviceAccountUserId = randomUUID();
+
+  async function provisionIntegration(integrationId: string): Promise<void> {
+    const secret = encryptSecret(keyring, integrationId, "clientSecret", "client-secret");
+    await admin.db.connection().execute(async (conn) => {
+      await sql`insert into platform.api_key_integrations
+          (id, tenant_id, display_name, keycloak_client_id, status, granted_roles,
+           client_secret_ciphertext, client_secret_key_id, client_secret_algorithm, created_by)
+        values (${integrationId}::uuid, ${tenantA}::uuid, 'Partner robot',
+          ${`osf-int-${integrationId}`}, 'active', cast('[]' as jsonb),
+          ${secret.ciphertext}, ${secret.keyId}, ${secret.algorithm}, ${randomUUID()}::uuid)
+      `.execute(conn);
+    });
+  }
+
+  async function issueKey(integrationId: string): Promise<string> {
+    const minted = mintApiKey();
+    await admin.db.connection().execute(async (conn) => {
+      await sql`insert into platform.api_keys
+          (id, tenant_id, integration_id, lookup_id, secret_hash, display_name, created_by)
+        values (${randomUUID()}::uuid, ${tenantA}::uuid, ${integrationId}::uuid,
+          ${minted.lookupId}, ${minted.secretHash}, 'key', ${randomUUID()}::uuid)
+      `.execute(conn);
+    });
+    return minted.token;
+  }
+
+  async function resolve(token: string) {
+    return resolveApiKeySession({
+      db: app.db,
+      keyring,
+      issuer: "https://identity.example/realms/test",
+      verifyToken: async () => ({
+        tenantId: tenantA, userId: serviceAccountUserId, roles: [SHARED_ROLE], groups: [],
+      }),
+      resolveScope: () => "tenant",
+      fetch: (async () => new Response(
+        JSON.stringify({ access_token: "token", expires_in: 60 }), { status: 200 },
+      )) as unknown as typeof fetch,
+    }, token);
+  }
+
+  test("the session names the integration and the record action then applies", async () => {
+    await provisionIntegration(integration);
+    const session = await resolve(await issueKey(integration));
+    expect(session).toBeDefined();
+    expect(session!.credential).toBe("api-key");
+    expect(session!.principalKind).toBe("service");
+    expect(session!.appPrincipal).toEqual({ integrationId: integration });
+    // The grant in the fixture names this integration, and here it is being
+    // matched against a value the store produced.
+    expect(await allows(app.db, session as DbSessionInput, RUN, runRow, "start")).toBe(true);
+    // The same session holds SHARED_ROLE, which the doc's person-only
+    // `publish` entry names. An application still gets nothing from it.
+    expect(session!.roles).toContain(SHARED_ROLE);
+    expect(await allows(app.db, session as DbSessionInput, DOC, docRow, "publish")).toBe(false);
+  }, TEST_TIMEOUT);
+
+  test("a second credential of the same integration is the same principal", async () => {
+    const rotated = await resolve(await issueKey(integration));
+    expect(rotated!.appPrincipal).toEqual({ integrationId: integration });
+    expect(await allows(app.db, rotated as DbSessionInput, RUN, runRow, "start")).toBe(true);
+  }, TEST_TIMEOUT);
+
+  test("a different integration is a different principal and holds nothing", async () => {
+    const stranger = randomUUID();
+    await provisionIntegration(stranger);
+    const session = await resolve(await issueKey(stranger));
+    expect(session!.appPrincipal).toEqual({ integrationId: stranger });
+    expect(await allows(app.db, session as DbSessionInput, RUN, runRow, "start")).toBe(false);
+  }, TEST_TIMEOUT);
+
+  test("an unknown credential resolves to no session, so to no principal", async () => {
+    expect(await resolve(mintApiKey().token)).toBeUndefined();
+    expect(await resolve("osf_live_not_a_key")).toBeUndefined();
   }, TEST_TIMEOUT);
 });
 

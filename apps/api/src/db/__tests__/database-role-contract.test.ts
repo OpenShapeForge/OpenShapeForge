@@ -67,10 +67,16 @@ describe("database role contract", () => {
       "app",
       "blueprintReader",
       "identityResolver",
+      "recordActionResolver",
       "worker",
     ]);
     expect(databaseRole("blueprintReader")).toMatchObject({ login: false, migratorMember: true });
     expect(databaseRole("identityResolver")).toMatchObject({ login: false, migratorMember: true });
+    // The record-action lookup's definer. Like the other two it never logs in,
+    // and the migrate role must be a member to hand it the function.
+    expect(databaseRole("recordActionResolver")).toMatchObject({
+      login: false, migratorMember: true,
+    });
     const rendered = renderProvisioningSql({ migratorRole: "some_migrator" });
     expect(rendered).toContain("create role openshapeforge_blueprint_reader nologin");
     expect(rendered).toContain(

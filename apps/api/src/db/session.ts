@@ -24,6 +24,9 @@ const MAX_EXPANDED_SESSION_GROUPS = 4096;
 export type DbSessionInput = {
   tenantId?: string | null;
   userId?: string | null;
+  /** Trusted identity context retained by nested database work, never caller input. */
+  auditIdentityId?: string | null;
+  auditIssuer?: string | null;
   /**
    * Opaque binding to a verified interactive login session. This is control
    * metadata for canonical Operations and is deliberately not projected into
@@ -45,6 +48,8 @@ export type DbSessionInput = {
 export type DbSessionContext = {
   tenantId: string;
   userId: string;
+  auditIdentityId?: string | null;
+  auditIssuer?: string | null;
   roles: readonly string[];
   groups: readonly string[];
   relationGroupIds: readonly string[];
@@ -150,6 +155,21 @@ function normalizeScope(scope: DbSessionScope | null | undefined): DbSessionScop
   return "self";
 }
 
+export function verifiedAuditIdentity(input: DbSessionInput): { auditIdentityId: string | null; auditIssuer: string | null } {
+  const link = input.relation as { identityId?: unknown; issuer?: unknown; subject?: unknown; status?: unknown } | undefined;
+  if (link && ["linked", "pending_confirmation"].includes(String(link.status)) &&
+      link.subject === input.userId && typeof link.identityId === "string" &&
+      UUID_PATTERN.test(link.identityId) && typeof link.issuer === "string" && link.issuer) {
+    return { auditIdentityId: link.identityId, auditIssuer: link.issuer };
+  }
+  // A nested database session already carries the verified identity context.
+  if (input.auditIdentityId) {
+    assertUuid(input.auditIdentityId, "auditIdentityId");
+    return { auditIdentityId: input.auditIdentityId, auditIssuer: input.auditIssuer ?? null };
+  }
+  return { auditIdentityId: null, auditIssuer: null };
+}
+
 export function createDbSessionContext(input: DbSessionInput): DbSessionContext {
   if (!input.tenantId) {
     throw new Error("Database session is missing tenantId; refusing unscoped access.");
@@ -164,6 +184,7 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
   return {
     tenantId: input.tenantId,
     userId: input.userId,
+    ...verifiedAuditIdentity(input),
     roles: input.roles ?? [],
     groups: normalizeGroups(input.groups),
     relationGroupIds: normalizeRelationGroupIds(input.relationGroupIds),
@@ -196,6 +217,8 @@ export async function applyDbSession<TDatabase>(
     sql`set_config('app.bypass_rls', 'false', true)`,
     sql`set_config('app.tenant_id', ${session.tenantId}, true)`,
     sql`set_config('app.user_id', ${session.userId}, true)`,
+    sql`set_config('app.audit_identity_id', ${session.auditIdentityId??''}, true)`,
+    sql`set_config('app.audit_actor_issuer', ${session.auditIssuer??''}, true)`,
     ...auditSessionSettings(audit),
     sql`set_config('app.roles', ${session.roles.join(",")}, true)`,
     sql`set_config('app.scope', ${session.scope}, true)`,
@@ -266,6 +289,8 @@ export async function withDbSession<TDatabase, TResult>(
   if (active && active.db === db) {
     const sameSession = active.session.tenantId === session.tenantId &&
       active.session.userId === session.userId &&
+      active.session.auditIdentityId === session.auditIdentityId &&
+      active.session.auditIssuer === session.auditIssuer &&
       active.session.scope === session.scope &&
       active.session.roles.length === session.roles.length &&
       active.session.roles.every((role, index) => role === session.roles[index]) &&

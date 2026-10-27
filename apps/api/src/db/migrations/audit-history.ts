@@ -59,14 +59,14 @@ export function auditTableConfigs(tables: readonly GeneratedCrudTable[], timelin
 /** Readiness must not accept a database that can silently omit row auditing. */
 export async function auditHistoryReady(db: OpenShapeForgeDatabase, tables: readonly GeneratedCrudTable[] = manifest.tables as unknown as GeneratedCrudTable[], timelines: Timelines = auditCatalog.timelines): Promise<boolean> {
   const expected = auditTableConfigs(tables, timelines);
-  const result = await sql<{ name: string; handler: string; config: string | null }>`select case when t.tgnargs=1 then convert_from(substring(t.tgargs from 1 for octet_length(t.tgargs)-1),'UTF8') else null end as config,n.nspname||'.'||c.relname as name,p.proname as handler
+  const result = await sql<{ name: string; handler: string; config: string | null; identity: boolean }>`select case when t.tgnargs=1 then convert_from(substring(t.tgargs from 1 for octet_length(t.tgargs)-1),'UTF8') else null end as config,n.nspname||'.'||c.relname as name,p.proname as handler, position('actorIdentityId' in p.prosrc)>0 as identity
     from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace
     join pg_proc p on p.oid=t.tgfoid join pg_namespace fn on fn.oid=p.pronamespace
     where not t.tgisinternal and t.tgenabled in ('O','A') and fn.nspname='platform'
       and (t.tgname='audit_business_row' and p.proname='audit_business_row'
         or t.tgname='audit_event_envelope' and p.proname='audit_event_envelope')`.execute(db);
   const active = new Map(result.rows.filter(row => row.handler === "audit_business_row").map(row => [row.name, row.config]));
-  return result.rows.some(row => row.name === "platform.entity_events" && row.handler === "audit_event_envelope") && expected.every(config => active.get(`${config.schema}.${config.table}`) === JSON.stringify(config));
+  return result.rows.some(row => row.name === "platform.entity_events" && row.handler === "audit_event_envelope" && row.identity) && expected.every(config => active.get(`${config.schema}.${config.table}`) === JSON.stringify(config));
 }
 
 export async function applyAuditHistory(db: OpenShapeForgeDatabase, tables: readonly GeneratedCrudTable[] = manifest.tables as unknown as GeneratedCrudTable[], timelines: Timelines = auditCatalog.timelines): Promise<void> {
@@ -200,10 +200,12 @@ async function installAuditHistory(db: OpenShapeForgeDatabase, tables: readonly 
           else observed_subjects=platform.audit_recorded_subjects(cfg,NEW.aggregate_id,NEW.tenant_id); end if;
         end if;
       end if;
-      identity=nullif(current_setting('app.user_id',true),'');
+      identity=coalesce(nullif(current_setting('app.audit_identity_id',true),''),nullif(current_setting('app.user_id',true),''));
       correlation=coalesce(nullif(current_setting('app.audit_correlation',true),''),pg_current_xact_id()::text);
       NEW.payload=platform.audit_redact(coalesce(NEW.payload,'{}'::jsonb)) || jsonb_build_object('audit',platform.audit_redact(envelope) || jsonb_build_object(
-        'version',1,'entityType',entity,
+        'version',2,'entityType',entity,
+        'actorIdentityId',nullif(current_setting('app.audit_identity_id',true),''),
+        'actorSubject',nullif(current_setting('app.user_id',true),''),'actorIssuer',nullif(current_setting('app.audit_actor_issuer',true),''),
         'actorId',identity,'actorKind',coalesce(nullif(current_setting('app.audit_actor_kind',true),''),'system'),
         'operationId',nullif(current_setting('app.audit_operation',true),''),'correlationId',correlation,
         'changedFields',changes,

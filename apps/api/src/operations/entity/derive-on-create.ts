@@ -80,8 +80,9 @@ export function maxDerivedIdentifierAttempts(): number {
 }
 
 /** Include matching partial indexes in PostgreSQL's arbiter inference too.
- * The mandatory unconditional index still scopes suffix allocation; other
- * unique columns must continue to raise their original constraint errors.
+ * All predicates over the same key columns express identifier uniqueness;
+ * the mandatory unconditional index still scopes suffix allocation. Unique
+ * indexes over other columns must raise their original constraint errors.
  * Read live catalog facts, never caller SQL or constraint error text. */
 export async function derivedIdentifierConflictPredicate(
   db: QueryExecutorProvider,

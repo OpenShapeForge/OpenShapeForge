@@ -114,6 +114,10 @@ describe("database-backed create-time identifiers", () => {
     const fixtureManifest = JSON.parse(artifacts.find((artifact: { path: string }) => artifact.path.endsWith("manifest.json"))!.contents);
     const table = fixtureManifest.tables.find((table: GeneratedCrudTable) => table.table === "derived_identifier_fixtures") as GeneratedCrudTable;
     await sql.raw(schema).execute(privileged.db);
+    // Complementary predicates must both arbitrate, although their conjunction
+    // is false: the inference predicate does not filter the inserted row.
+    await sql`create unique index inactive_identifier_keys on erp.derived_identifier_fixtures
+      (key, tenant_id) where not active`.execute(privileged.db);
     await sql`grant select, insert, update, delete on erp.derived_identifier_fixtures to openshapeforge_app`.execute(privileged.db);
     const session = { ...actor, roles: ["Relaties.All.ReadWrite"] };
     const create = (active: boolean, inputSession = session) => withDbSession(runtime.db, inputSession, (trx, dbSession) =>
@@ -126,7 +130,7 @@ describe("database-backed create-time identifiers", () => {
     expect(created.filter((row) => row.active === false)).toHaveLength(2);
 
     // Assert PostgreSQL's actual plan for the runtime's INSERT, not a SQL
-    // spelling: both key indexes must arbitrate the concurrent allocation.
+    // spelling: all three key indexes must arbitrate concurrent allocation.
     const insert = derivedInserts[0]!;
     const explain = await withDbSession(runtime.db, session, (trx) => trx.executeQuery<{ "QUERY PLAN": Array<{ Plan: { "Conflict Arbiter Indexes": string[] } }> }>(
       CompiledQuery.raw("explain (format json) " + insert.sql, [...insert.parameters]),
@@ -134,6 +138,7 @@ describe("database-backed create-time identifiers", () => {
     const plan = explain.rows[0]!["QUERY PLAN"] as Array<{ Plan: { "Conflict Arbiter Indexes": string[] } }>;
     expect(plan[0]!.Plan["Conflict Arbiter Indexes"].sort()).toEqual([
       "active_identifier_keys", "derived_identifier_fixtures_key_derived_uidx",
+      "inactive_identifier_keys",
     ]);
 
     // A different unique business property must still fail rather than

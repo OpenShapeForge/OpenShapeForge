@@ -229,18 +229,9 @@ function buildFilterConditions(
       continue;
     }
 
-    if (column.type === "text" && value && typeof value === "object" && !Array.isArray(value)
-      && (Object.hasOwn(value, "contains") || Object.hasOwn(value, "startsWith"))) {
-      conditions.push(structuredFilter({[fieldName]:value}, {[fieldName]: {sql:sql.id("row_source",column.name),kind:"text"}}));
-      continue;
-    }
-    const exact = value && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, "eq")
-      ? (value as { eq?: unknown }).eq : undefined;
-    if (exact !== undefined) {
-      if (Object.keys(value as object).length !== 1) {
-        throw generatedCrudError(`Exact filter ${key} accepts eq only.`, "BAD_USER_INPUT");
-      }
-      conditions.push(sql`${sql.id("row_source", column.name)} = ${exact}`);
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const kind = column.type === "boolean" ? "boolean" : ["integer","numeric","bigint","double precision","real"].includes(column.type) ? "number" : ["date","timestamp","timestamptz"].includes(column.type) ? "timestamp" : "text";
+      conditions.push(structuredFilter({[fieldName]:value}, {[fieldName]: {sql:sql.id("row_source",column.name),kind}}));
       continue;
     }
 

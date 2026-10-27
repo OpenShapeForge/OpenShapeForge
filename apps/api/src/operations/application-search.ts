@@ -48,7 +48,7 @@ export function nativeApplicationSearchHandler(operation:OperationContract):Modu
           readable(field)&&(!columns||columns.get(field)?.type==='text'||(exactId&&columns.get(field)?.type==='uuid')));
         if(!fields.length)continue;
         const definition=available.get(source.list)!;
-        const schema=definition.input.kind==='json-schema'?definition.input.schema as Record<string,any>:undefined;
+        const schema=(definition.input.kind==='json-schema'?definition.input.schema:definition.input) as Record<string,any>;
         const properties=schema?.properties??{};
         // All persisted CRUD uses the same structured filter. Operation sources advertise their own query shape.
         const structured=!!table||!!properties.filter;

@@ -9,7 +9,9 @@ export type OpenShapeForgeDatabase = Kysely<DB>;
 
 const poolLimits = new WeakMap<OpenShapeForgeDatabase, number>();
 export function databasePoolLimit(db: OpenShapeForgeDatabase): number {
-  return poolLimits.get(db) ?? readDatabasePoolMaxConnections();
+  // An externally constructed/cloned Kysely does not establish pool capacity.
+  // Keep its transaction fallback rather than risk consuming its only slot.
+  return poolLimits.get(db) ?? 1;
 }
 
 export type DatabaseRuntime = {

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { setTimeout as delay } from "node:timers/promises";
+import { readStatementTimeoutMs } from "../config/limits.js";
 import type { OpenShapeForgeDatabase } from "./connection.js";
 
 type Reservation = {
@@ -152,21 +154,35 @@ export class SharedReadBarriers {
       return result;
     }
     let reservation: Reservation | undefined;
+    const deadline = Date.now() + (readStatementTimeoutMs() || 30_000);
+    let retryMs = 15;
     while (!reservation) {
       signal?.throwIfAborted();
+      if (Date.now() >= deadline) throw new Error("Read barrier acquisition timed out.");
       reservation = await this.#acquire(namespace, tenantId);
-      if (!reservation) await new Promise(resolve => setTimeout(resolve, 15));
+      if (!reservation) {
+        await delay(Math.min(retryMs + Math.floor(Math.random() * 15), Math.max(1, deadline - Date.now())), undefined, { signal });
+        retryMs = Math.min(250, retryMs * 2);
+      }
     }
     const scope = { key, active: true, reservation };
+    let failed = false, failure: unknown;
     try {
       signal?.throwIfAborted();
       const result = await this.#scope.run(scope, work);
       signal?.throwIfAborted();
       return result;
+    } catch (error) {
+      failed = true; failure = error;
+      throw error;
     } finally {
       scope.active = false;
       // Validate ownership before returning a result, including read failures.
-      await this.#release(reservation, namespace, tenantId);
+      try { await this.#release(reservation, namespace, tenantId); }
+      catch (error) {
+        if (failed) throw new AggregateError([failure, error], "Provider read and read barrier both failed.");
+        throw error;
+      }
     }
   }
 }

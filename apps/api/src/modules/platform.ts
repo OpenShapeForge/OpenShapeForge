@@ -471,7 +471,9 @@ export class ModulePlatformRuntime {
             return this.services.db.withSession(session, async trx => {
               await sql`select pg_advisory_xact_lock_shared(hashtext(${'osf.read-barrier:' + namespace}), hashtext(${tenantId}))`.execute(trx);
               options?.signal?.throwIfAborted();
-              return work();
+              const result = await work();
+              options?.signal?.throwIfAborted();
+              return result;
             });
           }
           return this.#readBarriers.run(namespace, tenantId, work, options?.signal);

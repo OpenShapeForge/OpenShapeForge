@@ -675,6 +675,28 @@ on the GraphQL surface, gated by `Platform.ApiKeys.Manage` and by a privilege
 ceiling — a caller cannot grant roles it does not hold, and an api-key session
 may never manage keys at all.
 
+A resolved key is also the ONLY carrier that produces an *application
+principal*: the `integration_id` of the row the store resolved, carried as
+`session.appPrincipal` and projected into `app.app_principal_id`, with the
+session's class fixed at `application`. A named record action
+([authoring.md](authoring.md)) matches an `integrations` subject against that
+and nothing else, so:
+
+- the grant follows the INTEGRATION, not the credential. Rotating or revoking
+  one key does not move it; deleting the integration ends it.
+- a direct bearer token of the same integration's Keycloak service account is
+  classified `service`, not `application`, and satisfies no record action.
+  Mapping `azp` back to an integration row would mean trusting a claim-to-row
+  lookup that cannot distinguish a re-pointed or separately created realm
+  client, so it is deliberately not done. An application that needs a record
+  action presents its key.
+- organization automation and every other configured service account are
+  likewise `service`. Nothing about their existing access changes; they simply
+  hold no named action, which is the default for every principal.
+- a trusted-context bundle names no application principal at all, however it
+  is spelled in the headers. The reader builds the session from the bundle's
+  tenant, user, roles and groups and nothing else.
+
 **3. Trusted-context HMAC headers (v2)** — the internal service-to-service
 path (`packages/auth/src/trusted-context.ts`). Header names:
 

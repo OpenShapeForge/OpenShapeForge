@@ -215,6 +215,79 @@ or leases are issued and again inside the write transaction. This semantic
 action is independent of its SQL verb, so an archive implemented with UPDATE
 can truthfully require `delete`.
 
+### Named record actions
+
+The three permissions answer "who may see, change and remove this record".
+Some records also need "who may *do this particular thing* to it" — start it,
+follow it, publish it — for a party that has no business reading or changing
+it at all. That is a second, independent axis, declared per entity and per
+action:
+
+```yaml
+    recordPermissions:
+      field: authorization
+      empty: public
+      createRequires: [view, edit]
+      actions:
+        - name: start
+          principals: [integration]
+          reads: [definition, status]
+        - name: follow
+          principals: [integration, person]
+```
+
+and granted per record, under the ACL's own `actions` member:
+
+```json
+{
+  "view":   { "users": ["<person>"] },
+  "edit":   { "users": ["<person>"] },
+  "actions": {
+    "start":  { "integrations": ["<integration id>"] },
+    "follow": { "integrations": ["<integration id>"], "roles": ["Runs.All.Follow"] }
+  }
+}
+```
+
+What is true of this axis, and is the reason it is separate:
+
+- **Independent in both directions.** Holding `view` grants no action, and
+  holding an action grants no `view`, `edit` or `delete`. A holder of `start`
+  cannot read the record through any generic API, because the row-scope policy
+  that gates every read is unchanged and still asks for `view`.
+- **Never public.** An absent `actions` member, an absent entry, an entry
+  naming nobody and a malformed document are all denials, whatever the entity
+  authored for `empty`. `empty: public` is about the three permissions only.
+- **Matched against the verified principal class.** `users`, `groups` and
+  `roles` are satisfiable only by a session the server classified as a person;
+  `integrations` only by one carrying a resolved API-key integration. A service
+  account holding the same role as a person therefore acquires nothing here,
+  and a carrier the server could not classify holds no action at all.
+- **Keyed on the integration, not the credential.** An `integrations` entry
+  names `platform.api_key_integrations.id`, which survives key rotation and is
+  independent of the integration's display name. A direct bearer token of the
+  same integration's Keycloak service account is *not* an application
+  principal and satisfies no action — see docs/api.md.
+- **Opt-in.** An entity that declares no `actions` can carry none: a write
+  naming an undeclared action, or a principal kind the action does not admit,
+  is refused with `VALIDATION`. Assigning one is an ordinary ACL edit and so
+  needs the record's `edit` permission; an editor may grant any action the
+  entity declares, exactly as it may already rewrite view/edit/delete.
+- **`reads` is the whole execution capability.** An action that must work with
+  the record declares the fields it needs; core returns exactly those fields of
+  exactly that record, through the same owner-scoped lookup that authorized the
+  action. The ACL field, a classified, computed, localized or unpersisted
+  field, a relationship and a field with its own authorization are refused at
+  compile time. An action with no `reads` authorizes an effect and discloses
+  nothing.
+
+A record-scoped plugin Operation requires one with
+`auth.recordAction: <name>`; the entity must declare it, and the check is a
+live read inside the Operation's transaction (docs/operations.md). The lookup
+locks the record's ACL row for the rest of that transaction, which is the
+single ordering a concurrent policy change also follows, so a grant and its
+removal cannot interleave with the effect in either direction.
+
 Notes on what the compiler does with this:
 
 - **Only `persisted` fields produce columns.** A field without a `persisted`

@@ -5,6 +5,8 @@ import {
   assertCreateRecordPermissions,
   assertUpdateRecordPermissions,
   parseRecordPermissions,
+  recordActionAllows,
+  recordActionsAllowRow,
   recordPermissionAllows,
   recordPermissionsAllowRow,
 } from "./record-permissions.js";
@@ -204,5 +206,173 @@ describe("record permissions", () => {
     };
     expect(recordPermissionsAllowRow(table, row, ["view", "edit"], session)).toBe(true);
     expect(recordPermissionsAllowRow(table, row, ["delete"], session)).toBe(false);
+  });
+});
+
+const integrationId = "44444444-4444-4444-8444-444444444444";
+
+/** The same entity, with a declared action axis. */
+const actionTable = {
+  ...table,
+  source: {
+    ...table.source,
+    authorization: {
+      ...table.source!.authorization,
+      recordPermissions: {
+        ...table.source!.authorization!.recordPermissions,
+        actions: [
+          { name: "start", principals: ["integration"], reads: ["definition"] },
+          { name: "review", principals: ["person"] },
+          { name: "both", principals: ["integration", "person"] },
+        ],
+      },
+    },
+  },
+} as unknown as GeneratedCrudTable;
+
+const linked = {
+  relation: {
+    identityId: "55555555-5555-4555-8555-555555555555",
+    issuer: "https://identity.example/realms/test",
+    subject: userId,
+    status: "linked",
+  },
+} as Partial<DbSessionInput>;
+
+describe("named record actions", () => {
+  const grant = (subjects: Record<string, string[]>) => ({ actions: { start: subjects } });
+
+  test("parses the action axis and refuses anything outside its shape", () => {
+    expect(parseRecordPermissions(grant({ integrations: [integrationId] }))?.actions).toEqual({
+      start: { users: [], groups: [], roles: [], integrations: [integrationId] },
+    });
+    for (const malformed of [
+      { actions: [] },
+      { actions: "start" },
+      { actions: { start: [] } },
+      { actions: { start: { unknown: [] } } },
+      { actions: { start: { integrations: "x" } } },
+      { actions: { start: { integrations: [""] } } },
+      // An action may never restate a record permission, in either direction.
+      { actions: { view: { users: [userId] } } },
+      { actions: { Start: { users: [userId] } } },
+      { actions: { "start-run": { users: [userId] } } },
+      // `integrations` is refused on the permissions themselves.
+      { view: { integrations: [integrationId] } },
+    ]) {
+      expect(parseRecordPermissions(malformed)).toBeUndefined();
+    }
+  });
+
+  test("an action is independent of view, and empty never means public", () => {
+    const application: DbSessionInput = {
+      ...session, userId: "66666666-6666-4666-8666-666666666666",
+      principalKind: "service", appPrincipal: { integrationId },
+    };
+    // Granted the action, granted no view.
+    const document = grant({ integrations: [integrationId] });
+    expect(recordActionAllows(document, "start", application)).toBe(true);
+    expect(recordPermissionAllows(document, "view", application, "restricted")).toBe(false);
+    // Holding view grants no action, however permissive the ACL is.
+    expect(recordActionAllows({}, "start", { ...session, ...linked })).toBe(false);
+    expect(recordActionAllows({ actions: { start: {} } }, "start", application)).toBe(false);
+    expect(recordPermissionAllows({}, "view", session, "public")).toBe(true);
+    // A malformed document and an unnamed action are denials, not errors.
+    expect(recordActionAllows({ actions: { start: { users: 1 } } }, "start", application)).toBe(false);
+    expect(recordActionAllows(document, "follow", application)).toBe(false);
+    expect(recordActionAllows(document, "view", application)).toBe(false);
+  });
+
+  test("a subject kind is matched against the verified principal class", () => {
+    const roles = ["Records.All.Manage"];
+    const personGrant = { actions: { start: { roles, users: [userId] } } };
+    const applicationGrant = grant({ integrations: [integrationId] });
+    const carriers: Array<[string, DbSessionInput, boolean, boolean]> = [
+      // label, session, may use a person subject, may use an integration one
+      ["stated person", { ...session, roles, principalKind: "person" }, true, false],
+      ["linked person", { ...session, roles, ...linked }, true, false],
+      ["service bearer", { ...session, roles, principalKind: "service" }, false, false],
+      [
+        "api-key application",
+        { ...session, roles, principalKind: "service", appPrincipal: { integrationId } },
+        false, true,
+      ],
+      ["unclassified", { ...session, roles }, false, false],
+    ];
+    for (const [label, carrier, person, application] of carriers) {
+      expect([label, recordActionAllows(personGrant, "start", carrier)]).toEqual([label, person]);
+      expect([label, recordActionAllows(applicationGrant, "start", carrier)])
+        .toEqual([label, application]);
+    }
+  });
+
+  test("row-local evaluation agrees, and refuses an entity without the policy", () => {
+    const application: DbSessionInput = {
+      ...session, principalKind: "service", appPrincipal: { integrationId },
+    };
+    const row = { authorization: grant({ integrations: [integrationId] }) };
+    expect(recordActionsAllowRow(actionTable, row, ["start"], application)).toBe(true);
+    expect(recordActionsAllowRow(actionTable, row, ["review"], application)).toBe(false);
+    expect(recordActionsAllowRow(actionTable, row, [], application)).toBe(true);
+    expect(recordActionsAllowRow(
+      { ...actionTable, source: {} } as unknown as GeneratedCrudTable,
+      row, ["start"], application,
+    )).toBe(false);
+  });
+});
+
+describe("assigning a record action", () => {
+  const write = (values: Record<string, unknown>) =>
+    () => assertUpdateRecordPermissions(actionTable, values);
+
+  test("refuses an action the entity does not declare", () => {
+    expect(write({ authorization: { actions: { publish: { users: [userId] } } } }))
+      .toThrow(/does not declare/);
+    // ...and on an entity with no action axis at all.
+    expect(() => assertUpdateRecordPermissions(table, {
+      authorization: { actions: { start: { users: [userId] } } },
+    })).toThrow(/does not declare/);
+  });
+
+  test("refuses a principal kind the action does not admit", () => {
+    expect(write({ authorization: { actions: { start: { users: [userId] } } } }))
+      .toThrow(/does not admit/);
+    expect(write({ authorization: { actions: { review: { integrations: [integrationId] } } } }))
+      .toThrow(/does not admit/);
+    // Both kinds declared, both accepted.
+    expect(write({
+      authorization: { actions: { both: { users: [userId], integrations: [integrationId] } } },
+    })).not.toThrow();
+  });
+
+  test("refuses an application that is not an integration id", () => {
+    for (const named of ["osf_live_abc", "my integration", userId.slice(0, 8)]) {
+      expect(write({ authorization: { actions: { start: { integrations: [named] } } } }))
+        .toThrow(/not an integration id/);
+    }
+  });
+
+  test("an empty subject set round-trips, so reading and rewriting an ACL works", () => {
+    expect(write({
+      authorization: {
+        view: { users: [], groups: [], roles: [] },
+        actions: { start: { users: [], groups: [], roles: [], integrations: [integrationId] } },
+      },
+    })).not.toThrow();
+  });
+
+  test("create applies the same rules", () => {
+    expect(() => assertCreateRecordPermissions(actionTable, session, {
+      authorization: {
+        view: { users: [userId] }, edit: { users: [userId] },
+        actions: { start: { integrations: [integrationId] } },
+      },
+    })).not.toThrow();
+    expect(() => assertCreateRecordPermissions(actionTable, session, {
+      authorization: {
+        view: { users: [userId] }, edit: { users: [userId] },
+        actions: { start: { users: [userId] } },
+      },
+    })).toThrow(/does not admit/);
   });
 });

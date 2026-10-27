@@ -104,9 +104,21 @@ migrate role, which on a managed instance has neither `SUPERUSER` nor
 `CREATEROLE`. So the chain never creates a role. The compiler declares the
 roles the generated schema depends on in `apps/api/src/generated/db/manifest.json`
 under `databaseRoles` — the runtime login role, the worker login role and the
-`nologin` definer role that owns the cross-tenant blueprint read function —
-and step 0 verifies them, failing *before any schema exists* with the exact
-administrator statements that satisfy the contract.
+`nologin` definer roles that own the cross-tenant blueprint read function, the
+identity-registry point lookups and the record-action lookup — and step 0
+verifies them, failing *before any schema exists* with the exact administrator
+statements that satisfy the contract.
+
+A definer role exists so one function can read what its caller may not, and
+owns nothing else. `openshapeforge_record_action_resolver` is the narrowest of
+them: per entity that declares a record action it holds column-level `SELECT`
+on the key, the tenant column, the ACL column and that action's declared read
+fields, plus the `UPDATE` privilege `SELECT … FOR SHARE` requires behind a
+`WITH CHECK (false)` policy — so it may lock an ACL row to serialize a check
+against a concurrent policy change, and may never write one. Its two functions
+are not executable by the worker connection or by `PUBLIC`. Adding a role is a
+host provisioning step: `db:provision-roles` before the next `db:migrate`, or
+step 0 refuses the chain and names the statements.
 
 ```sh
 OPENSHAPEFORGE_ADMIN_DATABASE_URL=postgres://admin:...@host/db \

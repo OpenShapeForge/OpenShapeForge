@@ -2,7 +2,7 @@
 import { sql, type Kysely } from "kysely";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { setTimeout as delay } from "node:timers/promises";
-import { readStatementTimeoutMs, readSharedReadTransactionTimeoutMs, readMaintenanceAdmissionTimeoutMs } from "../config/limits.js";
+import { readStatementTimeoutMs, readSharedReadTransactionTimeoutMs, readMaintenanceAdmissionTimeoutMs, readSharedReadAdmissionProbeMs } from "../config/limits.js";
 import type { OpenShapeForgeDatabase } from "./connection.js";
 
 type Reservation = {
@@ -27,8 +27,8 @@ export function hasSharedReadBarrier(db: OpenShapeForgeDatabase): boolean {
 }
 
 /** Reader metadata must remain able to finish even when every ordinary pool
- * slot is occupied by writers waiting on the read fence. Serialize its short
- * tenant transactions on the already reserved connection instead. */
+ * slot is occupied by writers waiting on the read fence. Prefer free pool
+ * slots for parallel metadata; use the reserved backend when admission fails. */
 export type ReadBarrierDatabaseContext = { marker: string; budgetMs: number; isActive: () => boolean; retain: (pending: Promise<unknown>) => void };
 export function withReadBarrierDatabase<Database, Result>(db: Kysely<Database>, tenantId: string, work: (database: Kysely<Database>, context?: ReadBarrierDatabaseContext) => Promise<Result>): Promise<Result> {
   const manager = managers.get(db as unknown as OpenShapeForgeDatabase);
@@ -72,8 +72,9 @@ export function withReadBarrierMaintenanceDatabase<Database, Result>(db: Kysely<
 }
 
 /** Session advisory locks share ONE pooled connection across concurrent reads.
- * Short tenant transactions are serialized here, with local GUCs cleared on
- * commit. Provider I/O belongs outside DB callbacks; a whole-transaction
+ * Short tenant transactions prefer free pool slots; the reserved backend
+ * serializes their fallback. Local GUCs clear on commit. Provider I/O belongs
+ * outside DB callbacks; a whole-transaction
  * budget rolls back accidentally slow callbacks without releasing their
  * Service fence before their remaining work has drained. Writers
  * use the matching transaction advisory lock before changing protected data.
@@ -131,26 +132,59 @@ export class SharedReadBarriers {
     if (current.tenantId !== tenantId.toLowerCase()) throw new Error("Read barrier database work belongs to another tenant.");
     if (this.#databaseScope.getStore()) throw new Error("An independent transaction cannot nest inside read barrier database work.");
     const retain = (pending: Promise<unknown>) => this.retainScopeWork(pending);
-    const job = this.#serialize(async () => {
-      if (!current.active) throw new Error("Read barrier scope is no longer active.");
-      current.signal?.throwIfAborted();
-      if (current.reservation.failure) throw current.reservation.failure;
-      await this.#assertHeld(current.reservation, current.namespace, current.tenantId);
+    const execute = async (run: (invoke: (connection: OpenShapeForgeDatabase) => Promise<T>) => Promise<T>, serializeChecks: boolean) => {
+      const assertActive = () => {
+        if (!current.active) throw new Error("Read barrier scope is no longer active.");
+        current.signal?.throwIfAborted();
+        if (current.reservation.failure) throw current.reservation.failure;
+      };
+      const held = () => serializeChecks
+        ? this.#serialize(() => this.#assertHeld(current.reservation, current.namespace, current.tenantId))
+        : this.#assertHeld(current.reservation, current.namespace, current.tenantId);
+      assertActive();
+      await held();
+      assertActive();
       let result: T;
-      try { result = await this.#databaseScope.run(true, () => work(current.reservation.connection, {
+      try { result = await run(connection => this.#databaseScope.run(true, () => work(connection, {
         marker: JSON.stringify({ namespace: current.namespace, tenantId: current.tenantId }),
         budgetMs: readSharedReadTransactionTimeoutMs(), isActive: () => current.active, retain,
-      })); }
+      }))); }
       catch (error) {
-        try { await this.#assertHeld(current.reservation, current.namespace, current.tenantId); }
+        try { await held(); }
         catch (lockError) { throw new AggregateError([error, lockError], "Database work and read barrier both failed."); }
         throw error;
       }
-      await this.#assertHeld(current.reservation, current.namespace, current.tenantId);
-      if (!current.active) throw new Error("Read barrier scope is no longer active.");
-      if (current.reservation.failure) throw current.reservation.failure;
+      await held();
+      assertActive();
       return result;
-    });
+    };
+    const job = (async () => {
+      // Prefer parallel, short transactions on free ordinary pool slots. This
+      // probe only selects a strategy: cold or busy slots fall back to the
+      // already reserved backend, so waiting writers cannot deadlock a reader.
+      let admitted = false;
+      let admissionFailed = false;
+      try {
+        // Fence checks happen before borrowing and after returning the slot.
+        // A queued fallback must not leave ordinary slots parked on its queue.
+        return await execute(async invoke => {
+          const probe = AbortSignal.timeout(readSharedReadAdmissionProbeMs());
+          try {
+            return await this.#db.connection().execute(connection => {
+              admitted = true;
+              return invoke(connection);
+            }, { signal: AbortSignal.any([probe, ...(current.signal ? [current.signal] : [])]) });
+          } catch (error) {
+            admissionFailed = !admitted;
+            throw error;
+          }
+        }, true);
+      } catch (error) {
+        // Never replay callback work, including a callback's own TimeoutError.
+        if (!admissionFailed || current.signal?.aborted) throw error;
+        return this.#serialize(() => execute(invoke => invoke(current.reservation.connection), false));
+      }
+    })();
     retain(job);
     return job;
   }

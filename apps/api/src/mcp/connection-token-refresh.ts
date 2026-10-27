@@ -18,7 +18,7 @@ import { randomUUID } from "node:crypto";
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
-import { withReadBarrierMaintenanceDatabase } from "../db/read-barrier.js";
+import { withReadBarrierMaintenanceDatabase, ReadBarrierMaintenanceAdmissionError } from "../db/read-barrier.js";
 import type { DB } from "../generated/db/types.js";
 import { appendEntityEventInTransaction } from "../platform/entity-events.js";
 import { HttpError } from "../rest/http-error.js";
@@ -198,7 +198,7 @@ export async function refreshConnectionRowLocked(input: {
         ),
       store: {
         withLockedRow: (work) =>
-          withReadBarrierMaintenanceDatabase(input.db, database => withDbSession(database, input.session, async (lockedTrx) => {
+          withReadBarrierMaintenanceDatabase(input.db, input.session.tenantId, database => withDbSession(database, input.session, async (lockedTrx) => {
             trx = lockedTrx;
             input.signal?.throwIfAborted();
             const locked = await sql<{
@@ -295,6 +295,7 @@ export async function refreshConnectionRowLocked(input: {
     return result;
   } catch (error) {
     input.signal?.throwIfAborted();
+    if (error instanceof ReadBarrierMaintenanceAdmissionError) throw new HttpError(503, "DATABASE_BUSY", error.message);
     const failureKind = egressInvocation.consumeFailure(error);
     const boundedTimeout =
       error instanceof DOMException && error.name === "TimeoutError";

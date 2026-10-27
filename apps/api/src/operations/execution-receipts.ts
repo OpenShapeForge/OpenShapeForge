@@ -5,6 +5,7 @@ import { operationFailure } from "@openshapeforge/operations";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
+import { withReadBarrierMaintenanceDatabase } from "../db/read-barrier.js";
 import {
   applyDbSession,
   createDbSessionContext,
@@ -359,10 +360,10 @@ async function withCommittedReceiptTransaction<T>(
   work: (trx: Transaction<DB>) => Promise<T>,
 ): Promise<T> {
   const resolved = createDbSessionContext(session);
-  return db.transaction().execute(async (trx) => {
+  return withReadBarrierMaintenanceDatabase(db, session.tenantId, database => database.transaction().execute(async (trx) => {
     await applyDbSession(trx, resolved);
     return work(trx);
-  });
+  }));
 }
 
 /**

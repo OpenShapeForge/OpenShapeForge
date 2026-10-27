@@ -2,7 +2,7 @@
 import { sql, type Kysely } from "kysely";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { setTimeout as delay } from "node:timers/promises";
-import { readStatementTimeoutMs, readSharedReadTransactionTimeoutMs } from "../config/limits.js";
+import { readStatementTimeoutMs, readSharedReadTransactionTimeoutMs, readMaintenanceAdmissionTimeoutMs } from "../config/limits.js";
 import type { OpenShapeForgeDatabase } from "./connection.js";
 
 type Reservation = {
@@ -10,6 +10,7 @@ type Reservation = {
   pid: number;
   references: Map<string, number>;
   locks: Set<string>;
+  marked: boolean;
   failure?: unknown;
   finish: () => void;
   finished: Promise<unknown>;
@@ -39,11 +40,30 @@ export function withReadBarrierDatabase<Database, Result>(db: Kysely<Database>, 
  * rather than deadlocking a reader behind writers waiting on its own fence.
  * The admission signal does not cancel work after a connection is acquired.
  */
-export function withReadBarrierMaintenanceDatabase<Database, Result>(db: Kysely<Database>, work: (database: Kysely<Database>) => Promise<Result>, signal?: AbortSignal): Promise<Result> {
+export class ReadBarrierMaintenanceAdmissionError extends Error {
+  constructor(cause: unknown) { super("Database maintenance admission timed out; retry the request.", { cause }); }
+}
+export function withReadBarrierMaintenanceDatabase<Database, Result>(db: Kysely<Database>, tenantId: string | null | undefined, work: (database: Kysely<Database>) => Promise<Result>, signal?: AbortSignal): Promise<Result> {
   const manager = managers.get(db as unknown as OpenShapeForgeDatabase);
   if (!manager?.hasScope()) return work(db);
-  manager.assertMaintenanceAdmission();
-  const job = db.connection().execute(work, { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(50)]) });
+  manager.assertMaintenanceAdmission(tenantId);
+  const job = (async () => {
+    await manager.verifyMaintenanceFence(tenantId);
+    const deadline = AbortSignal.timeout(readMaintenanceAdmissionTimeoutMs());
+    let admitted = false;
+    try {
+      return await db.connection().execute(async connection => {
+        admitted = true;
+        manager.assertMaintenanceAdmission(tenantId);
+        const value = await work(connection);
+        await manager.verifyMaintenanceFence(tenantId);
+        return value;
+      }, { signal: AbortSignal.any([...(signal ? [signal] : []), deadline]) });
+    } catch (error) {
+      if (!admitted && deadline.aborted && !signal?.aborted) throw new ReadBarrierMaintenanceAdmissionError(error);
+      throw error;
+    }
+  })();
   manager.retainScopeWork(job);
   return job;
 }
@@ -72,12 +92,20 @@ export class SharedReadBarriers {
     scope.pending.add(drain);
     void drain.then(() => scope.pending.delete(drain));
   }
-  assertMaintenanceAdmission(): void {
+  assertMaintenanceAdmission(tenantId: string | null | undefined): void {
     const scope = this.#scope.getStore();
     if (!scope?.active) throw new Error("Read barrier scope is no longer active.");
+    if (scope.tenantId !== tenantId?.toLowerCase()) throw new Error("Read barrier maintenance belongs to another tenant.");
     if (scope.reservation.failure) throw scope.reservation.failure;
     scope.signal?.throwIfAborted();
     if (this.#databaseScope.getStore()) throw new Error("Atomic maintenance must run outside shared metadata transactions.");
+  }
+  verifyMaintenanceFence(tenantId: string | null | undefined): Promise<void> {
+    return this.#serialize(async () => {
+      this.assertMaintenanceAdmission(tenantId);
+      const scope = this.#scope.getStore()!;
+      await this.#assertHeld(scope.reservation, scope.namespace, scope.tenantId);
+    });
   }
 
   async #assertHeld(reservation: Reservation, namespace: string, tenantId: string): Promise<void> {
@@ -86,7 +114,10 @@ export class SharedReadBarriers {
         exists(select 1 from pg_locks where pid=pg_backend_pid() and locktype='advisory'
           and classid=(hashtext(${'osf.read-barrier:' + namespace})::bigint & 4294967295)::oid
           and objid=(hashtext(${tenantId})::bigint & 4294967295)::oid
-          and objsubid=2 and mode='ShareLock' and granted) as held`.execute(reservation.connection)).rows[0]!;
+          and objsubid=2 and mode='ShareLock' and granted)
+        and exists(select 1 from pg_locks where pid=pg_backend_pid() and locktype='advisory'
+          and classid=(hashtext('osf.read-barrier:shared-backend')::bigint & 4294967295)::oid
+          and objid=0 and objsubid=2 and mode='ShareLock' and granted) as held`.execute(reservation.connection)).rows[0]!;
       if (row.pid !== reservation.pid || !row.held) throw new Error("Read barrier was lost during database work.");
     } catch (error) { reservation.failure = error; throw error; }
   }
@@ -136,7 +167,7 @@ export class SharedReadBarriers {
     const idle = new Promise<void>(resolve => { finish = resolve; });
     const finished = this.#db.connection().execute(async connection => {
       const pid = (await sql<{ pid: number }>`select pg_backend_pid() as pid`.execute(connection)).rows[0]!.pid;
-      const reservation: Reservation = { connection, pid, references: new Map(), locks: new Set(), finish, finished };
+      const reservation: Reservation = { connection, pid, references: new Map(), locks: new Set(), marked: false, finish, finished };
       this.#reservation = reservation;
       ready(reservation);
       await idle;
@@ -164,6 +195,10 @@ export class SharedReadBarriers {
       // leave a session lock behind when this connection returns to its pool.
       if (!held) reservation.locks.add(key);
       try {
+      if (!reservation.marked) {
+        reservation.marked = true;
+        await sql`select pg_advisory_lock_shared(hashtext('osf.read-barrier:shared-backend'),0)`.execute(reservation.connection);
+      }
       const row = (await sql<{ pid: number; acquired: boolean }>`
         select pg_backend_pid() as pid, case when exists (
           select 1 from pg_locks where locktype = 'advisory'
@@ -196,6 +231,7 @@ export class SharedReadBarriers {
         const [namespace, tenantId] = JSON.parse(key) as [string, string];
         await sql`select pg_advisory_unlock_shared(hashtext(${'osf.read-barrier:' + namespace}), hashtext(${tenantId}))`.execute(reservation.connection);
       }
+      if (reservation.marked) await sql`select pg_advisory_unlock_shared(hashtext('osf.read-barrier:shared-backend'),0)`.execute(reservation.connection);
     } catch (error) {
       // Never return a connection with uncertain session-lock ownership.
       await sql`select pg_terminate_backend(pg_backend_pid())`.execute(reservation.connection).catch(() => {});

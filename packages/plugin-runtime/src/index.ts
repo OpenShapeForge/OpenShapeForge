@@ -397,7 +397,9 @@ export type PluginDatabase = {
    * have a whole-transaction budget; expired callbacks cannot execute more SQL
    * and their outstanding I/O drains before the Service fence is released.
    * The transaction-local `app.shared_read_barrier` GUC contains the current
-   * namespace/tenant JSON only in this shared mode. Definition writers must
+   * namespace/tenant JSON only in this shared mode. The reserved backend also
+   * holds a session ShareLock on (hashtext('osf.read-barrier:shared-backend'), 0),
+   * which guards can inspect even if the metadata marker is cleared. Writers must
    * refuse writes when it is nonempty, preventing own-backend lock upgrades
    * for every namespace. Independent nested transactions and SQL streams are
    * refused; use a command Operation when atomic writes are needed.

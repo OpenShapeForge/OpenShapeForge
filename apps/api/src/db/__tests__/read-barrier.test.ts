@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { SQL } from "bun";
 import { CompiledQuery, sql, type DatabaseConnection, type Transaction } from "kysely";
 import { createDatabaseRuntime, databasePoolLimit } from "../connection.js";
-import { sharedReadBarriers, withReadBarrierMaintenanceDatabase } from "../read-barrier.js";
+import { sharedReadBarriers, withReadBarrierMaintenanceDatabase, ReadBarrierMaintenanceAdmissionError } from "../read-barrier.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
 import { withDbSession } from "../session.js";
 import { withAuditContext } from "../../platform/audit-context.js";
@@ -180,6 +180,7 @@ test("expired metadata frees other tenants while retaining its own fence until c
 
 test("atomic maintenance survives the metadata budget and never starts when the ordinary pool is full", async () => {
   const previous = process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS;
+  const previousAdmission = process.env.DB_MAINTENANCE_ADMISSION_TIMEOUT_MS;
   process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS = "25";
   const admin = new SQL(owner, { max: 2 });
   const name = `barrier_rotation_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -194,7 +195,7 @@ test("atomic maintenance survives the metadata budget and never starts when the 
   try {
     await sql`create table fixture_rotation (value text not null)`.execute(runtime.db);
     rotating = platform.withActiveOperationSession(session as never, live => platform.services.db.withSharedReadBarrier!(live, namespace, () =>
-      withReadBarrierMaintenanceDatabase(runtime.db, database => withDbSession(database, live, async trx => {
+      withReadBarrierMaintenanceDatabase(runtime.db, live.tenantId, database => withDbSession(database, live, async trx => {
         expect((await sql<{ marker: string }>`select current_setting('app.shared_read_barrier') as marker`.execute(trx)).rows[0]!.marker).toBe("");
         entered.resolve(); await finishHttp.promise;
         await sql`insert into fixture_rotation(value) values('rotated')`.execute(trx);
@@ -206,17 +207,28 @@ test("atomic maintenance survives the metadata budget and never starts when the 
     await platform.withActiveOperationSession(other as never, live => platform.services.db.withSharedReadBarrier!(live, "test.unrelated", () =>
       platform.services.db.withSession(live, async () => {
         let called = false;
-        await expect(Promise.resolve().then(() => withReadBarrierMaintenanceDatabase(runtime.db, async () => { called = true; }))).rejects.toThrow("outside shared metadata");
+        await expect(Promise.resolve().then(() => withReadBarrierMaintenanceDatabase(runtime.db, live.tenantId, async () => { called = true; }))).rejects.toThrow("outside shared metadata");
         expect(called).toBe(false);
       })
     ));
     finishHttp.resolve(); await rotating;
     expect((await sql<{ value: string }>`select value from fixture_rotation`.execute(runtime.db)).rows[0]!.value).toBe("rotated");
+    // Ordinary contention exceeding 50 ms must still admit maintenance.
+    await platform.withActiveOperationSession(session as never, live => platform.services.db.withSharedReadBarrier!(live, namespace, async () => {
+      await expect(Promise.resolve().then(() => withReadBarrierMaintenanceDatabase(runtime.db, crypto.randomUUID(), async () => {}))).rejects.toThrow("another tenant");
+      const release = deferred(), both = deferred(); let slots = 0;
+      const held = [1, 2].map(() => runtime.db.connection().execute(async () => { if (++slots === 2) both.resolve(); await release.promise; }));
+      await both.promise;
+      const timer = setTimeout(release.resolve, 100);
+      try { await withReadBarrierMaintenanceDatabase(runtime.db, live.tenantId, async () => {}); }
+      finally { clearTimeout(timer); release.resolve(); await Promise.all(held); }
+    }));
+    process.env.DB_MAINTENANCE_ADMISSION_TIMEOUT_MS = "75";
     let exchangeStarted = false, refused = false;
     busy = platform.withActiveOperationSession(session as never, live => platform.services.db.withSharedReadBarrier!(live, namespace, async () => {
       admitted.resolve(); await occupy.promise;
-      try { await withReadBarrierMaintenanceDatabase(runtime.db, async () => { exchangeStarted = true; }); }
-      catch { refused = true; }
+      try { await withReadBarrierMaintenanceDatabase(runtime.db, live.tenantId, async () => { exchangeStarted = true; }); }
+      catch (error) { refused = error instanceof ReadBarrierMaintenanceAdmissionError; }
     }));
     await admitted.promise;
     for (let index = 0; index < 2; index++) writers.push(runtime.db.transaction().execute(trx =>
@@ -232,6 +244,7 @@ test("atomic maintenance survives the metadata budget and never starts when the 
     await Promise.allSettled([rotating, busy, ...writers].filter(Boolean));
     await runtime.close(); await admin.unsafe(`drop database "${name}" with (force)`); await admin.close();
     if (previous === undefined) delete process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS; else process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS = previous;
+    if (previousAdmission === undefined) delete process.env.DB_MAINTENANCE_ADMISSION_TIMEOUT_MS; else process.env.DB_MAINTENANCE_ADMISSION_TIMEOUT_MS = previousAdmission;
   }
 }, 10_000);
 

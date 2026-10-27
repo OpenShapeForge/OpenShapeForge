@@ -143,6 +143,9 @@ export const SHARED_READ_TRANSACTION_TIMEOUT_ENV = "DB_SHARED_READ_TRANSACTION_T
 export function readSharedReadTransactionTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   return readPositiveIntEnv(SHARED_READ_TRANSACTION_TIMEOUT_ENV, 1_000, env);
 }
+export function readMaintenanceAdmissionTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  return readPositiveIntEnv("DB_MAINTENANCE_ADMISSION_TIMEOUT_MS", 1_000, env);
+}
 
 export function readApiLimits(env: NodeJS.ProcessEnv = process.env): ApiLimits {
   const anonymous = readPositiveIntEnv(

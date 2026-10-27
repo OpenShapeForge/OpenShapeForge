@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { structuredFilter } from "../../platform/structured-filter.js";
+import { filterLeaves } from "./filter-groups.js";
 import { sql, type RawBuilder } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
@@ -124,6 +126,7 @@ function buildFilterConditions(
   filter?: Record<string, unknown> | null,
   fixedWhere: Array<{ column: string; value: unknown }> = [],
 ) {
+  filterLeaves(filter);
   const fields = fieldColumnMap(table);
   const columns = tableColumnMap(table);
   const conditions = fixedWhere.map((condition) => {
@@ -150,6 +153,11 @@ function buildFilterConditions(
       continue;
     }
 
+    if (key === "and" || key === "or") {
+      conditions.push(sql`(${sql.join((value as Record<string, unknown>[]).map(child =>
+        buildFilterConditions(table, session, child)), key === "and" ? sql` and ` : sql` or `)})`);
+      continue;
+    }
     const relationship = table.source?.graphql?.relationships?.find((candidate) => candidate.name === key);
     if (relationship && value && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, "any")) {
       if (relationship.resolve !== "hasMany" || !relationship.foreignKey || !table.primaryKey) {
@@ -221,13 +229,9 @@ function buildFilterConditions(
       continue;
     }
 
-    const exact = value && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, "eq")
-      ? (value as { eq?: unknown }).eq : undefined;
-    if (exact !== undefined) {
-      if (Object.keys(value as object).length !== 1) {
-        throw generatedCrudError(`Exact filter ${key} accepts eq only.`, "BAD_USER_INPUT");
-      }
-      conditions.push(sql`${sql.id("row_source", column.name)} = ${exact}`);
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const kind = column.type === "boolean" ? "boolean" : ["integer","numeric","bigint","double precision","real"].includes(column.type) ? "number" : ["date","timestamp","timestamptz"].includes(column.type) ? "timestamp" : "text";
+      conditions.push(structuredFilter({[fieldName]:value}, {[fieldName]: {sql:sql.id("row_source",column.name),kind}}));
       continue;
     }
 

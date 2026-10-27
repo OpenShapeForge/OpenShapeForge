@@ -12,6 +12,7 @@ export type LocalizedText = { en: string; nl: string };
 export type WebOperationIntent = "list" | "get" | "create" | "update" | "delete";
 export type WebOperationPrerequisite = OperationPrerequisite;
 export type WebCollectionQueryContract = {
+  filterMode?: "structured";
   kind: "collection-query";
   /** Entity fields accepted by the canonical list Operation as filters. */
   filterFields: readonly string[];
@@ -136,7 +137,7 @@ export type WebRelationshipConstraints = Record<
 export type WebFieldOptionSource =
   | { type: "referentiedata"; group: string }
   | { type: "entity"; source: string; valueField: string }
-  | { type: "remote" | "dynamic"; source: string };
+  | { type: "remote" | "dynamic"; source: string; parameters?: Record<string, string | number | boolean>; bindings?: Record<string, string> };
 
 /**
  * Semantic field projection. A renderer registry resolves presentation from

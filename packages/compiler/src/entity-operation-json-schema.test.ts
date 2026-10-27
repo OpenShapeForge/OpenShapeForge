@@ -203,7 +203,7 @@ describe("canonical entity Operation JSON Schemas", () => {
       "includeTotalCount",
     ]);
     expect(
-      ((list.inputSchema.properties as Record<string, any>).filter.properties),
+      ((list.inputSchema.$defs as Record<string, any>).entityFilter.properties),
     ).not.toHaveProperty("secretValues");
     expect(list.outputSchema).toMatchObject({
       properties: {
@@ -239,10 +239,10 @@ describe("canonical entity Operation JSON Schemas", () => {
     const constrained = structuredClone(contract);
     constrained.model.relationships.push({ key: "memberships", kind: "hasMany", target: "Membership", foreignKey: "work_item_id" });
     const list = entityOperationJsonSchemas(constrained, constrained.entityOperations.list!, [...contracts, membership], {});
-    const filter = (list.inputSchema.properties as Record<string, any>).filter;
+    const filter = (list.inputSchema.$defs as Record<string, any>).entityFilter;
     expect(filter.properties.title.oneOf).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "string" }),
-      expect.objectContaining({ type: "object", additionalProperties: false, required: ["eq"], properties: { eq: expect.objectContaining({ type: "string" }) } }),
+      expect.objectContaining({ type: "object", additionalProperties: false, minProperties: 1, properties: expect.objectContaining({ eq: expect.objectContaining({ type: "string" }), in: expect.objectContaining({ type: "array" }), contains: expect.objectContaining({ type: "string" }) }) }),
     ]));
     expect(filter.properties.memberships).toMatchObject({
       properties: { any: { properties: { groupId: { properties: { eq: { type: "string" } } } } } },
@@ -259,7 +259,7 @@ describe("canonical entity Operation JSON Schemas", () => {
     const output = (list.outputSchema as Record<string, any>).properties.items.items.properties.data.properties;
     expect(output.title["x-osf-type"]).toBe("string");
     expect(output.reviewedAt).toMatchObject({ anyOf: [{ type: "string", format: "date-time" }, { type: "null" }], "x-osf-type": "string" }); // the type sits on the nullable wrapper a reader gets
-    const filter = (list.inputSchema.properties as Record<string, any>).filter.properties;
+    const filter = (list.inputSchema.$defs as Record<string, any>).entityFilter.properties;
     expect(filter.title["x-osf-type"]).toBe("string");
     expect(filter.projectId).toMatchObject({ "x-osf-type": "Project", oneOf: expect.any(Array) });
   });

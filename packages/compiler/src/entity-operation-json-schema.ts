@@ -651,12 +651,24 @@ export function entityOperationJsonSchemas(
       }
       const filterProperties: JsonObject = {};
       for (const { key, schema } of entityListFilterFields(contract, relationships, referentiedata, { excludeField: secureInputTarget })) {
-        filterProperties[key] = { ...presentation(schema), oneOf: [schema, exactFilter(schema)] };
+        const field=contract.model.fields.find(field=>field.key===key);
+        const operand=Object.fromEntries(Object.entries(schema).filter(([key])=>!key.startsWith("x-")&&key!=="description"&&key!=="title"));
+        const properties:JsonObject={eq:operand,ne:operand,in:{type:"array",minItems:1,maxItems:100,items:operand},isNull:{type:"boolean"}};
+        if(field&&["string","date","datetime","integer","number"].includes(field.baseType))for(const operator of ["gt","gte","lt","lte"])properties[operator]=operand;
+        if(field?.baseType==="string"&&field.validation?.format!=="uuid")Object.assign(properties,{contains:{type:"string",maxLength:500},startsWith:{type:"string",maxLength:500}});
+        filterProperties[key]={...presentation(schema),oneOf:[schema,{type:"object",additionalProperties:false,minProperties:1,properties}]};
       }
       Object.assign(filterProperties, relationshipAnyFilters(contract, contracts, referentiedata));
+      const filterDefinitions = {entityFilter: {
+        type:"object", additionalProperties:false, maxProperties:30,
+        properties:{...filterProperties, ...Object.fromEntries(["and","or"].map(key=>[key,{
+          type:"array",minItems:1,maxItems:20,items:{$ref:"#/$defs/entityFilter"}
+        }]))}
+      }};
       const sortable = entitySortableFieldKeys(contract, secureInputTarget, contracts);
       return {
         inputSchema: {
+          $defs: filterDefinitions,
           type: "object",
           properties: {
             limit: {
@@ -666,11 +678,7 @@ export function entityOperationJsonSchemas(
               default: operation.input.pagination.defaultLimit,
             },
             cursor: { type: "string", description: "Opaque cursor from a previous page." },
-            filter: {
-              type: "object",
-              properties: filterProperties,
-              additionalProperties: false,
-            },
+            filter: { $ref: "#/$defs/entityFilter" },
             sort: {
               type: "object",
               properties: {

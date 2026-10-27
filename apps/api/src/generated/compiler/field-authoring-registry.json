@@ -732,7 +732,7 @@
       "icon": "Ruler",
       "render": {
         "display": "TextDisplay",
-        "input": "JsonFieldEditor"
+        "input": "FieldMeasurement"
       },
       "children": [
         {
@@ -861,7 +861,7 @@
       "icon": "ArrowLeftRight",
       "render": {
         "display": "TextDisplay",
-        "input": "JsonFieldEditor"
+        "input": "FieldNumericRange"
       },
       "children": [
         {
@@ -929,7 +929,7 @@
       "icon": "CalendarRange",
       "render": {
         "display": "TextDisplay",
-        "input": "JsonFieldEditor"
+        "input": "FieldDateRange"
       },
       "children": [
         {
@@ -1093,7 +1093,7 @@
       "icon": "Repeat",
       "render": {
         "display": "TextDisplay",
-        "input": "JsonFieldEditor"
+        "input": "FieldRecurrence"
       },
       "children": [
         {
@@ -1394,7 +1394,7 @@
       "icon": "ListChecks",
       "render": {
         "display": "FieldDefinitionView",
-        "input": "JsonFieldEditor"
+        "input": "FieldDefinitionEditor"
       }
     },
     "keyValueMap": {
@@ -1424,7 +1424,7 @@
       },
       "render": {
         "display": "TextDisplay",
-        "input": "JsonFieldEditor"
+        "input": "FieldKeyValuePairs"
       }
     },
     "Account": {
@@ -7212,6 +7212,10 @@
           "label": {
             "en": "Entity type",
             "nl": "Entiteitstype"
+          },
+          "options": {
+            "type": "dynamic",
+            "source": "entityTypes.list"
           }
         },
         {
@@ -7222,6 +7226,18 @@
           "label": {
             "en": "Record",
             "nl": "Record"
+          },
+          "options": {
+            "type": "dynamic",
+            "source": "collection.options",
+            "parameters": {
+              "entity": "AuditEvent",
+              "field": "recordId"
+            },
+            "bindings": {
+              "referenceEntity": "entityType",
+              "filter.entityType.eq": "entityType"
+            }
           }
         },
         {
@@ -7232,6 +7248,14 @@
           "label": {
             "en": "Event type",
             "nl": "Gebeurtenistype"
+          },
+          "options": {
+            "type": "dynamic",
+            "source": "collection.options",
+            "parameters": {
+              "entity": "AuditEvent",
+              "field": "eventType"
+            }
           }
         },
         {
@@ -7251,6 +7275,15 @@
           "label": {
             "en": "Actor",
             "nl": "Actor"
+          },
+          "options": {
+            "type": "dynamic",
+            "source": "collection.options",
+            "parameters": {
+              "entity": "AuditEvent",
+              "field": "actorId",
+              "referenceEntity": "Account"
+            }
           }
         },
         {
@@ -7260,6 +7293,14 @@
           "label": {
             "en": "Actor kind",
             "nl": "Actorsoort"
+          },
+          "options": {
+            "type": "dynamic",
+            "source": "collection.options",
+            "parameters": {
+              "entity": "AuditEvent",
+              "field": "actorKind"
+            }
           }
         },
         {
@@ -7269,6 +7310,15 @@
           "label": {
             "en": "Operation",
             "nl": "Operation"
+          },
+          "options": {
+            "type": "dynamic",
+            "source": "collection.options",
+            "parameters": {
+              "entity": "AuditEvent",
+              "field": "operationId",
+              "catalog": "operations"
+            }
           }
         },
         {
@@ -7278,6 +7328,14 @@
           "label": {
             "en": "Correlation",
             "nl": "Samenhang"
+          },
+          "options": {
+            "type": "dynamic",
+            "source": "collection.options",
+            "parameters": {
+              "entity": "AuditEvent",
+              "field": "correlationId"
+            }
           }
         },
         {
@@ -7289,6 +7347,14 @@
           "label": {
             "en": "Changed fields",
             "nl": "Gewijzigde velden"
+          },
+          "options": {
+            "type": "dynamic",
+            "source": "collection.options",
+            "parameters": {
+              "entity": "AuditEvent",
+              "field": "changedFields"
+            }
           }
         },
         {

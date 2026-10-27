@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: BUSL-1.1
+import {test,expect} from 'bun:test';
+import {SQL} from 'bun';
+import {jsonbLiteral} from '../db/sql-helpers.js';
+import {sql} from 'kysely';
+import {createDatabaseRuntime} from '../db/connection.js';
+import {withDbSession,createDbSessionContext} from '../db/session.js';
+import {applyAuditHistory,auditHistoryReady} from '../db/migrations/audit-history.js';
+import {auditOperationHandler} from './history-operations.js';
+test.skipIf(!process.env.SCRATCH_ADMIN_DATABASE_URL)('audit identities retain facts, resolve only unique tenant identities and capture verified new identities',async()=>{
+ const adminUrl=process.env.SCRATCH_ADMIN_DATABASE_URL!;expect(adminUrl).toBeTruthy();
+ const dbName=`audit_identity_${crypto.randomUUID().replaceAll('-','')}`;const admin=new SQL(adminUrl,{max:1});await admin.unsafe(`create database "${dbName}"`);
+ const url=new URL(adminUrl);url.pathname='/'+dbName;const runtime=createDatabaseRuntime({databaseUrl:String(url),maxConnections:2});const db=runtime.db;
+ const tenant=crypto.randomUUID(),otherTenant=crypto.randomUUID(),subject=crypto.randomUUID(),identity=crypto.randomUUID(),otherIdentity=crypto.randomUUID(),oldEvent=crypto.randomUUID(),newEvent=crypto.randomUUID();
+ const session={tenantId:tenant,userId:subject,roles:['Audit.Read'],groups:[]};
+ const get=auditOperationHandler({handler:'get',auth:{mode:'session',roles:['Audit.Read']}} as any),list=auditOperationHandler({handler:'list',auth:{mode:'session',roles:['Audit.Read']}} as any);
+ const context={db,session} as any;
+ try{
+  await sql.raw(`create schema platform;create table platform.identities(id uuid primary key,subject text,issuer text);create table platform.identity_relations(identity_id uuid,tenant_id uuid);create table platform.entity_events(id uuid primary key,tenant_id uuid,aggregate_type text,aggregate_id text,event_type text,occurred_at timestamptz default now(),sequence bigserial,delivery_sequence bigint,payload jsonb);`).execute(db);
+  await sql`insert into platform.identities values(${identity}::uuid,${subject},'https://issuer-a'),(${otherIdentity}::uuid,${subject},'https://issuer-b')`.execute(db);
+  await sql`insert into platform.identity_relations values(${identity}::uuid,${tenant}::uuid),(${otherIdentity}::uuid,${otherTenant}::uuid)`.execute(db);
+  await sql`insert into platform.entity_events(id,tenant_id,aggregate_type,aggregate_id,event_type,payload) values(${oldEvent}::uuid,${tenant}::uuid,'Example','record','changed',${jsonbLiteral({audit:{version:1,actorId:subject,entityType:'Example'}})})`.execute(db);
+  const original=(await sql<{payload:unknown}>`select payload from platform.entity_events where id=${oldEvent}::uuid`.execute(db)).rows[0]!.payload;
+  await applyAuditHistory(db,[],{});expect(await auditHistoryReady(db,[],{})).toBe(true);
+  const read=async(id:string)=>(await get({id},context) as any).value;
+  expect((await read(oldEvent)).actorId).toBe(identity);expect((await read(oldEvent)).rawData.audit.actorId).toBe(subject);
+  expect((await list({filter:{actorId:{eq:identity}}},context) as any).value.items.map((x:any)=>x.id)).toEqual([oldEvent]);
+  const verified={...session,relation:{identityId:identity,issuer:'https://issuer-a',subject,status:'linked',relationId:null}};
+  expect(createDbSessionContext(verified).auditIdentityId).toBe(identity);
+  expect(createDbSessionContext({...verified, userId:crypto.randomUUID()}).auditIdentityId).toBeNull();
+  expect(createDbSessionContext(session).auditIdentityId).toBeNull();
+  expect(createDbSessionContext(createDbSessionContext(verified)).auditIdentityId).toBe(identity);
+  await withDbSession(db,verified,tx=>sql`insert into platform.entity_events(id,tenant_id,aggregate_type,aggregate_id,event_type,payload) values(${newEvent}::uuid,${tenant}::uuid,'Example','record','changed','{}')`.execute(tx));
+  const fresh=await read(newEvent);expect(fresh.actorId).toBe(identity);expect(fresh.rawData.audit).toMatchObject({version:2,actorIdentityId:identity,actorSubject:subject,actorIssuer:'https://issuer-a'});
+  await sql`insert into platform.identity_relations values(${otherIdentity}::uuid,${tenant}::uuid)`.execute(db);
+  expect((await read(oldEvent)).actorId).toBe(subject);expect((await read(newEvent)).actorId).toBe(identity);
+  expect((await sql<{payload:unknown}>`select payload from platform.entity_events where id=${oldEvent}::uuid`.execute(db)).rows[0]!.payload).toEqual(original);
+  await expect(get({id:oldEvent},{...context,session:{...session,tenantId:otherTenant}})).rejects.toThrow();
+  await expect(get({id:oldEvent},{...context,session:{...session,roles:[]}})).rejects.toThrow();
+  await sql`delete from platform.identities`.execute(db);expect((await read(oldEvent)).actorId).toBe(subject);expect((await read(newEvent)).actorId).toBe(identity);
+ }finally{await runtime.close();await admin.unsafe(`drop database "${dbName}" with (force)`);await admin.close();}
+});

@@ -1,3 +1,5 @@
+import { collectionOptionsDefinition, collectionOptionSources } from "./collection-options.js";
+import { applicationSearchDefinition, applicationSearchSources } from "./application-search.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
@@ -898,6 +900,8 @@ export function collectAuthoredEntityPluginOperations(
   return [
     ...collectOperationContracts(synthetic, context, true),
     ...collectConstrainedReferenceCreateOperations(entities, referentiedata),
+    ...collectApplicationSearch(entities, context),
+    ...collectCollectionOptions(entities, context),
     ...(needsEntityTypeList
       ? collectEntityTypeListOperation(context, entities)
       : []),
@@ -1226,7 +1230,7 @@ export function assertOperationRuntimeModules(
 ): void {
   const available = new Set(runtimeModuleNames);
   for (const operation of operations) {
-    if (operation.implementation && (operation.plugin !== "core" || !["collectionMutation", "listEntityTypes", "constrainedReferenceCreate"].includes(operation.handler) ||
+    if (operation.implementation && (operation.plugin !== "core" || !["collectionMutation", "listEntityTypes", "constrainedReferenceCreate", "searchApplication", "listCollectionOptions"].includes(operation.handler) ||
       verifiedNativeOperations.get(operation) !== JSON.stringify(operation.implementation))) {
       throw new Error(`Operation ${operation.id} has unverified native implementation metadata.`);
     }
@@ -1459,4 +1463,18 @@ export function operationOpenApiPaths(
     };
   }
   return paths;
+}
+
+function collectApplicationSearch(entities: readonly Pick<CompiledEntityInfo,"contract">[], context: PluginBaseContext): CompiledPluginOperation[] {
+  const sources=applicationSearchSources(entities);
+  if(!sources.length)return [];
+  const operation=applicationSearchDefinition(entities);
+  nativeBindings.set(operation,{type:"application-search",sources});
+  return collectOperationContracts([{name:"core",operations:[operation]}],context,true);
+}
+
+function collectCollectionOptions(entities: readonly Pick<CompiledEntityInfo,"contract">[], context: PluginBaseContext): CompiledPluginOperation[] {
+  const operation=collectionOptionsDefinition(entities);
+  nativeBindings.set(operation,{type:"collection-options",sources:collectionOptionSources(entities)});
+  return collectOperationContracts([{name:"core",operations:[operation]}],context,true);
 }

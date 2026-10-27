@@ -1,3 +1,4 @@
+import { filterFieldNames } from "../operations/entity/filter-groups.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * Runtime function-level and field-level authorization for generated entities.
@@ -134,7 +135,7 @@ export function assertClassifiedQueryFieldsAllowed(
   const classified = canReadClassifiedColumns(authorization, session);
 
   const requestedFields = [
-    ...Object.keys(filter ?? {}).map((field) => ({
+    ...filterFieldNames(filter).map((field) => ({
       field,
       column: classifiedColumnForFilterField(columns, field, exactFilterFields),
     })),

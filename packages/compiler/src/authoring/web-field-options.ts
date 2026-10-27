@@ -22,7 +22,7 @@ export function fieldOptionSource(field: Pick<CompiledField, "options">): WebFie
     return { type: "entity", source: options.source, valueField: options.valueField ?? "id" };
   }
   if ((options.type === "remote" || options.type === "dynamic") && (options.remoteUrl || options.source)) {
-    return { type: options.type, source: options.remoteUrl ?? options.source! };
+    return { type: options.type, source: options.remoteUrl ?? options.source!, ...(options.parameters ? { parameters: options.parameters } : {}), ...(options.bindings ? { bindings: options.bindings } : {}) };
   }
   return undefined;
 }

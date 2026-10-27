@@ -22,6 +22,9 @@ export function sharedReadBarriers(db: OpenShapeForgeDatabase): SharedReadBarrie
   if (!manager) { manager = new SharedReadBarriers(db); managers.set(db, manager); }
   return manager;
 }
+export function hasSharedReadBarrier(db: OpenShapeForgeDatabase): boolean {
+  return managers.get(db)?.hasScope() ?? false;
+}
 
 /** Reader metadata must remain able to finish even when every ordinary pool
  * slot is occupied by writers waiting on the read fence. Serialize its short
@@ -193,12 +196,17 @@ export class SharedReadBarriers {
       // so a stream of new readers cannot indefinitely postpone retirement.
       // Track even an uncertain acquire: an interrupted SQL response must not
       // leave a session lock behind when this connection returns to its pool.
-      if (!held) reservation.locks.add(key);
       try {
       if (!reservation.marked) {
         reservation.marked = true;
-        await sql`select pg_advisory_lock_shared(hashtext('osf.read-barrier:shared-backend'),0)`.execute(reservation.connection);
+        const marker = (await sql<{ acquired: boolean }>`select pg_try_advisory_lock_shared(hashtext('osf.read-barrier:shared-backend'),0) as acquired`.execute(reservation.connection)).rows[0]!;
+        if (!marker.acquired) {
+          reservation.marked = false;
+          await this.#finish(reservation);
+          return undefined;
+        }
       }
+      if (!held) reservation.locks.add(key);
       const row = (await sql<{ pid: number; acquired: boolean }>`
         select pg_backend_pid() as pid, case when exists (
           select 1 from pg_locks where locktype = 'advisory'

@@ -6,6 +6,10 @@ import { createDatabaseRuntime, databasePoolLimit } from "../connection.js";
 import { sharedReadBarriers, withReadBarrierMaintenanceDatabase, ReadBarrierMaintenanceAdmissionError } from "../read-barrier.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
 import { withDbSession } from "../session.js";
+import { operationErrorOf } from "@openshapeforge/operations";
+import { executeKeyedOperation } from "../../operations/execution-receipts.js";
+import { refreshConnectionRowLocked } from "../../mcp/connection-token-refresh.js";
+import { toHttpError } from "../../rest/http-error.js";
 import { withAuditContext } from "../../platform/audit-context.js";
 
 const owner = process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
@@ -216,6 +220,14 @@ test("atomic maintenance survives the metadata budget and never starts when the 
     // Ordinary contention exceeding 50 ms must still admit maintenance.
     await platform.withActiveOperationSession(session as never, live => platform.services.db.withSharedReadBarrier!(live, namespace, async () => {
       await expect(Promise.resolve().then(() => withReadBarrierMaintenanceDatabase(runtime.db, crypto.randomUUID(), async () => {}))).rejects.toThrow("another tenant");
+      let effects = 0;
+      const failure = await executeKeyedOperation(runtime.db, live as never, {
+        operation: { id: "test.external", intent: "invoke" }, idempotencyKey: "never-claim",
+        contractFingerprint: "test", input: {}, externalWrite: true,
+        execute: async () => { effects++; return "must not dispatch"; }, encode: value => value, decode: value => value,
+      }).catch(error => error);
+      expect(operationErrorOf(failure)?.code).toBe("FORBIDDEN");
+      expect(effects).toBe(0);
       const release = deferred(), both = deferred(); let slots = 0;
       const held = [1, 2].map(() => runtime.db.connection().execute(async () => { if (++slots === 2) both.resolve(); await release.promise; }));
       await both.promise;
@@ -229,6 +241,16 @@ test("atomic maintenance survives the metadata budget and never starts when the 
       admitted.resolve(); await occupy.promise;
       try { await withReadBarrierMaintenanceDatabase(runtime.db, live.tenantId, async () => { exchangeStarted = true; }); }
       catch (error) { refused = error instanceof ReadBarrierMaintenanceAdmissionError; }
+      const failure = await refreshConnectionRowLocked({
+        db: runtime.db, session: live, rowId: crypto.randomUUID(), valuesField: "values", providerField: "providerId",
+        table: { schema: "public", table: "never_query", primaryKey: "id", columns: [{ name: "values" }, { name: "provider_id", sourceField: "providerId" }, { name: "owner_user_id", sourceField: "ownerUserId" }] } as never,
+        expectedProviderId: crypto.randomUUID(), expectedOwnerUserId: null,
+        audit: { sourceTable: "fixture", connectionId: crypto.randomUUID(), scope: "tenant", correlationId: "fixture" },
+        tokenUrl: "https://provider.example/token", clientId: "fixture", clientSecret: "fixture", egress: ["https://provider.example"], keyring: {} as never, secretScope: "fixture",
+        fetchImpl: async () => { exchangeStarted = true; throw new Error("must not exchange"); },
+      }).catch(error => error);
+      expect(toHttpError(failure)).toMatchObject({ status: 503, body: { error: { code: "DATABASE_BUSY", retryable: true } } });
+
     }));
     await admitted.promise;
     for (let index = 0; index < 2; index++) writers.push(runtime.db.transaction().execute(trx =>
@@ -328,6 +350,12 @@ test.each([2, 3])("parallel external reads share one lock connection in a pool o
     await expect(barrier.run(namespace, tenant, async () => { throw new Error("provider failed"); })).rejects.toThrow("provider failed");
     const abort = new AbortController(); abort.abort();
     await expect(barrier.run(namespace, tenant, async () => { throw new Error("must not enter"); }, abort.signal)).rejects.toThrow();
+    await writer.begin(async trx => {
+      await trx.unsafe("select pg_advisory_xact_lock(hashtext('osf.read-barrier:shared-backend'),0)");
+      const previous = process.env.DB_STATEMENT_TIMEOUT_MS; process.env.DB_STATEMENT_TIMEOUT_MS = "25";
+      try { await expect(barrier.run(namespace, tenant, async () => { throw new Error("must not enter"); })).rejects.toThrow("acquisition timed out"); }
+      finally { if (previous === undefined) delete process.env.DB_STATEMENT_TIMEOUT_MS; else process.env.DB_STATEMENT_TIMEOUT_MS = previous; }
+    });
     expect(await barrier.run(namespace, tenant, async () => "again")).toBe("again");
   } finally {
     pending.resolve(); await Promise.allSettled(reads);

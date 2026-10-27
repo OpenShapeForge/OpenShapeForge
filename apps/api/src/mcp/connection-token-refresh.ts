@@ -15,6 +15,7 @@
  * cannot drift on leeway, locking, rotation or audit order.
  */
 import { randomUUID } from "node:crypto";
+import { operationFailure } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
@@ -295,7 +296,7 @@ export async function refreshConnectionRowLocked(input: {
     return result;
   } catch (error) {
     input.signal?.throwIfAborted();
-    if (error instanceof ReadBarrierMaintenanceAdmissionError) throw new HttpError(503, "DATABASE_BUSY", error.message);
+    if (error instanceof ReadBarrierMaintenanceAdmissionError) throw operationFailure({ code: "DATABASE_BUSY", message: error.message, retryable: true });
     const failureKind = egressInvocation.consumeFailure(error);
     const boundedTimeout =
       error instanceof DOMException && error.name === "TimeoutError";

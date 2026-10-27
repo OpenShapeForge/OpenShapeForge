@@ -402,7 +402,8 @@ export type PluginDatabase = {
    * which guards can inspect even if the metadata marker is cleared. Writers must
    * refuse writes when it is nonempty, preventing own-backend lock upgrades
    * for every namespace. Independent nested transactions and SQL streams are
-   * refused; use a command Operation when atomic writes are needed.
+   * refused. Keyed external writes must start outside the shared read barrier
+   * and are refused before their receipt claim or provider effects inside it.
    */
   withSharedReadBarrier?<T>(
     session: PluginSessionContext,

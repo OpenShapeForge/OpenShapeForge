@@ -85,8 +85,23 @@ set; non-local exporters require HTTPS. `OTEL_TRACES_EXPORTER=none` disables it
 explicitly. The consumer owns exporter infrastructure and sampling policy.
 Automatic instrumentation directly loads only HTTP and Fastify. Raw URLs,
 paths, query strings, client/peer addresses, ports, and user-agent fingerprints
-are replaced with fixed values. GraphQL document/resolver and database spans
-are disabled so tenant data cannot enter the exporter by default.
+are replaced with fixed values. Automatic GraphQL document/resolver and SQL
+instrumentation remain disabled. Explicit runtime spans describe MCP admission,
+credential/relation/member checks, Operation resolution/execution, policy
+admission, database acquisition/session lifetime and outbound HTTP headers.
+Operation names are SHA-256 fingerprints; providers use the closed labels
+`jira`, `hubspot` and `other`. Query events retain only duration, a fixed SQL
+verb and one of three schema categories. SQL text, parameters, inputs, URLs,
+identity values and exception messages/stacks are never exported by these
+runtime spans. An explicitly supplied database logger retains its existing
+behavior rather than being replaced by diagnostics.
+
+Spans are inclusive: a database session can contain an HTTP call, and parallel
+Operation spans overlap. Do not add their elapsed times to a request total.
+Query durations describe the driver call (including its waits), not pure
+PostgreSQL CPU time. The outbound span ends at response headers; parsing and
+mapping belong to the enclosing Operation. With tracing disabled the runtime
+wrappers dispatch directly and install no diagnostic database hooks.
 
 GraphiQL is available only outside production. Its default health query is
 safe without credentials and explains where a local bearer header belongs;

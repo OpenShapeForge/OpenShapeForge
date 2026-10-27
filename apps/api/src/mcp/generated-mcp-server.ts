@@ -64,6 +64,7 @@
  *   *-routes.ts, route-context.ts       the browser-facing routes
  */
 import { createMcpSessionAdmission } from "./session-admission.js";
+import { withRuntimeSpan } from "@openshapeforge/observability";
 import { createTransportSessions } from "./transport-sessions.js";
 import { registerSessionWithPlatform } from "./platform-registration.js";
 import { registerSessionExecutors } from "./session-executors.js";
@@ -320,7 +321,7 @@ export function registerGeneratedMcpServer(
     instance.route({
       url: MCP_MOUNT_PATH,
       method: ["GET", "POST", "DELETE"],
-      handler: handleMcpRequest,
+      handler: (request, reply) => withRuntimeSpan("mcp.request", () => handleMcpRequest(request, reply)),
     });
     // One resource per Keycloak Organization, same server, same handler;
     // what differs is how the session is admitted (requireMcpSession). Both
@@ -330,7 +331,7 @@ export function registerGeneratedMcpServer(
       instance.route({
         url,
         method: ["GET", "POST", "DELETE"],
-        handler: handleMcpRequest,
+        handler: (request, reply) => withRuntimeSpan("mcp.request", () => handleMcpRequest(request, reply)),
       });
     }
   });

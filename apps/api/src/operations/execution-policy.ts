@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { withRuntimeSpan } from "@openshapeforge/observability";
 /**
  * The host-wide execution admission guard.
  *
@@ -510,8 +511,10 @@ export async function assertOperationAdmitted(
   session: DbSessionInput | undefined,
   operation: GovernedOperation,
 ): Promise<void> {
-  const denial = await operationAdmissionRefusal(db, session, operation);
-  if (denial) refusal(denial);
+  await withRuntimeSpan("authorization.policy", async () => {
+    const denial = await operationAdmissionRefusal(db, session, operation);
+    if (denial) refusal(denial);
+  }, { operationId: operation.id });
 }
 
 /**

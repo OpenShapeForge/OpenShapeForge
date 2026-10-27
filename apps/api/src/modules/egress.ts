@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { isOpenTelemetryEnabled, withRuntimeSpan } from "@openshapeforge/observability";
 /** Canonical protocol/allowlist gate and optional runtime-module egress owner. */
 import type {
   ModuleEgressFailureKind,
@@ -227,7 +228,18 @@ export function hostAllowed(host: string, allowlist: readonly string[]): boolean
   });
 }
 
-export async function fetchValidatedOutbound(input: {
+export function fetchValidatedOutbound(input: Parameters<typeof fetchValidatedOutboundInternal>[0]): Promise<Response> {
+  if (!isOpenTelemetryEnabled()) return fetchValidatedOutboundInternal(input);
+  let provider: "jira" | "hubspot" | "other" = "other";
+  try {
+    const host = new URL(input.target instanceof Request ? input.target.url : input.target).hostname;
+    if (host === "api.hubapi.com") provider = "hubspot";
+    else if (host === "api.atlassian.com" || host.endsWith(".atlassian.net")) provider = "jira";
+  } catch { /* The owner below preserves the canonical invalid-URL failure. */ }
+  return withRuntimeSpan("external.headers", () => fetchValidatedOutboundInternal(input), { provider });
+}
+
+async function fetchValidatedOutboundInternal(input: {
   target: string | URL | Request;
   init: RequestInit;
   allowlist: readonly string[];

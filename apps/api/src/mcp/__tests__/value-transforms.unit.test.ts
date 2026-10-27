@@ -3,12 +3,13 @@
  * The single-value transforms. `source-version` turns a provider's change
  * marker into a sourceVersion whose text order is its change order — that is
  * what lets "highest sourceVersion per source" serve as the incremental-import
- * watermark. `date`, `sign`, `abs` and `lookup` turn provider values into
- * reference-data codes and plain dates without provider knowledge.
+ * watermark. `date`, `sign`, `abs`, `number`, `prefix` and `lookup` turn
+ * provider values into reference-data codes, numbers and plain dates without
+ * provider knowledge.
  */
 import { describe, expect, it } from "bun:test";
 import { applyResponseTransforms } from "../response-transforms.js";
-import { absolute, asText, calendarDate, sign, sourceVersion } from "../value-transforms.js";
+import { absolute, asNumber, asText, calendarDate, sign, sourceVersion } from "../value-transforms.js";
 import { HttpError } from "../../rest/http-error.js";
 
 describe("sourceVersion", () => {
@@ -53,9 +54,20 @@ describe("date, sign, abs", () => {
     expect(calendarDate("13-09-2020")).toBeNull();
   });
 
+  it("reads a zoneless local timestamp as its own date part", () => {
+    expect(calendarDate("2026-01-13T00:00:00")).toBe("2026-01-13");
+    expect(calendarDate("2026-01-13T23:59:59.997")).toBe("2026-01-13");
+    // The zone rule for change markers is unchanged: no zone, no instant.
+    expect(sourceVersion("2026-01-13T00:00:00")).toBeNull();
+  });
+
   it("splits a signed amount into a side and a magnitude", () => {
     expect([-12.5, 0, 3, "-4", "x", null].map(sign)).toEqual(["negative", "zero", "positive", "negative", null, null]);
     expect([-12.5, "4", "", null].map(absolute)).toEqual([12.5, 4, null, null]);
+  });
+
+  it("reads a number from text, nothing else", () => {
+    expect(["55", "-217.80", 3, "", "x", null].map(asNumber)).toEqual([55, -217.8, 3, null, null, null]);
   });
 
   it("reads a scalar as text, nothing else", () => {
@@ -84,6 +96,29 @@ describe("lookup", () => {
     for (const steps of [[{ op: "lookup", from: "value" }], [{ op: "constructor", from: "value" }]]) {
       try {
         applyResponseTransforms({ value: 1 }, steps);
+        throw new Error("expected a failure");
+      } catch (error) {
+        expect(error).toBeInstanceOf(HttpError);
+        expect((error as HttpError).code).toBe("SERVICE_MISCONFIGURED");
+      }
+    }
+  });
+});
+
+describe("prefix", () => {
+  const run = (value: unknown, length: unknown) =>
+    applyResponseTransforms({ value }, [{ op: "prefix", from: "value", to: "out", length }]).out;
+
+  it("keeps the leading characters of text, null otherwise", () => {
+    expect(run("BEivGokAndGok", 4)).toBe("BEiv");
+    expect(run("WOm", 4)).toBe("WOm");
+    expect(run(1042, 2)).toBeNull();
+  });
+
+  it("fails as SERVICE_MISCONFIGURED without a usable length", () => {
+    for (const length of [undefined, 0, 1.5, 65, "4"]) {
+      try {
+        run("BEiv", length);
         throw new Error("expected a failure");
       } catch (error) {
         expect(error).toBeInstanceOf(HttpError);

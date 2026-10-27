@@ -352,6 +352,7 @@ export function hasDynamicModuleToolProjection(
   return modules.some(
     (module) =>
       module.mcp?.tools !== undefined ||
+      module.mcp?.getTool !== undefined ||
       module.mcp?.decorateTool !== undefined,
   );
 }

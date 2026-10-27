@@ -883,6 +883,9 @@ compose stack):
 | `API_RATE_LIMIT_MAX_SERVICE` | budget per organization service identity, e.g. the durable workflow worker (default: the trusted budget) |
 | `API_RATE_LIMIT_REDIS_URL` | shared limiter store; unset ⇒ in-memory, budget enforced per instance |
 | `API_REQUEST_TIMEOUT_MS` / `DB_STATEMENT_TIMEOUT_MS` | whole-request and per-request statement budgets |
+| `DB_SHARED_READ_TRANSACTION_TIMEOUT_MS` | shared-read metadata transaction budget; positive milliseconds, default `1000`; remains bounded when the ordinary statement budget is disabled |
+| `DB_SHARED_READ_ADMISSION_PROBE_MS` | ordinary-slot strategy probe for shared-read metadata; positive milliseconds, default `5`; cold/busy admission falls back to the reserved backend, without replaying or cancelling admitted work |
+| `DB_MAINTENANCE_ADMISSION_TIMEOUT_MS` | connection admission budget for atomic maintenance during shared reads; positive milliseconds, default `1000`; expiry is an internal retryable database-busy error, before provider I/O |
 | `GRAPHQL_MAX_DEPTH` / `_ALIASES` / `_COST` / `_TOKENS` / `_DIRECTIVES` | query-hardening caps |
 
 ## Rate limiting

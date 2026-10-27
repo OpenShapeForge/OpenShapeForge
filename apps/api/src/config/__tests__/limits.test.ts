@@ -18,10 +18,17 @@ import {
   readNonNegativeIntEnv,
   readPositiveIntEnv,
   readStatementTimeoutMs,
+  readSharedReadAdmissionProbeMs,
   readTrustProxyEnv,
 } from "../limits.js";
 
 const env = (o: Record<string, string>) => o as unknown as NodeJS.ProcessEnv;
+
+test("shared-read admission probe is positive and independently tunable", () => {
+  expect(readSharedReadAdmissionProbeMs(env({}))).toBe(5);
+  expect(readSharedReadAdmissionProbeMs(env({ DB_SHARED_READ_ADMISSION_PROBE_MS: "20" }))).toBe(20);
+  expect(() => readSharedReadAdmissionProbeMs(env({ DB_SHARED_READ_ADMISSION_PROBE_MS: "0" }))).toThrow("positive integer");
+});
 
 describe("readPositiveIntEnv", () => {
   test("returns the fallback when unset or blank", () => {

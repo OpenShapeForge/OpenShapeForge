@@ -11,6 +11,13 @@ export type RuntimeRecordAccessRequest = Readonly<{
   intent: RuntimeRecordAccessIntent;
 }>;
 
+/** All identities must pass canonical access in the same session; no data is returned. */
+export type RuntimeRecordAccessBatchRequest = Readonly<{
+  entityName: string;
+  ids: readonly string[];
+  intent: RuntimeRecordAccessIntent;
+}>;
+
 export type RuntimeStoredFieldProjectionRequest = Readonly<{
   /** Canonical authored Entity name, never a physical schema or table name. */
   entityName: string;
@@ -31,6 +38,7 @@ export type RuntimeStoredFieldProjectionRequest = Readonly<{
  * values the module already holds.
  */
 export type RuntimeRecordAccessServices<Session> = Readonly<{
+  assertAccessMany(session: Session, request: RuntimeRecordAccessBatchRequest): Promise<void>;
   assertAccess(session: Session, request: RuntimeRecordAccessRequest): Promise<void>;
   projectStoredFields(
     session: Session,

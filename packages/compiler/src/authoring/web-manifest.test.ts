@@ -162,6 +162,28 @@ function entity(
 }
 
 describe("web manifest projection", () => {
+  test("structured semantic types project their existing catalogue editors", () => {
+    const artifacts = loadEntity(authoringDir, "chip");
+    const editors = {
+      measurement: "FieldMeasurement",
+      numericRange: "FieldNumericRange",
+      dateRange: "FieldDateRange",
+      recurrence: "FieldRecurrence",
+      keyValueMap: "FieldKeyValuePairs",
+    };
+    for (const osfType of Object.keys(editors)) {
+      artifacts.coreEntity.fields.push({
+        key: osfType, osfType, baseType: "object", required: false,
+        label: text(osfType), description: text("Synthetic editor projection"),
+      });
+    }
+    const projected = buildWebManifest([{slug: "chip", contract: compile(artifacts)}]).entities.Chip!;
+    for (const [osfType, component] of Object.entries(editors)) {
+      expect(projected.fields[osfType]).toMatchObject({osfType, baseType: "object", presentation: {component}});
+      expect(artifacts.componentCatalog.components[component]).toBeDefined();
+    }
+  });
+
   test("a compound name control preserves separate canonical properties and columns", () => {
     const artifacts=loadEntity(authoringDir,"natural-person");
     const contract=compile(artifacts);

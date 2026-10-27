@@ -46,7 +46,8 @@ export type { CompiledPluginOperation } from "./plugins.js";
  * Runtime modules the API itself provides, so an Operation bound to one needs
  * no plugin runtime in the module registry: `osf-blueprints` serves the
  * blueprint Operations, `osf-control` the platform's own administration,
- * `osf-grants` the operator side of capability grants, `osf-jobs` the
+ * `osf-grants` the operator side of capability grants, `osf-api-keys` the
+ * integration/API-key catalog over the one provisioning service, `osf-jobs` the
  * durable job queue, `osf-transitions` the status transitions declared on
  * entity fields, `osf-source-sync` the import of records from an external
  * source system by their base source fields, `osf-edit-leases` the central
@@ -54,7 +55,7 @@ export type { CompiledPluginOperation } from "./plugins.js";
  * `osf-billing` the milestone billing run and the milestone create that
  * freezes a computed amount.
  */
-export const CORE_OPERATION_MODULES: readonly string[] = ["accounts", "osf-audit", "osf-billing", "osf-blueprints", "osf-control", "osf-edit-leases", "osf-grants", "osf-jobs", "osf-source-sync", "osf-transitions"];
+export const CORE_OPERATION_MODULES: readonly string[] = ["accounts", "osf-api-keys", "osf-audit", "osf-billing", "osf-blueprints", "osf-control", "osf-edit-leases", "osf-grants", "osf-jobs", "osf-source-sync", "osf-transitions"];
 
 /**
  * The one OpenAPI security scheme every `auth.mode: capability` Operation is

@@ -72,7 +72,7 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   // and the operator side of capability grants (operations/grants.yaml),
   // plus accounts, members, groups, permissions, roles, source-sync and
   // edit-lease catalogs.
-  "operation-catalog.schema.json": 9,
+  "operation-catalog.schema.json": 10,
   "settings-definition.schema.json": 0,
   "settings-provider.schema.json": 0,
   "retention-policy-catalog.schema.json": 1,

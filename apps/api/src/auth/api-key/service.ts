@@ -296,79 +296,241 @@ export type ListedKey = {
   lastUsedAt: Date | null;
 };
 
+type KeyRow = {
+  id: string;
+  integration_id: string;
+  integration_name: string;
+  display_name: string;
+  role_subset: unknown;
+  created_at: Date;
+  expires_at: Date | null;
+  revoked_at: Date | null;
+  last_used_at: Date | null;
+};
+
+/** The columns a management read may select. No secret_hash, no lookup_id. */
+const KEY_METADATA_COLUMNS = sql`
+  k.id, k.integration_id, i.display_name as integration_name,
+  k.display_name, k.role_subset, k.created_at, k.expires_at,
+  k.revoked_at, k.last_used_at
+`;
+
+function listedKey(row: KeyRow): ListedKey {
+  return {
+    id: row.id,
+    integrationId: row.integration_id,
+    integrationName: row.integration_name,
+    displayName: row.display_name,
+    roleSubset: parseRoleSubset(row.role_subset),
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    revokedAt: row.revoked_at,
+    lastUsedAt: row.last_used_at,
+  };
+}
+
 /**
- * List the tenant's keys.
+ * List the tenant's keys, or those of one integration.
  *
  * The join through `api_key_integrations` is deliberate: that table carries the
  * tenant policy, so the join is what confines the result set even though
  * `api_keys` has no policy of its own.
+ *
+ * `integrationId` is a SUBJECT BINDING, not a filter the caller may widen: it
+ * is matched alongside the tenant predicate, so naming another tenant's
+ * integration yields an empty page rather than its keys.
  */
 export async function listKeys(
   deps: ApiKeyServiceDeps,
   session: ProvisioningSession,
+  scope: { integrationId?: string } = {},
 ): Promise<ListedKey[]> {
   assertMayManageApiKeys(session);
 
   return withSession(deps, session, async (trx) => {
-    const result = await sql<{
-      id: string;
-      integration_id: string;
-      integration_name: string;
-      display_name: string;
-      role_subset: unknown;
-      created_at: Date;
-      expires_at: Date | null;
-      revoked_at: Date | null;
-      last_used_at: Date | null;
-    }>`
-      select k.id, k.integration_id, i.display_name as integration_name,
-             k.display_name, k.role_subset, k.created_at, k.expires_at,
-             k.revoked_at, k.last_used_at
+    const result = await sql<KeyRow>`
+      select ${KEY_METADATA_COLUMNS}
         from platform.api_keys k
         join platform.api_key_integrations i on i.id = k.integration_id
        where k.tenant_id = ${session.tenantId}
+         ${scope.integrationId === undefined
+           ? sql``
+           : sql`and k.integration_id = ${scope.integrationId}`}
        order by k.created_at desc
     `.execute(trx);
 
-    return result.rows.map((row) => ({
-      id: row.id,
-      integrationId: row.integration_id,
-      integrationName: row.integration_name,
-      displayName: row.display_name,
-      roleSubset: parseRoleSubset(row.role_subset),
-      createdAt: row.created_at,
-      expiresAt: row.expires_at,
-      revokedAt: row.revoked_at,
-      lastUsedAt: row.last_used_at,
-    }));
+    return result.rows.map(listedKey);
+  });
+}
+
+/**
+ * One key by id, bound to the integration it was issued under.
+ *
+ * Both identifiers are predicates: a key id that exists but belongs to another
+ * integration is reported as absent, so the nested read cannot be used to walk
+ * out of the integration it was opened on.
+ */
+export async function getKey(
+  deps: ApiKeyServiceDeps,
+  session: ProvisioningSession,
+  target: { keyId: string; integrationId: string },
+): Promise<ListedKey> {
+  assertMayManageApiKeys(session);
+
+  return withSession(deps, session, async (trx) => {
+    const result = await sql<KeyRow>`
+      select ${KEY_METADATA_COLUMNS}
+        from platform.api_keys k
+        join platform.api_key_integrations i on i.id = k.integration_id
+       where k.tenant_id = ${session.tenantId}
+         and k.id = ${target.keyId}
+         and k.integration_id = ${target.integrationId}
+       limit 1
+    `.execute(trx);
+
+    const row = result.rows[0];
+    if (!row) throw new ApiKeyNotFoundError("No such key.");
+    return listedKey(row);
+  });
+}
+
+export type ListedIntegration = {
+  id: string;
+  displayName: string;
+  status: "pending" | "active" | "disabled";
+  /** Roles the service account holds, as the provisioning caller authorized them. */
+  grantedRoles: string[];
+  createdAt: Date;
+  updatedAt: Date;
+  keyCount: number;
+  /** Keys that are neither revoked nor past their expiry. */
+  activeKeyCount: number;
+};
+
+type IntegrationRow = {
+  id: string;
+  display_name: string;
+  status: string;
+  granted_roles: unknown;
+  created_at: Date;
+  updated_at: Date;
+  key_count: string | number;
+  active_key_count: string | number;
+};
+
+/**
+ * The integration columns a management read may select.
+ *
+ * The encrypted client secret is deliberately absent, and so is
+ * `keycloak_client_id`: it is derived (`osf-int-<id>`) and is realm internals,
+ * while `id` is the stable identifier the realm reconciler rebuilds a missing
+ * client UNDER rather than replaces.
+ */
+const INTEGRATION_METADATA_COLUMNS = sql`
+  i.id, i.display_name, i.status, i.granted_roles, i.created_at, i.updated_at,
+  count(k.id) as key_count,
+  count(k.id) filter (
+    where k.revoked_at is null and (k.expires_at is null or k.expires_at > now())
+  ) as active_key_count
+`;
+
+function listedIntegration(row: IntegrationRow): ListedIntegration {
+  const status = row.status === "active" || row.status === "disabled" ? row.status : "pending";
+  return {
+    id: row.id,
+    displayName: row.display_name,
+    status,
+    // An absent or malformed array is no roles, never "every role".
+    grantedRoles: Array.isArray(row.granted_roles)
+      ? row.granted_roles.filter((role): role is string => typeof role === "string")
+      : [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    // Postgres counts arrive as bigint, which the driver hands back as text.
+    keyCount: Number(row.key_count),
+    activeKeyCount: Number(row.active_key_count),
+  };
+}
+
+/** Every integration of the caller's tenant, with its key counts. */
+export async function listIntegrations(
+  deps: ApiKeyServiceDeps,
+  session: ProvisioningSession,
+): Promise<ListedIntegration[]> {
+  assertMayManageApiKeys(session);
+
+  return withSession(deps, session, async (trx) => {
+    const result = await sql<IntegrationRow>`
+      select ${INTEGRATION_METADATA_COLUMNS}
+        from platform.api_key_integrations i
+        left join platform.api_keys k
+          on k.integration_id = i.id and k.tenant_id = i.tenant_id
+       where i.tenant_id = ${session.tenantId}
+       group by i.id
+       order by i.display_name asc
+    `.execute(trx);
+
+    return result.rows.map(listedIntegration);
+  });
+}
+
+/** One integration by its stable id. Absent in this tenant reads as absent. */
+export async function getIntegration(
+  deps: ApiKeyServiceDeps,
+  session: ProvisioningSession,
+  integrationId: string,
+): Promise<ListedIntegration> {
+  assertMayManageApiKeys(session);
+
+  return withSession(deps, session, async (trx) => {
+    const result = await sql<IntegrationRow>`
+      select ${INTEGRATION_METADATA_COLUMNS}
+        from platform.api_key_integrations i
+        left join platform.api_keys k
+          on k.integration_id = i.id and k.tenant_id = i.tenant_id
+       where i.tenant_id = ${session.tenantId}
+         and i.id = ${integrationId}
+       group by i.id
+       limit 1
+    `.execute(trx);
+
+    const row = result.rows[0];
+    if (!row) throw new ApiKeyNotFoundError("No such integration.");
+    return listedIntegration(row);
   });
 }
 
 /**
  * Revoke a key. Idempotent, and never deletes: the row is the only evidence
  * that the credential existed and when it was last used.
+ *
+ * Returns the revocation instant as it now stands — the earlier one when the
+ * key was already revoked, which is what makes a repeated call honest rather
+ * than silently rewriting history.
  */
 export async function revokeKey(
   deps: ApiKeyServiceDeps,
   session: ProvisioningSession,
   keyId: string,
   now: Date = new Date(),
-): Promise<void> {
+): Promise<{ id: string; revokedAt: Date }> {
   assertMayManageApiKeys(session);
 
-  await withSession(deps, session, async (trx) => {
-    const result = await sql<{ id: string }>`
+  return withSession(deps, session, async (trx) => {
+    const result = await sql<{ id: string; revoked_at: Date }>`
       update platform.api_keys k
          set revoked_at = coalesce(k.revoked_at, ${now})
         from platform.api_key_integrations i
        where k.id = ${keyId}
          and i.id = k.integration_id
          and k.tenant_id = ${session.tenantId}
-      returning k.id
+      returning k.id, k.revoked_at
     `.execute(trx);
-    if (!result.rows[0]) {
+    const row = result.rows[0];
+    if (!row) {
       throw new ApiKeyNotFoundError("No such key.");
     }
+    return { id: row.id, revokedAt: row.revoked_at };
   });
 }
 
@@ -383,10 +545,10 @@ export async function disableIntegration(
   session: ProvisioningSession,
   integrationId: string,
   now: Date = new Date(),
-): Promise<void> {
+): Promise<{ id: string; revokedKeys: number }> {
   assertMayManageApiKeys(session);
 
-  await withSession(deps, session, async (trx) => {
+  const revokedKeys = await withSession(deps, session, async (trx) => {
     const result = await sql<{ id: string }>`
       update platform.api_key_integrations
          set status = 'disabled', updated_at = ${now}
@@ -398,15 +560,21 @@ export async function disableIntegration(
       throw new ApiKeyNotFoundError("No such integration.");
     }
 
-    await sql`
+    // Only the keys that were still live are counted: the predicate is what
+    // makes a second disable report 0 instead of the whole history again.
+    const revoked = await sql<{ id: string }>`
       update platform.api_keys
-         set revoked_at = coalesce(revoked_at, ${now})
+         set revoked_at = ${now}
        where integration_id = ${integrationId}
          and tenant_id = ${session.tenantId}
+         and revoked_at is null
+      returning id
     `.execute(trx);
+    return revoked.rows.length;
   });
 
   invalidateIntegrationToken(integrationId);
+  return { id: integrationId, revokedKeys };
 }
 
 type InsertKeyArgs = {

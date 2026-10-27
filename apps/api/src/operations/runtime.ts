@@ -83,6 +83,7 @@ import type { DB } from "../generated/db/types.js";
 import { evaluateOperationAvailability } from "./availability.js";
 import { assertOperationAdmitted } from "./execution-policy.js";
 import { nativeEntityTypeListHandler } from "./entity-type-list.js";
+import { API_KEYS_PLUGIN, apiKeyOperationHandler } from "./api-key-operations.js";
 import { GRANTS_PLUGIN, grantsOperationHandler } from "./grants-operations.js";
 import { SOURCE_SYNC_PLUGIN, sourceSyncOperationHandler } from "./source-sync-operations.js";
 import { EDIT_LEASES_PLUGIN, editLeaseOperationHandler } from "./edit-lease-operations.js";
@@ -647,6 +648,15 @@ export function bindOperationHandlers(
     if (operation.plugin === GRANTS_PLUGIN) {
       if (modulesByName.has(GRANTS_PLUGIN)) throw new Error("The core capability grant runtime cannot be replaced by a plugin.");
       bound.set(operation.key, { operation, handler: grantsOperationHandler(operation) });
+      continue;
+    }
+    // The integration/API-key catalog is core as well: its handlers
+    // (operations/api-key-operations.ts) call the one provisioning service and
+    // therefore the one privilege ceiling, so they bind wherever the
+    // authentication path they provision for binds.
+    if (operation.plugin === API_KEYS_PLUGIN) {
+      if (modulesByName.has(API_KEYS_PLUGIN)) throw new Error("The core API key catalog runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: apiKeyOperationHandler(operation) });
       continue;
     }
     // Importing records from an external source system by their base source

@@ -56,6 +56,7 @@ type GeneratedColumn = GeneratedTable["columns"][number];
 type RestMetadata = NonNullable<NonNullable<GeneratedTable["source"]>["rest"]>;
 
 const RESERVED_LIST_PARAMS = new Set([
+  "filter",
   "first",
   "after",
   "sortField",
@@ -301,7 +302,15 @@ function buildListInput(table: GeneratedTable, query: Record<string, unknown>) {
   const columnsByField = new Map(
     table.columns.map((column) => [fieldNameForColumn(column), column]),
   );
-  const filter: Record<string, unknown> = {};
+  let filter: Record<string, unknown> = {};
+  if (query.filter !== undefined) {
+    try {
+      if (typeof query.filter !== "string" || query.filter.length > 20000) throw new Error();
+      const parsed = JSON.parse(query.filter);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+      filter = parsed;
+    } catch { throw new HttpError(400,"BAD_USER_INPUT","Query parameter filter expects a JSON object."); }
+  }
   for (const [key, value] of Object.entries(query)) {
     if (RESERVED_LIST_PARAMS.has(key) || value === undefined) {
       continue;

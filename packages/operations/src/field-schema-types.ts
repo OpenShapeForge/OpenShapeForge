@@ -22,6 +22,9 @@ export type OperationFieldValidation = {
 };
 
 export type OperationFieldOptions = {
+  parameters?: Record<string, string | number | boolean>;
+  bindings?: Record<string, string>;
+
   type: "static" | "referentiedata" | "remote" | "dynamic" | "entity";
   items?: readonly {
     value: string;

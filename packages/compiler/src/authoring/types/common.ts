@@ -170,6 +170,9 @@ export interface FieldOptionStatic {
 }
 
 export interface FieldOptions {
+  parameters?: Record<string, string | number | boolean>;
+  bindings?: Record<string, string>;
+
   type: "static" | "referentiedata" | "remote" | "dynamic" | "entity";
   items?: FieldOptionStatic[];
   /** `tiles` renders static options as icon tiles instead of a select. */

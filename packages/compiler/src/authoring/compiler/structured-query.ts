@@ -24,12 +24,10 @@ export function structuredQuerySchema(fields: CompiledField[], filterFields: str
     }
     predicates[key] = { type: "object", additionalProperties: false, minProperties: 1, properties };
   }
-  const definitions = Object.fromEntries(Array.from({ length: 5 }, (_, depth) => [`filter${depth}`, {
-    type: "object", additionalProperties: false, maxProperties: 30,
-    properties: { ...predicates, ...(depth < 4 ? Object.fromEntries(["and", "or"].map(key => [key, {
-      type: "array", minItems: 1, maxItems: 20, items: { $ref: `#/$defs/filter${depth + 1}` },
-    }])) : {}) },
-  }]));
+  const definitions = {filter0:{
+    type:"object",additionalProperties:false,maxProperties:30,
+    properties:{...predicates,...Object.fromEntries(["and","or"].map(key=>[key,{type:"array",minItems:1,maxItems:20,items:{$ref:"#/$defs/filter0"}}]))}
+  }};
   if (sortFields.some(key => !fields.some(field => field.key === key && field.cardinality === "single" && field.baseType !== "object"))) throw new Error("Structured query sorting requires scalar fields.");
   return { type: "object", additionalProperties: false, $defs: definitions, properties: {
     first: { type: "integer", minimum: 1, maximum: 200, default: 50, "x-osf-i18n": { title: { en: "Page size", nl: "Paginagrootte" } } }, after: { type: "string", maxLength: 4096, "x-osf-i18n": { title: { en: "Cursor", nl: "Cursor" } } },

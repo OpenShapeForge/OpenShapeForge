@@ -413,6 +413,8 @@ describe("canonical operation runtime", () => {
     const bound = bindCanonicalOperationHandlers([]);
     expect(bound.has("notebook.import")).toBe(false);
     expect(bound.has("entityTypes.list")).toBe(true);
+    expect(bound.has("application.search")).toBe(true);
+    expect(bound.has("collection.options")).toBe(true);
     expect(bound.has("control.list-tenants")).toBe(true);
     expect(bound.has("grants.revoke")).toBe(true);
     expect(bound.has("AgreementMilestone.trigger")).toBe(true);
@@ -423,6 +425,8 @@ describe("canonical operation runtime", () => {
       [...bound.values()].every(({ operation }) =>
         operation.implementation?.type === "collection" ||
         operation.implementation?.type === "entity-type-list" ||
+        operation.implementation?.type === "application-search" ||
+        operation.implementation?.type === "collection-options" ||
         operation.implementation?.type === "constrained-reference-create" ||
         operation.plugin === "osf-audit" ||
         operation.plugin === "osf-billing" ||

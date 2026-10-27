@@ -1,3 +1,4 @@
+import { filterFieldNames } from "./filter-groups.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { generatedCrudTables, isGeneratedCrudTableEligible } from "./table-registry.js";
 export { getGeneratedCrudTables, isGeneratedCrudTableEligible } from "./table-registry.js";
@@ -222,7 +223,7 @@ export function assertElicitedQueryAllowed(
   const columns = [elicitedOutputColumn(table), ...table.columns.filter(column => column.typedBy?.encrypted)].filter((column): column is GeneratedCrudColumn => !!column);
   for (const column of columns) {
   const field = fieldNameForColumn(column);
-  const filtered = Object.keys(input.filter ?? {}).some(
+  const filtered = filterFieldNames(input.filter).some(
     (candidate) => candidate === field || (!exactFilterFields && candidate === `${field}In`),
   );
   if (filtered || input.sort?.field === field) {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { OpenShapeForgeDatabase } from "./connection.js";
 
 type Reservation = {
@@ -28,8 +29,10 @@ export class SharedReadBarriers {
   readonly #db: OpenShapeForgeDatabase;
   #reservation: Reservation | undefined;
   #queue: Promise<unknown> = Promise.resolve();
+  readonly #scope = new AsyncLocalStorage<{ key: string; active: boolean; reservation: Reservation }>();
 
   constructor(db: OpenShapeForgeDatabase) { this.#db = db; }
+  hasScope(): boolean { return this.#scope.getStore() !== undefined; }
 
   #serialize<T>(work: () => Promise<T>): Promise<T> {
     const next = this.#queue.then(work, work);
@@ -137,18 +140,31 @@ export class SharedReadBarriers {
 
   async run<T>(namespace: string, tenantId: string, work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     tenantId = tenantId.toLowerCase();
+    const key = JSON.stringify([namespace, tenantId]);
+    const current = this.#scope.getStore();
+    if (current) {
+      if (!current.active) throw new Error("Read barrier scope is no longer active.");
+      if (current.key !== key) throw new Error("A read barrier cannot acquire another namespace during execution.");
+      if (current.reservation.failure) throw current.reservation.failure;
+      signal?.throwIfAborted();
+      const result = await work();
+      signal?.throwIfAborted();
+      return result;
+    }
     let reservation: Reservation | undefined;
     while (!reservation) {
       signal?.throwIfAborted();
       reservation = await this.#acquire(namespace, tenantId);
       if (!reservation) await new Promise(resolve => setTimeout(resolve, 15));
     }
+    const scope = { key, active: true, reservation };
     try {
       signal?.throwIfAborted();
-      const result = await work();
+      const result = await this.#scope.run(scope, work);
       signal?.throwIfAborted();
       return result;
     } finally {
+      scope.active = false;
       // Validate ownership before returning a result, including read failures.
       await this.#release(reservation, namespace, tenantId);
     }

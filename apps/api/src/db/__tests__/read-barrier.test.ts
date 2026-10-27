@@ -50,6 +50,7 @@ test("parallel external reads share one lock connection, no open transactions; q
     reads = Array.from({ length: 12 }, () => barrier.run(namespace, tenant, async () => {
       if (++started === 12) allStarted.resolve();
       await pending.promise;
+      await barrier.run(namespace, tenant, async () => {});
       return "live";
     }));
     await allStarted.promise;

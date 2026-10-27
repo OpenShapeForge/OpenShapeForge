@@ -466,6 +466,7 @@ export class ModulePlatformRuntime {
           options?.signal?.throwIfAborted();
           const active = this.#activeTransaction(session, "Module read barrier");
           const tenantId = session.tenantId.toLowerCase();
+          if (this.#readBarriers.hasScope()) return this.#readBarriers.run(namespace, tenantId, work, options?.signal);
           if (active || databasePoolLimit(this.#db) === 1) {
             return this.services.db.withSession(session, async trx => {
               await sql`select pg_advisory_xact_lock_shared(hashtext(${'osf.read-barrier:' + namespace}), hashtext(${tenantId}))`.execute(trx);

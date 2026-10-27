@@ -391,6 +391,8 @@ export type PluginDatabase = {
    * (hashtext('osf.read-barrier:' || namespace), hashtext(tenantId)).
    * A host with one connection, or an already active transaction, retains a
    * transaction lock instead. This does not authorize reads or cache data.
+   * Reentry for the same namespace is allowed; nested acquisition of another
+   * namespace is refused to avoid distributed lock-order deadlocks.
    */
   withSharedReadBarrier?<T>(
     session: PluginSessionContext,

@@ -140,4 +140,45 @@ describe("artifact REST adapter", () => {
       expect(() => assertUploadFileName(name)).toThrow("The file name is invalid.");
     }
   });
+test("download capacity includes in-flight reads and recovers after they finish",async()=>{
+ const app=Fastify(); let release!:()=>void;const gate=new Promise<void>(r=>{release=r;});let entered=0;
+ let enteredAll!:()=>void; const all=new Promise<void>(r=>{enteredAll=r;});
+ registerArtifactRestRoutes(app,{artifacts:{stage:async()=>{throw Error('unused');},bind:async()=>{throw Error('unused');},read:async(_s,input)=>{
+  if(++entered===4)enteredAll();await gate;const bytes=Uint8Array.of(1,2,3);
+  return {descriptor:{artifactId:ARTIFACT_ID,version:1,fileName:'test.bin',mediaType:'application/octet-stream',sha256:'a'.repeat(64),byteSize:3},bytes,owner:input.owner};
+ }}});
+ const headers=authorizationHeaders();delete headers['content-type'];
+ const request=()=>app.inject({method:'GET',url:`/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`,headers});
+ const pending=Array.from({length:4},()=>Promise.resolve(request()));
+ await all;
+ try {expect((await request()).statusCode).toBe(429);}finally{release();}
+ expect((await Promise.all(pending)).map(x=>x.statusCode)).toEqual([200,200,200,200]);
+ expect((await request()).statusCode).toBe(200);await app.close();
+});
+
+ test("a response close cannot release reads still buffering provider data", async () => {
+   const app = Fastify();
+   const responses: import("node:http").ServerResponse[] = [];
+   let finishRead!: () => void, allStarted!: () => void;
+   const gate = new Promise<void>(r => { finishRead = r; });
+   const startedGate = new Promise<void>(r => { allStarted = r; });
+   let started = 0;
+   app.addHook("onRequest", async (_request, reply) => { responses.push(reply.raw); });
+   registerArtifactRestRoutes(app, {artifacts:{stage:async()=>{throw Error("unused");},bind:async()=>{throw Error("unused");},read:async(_s,input)=>{
+     if (++started === 4) allStarted();
+     await gate;
+     return {descriptor:{artifactId:ARTIFACT_ID,version:1,fileName:"a.bin",mediaType:"application/octet-stream",sha256:"a".repeat(64),byteSize:1},bytes:Uint8Array.of(1),owner:input.owner};
+   }}});
+   const headers = authorizationHeaders(); delete headers["content-type"];
+   const path = `/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`;
+   const pending = Array.from({length:4},()=>Promise.resolve(app.inject({method:"GET",url:path,headers})).catch(error => { expect(error.code).toBe("LIGHT_ECONNRESET"); }));
+   try {
+     await startedGate;
+     // Deterministically reproduce the socket-close event while storage is suspended.
+     for (const response of responses) response.emit("close");
+     expect((await app.inject({method:"GET",url:path,headers})).statusCode).toBe(429);
+     expect(started).toBe(4);
+   } finally { finishRead(); await Promise.all(pending); await app.close(); }
+ });
+
 });

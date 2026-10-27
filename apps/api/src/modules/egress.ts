@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { assertOutboundTls } from "./outbound-response.js";
+import { HttpError } from "../rest/http-error.js";
 /** Canonical protocol/allowlist gate and optional runtime-module egress owner. */
 import { withRuntimeSpan } from "@openshapeforge/observability";
 import type {
@@ -246,6 +248,7 @@ export async function fetchValidatedOutbound(input: {
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     throw input.denied(url, "protocol");
   }
+  assertOutboundTls(url);
   if (!hostAllowed(url.hostname, input.allowlist)) {
     throw input.denied(url, "host");
   }
@@ -253,6 +256,11 @@ export async function fetchValidatedOutbound(input: {
   const provider = input.dispatch?.scope.provider;
   const owner = input.dispatch?.owner;
   if (!input.dispatch || !owner) {
+    // Hostname matching alone cannot stop private addresses or DNS rebinding.
+    // Production network admission belongs to the selected hardened owner.
+    if (process.env.NODE_ENV === "production") {
+      throw new HttpError(503, "EGRESS_OWNER_REQUIRED", "Production outbound requests require a configured egress owner.");
+    }
     return withRuntimeSpan("external.headers", () => input.fallback(input.target, input.init), { ...(provider ? { provider } : {}) });
   }
 

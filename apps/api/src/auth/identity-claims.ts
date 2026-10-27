@@ -16,7 +16,8 @@ export function identityClaimsFromToken(
   return {
     issuer,
     subject,
-    email: stringClaim(claims.email),
+    // Only a verified mailbox may select invitations or identity candidates.
+    email: claims.email_verified === true ? stringClaim(claims.email) : undefined,
     name: stringClaim(claims.name),
     givenName: stringClaim(claims.given_name),
     familyName: stringClaim(claims.family_name),

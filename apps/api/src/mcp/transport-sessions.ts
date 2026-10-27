@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { SessionCapacity } from "./session-capacity.js";
 /**
  * The stateful MCP transport sessions and their request handler. Split out
  * of generated-mcp-server.ts, verbatim.
@@ -25,6 +26,8 @@ import type { BuildServer } from "./generated-mcp-server.js";
 import { resolveServerIcons } from "./server-icons.js";
 
 /** Only discovery/initialization consumes instructions; keep other shapes conservative. */
+const sessionCapacity = new SessionCapacity();
+
 export function requestNeedsInstructions(body: unknown): boolean {
   return body === null || typeof body !== "object" || Array.isArray(body) ||
     (body as { method?: unknown }).method !== "tools/call";
@@ -70,6 +73,7 @@ export function createTransportSessions(input: {
     credential: TrustedSessionContext["credential"];
     loginSessionBinding?: string;
     lastSeenMs: number;
+    releaseCapacity(): void;
   };
   const mcpSessions = new Map<string, McpSessionEntry>();
   const SESSION_IDLE_LIMIT_MS = 30 * 60 * 1000;
@@ -78,6 +82,7 @@ export function createTransportSessions(input: {
     for (const [id, entry] of mcpSessions) {
       if (now - entry.lastSeenMs > SESSION_IDLE_LIMIT_MS) {
         mcpSessions.delete(id);
+        entry.releaseCapacity();
         options.modulePlatform?.unregisterServer(entry.server);
         void entry.transport.close();
         void entry.server.close();
@@ -176,6 +181,7 @@ export function createTransportSessions(input: {
       }
       if (!sameStatefulMcpAuthorization(existing, session)) {
         mcpSessions.delete(sessionId);
+        existing.releaseCapacity();
         options.modulePlatform?.unregisterServer(existing.server);
         void existing.transport.close();
         void existing.server.close();
@@ -204,6 +210,9 @@ export function createTransportSessions(input: {
     }
 
     if (request.method === "POST" && isInitializeBody(request.body)) {
+      const releaseCapacity = sessionCapacity.acquire(String(session.tenantId), String(session.userId));
+      let retained = false;
+      try {
       const statefulSession = createStatefulMcpSessionContext(session);
       // What the client says about itself is said once, here; the server
       // built next reads it for its instructions, and `whoami` for the
@@ -226,6 +235,7 @@ export function createTransportSessions(input: {
       const transport = new FastifyStreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (id) => {
+          retained = true;
           mcpSessions.set(id, {
             transport,
             server,
@@ -242,18 +252,18 @@ export function createTransportSessions(input: {
               ? { loginSessionBinding: session.loginSessionBinding }
               : {}),
             lastSeenMs: Date.now(),
+            releaseCapacity,
           });
         },
       });
       transport.onclose = () => {
+        releaseCapacity();
         if (transport.sessionId) mcpSessions.delete(transport.sessionId);
         options.modulePlatform?.unregisterServer(server);
       };
       reply.hijack();
-      await server.connect(
-        transport,
-      );
       try {
+        await server.connect(transport);
         await withFreshRelationGroupMemberships(
           session,
           () => transport.handleNodeRequest(request.raw, reply.raw, request.body),
@@ -270,6 +280,9 @@ export function createTransportSessions(input: {
         }
       }
       return;
+      } finally {
+        if (!retained) releaseCapacity();
+      }
     }
 
     // Sessionless non-initialize request: the pre-session stateless

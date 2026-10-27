@@ -3,6 +3,8 @@
  * The CRUD execution of an entity tool. Split out of the entity section of
  * tool dispatch, verbatim.
  */
+import { executeEntityOperation, entityOperationContract, entityOperationRef } from "../operations/entity/runtime.js";
+import { operationFailure } from "@openshapeforge/operations";
 import { actingRelationId } from "../db/acting-relation.js";
 import { configurationOwnerPatch } from "./configuration-ownership.js";
 import { getEntityOperationContracts, getGeneratedEntity } from "../operations/entity/index.js";
@@ -107,6 +109,22 @@ export async function crudToolCall(
           });
         }
       }
+      if (modelArguments.blueprintId !== undefined || modelArguments.bindings !== undefined || modelArguments.unbind !== undefined) {
+        throw new HttpError(400, "BAD_USER_INPUT", "Secure completion cannot include a blueprint or field bindings.");
+      }
+      const secureContract = entityOperationContract(entityOperationRef(table, "create").id);
+      if (secureContract.implementation?.type !== "entity" || secureContract.interaction.secureInput?.into !== elicit.into) {
+        throw new HttpError(409, "CONFLICT", "The secure Operation definition changed; start a new configuration.");
+      }
+      const admission = await executeEntityOperation(db, session, {
+        operation: entityOperationRef(table, "create"),
+        input: { values: Object.fromEntries(Object.entries(modelArguments).filter(([key]) => !ENVELOPE_KEYS.has(key))),
+          ...(modelArguments.confirmed === true ? { confirmed: true } : {}) },
+      });
+      if (!("error" in admission) || admission.error.code !== "INTERACTION_REQUIRED") {
+        if ("error" in admission) throw operationFailure(admission.error);
+        throw new HttpError(409, "CONFLICT", "Secure interaction is no longer declared for this Operation.");
+      }
       const sourceId = modelArguments[elicit.sourceField];
       const sourceTable = tables.get(elicit.sourceTable);
       let sourceRow: Record<string, unknown> | null = null;
@@ -190,6 +208,7 @@ export async function crudToolCall(
           ? ((match.inputSchema as { required: unknown[] }).required as string[])
           : [];
         const minted = await mintConfiguration({
+          ...(modelArguments.confirmed === true ? { confirmed: true } : {}),
           db,
           session,
           tenantId: session.tenantId as string,

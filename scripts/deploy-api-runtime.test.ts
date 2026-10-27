@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";

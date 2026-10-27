@@ -1,5 +1,5 @@
-import { applyDefaultTemplates } from "./default-template.js";
 // SPDX-License-Identifier: BUSL-1.1
+import { applyDefaultTemplates } from "./default-template.js";
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DB } from "../../generated/db/types.js";
@@ -160,6 +160,7 @@ export async function createGeneratedEntityAfterElicitation(
     table: string;
     values: Record<string, unknown>;
     into: string;
+    trusted?: { operation: string; values: Record<string, unknown> };
   },
 ): Promise<GeneratedEntityRow> {
   const table = readGeneratedCrudTable(input.table, "create", session);
@@ -173,7 +174,13 @@ export async function createGeneratedEntityAfterElicitation(
     );
   }
   assertCreateRecordPermissions(table, session, input.values);
-  const values = normalizeWritableValues(table, input.values, "create");
+  const modelValues = Object.fromEntries(Object.entries(input.values).filter(([field]) => field !== input.into));
+  assertCallerTopLevelFields(table, session, modelValues, "create");
+  const values = prepareProtectedFieldWrites(table, session,
+    normalizeWritableValues(table, modelValues, "create"), "create");
+  const secure = normalizeWritableValues(table, { [input.into]: input.values[input.into] }, "create");
+  for (const [field, value] of secure) values.set(field, value);
+  if (input.trusted) addTrustedOperationValues(table, values, input.trusted.operation, input.trusted.values);
   return insertGeneratedRow(db, session, table, values);
 }
 

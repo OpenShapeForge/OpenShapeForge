@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
+let activeDownloads = 0;
+const MAX_ACTIVE_DOWNLOADS = 4;
 /** Core-owned HTTP adapter for provider-neutral artifact services. */
 import type { RuntimeArtifactServices } from "@openshapeforge/plugin-runtime";
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -92,10 +94,20 @@ export function registerArtifactRestRoutes(
     instance.get(ARTIFACT_CONTENTS_PATH, async (request, reply) => {
       const verified = await session(request, options.db);
       const { artifactId } = request.params as { artifactId: string };
+      if (activeDownloads >= MAX_ACTIVE_DOWNLOADS) throw new HttpError(429, "ARTIFACT_DOWNLOAD_LIMIT", "Download capacity reached; retry later.");
+      activeDownloads++;
+      let released = false, readSettled = false, responseSettled = false;
+      const release = () => { if (!released && readSettled && responseSettled) { released = true; activeDownloads--; } };
+      const responseDone = () => { responseSettled = true; release(); };
+      reply.raw.once("finish", responseDone);
+      reply.raw.once("close", responseDone);
+      try {
       const result = await options.artifacts.read(verified, {
         artifactId,
         owner: { entity: queryString(request, "ownerEntity"), id: queryString(request, "ownerId") },
       });
+      readSettled = true;
+      release();
       return reply
         .header("content-type", result.descriptor.mediaType)
         .header("content-length", String(result.bytes.byteLength))
@@ -104,7 +116,8 @@ export function registerArtifactRestRoutes(
         // a later permission change must not be answered from a cache.
         .header("x-content-type-options", "nosniff")
         .header("cache-control", "private, no-store")
-        .send(Buffer.from(result.bytes));
+        .send(Buffer.from(result.bytes.buffer, result.bytes.byteOffset, result.bytes.byteLength));
+      } catch (error) { readSettled = true; responseSettled = true; release(); throw error; }
     });
   });
 }

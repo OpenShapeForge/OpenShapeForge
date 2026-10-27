@@ -107,8 +107,8 @@ export function callbackOrigin(): string {
 
 /**
  * The signed-in host web form, when a web origin is deployed. Optional: the
- * handoff page is served on the API's own origin, so the runtime never needs
- * a web origin to hand a person a working form.
+ * browser handoff redirects to this authenticated web origin. API-only hosts
+ * must provide an authenticated client before accepting secure configuration.
  */
 export function configurationWebUrl(): string | undefined {
   const configured = process.env.OPENSHAPEFORGE_WEB_ORIGIN?.trim().replace(

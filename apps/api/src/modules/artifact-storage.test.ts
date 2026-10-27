@@ -372,3 +372,9 @@ describe("ArtifactStorageRuntime", () => {
     }
   });
 });
+
+test("artifact descriptors above the upload ceiling are refused", async () => {
+  const h=harness(); const session={id:'size-limit'}; h.live.add(session);
+  h.runtime.configure([{name:'storage',artifactStorage:provider({stage:async()=>({...descriptor,byteSize:64*1024*1024+1})})}],[providerId]);
+  await expectFailure(h.runtime.services.stage(session,stageInput),'HANDLER_CONTRACT_VIOLATION');
+});

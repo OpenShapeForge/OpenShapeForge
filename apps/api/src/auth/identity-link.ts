@@ -244,7 +244,9 @@ export async function resolveIdentityLink(
     }
   }
 
-  const pending = inFlight.get(key);
+  // A concurrent request with different mailbox proof must not inherit admission.
+  const flightKey = `${key}\0${claims.email ?? ""}`;
+  const pending = inFlight.get(flightKey);
   if (pending) return pending;
 
   const work = (async () => {
@@ -267,10 +269,10 @@ export async function resolveIdentityLink(
         "The identity link could not be resolved; try again.",
       );
     } finally {
-      inFlight.delete(key);
+      inFlight.delete(flightKey);
     }
   })();
-  inFlight.set(key, work);
+  inFlight.set(flightKey, work);
   return work;
 }
 
@@ -293,7 +295,7 @@ async function ensureIdentityLink(
 
     const existing = await readLinkRow(trx, identityId, session.tenantId);
     if (existing) {
-      return { identityId, state: toState(existing, claims), knownToTenant: candidates.length > 0 };
+      return { identityId, state: { ...toState(existing, claims), ...(existing.status === "pending_confirmation" && !candidates.some(candidate => candidate.id === existing.candidate_relation_id) ? { candidateRelationId: null } : {}) }, knownToTenant: candidates.length > 0 };
     }
 
     if (candidates.length > 0 || !claims.email) {

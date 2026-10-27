@@ -7,17 +7,14 @@
  * Split out of generated-mcp-server.ts.
  */
 import { startConfigurationForSession } from "./configuration-start.js";
-import { sql } from "kysely";
-import { isDeepStrictEqual } from "node:util";
 import { withDbSession } from "../db/session.js";
-import { assertConfigurationOwner } from "./acting-relation-guard.js";
 import { configurationOwnerPatch } from "./configuration-ownership.js";
 import type { DbSessionInput } from "../db/session.js";
 import {
-  createGeneratedEntityForTable,
   listGeneratedEntitiesForTable,
 } from "../operations/entity/index.js";
-import { mergeGeneratedEntityObjectForTable } from "../operations/entity/mutations.js";
+import { completeEntitySecureInput, entityOperationRef, entityOperationContract, executeEntityOperation } from "../operations/entity/runtime.js";
+import { operationFailure } from "@openshapeforge/operations";
 import {
   consumeConfiguration,
   consumeConfigurationForSession,
@@ -42,15 +39,11 @@ import { failedCheckSummary, testElicitedRow } from "./connection-test.js";
 import { HttpError } from "../rest/http-error.js";
 import { tablesByName } from "./catalog.js";
 import { fieldNameForColumn, serializeRow } from "./catalog-rows.js";
-import { ENTITY_CONFIGURATION_PATH, elicitedKeyring } from "./handoff-config.js";
+import { ENTITY_CONFIGURATION_PATH, elicitedKeyring, configurationWebUrl } from "./handoff-config.js";
 import { type McpRouteContext } from "./route-context.js";
 import { ok } from "./tool-results.js";
 
-/**
- * The configuration handoff pages (unauthenticated: the single-use token is
- * the authorization) and the authenticated configuration form API the web
- * client uses.
- */
+/** Authenticated configuration API and browser redirects to the signed-in web client. */
 export async function registerConfigurationHandoffRoutes(
   ctx: McpRouteContext,
 ): Promise<void> {
@@ -59,10 +52,6 @@ export async function registerConfigurationHandoffRoutes(
     options,
     requireMcpSession,
   } = ctx;
-  // The configuration handoff pages. Unauthenticated by necessity, like
-  // the OAuth callback: the person arrives by browser, and the single-use
-  // token IS the authorization — it was minted for exactly this tenant,
-  // user and pending create. Values travel only in the POST body.
   instance.addContentTypeParser(
     "application/x-www-form-urlencoded",
     { parseAs: "string" },
@@ -100,6 +89,17 @@ export async function registerConfigurationHandoffRoutes(
         "INTERNAL",
         "Table is missing from the manifest.",
       );
+    const secureContract = entityOperationContract(entityOperationRef(tableDef, "create").id);
+    if (secureContract.implementation?.type !== "entity" || secureContract.interaction.secureInput?.into !== pending.elicit.into) {
+      throw new HttpError(409, "CONFLICT", "The secure Operation definition changed; start a new configuration.");
+    }
+    const admission = await executeEntityOperation(db, writeSession, {
+      operation: entityOperationRef(tableDef, "create"), input: { values: pending.modelValues, ...(pending.confirmed ? { confirmed: true } : {}) },
+    });
+    if (!("error" in admission) || admission.error.code !== "INTERACTION_REQUIRED") {
+      if ("error" in admission) throw operationFailure(admission.error);
+      throw new HttpError(409, "CONFLICT", "Secure interaction is no longer declared for this Operation.");
+    }
     const values = storeSubmission(pending, content, elicitedKeyring());
     // Verify against the provider BEFORE the row exists: the person is
     // right here at the form, so a wrong subdomain or refused credential
@@ -163,9 +163,7 @@ export async function registerConfigurationHandoffRoutes(
         }
       }
     }
-    // A key that already exists (the form submitted twice, a rotated
-    // secret) updates that row's values in place; submitted keys replace,
-    // untouched keys stay. Only a new key creates a row.
+    // A create continuation never authorizes changing an existing record.
     const existingRows =
       typeof pending.modelValues.key === "string"
         ? (
@@ -176,43 +174,14 @@ export async function registerConfigurationHandoffRoutes(
           ).rows.map((row) => serializeRow(tableDef, row))
         : [];
     const existing = findExistingConfiguration(existingRows, pending);
-    if (existing) {
-      // The stable key finds a candidate; it does not authorize rebinding its
-      // source or owner. Check the original create identities under the same
-      // row lock used by the following canonical merge.
-      await withDbSession(db, writeSession, async (trx) => {
-        const locked = (await sql<{ row: Record<string, unknown> }>`select to_jsonb(t.*) as row
-          from ${sql.id(tableDef.schema, tableDef.table)} t
-          where ${sql.id(tableDef.primaryKey!)}::text = ${String(existing.id)} for update`.execute(trx)).rows[0]?.row;
-        if (!locked) throw new HttpError(404, "NOT_FOUND", "The configured record is unavailable.");
-        for (const column of tableDef.columns) {
-          const field = fieldNameForColumn(column);
-          if (field === "ownerUserId") assertConfigurationOwner(pending, locked[column.name], values.ownerUserId);
-          if (field === pending.elicit.into) continue;
-          if (!Object.hasOwn(pending.modelValues, field)) {
-            if (field === pending.elicit.sourceField || (column.immutable && locked[column.name] != null)) throw new HttpError(409, "CONFIGURATION_BINDING_MISMATCH", "The secure form does not match this record.");
-            continue;
-          }
-          if (!isDeepStrictEqual(locked[column.name], pending.modelValues[field])) {
-            throw new HttpError(409, "CONFIGURATION_BINDING_MISMATCH", "The secure form does not match this record.");
-          }
-        }
-      });
-      // Public reads intentionally return secret set markers. Merge only the
-      // submitted members against the locked storage row, so omitted encrypted
-      // siblings are retained rather than replaced by those markers.
-      await mergeGeneratedEntityObjectForTable(
-        db,
-        writeSession,
-        tableDef,
-        String(existing.id),
-        pending.elicit.into,
-        values[pending.elicit.into] as Record<string, unknown>,
-      );
-      return { ok: true, id: String(existing.id) };
-    }
-    const created = await createGeneratedEntityForTable(db, writeSession, tableDef, values);
-    return { ok: true, id: String(created.id) };
+    if (existing) throw new HttpError(403, "FORBIDDEN", "An existing configuration requires a separately authorized update Operation.");
+    const result = await completeEntitySecureInput(db, writeSession, {
+      operation: entityOperationRef(tableDef, "create"),
+      input: { values: Object.fromEntries(Object.entries(values).filter(([key]) => key !== pending.elicit.into)), ...(pending.confirmed ? { confirmed: true } : {}) },
+    }, { into: pending.elicit.into, value: values[pending.elicit.into] });
+    if ("error" in result) throw operationFailure(result.error);
+    if (result.intent !== "create" || !result.data) throw new HttpError(500, "INTERNAL", "Secure create returned no record.");
+    return { ok: true, id: String(result.data.id) };
   };
 
   class SubmissionRejected extends Error {
@@ -314,14 +283,12 @@ export async function registerConfigurationHandoffRoutes(
           .type("text/html")
           .send(renderConfigurationExpiredPage());
       }
-      return reply
-        .type("text/html")
-        .send(
-          renderConfigurationForm(
-            pending,
-            `${ENTITY_CONFIGURATION_PATH}/${pending.token}`,
-          ),
-        );
+      const webUrl = configurationWebUrl();
+      if (!webUrl) throw new HttpError(503, "CONFIGURATION_UNAVAILABLE", "A signed-in configuration web client is required.");
+      const destination = new URL(webUrl);
+      if (pending.id) destination.searchParams.set("formId", pending.id);
+      return reply.header("cache-control", "no-store").header("referrer-policy", "no-referrer").redirect(destination.href);
+
     },
   );
   instance.post(
@@ -339,14 +306,10 @@ export async function registerConfigurationHandoffRoutes(
       }
       const body = typeof request.body === "string" ? request.body : "";
       try {
-        const writeSession: DbSessionInput = {
-          tenantId: pending.tenantId,
-          userId: pending.userId,
-          relationId: pending.relationId ?? null,
-          roles: [],
-          groups: [],
-          scope: "self",
-        };
+        const { session: writeSession } = await requireMcpSession(request, "configuration-form");
+        if (writeSession.tenantId !== pending.tenantId || writeSession.userId !== pending.userId) {
+          throw new HttpError(403, "FORBIDDEN", "The secure form belongs to another identity.");
+        }
         const outcome = await submitAtomically(pending, body, writeSession,
           () => consumeConfiguration(pending.token, options.db, writeSession));
         if (!outcome.ok) {

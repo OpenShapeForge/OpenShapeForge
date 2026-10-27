@@ -182,13 +182,6 @@ export async function invokeConnectorOperation(
   // one call can be joined without any of them naming the tenant or the
   // installation.
   try {
-    const wrapFetch = await oauthFetchWrapper({
-      ...context,
-      contract,
-      installation,
-      secrets,
-      correlationId,
-    });
     return await context.governor.run(
       {
         connector: contract.slug,
@@ -198,8 +191,12 @@ export async function invokeConnectorOperation(
         reliability: operation.reliability,
         ...(context.signal ? { signal: context.signal } : {}),
       },
-      () =>
-        invokeOperation({
+      async () => {
+        const timeout = AbortSignal.timeout(operation.reliability.timeouts.attemptMs);
+        const signal = context.signal ? AbortSignal.any([context.signal, timeout]) : timeout;
+        const wrapFetch = await oauthFetchWrapper({ ...context, signal, contract, installation, secrets, correlationId });
+        signal.throwIfAborted();
+        return invokeOperation({
           contract,
           operation,
           boundary: loaded.boundary,
@@ -220,10 +217,11 @@ export async function invokeConnectorOperation(
             },
             ...(context.egressSource ? { source: context.egressSource } : {}),
           },
-          ...(context.signal ? { signal: context.signal } : {}),
+          signal,
           ...(wrapFetch ? { wrapFetch } : {}),
           ...(context.log ? { log: context.log } : {}),
-        }),
+        });
+      },
     );
   } catch (error) {
     if (error instanceof ConnectorExecutionError && error.outcome) {
@@ -332,10 +330,8 @@ async function oauthFetchWrapper(input: {
   // OWN egress allowlist. The compiler already refused a contract whose token
   // URL has no egress to reach it, so a denial here is a misconfigured
   // installation rather than an unreachable design.
-  const controller = new AbortController();
-  const refreshSignal = input.signal
-    ? AbortSignal.any([input.signal, controller.signal])
-    : controller.signal;
+  const timeout = AbortSignal.timeout(20_000);
+  const refreshSignal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
   const egressInvocation = createModuleEgressInvocation({
     owner: input.egressOwner,
     purpose: "oauth",
@@ -367,7 +363,7 @@ async function oauthFetchWrapper(input: {
       secrets: input.secrets,
       boundFetch: refreshFetch,
       correlationId: input.correlationId,
-      ...(input.signal ? { signal: input.signal } : {}),
+      signal: refreshSignal,
     });
     return (bound) => withOAuthAuthorization(bound, accessToken);
   } catch (error) {

@@ -58,6 +58,7 @@ describe("identityClaimsFromToken", () => {
         iss: "http://kc/realms/r",
         sub: "s",
         email: " hans@example.com ",
+        email_verified: true,
         name: "Hans Dev",
         given_name: "Hans",
         family_name: "Dev",
@@ -73,6 +74,15 @@ describe("identityClaimsFromToken", () => {
       preferredUsername: undefined,
     });
   });
+});
+
+describe("unverified mailbox claims", () => {
+  for (const email_verified of [undefined, false, "true", 1, null]) {
+    test(`does not use email with verification ${String(email_verified)} for admission`, () => {
+      expect(identityClaimsFromToken({iss: "https://issuer.example", sub: "attacker",
+        email: "victim@example.com", email_verified})?.email).toBeUndefined();
+    });
+  }
 });
 
 describe("names from claims", () => {

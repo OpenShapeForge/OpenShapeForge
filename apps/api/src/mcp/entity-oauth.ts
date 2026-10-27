@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { assertOutboundTls } from "../modules/outbound-response.js";
 /**
  * Personal OAuth connections for derived tools — the authorization-code
  * flow, gated by the definition chain.
@@ -105,6 +106,9 @@ export async function mintAuthorization(
   state: string;
   expiresInSeconds: number;
 }> {
+  const url = new URL(input.authorizationUrl);
+  assertOutboundTls(url);
+  assertOutboundTls(new URL(input.tokenUrl));
   sweep();
   const codeVerifier = base64url(randomBytes(48));
   const challenge = base64url(
@@ -138,7 +142,6 @@ export async function mintAuthorization(
     });
   }
 
-  const url = new URL(authorizationUrl);
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     throw new HttpError(
       400,

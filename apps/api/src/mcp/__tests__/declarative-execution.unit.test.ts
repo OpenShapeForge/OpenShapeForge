@@ -2131,3 +2131,19 @@ describe("mapOperationResponse over collections", () => {
     ).toThrow(/none of its field paths/);
   });
 });
+
+it("client credential cache evicts old keys and rejects oversized token values", async () => {
+  let calls=0;
+  let oversized=false;
+  const fetchImpl=(async()=>{calls++;return Response.json({access_token:oversized ? 'x'.repeat(16385) : 'bounded-token',expires_in:3600});}) as unknown as typeof fetch;
+  const request=(id:string)=>acquireAuthHeaders({auth:{scheme:'oauth2ClientCredentials',tokenUrl:'https://bounded.example/token'},plain:{clientId:id},secret:{clientSecret:'synthetic-test-secret'},egress:['bounded.example'],fetchImpl});
+  await request('first');
+  for(let i=0;i<256;i++) await request(`key-${i}`);
+  const before=calls;
+  await request('first');
+  expect(calls).toBe(before+1);
+  oversized=true;
+  await expect(request('oversized')).rejects.toMatchObject({code:'TOKEN_ENDPOINT_ERROR'});
+  oversized=false;
+  await expect(request('oversized')).resolves.toMatchObject({authorization:'Bearer bounded-token'});
+});

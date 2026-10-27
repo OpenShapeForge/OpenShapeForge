@@ -35,6 +35,7 @@ import {
 } from "./confirmation-challenges.js";
 import {
   createGeneratedEntity,
+  createGeneratedEntityAfterElicitation,
   deleteGeneratedEntity,
   updateGeneratedEntity,
 } from "./mutations.js";
@@ -891,10 +892,13 @@ function listPageInput(input: EntityOperationInput | undefined): ListPageInput {
 }
 
 /** Interface-neutral dispatcher used by REST, MCP and future transports. */
+type SecureCompletion = { into: string; value: unknown; existingId?: string };
+
 async function executeEntityOperationWithContext(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   request: EntityOperationRequest,
+  completion?: SecureCompletion,
 ): Promise<EntityOperationResult> {
   try {
     const table = tableForEntityOperation(request.operation);
@@ -1081,6 +1085,26 @@ async function executeEntityOperationWithContext(
         requireContractValues(operation, table, values, { partial: blueprintId !== undefined }, session);
         await requireOperationPrerequisites(db, session, operation);
         requireCreateOperationConfirmation(operation, request.input);
+        if (completion) {
+          const secure = operation.interaction.secureInput;
+          if (!secure || secure.into !== completion.into || blueprintId !== undefined || prepared.bindings) {
+            throw operationFailure({ code: "BAD_USER_INPUT", message: "Secure completion does not match this Operation." });
+          }
+          const data = await governed(async () => {
+            // The final effect repeats prerequisites inside the owning transaction.
+            await requireOperationPrerequisites(db, session, operation);
+            if (completion.existingId) {
+              throw operationFailure({ code: "FORBIDDEN", message: "An existing configuration requires a separately authorized update Operation." });
+            }
+            return createGeneratedEntityAfterElicitation(db, session, {
+              table: table.name, into: completion.into, values: { ...values, [completion.into]: completion.value },
+              ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
+            });
+          });
+          if (!data) throw operationFailure({ code: "NOT_FOUND", message: "The configured record is unavailable." });
+          return { intent: "create", data, operations: await currentRecordOffers(db, session, entityName, table,
+            offerTarget(data, table), projectedOfferIntents(request, RECORD_OFFER_INTENTS)) };
+        }
         const interactionError = secureInputInteractionError(operation);
         if (interactionError) return { intent: "create", error: interactionError };
         const data = await governed(() => blueprintId !== undefined
@@ -1250,7 +1274,15 @@ async function executeEntityOperationWithContext(
   }
 }
 
-export const executeEntityOperation: typeof executeEntityOperationWithContext = (db, session, request, ...rest) =>
+export const executeEntityOperation = (db: OpenShapeForgeDatabase, session: DbSessionInput, request: EntityOperationRequest): Promise<EntityOperationResult> =>
   withAuditContext(request.operation.id, (session as { credential?: import("../../auth/trusted-context.js").SessionCredential }).credential,
-    () => executeEntityOperationWithContext(db, session, request, ...rest),
+    () => executeEntityOperationWithContext(db, session, request),
     (session as { principalKind?: "person" | "service" }).principalKind);
+
+/** Server-only continuation: secret values are never accepted through public Operation input. */
+export function completeEntitySecureInput(db: OpenShapeForgeDatabase, session: DbSessionInput,
+  request: EntityOperationRequest, completion: SecureCompletion): Promise<EntityOperationResult> {
+  if (request.operation.intent !== "create") throw operationFailure({ code: "BAD_USER_INPUT", message: "Secure completion requires a create Operation." });
+  return withAuditContext(request.operation.id, (session as { credential?: import("../../auth/trusted-context.js").SessionCredential }).credential,
+    () => executeEntityOperationWithContext(db, session, request, completion));
+}

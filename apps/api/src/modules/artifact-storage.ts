@@ -14,7 +14,7 @@ function descriptor(value: RuntimeArtifactDescriptor): RuntimeArtifactDescriptor
       typeof value.fileName !== "string" || !value.fileName || /[\r\n\0/\\]/.test(value.fileName) ||
       typeof value.mediaType !== "string" || !/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(value.mediaType) ||
       typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256) ||
-      !Number.isSafeInteger(value.byteSize) || value.byteSize < 0) {
+      !Number.isSafeInteger(value.byteSize) || value.byteSize < 0 || value.byteSize > 64 * 1024 * 1024) {
     throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "Stored file metadata could not be verified." });
   }
   return Object.freeze({ artifactId: value.artifactId, version: value.version, fileName: value.fileName,

@@ -201,34 +201,44 @@ test("exact projections fail closed for a different name and ambiguous ownership
 
 test("exact projections preserve live role and tenant filtering", async () => {
   for (const boundary of ["role", "tenant"]) {
-    const f = fixture(),project=f.module.mcp!.tools!;
-    f.module.mcp!.getTool=async(name,ctx)=>(await project(ctx)).find(tool=>tool.name===name);
-    f.module.mcp!.tools=async()=>{throw Error("Unexpected full listing")};
-    if(boundary==="role")f.session.roles=[];
-    else f.session.tenantId="33333333-3333-4333-8333-333333333333";
-    await inMemory(f,async client=>{
-      expect((await client.callTool({name:"reports.summary",arguments:{}})).isError).toBe(true);
+    const f = fixture(), project = f.module.mcp!.tools!;
+    f.module.mcp!.getTool = async (name, ctx) =>
+      (await project(ctx)).find(tool => tool.name === name);
+    f.module.mcp!.tools = async () => { throw Error("Unexpected full listing"); };
+    if (boundary === "role") f.session.roles = [];
+    else f.session.tenantId = "33333333-3333-4333-8333-333333333333";
+    await inMemory(f, async client => {
+      expect((await client.callTool({ name: "reports.summary", arguments: {} })).isError).toBe(true);
       expect(f.counts().calls).toBe(0);
     });
   }
 });
 
-
 test("full discovery keeps its projection while authorization uses exact live lookup", async () => {
-  const f=fixture(), project=f.module.mcp!.tools!;
-  let listings=0,lookups=0;
-  f.module.mcp!.tools=async ctx=>{listings++;return project(ctx)};
-  f.module.mcp!.getTool=async(name,ctx)=>{lookups++;return (await project(ctx)).find(tool=>tool.name===name)};
-  const all=await moduleTools([f.module],{db:f.db,session:f.session,clientCapabilities:{elicitation:false,mcpApp:false}});
-  expect(all.map(entry=>entry.tool.name)).toEqual(["reports.summary"]);
-  expect(listings).toBe(1);expect(lookups).toBe(0);
-  f.module.mcp!.authorize=async()=>({allowed:true});
-  f.module.mcp!.callTool=async(_name,_args,ctx)=>({content:[],structuredContent:{
-    decision:await f.platform.services.mcp.authorize(ctx.session,{action:"call",subject:{kind:"tool",name:"reports.summary"}}),
-  }});
-  await inMemory(f,async client=>{
-    const result=await client.callTool({name:"reports.summary",arguments:{}});
-    expect(result.isError).toBeFalsy();expect(result.structuredContent).toEqual({decision:{allowed:true}});
+  const f = fixture(), project = f.module.mcp!.tools!;
+  let listings = 0, lookups = 0;
+  f.module.mcp!.tools = async ctx => { listings++; return project(ctx); };
+  f.module.mcp!.getTool = async (name, ctx) => {
+    lookups++;
+    return (await project(ctx)).find(tool => tool.name === name);
+  };
+  const all = await moduleTools([f.module], {
+    db: f.db, session: f.session, clientCapabilities: { elicitation: false, mcpApp: false },
   });
-  expect(listings).toBe(1);expect(lookups).toBeGreaterThan(0);
+  expect(all.map(entry => entry.tool.name)).toEqual(["reports.summary"]);
+  expect(listings).toBe(1);
+  expect(lookups).toBe(0);
+  f.module.mcp!.authorize = async () => ({ allowed: true });
+  f.module.mcp!.callTool = async (_name, _args, ctx) => ({ content: [], structuredContent: {
+    decision: await f.platform.services.mcp.authorize(ctx.session, {
+      action: "call", subject: { kind: "tool", name: "reports.summary" },
+    }),
+  } });
+  await inMemory(f, async client => {
+    const result = await client.callTool({ name: "reports.summary", arguments: {} });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual({ decision: { allowed: true } });
+  });
+  expect(listings).toBe(1);
+  expect(lookups).toBeGreaterThan(0);
 });

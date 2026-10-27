@@ -54,6 +54,30 @@ test("tenant sessions batch setup without retaining pooled tenant, role, relatio
       `.execute(trx)).rows[0];
       expect(result).toEqual({ tenant: second.tenantId, roles: "", relation: "", memberships: "", bypass: "false", audit: "" });
     });
+    // The non-empty path must clear inherited group authority BEFORE closure
+    // reads too. This fixture view exposes rows only with all three GUCs clear.
+    const parent = crypto.randomUUID(), child = crypto.randomUUID();
+    await sql`create schema platform`.execute(db);
+    await sql`create table platform.fixture_closure (tenant_id uuid, ancestor_id uuid, descendant_id uuid)`.execute(db);
+    await sql`insert into platform.fixture_closure values
+      (${second.tenantId}::uuid, ${parent}::uuid, ${parent}::uuid),
+      (${second.tenantId}::uuid, ${parent}::uuid, ${child}::uuid),
+      (${second.tenantId}::uuid, ${child}::uuid, ${child}::uuid)`.execute(db);
+    await sql`create view platform.org_unit_closure as select * from platform.fixture_closure
+      where current_setting('app.user_groups', true) = ''
+        and current_setting('app.user_groups_exact', true) = ''
+        and current_setting('app.user_groups_ancestors', true) = ''`.execute(db);
+    statements.length = 0;
+    await withDbSession(db, { ...second, groups: [child] }, async trx => {
+      const result = (await sql<{ groups: string; exact: string; ancestors: string }>`
+        select current_setting('app.user_groups') as groups,
+          current_setting('app.user_groups_exact') as exact,
+          current_setting('app.user_groups_ancestors') as ancestors`.execute(trx)).rows[0]!;
+      expect(result.groups).toBe(child);
+      expect(result.exact).toBe(child);
+      expect(result.ancestors.split(',').sort()).toEqual([parent, child].sort());
+    });
+    expect(statements.filter(statement => statement.includes("set_config"))).toHaveLength(2);
     expect((await sql<{ tenant: string }>`select current_setting('app.tenant_id', true) as tenant`.execute(db)).rows[0]!.tenant).toBe("");
   } finally {
     await runtime?.close();

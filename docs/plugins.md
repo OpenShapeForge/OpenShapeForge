@@ -524,7 +524,8 @@ Seven properties are worth knowing:
   `mcp.getTool(name, context)` as its complete live lookup for one own tool.
   It returns the same available contract as `tools(context)`, or `undefined`
   when absent. Core uses it for namespaced calls and ownership checks while
-  retaining collision checks, decorators, authorization and interceptors.
+  retaining collision checks for the requested name, decorators, authorization
+  and interceptors. Whole-projection uniqueness is still checked at discovery.
   `tools(context)` still owns discovery; modules without `getTool` keep their
   full projection. Keep discovery-only instruction or onboarding reads out of
   exact lookup. Resolve availability from the current session and canonical

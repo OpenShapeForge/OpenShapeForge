@@ -202,11 +202,9 @@ export async function applyDbSession<TDatabase>(
     sql`set_config('app.scope', ${session.scope}, true)`,
     sql`set_config('app.relation_group_ids', ${session.relationGroupIds.join(",")}, true)`,
     sql`set_config('app.relation_id', ${session.relationId ?? ""}, true)`,
-    ...(exact.length === 0 ? [
-      sql`set_config('app.user_groups', '', true)`,
-      sql`set_config('app.user_groups_exact', '', true)`,
-      sql`set_config('app.user_groups_ancestors', '', true)`,
-    ] : []),
+    sql`set_config('app.user_groups', '', true)`,
+    sql`set_config('app.user_groups_exact', '', true)`,
+    sql`set_config('app.user_groups_ancestors', '', true)`,
   ])}`.execute(trx);
 
   // Group expansion (§E.1/E.3). The user's DIRECT org-unit UUIDs

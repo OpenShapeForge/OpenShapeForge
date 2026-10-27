@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import {expect,test} from 'bun:test';
 import {nativeCollectionOptionsHandler} from './collection-options.js';
 const source={entity:'History',list:'History.list',fields:{actor:{type:'string',many:false},tags:{type:'string',many:true}}};

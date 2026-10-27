@@ -1474,7 +1474,9 @@ function collectApplicationSearch(entities: readonly Pick<CompiledEntityInfo,"co
 }
 
 function collectCollectionOptions(entities: readonly Pick<CompiledEntityInfo,"contract">[], context: PluginBaseContext): CompiledPluginOperation[] {
+  const sources=collectionOptionSources(entities);
+  if(!sources.length)return [];
   const operation=collectionOptionsDefinition(entities);
-  nativeBindings.set(operation,{type:"collection-options",sources:collectionOptionSources(entities)});
+  nativeBindings.set(operation,{type:"collection-options",sources});
   return collectOperationContracts([{name:"core",operations:[operation]}],context,true);
 }

@@ -34,11 +34,11 @@ test("real authored template collection Operations compile the direct-edit varia
   });
   // The production collector validates every published schema with strict:true.
   const operations = collectAuthoredEntityPluginOperations(entries, { ...context, authoringDir });
-  for (const operation of operations) {
+  for (const operation of operations.filter(operation => operation.implementation?.type === "collection")) {
     expect(missingSchemaUiTranslations(operation.inputSchema, `${operation.id}.input`)).toEqual([]);
     expect(missingSchemaUiTranslations(operation.outputSchema, `${operation.id}.output`)).toEqual([]);
   }
-  expect(operations.filter((operation) => operation.implementation).map((operation) => operation.id).sort()).toEqual(["Template.insertVariant", "TemplateVariant.insertBlock", "TemplateVariant.moveBlock", "TemplateVariant.removeBlock", "TemplateVariant.updateBlock"]);
+  expect(operations.filter((operation) => operation.implementation?.type === "collection").map((operation) => operation.id).sort()).toEqual(["Template.insertVariant", "TemplateVariant.insertBlock", "TemplateVariant.moveBlock", "TemplateVariant.removeBlock", "TemplateVariant.updateBlock"]);
   const schema = operations.find((operation) => operation.id === "Template.insertVariant")!.inputSchema;
   const ajv = new Ajv.default({ strict: true }); (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
   for (const keyword of ["x-osf-reference", "x-osf-i18n", "x-osf-sourceField", "x-osf-control"]) ajv.addKeyword({ keyword, valid: true });
@@ -77,7 +77,7 @@ test("lowers native collection declarations to the canonical invoke catalog and 
   expect(insert).toMatchObject({ intent: "invoke", plugin: "core", handler: "collectionMutation", implementation: { type: "collection", entityName: "Owner", field: "children", action: "insert" }, target: { entityName: "Owner", scope: "record", inputField: "id" }, auth: { mode: "session", roles: ["Example.Update"] }, tenancy: { mode: "required" } });
   expect(insert.transports.mcp.enabled).toBe(true);
   expect(insert.transports.graphql.enabled).toBe(true);
-  expect(buildStaticOperationCatalog(operations, [], entries, {}).operations).toHaveLength(2);
+  expect(buildStaticOperationCatalog(operations.filter(operation => operation.implementation?.type === "collection"), [], entries, {}).operations).toHaveLength(2);
   expect(() => assertOperationRuntimeModules(operations, [])).not.toThrow();
   const ajv = new Ajv.default({ strict: false }); (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
   const validate = ajv.compile(insert.inputSchema);

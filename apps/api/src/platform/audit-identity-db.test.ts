@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import {test,expect} from 'bun:test';
 import {SQL} from 'bun';
 import {jsonbLiteral} from '../db/sql-helpers.js';

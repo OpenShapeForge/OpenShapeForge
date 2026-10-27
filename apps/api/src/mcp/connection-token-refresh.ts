@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
+import { withReadBarrierMaintenanceDatabase } from "../db/read-barrier.js";
 import type { DB } from "../generated/db/types.js";
 import { appendEntityEventInTransaction } from "../platform/entity-events.js";
 import { HttpError } from "../rest/http-error.js";
@@ -197,7 +198,7 @@ export async function refreshConnectionRowLocked(input: {
         ),
       store: {
         withLockedRow: (work) =>
-          withDbSession(input.db, input.session, async (lockedTrx) => {
+          withReadBarrierMaintenanceDatabase(input.db, database => withDbSession(database, input.session, async (lockedTrx) => {
             trx = lockedTrx;
             input.signal?.throwIfAborted();
             const locked = await sql<{
@@ -233,7 +234,7 @@ export async function refreshConnectionRowLocked(input: {
             result = current;
             input.signal?.throwIfAborted();
             return work();
-          }),
+          }), input.signal),
         read: async () => current,
         decode: (values): OAuthTokenSet => {
           const expiresAt = values.accessTokenExpiresAt == null

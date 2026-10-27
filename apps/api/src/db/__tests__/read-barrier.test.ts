@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { SQL } from "bun";
 import { CompiledQuery, sql, type DatabaseConnection, type Transaction } from "kysely";
 import { createDatabaseRuntime, databasePoolLimit } from "../connection.js";
-import { sharedReadBarriers } from "../read-barrier.js";
+import { sharedReadBarriers, withReadBarrierMaintenanceDatabase } from "../read-barrier.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
 import { withDbSession } from "../session.js";
 import { withAuditContext } from "../../platform/audit-context.js";
@@ -175,6 +175,63 @@ test("expired metadata frees other tenants while retaining its own fence until c
     await runtime.close(); await admin.unsafe(`drop database "${name}" with (force)`); await admin.close();
     if (previous === undefined) delete process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS;
     else process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS = previous;
+  }
+}, 10_000);
+
+test("atomic maintenance survives the metadata budget and never starts when the ordinary pool is full", async () => {
+  const previous = process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS;
+  process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS = "25";
+  const admin = new SQL(owner, { max: 2 });
+  const name = `barrier_rotation_${crypto.randomUUID().replaceAll("-", "")}`;
+  await admin.unsafe(`create database "${name}"`);
+  const url = new URL(owner); url.pathname = `/${name}`;
+  const runtime = createDatabaseRuntime({ databaseUrl: url.toString(), maxConnections: 3 });
+  const platform = new ModulePlatformRuntime(runtime.db), namespace = "test.rotation";
+  const session = { tenantId: crypto.randomUUID(), userId: crypto.randomUUID(), roles: [], groups: [], credential: "bearer", scope: "self" };
+  const entered = deferred(), finishHttp = deferred(), occupy = deferred(), admitted = deferred();
+  let rotating: Promise<unknown> | undefined, busy: Promise<unknown> | undefined;
+  const writers: Promise<unknown>[] = [];
+  try {
+    await sql`create table fixture_rotation (value text not null)`.execute(runtime.db);
+    rotating = platform.withActiveOperationSession(session as never, live => platform.services.db.withSharedReadBarrier!(live, namespace, () =>
+      withReadBarrierMaintenanceDatabase(runtime.db, database => withDbSession(database, live, async trx => {
+        expect((await sql<{ marker: string }>`select current_setting('app.shared_read_barrier') as marker`.execute(trx)).rows[0]!.marker).toBe("");
+        entered.resolve(); await finishHttp.promise;
+        await sql`insert into fixture_rotation(value) values('rotated')`.execute(trx);
+      }))
+    ));
+    await entered.promise;
+    await Bun.sleep(75); // longer than both metadata and admission budgets
+    const other = { ...session, tenantId: crypto.randomUUID() };
+    await platform.withActiveOperationSession(other as never, live => platform.services.db.withSharedReadBarrier!(live, "test.unrelated", () =>
+      platform.services.db.withSession(live, async () => {
+        let called = false;
+        await expect(Promise.resolve().then(() => withReadBarrierMaintenanceDatabase(runtime.db, async () => { called = true; }))).rejects.toThrow("outside shared metadata");
+        expect(called).toBe(false);
+      })
+    ));
+    finishHttp.resolve(); await rotating;
+    expect((await sql<{ value: string }>`select value from fixture_rotation`.execute(runtime.db)).rows[0]!.value).toBe("rotated");
+    let exchangeStarted = false, refused = false;
+    busy = platform.withActiveOperationSession(session as never, live => platform.services.db.withSharedReadBarrier!(live, namespace, async () => {
+      admitted.resolve(); await occupy.promise;
+      try { await withReadBarrierMaintenanceDatabase(runtime.db, async () => { exchangeStarted = true; }); }
+      catch { refused = true; }
+    }));
+    await admitted.promise;
+    for (let index = 0; index < 2; index++) writers.push(runtime.db.transaction().execute(trx =>
+      sql`select pg_advisory_xact_lock(hashtext(${'osf.read-barrier:' + namespace}),hashtext(${session.tenantId}))`.execute(trx)).catch(() => null));
+    await waitFor(async () => (await admin.unsafe("select count(*)::int as n from pg_locks where locktype='advisory' and not granted and database=(select oid from pg_database where datname=$1)",[name]))[0].n === 2);
+    occupy.resolve(); await busy; await Promise.all(writers);
+    expect(refused).toBe(true); expect(exchangeStarted).toBe(false);
+    const available = await Promise.all([1, 2, 3].map(() => sql<{ pid: number }>`select pg_backend_pid() as pid,pg_sleep(0.02)`.execute(runtime.db)));
+    expect(new Set(available.map(result => result.rows[0]!.pid)).size).toBe(3);
+  } finally {
+    finishHttp.resolve(); occupy.resolve();
+    await admin.unsafe("select pg_cancel_backend(pid) from pg_locks where locktype='advisory' and not granted and database=(select oid from pg_database where datname=$1)",[name]);
+    await Promise.allSettled([rotating, busy, ...writers].filter(Boolean));
+    await runtime.close(); await admin.unsafe(`drop database "${name}" with (force)`); await admin.close();
+    if (previous === undefined) delete process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS; else process.env.DB_SHARED_READ_TRANSACTION_TIMEOUT_MS = previous;
   }
 }, 10_000);
 

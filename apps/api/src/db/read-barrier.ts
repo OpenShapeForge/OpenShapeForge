@@ -33,6 +33,21 @@ export function withReadBarrierDatabase<Database, Result>(db: Kysely<Database>, 
     : work(db);
 }
 
+/** Rotating credentials must be saved atomically after their HTTP exchange.
+ * They cannot be interrupted by the short metadata budget. Borrow a normal
+ * pool slot before starting; fail admission if writers occupy every slot,
+ * rather than deadlocking a reader behind writers waiting on its own fence.
+ * The admission signal does not cancel work after a connection is acquired.
+ */
+export function withReadBarrierMaintenanceDatabase<Database, Result>(db: Kysely<Database>, work: (database: Kysely<Database>) => Promise<Result>, signal?: AbortSignal): Promise<Result> {
+  const manager = managers.get(db as unknown as OpenShapeForgeDatabase);
+  if (!manager?.hasScope()) return work(db);
+  manager.assertMaintenanceAdmission();
+  const job = db.connection().execute(work, { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(50)]) });
+  manager.retainScopeWork(job);
+  return job;
+}
+
 /** Session advisory locks share ONE pooled connection across concurrent reads.
  * Short tenant transactions are serialized here, with local GUCs cleared on
  * commit. Provider I/O belongs outside DB callbacks; a whole-transaction
@@ -50,6 +65,20 @@ export class SharedReadBarriers {
 
   constructor(db: OpenShapeForgeDatabase) { this.#db = db; }
   hasScope(): boolean { return this.#scope.getStore() !== undefined; }
+  retainScopeWork(pending: Promise<unknown>): void {
+    const scope = this.#scope.getStore();
+    if (!scope) throw new Error("Read barrier scope is unavailable.");
+    const drain = pending.then(() => {}, () => {});
+    scope.pending.add(drain);
+    void drain.then(() => scope.pending.delete(drain));
+  }
+  assertMaintenanceAdmission(): void {
+    const scope = this.#scope.getStore();
+    if (!scope?.active) throw new Error("Read barrier scope is no longer active.");
+    if (scope.reservation.failure) throw scope.reservation.failure;
+    scope.signal?.throwIfAborted();
+    if (this.#databaseScope.getStore()) throw new Error("Atomic maintenance must run outside shared metadata transactions.");
+  }
 
   async #assertHeld(reservation: Reservation, namespace: string, tenantId: string): Promise<void> {
     try {
@@ -67,11 +96,7 @@ export class SharedReadBarriers {
     if (!current?.active) throw new Error("Read barrier scope is no longer active.");
     if (current.tenantId !== tenantId.toLowerCase()) throw new Error("Read barrier database work belongs to another tenant.");
     if (this.#databaseScope.getStore()) throw new Error("An independent transaction cannot nest inside read barrier database work.");
-    const retain = (pending: Promise<unknown>) => {
-      const drain = pending.then(() => {}, () => {});
-      current.pending.add(drain);
-      void drain.then(() => current.pending.delete(drain));
-    };
+    const retain = (pending: Promise<unknown>) => this.retainScopeWork(pending);
     const job = this.#serialize(async () => {
       if (!current.active) throw new Error("Read barrier scope is no longer active.");
       current.signal?.throwIfAborted();
@@ -125,6 +150,11 @@ export class SharedReadBarriers {
       signal?.throwIfAborted();
       if (Date.now() >= deadline) throw new Error("Read barrier acquisition timed out.");
       const reservation = await this.#reserve();
+      if (signal?.aborted || Date.now() >= deadline) {
+        if (!reservation.references.size) await this.#finish(reservation);
+        signal?.throwIfAborted();
+        throw new Error("Read barrier acquisition timed out.");
+      }
       if (reservation.failure) throw reservation.failure;
       const key = JSON.stringify([namespace, tenantId]);
       const held = reservation.references.has(key);

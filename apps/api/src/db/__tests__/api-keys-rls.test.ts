@@ -96,8 +96,16 @@ async function integrationWithKey(adminDb: Kysely<DB>, tenantId: string, granted
   return { integrationId, keyId, token: minted.token, lookupId: minted.lookupId };
 }
 
+/**
+ * A verified human administrator. `principalKind` is what the ceiling's
+ * carrier rule reads (auth/api-key/ceiling.ts): a bearer session without it is
+ * an unknown principal and may not manage credentials at all.
+ */
 function session(tenantId: string, roles: string[]) {
-  return { tenantId, userId: USER, roles, groups: [], scope: "tenant" as const, credential: "bearer" as const };
+  return {
+    tenantId, userId: USER, roles, groups: [], scope: "tenant" as const,
+    credential: "bearer" as const, principalKind: "person" as const,
+  };
 }
 
 describe("platform.api_keys under the app role", () => {

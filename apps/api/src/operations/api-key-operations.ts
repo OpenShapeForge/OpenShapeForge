@@ -24,21 +24,26 @@
  * is never logged, never read back, and never projected to the web — see the
  * catalog YAML for why that projection is absent rather than merely unused.
  */
+import { createHash } from "node:crypto";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { ApiKeyAuthorizationError } from "../auth/api-key/ceiling.js";
 import {
   readApiKeyProvisioningConfig,
   type ApiKeyProvisioningConfig,
 } from "../auth/api-key/runtime-config.js";
+import type { KeysetCursor } from "../auth/api-key/catalog-page.js";
 import {
   ApiKeyNotFoundError,
+  ApiKeyProvisioningError,
   ApiKeyValidationError,
+  createIntegration,
   disableIntegration,
   getIntegration,
   getKey,
   issueKey,
-  listIntegrations,
-  listKeys,
+  MAX_PAGE_SIZE,
+  pageIntegrations,
+  pageKeys,
   revokeKey,
   type ApiKeyServiceDeps,
   type ListedIntegration,
@@ -118,7 +123,7 @@ function resolve(context: ModuleOperationContext): Resolved | ModuleOperationErr
 /**
  * Map the service's own errors onto this catalog's declared ones.
  *
- * Only the four the exposed paths can raise. Anything else is ours, not the
+ * Only the ones the exposed paths can raise. Anything else is ours, not the
  * caller's, and is rethrown so the runtime reports an internal failure rather
  * than describing it.
  */
@@ -132,6 +137,12 @@ function declaredServiceFailure(error: unknown): ModuleOperationErrorResult {
   if (error instanceof ApiKeyValidationError) {
     return declaredFailure(400, "VALIDATION", error.message);
   }
+  if (error instanceof ApiKeyProvisioningError) {
+    // Only `createIntegration` mutates the realm, and only its contract
+    // declares this status; every other Operation here would be a handler
+    // contract violation if it reached this branch, which is the intent.
+    return declaredFailure(502, "PROVISIONING_FAILED", error.message);
+  }
   throw error;
 }
 
@@ -141,6 +152,87 @@ function text(value: unknown): string {
 
 function iso(value: Date | null): string | null {
   return value === null ? null : value.toISOString();
+}
+
+/**
+ * The longest life this contract will ask for, in days.
+ *
+ * 366 is the product's own boundary — a credential that survives a yearly
+ * review, or one that never expires at all, is not something a generic
+ * integration form may request on anyone's behalf. The authored input schema
+ * states the same bound, so every transport is refused before the handler;
+ * this restates it for a direct caller and is what a drift test pins against
+ * the schema. The service's own default (365 days) sits inside it.
+ *
+ * Making this a deployment setting rather than a constant is a real need for
+ * some integrations and deliberately NOT done here: see the task report for
+ * the generic configuration boundary proposed instead of a per-application
+ * exception list.
+ */
+export const MAX_CREDENTIAL_TTL_DAYS = 366;
+
+/**
+ * Normalise the requested lifetime, or refuse it.
+ *
+ * `null` is refused rather than forwarded. The service reads it as "never
+ * expires", which is exactly the silent widening this contract must not offer:
+ * omitting the field takes the deployment default instead.
+ */
+function lifetime(value: unknown): { expiresInDays?: number } {
+  if (value === undefined) return {};
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new ApiKeyValidationError(
+      `expiresInDays must be an integer from 1 through ${MAX_CREDENTIAL_TTL_DAYS}.`,
+    );
+  }
+  if (value > MAX_CREDENTIAL_TTL_DAYS) {
+    throw new ApiKeyValidationError(
+      `A credential may live at most ${MAX_CREDENTIAL_TTL_DAYS} days.`,
+    );
+  }
+  return { expiresInDays: value };
+}
+
+/** A non-empty list of role names, refused rather than coerced. */
+function roleList(value: unknown, name: string): string[] {
+  if (!Array.isArray(value) || value.some((role) => typeof role !== "string")) {
+    throw new ApiKeyValidationError(`${name} must be a list of role names.`);
+  }
+  if (value.length === 0) {
+    throw new ApiKeyValidationError(`${name} must name at least one role.`);
+  }
+  return value as string[];
+}
+
+/**
+ * Response headers for a result that carries a live credential.
+ *
+ * `no-store` is the one that matters: without it a shared cache, a browser
+ * back button or a proxy may keep the only copy of a secret that is, by
+ * design, never retrievable again. `private` and the legacy `pragma` cover
+ * intermediaries that predate it. The REST adapter applies these verbatim
+ * (operations/runtime.ts), so the header travels with the canonical Operation
+ * rather than being something each transport has to remember.
+ */
+export const ONE_TIME_CREDENTIAL_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+  "cache-control": "private, no-store, max-age=0",
+  pragma: "no-cache",
+});
+
+/** The credential half of a mint: returned here, once, and never read back. */
+function mintedCredential(created: { keyId: string; token: string; expiresAt: Date | null }) {
+  if (created.expiresAt === null) {
+    // Unreachable through this contract — `lifetime` refuses null and the
+    // service defaults to a finite TTL — and refused rather than reported, so
+    // a future change to either cannot hand out a non-expiring credential
+    // through a form that promises a lifetime.
+    throw new ApiKeyValidationError("A credential issued here must have an expiry.");
+  }
+  return { id: created.keyId, secret: created.token, expiresAt: created.expiresAt.toISOString() };
+}
+
+function oneTimeCredential(value: Record<string, unknown>): ModuleOperationResult {
+  return { value, headers: { ...ONE_TIME_CREDENTIAL_HEADERS } };
 }
 
 /** Status as a reader thinks about a credential, derived from the two instants. */
@@ -205,105 +297,119 @@ function projectCredential(key: ListedKey, now: Date): ProjectedCredential {
 }
 
 /**
- * The declared collection query, applied to an authorized result set.
+ * The opaque `after` cursor: the database keyset, plus the query it belongs to.
  *
- * The cursor is an opaque offset into the SORTED, FILTERED page — the same
- * shape the platform tenant listing uses. A cursor that no longer addresses a
- * row (the set shrank under it) is a client error rather than a silent empty
- * page, because a caller paging forward would otherwise never learn that it
- * skipped the tail.
+ * The keyset alone would be resumable under a DIFFERENT sort or filter, where
+ * "everything after this value" means something else entirely and silently
+ * skips or repeats rows. So the cursor carries a fingerprint of the sort and
+ * the filters it was issued for, and a request whose own sort or filters do
+ * not match it is refused as a client error instead of answered with a page
+ * that looks fine and is not.
+ *
+ * The fingerprint is a hash, so the cursor stays short, but it is NOT a
+ * security boundary and is not relied on as one: the tenant comes from the
+ * session and the subject from the request, both re-applied as SQL predicates
+ * on every statement, so the worst a forged cursor can do is pick a different
+ * resume point inside a set the caller may already read.
  */
-const MAX_PAGE_OFFSET = 100_000;
-
-function decodeCursor(value: unknown): number {
-  if (value === undefined) return 0;
-  if (typeof value !== "string") {
-    throw new ApiKeyValidationError("after must be a cursor returned by this listing.");
-  }
-  const decoded = Buffer.from(value, "base64url").toString("utf8");
-  const offset = /^\d+$/.test(decoded) ? Number(decoded) : Number.NaN;
-  if (!Number.isSafeInteger(offset) || offset < 0 || offset > MAX_PAGE_OFFSET) {
-    throw new ApiKeyValidationError("after must be a cursor returned by this listing.");
-  }
-  return offset;
-}
-
-function encodeCursor(offset: number): string {
-  return Buffer.from(String(offset), "utf8").toString("base64url");
-}
-
-type SortableValue = string | number | null;
-
-type PageInput = {
-  first?: unknown;
-  after?: unknown;
-  sortField?: unknown;
-  sortDirection?: unknown;
+type CursorPayload = {
+  /** Sort field and direction this cursor was issued under. */
+  f: string;
+  d: "asc" | "desc";
+  /** Fingerprint of the subject and filters. */
+  q: string;
+  /** The last row's sort value as the database rendered it; null in the NULL block. */
+  v: string | null;
+  /** The last row's id — the tie-break half of the keyset. */
+  i: string;
 };
 
-type Page<T> = { items: T[]; totalCount: number; nextCursor: string | null };
+function fingerprint(parts: readonly (string | undefined)[]): string {
+  return createHash("sha256").update(JSON.stringify(parts.map((part) => part ?? null)))
+    .digest("base64url").slice(0, 16);
+}
+
+function invalidCursor(): never {
+  // Deliberately one message for every rejection: a caller that tampered with
+  // a cursor learns that it was rejected, not which half gave it away.
+  throw new ApiKeyValidationError("after must be a cursor this listing returned for this same query.");
+}
+
+function decodeCursor(value: unknown, sort: { f: string; d: string }, query: string): KeysetCursor | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.length > 512) invalidCursor();
+  let payload: CursorPayload;
+  try {
+    payload = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as CursorPayload;
+  } catch {
+    invalidCursor();
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) invalidCursor();
+  if (typeof payload.i !== "string" || payload.i === "") invalidCursor();
+  if (payload.v !== null && typeof payload.v !== "string") invalidCursor();
+  // Sort or filter tampering: the keyset is only meaningful under the order
+  // and the set it was produced in.
+  if (payload.f !== sort.f || payload.d !== sort.d || payload.q !== query) invalidCursor();
+  return { value: payload.v, id: payload.i };
+}
+
+function encodeCursor(
+  cursor: KeysetCursor | null,
+  sort: { f: string; d: "asc" | "desc" },
+  query: string,
+): string | null {
+  if (!cursor) return null;
+  const payload: CursorPayload = { f: sort.f, d: sort.d, q: query, v: cursor.value, i: cursor.id };
+  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+}
 
 /**
- * `first`, `sortField` and `sortDirection` are already bounded by the compiled
- * input schema the runtime validated, so this reads them rather than
- * re-deriving their limits. `defaultFirst` and `defaultSort` restate the
- * authored defaults for the direct (non-transport) caller that passes neither.
+ * Read the sort, direction and page size the caller asked for.
+ *
+ * The compiled input schema the runtime validated already bounds all three —
+ * `sortField` to its enum, `first` to 1..100 — so this reads them and restates
+ * the authored defaults for a direct caller that passes none. An unsupported
+ * sort cannot arrive through a transport; one that does arrive is refused
+ * rather than quietly answered in some other order.
  */
-function paginate<T>(
-  rows: readonly T[],
-  input: PageInput,
-  options: {
-    defaultFirst: number;
-    defaultSort: { field: string; direction: "asc" | "desc" };
-    value: (row: T, field: string) => SortableValue;
-    tiebreak: (row: T) => string;
-  },
-): Page<T> {
-  const field = typeof input.sortField === "string" ? input.sortField : options.defaultSort.field;
-  const direction = input.sortDirection === "asc" || input.sortDirection === "desc"
-    ? input.sortDirection
-    : options.defaultSort.direction;
-  const first = typeof input.first === "number" && Number.isInteger(input.first) && input.first > 0
-    ? input.first
-    : options.defaultFirst;
-  const sign = direction === "desc" ? -1 : 1;
-  const sorted = [...rows].sort((left, right) => {
-    const leftValue = options.value(left, field);
-    const rightValue = options.value(right, field);
-    // A missing value sorts last in both directions: "no expiry" and "never
-    // used" are not the smallest date, they are the absence of one.
-    if (leftValue === null || rightValue === null) {
-      if (leftValue === rightValue) return options.tiebreak(left).localeCompare(options.tiebreak(right), "en");
-      return leftValue === null ? 1 : -1;
-    }
-    const ordered = typeof leftValue === "number" && typeof rightValue === "number"
-      ? Math.sign(leftValue - Number(rightValue))
-      : String(leftValue).localeCompare(String(rightValue), "en", { sensitivity: "base", numeric: true });
-    return ordered === 0
-      ? options.tiebreak(left).localeCompare(options.tiebreak(right), "en")
-      : ordered * sign;
-  });
-  const offset = decodeCursor(input.after);
-  if (offset > sorted.length) {
-    throw new ApiKeyValidationError("after points beyond the end of this listing.");
+function readSort<TField extends string>(
+  input: Record<string, unknown>,
+  supported: readonly TField[],
+  defaults: { field: TField; direction: "asc" | "desc" },
+): { field: TField; direction: "asc" | "desc"; first: number } {
+  const field = input.sortField === undefined ? defaults.field : input.sortField;
+  if (typeof field !== "string" || !supported.includes(field as TField)) {
+    throw new ApiKeyValidationError(
+      `sortField must be one of ${[...supported].sort().join(", ")}.`,
+    );
   }
-  const items = sorted.slice(offset, offset + first);
-  const nextOffset = offset + items.length;
-  return {
-    items,
-    totalCount: sorted.length,
-    nextCursor: nextOffset < sorted.length ? encodeCursor(nextOffset) : null,
-  };
+  const direction = input.sortDirection === undefined ? defaults.direction : input.sortDirection;
+  if (direction !== "asc" && direction !== "desc") {
+    throw new ApiKeyValidationError("sortDirection must be asc or desc.");
+  }
+  const first = input.first === undefined ? DEFAULT_PAGE_SIZE : input.first;
+  if (typeof first !== "number" || !Number.isInteger(first) || first < 1 || first > MAX_PAGE_SIZE) {
+    throw new ApiKeyValidationError(`first must be an integer from 1 through ${MAX_PAGE_SIZE}.`);
+  }
+  return { field: field as TField, direction, first };
 }
 
-/** A free-text filter the authored input declares: contains, case-insensitive. */
-function matches(value: string, query: unknown): boolean {
-  if (typeof query !== "string" || query.trim() === "") return true;
-  return value.toLocaleLowerCase("en").includes(query.trim().toLocaleLowerCase("en"));
+/** `exactOptionalPropertyTypes` forbids `after: undefined`; omit the key instead. */
+function cursorSpread(after: KeysetCursor | undefined): { after?: KeysetCursor } {
+  return after ? { after } : {};
 }
 
-function equals(value: string, query: unknown): boolean {
-  return typeof query !== "string" || query === "" ? true : value === query;
+/** The authored `first.default`; the compiler test pins the two together. */
+const DEFAULT_PAGE_SIZE = 25;
+
+const INTEGRATION_SORTS = ["displayName", "status", "createdAt", "updatedAt"] as const;
+const CREDENTIAL_SORTS = ["displayName", "status", "createdAt", "expiresAt", "lastUsedAt"] as const;
+
+/** An optional string filter, rejected rather than coerced. */
+function filter(value: unknown, name: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") throw new ApiKeyValidationError(`${name} must be a string.`);
+  return value;
 }
 
 const HANDLERS: Record<string, ModuleOperationHandler> = {
@@ -311,18 +417,27 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
     const resolved = resolve(context);
     if (isFailure(resolved)) return resolved;
     try {
-      const all = (await listIntegrations(resolved.deps, resolved.session)).map(projectIntegration);
-      const filtered = all.filter((integration) =>
-        matches(integration.displayName, input.displayName) && equals(integration.status, input.status)
-      );
-      const page = paginate(filtered, input, {
-        defaultFirst: 25,
-        defaultSort: { field: "displayName", direction: "asc" },
-        value: (row, field) => integrationSortValue(row, field),
-        tiebreak: (row) => row.integrationId,
+      const sort = readSort(input, INTEGRATION_SORTS, { field: "displayName", direction: "asc" });
+      const displayName = filter(input.displayName, "displayName");
+      const status = filter(input.status, "status");
+      const identity = { f: sort.field, d: sort.direction };
+      // The tenant is NOT in the fingerprint: it comes from the session and is
+      // a predicate on every statement, so a cursor cannot carry one.
+      const query = fingerprint(["integrations", displayName, status]);
+      const page = await pageIntegrations(resolved.deps, resolved.session, {
+        sortField: sort.field,
+        sortDirection: sort.direction,
+        first: sort.first,
+        ...cursorSpread(decodeCursor(input.after, identity, query)),
+        ...(displayName === undefined ? {} : { displayName }),
+        ...(status === undefined ? {} : { status }),
       });
       return {
-        value: { integrations: page.items, totalCount: page.totalCount, nextCursor: page.nextCursor },
+        value: {
+          integrations: page.rows.map(projectIntegration),
+          totalCount: page.totalCount,
+          nextCursor: encodeCursor(page.nextCursor, identity, query),
+        },
       };
     } catch (error) {
       return declaredServiceFailure(error);
@@ -348,20 +463,28 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
       const integrationId = text(input.integrationId);
       // The integration is read first so an id this tenant does not hold is a
       // NOT_FOUND rather than an empty page of credentials.
-      await getIntegration(resolved.deps, resolved.session, integrationId);
-      const all = (await listKeys(resolved.deps, resolved.session, { integrationId }))
-        .map((key) => projectCredential(key, now));
-      const filtered = all.filter((credential) =>
-        matches(credential.displayName, input.displayName) && equals(credential.status, input.status)
-      );
-      const page = paginate(filtered, input, {
-        defaultFirst: 25,
-        defaultSort: { field: "createdAt", direction: "desc" },
-        value: (row, field) => credentialSortValue(row, field),
-        tiebreak: (row) => row.id,
-      });
+      await getIntegration(resolved.deps, resolved.session, integrationId, now);
+      const sort = readSort(input, CREDENTIAL_SORTS, { field: "createdAt", direction: "desc" });
+      const displayName = filter(input.displayName, "displayName");
+      const status = filter(input.status, "status");
+      const identity = { f: sort.field, d: sort.direction };
+      // The integration IS in the fingerprint: a cursor issued under one
+      // parent must not resume a page under another, even within one tenant.
+      const query = fingerprint(["credentials", integrationId, displayName, status]);
+      const page = await pageKeys(resolved.deps, resolved.session, { integrationId }, {
+        sortField: sort.field,
+        sortDirection: sort.direction,
+        first: sort.first,
+        ...cursorSpread(decodeCursor(input.after, identity, query)),
+        ...(displayName === undefined ? {} : { displayName }),
+        ...(status === undefined ? {} : { status }),
+      }, now);
       return {
-        value: { credentials: page.items, totalCount: page.totalCount, nextCursor: page.nextCursor },
+        value: {
+          credentials: page.rows.map((key) => projectCredential(key, now)),
+          totalCount: page.totalCount,
+          nextCursor: encodeCursor(page.nextCursor, identity, query),
+        },
       };
     } catch (error) {
       return declaredServiceFailure(error);
@@ -382,6 +505,42 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
     }
   },
 
+  async createIntegration(input, context): Promise<ModuleOperationResult> {
+    const resolved = resolve(context);
+    if (isFailure(resolved)) return resolved;
+    const now = new Date();
+    try {
+      // The ceiling bounds `roles` and `roleSubset` against what this caller
+      // itself holds, inside the service. Nothing is re-decided here.
+      const created = await createIntegration(resolved.deps, resolved.session, {
+        displayName: text(input.displayName),
+        roles: roleList(input.roles, "roles"),
+        ...lifetime(input.expiresInDays),
+        ...(input.roleSubset === undefined
+          ? {}
+          : { roleSubset: roleList(input.roleSubset, "roleSubset") }),
+      }, now);
+      // One tenant-fenced read of the row that was just written, so the
+      // metadata reported here is the row's own and not an echo of the input
+      // (the service trims the name and flips the status).
+      const integration = await getIntegration(
+        resolved.deps, resolved.session, created.integrationId, now,
+      );
+      return oneTimeCredential({
+        integration: {
+          integrationId: integration.id,
+          displayName: integration.displayName,
+          status: integration.status,
+          grantedRoles: integration.grantedRoles,
+          createdAt: integration.createdAt.toISOString(),
+        },
+        credential: mintedCredential(created),
+      });
+    } catch (error) {
+      return declaredServiceFailure(error);
+    }
+  },
+
   async issueCredential(input, context): Promise<ModuleOperationResult> {
     const resolved = resolve(context);
     if (isFailure(resolved)) return resolved;
@@ -389,25 +548,15 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
       const created = await issueKey(resolved.deps, resolved.session, {
         integrationId: text(input.integrationId),
         displayName: text(input.displayName),
-        // Omitted and null are different requests: omitted takes the
-        // deployment default lifetime, null means "never expires".
-        ...(input.expiresInDays === undefined
-          ? {}
-          : { expiresInDays: input.expiresInDays as number | null }),
+        ...lifetime(input.expiresInDays),
         ...(input.roleSubset === undefined
           ? {}
-          : { roleSubset: input.roleSubset as string[] | null }),
+          : { roleSubset: roleList(input.roleSubset, "roleSubset") }),
       });
-      // The one place the credential is returned. Not logged, not cached, not
-      // readable again: the row stores only its hash.
-      return {
-        value: {
-          integrationId: created.integrationId,
-          id: created.keyId,
-          secret: created.token,
-          expiresAt: iso(created.expiresAt),
-        },
-      };
+      return oneTimeCredential({
+        integrationId: created.integrationId,
+        credential: mintedCredential(created),
+      });
     } catch (error) {
       return declaredServiceFailure(error);
     }
@@ -445,25 +594,6 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
     }
   },
 };
-
-function integrationSortValue(row: ProjectedIntegration, field: string): SortableValue {
-  switch (field) {
-    case "status": return row.status;
-    case "createdAt": return row.createdAt;
-    case "updatedAt": return row.updatedAt;
-    default: return row.displayName;
-  }
-}
-
-function credentialSortValue(row: ProjectedCredential, field: string): SortableValue {
-  switch (field) {
-    case "status": return row.status;
-    case "createdAt": return row.createdAt;
-    case "expiresAt": return row.expiresAt;
-    case "lastUsedAt": return row.lastUsedAt;
-    default: return row.displayName;
-  }
-}
 
 export function apiKeyOperationHandlerNames(): readonly string[] {
   return Object.keys(HANDLERS).sort();

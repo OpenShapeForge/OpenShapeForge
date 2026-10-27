@@ -325,6 +325,123 @@ operations:
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: none }
     errors: *catalogErrors
+  createIntegration:
+    id: api-keys.create-integration
+    name: { en: Add an integration, nl: Integratie toevoegen }
+    description:
+      en: 'Registers one external party against this organization and hands over its FIRST credential: a service
+        account is provisioned in the realm, bounded by the roles the caller itself holds, and one credential is
+        minted for it. RETURNS THE SECRET ONCE, under `credential`; everything under `integration` is ordinary
+        metadata that every later read reports too. The credential is hashed at rest and cannot be read again.'
+      nl: 'Registreert één externe partij bij deze organisatie en geeft de EERSTE credential mee: er wordt een
+        serviceaccount in het realm aangemaakt, begrensd door de rollen die de aanvrager zelf heeft, en daarvoor
+        wordt één credential uitgegeven. GEEFT HET SECRET ÉÉNMAAL TERUG, onder `credential`; alles onder
+        `integration` is gewone metadata die elke latere leesactie ook teruggeeft. De credential is gehasht
+        opgeslagen en is niet opnieuw op te vragen.'
+    implementation: { type: plugin, plugin: osf-api-keys, handler: createIntegration }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [displayName, roles]
+        properties:
+          displayName:
+            type: string
+            minLength: 1
+            maxLength: 200
+            description: How this organization recognises the external party. Not an identifier; the realm client id is derived server-side.
+            x-osf-i18n: { title: { en: Name, nl: Naam } }
+          roles:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items: { type: string, minLength: 1 }
+            description: Roles the integration's service account receives. Every one must already be held by the caller.
+            x-osf-i18n: { title: { en: Roles, nl: Rollen } }
+          expiresInDays: &expiresInDays
+            type: integer
+            minimum: 1
+            maximum: 366
+            description: 'Omit for this deployment''s default lifetime. The ceiling is 366 days: a credential that
+              never expires, or one that outlives a yearly review, is not something this contract can ask for.'
+            x-osf-i18n: { title: { en: Lifetime in days, nl: Looptijd in dagen } }
+          roleSubset:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items: { type: string, minLength: 1 }
+            description: Narrows the FIRST credential to a subset of the integration's roles. Omit for the integration's full set; an empty list is refused rather than read as "no narrowing".
+            x-osf-i18n: { title: { en: Role narrowing, nl: Rolbeperking } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integration, credential]
+        properties:
+          integration:
+            type: object
+            additionalProperties: false
+            required: [integrationId, displayName, status, grantedRoles, createdAt]
+            description: Ordinary metadata, identical to what the integration list and read report.
+            properties:
+              integrationId:
+                type: string
+                format: uuid
+                description: Stable database identifier. Unchanged when the realm service account is rebuilt.
+                x-osf-i18n: { title: { en: Integration, nl: Integratie } }
+              displayName:
+                type: string
+                x-osf-i18n: { title: { en: Name, nl: Naam } }
+              status:
+                type: string
+                enum: [pending, active, disabled]
+                x-osf-i18n:
+                  title: { en: Status, nl: Status }
+                  enum: *integrationStatusLabels
+              grantedRoles:
+                type: array
+                items: { type: string }
+                x-osf-i18n: { title: { en: Roles, nl: Rollen } }
+              createdAt:
+                type: string
+                format: date-time
+                x-osf-i18n: { title: { en: Created, nl: Aangemaakt } }
+            x-osf-i18n: { title: { en: Integration, nl: Integratie } }
+          credential: &mintedCredential
+            type: object
+            additionalProperties: false
+            required: [id, secret, expiresAt]
+            description: 'CONFIDENTIAL. `secret` is a live credential, returned here and nowhere else, exactly
+              once. Hand it to the external party; never store, log, cache or echo it. Every other read of this
+              credential reports metadata only, because the stored half is a hash.'
+            properties:
+              id:
+                type: string
+                format: uuid
+                x-osf-i18n: { title: { en: Credential, nl: Credential } }
+              secret:
+                type: string
+                description: The credential itself, returned exactly once and never recoverable. Treat as a password, not as data.
+                x-osf-i18n: { title: { en: Secret, nl: Secret } }
+                x-osf-presentation: { component: FieldSecret }
+              expiresAt:
+                type: string
+                format: date-time
+                x-osf-i18n: { title: { en: Expires, nl: Verloopt } }
+            x-osf-i18n: { title: { en: New credential, nl: Nieuwe credential } }
+    auth: *manageAuth
+    tenancy: { mode: required }
+    # The realm is mutated: a service account is created and its roles granted.
+    effects: { data: write, external: write }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: acknowledgement }
+    errors:
+      - { status: 400, code: VALIDATION, description: The input does not describe a valid request. }
+      - { status: 401, code: UNAUTHENTICATED, description: An authenticated tenant session is required. }
+      - { status: 403, code: FORBIDDEN, description: 'The session may not manage API keys: it lacks the management role, asked for a role the caller does not hold, or is not a verified person.' }
+      - { status: 404, code: NOT_FOUND, description: The integration or credential does not exist in this organization. }
+      - { status: 502, code: PROVISIONING_FAILED, description: The identity provider refused or could not complete the service account; nothing usable was handed out and the attempt is left for the reconciler. }
+      - { status: 503, code: NOT_CONFIGURED, description: 'This deployment has no API key provisioning configuration, so no integration can be managed here.' }
   issueCredential:
     id: api-keys.issue-credential
     name: { en: Issue a credential, nl: Credential uitgeven }
@@ -350,12 +467,7 @@ operations:
             minLength: 1
             maxLength: 200
             x-osf-i18n: { title: { en: Name, nl: Naam } }
-          expiresInDays:
-            type: [integer, 'null']
-            minimum: 1
-            maximum: 3650
-            description: Omit for this deployment's default lifetime; null for a credential that never expires.
-            x-osf-i18n: { title: { en: Lifetime in days, nl: Looptijd in dagen } }
+          expiresInDays: *expiresInDays
           roleSubset:
             type: [array, 'null']
             minItems: 1
@@ -366,25 +478,13 @@ operations:
       schema:
         type: object
         additionalProperties: false
-        required: [integrationId, id, secret, expiresAt]
-        description: 'Sensitivity: `secret` is a live credential. It is returned by this Operation only, exactly once.'
+        required: [integrationId, credential]
         properties:
           integrationId:
             type: string
             format: uuid
             x-osf-i18n: { title: { en: Integration, nl: Integratie } }
-          id:
-            type: string
-            format: uuid
-            x-osf-i18n: { title: { en: Credential, nl: Credential } }
-          secret:
-            type: string
-            description: The credential itself, returned exactly once and never recoverable. Treat as a password, not as data.
-            x-osf-i18n: { title: { en: Secret, nl: Secret } }
-          expiresAt:
-            type: [string, 'null']
-            format: date-time
-            x-osf-i18n: { title: { en: Expires, nl: Verloopt } }
+          credential: *mintedCredential
     auth: *manageAuth
     tenancy: { mode: required }
     effects: { data: write, external: none }
@@ -481,6 +581,7 @@ interfaces:
       getIntegration: { method: POST, path: /api/api-key-integrations/get, response: { status: 200, kind: json } }
       listCredentials: { method: POST, path: /api/api-key-integrations/list-credentials, response: { status: 200, kind: json } }
       getCredential: { method: POST, path: /api/api-key-integrations/get-credential, response: { status: 200, kind: json } }
+      createIntegration: { method: POST, path: /api/api-key-integrations/create, response: { status: 200, kind: json } }
       issueCredential: { method: POST, path: /api/api-key-integrations/issue-credential, response: { status: 200, kind: json } }
       revokeCredential: { method: POST, path: /api/api-key-integrations/revoke-credential, response: { status: 200, kind: json } }
       disableIntegration: { method: POST, path: /api/api-key-integrations/disable, response: { status: 200, kind: json } }

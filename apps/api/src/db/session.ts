@@ -11,6 +11,28 @@ import { boundedReadTransaction } from "./bounded-read-transaction.js";
 
 export type DbSessionScope = "tenant" | "group" | "self";
 
+/**
+ * What kind of principal the SERVER decided this session is.
+ *
+ * The named-action axis of the record ACL matches a subject kind against this
+ * and nothing else, so it has to be derived from facts the server read, never
+ * from anything a caller can assert:
+ *
+ *   person       verified bearer claims that are not a service account, or any
+ *                carrier whose identity-Relation link was read back from
+ *                `platform.identity_relations` (`verifiedAuditIdentity`)
+ *   application  a resolved API-key integration, and only that
+ *   service      a verified client-credentials principal with no integration
+ *                behind it — organization automation included
+ *   unknown      a carrier that states nothing and has no link to read
+ *
+ * `unknown` is spelled out rather than left empty so no consumer can read a
+ * missing value as a permissive one. It holds no named action; neither does
+ * `service`. None of this changes a role check, a scope or the view/edit/delete
+ * permissions — those behave for every existing session exactly as before.
+ */
+export type DbPrincipalClass = "person" | "application" | "service" | "unknown";
+
 const MAX_SESSION_GROUPS = 256;
 const MAX_RELATION_GROUPS = 256;
 
@@ -53,6 +75,12 @@ export type DbSessionInput = {
    * on the auth layer.
    */
   appPrincipal?: { integrationId: string } | null;
+  /**
+   * What the bearer verifier made of the token's claims, when the carrier
+   * states it. Server-derived; a carrier that asserts nothing leaves it
+   * undefined and is classified from the identity link instead, or not at all.
+   */
+  principalKind?: "person" | "service";
   scope?: DbSessionScope | null;
 } & NonNullable<ActingRelationSource>;
 
@@ -68,6 +96,8 @@ export type DbSessionContext = {
   relationId: string | null;
   /** The verified application id; `app.current_app_principal()`. */
   appPrincipalId: string | null;
+  /** The verified principal class; `app.current_principal_class()`. */
+  principalClass: DbPrincipalClass;
   scope: DbSessionScope;
 };
 
@@ -197,6 +227,24 @@ function normalizeAppPrincipalId(
   return principal.integrationId;
 }
 
+/**
+ * Classify the session from server-sourced facts, most specific first.
+ *
+ * A resolved integration outranks the "service" kind its own token carries:
+ * an API-key session is both, and `application` is the narrower, useful
+ * answer. A stated kind outranks the identity link, so a verified service
+ * account can never be re-read as a person by attaching a Relation to it.
+ * The link is the fallback for carriers that state nothing — the web tier's
+ * trusted-context bundle, which is how real people reach this code — and it
+ * is itself a row this server read under RLS, not a claim.
+ */
+export function resolvePrincipalClass(input: DbSessionInput): DbPrincipalClass {
+  if (input.appPrincipal) return "application";
+  if (input.principalKind === "service") return "service";
+  if (input.principalKind === "person") return "person";
+  return verifiedAuditIdentity(input).auditIdentityId ? "person" : "unknown";
+}
+
 export function createDbSessionContext(input: DbSessionInput): DbSessionContext {
   if (!input.tenantId) {
     throw new Error("Database session is missing tenantId; refusing unscoped access.");
@@ -217,6 +265,7 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
     relationGroupIds: normalizeRelationGroupIds(input.relationGroupIds),
     relationId: actingRelationId(input),
     appPrincipalId: normalizeAppPrincipalId(input.appPrincipal),
+    principalClass: resolvePrincipalClass(input),
     scope: normalizeScope(input.scope),
   };
 }
@@ -259,6 +308,7 @@ export async function applyDbSession<TDatabase>(
     // written when present would let one request's application principal be
     // observed by the next session opened on the same transaction.
     sql`set_config('app.app_principal_id', ${session.appPrincipalId ?? ""}, true)`,
+    sql`set_config('app.principal_class', ${session.principalClass}, true)`,
     sql`set_config('app.user_groups', '', true)`,
     sql`set_config('app.user_groups_exact', '', true)`,
     sql`set_config('app.user_groups_ancestors', '', true)`,
@@ -341,7 +391,8 @@ export async function withDbSession<TDatabase, TResult>(
         (group, index) => group === session.relationGroupIds[index],
       ) &&
       active.session.relationId === session.relationId &&
-      active.session.appPrincipalId === session.appPrincipalId;
+      active.session.appPrincipalId === session.appPrincipalId &&
+      active.session.principalClass === session.principalClass;
     if (!sameSession) {
       throw new Error("Nested database work cannot replace the active session.");
     }
@@ -470,7 +521,8 @@ export async function withCredentialResolutionSession<TDatabase, TResult>(
       );
     }
     await sql`select set_config('app.tenant_id', ${tenantId}, true)`.execute(trx);
-    // Deliberately no app.user_id, no app.roles, no app.scope and no
+    // Deliberately no app.user_id, no app.roles, no app.scope, no
+    // app.principal_class and no
     // app.app_principal_id: nothing this callback reads is user-, role- or
     // application-predicated, and setting a placeholder would make a later
     // rowScope or record-action policy silently match the wrong rows. The

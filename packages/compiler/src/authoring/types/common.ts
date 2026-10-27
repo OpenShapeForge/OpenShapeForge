@@ -101,6 +101,27 @@ export type RecordPermissionAction = "view" | "edit" | "delete";
  * that shape fixed lets the database policy and every Operation adapter use
  * one parser instead of letting each entity invent an authorization dialect.
  */
+/** Principal kinds a named record action may be granted to. */
+export type RecordActionPrincipal = "person" | "integration";
+
+/**
+ * One named action the record ACL may grant, declared by the entity.
+ *
+ * The axis is opt-in per entity and per action, which is what keeps it from
+ * regressing any existing policy: an entity that declares nothing can carry
+ * no action, and an action that does not admit `integration` can never be
+ * granted to an application. The name is the key under the stored ACL's
+ * `actions` member and the value an Operation's `auth.recordAction` names.
+ */
+export interface RowAccessRecordActionConfig {
+  /** lowerCamel identifier; never view, edit or delete. */
+  name: RecordActionName;
+  /** Which principal kinds a grant of this action may name. */
+  principals: RecordActionPrincipal[];
+}
+
+export type RecordActionName = string;
+
 export interface RowAccessRecordPermissionsConfig {
   /** Authored field key for the persisted single jsonb object. */
   field: string;
@@ -108,6 +129,11 @@ export interface RowAccessRecordPermissionsConfig {
   empty: "public" | "restricted";
   /** Permissions the creator must hold in the submitted ACL. */
   createRequires: RecordPermissionAction[];
+  /**
+   * Named actions this record ACL may grant, independently of view/edit/delete.
+   * Absent on every entity that did not opt in.
+   */
+  actions?: RowAccessRecordActionConfig[];
 }
 
 export interface RowAccessConfig {

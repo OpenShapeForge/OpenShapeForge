@@ -2,14 +2,14 @@
 /** Action-specific record authorization shared by CRUD and plugin Operations. */
 import { sql, type Transaction } from "kysely";
 import type { DB } from "../../generated/db/types.js";
-import { withDbSession, type DbSessionInput } from "../../db/session.js";
+import { resolvePrincipalClass, withDbSession, type DbSessionInput } from "../../db/session.js";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { generatedCrudError } from "./catalog.js";
 import { primaryKeyEquals } from "./columns.js";
 import { notAuthorizedRefusal } from "./authorization-refusal-text.js";
 import { operationFailure } from "@openshapeforge/operations";
 import type { GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
-import { subtypeScope, subtypeScopeWhere } from "./subtype-scope.js";
+import { subtypeScopeWhere } from "./subtype-scope.js";
 
 export type RecordPermissionAction = "view" | "edit" | "delete";
 
@@ -177,9 +177,13 @@ export function recordPermissionAllows(
  *     record may authorize an application to start something it cannot read.
  *   - An empty or absent entry denies, whatever the entity authored for
  *     `empty`. There is no public action.
- *   - `integrations` matches the session's VERIFIED application principal
- *     only. A session without one — a person, a direct bearer service
- *     account, a trusted-context bundle — matches nothing in it.
+ *   - A subject kind is matched against the session's VERIFIED principal
+ *     class, not merely against its roles. A person subject is satisfiable
+ *     only by a session the server classified as a person, and `integrations`
+ *     only by one carrying a resolved API-key integration. So a service
+ *     account that happens to hold the same role as a person acquires no
+ *     person-only action, and a session the server could not classify holds
+ *     no action at all.
  */
 export function recordActionAllows(
   value: unknown,
@@ -200,12 +204,22 @@ export function recordActionAllows(
   ) {
     return false;
   }
-  if (session.userId && subjects.users.includes(session.userId)) return true;
-  if ((session.roles ?? []).some((role) => subjects.roles.includes(role))) return true;
-  const directGroups = (session.relationGroupIds ?? []).filter((group) => UUID.test(group));
-  if (directGroups.some((group) => subjects.groups.includes(group))) return true;
-  const integrationId = session.appPrincipal?.integrationId;
-  return Boolean(integrationId) && subjects.integrations.includes(integrationId!);
+  // Mirrors app.record_action_subject_allows: one class, one set of subjects.
+  switch (resolvePrincipalClass(session)) {
+    case "person": {
+      if (session.userId && subjects.users.includes(session.userId)) return true;
+      if ((session.roles ?? []).some((role) => subjects.roles.includes(role))) return true;
+      const directGroups = (session.relationGroupIds ?? [])
+        .filter((group) => UUID.test(group));
+      return directGroups.some((group) => subjects.groups.includes(group));
+    }
+    case "application": {
+      const integrationId = session.appPrincipal?.integrationId;
+      return Boolean(integrationId) && subjects.integrations.includes(integrationId!);
+    }
+    default:
+      return false;
+  }
 }
 
 function policy(table: GeneratedCrudTable) {
@@ -413,15 +427,23 @@ export function assertRecordPermission(
 }
 
 /**
- * Authorize ONE named action on ONE record, as a live read in the caller's
- * transaction.
+ * Authorize ONE named action on ONE record.
  *
- * In the transaction on purpose: the grant is a column of the record, so a
- * policy edit or a revocation that commits while this Operation runs must
- * decide the same way the rest of the Operation's reads and writes do. The
- * row is read through `app.record_action_allows`, which is also the only way
- * to reach it — the record itself stays invisible to a session that holds an
- * action and not `view`.
+ * Delegates to `app.record_action_allows`, the owner-scoped point lookup
+ * installed by db/migrations/record-actions.ts. Three properties come from
+ * there rather than from here, and this function must not try to reproduce
+ * them:
+ *
+ *   - the record stays unreadable. The lookup's definer role is admitted to
+ *     the key, tenant and ACL columns of this entity and to nothing else, so
+ *     a session holding `start` and not `view` learns one boolean and no
+ *     record data;
+ *   - the entity, its ACL column and its declared actions are compiled into
+ *     that function. Only an entity name, a record key and an action name
+ *     cross the boundary, so nothing a caller supplies can widen it;
+ *   - the ACL row is locked `for share` in THIS transaction and held until it
+ *     commits. That is the single lock ordering: ACL row first, then the
+ *     effect, with a concurrent policy change waiting its turn either side.
  */
 export async function assertRecordActionInTransaction(
   trx: Transaction<DB>,
@@ -432,29 +454,29 @@ export async function assertRecordActionInTransaction(
 ): Promise<void> {
   const config = policy(table);
   const declaration = recordActionDeclaration(table, action);
-  // A contract that asks for an action the entity never declared, an entity
-  // without the ACL at all, an untenanted table or a keyless one is a
-  // compiler-side mistake, not a caller's: refuse without consulting a row.
-  if (!config || !declaration || !table.primaryKey || !table.tenantScoped) {
+  const entity = table.source?.authoringEntityName;
+  // A contract asking for an action the entity never declared, an entity
+  // without the ACL at all, an untenanted table or one the manifest gave no
+  // authoring name is a compiler-side mistake, not a caller's: refuse without
+  // consulting a row.
+  if (!config || !declaration || !entity || !table.tenantScoped) {
     throw generatedCrudError(
       "The record authorization contract is incomplete.",
       "INTERNAL_SERVER_ERROR",
     );
   }
-  const keyColumn = table.columns.find((column) => column.name === table.primaryKey);
-  const scope = Object.fromEntries(
-    subtypeScope(table).map((entry) => [entry.column, entry.value]),
-  );
+  // A subtype shares its base's physical table, and the lookup is keyed on
+  // the base entity. Authorizing a subtype action through the base row would
+  // let a sibling projection's record answer for it, so refuse rather than
+  // decide on the wrong contract.
+  if (table.subtype) {
+    throw generatedCrudError(
+      "Record actions are not available on an entity subtype.",
+      "INTERNAL_SERVER_ERROR",
+    );
+  }
   const result = await sql<{ allowed: boolean }>`
-    select app.record_action_allows(
-      ${`${table.schema}.${table.table}`}::regclass,
-      ${config.column},
-      ${table.primaryKey},
-      ${keyColumn?.type === "uuid"},
-      ${id},
-      ${JSON.stringify(scope)}::jsonb,
-      ${action}
-    ) as allowed
+    select app.record_action_allows(${entity}, ${id}, ${action}) as allowed
   `.execute(trx);
   if (result.rows[0]?.allowed !== true) {
     throw operationFailure(notAuthorizedRefusal(table, action));

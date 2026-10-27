@@ -102,6 +102,7 @@ import { applyBlueprintsMigration, applyBlueprintsGrants } from "./migrations/bl
 import { applyOperationExecutionReceiptsMigration } from "./migrations/operation-execution-receipts.js";
 import { applyAuditHistory } from "./migrations/audit-history.js";
 import { applyJobsMigration } from "./migrations/jobs.js";
+import { applyRecordActionsMigration } from "./migrations/record-actions.js";
 import {
   applyGeneratedSchemaMigration,
   type GeneratedSchemaMigrationResult,
@@ -205,6 +206,14 @@ export async function runMigrationChain(
   // declares (or stops declaring) workerDml is picked up without a bespoke
   // migration.
   await applyWorkerRoleGrants(db);
+  // LAST of the privilege steps, and deliberately so. The two sweeps above
+  // grant EXECUTE on every function in `app` to the app and worker roles and
+  // set a default privilege that would catch a later one too; the
+  // record-action lookup is the one function that must not be reachable from
+  // the worker connection, so it revokes and re-grants after them. It also
+  // needs every table to exist, a plugin's included, because it enumerates
+  // the entities that declared an action from the manifest.
+  await applyRecordActionsMigration(db);
   const pageConfigs = await applyEntityPageConfigsSeed(db);
   const moduleSeeds: Record<string, CatalogSeedResult> = {};
   for (const seed of options.moduleSeeds ?? []) {

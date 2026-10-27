@@ -108,6 +108,27 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
       select nullif(current_setting('app.app_principal_id', true), '')::uuid
     $$;
 
+    -- WHAT KIND of principal the server verified this session to be, written
+    -- by applyDbSession from server-sourced facts only (db/session.ts):
+    --   person      a verified human - bearer claims that are not a service
+    --               account, or any carrier whose identity-Relation link was
+    --               read back from platform.identity_relations
+    --   application a resolved API-key integration (app.current_app_principal)
+    --   service     a verified client-credentials principal with no
+    --               integration behind it, organization automation included
+    --   unknown     anything else, including a carrier that states nothing
+    --
+    -- The named-action axis matches a subject kind against this and nothing
+    -- else: a person subject is satisfiable only by person, an integrations
+    -- subject only by application. So a service account holding the same role
+    -- as a person cannot acquire that person's action, an unclassified session
+    -- holds no action at all, and none of this touches how view/edit/delete
+    -- or any existing role check behaves.
+    create or replace function app.current_principal_class() returns text
+    language sql stable parallel safe as $$
+      select coalesce(nullif(current_setting('app.principal_class', true), ''), 'unknown')
+    $$;
+
     create or replace function app.current_worker_role() returns text
     language sql stable parallel safe as $$
       select nullif(current_setting('app.worker_role', true), '')
@@ -271,7 +292,10 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
            + jsonb_array_length(coalesce(subjects -> 'roles', '[]'::jsonb))
            + jsonb_array_length(coalesce(subjects -> 'integrations', '[]'::jsonb)) = 0
           then false
-        else
+        -- A person subject is a PERSON's. A session the server classified as
+        -- a service or could not classify at all holds nothing here, however
+        -- many of the named roles it carries.
+        when app.current_principal_class() = 'person' then
           coalesce((subjects -> 'users') ? app.current_user_id()::text, false)
           or coalesce(
             (subjects -> 'roles') ?| string_to_array(
@@ -285,107 +309,15 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
             ),
             false
           )
-          -- The verified application, never a claim or a header; null for
-          -- every other carrier, and ? null is null, hence a denial.
-          or coalesce(
+        -- The verified application, never a claim or a header; null for every
+        -- other carrier, and ? null is null, hence a denial.
+        when app.current_principal_class() = 'application' then
+          coalesce(
             (subjects -> 'integrations') ? app.current_app_principal()::text,
             false
           )
+        else false
       end
-    $$;
-
-    -- Does the current session hold action on ONE row of ONE table?
-    --
-    -- This exists because a named action must be authorizable WITHOUT making
-    -- the record readable. The generated row-scope policy gates SELECT on the
-    -- record's view permission and stays exactly as it was, so an
-    -- application that holds only start cannot see the row — including
-    -- through this check, if it were an ordinary read. The statement below
-    -- therefore raises the bypass GUC for its own single point lookup and
-    -- lowers it again, the same shape as app.api_key_tenant: it answers ONE
-    -- boolean about ONE row and discloses nothing else. An error inside the
-    -- lookup either aborts the caller's transaction or rolls the setting back
-    -- with the handler's subtransaction, so the bypass cannot outlive the
-    -- statement it was raised for. This function is VOLATILE and is never
-    -- referenced by a policy, so no STABLE policy helper can observe or cache
-    -- the raised value.
-    --
-    -- Every identifier comes from the compiled manifest (the entity's table,
-    -- its ACL column, its primary key), never from request input, and is
-    -- rendered through %I/regclass so a hostile name could at worst name a
-    -- column that does not exist. The tenant is read from the session rather
-    -- than accepted as an argument, and tenant_id is the manifest's tenant
-    -- column on every tenant-scoped table; the caller refuses an entity
-    -- without one before reaching here.
-    create or replace function app.record_action_allows(
-      target regclass,
-      acl_column text,
-      key_column text,
-      key_is_uuid boolean,
-      record_key text,
-      subtype_scope jsonb,
-      action text
-    ) returns boolean
-    language plpgsql volatile parallel unsafe
-    as $$
-    declare
-      tenant uuid := app.current_tenant();
-      previous_bypass text;
-      statement text;
-      document jsonb;
-    begin
-      if action is null or action !~ '^[a-z][A-Za-z0-9]*$'
-        or action in ('view', 'edit', 'delete') then
-        return false;
-      end if;
-      if tenant is null or target is null or acl_column is null
-        or key_column is null or record_key is null or record_key = '' then
-        return false;
-      end if;
-      if key_is_uuid and record_key !~*
-        '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
-        return false;
-      end if;
-      -- An ordinary data table, never a catalog, a view or a toast relation.
-      if not exists (
-        select 1
-          from pg_catalog.pg_class c
-          join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-         where c.oid = target
-           and c.relkind in ('r', 'p')
-           and n.nspname not in ('pg_catalog', 'information_schema', 'pg_toast')
-      ) then
-        return false;
-      end if;
-
-      statement := format(
-        'select t.%I from %s as t where t.%I %s and t.tenant_id = $2'
-          || ' and to_jsonb(t) @> $3 limit 1',
-        acl_column,
-        target,
-        key_column,
-        case when key_is_uuid then '= $1::uuid' else '::text = $1' end
-      );
-
-      previous_bypass := current_setting('app.bypass_rls', true);
-      perform set_config('app.bypass_rls', 'true', true);
-      begin
-        execute statement
-           into document
-          using record_key, tenant, coalesce(subtype_scope, '{}'::jsonb);
-      exception when others then
-        perform set_config('app.bypass_rls', coalesce(previous_bypass, ''), true);
-        raise;
-      end;
-      perform set_config('app.bypass_rls', coalesce(previous_bypass, ''), true);
-
-      -- An absent row, a malformed document and an unnamed action are one
-      -- answer: no.
-      if document is null or not app.record_permissions_valid(document) then
-        return false;
-      end if;
-      return app.record_action_subject_allows(document -> 'actions' -> action);
-    end
     $$;
 
     -- The body is replaced, privilege-scoped and transferred to the dedicated

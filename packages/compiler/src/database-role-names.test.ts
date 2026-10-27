@@ -16,6 +16,7 @@ const defaults = Object.fromEntries(DATABASE_ROLES.map(role => [role.key, role.n
 const secondary: DatabaseRoleNames = {
   app: "secondary_app", worker: "secondary_worker",
   blueprintReader: "secondary_blueprint_reader", identityResolver: "secondary_identity_resolver",
+  recordActionResolver: "secondary_record_action_resolver",
 };
 const manifest: PlatformSchemaManifest = {
   version: 1,

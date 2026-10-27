@@ -17,7 +17,7 @@ import type { OpenShapeForgeDatabase } from "./connection.js";
 import manifest from "../generated/db/manifest.json" with { type: "json" };
 
 export type DatabaseRoleContract = {
-  key: "app" | "worker" | "blueprintReader" | "identityResolver";
+  key: "app" | "worker" | "blueprintReader" | "identityResolver" | "recordActionResolver";
   name: string;
   login: boolean;
   migratorMember: boolean;

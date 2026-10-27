@@ -571,6 +571,12 @@ export type TableSourceDefinition = {
       empty: "public" | "restricted";
       createRequires: import("./authoring/types/common.js").RecordPermissionAction[];
       defaultValue?: Record<string, unknown>;
+      /**
+       * Named actions this entity's ACL may grant, and the principal kinds
+       * each admits. The runtime authorizes an Operation's `auth.recordAction`
+       * against exactly this set; absent means the entity carries no action.
+       */
+      actions?: import("./authoring/types/common.js").RowAccessRecordActionConfig[];
     };
   };
   relationshipStatus?: {

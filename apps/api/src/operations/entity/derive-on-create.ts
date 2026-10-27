@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { sql, type Kysely } from "kysely";
 import { generatedCrudError } from "./catalog.js";
 import { fieldNameForColumn } from "./columns.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable } from "./types.js";
@@ -76,4 +77,31 @@ export function derivedSlugCandidate(
 
 export function maxDerivedIdentifierAttempts(): number {
   return MAX_SUFFIX_ATTEMPTS;
+}
+
+/** Include matching partial indexes in PostgreSQL's arbiter inference too.
+ * The mandatory unconditional index still scopes suffix allocation; other
+ * unique columns must continue to raise their original constraint errors.
+ * Read live catalog facts, never caller SQL or constraint error text. */
+export async function derivedIdentifierConflictPredicate<TDatabase>(
+  db: Kysely<TDatabase>,
+  table: GeneratedCrudTable,
+  columns: readonly string[],
+): Promise<string | undefined> {
+  const result = await sql<{ predicate: string }>`
+    select pg_catalog.pg_get_expr(i.indpred, i.indrelid) as predicate
+      from pg_catalog.pg_index i
+      join pg_catalog.pg_class c on c.oid = i.indrelid
+      join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = ${table.schema} and c.relname = ${table.table}
+       and i.indisunique and i.indisvalid and i.indpred is not null
+       and i.indnkeyatts = ${columns.length}
+       and array(select a.attname::text
+         from unnest(i.indkey) with ordinality as k(attnum, position)
+         join pg_catalog.pg_attribute a on a.attrelid = c.oid and a.attnum = k.attnum
+         where k.position <= i.indnkeyatts)
+         @> array[${sql.join(columns.map((column) => sql`${column}`))}]::text[]
+     order by i.indexrelid
+  `.execute(db);
+  return result.rows.length ? result.rows.map((row) => `(${row.predicate})`).join(" and ") : undefined;
 }

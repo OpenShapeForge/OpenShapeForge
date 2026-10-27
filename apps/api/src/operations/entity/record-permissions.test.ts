@@ -55,6 +55,9 @@ describe("record permissions", () => {
       view: subjects(),
       edit: subjects(),
       delete: subjects(),
+      // The named-action axis is always normalized, and always empty until an
+      // entity declares an action and a record grants one.
+      actions: {},
     });
     for (const action of ["view", "edit", "delete"] as const) {
       expect(recordPermissionAllows({}, action, session, "public")).toBe(true);

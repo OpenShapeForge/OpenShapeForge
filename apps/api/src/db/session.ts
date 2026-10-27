@@ -44,6 +44,15 @@ export type DbSessionInput = {
    * groups and are never expanded through the platform org-unit hierarchy.
    */
   relationGroupIds?: readonly string[] | null;
+  /**
+   * The verified application this session acts as, when it acts as one
+   * (auth/trusted-context.ts, {@link VerifiedAppPrincipal}). Only the API-key
+   * carrier produces it; every other credential leaves it absent and the
+   * `app.app_principal_id` GUC empty, so a record-action policy matches
+   * nobody. Declared structurally so the database layer keeps no dependency
+   * on the auth layer.
+   */
+  appPrincipal?: { integrationId: string } | null;
   scope?: DbSessionScope | null;
 } & NonNullable<ActingRelationSource>;
 
@@ -57,6 +66,8 @@ export type DbSessionContext = {
   relationGroupIds: readonly string[];
   /** The acting Relation (acting-relation.ts); `app.current_relation_id()`. */
   relationId: string | null;
+  /** The verified application id; `app.current_app_principal()`. */
+  appPrincipalId: string | null;
   scope: DbSessionScope;
 };
 
@@ -172,6 +183,20 @@ export function verifiedAuditIdentity(input: DbSessionInput): { auditIdentityId:
   return { auditIdentityId: null, auditIssuer: null };
 }
 
+/**
+ * The verified application id, or null. A malformed value is a programming
+ * error here rather than a denial to be papered over: the only writer is the
+ * API-key resolver, which reads a uuid primary key, so anything else means
+ * some other path invented a principal.
+ */
+function normalizeAppPrincipalId(
+  principal: { integrationId: string } | null | undefined,
+): string | null {
+  if (!principal) return null;
+  assertUuid(principal.integrationId, "appPrincipal.integrationId");
+  return principal.integrationId;
+}
+
 export function createDbSessionContext(input: DbSessionInput): DbSessionContext {
   if (!input.tenantId) {
     throw new Error("Database session is missing tenantId; refusing unscoped access.");
@@ -191,6 +216,7 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
     groups: normalizeGroups(input.groups),
     relationGroupIds: normalizeRelationGroupIds(input.relationGroupIds),
     relationId: actingRelationId(input),
+    appPrincipalId: normalizeAppPrincipalId(input.appPrincipal),
     scope: normalizeScope(input.scope),
   };
 }
@@ -229,6 +255,10 @@ export async function applyDbSession<TDatabase>(
     sql`set_config('app.scope', ${session.scope}, true)`,
     sql`set_config('app.relation_group_ids', ${session.relationGroupIds.join(",")}, true)`,
     sql`set_config('app.relation_id', ${session.relationId ?? ""}, true)`,
+    // Always written, empty included: a transaction-local setting that is only
+    // written when present would let one request's application principal be
+    // observed by the next session opened on the same transaction.
+    sql`set_config('app.app_principal_id', ${session.appPrincipalId ?? ""}, true)`,
     sql`set_config('app.user_groups', '', true)`,
     sql`set_config('app.user_groups_exact', '', true)`,
     sql`set_config('app.user_groups_ancestors', '', true)`,
@@ -310,7 +340,8 @@ export async function withDbSession<TDatabase, TResult>(
       active.session.relationGroupIds.every(
         (group, index) => group === session.relationGroupIds[index],
       ) &&
-      active.session.relationId === session.relationId;
+      active.session.relationId === session.relationId &&
+      active.session.appPrincipalId === session.appPrincipalId;
     if (!sameSession) {
       throw new Error("Nested database work cannot replace the active session.");
     }
@@ -439,9 +470,11 @@ export async function withCredentialResolutionSession<TDatabase, TResult>(
       );
     }
     await sql`select set_config('app.tenant_id', ${tenantId}, true)`.execute(trx);
-    // Deliberately no app.user_id, no app.roles, no app.scope: nothing this
-    // callback reads is user- or role-predicated, and setting a placeholder
-    // would make a later rowScope policy silently match the wrong rows.
+    // Deliberately no app.user_id, no app.roles, no app.scope and no
+    // app.app_principal_id: nothing this callback reads is user-, role- or
+    // application-predicated, and setting a placeholder would make a later
+    // rowScope or record-action policy silently match the wrong rows. The
+    // application principal is an OUTPUT of this resolution, not an input.
     return callback(trx);
   });
 }

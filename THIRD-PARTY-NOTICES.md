@@ -4,13 +4,13 @@ OpenShapeForge is distributed under the Business Source License 1.1 (see [LICENS
 
 These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a source-available one.
 
-Regenerate with `bun run notices`. 514 packages.
+Regenerate with `bun run notices`. 522 packages.
 
 ## License summary
 
 | License | Packages |
 | --- | --- |
-| MIT | 391 |
+| MIT | 399 |
 | Apache-2.0 | 60 |
 | ISC | 31 |
 | BSD-3-Clause | 16 |
@@ -296,6 +296,10 @@ Regenerate with `bun run notices`. 514 packages.
 
 ### @next/swc-linux-x64-musl@16.2.11
 - License: **MIT** — https://github.com/vercel/next.js
+
+### @nodable/entities@3.1.0
+- License: **MIT** — git+https://github.com/nodable/val-parsers.git
+- Author: Amit Gupta (https://solothought.com)
 
 ### @opentelemetry/api@1.9.1
 - License: **Apache-2.0** — https://github.com/open-telemetry/opentelemetry-js/tree/main/api
@@ -744,6 +748,10 @@ Regenerate with `bun run notices`. 514 packages.
 - License: **MIT** — chalk/ansi-styles
 - Author: Sindre Sorhus
 
+### anynum@1.0.1
+- License: **MIT** — https://github.com/NaturalIntelligence/anynum
+- Author: Amit Gupta (https://solothought.work/)
+
 ### aria-hidden@1.2.6
 - License: **MIT** — https://github.com/theKashey/aria-hidden#readme
 - Author: Anton Korzunov <thekashey@gmail.com>
@@ -1062,6 +1070,14 @@ Regenerate with `bun run notices`. 514 packages.
 - License: **BSD-3-Clause** — https://github.com/fastify/fast-uri
 - Author: Vincent Le Goff <vince.legoff@gmail.com> (https://github.com/zekth)
 
+### fast-xml-builder@1.3.1
+- License: **MIT** — git+https://github.com/NaturalIntelligence/fast-xml-builder.git
+- Author: Amit Gupta (https://solothought.com)
+
+### fast-xml-parser@5.11.2
+- License: **MIT** — git+https://github.com/NaturalIntelligence/fast-xml-parser.git
+- Author: Amit Gupta (https://solothought.com)
+
 ### fastify@5.12.2
 - License: **MIT** — https://fastify.dev/
 - Author: Matteo Collina <hello@matteocollina.com>
@@ -1216,6 +1232,10 @@ Regenerate with `bun run notices`. 514 packages.
 ### is-promise@4.0.0
 - License: **MIT** — https://github.com/then/is-promise.git
 - Author: ForbesLindesay
+
+### is-unsafe@2.0.2
+- License: **MIT** — https://github.com/NaturalIntelligence/is-unsafe
+- Author: Amit Gupta (https://solothought.com/)
 
 ### isexe@2.0.0
 - License: **ISC** — https://github.com/isaacs/isexe#readme
@@ -1483,6 +1503,10 @@ Regenerate with `bun run notices`. 514 packages.
 
 ### parseurl@1.3.3
 - License: **MIT** — pillarjs/parseurl
+
+### path-expression-matcher@1.6.2
+- License: **MIT** — https://github.com/NaturalIntelligence/path-expression-matcher#readme
+- Author: Amit Gupta (https://solothought.com)
 
 ### path-key@3.1.1
 - License: **MIT** — sindresorhus/path-key
@@ -1786,6 +1810,10 @@ Regenerate with `bun run notices`. 514 packages.
 - License: **MIT** — chalk/strip-ansi
 - Author: Sindre Sorhus
 
+### strnum@2.5.1
+- License: **MIT** — https://github.com/NaturalIntelligence/strnum
+- Author: Amit Gupta (https://solothought.work/)
+
 ### style-to-js@1.1.21
 - License: **MIT** — git+https://github.com/remarkablemark/style-to-js.git
 - Author: Mark <mark@remarkablemark.org>
@@ -1924,6 +1952,10 @@ Regenerate with `bun run notices`. 514 packages.
 ### wrappy@1.0.2
 - License: **ISC** — https://github.com/npm/wrappy
 - Author: Isaac Z. Schlueter <i@izs.me> (http://blog.izs.me/)
+
+### xml-naming@0.3.0
+- License: **MIT** — https://github.com/NaturalIntelligence/xml-naming
+- Author: Amit Gupta (https://solothought.com)
 
 ### y18n@5.0.8
 - License: **ISC** — https://github.com/yargs/y18n
@@ -4836,6 +4868,33 @@ SOFTWARE.
 ```
 </details>
 
+<details><summary>anynum@1.0.1, fast-xml-builder@1.3.1, is-unsafe@2.0.2, xml-naming@0.3.0</summary>
+
+```
+MIT License
+
+Copyright (c) 2026 Natural Intelligence
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+</details>
+
 <details><summary>aria-hidden@1.2.6, react-remove-scroll@2.7.2, react-style-singleton@2.2.3, use-callback-ref@1.3.3, use-sidecar@1.1.3</summary>
 
 ```
@@ -7279,6 +7338,33 @@ The complete list of contributors can be found at:
 ```
 </details>
 
+<details><summary>fast-xml-parser@5.11.2</summary>
+
+```
+MIT License
+
+Copyright (c) 2017 Amit Kumar Gupta
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+</details>
+
 <details><summary>fastify@5.12.2</summary>
 
 ```
@@ -9395,6 +9481,33 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 </details>
 
+<details><summary>path-expression-matcher@1.6.2</summary>
+
+```
+MIT License
+
+Copyright (c) 2024
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+</details>
+
 <details><summary>path-to-regexp@8.4.2</summary>
 
 ```
@@ -10832,6 +10945,33 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
+</details>
+
+<details><summary>strnum@2.5.1</summary>
+
+```
+MIT License
+
+Copyright (c) 2021 Natural Intelligence
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 </details>
 

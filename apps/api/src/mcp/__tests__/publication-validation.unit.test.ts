@@ -584,6 +584,13 @@ describe("requiredAuthValueKeys", () => {
       "clientId",
       "clientSecret",
     ]);
+    expect(
+      requiredAuthValueKeys({
+        scheme: "session",
+        loginUrl: "https://{region}.example.com/Authenticate",
+        credentialFrom: "accessKey",
+      }).sort(),
+    ).toEqual(["accessKey", "region"]);
     expect(requiredAuthValueKeys({ profile: "oauth2AuthorizationCode" }).sort()).toEqual([
       "clientId",
       "clientSecret",

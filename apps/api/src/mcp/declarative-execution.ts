@@ -12,11 +12,14 @@
  *
  *   provider row:   transport ("rest"), baseUrlTemplate, optional
  *                   baseUrlTemplates, auth
- *                   { scheme: basic|bearer|header, usernameTemplate,
- *                     passwordFrom, headerName, tokenFrom }, egressHosts
+ *                   { scheme: basic|bearer|header|oauth2ClientCredentials|
+ *                     session, usernameTemplate, passwordFrom, headerName,
+ *                     tokenFrom, loginUrl, loginParam, credentialFrom,
+ *                     loginResponseFormat, sessionPath, sessionParam,
+ *                     sessionTtlSeconds }, egressHosts
  *   operation row:  kind, operation { method, pathTemplate },
- *                   inputFields, responseMapping { rootPath, fieldPaths,
- *                   transforms }
+ *                   inputFields, responseMapping { format: json|xml,
+ *                   xml { arrays }, rootPath, fieldPaths, transforms }
  *   binding:        <operationRef>, order, inputMapping [{from,to}],
  *                   outputMapping [{from,to}], optional
  *                   forEach {from,as} for bounded query fan-out
@@ -28,7 +31,10 @@
  *     interpreter. REST only in this slice.
  *   - Egress is a grant: an empty/absent egressHosts refuses every call.
  *   - Secret values resolve ONLY into auth credentials — never into URLs,
- *     paths, query strings, bodies, or error messages.
+ *     paths, query strings, bodies, or error messages. Only the credential's
+ *     own egress-checked endpoint (OAuth token, session login) receives it,
+ *     in the form that endpoint requires; a session it yields is placed by
+ *     core as one named query parameter, never by an operation.
  *   - Template placeholders form a closed vocabulary: connection value keys
  *     and operation inputs. An unresolved placeholder fails the call.
  */
@@ -36,6 +42,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { allPagesPlan, collectMappedPages } from "./declarative-pagination.js";
 import { HttpError } from "../rest/http-error.js";
 import { applyResponseTransforms } from "./response-transforms.js";
+import { parseXmlResponse, xmlArrayPaths } from "./xml-response.js";
 import { hostAllowed } from "../connectors/executor.js";
 import {
   boundedAbortSignal,
@@ -666,6 +673,25 @@ type AuthConfig = {
   scopes?: unknown;
   clientIdFrom?: unknown;
   clientSecretFrom?: unknown;
+  loginUrl?: unknown;
+  loginParam?: unknown;
+  credentialFrom?: unknown;
+  loginResponseFormat?: unknown;
+  sessionPath?: unknown;
+  sessionParam?: unknown;
+  sessionTtlSeconds?: unknown;
+};
+
+/**
+ * Where the runtime places request authentication. Headers for every scheme
+ * but `session`, whose provider takes its session token as one named query
+ * parameter. `sessionKey` identifies the cached session so a rejected call
+ * can drop it; it is a digest, never the token or the credential.
+ */
+export type RequestAuth = {
+  headers: Record<string, string>;
+  query: Record<string, string>;
+  sessionKey?: string;
 };
 
 /**
@@ -787,6 +813,152 @@ async function clientCredentialsToken(input: {
     expiresAtMs: Date.now() + Math.max(0, expiresInS - 60) * 1000,
   });
   return payload.access_token;
+}
+
+const SESSION_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+const SESSION_TTL_DEFAULT_S = 600;
+
+/**
+ * Session tokens from a provider login call, cached per (login URL, login
+ * parameter, credential digest) until their authored lifetime ends. Older
+ * web services exchange an access key for a session once and then take that
+ * session as an argument of every call. The cache holds session tokens only;
+ * its key holds a digest of the credential, never the credential itself.
+ */
+const sessionCache = new Map<string, { token: string; expiresAtMs: number }>();
+
+/** Drop a cached session the provider stopped accepting, so the next call logs in again. */
+export function forgetSession(sessionKey: string): void {
+  sessionCache.delete(sessionKey);
+}
+
+function sessionName(value: unknown, what: string): string {
+  if (typeof value !== "string" || !SESSION_NAME.test(value)) {
+    throw new HttpError(
+      400,
+      "AUTH_MISCONFIGURED",
+      `Provider auth ${what} must be a parameter name of letters, digits, "_" or "-".`,
+    );
+  }
+  return value;
+}
+
+function sessionTtlMs(value: unknown): number {
+  const seconds =
+    typeof value === "number" && Number.isFinite(value)
+      ? Math.min(3600, Math.max(60, Math.floor(value)))
+      : SESSION_TTL_DEFAULT_S;
+  return seconds * 1000;
+}
+
+async function sessionToken(input: {
+  config: AuthConfig;
+  plain: Record<string, string>;
+  secret: Record<string, string>;
+  egress: readonly string[];
+  fetchImpl: typeof fetch;
+  egressDispatch?: ModuleEgressDispatch | undefined;
+  signal?: AbortSignal;
+}): Promise<{ token: string; sessionKey: string }> {
+  input.signal?.throwIfAborted();
+  const { config } = input;
+  const loginUrl = new URL(
+    resolveTemplate(
+      typeof config.loginUrl === "string" ? config.loginUrl : "",
+      input.plain,
+      "auth.loginUrl",
+    ),
+  );
+  if (loginUrl.protocol !== "https:") {
+    throw new HttpError(
+      400,
+      "EGRESS_DENIED",
+      "A session login endpoint must use HTTPS.",
+    );
+  }
+  if (!hostAllowed(loginUrl.hostname, input.egress)) {
+    throw new HttpError(
+      403,
+      "EGRESS_DENIED",
+      `Login endpoint host ${loginUrl.hostname} is not in the provider's egress allow-list.`,
+    );
+  }
+  const loginParam = sessionName(config.loginParam, "loginParam");
+  const credentialKey =
+    typeof config.credentialFrom === "string" ? config.credentialFrom : "";
+  const credential = { ...input.plain, ...input.secret }[credentialKey];
+  if (credentialKey === "" || credential === undefined) {
+    throw new HttpError(
+      400,
+      "CONNECTION_INCOMPLETE",
+      `Session login needs the connection value "${credentialKey || "credentialFrom"}", which is not set.`,
+    );
+  }
+
+  const sessionKey = createHash("sha256")
+    .update(`${loginUrl.href}\u0000${loginParam}\u0000${credential}`)
+    .digest("hex");
+  const cached = sessionCache.get(sessionKey);
+  if (cached && cached.expiresAtMs > Date.now()) {
+    return { token: cached.token, sessionKey };
+  }
+
+  const xml = config.loginResponseFormat === "xml";
+  const requestSignal = boundedAbortSignal(input.signal, REQUEST_TIMEOUT_MS);
+  const response = await fetchWithAllowedRedirects(
+    loginUrl,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        accept: xml ? XML_ACCEPT : "application/json",
+      },
+      body: new URLSearchParams({ [loginParam]: credential }).toString(),
+      signal: requestSignal,
+    },
+    input.egress,
+    input.fetchImpl,
+    input.egressDispatch,
+    "https-only",
+  );
+  requestSignal.throwIfAborted();
+  const text = await response.text();
+  requestSignal.throwIfAborted();
+  if (!response.ok) {
+    throw new HttpError(
+      502,
+      "SESSION_LOGIN_ERROR",
+      `Login endpoint answered ${response.status}.`,
+    );
+  }
+  let payload: unknown;
+  try {
+    payload = xml ? parseXmlResponse(text) : JSON.parse(text);
+  } catch {
+    throw new HttpError(
+      502,
+      "SESSION_LOGIN_ERROR",
+      `Login endpoint response is not ${xml ? "XML" : "JSON"}.`,
+    );
+  }
+  const token = extractPath(payload, config.sessionPath);
+  if (
+    typeof token !== "string" ||
+    token.length === 0 ||
+    token.length > 512 ||
+    /\s/.test(token)
+  ) {
+    throw new HttpError(
+      502,
+      "SESSION_LOGIN_ERROR",
+      "Login endpoint returned no session at the configured sessionPath.",
+    );
+  }
+  sessionCache.set(sessionKey, {
+    token,
+    expiresAtMs: Date.now() + sessionTtlMs(config.sessionTtlSeconds),
+  });
+  return { token, sessionKey };
 }
 
 /**
@@ -1089,8 +1261,8 @@ export function mapOperationResponse(
  * request from the canonical operation/provider fields, enforce egress, call,
  * and map the (optionally rootPath-extracted) response onto service outputs.
  */
-/** All schemes; the OAuth one needs I/O, so acquisition is async. */
-export async function acquireAuthHeaders(input: {
+/** All schemes; the OAuth and session ones need I/O, so acquisition is async. */
+export async function acquireRequestAuth(input: {
   auth: unknown;
   plain: Record<string, string>;
   secret: Record<string, string>;
@@ -1098,12 +1270,27 @@ export async function acquireAuthHeaders(input: {
   fetchImpl: typeof fetch;
   egressDispatch?: ModuleEgressDispatch | undefined;
   signal?: AbortSignal;
-}): Promise<Record<string, string>> {
+}): Promise<RequestAuth> {
   input.signal?.throwIfAborted();
   const config =
     input.auth && typeof input.auth === "object"
       ? (input.auth as AuthConfig)
       : undefined;
+  if (config?.scheme === "session") {
+    const sessionParam = sessionName(config.sessionParam, "sessionParam");
+    // The login exchange is credential lifecycle traffic like the OAuth token
+    // request, so it takes the same purpose and no source coordination.
+    const { token, sessionKey } = await sessionToken({
+      config,
+      plain: input.plain,
+      secret: input.secret,
+      egress: input.egress,
+      fetchImpl: input.fetchImpl,
+      egressDispatch: deriveModuleEgressDispatch(input.egressDispatch, "oauth"),
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    return { headers: {}, query: { [sessionParam]: token }, sessionKey };
+  }
   if (config?.scheme === "oauth2ClientCredentials") {
     // Token acquisition is OAuth traffic, not execution against the resolved
     // invocation source. Preserve the core owner/scope but deliberately omit
@@ -1121,38 +1308,53 @@ export async function acquireAuthHeaders(input: {
       egressDispatch: oauthEgress,
       ...(input.signal ? { signal: input.signal } : {}),
     });
-    return { authorization: `Bearer ${token}` };
+    return { headers: { authorization: `Bearer ${token}` }, query: {} };
   }
-  return buildAuthHeaders(input.auth, input.plain, input.secret);
+  return {
+    headers: buildAuthHeaders(input.auth, input.plain, input.secret),
+    query: {},
+  };
 }
 
 /**
- * Placeholder auth headers for composition WITHOUT credentials: the header
- * names and shapes are real, the values describe where the value would come
- * from. Secrets are never decrypted on this path.
+ * Placeholder request authentication for composition WITHOUT credentials: the
+ * header and parameter names are real, the values describe where the value
+ * would come from. Secrets are never decrypted on this path.
  */
-export function describeAuthHeaders(auth: unknown): Record<string, string> {
-  if (!auth || typeof auth !== "object") return {};
+export function describeRequestAuth(auth: unknown): RequestAuth {
+  const headers = (value: Record<string, string>): RequestAuth => ({
+    headers: value,
+    query: {},
+  });
+  if (!auth || typeof auth !== "object") return headers({});
   const config = auth as AuthConfig;
   switch (config.scheme) {
     case "basic":
-      return { authorization: "Basic <credentials from the connection>" };
+      return headers({ authorization: "Basic <credentials from the connection>" });
     case "bearer":
-      return {
+      return headers({
         authorization: `Bearer <value of "${String(config.tokenFrom ?? "?")}" from the connection>`,
-      };
+      });
     case "header": {
       const name = canonicalCustomAuthHeaderName(config)!;
-      return {
+      return headers({
         [name]: `<value of "${String(config.tokenFrom ?? "?")}" from the connection>`,
-      };
+      });
     }
     case "oauth2ClientCredentials":
-      return {
+      return headers({
         authorization: `Bearer <token from ${String(config.tokenUrl ?? "the token endpoint")}>`,
+      });
+    case "session":
+      return {
+        headers: {},
+        query: {
+          [sessionName(config.sessionParam, "sessionParam")]:
+            `<session from ${String(config.loginUrl ?? "the login endpoint")}>`,
+        },
       };
     default:
-      return {};
+      return headers({});
   }
 }
 
@@ -1189,7 +1391,21 @@ export type ComposedRequest = {
   url: URL;
   headers: Record<string, string>;
   body?: string;
+  /** The cached provider session this request carries, when its scheme is `session`. */
+  sessionKey?: string;
 };
+
+const XML_ACCEPT = "application/xml, text/xml;q=0.9";
+
+/** The response format an operation declares; JSON unless it says XML. */
+function responseFormat(operationRow: JsonRecord): "json" | "xml" {
+  const mapping = operationRow.responseMapping;
+  return mapping &&
+    typeof mapping === "object" &&
+    (mapping as JsonRecord).format === "xml"
+    ? "xml"
+    : "json";
+}
 
 /**
  * Compose the provider request for ONE binding — everything up to but not
@@ -1411,10 +1627,10 @@ export async function composeBindingRequest(
     }
     authoredHeaders[mapping.header] = serialized;
   }
-  const authHeaders =
+  const auth =
     mode === "describe"
-      ? describeAuthHeaders(providerRow.auth)
-      : await acquireAuthHeaders({
+      ? describeRequestAuth(providerRow.auth)
+      : await acquireRequestAuth({
           auth: providerRow.auth,
           plain,
           secret,
@@ -1424,11 +1640,11 @@ export async function composeBindingRequest(
           ...(input.signal ? { signal: input.signal } : {}),
         });
   const headers: Record<string, string> = {
-    accept: "application/json",
+    accept: responseFormat(operationRow) === "xml" ? XML_ACCEPT : "application/json",
     ...authoredHeaders,
     // Authentication is core-owned and always wins as a final safeguard even
     // though publication/runtime validation rejects an authored collision.
-    ...authHeaders,
+    ...auth.headers,
   };
   if (
     mode === "acquire" &&
@@ -1482,7 +1698,27 @@ export async function composeBindingRequest(
     }
   }
 
-  return { method, url, headers, ...(body !== undefined ? { body } : {}) };
+  // A session parameter is authentication: core places it last, and an
+  // operation that would set the same parameter itself is a definition
+  // mistake rather than something to silently overwrite.
+  for (const [param, value] of Object.entries(auth.query)) {
+    if (url.searchParams.has(param)) {
+      throw new HttpError(
+        400,
+        "OPERATION_MISCONFIGURED",
+        `Query parameter "${param}" carries the provider session and cannot be set by the operation.`,
+      );
+    }
+    url.searchParams.set(param, value);
+  }
+
+  return {
+    method,
+    url,
+    headers,
+    ...(body !== undefined ? { body } : {}),
+    ...(auth.sessionKey !== undefined ? { sessionKey: auth.sessionKey } : {}),
+  };
 }
 
 function operationSubject(operationRow: JsonRecord): string {
@@ -1586,6 +1822,8 @@ export async function executeBinding(
     throw error;
   }
 
+  const xmlResponse = responseFormat(operationRow) === "xml";
+  const xmlArrays = xmlArrayPaths(operationRow.responseMapping);
   const fetchPage = async (pageUrl: URL) => {
     const requestSignal = boundedAbortSignal(input.signal, REQUEST_TIMEOUT_MS);
     let response: Response;
@@ -1618,6 +1856,9 @@ export async function executeBinding(
       throw error;
     }
     if (!response.ok) {
+      // A provider that refuses a call may have ended the session; the next
+      // call logs in again rather than replaying a dead token until expiry.
+      if (request.sessionKey !== undefined) forgetSession(request.sessionKey);
       throw providerFailure(operationRow, response);
     }
     try {
@@ -1632,7 +1873,11 @@ export async function executeBinding(
     }
     let parsed: unknown = null;
     try {
-      parsed = text ? JSON.parse(text) : null;
+      parsed = !text
+        ? null
+        : xmlResponse
+          ? parseXmlResponse(text, xmlArrays)
+          : JSON.parse(text);
     } catch {
       throw providerFailure(
         operationRow,

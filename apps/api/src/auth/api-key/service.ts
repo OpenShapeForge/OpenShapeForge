@@ -39,6 +39,8 @@ export type ProvisioningSession = CeilingSession & {
   groups?: readonly string[];
 };
 
+export type { CeilingSession };
+
 export type ApiKeyServiceDeps = {
   db: OpenShapeForgeDatabase;
   keyring: SecretKeyring;

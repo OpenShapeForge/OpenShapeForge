@@ -145,6 +145,9 @@ function sessionFrom(context: GraphqlContext): ProvisioningSession {
     roles: session.roles,
     groups: session.groups,
     credential: session.credential,
+    // Carried untouched for the same reason the REST adapter carries it: the
+    // ceiling's carrier rule is this value.
+    ...(session.principalKind ? { principalKind: session.principalKind } : {}),
   };
 }
 

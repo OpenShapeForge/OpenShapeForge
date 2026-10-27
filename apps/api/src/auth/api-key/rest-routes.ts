@@ -109,6 +109,9 @@ export function registerApiKeyRestRoutes(
       roles: resolved.roles,
       groups: resolved.groups,
       credential: resolved.credential,
+      // The ceiling reads this to refuse a non-person carrier; dropping it
+      // here would silently turn the control off for this transport.
+      ...(resolved.principalKind ? { principalKind: resolved.principalKind } : {}),
     };
   }
 

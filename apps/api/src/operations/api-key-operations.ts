@@ -101,14 +101,16 @@ function resolve(context: ModuleOperationContext): Resolved | ModuleOperationErr
       admin: config.admin,
       entityRoleClientId: config.entityRoleClientId,
     },
-    // `credential` is carried through untouched: the ceiling reads it to refuse
-    // an API key session, so flattening it here would disable that control.
+    // `credential` and `principalKind` are carried through untouched: together
+    // they are the ceiling's carrier rule, so flattening either here would
+    // disable that control for every Operation in this catalog.
     session: {
       tenantId: session.tenantId,
       userId: session.userId,
       roles: session.roles,
       groups: session.groups,
       credential: session.credential,
+      ...(session.principalKind ? { principalKind: session.principalKind } : {}),
     },
   };
 }

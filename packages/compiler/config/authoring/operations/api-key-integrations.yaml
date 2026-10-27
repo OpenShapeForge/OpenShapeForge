@@ -466,7 +466,7 @@ operations:
           revokedCredentials:
             type: integer
             minimum: 0
-            description: Credentials that were still live when the integration was disabled.
+            description: Credentials that had not yet been revoked when the integration was disabled; an expired one is included, because expiry is not revocation.
             x-osf-i18n: { title: { en: Revoked credentials, nl: Ingetrokken credentials } }
     auth: *manageAuth
     tenancy: { mode: required }

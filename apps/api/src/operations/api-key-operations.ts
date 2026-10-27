@@ -80,12 +80,9 @@ function isFailure(value: Resolved | ModuleOperationErrorResult): value is Modul
   return "ok" in value && value.ok === false;
 }
 
-function resolve(
-  context: ModuleOperationContext,
-  env?: Parameters<typeof readApiKeyProvisioningConfig>[0],
-): Resolved | ModuleOperationErrorResult {
+function resolve(context: ModuleOperationContext): Resolved | ModuleOperationErrorResult {
   const db = context.db as OpenShapeForgeDatabase | undefined;
-  const config: ApiKeyProvisioningConfig | undefined = readApiKeyProvisioningConfig(env);
+  const config: ApiKeyProvisioningConfig | undefined = readApiKeyProvisioningConfig();
   if (!db || !config) {
     return declaredFailure(
       503,

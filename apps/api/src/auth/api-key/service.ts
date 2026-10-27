@@ -560,8 +560,9 @@ export async function disableIntegration(
       throw new ApiKeyNotFoundError("No such integration.");
     }
 
-    // Only the keys that were still live are counted: the predicate is what
-    // makes a second disable report 0 instead of the whole history again.
+    // Only rows that were not already revoked are stamped and counted — an
+    // expired key included, because expiry is not revocation. The predicate is
+    // what makes a second disable report 0 instead of the whole history again.
     const revoked = await sql<{ id: string }>`
       update platform.api_keys
          set revoked_at = ${now}

@@ -146,6 +146,11 @@ export function readSharedReadTransactionTimeoutMs(env: NodeJS.ProcessEnv = proc
 export function readMaintenanceAdmissionTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   return readPositiveIntEnv("DB_MAINTENANCE_ADMISSION_TIMEOUT_MS", 1_000, env);
 }
+/** Strategy admission only: cold/busy slots use the reserved-backend fallback.
+ * This never cancels admitted metadata or sets a provider deadline. */
+export function readSharedReadAdmissionProbeMs(env: NodeJS.ProcessEnv = process.env): number {
+  return readPositiveIntEnv("DB_SHARED_READ_ADMISSION_PROBE_MS", 5, env);
+}
 
 export function readApiLimits(env: NodeJS.ProcessEnv = process.env): ApiLimits {
   const anonymous = readPositiveIntEnv(

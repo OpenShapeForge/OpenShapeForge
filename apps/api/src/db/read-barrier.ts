@@ -2,7 +2,7 @@
 import { sql, type Kysely } from "kysely";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { setTimeout as delay } from "node:timers/promises";
-import { readStatementTimeoutMs, readSharedReadTransactionTimeoutMs, readMaintenanceAdmissionTimeoutMs } from "../config/limits.js";
+import { readStatementTimeoutMs, readSharedReadTransactionTimeoutMs, readMaintenanceAdmissionTimeoutMs, readSharedReadAdmissionProbeMs } from "../config/limits.js";
 import type { OpenShapeForgeDatabase } from "./connection.js";
 
 type Reservation = {
@@ -132,7 +132,7 @@ export class SharedReadBarriers {
     if (current.tenantId !== tenantId.toLowerCase()) throw new Error("Read barrier database work belongs to another tenant.");
     if (this.#databaseScope.getStore()) throw new Error("An independent transaction cannot nest inside read barrier database work.");
     const retain = (pending: Promise<unknown>) => this.retainScopeWork(pending);
-    const execute = async (connection: OpenShapeForgeDatabase, serializeChecks: boolean) => {
+    const execute = async (run: (invoke: (connection: OpenShapeForgeDatabase) => Promise<T>) => Promise<T>, serializeChecks: boolean) => {
       const assertActive = () => {
         if (!current.active) throw new Error("Read barrier scope is no longer active.");
         current.signal?.throwIfAborted();
@@ -145,10 +145,10 @@ export class SharedReadBarriers {
       await held();
       assertActive();
       let result: T;
-      try { result = await this.#databaseScope.run(true, () => work(connection, {
+      try { result = await run(connection => this.#databaseScope.run(true, () => work(connection, {
         marker: JSON.stringify({ namespace: current.namespace, tenantId: current.tenantId }),
         budgetMs: readSharedReadTransactionTimeoutMs(), isActive: () => current.active, retain,
-      })); }
+      }))); }
       catch (error) {
         try { await held(); }
         catch (lockError) { throw new AggregateError([error, lockError], "Database work and read barrier both failed."); }
@@ -162,17 +162,27 @@ export class SharedReadBarriers {
       // Prefer parallel, short transactions on free ordinary pool slots. This
       // probe only selects a strategy: cold or busy slots fall back to the
       // already reserved backend, so waiting writers cannot deadlock a reader.
-      const probe = AbortSignal.timeout(5);
       let admitted = false;
+      let admissionFailed = false;
       try {
-        return await this.#db.connection().execute(connection => {
-          admitted = true;
-          return execute(connection, true);
-        }, { signal: AbortSignal.any([probe, ...(current.signal ? [current.signal] : [])]) });
+        // Fence checks happen before borrowing and after returning the slot.
+        // A queued fallback must not leave ordinary slots parked on its queue.
+        return await execute(async invoke => {
+          const probe = AbortSignal.timeout(readSharedReadAdmissionProbeMs());
+          try {
+            return await this.#db.connection().execute(connection => {
+              admitted = true;
+              return invoke(connection);
+            }, { signal: AbortSignal.any([probe, ...(current.signal ? [current.signal] : [])]) });
+          } catch (error) {
+            admissionFailed = !admitted;
+            throw error;
+          }
+        }, true);
       } catch (error) {
         // Never replay callback work, including a callback's own TimeoutError.
-        if (admitted || !probe.aborted || current.signal?.aborted) throw error;
-        return this.#serialize(() => execute(current.reservation.connection, false));
+        if (!admissionFailed || current.signal?.aborted) throw error;
+        return this.#serialize(() => execute(invoke => invoke(current.reservation.connection), false));
       }
     })();
     retain(job);

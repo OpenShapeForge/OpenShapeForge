@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { expect, test } from "bun:test";
+import { expect, test, spyOn } from "bun:test";
 import { SQL } from "bun";
 import { CompiledQuery, sql, type DatabaseConnection, type Transaction } from "kysely";
 import { createDatabaseRuntime, databasePoolLimit } from "../connection.js";
@@ -107,7 +107,12 @@ test("independent metadata uses free pool slots concurrently without releasing t
     await Promise.all([1,2,3].map(() => sql`select pg_sleep(0.02)`.execute(runtime.db)));
     result = platform.withActiveOperationSession(session as never, live => platform.services.db.withSharedReadBarrier!(live, "test.parallel-metadata", async () => {
       await Promise.all([1,2].map(() => platform.services.db.withSession(live, async trx => {
-        const row = (await sql<{pid:number}>`select pg_backend_pid() as pid`.execute(trx)).rows[0]!;
+        const row = (await sql<{pid:number; owns_fence:boolean}>`select pg_backend_pid() as pid,
+          exists(select 1 from pg_locks where pid=pg_backend_pid() and locktype='advisory'
+            and classid=(hashtext('osf.read-barrier:test.parallel-metadata')::bigint & 4294967295)::oid
+            and objid=(hashtext(${session.tenantId})::bigint & 4294967295)::oid
+            and objsubid=2 and mode='ShareLock' and granted) as owns_fence`.execute(trx)).rows[0]!;
+        expect(row.owns_fence).toBe(false);
         pids.add(row.pid); started++; await finish.promise;
       })));
     })).then(() => ({}), error => ({error}));
@@ -124,6 +129,75 @@ test("independent metadata uses free pool slots concurrently without releasing t
     expect(invoked).toBe(1);
 
   } finally { finish.resolve(); await result; await runtime.close(); }
+}, 10_000);
+
+test("cold metadata and pre-admission errors finish once on a verified backend", async () => {
+  const runtime = createDatabaseRuntime({ databaseUrl: owner, maxConnections: 3 });
+  const platform = new ModulePlatformRuntime(runtime.db);
+  const session = { tenantId: crypto.randomUUID(), userId: crypto.randomUUID(), roles: [], groups: [], credential: "bearer", scope: "self" };
+  let invoked = 0;
+  try {
+    // No warm-up: creating an ordinary backend may exceed the strategy probe.
+    await platform.withActiveOperationSession(session as never, live => platform.services.db.withSharedReadBarrier!(live, "test.cold", async () => {
+      await platform.services.db.withSession(live, async trx => {
+        invoked++;
+        expect((await sql<{tenant:string}>`select current_setting('app.tenant_id') as tenant`.execute(trx)).rows[0]!.tenant).toBe(session.tenantId);
+      });
+      const connection = spyOn(runtime.db, "connection").mockImplementationOnce(() => ({
+        execute: async () => { throw new Error("injected admission failure"); },
+      }) as never);
+      try {
+        await platform.services.db.withSession(live, async trx => {
+          invoked++;
+          expect((await sql<{held:boolean}>`select exists(select 1 from pg_locks where pid=pg_backend_pid() and locktype='advisory'
+            and classid=(hashtext('osf.read-barrier:test.cold')::bigint & 4294967295)::oid
+            and objid=(hashtext(${session.tenantId})::bigint & 4294967295)::oid
+            and objsubid=2 and mode='ShareLock' and granted) as held`.execute(trx)).rows[0]!.held).toBe(true);
+        });
+      } finally { connection.mockRestore(); }
+    }));
+    expect(invoked).toBe(2);
+  } finally { await runtime.close(); }
+}, 10_000);
+
+test("queued fence checks leave ordinary slots free for other work and a same-pool writer", async () => {
+  const runtime = createDatabaseRuntime({ databaseUrl: owner, maxConnections: 4 });
+  const platform = new ModulePlatformRuntime(runtime.db);
+  const session = { tenantId: crypto.randomUUID(), userId: crypto.randomUUID(), roles: [], groups: [], credential: "bearer", scope: "self" };
+  const namespace = "test.queued-metadata";
+  const slotsReady = deferred(), releaseSlots = deferred(), fallbackEntered = deferred(), releaseFallback = deferred();
+  let writer: Promise<unknown> | undefined, written = false;
+  try {
+    await platform.withActiveOperationSession(session as never, live => platform.services.db.withSharedReadBarrier!(live, namespace, async () => {
+      let occupied = 0;
+      const holds = [1,2,3].map(() => runtime.db.connection().execute(async () => { if (++occupied === 3) slotsReady.resolve(); await releaseSlots.promise; }));
+      let fallback: Promise<unknown> | undefined;
+      const metadata: Promise<unknown>[] = [];
+      try {
+        await slotsReady.promise;
+        fallback = platform.services.db.withSession(live, async () => { fallbackEntered.resolve(); await releaseFallback.promise; });
+        await fallbackEntered.promise;
+        releaseSlots.resolve(); await Promise.all(holds);
+        for (const _ of [1,2,3]) metadata.push(platform.services.db.withSession(live, trx => sql`select 1`.execute(trx)));
+        await Bun.sleep(20);
+        // These metadata jobs wait on the reserved queue, without borrowing
+        // every ordinary slot. This fails when checks run inside the loan.
+        const free = runtime.db.connection().execute(async () => true);
+        expect(await Promise.race([free, Bun.sleep(250).then(() => false)])).toBe(true);
+        writer = runtime.db.transaction().execute(trx => sql`select pg_advisory_xact_lock(hashtext(${'osf.read-barrier:' + namespace}), hashtext(${session.tenantId}))`.execute(trx)).then(() => { written = true; });
+        await waitFor(async () => (await sql<{waiting:boolean}>`select exists(select 1 from pg_locks where locktype='advisory'
+          and classid=(hashtext(${'osf.read-barrier:' + namespace})::bigint & 4294967295)::oid
+          and objid=(hashtext(${session.tenantId})::bigint & 4294967295)::oid
+          and mode='ExclusiveLock' and not granted) as waiting`.execute(runtime.db)).rows[0]!.waiting);
+        expect(written).toBe(false);
+      } finally {
+        releaseSlots.resolve(); releaseFallback.resolve();
+        await Promise.allSettled([...holds, ...metadata, ...(fallback ? [fallback] : [])]);
+      }
+    }));
+    expect(await Promise.race([writer!.then(() => true), Bun.sleep(1_000).then(() => false)])).toBe(true);
+    expect(written).toBe(true);
+  } finally { releaseSlots.resolve(); releaseFallback.resolve(); await writer; await runtime.close(); }
 }, 10_000);
 
 test("serialized metadata keeps each tenant, actor, roles, relation and audit authority distinct", async () => {

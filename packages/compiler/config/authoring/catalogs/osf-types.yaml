@@ -372,7 +372,7 @@ types:
     icon: Ruler
     render:
       display: TextDisplay
-      input: JsonFieldEditor
+      input: FieldMeasurement
     children:
       - key: value
         osfType: number
@@ -422,7 +422,7 @@ types:
     icon: ArrowLeftRight
     render:
       display: TextDisplay
-      input: JsonFieldEditor
+      input: FieldNumericRange
     children:
       - key: from
         osfType: number
@@ -457,7 +457,7 @@ types:
     icon: CalendarRange
     render:
       display: TextDisplay
-      input: JsonFieldEditor
+      input: FieldDateRange
     children:
       - key: from
         osfType: date
@@ -507,7 +507,7 @@ types:
     icon: Repeat
     render:
       display: TextDisplay
-      input: JsonFieldEditor
+      input: FieldRecurrence
     children:
       - key: frequency
         osfType: string
@@ -673,4 +673,4 @@ types:
         maxLength: 160
         not: { enum: [constructor, prototype, __proto__] }
       additionalProperties: { type: string, maxLength: 8000 }
-    render: { display: TextDisplay, input: JsonFieldEditor }
+    render: { display: TextDisplay, input: FieldKeyValuePairs }

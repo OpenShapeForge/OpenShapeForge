@@ -192,6 +192,11 @@ components:
     description: Color picker for a hex color value.
     props: []
 
+  FieldDefinitionEditor:
+    kind: field
+    description: Structured editor for single field definitions and field-definition lists.
+    props: []
+
   FieldDefinitionView:
     kind: field
     description: Read-only display for single field definitions and field-definition lists.

@@ -7,6 +7,11 @@ import type { DB } from "../generated/db/types.js";
 
 export type OpenShapeForgeDatabase = Kysely<DB>;
 
+const poolLimits = new WeakMap<OpenShapeForgeDatabase, number>();
+export function databasePoolLimit(db: OpenShapeForgeDatabase): number {
+  return poolLimits.get(db) ?? readDatabasePoolMaxConnections();
+}
+
 export type DatabaseRuntime = {
   db: OpenShapeForgeDatabase;
   close: () => Promise<void>;
@@ -86,12 +91,12 @@ export function readDatabasePoolMaxConnections(env: NodeJS.ProcessEnv = process.
 export function createDatabaseRuntime(
   options: DatabaseRuntimeOptions = {},
 ): DatabaseRuntime {
-  const postgres = new SQL(options.databaseUrl ?? readDatabaseUrl(), {
-    max: options.maxConnections ?? readDatabasePoolMaxConnections(),
-  });
+  const maxConnections = options.maxConnections ?? readDatabasePoolMaxConnections();
+  const postgres = new SQL(options.databaseUrl ?? readDatabaseUrl(), { max: maxConnections });
 
   const dialect = new PostgresJSDialect({ postgres });
   const db = new Kysely<DB>(databaseDiagnosticConfig(dialect, options.log));
+  poolLimits.set(db, maxConnections);
 
   return {
     db,

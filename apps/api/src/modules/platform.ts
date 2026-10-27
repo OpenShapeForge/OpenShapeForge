@@ -8,7 +8,8 @@ import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Server } from "@modelcontextprotocol/server";
 import { sql, type Transaction } from "kysely";
-import { assertSameDatabase, type OpenShapeForgeDatabase } from "../db/connection.js";
+import { assertSameDatabase, databasePoolLimit, type OpenShapeForgeDatabase } from "../db/connection.js";
+import { sharedReadBarriers, type SharedReadBarriers } from "../db/read-barrier.js";
 import { withDbSession, withInvocationSavepoint, withSystemSession } from "../db/session.js";
 import { enqueueJob } from "../jobs/store.js";
 import { actorSessionOf, type JobActorCredential } from "../jobs/actor-session.js";
@@ -321,6 +322,7 @@ const documentPlatformRuntimes = new WeakMap<OpenShapeForgeDatabase, ModulePlatf
 export class ModulePlatformRuntime {
   readonly services: ModulePlatformServices;
   readonly #db: OpenShapeForgeDatabase;
+  readonly #readBarriers: SharedReadBarriers;
   readonly #artifactStorage: ArtifactStorageRuntime<TrustedSessionContext, Transaction<DB>>;
   readonly #servers = new Map<Server, ModuleMcpServerBinding>();
   readonly #activeOperationSessions = new WeakSet<ActiveOperationSession>();
@@ -396,6 +398,7 @@ export class ModulePlatformRuntime {
     } = {},
   ) {
     this.#db = db;
+    this.#readBarriers = sharedReadBarriers(db);
     documentPlatformRuntimes.set(db, this);
     this.#capabilityOperations = options.capabilityOperations;
     const records = new RecordAccessRuntime({
@@ -455,6 +458,23 @@ export class ModulePlatformRuntime {
         },
       },
       db: {
+        withSharedReadBarrier: async (session, namespace, work, options) => {
+          if (!this.#acceptsScopedSession(session) || !session.tenantId) {
+            throw new Error("Read barriers require a live verified tenant session.");
+          }
+          if (!/^[a-z][a-z0-9.-]{0,127}$/.test(namespace)) throw new Error("Invalid read barrier namespace.");
+          options?.signal?.throwIfAborted();
+          const active = this.#activeTransaction(session, "Module read barrier");
+          const tenantId = session.tenantId.toLowerCase();
+          if (active || databasePoolLimit(this.#db) === 1) {
+            return this.services.db.withSession(session, async trx => {
+              await sql`select pg_advisory_xact_lock_shared(hashtext(${'osf.read-barrier:' + namespace}), hashtext(${tenantId}))`.execute(trx);
+              options?.signal?.throwIfAborted();
+              return work();
+            });
+          }
+          return this.#readBarriers.run(namespace, tenantId, work, options?.signal);
+        },
         withControlSession: async (session, work) => {
           const active = activeOperationSessionStorage.getStore();
           const operationId = auditContext()?.operationId;

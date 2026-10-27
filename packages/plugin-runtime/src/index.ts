@@ -385,6 +385,19 @@ export type RuntimeOperationProvider = {
 
 /** The database capabilities exposed by the host to a runtime plugin. */
 export type PluginDatabase = {
+  /** Keep definition writers behind concurrent reads without holding a tenant
+   * transaction across external I/O. The tenant is derived from this live
+   * session. Writers must take the matching transaction advisory lock:
+   * (hashtext('osf.read-barrier:' || namespace), hashtext(tenantId)).
+   * A host with one connection, or an already active transaction, retains a
+   * transaction lock instead. This does not authorize reads or cache data.
+   */
+  withSharedReadBarrier?<T>(
+    session: PluginSessionContext,
+    namespace: string,
+    work: () => Promise<T>,
+    options?: { signal?: AbortSignal },
+  ): Promise<T>;
   /** Audited cross-tenant work, admitted only during a live control Operation.
    * The host derives actor and audit reason; plugins cannot supply authority. */
   withControlSession?<T>(

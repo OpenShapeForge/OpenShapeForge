@@ -212,6 +212,7 @@ export async function createIntegration(
              client_secret_algorithm = ${encrypted.algorithm},
              updated_at = ${now}
        where id = ${integrationId}
+         and tenant_id = ${session.tenantId}
     `.execute(trx);
 
     await insertKeyRow(trx, {

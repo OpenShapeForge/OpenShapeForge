@@ -52,10 +52,47 @@ function propertyNames(schema: unknown, found: Set<string> = new Set()): Set<str
 
 const SECRET_NAMES = ["secret", "token", "clientSecret", "secretHash", "lookupId", "password"];
 
+/**
+ * Every `x-osf-presentation` component named anywhere in a JSON value, with
+ * the path it sits on.
+ *
+ * The path is the point: a manifest carries the same operation ref under
+ * several keys (the operation map, the entity, each view that offers it), so
+ * counting occurrences says nothing. What matters is that every one of them is
+ * the credential's own secret property and none is a field of a metadata view.
+ */
+function presentationMarkers(
+  value: unknown,
+  path: string[] = [],
+  found: { path: string; component: string }[] = [],
+): { path: string; component: string }[] {
+  if (!value || typeof value !== "object") return found;
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) presentationMarkers(item, [...path, String(index)], found);
+    return found;
+  }
+  for (const [key, nested] of Object.entries(value)) {
+    if (key === "x-osf-presentation" && nested && typeof nested === "object") {
+      const component = (nested as { component?: unknown }).component;
+      if (typeof component === "string") found.push({ path: path.join("/"), component });
+    }
+    presentationMarkers(nested, [...path, key], found);
+  }
+  return found;
+}
+
+function presentationComponents(value: unknown): string[] {
+  return presentationMarkers(value).map((marker) => marker.component);
+}
+
+/** The two Operations that hand over a live credential. */
+const MINTING = ["api-keys.create-integration", "api-keys.issue-credential"];
+
 describe("shipped integration and API-key catalog", () => {
   test("binds every Operation to the one provisioning service under the management role", () => {
     const operations = compiled(apiKeyCatalog());
     expect(operations.map(({ key }) => key).sort()).toEqual([
+      "api-keys.create-integration",
       "api-keys.disable-integration",
       "api-keys.get-credential",
       "api-keys.get-integration",
@@ -70,17 +107,32 @@ describe("shipped integration and API-key catalog", () => {
       // service would then refuse — or, worse, the reverse.
       expect(operation.auth).toEqual({ mode: "session", roles: ["Platform.ApiKeys.Manage"] });
       expect(operation.tenancy).toEqual({ mode: "required" });
-      expect(operation.effects.external).toBe("none");
       // Every refusal the handlers can return is declared, the unconfigured
       // deployment included: an undeclared status is a contract violation at
-      // runtime, not a 503.
-      expect(operation.errors.map(({ status, code }) => `${status} ${code}`)).toEqual([
-        "400 VALIDATION",
-        "401 UNAUTHENTICATED",
-        "403 FORBIDDEN",
-        "404 NOT_FOUND",
-        "503 NOT_CONFIGURED",
-      ]);
+      // runtime, not a 503. Only the Operation that mutates the realm may
+      // report the identity provider refusing.
+      expect(operation.errors.map(({ status, code }) => `${status} ${code}`)).toEqual(
+        operation.key === "api-keys.create-integration"
+          ? [
+            "400 VALIDATION",
+            "401 UNAUTHENTICATED",
+            "403 FORBIDDEN",
+            "404 NOT_FOUND",
+            "502 PROVISIONING_FAILED",
+            "503 NOT_CONFIGURED",
+          ]
+          : [
+            "400 VALIDATION",
+            "401 UNAUTHENTICATED",
+            "403 FORBIDDEN",
+            "404 NOT_FOUND",
+            "503 NOT_CONFIGURED",
+          ],
+      );
+      // Creating an integration is the only path that reaches outward.
+      expect(operation.effects.external).toBe(
+        operation.key === "api-keys.create-integration" ? "write" : "none",
+      );
       // Not an MCP tool and not a GraphQL field: the existing GraphQL surface
       // already serves this feature, and an LLM transport has no business
       // being offered an Operation whose sibling returns a live credential.
@@ -90,19 +142,52 @@ describe("shipped integration and API-key catalog", () => {
     }
   });
 
-  test("never names a credential in a read contract, and names it once in the issue contract", () => {
-    const operations = compiled(apiKeyCatalog());
-    for (const operation of operations) {
+  test("names a credential only in the two minting contracts, never in a read", () => {
+    for (const operation of compiled(apiKeyCatalog())) {
       const names = propertyNames(operation.outputSchema);
       const leaked = SECRET_NAMES.filter((name) => names.has(name));
-      expect(leaked).toEqual(operation.key === "api-keys.issue-credential" ? ["secret"] : []);
+      expect({ key: operation.key, leaked })
+        .toEqual({ key: operation.key, leaked: MINTING.includes(operation.key) ? ["secret"] : [] });
+      // A read contract declares no input lifetime either: nothing about a
+      // credential's life is settable on a path that only reports metadata.
+      const input = propertyNames(operation.inputSchema);
+      expect(input.has("expiresInDays")).toBe(MINTING.includes(operation.key));
     }
-    const issue = operations.find(({ key }) => key === "api-keys.issue-credential")!;
-    expect(issue.effects.data).toBe("write");
-    // `natural` idempotency would invite a transport to replay a mint.
-    expect(issue.idempotency.mode).toBe("none");
-    expect((issue.outputSchema.properties as Record<string, { description?: string }>).secret?.description)
-      .toContain("exactly once");
+  });
+
+  test("declares each minted secret confidential with the shared FieldSecret marker", () => {
+    const operations = compiled(apiKeyCatalog());
+    for (const key of MINTING) {
+      const operation = operations.find((candidate) => candidate.key === key)!;
+      const credential = (operation.outputSchema.properties as Record<string, {
+        description?: string;
+        properties?: Record<string, Record<string, unknown>>;
+      }>).credential!;
+      const secret = credential.properties!.secret!;
+      // The marker the shared web implementation is adding support for. It is
+      // an EXISTING schema annotation, carried verbatim by the compiler — no
+      // new authoring key, so nothing here depends on unsupported YAML.
+      expect(secret["x-osf-presentation"]).toEqual({ component: "FieldSecret" });
+      expect(secret.description).toContain("exactly once");
+      expect(credential.description).toContain("CONFIDENTIAL");
+      expect(operation.effects.data).toBe("write");
+      // `natural` idempotency would invite a transport to replay a mint, and a
+      // keyed one would store the result — including the secret — in a
+      // receipt. Neither is acceptable for a credential.
+      expect(operation.idempotency.mode).toBe("none");
+      // The lifetime ceiling, pinned here so the schema and the handler
+      // constant cannot drift apart silently.
+      expect((operation.inputSchema.properties as Record<string, Record<string, unknown>>)
+        .expiresInDays).toMatchObject({ type: "integer", minimum: 1, maximum: 366 });
+    }
+  });
+
+  test("marks the secret nowhere else, and never on a read contract", () => {
+    for (const operation of compiled(apiKeyCatalog())) {
+      const components = presentationComponents(operation.outputSchema);
+      expect({ key: operation.key, components })
+        .toEqual({ key: operation.key, components: MINTING.includes(operation.key) ? ["FieldSecret"] : [] });
+    }
   });
 
   test("projects both collections with the pagination contract the web manifest validates", () => {
@@ -173,6 +258,7 @@ describe("shipped integration and API-key catalog", () => {
       "revokeCredential",
     ]);
     expect(placed).not.toContain("issueCredential");
+    expect(placed).not.toContain("createIntegration");
     // Neither entity offers a create: the only way to bring a credential into
     // existence returns it, so no generic form may own that step.
     for (const entity of Object.values(web.entities ?? {})) {
@@ -180,9 +266,15 @@ describe("shipped integration and API-key catalog", () => {
     }
     const entities = manifest(apiKeyCatalog()).entities;
     for (const entity of Object.values(entities)) {
-      const ids = JSON.stringify(entity.views);
-      expect(ids).not.toContain("api-keys.issue-credential");
+      const rendered = JSON.stringify(entity);
+      for (const key of MINTING) expect(rendered).not.toContain(key);
+      // And no field of a record or collection view carries the marker: the
+      // metadata a generic list and record read has no confidential property
+      // to project, so a FieldSecret anywhere in here would be a leak.
+      expect(presentationComponents(entity)).not.toContain("FieldSecret");
     }
+    // The whole manifest, not just these two entities.
+    expect(presentationComponents(manifest(apiKeyCatalog()))).not.toContain("FieldSecret");
     const actions = entities.ApiKeyIntegration!.views.record!.operations.actions!;
     expect(actions.map((action) => action.id)).toEqual(["api-keys.disable-integration"]);
     // The record action is bound to the record it was opened on, by the
@@ -193,6 +285,53 @@ describe("shipped integration and API-key catalog", () => {
       scope: "record",
       inputField: "integrationId",
     });
+  });
+
+  /**
+   * The projection that is NOT shipped, built here so its properties are known
+   * rather than assumed.
+   *
+   * Enabling the two minting actions on the canonical web entity is exactly
+   * this diff — `create: { operation: createIntegration }` and
+   * `issueCredential` in `recordActions` — and nothing else: no renderer, no
+   * second entity, no change to any Operation. This test runs that diff
+   * against the real compiler to show two things in advance: the placement
+   * compiles, and the FieldSecret marker reaches the manifest on the secret
+   * property, which is what the shared web implementation needs in order to
+   * mask it. It stays a test until that implementation has been independently
+   * security-reviewed.
+   */
+  test("would carry the marker into the web manifest if the minting actions were placed", () => {
+    const catalog = structuredClone(apiKeyCatalog());
+    const entity = catalog.interfaces.web!.entities!.ApiKeyIntegration!;
+    entity.operations.create = { operation: "createIntegration" };
+    entity.operations.recordActions = [
+      ...(entity.operations.recordActions ?? []),
+      "issueCredential",
+    ];
+    const projected = manifest(catalog);
+    for (const key of MINTING) {
+      const ref = projected.operations![key]!;
+      const credential = (ref.output.schema as {
+        properties: Record<string, { properties?: Record<string, Record<string, unknown>> }>;
+      }).properties.credential!;
+      expect(credential.properties!.secret!["x-osf-presentation"])
+        .toEqual({ component: "FieldSecret" });
+    }
+    // Still only on the secret, even once the Operations are in the manifest:
+    // the ref is carried under several keys, and EVERY marker sits on the
+    // credential's own secret property rather than on any metadata node.
+    const markers = presentationMarkers(projected).filter(({ component }) => component === "FieldSecret");
+    expect(markers.length).toBeGreaterThan(0);
+    for (const marker of markers) {
+      expect(marker.path.endsWith("output/schema/properties/credential/properties/secret")).toBe(true);
+    }
+    // And the metadata views are unchanged by the placement: the collection
+    // and record field sets never gain a confidential property.
+    expect(presentationComponents(projected.entities.ApiKeyIntegration!.fields))
+      .not.toContain("FieldSecret");
+    expect(presentationComponents(projected.entities.ApiKeyCredential!.fields))
+      .not.toContain("FieldSecret");
   });
 
   test("refuses an incomplete collection query rather than degrading the list", () => {

@@ -675,6 +675,33 @@ on the GraphQL surface, gated by `Platform.ApiKeys.Manage` and by a privilege
 ceiling — a caller cannot grant roles it does not hold, and an api-key session
 may never manage keys at all.
 
+The same feature is also reachable as canonical Operations, authored in
+`packages/compiler/config/authoring/operations/api-key-integrations.yaml` under
+the core `osf-api-keys` plugin and bound by
+`apps/api/src/operations/api-key-operations.ts`: `api-keys.list-integrations`,
+`api-keys.get-integration`, `api-keys.list-credentials`,
+`api-keys.get-credential`, `api-keys.issue-credential`,
+`api-keys.revoke-credential` and `api-keys.disable-integration`, projected to
+REST under `/api/api-key-integrations/*`. They are a third projection of the
+same authority, not a second implementation: every handler calls
+`auth/api-key/service.ts` and therefore the one ceiling, and an integration is
+named by its stable `platform.api_key_integrations.id` — never by the derived
+Keycloak clientId, which the realm reconciler rebuilds under the same row.
+Reads select metadata only; a deployment without provisioning configuration
+answers every one of them with a declared `503 NOT_CONFIGURED` rather than
+half-managing its integrations.
+
+The list and get Operations also carry generic `interfaces.web.entities`
+declarations (`ApiKeyIntegration`, and `ApiKeyCredential` nested under it),
+with cursor paging, sorting and name/status filters, plus the revoke and
+disable record actions. `api-keys.issue-credential` is deliberately absent from
+that projection: it returns the credential once, and a generic entity form
+renders whatever its Operation returns. Nothing in the authoring contract can
+withhold one output property from one interface — `interaction.secureInput`
+covers sensitive INPUT, and field `classification.sensitivity` applies to
+entity fields, not to an Operation's result — so issuing stays on REST and the
+existing surfaces until such a contract exists.
+
 **3. Trusted-context HMAC headers (v2)** — the internal service-to-service
 path (`packages/auth/src/trusted-context.ts`). Header names:
 

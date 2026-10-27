@@ -118,6 +118,25 @@ export interface RowAccessRecordActionConfig {
   name: RecordActionName;
   /** Which principal kinds a grant of this action may name. */
   principals: RecordActionPrincipal[];
+  /**
+   * The ONLY fields a holder of this action may read from the record, as
+   * authored field keys.
+   *
+   * Holding an action does not make the record readable — that is the point of
+   * the axis — but an action that cannot read anything cannot be carried out
+   * either. This list is the entity's explicit answer to "what does executing
+   * this need to see": core reads exactly these columns of exactly that row,
+   * through the same owner-scoped lookup that authorized the action, and
+   * returns nothing else. The ACL field, a classified field, a computed or
+   * localized field and anything unpersisted are refused at compile time, so
+   * the projection cannot become a way to reach a draft, a document body or
+   * another record.
+   *
+   * Omitted or empty means the action authorizes an effect and discloses
+   * nothing, which is the correct shape for an action whose input the caller
+   * already supplies.
+   */
+  reads?: string[];
 }
 
 export type RecordActionName = string;

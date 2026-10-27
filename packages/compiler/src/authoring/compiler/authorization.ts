@@ -289,7 +289,9 @@ export function buildAuthorization(
             `Use an object with optional view/edit/delete members whose users/groups/roles values are arrays of non-empty strings.`,
         );
       }
-      const actions = compileRecordActions(coreEntity, recordPermissions.actions);
+      const actions = compileRecordActions(
+        coreEntity, recordPermissions.actions, allAuthoringFields, recordPermissions.field,
+      );
       if (
         field.defaultValue !== undefined &&
         !defaultRecordActionsAreDeclared(field.defaultValue, actions)
@@ -393,6 +395,8 @@ const RECORD_PERMISSIONS = ["view", "edit", "delete"];
 function compileRecordActions(
   coreEntity: CoreEntity,
   authored: import("../types/common.js").RowAccessRecordActionConfig[] | undefined,
+  fields: ReadonlyArray<Record<string, unknown>>,
+  aclField: string,
 ): import("../types/common.js").RowAccessRecordActionConfig[] {
   if (!authored || authored.length === 0) return [];
   const seen = new Set<string>();
@@ -423,8 +427,59 @@ function compileRecordActions(
           `and an undeclared principal kind is refused at write time.`,
       );
     }
-    return { name: action.name, principals: principals.sort() };
+    const reads = compileRecordActionReads(coreEntity, action, fields, aclField);
+    return {
+      name: action.name,
+      principals: principals.sort(),
+      ...(reads.length > 0 ? { reads } : {}),
+    };
   }).sort((left, right) => left.name.localeCompare(right.name));
+}
+
+/**
+ * The fields a holder of this action may read, validated against what the
+ * projection can safely carry.
+ *
+ * Each refusal below is a way the projection could otherwise become a read of
+ * something the action never authorized: the ACL itself (who else holds what),
+ * a classified field (PII, a BSN, a confidential value), a computed or
+ * localized field (resolved elsewhere, so the stored column is not the value),
+ * a relationship (another record), and anything unpersisted (no column to
+ * read). A field that survives all of them is one plain stored column of the
+ * one row the action names.
+ */
+function compileRecordActionReads(
+  coreEntity: CoreEntity,
+  action: import("../types/common.js").RowAccessRecordActionConfig,
+  fields: ReadonlyArray<Record<string, unknown>>,
+  aclField: string,
+): string[] {
+  const reads = [...new Set(action.reads ?? [])].sort();
+  const refuse = (key: string, reason: string): never => {
+    throw new AuthorizationCompileError(
+      coreEntity.entity,
+      `authorization.rowAccess.recordPermissions.actions "${action.name}" cannot read "${key}": ${reason}. ` +
+        `A record action's read projection carries plain stored columns of the record it names and nothing else.`,
+    );
+  };
+  for (const key of reads) {
+    if (key === aclField) refuse(key, "it is the record ACL itself");
+    const field = fields.find((candidate) => candidate.key === key);
+    if (!field) refuse(key, "it is not a field of this entity");
+    if (!(field!.persisted as { column?: string } | undefined)?.column) {
+      refuse(key, "it is not persisted, so there is no column to read");
+    }
+    if (field!.relationship) refuse(key, "it is a relationship, which would reach another record");
+    if (field!.computed) refuse(key, "it is computed rather than stored");
+    if (field!.localized) refuse(key, "it is localized, so the stored column is not the value");
+    if (field!.classification) {
+      refuse(key, `it is classified ${JSON.stringify(field!.classification)}`);
+    }
+    if (field!.authorization || field!.permissions) {
+      refuse(key, "it carries its own field authorization, which this projection cannot apply");
+    }
+  }
+  return reads;
 }
 
 function isValidSubjectSets(value: unknown, allowIntegrations: boolean): boolean {

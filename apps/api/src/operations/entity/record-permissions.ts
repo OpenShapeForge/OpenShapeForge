@@ -232,17 +232,24 @@ function valueFromRow(table: GeneratedCrudTable, row: GeneratedEntityRow): unkno
   return row[config.field] ?? row[config.column];
 }
 
+export type RecordActionDeclaration = {
+  name: string;
+  principals: ReadonlyArray<"person" | "integration">;
+  /** Fields a holder may read; absent for an action that discloses nothing. */
+  reads?: ReadonlyArray<string>;
+};
+
 /** The actions this entity declared, if any. Nothing else may be stored. */
 export function declaredRecordActions(
   table: GeneratedCrudTable,
-): ReadonlyArray<{ name: string; principals: ReadonlyArray<"person" | "integration"> }> {
+): ReadonlyArray<RecordActionDeclaration> {
   return policy(table)?.actions ?? [];
 }
 
 export function recordActionDeclaration(
   table: GeneratedCrudTable,
   action: string,
-): { name: string; principals: ReadonlyArray<"person" | "integration"> } | undefined {
+): RecordActionDeclaration | undefined {
   return declaredRecordActions(table).find((candidate) => candidate.name === action);
 }
 
@@ -481,6 +488,73 @@ export async function assertRecordActionInTransaction(
   if (result.rows[0]?.allowed !== true) {
     throw operationFailure(notAuthorizedRefusal(table, action));
   }
+}
+
+/**
+ * The record a holder of this action may read, and nothing else.
+ *
+ * A session that holds `start` and not `view` cannot see the record — so an
+ * action that has to DO something with it would be stuck. The entity answers
+ * that explicitly: the action declares the fields its execution needs, and
+ * this returns exactly those fields of exactly that record.
+ *
+ * What makes it bounded rather than a bypass:
+ *
+ *   - the fields are compiled into `app.record_action_read` and the resolver
+ *     role holds SELECT on only those columns, so an undeclared column is a
+ *     privilege error and not a disclosure. The ACL column and the tenant
+ *     column are refused outright, so a holder never learns who else holds
+ *     what;
+ *   - the row is the one the action named, in the session's own tenant, and
+ *     the authorization is the same lookup under the same lock. There is no
+ *     list, no second record, and no session-wide widening — the app role's
+ *     own view of the table is unchanged throughout;
+ *   - an action that declares nothing reads nothing. Refused here as a
+ *     contract mistake rather than answered with an empty object, so a
+ *     handler cannot mistake "nothing declared" for "nothing there".
+ */
+export async function readRecordForActionInTransaction(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  id: string,
+  action: string,
+): Promise<Readonly<Record<string, unknown>>> {
+  const declaration = recordActionDeclaration(table, action);
+  const entity = table.source?.authoringEntityName;
+  if (!policy(table) || !declaration || !entity || !table.tenantScoped || table.subtype) {
+    throw generatedCrudError(
+      "The record authorization contract is incomplete.",
+      "INTERNAL_SERVER_ERROR",
+    );
+  }
+  if (!declaration.reads?.length) {
+    throw generatedCrudError(
+      `The ${action} action declares no record fields to read.`,
+      "INTERNAL_SERVER_ERROR",
+    );
+  }
+  const result = await sql<{ payload: Record<string, unknown> | null }>`
+    select app.record_action_read(${entity}, ${id}, ${action}) as payload
+  `.execute(trx);
+  const payload = result.rows[0]?.payload;
+  // Null is the only failure the lookup reports, and it covers every reason:
+  // not authorized, wrong tenant, no such row. They are one refusal, so a
+  // caller cannot use the distinction to probe for records.
+  if (!payload) throw operationFailure(notAuthorizedRefusal(table, action));
+  return Object.freeze(payload);
+}
+
+export function readRecordForAction(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  id: string,
+  action: string,
+): Promise<Readonly<Record<string, unknown>>> {
+  return withDbSession(db, session, (trx, resolvedSession) =>
+    readRecordForActionInTransaction(trx, resolvedSession, table, id, action)
+  );
 }
 
 export function assertRecordAction(

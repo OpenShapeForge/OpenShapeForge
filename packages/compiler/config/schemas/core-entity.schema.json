@@ -339,6 +339,12 @@
                         "not": { "enum": ["view", "edit", "delete"] },
                         "description": "lowerCamel action name, unique on the entity and never a record permission."
                       },
+                      "reads": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": { "$ref": "#/$defs/fieldKey" },
+                        "description": "The only fields a holder of this action may read from the record. Holding an action never makes the record readable; core reads exactly these columns of exactly that row through the same owner-scoped lookup that authorized the action. The ACL field, a classified field, a computed, localized or unpersisted field and a relationship are refused at compile time. Omit it for an action that authorizes an effect and discloses nothing."
+                      },
                       "principals": {
                         "type": "array",
                         "minItems": 1,

@@ -26,7 +26,12 @@ export type GeneratedCrudAuthorization = {
      * kinds each admits. Absent on every entity that did not opt in, which is
      * what makes the axis unable to regress an existing policy.
      */
-    actions?: Array<{ name: string; principals: Array<"person" | "integration"> }>;
+    actions?: Array<{
+      name: string;
+      principals: Array<"person" | "integration">;
+      /** Fields a holder of this action may read; absent discloses nothing. */
+      reads?: string[];
+    }>;
   };
 };
 

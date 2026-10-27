@@ -65,11 +65,20 @@ const entities: RecordActionEntity[] = [
     entity: RUN, schema: "erp", table: "action_runs",
     keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
     actions: ["follow", "start"],
+    // `start` needs the definition to run; `follow` declares nothing, so it
+    // authorizes an effect and discloses nothing. `secret` is declared by
+    // neither and is what the tests watch for.
+    reads: {
+      start: [
+        { field: "definition", column: "definition" },
+        { field: "status", column: "status" },
+      ],
+    },
   },
   {
     entity: DOC, schema: "erp", table: "action_docs",
     keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
-    actions: ["publish"],
+    actions: ["publish"], reads: {},
   },
 ];
 
@@ -139,6 +148,8 @@ beforeAll(async () => {
           id uuid primary key,
           tenant_id uuid not null,
           secret text not null,
+          definition text not null default 'graph',
+          status text not null default 'ready',
           acl jsonb not null default '{}'::jsonb
         )
       `.execute(conn);
@@ -166,11 +177,11 @@ beforeAll(async () => {
         actions: { start: { integrations: [id] }, follow: { integrations: [id] } },
       });
     await sql`
-      insert into erp.action_runs (id, tenant_id, secret, acl) values
-        (${runRow}::uuid, ${tenantA}::uuid, 'run-a-secret', ${sql.raw(`'${grantToIntegration(integration)}'::jsonb`)}),
-        (${runRowTenantB}::uuid, ${tenantB}::uuid, 'run-b-secret', ${sql.raw(`'${grantToIntegration(integration)}'::jsonb`)}),
-        (${lockRowCheckFirst}::uuid, ${tenantA}::uuid, 'lock-1', ${sql.raw(`'${grantToIntegration(integration)}'::jsonb`)}),
-        (${lockRowRevokeFirst}::uuid, ${tenantA}::uuid, 'lock-2', ${sql.raw(`'${grantToIntegration(integration)}'::jsonb`)})
+      insert into erp.action_runs (id, tenant_id, secret, definition, status, acl) values
+        (${runRow}::uuid, ${tenantA}::uuid, 'run-a-secret', 'graph-a', 'ready', ${sql.raw(`'${grantToIntegration(integration)}'::jsonb`)}),
+        (${runRowTenantB}::uuid, ${tenantB}::uuid, 'run-b-secret', 'graph-b', 'ready', ${sql.raw(`'${grantToIntegration(integration)}'::jsonb`)}),
+        (${lockRowCheckFirst}::uuid, ${tenantA}::uuid, 'lock-1', 'graph-1', 'ready', ${sql.raw(`'${grantToIntegration(integration)}'::jsonb`)}),
+        (${lockRowRevokeFirst}::uuid, ${tenantA}::uuid, 'lock-2', 'graph-2', 'ready', ${sql.raw(`'${grantToIntegration(integration)}'::jsonb`)})
     `.execute(conn);
     // A person-only action grant that names a ROLE, beside an integration
     // grant for a different integration. Nothing here grants view.
@@ -322,6 +333,70 @@ describe("verified principal class decides which subjects apply", () => {
   }, TEST_TIMEOUT);
 });
 
+describe("the bounded execution capability", () => {
+  const machine = (id = integration) => session({
+    userId: randomUUID(), principalKind: "service",
+    appPrincipal: { integrationId: id },
+  });
+  async function read(
+    input: DbSessionInput, entity: string, recordKey: string, action: string,
+  ): Promise<Record<string, unknown> | null> {
+    return withDbSession(app.db, input, async (trx) =>
+      (await sql<{ payload: Record<string, unknown> | null }>`
+        select app.record_action_read(${entity}, ${recordKey}, ${action}) as payload
+      `.execute(trx)).rows[0]?.payload ?? null);
+  }
+
+  test("a start-only application reads exactly the declared fields", async () => {
+    expect(await read(machine(), RUN, runRow, "start")).toEqual({
+      definition: "graph-a", status: "ready",
+    });
+  }, TEST_TIMEOUT);
+
+  test("it carries neither the ACL, nor the tenant, nor an undeclared column", async () => {
+    const payload = (await read(machine(), RUN, runRow, "start"))!;
+    expect(Object.keys(payload).sort()).toEqual(["definition", "status"]);
+    for (const leaked of ["acl", "secret", "tenant_id", "id"]) {
+      expect(payload).not.toHaveProperty(leaked);
+    }
+    expect(JSON.stringify(payload)).not.toContain("run-a-secret");
+    expect(JSON.stringify(payload)).not.toContain(integration);
+  }, TEST_TIMEOUT);
+
+  test("an action that declares no projection discloses nothing", async () => {
+    // `follow` is granted to this application and still reads nothing.
+    expect(await allows(app.db, machine(), RUN, runRow, "follow")).toBe(true);
+    expect(await read(machine(), RUN, runRow, "follow")).toBeNull();
+    expect(await read(machine(otherIntegration), DOC, docRow, "publish")).toBeNull();
+  }, TEST_TIMEOUT);
+
+  test("it refuses for every reason the check refuses, as one answer", async () => {
+    // Not granted this action.
+    expect(await read(machine(otherIntegration), RUN, runRow, "start")).toBeNull();
+    // Another tenant's record, and this session in another tenant.
+    expect(await read(machine(), RUN, runRowTenantB, "start")).toBeNull();
+    expect(await read({ ...machine(), tenantId: tenantB }, RUN, runRow, "start")).toBeNull();
+    // Outside the registry, outside the declared actions, and absent rows.
+    expect(await read(machine(), "Tenant", runRow, "start")).toBeNull();
+    expect(await read(machine(), RUN, runRow, "view")).toBeNull();
+    expect(await read(machine(), RUN, randomUUID(), "start")).toBeNull();
+    expect(await read(machine(), RUN, "not-a-uuid", "start")).toBeNull();
+    // A person who holds no action on this record gets nothing either; the
+    // projection is the action's, not the carrier's.
+    expect(await read(session({ userId: otherPerson, principalKind: "person" }), RUN, runRow, "start"))
+      .toBeNull();
+  }, TEST_TIMEOUT);
+
+  test("reading still does not make the record readable", async () => {
+    const input = machine();
+    expect(await read(input, RUN, runRow, "start")).not.toBeNull();
+    const visible = await withDbSession(app.db, input, async (trx) =>
+      (await sql<{ count: number }>`select count(*)::int as count from erp.action_runs`
+        .execute(trx)).rows[0]!.count);
+    expect(visible).toBe(0);
+  }, TEST_TIMEOUT);
+});
+
 describe("the definer role is bounded", () => {
   test("the app role can neither assume it nor read what it reads", async () => {
     await admin.db.connection().execute(async (conn) => {
@@ -346,10 +421,15 @@ describe("the definer role is bounded", () => {
       `.execute(conn);
       expect(columns.rows).toEqual([
         { column_name: "acl", privilege_type: "SELECT" },
+        { column_name: "definition", privilege_type: "SELECT" },
         { column_name: "id", privilege_type: "SELECT" },
+        { column_name: "status", privilege_type: "SELECT" },
         { column_name: "tenant_id", privilege_type: "SELECT" },
         { column_name: "acl", privilege_type: "UPDATE" },
       ]);
+      // `secret` is declared by no action, so the resolver cannot read it at
+      // all — the projection is bounded by a privilege, not only by SQL.
+      expect(columns.rows.map((row) => row.column_name)).not.toContain("secret");
       // The lock privilege exists so FOR SHARE is legal; the policy is what
       // makes a write impossible.
       const policies = await sql<{ policyname: string; cmd: string; withcheck: string | null }>`

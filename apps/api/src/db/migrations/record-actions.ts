@@ -91,17 +91,27 @@ const ACTION_NAME = /^[a-z][A-Za-z0-9]*$/;
 const UUID_LITERAL =
   "'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'";
 
+/**
+ * The authored field name a column carries, the same derivation the entity
+ * runtime uses (operations/entity/columns.ts): the explicit `sourceField`, or
+ * the column name in lowerCamel.
+ */
+function fieldNameForColumn(column: { name: string; sourceField?: string }): string {
+  return column.sourceField ??
+    column.name.replace(/_([a-z0-9])/g, (_match, char: string) => char.toUpperCase());
+}
+
 type ManifestRecordActionTable = {
   schema: string;
   name: string;
   tenantScoped?: boolean;
-  columns?: Array<{ name: string; primaryKey?: boolean; type?: string }>;
+  columns?: Array<{ name: string; primaryKey?: boolean; type?: string; sourceField?: string }>;
   source?: {
     authoringEntityName?: string;
     authorization?: {
       recordPermissions?: {
         column: string;
-        actions?: Array<{ name: string; principals: string[] }>;
+        actions?: Array<{ name: string; principals: string[]; reads?: string[] }>;
       };
     };
   };
@@ -115,6 +125,12 @@ export type RecordActionEntity = {
   keyIsUuid: boolean;
   aclColumn: string;
   actions: string[];
+  /**
+   * Per action, the columns its read projection carries, as
+   * `{ field, column }`. Empty for an action that authorizes an effect and
+   * discloses nothing.
+   */
+  reads: Record<string, Array<{ field: string; column: string }>>;
 };
 
 function invalid(table: ManifestRecordActionTable, reason: string): never {
@@ -160,6 +176,26 @@ export function recordActionEntities(
         invalid(table, `declared action "${action}" is not a lowerCamel name outside view/edit/delete`);
       }
     }
+    const reads: RecordActionEntity["reads"] = {};
+    for (const action of policy.actions) {
+      const projection: Array<{ field: string; column: string }> = [];
+      for (const field of [...new Set(action.reads ?? [])].sort()) {
+        const column = (table.columns ?? []).find(
+          (candidate) => fieldNameForColumn(candidate) === field,
+        );
+        // The compiler already refused an unpersisted, classified, computed,
+        // localized or relationship field, and the ACL field itself. Reaching
+        // here with no column means manifest and authoring disagree.
+        if (!column || !IDENTIFIER.test(column.name)) {
+          invalid(table, `action "${action.name}" reads "${field}", which is not a plain column of this table`);
+        }
+        if (column!.name === policy.column || column!.name === "tenant_id") {
+          invalid(table, `action "${action.name}" may not read "${field}"`);
+        }
+        projection.push({ field, column: column!.name });
+      }
+      if (projection.length > 0) reads[action.name] = projection;
+    }
     entities.push({
       entity: entity!,
       schema: table.schema,
@@ -168,6 +204,7 @@ export function recordActionEntities(
       keyIsUuid: key!.type === "uuid",
       aclColumn: policy.column,
       actions,
+      reads,
     });
   }
   return entities.sort((left, right) => left.entity.localeCompare(right.entity));
@@ -207,6 +244,44 @@ export function renderRecordActionLookup(entities: readonly RecordActionEntity[]
   ].join("\n");
 }
 
+/**
+ * The read projection, one branch per (entity, action) that declared fields.
+ *
+ * An action with no declared `reads` has no branch and falls through to null:
+ * it authorizes an effect and discloses nothing. Every column name here was
+ * resolved from the manifest and checked against the identifier pattern, and
+ * the ACL and tenant columns are refused outright, so the projection cannot
+ * name the row's own policy or widen past the record.
+ */
+export function renderRecordActionProjection(
+  entities: readonly RecordActionEntity[],
+): string {
+  const branches = entities.flatMap((entity) =>
+    Object.entries(entity.reads).map(([action, projection]) => {
+      const key = entity.keyIsUuid
+        ? `t.${entity.keyColumn} = record_key::uuid`
+        : `t.${entity.keyColumn}::text = record_key`;
+      const object = projection
+        .map((read) => `'${read.field}', t.${read.column}`)
+        .join(", ");
+      return [
+        `        when '${entity.entity}:${action}' then`,
+        `          select jsonb_build_object(${object}) into payload`,
+        `            from ${entity.schema}.${entity.table} t`,
+        `           where ${key} and t.tenant_id = app.current_tenant();`,
+      ].join("\n");
+    }));
+  if (branches.length === 0) {
+    return "      -- No declared action carries a read projection.\n      return null;";
+  }
+  return [
+    "      case entity || ':' || action",
+    ...branches,
+    "        else return null;",
+    "      end case;",
+  ].join("\n");
+}
+
 export async function applyRecordActionsMigration(
   db: OpenShapeForgeDatabase,
   entities: readonly RecordActionEntity[] = recordActionEntities(),
@@ -220,9 +295,19 @@ export async function applyRecordActionsMigration(
     const readPolicy = `${entity.table}_record_action_read`;
     const lockPolicy = `${entity.table}_record_action_lock`;
     await sql`grant usage on schema ${sql.id(entity.schema)} to ${sql.id(RESOLVER_ROLE)}`.execute(db);
+    // Exactly the columns the two questions need: the key and tenant to find
+    // the row, the ACL to decide, and the union of the declared read
+    // projections to answer with. Anything else on the row stays "permission
+    // denied for table" even to the resolver.
+    const readColumns = [...new Set(
+      Object.values(entity.reads).flat().map((read) => read.column),
+    )].sort();
+    const selectable = [entity.keyColumn, "tenant_id", entity.aclColumn, ...readColumns]
+      .filter((column, index, all) => all.indexOf(column) === index)
+      .map((column) => `"${column}"`)
+      .join(", ");
     await sql.raw(
-      `grant select ("${entity.keyColumn}", "tenant_id", "${entity.aclColumn}") ` +
-        `on ${entity.schema}.${entity.table} to ${RESOLVER_ROLE}`,
+      `grant select (${selectable}) on ${entity.schema}.${entity.table} to ${RESOLVER_ROLE}`,
     ).execute(db);
     // The lock privilege and nothing more: see the header. The WITH CHECK
     // below is what makes a write impossible even with the column grant.
@@ -272,6 +357,36 @@ ${renderRecordActionLookup(entities)}
     end
     $record_action$;
   `).execute(db);
+  await sql.raw(`
+    create or replace function app.record_action_read(
+      entity text,
+      record_key text,
+      action text
+    ) returns jsonb
+    language plpgsql volatile security definer
+    set search_path = pg_catalog, pg_temp
+    as $record_action_read$
+    declare
+      payload jsonb;
+    begin
+      -- The authorization is not re-implemented here: the same lookup decides,
+      -- and the FOR SHARE lock it takes covers this read too, so the
+      -- projection cannot come from a row whose grant has since changed.
+      if not app.record_action_allows(entity, record_key, action) then
+        return null;
+      end if;
+${renderRecordActionProjection(entities)}
+      return payload;
+    end
+    $record_action_read$;
+  `).execute(db);
+  await sql`revoke all on function app.record_action_read(text, text, text) from public`.execute(db);
+  await sql`revoke all on function app.record_action_read(text, text, text)
+    from ${sql.id(WORKER_ROLE)}`.execute(db);
+  await sql`grant execute on function app.record_action_read(text, text, text)
+    to ${sql.id(APP_ROLE)}`.execute(db);
+  await sql`alter function app.record_action_read(text, text, text)
+    owner to ${sql.id(RESOLVER_ROLE)}`.execute(db);
   await sql`revoke all on function app.record_action_allows(text, text, text) from public`.execute(db);
   await sql`revoke all on function app.record_action_allows(text, text, text)
     from ${sql.id(WORKER_ROLE)}`.execute(db);

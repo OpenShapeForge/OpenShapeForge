@@ -1,3 +1,4 @@
+import { applicationSearchDefinition, applicationSearchSources } from "./application-search.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
@@ -898,6 +899,7 @@ export function collectAuthoredEntityPluginOperations(
   return [
     ...collectOperationContracts(synthetic, context, true),
     ...collectConstrainedReferenceCreateOperations(entities, referentiedata),
+    ...collectApplicationSearch(entities, context),
     ...(needsEntityTypeList
       ? collectEntityTypeListOperation(context, entities)
       : []),
@@ -1459,4 +1461,12 @@ export function operationOpenApiPaths(
     };
   }
   return paths;
+}
+
+function collectApplicationSearch(entities: readonly Pick<CompiledEntityInfo,"contract">[], context: PluginBaseContext): CompiledPluginOperation[] {
+  const sources=applicationSearchSources(entities);
+  if(!sources.length)return [];
+  const operation=applicationSearchDefinition(entities);
+  nativeBindings.set(operation,{type:"application-search",sources});
+  return collectOperationContracts([{name:"core",operations:[operation]}],context,true);
 }

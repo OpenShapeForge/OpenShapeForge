@@ -1,3 +1,4 @@
+import { filterFieldNames } from "./filter-groups.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * The entity half of the typed-variable runtime: a stored field whose value
@@ -146,7 +147,7 @@ export function assertBoundFieldQueryAllowed(
   const bindable = bindableFields(table);
   if (bindable.size === 0) return;
   const refused = new Set<string>([...bindable.keys(), FIELD_BINDINGS_FIELD]);
-  const filtered = Object.keys(input.filter ?? {}).find(
+  const filtered = filterFieldNames(input.filter).find(
     (key) => refused.has(key) || (!exactFilterFields && key.endsWith("In") && refused.has(key.slice(0, -2))),
   );
   const sorted = input.sort?.field && refused.has(input.sort.field) ? input.sort.field : undefined;

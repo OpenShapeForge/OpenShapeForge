@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { sql, type Kysely } from "kysely";
+import { sql, type QueryExecutorProvider } from "kysely";
 import { generatedCrudError } from "./catalog.js";
 import { fieldNameForColumn } from "./columns.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable } from "./types.js";
@@ -83,8 +83,8 @@ export function maxDerivedIdentifierAttempts(): number {
  * The mandatory unconditional index still scopes suffix allocation; other
  * unique columns must continue to raise their original constraint errors.
  * Read live catalog facts, never caller SQL or constraint error text. */
-export async function derivedIdentifierConflictPredicate<TDatabase>(
-  db: Kysely<TDatabase>,
+export async function derivedIdentifierConflictPredicate(
+  db: QueryExecutorProvider,
   table: GeneratedCrudTable,
   columns: readonly string[],
 ): Promise<string | undefined> {

@@ -128,8 +128,8 @@ describe("database-backed create-time identifiers", () => {
     // Assert PostgreSQL's actual plan for the runtime's INSERT, not a SQL
     // spelling: both key indexes must arbitrate the concurrent allocation.
     const insert = derivedInserts[0]!;
-    const explain = await withDbSession(runtime.db, session, (trx) => trx.executeQuery(
-      CompiledQuery.raw("explain (format json) " + insert.sql, insert.parameters),
+    const explain = await withDbSession(runtime.db, session, (trx) => trx.executeQuery<{ "QUERY PLAN": Array<{ Plan: { "Conflict Arbiter Indexes": string[] } }> }>(
+      CompiledQuery.raw("explain (format json) " + insert.sql, [...insert.parameters]),
     ));
     const plan = explain.rows[0]!["QUERY PLAN"] as Array<{ Plan: { "Conflict Arbiter Indexes": string[] } }>;
     expect(plan[0]!.Plan["Conflict Arbiter Indexes"].sort()).toEqual([

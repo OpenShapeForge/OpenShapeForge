@@ -65,6 +65,7 @@ function createServerScopePrologue(input: {
   moduleSessionOverride: TrustedSessionContext | undefined;
   operationToolProjectionOverride: OperationToolProjection | undefined;
   serverIcons: Icon[] | undefined;
+  includeInstructions: boolean;
 }) {
   const {
     db,
@@ -125,7 +126,7 @@ function createServerScopePrologue(input: {
     // The server owns the OAuth redirect URL, so it states it rather than
     // leaving assistants to ask the person for a value only this process
     // knows; without a public origin it says that, instead of failing.
-    instructions: buildServerInstructions({
+    instructions: input.includeInstructions === false ? "" : buildServerInstructions({
       opening,
       hasConnectors: catalogDerivedTools.some((entry) => entry.connect),
       oauthCallbackUrl: oauthCallbackUrlForInstructions(),
@@ -149,6 +150,11 @@ function createServerScopePrologue(input: {
   // stubs no longer carry the upload marker of an entity's own fields.
   const canUploadArtifacts = hasArtifactStorage && toolsForSession(session, tables).some(
     ({ tool, entity }) =>
+      // Projection may WITHHOLD an upload field; it cannot introduce one.
+      // Avoid cloning/localizing every unrelated entity schema just to find
+      // whether the session has an upload control. Still check the projected
+      // schema for every candidate, preserving classified-field policy.
+      schemaUsesArtifactUpload(tool.inputSchema) &&
       schemaUsesArtifactUpload(
         describeTool(tool, entity, tables.get(tool.table), session).inputSchema,
       ),

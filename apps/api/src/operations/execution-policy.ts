@@ -49,6 +49,7 @@
  * cannot impersonate a declared Operation failure, and cannot smuggle an
  * internal cause, SQL text or another tenant's data into a caller's answer.
  */
+import { withRuntimeSpan } from "@openshapeforge/observability";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { operationFailure, type OperationError } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
@@ -510,8 +511,10 @@ export async function assertOperationAdmitted(
   session: DbSessionInput | undefined,
   operation: GovernedOperation,
 ): Promise<void> {
-  const denial = await operationAdmissionRefusal(db, session, operation);
-  if (denial) refusal(denial);
+  await withRuntimeSpan("authorization.policy", async () => {
+    const denial = await operationAdmissionRefusal(db, session, operation);
+    if (denial) refusal(denial);
+  }, { operationId: operation.id });
 }
 
 /**

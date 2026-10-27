@@ -99,7 +99,14 @@ export function policyEntityId(table: GeneratedCrudTable, operation: { entityId:
   return table.subtype?.base.entityId ?? operation.entityId;
 }
 
+const policyProjections = new WeakMap<object, Map<string, object>>();
+
 export function policyOperation<T extends { entityId: string }>(table: GeneratedCrudTable, operation: T): T {
   const entityId = policyEntityId(table, operation);
-  return entityId === operation.entityId ? operation : { ...operation, entityId };
+  if (entityId === operation.entityId) return operation;
+  let projections = policyProjections.get(operation);
+  if (!projections) { projections = new Map(); policyProjections.set(operation, projections); }
+  let projected = projections.get(entityId);
+  if (!projected) { projected = { ...operation, entityId }; projections.set(entityId, projected); }
+  return projected as T;
 }

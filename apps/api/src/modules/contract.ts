@@ -58,6 +58,7 @@ import type {
   RuntimeArtifactStorageContribution,
   RuntimeCapabilityGrantServices,
   RuntimeWebhookSecretServices,
+  RuntimeReadProgressServices,
   RuntimeWorkerContextContract,
   RuntimeWorkerContract,
   RuntimeWorkerHandle,
@@ -265,6 +266,7 @@ export type ModuleConnectionValues = RuntimeConnectionValues;
 export type ModuleConnectionResolution = RuntimeConnectionResolution;
 
 export type ModulePlatformServices = {
+  readonly readProgress?: RuntimeReadProgressServices<TrustedSessionContext>;
   readonly webhookSecrets?: RuntimeWebhookSecretServices<TrustedSessionContext>;
   readonly records: RuntimeRecordAccessServices<TrustedSessionContext>;
   readonly settings: RuntimeSettingsService;

@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { classifyDatabaseError } from "../../db/database-refusals.js";
 import { applyRelatedChanges } from "./related-update.js";
-// SPDX-License-Identifier: BUSL-1.1
 import { getGeneratedCrudTables } from "./table-registry.js";
 import { withAuditContext } from "../../platform/audit-context.js";
 import { createFromBlueprint } from "./blueprints.js";
@@ -989,6 +989,9 @@ async function executeEntityOperationWithContext(
           projectedOfferIntents(request, RECORD_OFFER_INTENTS)),
       };
     }
+    if (request.operation.intent !== "update" && Object.hasOwn(request.input ?? {}, "relatedChanges")) {
+      throw operationFailure({ code: "VALIDATION", message: "relatedChanges is only supported when updating a record.", retryable: false });
+    }
     const collectionError = collectionMutationError(table, request.operation.intent, getGeneratedCrudTables(), request.input?.values);
     if (collectionError) throw operationFailure(collectionError);
     switch (request.operation.intent) {
@@ -1122,6 +1125,8 @@ async function executeEntityOperationWithContext(
         const prepared = await prepareWriteBindings(db, session, table, request.input, supplied, projectBindingWriteRow(table, session, current ?? null));
         const values = prepared.values;
         requireContractValues(operation, table, values, { partial: true }, session);
+        const relatedChanges = request.input?.relatedChanges;
+        if (relatedChanges !== undefined) assertOperationInputValid(operation, request.input ?? {});
         const confirmation = await prepareMutationConfirmation(
           db,
           session,
@@ -1156,8 +1161,6 @@ async function executeEntityOperationWithContext(
           ...(guard ? { guard } : {}),
         });
         };
-        const relatedChanges = request.input?.relatedChanges;
-        if (relatedChanges !== undefined) assertOperationInputValid(operation, request.input ?? {});
         const data = await governed(() => relatedChanges === undefined ? writeParent() : withDbSession(db, session, async trx => {
           const parent = await writeParent();
           if (!parent) throw operationFailure({code:"NOT_FOUND",message:"Record not found.",retryable:false});

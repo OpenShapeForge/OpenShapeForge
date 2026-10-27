@@ -2,6 +2,7 @@
 import { SQL } from "bun";
 import { Kysely, sql, type KyselyConfig } from "kysely";
 import { PostgresJSDialect } from "kysely-postgres-js";
+import { databaseDiagnosticConfig } from "./diagnostics.js";
 import type { DB } from "../generated/db/types.js";
 
 export type OpenShapeForgeDatabase = Kysely<DB>;
@@ -89,12 +90,8 @@ export function createDatabaseRuntime(
     max: options.maxConnections ?? readDatabasePoolMaxConnections(),
   });
 
-  const db = new Kysely<DB>({
-    dialect: new PostgresJSDialect({
-      postgres,
-    }),
-    ...(options.log ? { log: options.log } : {}),
-  });
+  const dialect = new PostgresJSDialect({ postgres });
+  const db = new Kysely<DB>(databaseDiagnosticConfig(dialect, options.log));
 
   return {
     db,

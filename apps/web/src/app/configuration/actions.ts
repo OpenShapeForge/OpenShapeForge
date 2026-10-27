@@ -36,5 +36,5 @@ export async function submitPendingConfiguration(
       body,
     },
   );
-  redirect(response.ok ? "/configuration?saved=1" : "/configuration?error=invalid");
+  redirect(response.ok ? "/configuration?saved=1" : `/configuration?error=invalid&formId=${encodeURIComponent(handoffId)}`);
 }

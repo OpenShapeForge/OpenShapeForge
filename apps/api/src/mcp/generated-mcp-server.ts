@@ -64,11 +64,13 @@
  *   *-routes.ts, route-context.ts       the browser-facing routes
  */
 import { createMcpSessionAdmission } from "./session-admission.js";
+import { withRuntimeSpan } from "@openshapeforge/observability";
 import { createTransportSessions } from "./transport-sessions.js";
 import { registerSessionWithPlatform } from "./platform-registration.js";
 import { registerSessionExecutors } from "./session-executors.js";
 import { createDispatchTool } from "./tool-dispatcher.js";
 import { Server } from "@modelcontextprotocol/server";
+import { READ_PROGRESS_META_KEY } from "@openshapeforge/plugin-runtime/read-progress";
 import type { FastifyInstance } from "fastify";
 import { buildAuthenticateChallenge } from "./protected-resource-metadata.js";
 import { MCP_MOUNT_PATH, ORGANIZATION_MCP_ROUTES } from "./organization-resource.js";
@@ -168,10 +170,12 @@ export function buildServer(
   operationToolProjectionOverride?: OperationToolProjection,
   /** Already validated, tenant-scoped initialize presentation metadata. */
   serverIcons?: import("@modelcontextprotocol/server").Icon[],
+  /** A modern tools/call does not return discovery instructions. */
+  includeInstructions = true,
 ): Server {
   const scope = createServerScope({
     db, session, modules, modulePlatform, egressOwner, onDerivedDefinitionChanged,
-    stateful, tableOverride, opening, moduleSessionOverride, operationToolProjectionOverride, serverIcons,
+    stateful, tableOverride, opening, moduleSessionOverride, operationToolProjectionOverride, serverIcons, includeInstructions,
   });
   const { server } = scope;
 
@@ -180,12 +184,24 @@ export function buildServer(
   const dispatchTool = createDispatchTool(scope, surface);
 
   server.setRequestHandler('tools/call', async (request, ctx) => {
-    const outcome = await dispatchTool(
+    const dispatch = () => dispatchTool(
       request.params.name,
       (request.params.arguments ?? {}) as Record<string, unknown>,
       ctx.mcpReq.id,
       false,
     );
+    const meta = request.params._meta;
+    const optIn = meta?.[READ_PROGRESS_META_KEY] as {version?: unknown} | undefined;
+    const progressToken = meta?.progressToken;
+    const outcome = modulePlatform && optIn?.version === 1 &&
+      (typeof progressToken === "string" || (typeof progressToken === "number" && Number.isFinite(progressToken)))
+      ? await modulePlatform.withReadProgressObserver(scope.moduleSession, async snapshot => {
+          await ctx.mcpReq.notify({method: "notifications/progress", params: {
+            progressToken, progress: snapshot.sequence, ...(snapshot.message ? {message: snapshot.message} : {}),
+            _meta: {[READ_PROGRESS_META_KEY]: {...snapshot, toolName: request.params.name}},
+          }});
+        }, dispatch, ctx.mcpReq.signal)
+      : await dispatch();
     return outcome.result;
   });
 
@@ -305,7 +321,9 @@ export function registerGeneratedMcpServer(
     instance.route({
       url: MCP_MOUNT_PATH,
       method: ["GET", "POST", "DELETE"],
-      handler: handleMcpRequest,
+      handler: (request, reply) => request.method === "POST"
+        ? withRuntimeSpan("mcp.request", () => handleMcpRequest(request, reply))
+        : handleMcpRequest(request, reply),
     });
     // One resource per Keycloak Organization, same server, same handler;
     // what differs is how the session is admitted (requireMcpSession). Both
@@ -315,7 +333,9 @@ export function registerGeneratedMcpServer(
       instance.route({
         url,
         method: ["GET", "POST", "DELETE"],
-        handler: handleMcpRequest,
+        handler: (request, reply) => request.method === "POST"
+        ? withRuntimeSpan("mcp.request", () => handleMcpRequest(request, reply))
+        : handleMcpRequest(request, reply),
       });
     }
   });

@@ -413,7 +413,6 @@ export function composeEntitySubtype(
     const override = subtype.fields?.find((candidate) => candidate.key === field.key);
     if (!override) return field;
     const { key: _key, hidden: _hidden, ...changes } = override;
-    if (changes.required === true && field.required !== true) changes.required = true;
     const next = strategicMerge(field as unknown as JsonValue, changes as unknown as JsonValue) as unknown as Field;
     assertValidationOnlyNarrows(
       field.validation as Record<string, unknown> | undefined,
@@ -511,7 +510,7 @@ function assertInheritedContractOmitsHidden(merged: Record<string, unknown>, hid
     for (const key of templateFieldKeys(record?.[templateKey] as string | undefined)) if (hidden.has(key)) naming(`interfaces.web.views.record.${templateKey}`, key);
   }
   const leakedView = web ? findExplicitHiddenReference({ views: web.views }, hidden, "interfaces.web") : undefined;
-  if (leakedView) naming(leakedView, leakedView);
+  if (leakedView) fail(origin, `inherited web configuration references a hidden field at ${leakedView}; restate that part on the subtype without the hidden field.`);
   const authorization = isPlainObject(merged.authorization) ? merged.authorization : undefined;
   const rowAccess = authorization && isPlainObject(authorization.rowAccess) ? authorization.rowAccess : undefined;
   if (rowAccess) {

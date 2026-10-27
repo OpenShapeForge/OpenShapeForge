@@ -29,6 +29,7 @@ import {
 import { partial } from "./composed-results.js";
 import { assertDeclaredProperties, assertOperationWrittenFields } from "./entity-tool-guards.js";
 import { invokeTool } from "./entity-tool-invocation.js";
+import { assertPublicTypedValueArguments } from "./typed-value-write-guard.js";
 import { withoutEntitySelector } from "./generic-tool-projection.js";
 import {
   ENTITY_OAUTH_CALLBACK_PATH,
@@ -100,6 +101,7 @@ export async function crudToolCall(
             contract.implementation?.type === "plugin" ? contract.id : undefined,
           );
           assertDeclaredProperties(match.inputSchema, modelFields, "field");
+          if (contract.implementation?.type !== "plugin") assertPublicTypedValueArguments(table, modelFields);
           assertEntityValuesValid(contract, table, modelFields, {
             partial: typeof modelArguments.blueprintId === "string",
           });

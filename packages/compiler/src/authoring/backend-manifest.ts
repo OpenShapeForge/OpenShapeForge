@@ -1028,6 +1028,15 @@ function detectCandidateCollisions(candidates: CompiledCandidate[], schemaByModu
     "web record route": new Map(),
   };
 
+  // A plain route applies in every locale authored by this manifest.
+  const routeLocales = new Set<string>();
+  for (const candidate of candidates) {
+    for (const route of Object.values(candidate.contract.views.core?.routes ?? {})) {
+      if (route && typeof route === "object") for (const locale of Object.keys(route)) routeLocales.add(locale);
+    }
+  }
+  if (!routeLocales.size) routeLocales.add("*");
+
   function record(bucket: string, key: string, candidate: CompiledCandidate) {
     const map = buckets[bucket]!;
     const existing = map.get(key);
@@ -1074,7 +1083,7 @@ function detectCandidateCollisions(candidates: CompiledCandidate[], schemaByModu
     // route would silently serve the wrong one.
     const routes = candidate.contract.views.core?.routes;
     const localized = (route: unknown): Array<[string, string]> =>
-      typeof route === "string" ? [["*", route]]
+      typeof route === "string" ? [...routeLocales].map((locale): [string, string] => [locale, route])
         : route && typeof route === "object"
           ? Object.entries(route as Record<string, string>).filter(([, value]) => typeof value === "string")
           : [];

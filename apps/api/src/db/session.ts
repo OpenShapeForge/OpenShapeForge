@@ -189,6 +189,7 @@ export async function applyDbSession<TDatabase>(
   // only transaction-local settings: no row access runs until ALL have been
   // applied. Batch the round trips, not the authorization or audit checks.
   const audit = resolveAuditSession();
+  const exact = [...session.groups];
   await sql`select ${sql.join([
     ...(statementTimeoutMs > 0
       ? [sql`set_config('statement_timeout', ${String(statementTimeoutMs)}, true)`]
@@ -201,6 +202,9 @@ export async function applyDbSession<TDatabase>(
     sql`set_config('app.scope', ${session.scope}, true)`,
     sql`set_config('app.relation_group_ids', ${session.relationGroupIds.join(",")}, true)`,
     sql`set_config('app.relation_id', ${session.relationId ?? ""}, true)`,
+    sql`set_config('app.user_groups', '', true)`,
+    sql`set_config('app.user_groups_exact', '', true)`,
+    sql`set_config('app.user_groups_ancestors', '', true)`,
   ])}`.execute(trx);
 
   // Group expansion (§E.1/E.3). The user's DIRECT org-unit UUIDs
@@ -216,7 +220,6 @@ export async function applyDbSession<TDatabase>(
   // PERF NOTE: up to two closure queries per withDbSession (exact needs none).
   // Acceptable for now; if it becomes hot, cache per (tenant, direct-set) or
   // fold into the identity resolver's session establishment.
-  const exact = [...session.groups];
   let descendants: string[] = [];
   let ancestors: string[] = [];
   if (exact.length > 0) {
@@ -249,7 +252,7 @@ export async function applyDbSession<TDatabase>(
     assertExpandedGroupsWithinCap(ancestors, "app.user_groups_ancestors (ancestors)");
   }
 
-  await sql`select set_config('app.user_groups', ${descendants.join(",")}, true),
+  if (exact.length > 0) await sql`select set_config('app.user_groups', ${descendants.join(",")}, true),
     set_config('app.user_groups_exact', ${exact.join(",")}, true),
     set_config('app.user_groups_ancestors', ${ancestors.join(",")}, true)`.execute(trx);
   return audit;

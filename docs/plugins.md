@@ -520,6 +520,16 @@ Seven properties are worth knowing:
   initialization order, both for the API and worker roles. A rejection does not
   skip the remaining module or host cleanup; shutdown rejects with an aggregate
   error after all cleanup has been attempted.
+- **Direct lookup is distinct from discovery.** A module may provide
+  `mcp.getTool(name, context)` as its complete live lookup for one own tool.
+  It returns the same available contract as `tools(context)`, or `undefined`
+  when absent. Core uses it for namespaced calls and ownership checks while
+  retaining collision checks for the requested name, decorators, authorization
+  and interceptors. Whole-projection uniqueness is still checked at discovery.
+  `tools(context)` still owns discovery; modules without `getTool` keep their
+  full projection. Keep discovery-only instruction or onboarding reads out of
+  exact lookup. Resolve availability from the current session and canonical
+  Operation rather than caching task data or trusting an earlier listing.
 - **Module authorization only narrows or claims.** `mcp.authorize(session,
   request)` receives the verified session capability and typed subject. Return
   `undefined` to abstain, an allowed decision to claim the module's registered

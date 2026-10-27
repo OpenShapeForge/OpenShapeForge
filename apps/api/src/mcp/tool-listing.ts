@@ -264,7 +264,7 @@ export function createToolListing(scope: ServerScope) {
     // CRUD schemas or enumerating every provider Operation just to find it.
     if (name.includes(".") && deriveToolName(name) === null &&
         !coreOwnsStaticToolName(name, operationToolProjection)) {
-      const projected = await moduleTools(runtimeModules, projectionContext());
+      const projected = await moduleTools(runtimeModules, projectionContext(), name);
       await assertModuleToolNamesAvailable(projected, name);
       const selected = projected.find((entry) => entry.tool.name === name);
       return selected

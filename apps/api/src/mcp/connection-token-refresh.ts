@@ -15,9 +15,11 @@
  * cannot drift on leeway, locking, rotation or audit order.
  */
 import { randomUUID } from "node:crypto";
+import { operationFailure } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
+import { withReadBarrierMaintenanceDatabase, ReadBarrierMaintenanceAdmissionError } from "../db/read-barrier.js";
 import type { DB } from "../generated/db/types.js";
 import { appendEntityEventInTransaction } from "../platform/entity-events.js";
 import { HttpError } from "../rest/http-error.js";
@@ -197,7 +199,7 @@ export async function refreshConnectionRowLocked(input: {
         ),
       store: {
         withLockedRow: (work) =>
-          withDbSession(input.db, input.session, async (lockedTrx) => {
+          withReadBarrierMaintenanceDatabase(input.db, input.session.tenantId, database => withDbSession(database, input.session, async (lockedTrx) => {
             trx = lockedTrx;
             input.signal?.throwIfAborted();
             const locked = await sql<{
@@ -233,7 +235,7 @@ export async function refreshConnectionRowLocked(input: {
             result = current;
             input.signal?.throwIfAborted();
             return work();
-          }),
+          }), input.signal),
         read: async () => current,
         decode: (values): OAuthTokenSet => {
           const expiresAt = values.accessTokenExpiresAt == null
@@ -294,6 +296,7 @@ export async function refreshConnectionRowLocked(input: {
     return result;
   } catch (error) {
     input.signal?.throwIfAborted();
+    if (error instanceof ReadBarrierMaintenanceAdmissionError) throw operationFailure({ code: "DATABASE_BUSY", message: error.message, retryable: true });
     const failureKind = egressInvocation.consumeFailure(error);
     const boundedTimeout =
       error instanceof DOMException && error.name === "TimeoutError";

@@ -37,6 +37,10 @@ describe("module-only MCP transport registration", () => {
       name: "decorator",
       mcp: { decorateTool: (tool) => tool },
     }])).toBe(true);
+    expect(hasDynamicModuleToolProjection([{
+      name: "exact-lookup",
+      mcp: { getTool: async () => undefined },
+    }])).toBe(true);
   });
 
   it("registers all methods on the canonical route for an MCP module", async () => {

@@ -9,13 +9,21 @@ import type { OperationContract } from "../operations/runtime.js";
 import { invalidQuery, structuredFilter, type QueryField } from "./structured-filter.js";
 
 export const AUDIT_PLUGIN = "osf-audit";
-const entityType = sql`coalesce(payload->'audit'->>'entityType',aggregate_type)`;
+const entityType = sql<string>`coalesce(platform.audit_entity_name(coalesce(payload->'audit'->>'entityType',aggregate_type)),payload->'audit'->>'entityType',aggregate_type)`;
+/** Resolve historical subjects only within the event's organization and only when unique. */
+const actorIdentity = sql<string>`coalesce(payload->'audit'->>'actorIdentityId',
+ (select min(i.id::text) from platform.identities i
+  join platform.identity_relations ir on ir.identity_id=i.id and ir.tenant_id=entity_events.tenant_id
+  where i.subject=coalesce(payload->'audit'->>'actorSubject',payload->'audit'->>'actorId')
+    and (nullif(payload->'audit'->>'actorIssuer','') is null or i.issuer=payload->'audit'->>'actorIssuer')
+  having count(distinct i.id)=1), payload->'audit'->>'actorId')`;
+
 const subjects = sql`platform.audit_event_subjects(payload,aggregate_type,aggregate_id)`;
 const fields: Record<string, QueryField> = {
   id: { sql: sql`id::text`, kind: "text" }, entityType: { sql: entityType, kind: "text" },
   recordId: { sql: sql`aggregate_id`, kind: "text" }, eventType: { sql: sql`event_type`, kind: "text" },
   occurredAt: { sql: sql`occurred_at`, kind: "timestamp" },
-  actorId: { sql: sql`payload->'audit'->>'actorId'`, kind: "text" },
+  actorId: { sql: actorIdentity, kind: "text" },
   actorKind: { sql: sql`payload->'audit'->>'actorKind'`, kind: "text" },
   operationId: { sql: sql`payload->'audit'->>'operationId'`, kind: "text" },
   correlationId: { sql: sql`payload->'audit'->>'correlationId'`, kind: "text" },
@@ -31,19 +39,19 @@ const safePayload = sql<unknown>`platform.audit_redact(payload)`.as("payload");
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
-function view(row: { id: string; aggregate_type: string; aggregate_id: string; event_type: string; occurred_at: string; payload: unknown }, details: boolean) {
+function view(row: { id: string; aggregate_type: string; aggregate_id: string; event_type: string; occurred_at: string; payload: unknown; resolved_actor_id?: string | null; resolved_entity_type?: string | null }, details: boolean) {
   const payload = object(row.payload);
   const audit = object(payload.audit);
-  const kind = typeof audit.entityType === "string" ? audit.entityType : row.aggregate_type;
+  const kind = row.resolved_entity_type ?? (typeof audit.entityType === "string" ? audit.entityType : row.aggregate_type);
   const optional = (key: string) => typeof audit[key] === "string" ? audit[key] : null;
   const { audit: _audit, visibility: _visibility, ...raw } = payload;
   return { id: row.id, entityType: kind, recordId: row.aggregate_id, eventType: row.event_type,
-    occurredAt: new Date(row.occurred_at).toISOString(), actorId: optional("actorId"), actorKind: optional("actorKind"),
+    occurredAt: new Date(row.occurred_at).toISOString(), actorId: row.resolved_actor_id ?? optional("actorId"), actorKind: optional("actorKind"),
     operationId: optional("operationId"), correlationId: optional("correlationId"),
     changedFields: Array.isArray(audit.changedFields) ? audit.changedFields : [],
     subjects: Array.isArray(audit.subjects) ? audit.subjects : [{ entityType: kind, recordId: row.aggregate_id }],
     beforeValues: details && audit.before != null ? audit.before : null,
-    afterValues: details && audit.after != null ? audit.after : null, rawData: details ? raw : null };
+    afterValues: details && audit.after != null ? audit.after : null, rawData: details ? {...raw, audit} : null };
 }
 
 export function auditOperationHandler(operation: Pick<OperationContract, "handler" | "auth">): ModuleOperationHandler {
@@ -55,7 +63,7 @@ export function auditOperationHandler(operation: Pick<OperationContract, "handle
     if (!db) throw operationFailure({ code: "OPERATION_UNAVAILABLE", message: "Audit storage is unavailable." });
     if (operation.handler === "get") {
       if (typeof input.id !== "string" || !UUID_PATTERN.test(input.id)) invalidQuery("Select a valid audit event.");
-      const row = await withDbSession(db, session, tx => tx.selectFrom("platform.entity_events").select(columns).select(safePayload)
+      const row = await withDbSession(db, session, tx => tx.selectFrom("platform.entity_events").select(columns).select(safePayload).select(actorIdentity.as("resolved_actor_id")).select(entityType.as("resolved_entity_type"))
         .where("tenant_id", "=", session.tenantId!).where("id", "=", String(input.id)).executeTakeFirst());
       if (!row) throw operationFailure({ code: "NOT_FOUND", message: "Audit event not found in this organization." });
       return { value: view(row, true) };
@@ -82,7 +90,7 @@ export function auditOperationHandler(operation: Pick<OperationContract, "handle
     return withDbSession(db, session, async tx => {
       const base = tx.selectFrom("platform.entity_events").where("tenant_id", "=", session.tenantId!).where(predicate);
       const count = await base.select(sql<string>`count(*)::text`.as("count")).executeTakeFirstOrThrow();
-      let query = base.select(columns).select(metadataPayload).select(sql<string>`${sorting}::text`.as("sort_value"));
+      let query = base.select(columns).select(metadataPayload).select(actorIdentity.as("resolved_actor_id")).select(entityType.as("resolved_entity_type")).select(sql<string>`${sorting}::text`.as("sort_value"));
       if (cursor) query = query.where(sql<boolean>`(${sorting} ${comparison} ${bound} or (${sorting}=${bound} and id ${comparison} ${cursor.id}::uuid))`);
       const rows = await query.orderBy(sql`${sorting} ${order}`).orderBy(sql`id ${order}`).limit(first + 1).execute();
       const page = rows.slice(0, first), last = page.at(-1);

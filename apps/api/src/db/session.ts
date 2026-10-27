@@ -6,6 +6,8 @@ import { randomUUID } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { readStatementTimeoutMs } from "../config/limits.js";
 import { actingRelationId, type ActingRelationSource } from "./acting-relation.js";
+import { withReadBarrierDatabase } from "./read-barrier.js";
+import { boundedReadTransaction } from "./bounded-read-transaction.js";
 
 export type DbSessionScope = "tenant" | "group" | "self";
 
@@ -24,6 +26,9 @@ const MAX_EXPANDED_SESSION_GROUPS = 4096;
 export type DbSessionInput = {
   tenantId?: string | null;
   userId?: string | null;
+  /** Trusted identity context retained by nested database work, never caller input. */
+  auditIdentityId?: string | null;
+  auditIssuer?: string | null;
   /**
    * Opaque binding to a verified interactive login session. This is control
    * metadata for canonical Operations and is deliberately not projected into
@@ -45,6 +50,8 @@ export type DbSessionInput = {
 export type DbSessionContext = {
   tenantId: string;
   userId: string;
+  auditIdentityId?: string | null;
+  auditIssuer?: string | null;
   roles: readonly string[];
   groups: readonly string[];
   relationGroupIds: readonly string[];
@@ -150,6 +157,21 @@ function normalizeScope(scope: DbSessionScope | null | undefined): DbSessionScop
   return "self";
 }
 
+export function verifiedAuditIdentity(input: DbSessionInput): { auditIdentityId: string | null; auditIssuer: string | null } {
+  const link = input.relation as { identityId?: unknown; issuer?: unknown; subject?: unknown; status?: unknown } | undefined;
+  if (link && ["linked", "pending_confirmation"].includes(String(link.status)) &&
+      link.subject === input.userId && typeof link.identityId === "string" &&
+      UUID_PATTERN.test(link.identityId) && typeof link.issuer === "string" && link.issuer) {
+    return { auditIdentityId: link.identityId, auditIssuer: link.issuer };
+  }
+  // A nested database session already carries the verified identity context.
+  if (input.auditIdentityId) {
+    assertUuid(input.auditIdentityId, "auditIdentityId");
+    return { auditIdentityId: input.auditIdentityId, auditIssuer: input.auditIssuer ?? null };
+  }
+  return { auditIdentityId: null, auditIssuer: null };
+}
+
 export function createDbSessionContext(input: DbSessionInput): DbSessionContext {
   if (!input.tenantId) {
     throw new Error("Database session is missing tenantId; refusing unscoped access.");
@@ -164,6 +186,7 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
   return {
     tenantId: input.tenantId,
     userId: input.userId,
+    ...verifiedAuditIdentity(input),
     roles: input.roles ?? [],
     groups: normalizeGroups(input.groups),
     relationGroupIds: normalizeRelationGroupIds(input.relationGroupIds),
@@ -175,6 +198,7 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
 export async function applyDbSession<TDatabase>(
   trx: Transaction<TDatabase>,
   session: DbSessionContext,
+  options: { statementTimeoutMs?: number; sharedReadBarrier?: string } = {},
 ) {
   // Bound subsequent statements in this tenant-scoped transaction so an
   // accepted GraphQL/REST request cannot hold a database
@@ -183,25 +207,35 @@ export async function applyDbSession<TDatabase>(
   // also covers the closure-expansion queries below. The initial settings
   // statement itself, like BEGIN, runs before this limit takes effect.
   // 0 disables the override (dev/opt-out).
-  const statementTimeoutMs = readStatementTimeoutMs();
+  const statementTimeoutMs = options.statementTimeoutMs ?? readStatementTimeoutMs();
   // A tenant session is never a continuation of a system session. Clear the
   // break-glass flag before any tenant-scoped lookup. This statement contains
   // only transaction-local settings: no row access runs until ALL have been
   // applied. Batch the round trips, not the authorization or audit checks.
   const audit = resolveAuditSession();
-  await sql`select ${sql.join([
+  const exact = [...session.groups];
+  const settings = await sql<{ shared_read_marker?: boolean }>`select ${sql.join([
     ...(statementTimeoutMs > 0
       ? [sql`set_config('statement_timeout', ${String(statementTimeoutMs)}, true)`]
       : []),
     sql`set_config('app.bypass_rls', 'false', true)`,
+    sql`set_config('app.shared_read_barrier', ${options.sharedReadBarrier ?? ''}, true)`,
     sql`set_config('app.tenant_id', ${session.tenantId}, true)`,
     sql`set_config('app.user_id', ${session.userId}, true)`,
+    sql`set_config('app.audit_identity_id', ${session.auditIdentityId??''}, true)`,
+    sql`set_config('app.audit_actor_issuer', ${session.auditIssuer??''}, true)`,
     ...auditSessionSettings(audit),
     sql`set_config('app.roles', ${session.roles.join(",")}, true)`,
     sql`set_config('app.scope', ${session.scope}, true)`,
     sql`set_config('app.relation_group_ids', ${session.relationGroupIds.join(",")}, true)`,
     sql`set_config('app.relation_id', ${session.relationId ?? ""}, true)`,
-  ])}`.execute(trx);
+    sql`set_config('app.user_groups', '', true)`,
+    sql`set_config('app.user_groups_exact', '', true)`,
+    sql`set_config('app.user_groups_ancestors', '', true)`,
+  ])}${options.sharedReadBarrier ? sql`, pg_try_advisory_xact_lock_shared(hashtext('osf.read-barrier:shared-backend'), 0) as shared_read_marker` : sql``}`.execute(trx);
+  if (options.sharedReadBarrier && !settings.rows[0]?.shared_read_marker) {
+    throw new Error("Shared read metadata marker is unavailable.");
+  }
 
   // Group expansion (§E.1/E.3). The user's DIRECT org-unit UUIDs
   // (session.groups — already UUID-filtered and capped at MAX_SESSION_GROUPS by
@@ -216,7 +250,6 @@ export async function applyDbSession<TDatabase>(
   // PERF NOTE: up to two closure queries per withDbSession (exact needs none).
   // Acceptable for now; if it becomes hot, cache per (tenant, direct-set) or
   // fold into the identity resolver's session establishment.
-  const exact = [...session.groups];
   let descendants: string[] = [];
   let ancestors: string[] = [];
   if (exact.length > 0) {
@@ -249,7 +282,7 @@ export async function applyDbSession<TDatabase>(
     assertExpandedGroupsWithinCap(ancestors, "app.user_groups_ancestors (ancestors)");
   }
 
-  await sql`select set_config('app.user_groups', ${descendants.join(",")}, true),
+  if (exact.length > 0) await sql`select set_config('app.user_groups', ${descendants.join(",")}, true),
     set_config('app.user_groups_exact', ${exact.join(",")}, true),
     set_config('app.user_groups_ancestors', ${ancestors.join(",")}, true)`.execute(trx);
   return audit;
@@ -266,6 +299,8 @@ export async function withDbSession<TDatabase, TResult>(
   if (active && active.db === db) {
     const sameSession = active.session.tenantId === session.tenantId &&
       active.session.userId === session.userId &&
+      active.session.auditIdentityId === session.auditIdentityId &&
+      active.session.auditIssuer === session.auditIssuer &&
       active.session.scope === session.scope &&
       active.session.roles.length === session.roles.length &&
       active.session.roles.every((role, index) => role === session.roles[index]) &&
@@ -297,12 +332,16 @@ export async function withDbSession<TDatabase, TResult>(
   }
   const hooks = { afterCommit: [] as DbSessionAfterCommitHook[] };
 
-  const result = await withRuntimeSpan("database.session", () => dbSessionHooks.run(hooks, () => {
+  const result = await withRuntimeSpan("database.session", () => dbSessionHooks.run(hooks, () => withReadBarrierDatabase(db, session.tenantId, (database, barrier) => {
     const transaction = options.isolationLevel
-      ? db.transaction().setIsolationLevel(options.isolationLevel)
-      : db.transaction();
-    return transaction.execute(async (trx) => {
-      const audit = await applyDbSession(trx, session);
+      ? database.transaction().setIsolationLevel(options.isolationLevel)
+      : database.transaction();
+    return transaction.execute(async (original) => {
+      const execute = async (trx: Transaction<TDatabase>) => {
+      const audit = await applyDbSession(trx, session, barrier ? {
+        statementTimeoutMs: Math.min(readStatementTimeoutMs() || barrier.budgetMs, barrier.budgetMs),
+        sharedReadBarrier: barrier.marker,
+      } : {});
       return runWithAuditContext(audit, () => activeDbSession.run(
         {
           db: db as Kysely<unknown>,
@@ -312,8 +351,10 @@ export async function withDbSession<TDatabase, TResult>(
         },
         () => callback(trx, session),
       ));
+      };
+      return barrier ? boundedReadTransaction(original, barrier.budgetMs, barrier.isActive, barrier.retain, execute) : execute(original);
     });
-  }));
+  })));
 
   for (const hook of hooks.afterCommit) {
     await hook();
@@ -491,7 +532,7 @@ export async function withSystemSession<TDatabase, TResult>(
       const audit = auditContext();
       const appliedAudit = await applyAuditSession(trx, audit ? { ...audit, actorKind: "system" } : null);
       await sql`select set_config('app.roles', ${input.roles.join(",")}, true)`.execute(trx);
-      await sql`select set_config('app.bypass_rls', 'true', true)`.execute(trx);
+      await sql`select set_config('app.bypass_rls', 'true', true), set_config('app.shared_read_barrier', '', true)`.execute(trx);
 
       await sql`
         insert into platform.system_bypass_audit

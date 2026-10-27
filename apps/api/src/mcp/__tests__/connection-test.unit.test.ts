@@ -84,6 +84,58 @@ describe("testElicitedRow", () => {
     expect(JSON.stringify(report)).not.toContain("tok-1");
   });
 
+  it("logs in for a session scheme and probes with the session, never the key", async () => {
+    const calls: URL[] = [];
+    const report = await testElicitedRow({
+      row: {
+        id: "c1",
+        values: {
+          administrationId: "adm-1",
+          accessKey: encryptSecret(KEYRING, ELICIT.sourceTable, "accessKey", "obviously-fake-key"),
+        },
+      },
+      sourceRow: {
+        id: "provider-1",
+        name: "Session provider",
+        baseUrlTemplate: "https://ws.example.com/ws",
+        egressHosts: ["ws.example.com"],
+        probe: { method: "GET", pathTemplate: "/Info.asmx/Administrations" },
+        auth: {
+          profile: "apiKey",
+          scheme: "session",
+          loginUrl: "https://ws.example.com/ws/Info.asmx/Authenticate",
+          loginParam: "accessKey",
+          credentialFrom: "accessKey",
+          loginResponseFormat: "xml",
+          sessionPath: "string",
+          sessionParam: "sessionID",
+        },
+        definitions: [
+          { key: "administrationId", required: true },
+          { key: "accessKey", required: true, classification: { sensitivity: "confidential" } },
+        ],
+      },
+      elicit: ELICIT,
+      table: TABLE,
+      keyring: KEYRING,
+      fetchImpl: (async (input: string | URL | Request) => {
+        const url = new URL(String(input));
+        calls.push(url);
+        return url.pathname.endsWith("/Authenticate")
+          ? new Response("<string>obviously-fake-session</string>")
+          : new Response("<Administrations />");
+      }) as typeof fetch,
+    });
+    expect(report.ok).toBe(true);
+    expect(report.checks.find((check) => check.check === "credentials")?.detail).toContain(
+      "issued a session",
+    );
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.searchParams.get("sessionID")).toBe("obviously-fake-session");
+    expect(calls[1]?.href).not.toContain("obviously-fake-key");
+    expect(JSON.stringify(report)).not.toContain("obviously-fake-session");
+  });
+
   it("routes client-credentials acquisition through the canonical egress owner", async () => {
     const requests: unknown[] = [];
     const report = await testElicitedRow({

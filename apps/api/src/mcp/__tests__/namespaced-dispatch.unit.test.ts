@@ -11,6 +11,7 @@ import { __buildGeneratedMcpServerForTests, buildServer } from "../generated-mcp
 import { createTransportSessions, requestNeedsInstructions } from "../transport-sessions.js";
 import { createDerivedDefinitionResolution } from "../derived-definitions.js";
 import { catalogDerivedTools } from "../catalog.js";
+import { moduleTools } from "../../modules/mcp-hooks.js";
 
 function fixture(name = "reports.summary") {
   const db = {} as never;
@@ -159,4 +160,85 @@ test("modern discovery keeps instructions while tools/call skips presentation co
     expect(requestNeedsInstructions(body)).toBe(true);
   }
   expect(requestNeedsInstructions({ method: "tools/call" })).toBe(false);
+});
+
+test("exact module projections avoid discovery work and still recheck current availability", async () => {
+  for (const name of ["reports.summary", "integrations.tasks"]) {
+    const f = fixture(name);
+    let listings = 0, lookups = 0;
+    const project = f.module.mcp!.tools!;
+    f.module.mcp!.tools = async () => { listings++; throw Error("Discovery-only work was reached"); };
+    f.module.mcp!.getTool = async (requested, ctx) => {
+      lookups++;
+      return (await project(ctx)).find(tool => tool.name === requested);
+    };
+    await inMemory(f, async client => {
+      expect((await client.callTool({ name, arguments: {} })).isError).toBeFalsy();
+      expect(listings).toBe(0);
+      expect(lookups).toBe(1);
+      expect(f.counts()).toEqual({ providerListings: 0, calls: 1, interceptions: 1, decorations: 1 });
+      f.hide();
+      expect((await client.callTool({ name, arguments: {} })).isError).toBe(true);
+      expect(lookups).toBe(2);
+      expect(f.counts().calls).toBe(1);
+    });
+  }
+});
+
+test("exact projections fail closed for a different name and ambiguous ownership", async () => {
+  for (const failure of ["different-name", "duplicate-owner"]) {
+    const f = fixture();
+    f.module.mcp!.getTool = async () => ({ name: failure === "different-name" ? "other.summary" : "reports.summary", inputSchema: {type:"object"} });
+    if (failure === "duplicate-owner") f.modules.push({ name: "duplicate", mcp: {
+      getTool: async () => ({ name: "reports.summary", inputSchema: {type:"object"} }),
+    } });
+    await inMemory(f, async client => {
+      expect((await client.callTool({name:"reports.summary",arguments:{}})).isError).toBe(true);
+      expect(f.counts().calls).toBe(0);
+    });
+  }
+});
+
+test("exact projections preserve live role and tenant filtering", async () => {
+  for (const boundary of ["role", "tenant"]) {
+    const f = fixture(), project = f.module.mcp!.tools!;
+    f.module.mcp!.getTool = async (name, ctx) =>
+      (await project(ctx)).find(tool => tool.name === name);
+    f.module.mcp!.tools = async () => { throw Error("Unexpected full listing"); };
+    if (boundary === "role") f.session.roles = [];
+    else f.session.tenantId = "33333333-3333-4333-8333-333333333333";
+    await inMemory(f, async client => {
+      expect((await client.callTool({ name: "reports.summary", arguments: {} })).isError).toBe(true);
+      expect(f.counts().calls).toBe(0);
+    });
+  }
+});
+
+test("full discovery keeps its projection while authorization uses exact live lookup", async () => {
+  const f = fixture(), project = f.module.mcp!.tools!;
+  let listings = 0, lookups = 0;
+  f.module.mcp!.tools = async ctx => { listings++; return project(ctx); };
+  f.module.mcp!.getTool = async (name, ctx) => {
+    lookups++;
+    return (await project(ctx)).find(tool => tool.name === name);
+  };
+  const all = await moduleTools([f.module], {
+    db: f.db, session: f.session, clientCapabilities: { elicitation: false, mcpApp: false },
+  });
+  expect(all.map(entry => entry.tool.name)).toEqual(["reports.summary"]);
+  expect(listings).toBe(1);
+  expect(lookups).toBe(0);
+  f.module.mcp!.authorize = async () => ({ allowed: true });
+  f.module.mcp!.callTool = async (_name, _args, ctx) => ({ content: [], structuredContent: {
+    decision: await f.platform.services.mcp.authorize(ctx.session, {
+      action: "call", subject: { kind: "tool", name: "reports.summary" },
+    }),
+  } });
+  await inMemory(f, async client => {
+    const result = await client.callTool({ name: "reports.summary", arguments: {} });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual({ decision: { allowed: true } });
+  });
+  expect(listings).toBe(1);
+  expect(lookups).toBeGreaterThan(0);
 });

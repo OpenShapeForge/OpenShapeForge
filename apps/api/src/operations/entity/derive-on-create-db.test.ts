@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
-import { sql } from "kysely";
+import { sql, CompiledQuery } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
 import { runMigrationChain } from "../../db/migration-chain.js";
 import { withDbSession } from "../../db/session.js";
@@ -28,6 +28,7 @@ const actor = {
 let admin: SQL;
 let privileged: DatabaseRuntime;
 let runtime: DatabaseRuntime;
+const derivedInserts: Array<{ sql: string; parameters: readonly unknown[] }> = [];
 
 describe("database-backed create-time identifiers", () => {
   beforeAll(async () => {
@@ -43,7 +44,13 @@ describe("database-backed create-time identifiers", () => {
     await privileged.db.connection().execute((connection) => runMigrationChain(connection));
     url.username = "openshapeforge_app";
     url.password = "openshapeforge_app";
-    runtime = createDatabaseRuntime({ databaseUrl: url.toString(), maxConnections: 6 });
+    runtime = createDatabaseRuntime({ databaseUrl: url.toString(), maxConnections: 6,
+      log: (event) => {
+        if (event.level === "query" && event.query.sql.includes('insert into "erp"."derived_identifier_fixtures"')) {
+          derivedInserts.push({ sql: event.query.sql, parameters: event.query.parameters });
+        }
+      },
+    });
   }, 90_000);
 
   afterAll(async () => {
@@ -107,6 +114,10 @@ describe("database-backed create-time identifiers", () => {
     const fixtureManifest = JSON.parse(artifacts.find((artifact: { path: string }) => artifact.path.endsWith("manifest.json"))!.contents);
     const table = fixtureManifest.tables.find((table: GeneratedCrudTable) => table.table === "derived_identifier_fixtures") as GeneratedCrudTable;
     await sql.raw(schema).execute(privileged.db);
+    // Complementary predicates must both arbitrate, although their conjunction
+    // is false: the inference predicate does not filter the inserted row.
+    await sql`create unique index inactive_identifier_keys on erp.derived_identifier_fixtures
+      (key, tenant_id) where not active`.execute(privileged.db);
     await sql`grant select, insert, update, delete on erp.derived_identifier_fixtures to openshapeforge_app`.execute(privileged.db);
     const session = { ...actor, roles: ["Relaties.All.ReadWrite"] };
     const create = (active: boolean, inputSession = session) => withDbSession(runtime.db, inputSession, (trx, dbSession) =>
@@ -117,6 +128,27 @@ describe("database-backed create-time identifiers", () => {
       .toEqual(["cafe-offer", "cafe-offer-2", "cafe-offer-3", "cafe-offer-4"]);
     expect(created.every((row) => row.name === "Café Offer")).toBe(true);
     expect(created.filter((row) => row.active === false)).toHaveLength(2);
+
+    // Assert PostgreSQL's actual plan for the runtime's INSERT, not a SQL
+    // spelling: all three key indexes must arbitrate concurrent allocation.
+    const insert = derivedInserts[0]!;
+    const explain = await withDbSession(runtime.db, session, (trx) => trx.executeQuery<{ "QUERY PLAN": Array<{ Plan: { "Conflict Arbiter Indexes": string[] } }> }>(
+      CompiledQuery.raw("explain (format json) " + insert.sql, [...insert.parameters]),
+    ));
+    const plan = explain.rows[0]!["QUERY PLAN"] as Array<{ Plan: { "Conflict Arbiter Indexes": string[] } }>;
+    expect(plan[0]!.Plan["Conflict Arbiter Indexes"].sort()).toEqual([
+      "active_identifier_keys", "derived_identifier_fixtures_key_derived_uidx",
+      "inactive_identifier_keys",
+    ]);
+
+    // A different unique business property must still fail rather than
+    // being swallowed by the identifier's retry loop.
+    await sql`create unique index unrelated_source_name on erp.derived_identifier_fixtures
+      (tenant_id, name) where name = 'Unique Name'`.execute(privileged.db);
+    const uniqueName = () => withDbSession(runtime.db, session, (trx, dbSession) =>
+      createGeneratedEntityInTransaction(trx, dbSession, table, { name: "Unique Name", active: true }));
+    await uniqueName();
+    await expect(uniqueName()).rejects.toMatchObject({ constraint: "unrelated_source_name", errno: "23505" });
 
     const otherTenant = await create(false, { ...session, tenantId: randomUUID() });
     expect(otherTenant.key).toBe("cafe-offer");

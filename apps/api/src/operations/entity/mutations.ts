@@ -48,6 +48,7 @@ import {
 } from "./record-permissions.js";
 import {
   derivedOnCreateColumn,
+  derivedIdentifierConflictPredicate,
   derivedSlugCandidate,
   maxDerivedIdentifierAttempts,
 } from "./derive-on-create.js";
@@ -296,11 +297,14 @@ async function insertGeneratedRowInTransaction(
     ...(entityValues.tables ? { tables: entityValues.tables } : {}),
     ...(entityValues.derivedTools ? { entries: entityValues.derivedTools } : {}),
   });
+  const derivedColumn = derivedOnCreateColumn(table);
+  const derivation = derivedColumn?.deriveOnCreate;
+  const conflictPredicate = derivation
+    ? await derivedIdentifierConflictPredicate(trx, table, derivation.conflictColumns)
+    : undefined;
   // Everything above reads, validates and may wait on another transaction's
   // locks; the insert below is the first thing that cannot be taken back.
   await assertAdmittedBeforeEffects(trx, session);
-  const derivedColumn = derivedOnCreateColumn(table);
-  const derivation = derivedColumn?.deriveOnCreate;
   const tenantColumn = table.columns.find((column) => column.name === "tenant_id");
   const attempts = derivation ? maxDerivedIdentifierAttempts() : 1;
   let row: GeneratedEntityRow | undefined;
@@ -332,7 +336,8 @@ async function insertGeneratedRowInTransaction(
       sqlValues.push(scope.value);
     }
     const conflict = derivation
-      ? sql`on conflict (${sql.join(derivation.conflictColumns.map((column) => sql.id(column)))}) do nothing`
+      ? sql`on conflict (${sql.join(derivation.conflictColumns.map((column) => sql.id(column)))})
+          ${conflictPredicate ? sql`where ${sql.raw(conflictPredicate)}` : sql``} do nothing`
       : sql``;
     const result = await sql<{ row: GeneratedEntityRow }>`
       insert into ${sql.id(table.schema, table.table)}

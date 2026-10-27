@@ -18,6 +18,9 @@ const ODATA_DATE = /^\/Date\((\d+)(?:[+-]\d{4})?\)\/$/;
 // A zone is required: a bare local time would sort by the runtime's clock zone.
 const ISO_WITH_ZONE = /^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})$/i;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+// A zoneless local timestamp (an ASMX DateTime): its date part is already the
+// provider's own calendar date, so no clock zone is involved in reading it.
+const ISO_LOCAL = /^(\d{4}-\d{2}-\d{2})T[\d:.]+$/;
 
 function isRecord(value: unknown): value is Rec {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -59,11 +62,16 @@ export function sourceVersion(value: unknown): string | null {
   return isoOrNull(instant(text));
 }
 
-/** A calendar date (`YYYY-MM-DD`, UTC) from an ISO date, zoned ISO time or OData date. */
+/**
+ * A calendar date (`YYYY-MM-DD`) from an ISO date, a zoneless local timestamp
+ * (its own date part), a zoned ISO time (UTC) or an OData date.
+ */
 export function calendarDate(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const text = value.trim();
   if (ISO_DATE.test(text)) return text;
+  const local = ISO_LOCAL.exec(text);
+  if (local) return local[1]!;
   return isoOrNull(instant(text))?.slice(0, 10) ?? null;
 }
 
@@ -82,6 +90,24 @@ export function sign(value: unknown): "negative" | "zero" | "positive" | null {
 export function absolute(value: unknown): number | null {
   const number = numeric(value);
   return number === null ? null : Math.abs(number);
+}
+
+/** A number from a numeric string or number (text-only formats such as XML carry every value as text); else null. */
+export function asNumber(value: unknown): number | null {
+  return numeric(value);
+}
+
+/**
+ * The first `length` characters of a text value — the class a hierarchical
+ * provider code encodes in its leading characters (an RGS code such as
+ * BEivGok is equity by its first four). Null when the value is not text.
+ */
+export function prefix(value: unknown, step: Rec, misconfigured: Misconfigured): string | null {
+  const length = step.length;
+  if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 1 || length > 64) {
+    throw misconfigured("`length` must be an integer from 1 to 64");
+  }
+  return typeof value === "string" ? value.slice(0, length) : null;
 }
 
 /**
@@ -113,6 +139,8 @@ export const VALUE_TRANSFORMS: Readonly<
   date: (value) => calendarDate(value),
   sign: (value) => sign(value),
   abs: (value) => absolute(value),
+  number: (value) => asNumber(value),
   text: (value) => asText(value),
+  prefix,
   lookup,
 };

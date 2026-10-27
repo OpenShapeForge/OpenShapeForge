@@ -26,6 +26,11 @@ function state() {
   return (target[OTEL_STATE_KEY] ??= { sdk: null });
 }
 
+/** A host may skip diagnostic work entirely when no exporter was selected. */
+export function isOpenTelemetryEnabled(): boolean {
+  return state().sdk !== null;
+}
+
 const REDACTED_QUERY_PARAMS = [
   "query",
   "variables",

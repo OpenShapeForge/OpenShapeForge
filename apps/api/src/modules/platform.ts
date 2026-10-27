@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Core-owned services made available to reviewed runtime modules. */
+import { withRuntimeSpan } from "@openshapeforge/observability";
 import { isControlSession } from "../control/control-session.js";
 import { systemSessionForAdministrator } from "../control/platform-admin.js";
 import { auditContext, withAuditContext } from "../platform/audit-context.js";
@@ -598,7 +599,7 @@ export class ModulePlatformRuntime {
       operations: {
         list: (session) => this.#listOperations(session),
         get: (session, operationId) =>
-          this.#getOperation(session, operationId),
+          withRuntimeSpan("operation.resolve", () => this.#getOperation(session, operationId), { operationId }),
         execute: (session, request, options) =>
           this.#executeOperation(session, request, options),
       },
@@ -882,7 +883,7 @@ export class ModulePlatformRuntime {
   }
 
   #executeOperation(session: TrustedSessionContext, request: RuntimeOperationRequest, options: RuntimeOperationExecutionOptions = {}): Promise<RuntimeOperationExecutionResult> {
-    return withAuditContext(request.operation.id, session.credential, () => this.#executeOperationWithContext(session, request, options), session.principalKind);
+    return withAuditContext(request.operation.id, session.credential, () => withRuntimeSpan("operation.execute", () => this.#executeOperationWithContext(session, request, options), { operationId: request.operation.id }), session.principalKind);
   }
 
   async #executeOperationWithContext(

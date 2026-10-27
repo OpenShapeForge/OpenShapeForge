@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { withRuntimeSpan } from "@openshapeforge/observability";
 import { auditContext, runWithAuditContext, type AuditContext } from "../platform/audit-context.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
@@ -296,7 +297,7 @@ export async function withDbSession<TDatabase, TResult>(
   }
   const hooks = { afterCommit: [] as DbSessionAfterCommitHook[] };
 
-  const result = await dbSessionHooks.run(hooks, () => {
+  const result = await withRuntimeSpan("database.session", () => dbSessionHooks.run(hooks, () => {
     const transaction = options.isolationLevel
       ? db.transaction().setIsolationLevel(options.isolationLevel)
       : db.transaction();
@@ -312,7 +313,7 @@ export async function withDbSession<TDatabase, TResult>(
         () => callback(trx, session),
       ));
     });
-  });
+  }));
 
   for (const hook of hooks.afterCommit) {
     await hook();

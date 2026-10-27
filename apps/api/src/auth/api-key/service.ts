@@ -24,6 +24,17 @@ import { jsonbLiteral } from "../../db/sql-helpers.js";
 import { withDbSession } from "../../db/session.js";
 import { encryptSecret, type SecretKeyring } from "../../platform/secrets.js";
 import {
+  containsFilter,
+  exactFilter,
+  keysetPredicate,
+  limitWithProbe,
+  orderBy,
+  takePage,
+  type Page,
+  type PageQuery,
+  type SortColumn,
+} from "./catalog-page.js";
+import {
   assertMayGrantRoles,
   assertMayManageApiKeys,
   type CeilingSession,
@@ -220,6 +231,43 @@ export async function createIntegration(
   return { integrationId, keyId, token: minted.token, expiresAt };
 }
 
+/**
+ * Take the integration's row lock, tenant-fenced, before deciding anything
+ * about the keys under it.
+ *
+ * This is the serialization point `issueKey` and `disableIntegration` SHARE,
+ * and sharing it is the whole point. Without it the two interleave into a
+ * credential nobody asked for: disable reads the integration, revokes the keys
+ * it can see and commits, while a concurrent issue — which read the same
+ * integration as 'active' before that commit — inserts a key afterwards. The
+ * result is a live credential under a disabled parent, which the exchange path
+ * then has to be trusted to notice. With both statements taking this lock
+ * first, in this order (integration, then its keys), one of the two waits and
+ * then sees the other's committed status: a disable that lands first makes the
+ * issue a NOT_FOUND, and an issue that lands first has its key revoked by the
+ * disable.
+ *
+ * `for update` is on the integration row only. RLS already confines the row to
+ * the caller's tenant; the explicit `tenant_id` predicate is the same
+ * defense-in-depth the generated engine applies, and it keeps the lock from
+ * ever being taken on another tenant's row even if a policy were relaxed.
+ */
+async function lockIntegration(
+  trx: unknown,
+  tenantId: string,
+  integrationId: string,
+): Promise<{ id: string; status: string; granted_roles: unknown } | undefined> {
+  const found = await sql<{ id: string; status: string; granted_roles: unknown }>`
+    select id, status, granted_roles
+      from platform.api_key_integrations
+     where id = ${integrationId}
+       and tenant_id = ${tenantId}
+     limit 1
+     for update
+  `.execute(trx as never);
+  return found.rows[0];
+}
+
 export type IssueKeyInput = {
   integrationId: string;
   displayName: string;
@@ -255,19 +303,11 @@ export async function issueKey(
   );
 
   await withSession(deps, session, async (trx) => {
-    // RLS already confines this to the caller's tenant; the explicit predicate
-    // is the same defense-in-depth the generated engine applies.
-    const found = await sql<{ id: string; granted_roles: unknown }>`
-      select id, granted_roles from platform.api_key_integrations
-       where id = ${input.integrationId}
-         and tenant_id = ${session.tenantId}
-         and status = 'active'
-       limit 1
-    `.execute(trx);
-    if (!found.rows[0]) {
+    const parent = await lockIntegration(trx, session.tenantId, input.integrationId);
+    if (!parent || parent.status !== "active") {
       throw new ApiKeyNotFoundError("No such active integration.");
     }
-    assertMayGrantRoles(session, roleSubset ?? (parseRoleSubset(found.rows[0].granted_roles) ?? []));
+    assertMayGrantRoles(session, roleSubset ?? (parseRoleSubset(parent.granted_roles) ?? []));
 
     await insertKeyRow(trx, {
       keyId,
@@ -317,6 +357,38 @@ const KEY_METADATA_COLUMNS = sql`
   k.revoked_at, k.last_used_at
 `;
 
+/**
+ * A credential's lifecycle status, as ONE expression.
+ *
+ * It is derived rather than stored, so it has to be derived in the database:
+ * deriving it afterwards would mean filtering and sorting a page that was
+ * already cut, which is how an "active only" list ends up a page short. `now`
+ * is bound once per request, so the sort, the filter and the keyset all agree
+ * about where the expiry boundary is even if the request spans it.
+ */
+function credentialStatusExpr(now: Date) {
+  return sql`case
+    when k.revoked_at is not null then 'revoked'
+    when k.expires_at is not null and k.expires_at <= ${now} then 'expired'
+    else 'active'
+  end`;
+}
+
+export type CredentialSortField =
+  | "displayName" | "status" | "createdAt" | "expiresAt" | "lastUsedAt";
+
+function credentialSort(field: CredentialSortField, now: Date): SortColumn {
+  switch (field) {
+    case "status": return { expr: credentialStatusExpr(now) };
+    case "createdAt": return { expr: sql`k.created_at`, cast: "timestamptz" };
+    case "expiresAt": return { expr: sql`k.expires_at`, cast: "timestamptz" };
+    case "lastUsedAt": return { expr: sql`k.last_used_at`, cast: "timestamptz" };
+    // Case-insensitive, and the same expression the cursor value is rendered
+    // from, so paging by name is not sensitive to the display casing.
+    default: return { expr: sql`lower(k.display_name)` };
+  }
+}
+
 function listedKey(row: KeyRow): ListedKey {
   return {
     id: row.id,
@@ -341,6 +413,10 @@ function listedKey(row: KeyRow): ListedKey {
  * `integrationId` is a SUBJECT BINDING, not a filter the caller may widen: it
  * is matched alongside the tenant predicate, so naming another tenant's
  * integration yields an empty page rather than its keys.
+ *
+ * Unpaged, and kept that way: the existing REST and GraphQL surfaces return
+ * the whole set and changing that would break their published contracts. The
+ * canonical catalog Operations use {@link pageKeys} instead.
  */
 export async function listKeys(
   deps: ApiKeyServiceDeps,
@@ -362,6 +438,74 @@ export async function listKeys(
     `.execute(trx);
 
     return result.rows.map(listedKey);
+  });
+}
+
+/** How many rows one page may carry, whatever a caller asks for. */
+export const MAX_PAGE_SIZE = 100;
+
+function boundedFirst(first: number): number {
+  if (!Number.isFinite(first)) return 1;
+  return Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(first)));
+}
+
+export type ListedKeyPage = Page<ListedKey & { cursorValue: string | null }>;
+
+/**
+ * One keyset page of the credentials under ONE integration.
+ *
+ * The integration is required rather than optional: a credential page is
+ * always read in the context of its parent, and requiring it keeps the cursor
+ * from ever addressing a row outside the subject it was issued for. Both the
+ * tenant and the integration are predicates on every statement here, so
+ * neither a forged cursor nor a tampered sort can widen the set — the worst a
+ * tampered cursor can do is move the resume point inside a set the caller was
+ * already entitled to read.
+ */
+export async function pageKeys(
+  deps: ApiKeyServiceDeps,
+  session: ProvisioningSession,
+  scope: { integrationId: string },
+  query: PageQuery<CredentialSortField>,
+  now: Date = new Date(),
+): Promise<ListedKeyPage> {
+  assertMayManageApiKeys(session);
+
+  const first = boundedFirst(query.first);
+  const column = credentialSort(query.sortField, now);
+  const status = credentialStatusExpr(now);
+
+  return withSession(deps, session, async (trx) => {
+    // The fence, repeated verbatim in both statements below. Written once as a
+    // fragment so the count can never drift from the page it describes.
+    const fence = sql`
+      k.tenant_id = ${session.tenantId}
+        and k.integration_id = ${scope.integrationId}
+        ${containsFilter(sql`k.display_name`, query.displayName)}
+        ${exactFilter(status, query.status)}
+    `;
+
+    const counted = await sql<{ total: string | number }>`
+      select count(*) as total
+        from platform.api_keys k
+       where ${fence}
+    `.execute(trx);
+
+    const result = await sql<KeyRow & { sort_value: string | null }>`
+      select ${KEY_METADATA_COLUMNS}, (${column.expr})::text as sort_value
+        from platform.api_keys k
+        join platform.api_key_integrations i on i.id = k.integration_id
+       where ${fence}
+         ${keysetPredicate(column, sql`k.id`, { ...query, ...(query.after ? { after: query.after } : {}) })}
+       ${orderBy(column, sql`k.id`, query.sortDirection)}
+       ${limitWithProbe(first)}
+    `.execute(trx);
+
+    const page = takePage(result.rows, first, Number(counted.rows[0]?.total ?? 0));
+    return {
+      ...page,
+      rows: page.rows.map((row) => ({ ...listedKey(row), cursorValue: row.sort_value })),
+    };
   });
 }
 
@@ -428,13 +572,26 @@ type IntegrationRow = {
  * while `id` is the stable identifier the realm reconciler rebuilds a missing
  * client UNDER rather than replaces.
  */
-const INTEGRATION_METADATA_COLUMNS = sql`
-  i.id, i.display_name, i.status, i.granted_roles, i.created_at, i.updated_at,
-  count(k.id) as key_count,
-  count(k.id) filter (
-    where k.revoked_at is null and (k.expires_at is null or k.expires_at > now())
-  ) as active_key_count
-`;
+function integrationMetadataColumns(now: Date) {
+  return sql`
+    i.id, i.display_name, i.status, i.granted_roles, i.created_at, i.updated_at,
+    count(k.id) as key_count,
+    count(k.id) filter (
+      where k.revoked_at is null and (k.expires_at is null or k.expires_at > ${now})
+    ) as active_key_count
+  `;
+}
+
+export type IntegrationSortField = "displayName" | "status" | "createdAt" | "updatedAt";
+
+function integrationSort(field: IntegrationSortField): SortColumn {
+  switch (field) {
+    case "status": return { expr: sql`i.status` };
+    case "createdAt": return { expr: sql`i.created_at`, cast: "timestamptz" };
+    case "updatedAt": return { expr: sql`i.updated_at`, cast: "timestamptz" };
+    default: return { expr: sql`lower(i.display_name)` };
+  }
+}
 
 function listedIntegration(row: IntegrationRow): ListedIntegration {
   const status = row.status === "active" || row.status === "disabled" ? row.status : "pending";
@@ -454,25 +611,58 @@ function listedIntegration(row: IntegrationRow): ListedIntegration {
   };
 }
 
-/** Every integration of the caller's tenant, with its key counts. */
-export async function listIntegrations(
+export type ListedIntegrationPage = Page<ListedIntegration & { cursorValue: string | null }>;
+
+/**
+ * One keyset page of the caller's integrations, with each one's key counts.
+ *
+ * The counts come from a LEFT JOIN that is aggregated AFTER the fence and the
+ * keyset have selected the page's integrations, so an account with many keys
+ * pays for the page's keys and not for the tenant's. `totalCount` is a
+ * separate count over `api_key_integrations` alone — counting the joined rows
+ * would report keys, not integrations.
+ */
+export async function pageIntegrations(
   deps: ApiKeyServiceDeps,
   session: ProvisioningSession,
-): Promise<ListedIntegration[]> {
+  query: PageQuery<IntegrationSortField>,
+  now: Date = new Date(),
+): Promise<ListedIntegrationPage> {
   assertMayManageApiKeys(session);
 
+  const first = boundedFirst(query.first);
+  const column = integrationSort(query.sortField);
+
   return withSession(deps, session, async (trx) => {
-    const result = await sql<IntegrationRow>`
-      select ${INTEGRATION_METADATA_COLUMNS}
+    const fence = sql`
+      i.tenant_id = ${session.tenantId}
+        ${containsFilter(sql`i.display_name`, query.displayName)}
+        ${exactFilter(sql`i.status`, query.status)}
+    `;
+
+    const counted = await sql<{ total: string | number }>`
+      select count(*) as total
+        from platform.api_key_integrations i
+       where ${fence}
+    `.execute(trx);
+
+    const result = await sql<IntegrationRow & { sort_value: string | null }>`
+      select ${integrationMetadataColumns(now)}, (${column.expr})::text as sort_value
         from platform.api_key_integrations i
         left join platform.api_keys k
           on k.integration_id = i.id and k.tenant_id = i.tenant_id
-       where i.tenant_id = ${session.tenantId}
+       where ${fence}
+         ${keysetPredicate(column, sql`i.id`, { ...query, ...(query.after ? { after: query.after } : {}) })}
        group by i.id
-       order by i.display_name asc
+       ${orderBy(column, sql`i.id`, query.sortDirection)}
+       ${limitWithProbe(first)}
     `.execute(trx);
 
-    return result.rows.map(listedIntegration);
+    const page = takePage(result.rows, first, Number(counted.rows[0]?.total ?? 0));
+    return {
+      ...page,
+      rows: page.rows.map((row) => ({ ...listedIntegration(row), cursorValue: row.sort_value })),
+    };
   });
 }
 
@@ -481,12 +671,13 @@ export async function getIntegration(
   deps: ApiKeyServiceDeps,
   session: ProvisioningSession,
   integrationId: string,
+  now: Date = new Date(),
 ): Promise<ListedIntegration> {
   assertMayManageApiKeys(session);
 
   return withSession(deps, session, async (trx) => {
     const result = await sql<IntegrationRow>`
-      select ${INTEGRATION_METADATA_COLUMNS}
+      select ${integrationMetadataColumns(now)}
         from platform.api_key_integrations i
         left join platform.api_keys k
           on k.integration_id = i.id and k.tenant_id = i.tenant_id
@@ -551,16 +742,18 @@ export async function disableIntegration(
   assertMayManageApiKeys(session);
 
   const revokedKeys = await withSession(deps, session, async (trx) => {
-    const result = await sql<{ id: string }>`
+    // The same lock `issueKey` takes, in the same order, so a concurrent issue
+    // either waits and then finds this integration disabled, or commits first
+    // and has its key revoked below. See `lockIntegration`.
+    if (!await lockIntegration(trx, session.tenantId, integrationId)) {
+      throw new ApiKeyNotFoundError("No such integration.");
+    }
+    await sql`
       update platform.api_key_integrations
          set status = 'disabled', updated_at = ${now}
        where id = ${integrationId}
          and tenant_id = ${session.tenantId}
-      returning id
     `.execute(trx);
-    if (!result.rows[0]) {
-      throw new ApiKeyNotFoundError("No such integration.");
-    }
 
     // Only rows that were not already revoked are stamped and counted — an
     // expired key included, because expiry is not revocation. The predicate is

@@ -75,6 +75,7 @@ function entity(table: string, name: string, reads: string[]): RecordActionEntit
     aclColumn: "acl",
     actions: ["start"],
     reads: { start: reads.map((field) => ({ field, column: field })) },
+    locks: { start: "exclusive" },
   };
 }
 

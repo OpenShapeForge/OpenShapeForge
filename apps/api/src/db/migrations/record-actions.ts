@@ -45,8 +45,9 @@ import { WORKER_ROLE } from "./worker-role.js";
  *   - `select (<key>, tenant_id, <acl column>)` — column-level, so a `secret`
  *     column on the same row is "permission denied for table", not a leak;
  *   - `update (<acl column>)`, because UPDATE privilege is what PostgreSQL
- *     requires for `FOR SHARE` (an empty modified-column set is admitted by
- *     any column-level UPDATE grant). The resolver may LOCK an ACL row;
+ *     requires for a row lock in either declared mode (an empty
+ *     modified-column set is admitted by any column-level UPDATE grant). The
+ *     resolver may LOCK an ACL row;
  *   - four policies, below, that bound what those privileges can reach.
  *
  * WHY THE PERMISSIVE PAIR IS NOT ENOUGH
@@ -70,7 +71,7 @@ import { WORKER_ROLE } from "./worker-role.js";
  *                                  view-gated row policy would hide;
  *   `<table>_record_action_lock`   permissive, `for update to <resolver>`,
  *                                  same tenant predicate, `with check
- *                                  (false)` — admits `FOR SHARE` on those
+ *                                  (false)` — admits the row lock on those
  *                                  rows and no new row version;
  *   `<table>_record_action_fence`  RESTRICTIVE, `for all to <resolver>`,
  *                                  `using (<owns the table> or tenant_id =
@@ -272,7 +273,7 @@ import { WORKER_ROLE } from "./worker-role.js";
  *
  *   policy change   the ordinary entity UPDATE of the ACL field takes the row
  *                   lock PostgreSQL gives every UPDATE;
- *   runtime check   `for share` inside this function, in the CALLER's
+ *   runtime check   a row lock inside this function, in the CALLER's
  *                   transaction, so it is held for the whole Operation;
  *   effect          runs after the check in that same transaction, under that
  *                   same lock.
@@ -280,6 +281,11 @@ import { WORKER_ROLE } from "./worker-role.js";
  * So a revocation that starts after a check waits for the effect to commit,
  * and a check that starts after a revocation waits for it and then reads the
  * revoked ACL. Neither ordering can interleave a grant with its own removal.
+ *
+ * The STRENGTH of that lock is the action's own declaration, because only the
+ * action's author knows whether its effect writes the record: see
+ * RECORD_ACTION_LOCKS below. The default is the mode under which two parallel
+ * holders cannot deadlock.
  */
 const IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
 const ENTITY_NAME = /^[A-Z][A-Za-z0-9]*$/;
@@ -377,7 +383,14 @@ function fieldNameForColumn(column: { name: string; sourceField?: string }): str
 
 export type ManifestRecordActionTable = {
   schema: string;
+  /**
+   * The registry name, which is NOT always the physical table: a table in a
+   * plugin module's own schema is registered as `<schema>.<table>`. Used in
+   * messages only; the DDL below names {@link ManifestRecordActionTable.table}.
+   */
   name: string;
+  /** The physical table name. */
+  table: string;
   tenantScoped?: boolean;
   columns?: Array<{ name: string; primaryKey?: boolean; type?: string; sourceField?: string }>;
   source?: {
@@ -385,7 +398,12 @@ export type ManifestRecordActionTable = {
     authorization?: {
       recordPermissions?: {
         column: string;
-        actions?: Array<{ name: string; principals: string[]; reads?: string[] }>;
+        actions?: Array<{
+          name: string;
+          principals: string[];
+          reads?: string[];
+          lock?: string;
+        }>;
       };
     };
   };
@@ -405,11 +423,46 @@ export type RecordActionEntity = {
    * discloses nothing.
    */
   reads: Record<string, Array<{ field: string; column: string }>>;
+  /**
+   * Per action, the ACL row lock its check takes. `exclusive` renders `for no
+   * key update`, `shared` renders `for share`; see RECORD_ACTION_LOCKS below
+   * for why that choice belongs to the action rather than to this migration.
+   */
+  locks: Record<string, RecordActionLock>;
 };
+
+export type RecordActionLock = "exclusive" | "shared";
+
+/**
+ * The two lock modes, and what each one does to a concurrent pair.
+ *
+ * `for share` is self-COMPATIBLE: two holders of the same action on the same
+ * record both pass the check, both hold a shared lock on the ACL row, and if
+ * the effect then locks that row more strongly each waits for a lock the
+ * other will not release until it has upgraded. That is a deadlock, and
+ * PostgreSQL resolves it by aborting one transaction. It is not a security
+ * failure, but it is a liveness one, and it appears only under parallel load.
+ *
+ * `for no key update` is self-EXCLUSIVE: the second holder waits at the check
+ * until the first commits, so only one is ever positioned to upgrade and the
+ * deadlock cannot form. It costs serialization of concurrent holders of the
+ * same action on the same record, which is why it is a declared choice: an
+ * action whose effect only reads can afford `shared` and say so.
+ *
+ * Both modes conflict with the ordinary UPDATE of the ACL column (which takes
+ * `for no key update` itself), so the revocation fence is identical under
+ * either: a revocation that starts after a check waits for the effect to
+ * commit, and a check that starts after a revocation waits and then reads the
+ * revoked ACL.
+ */
+export const RECORD_ACTION_LOCKS: Readonly<Record<RecordActionLock, string>> = Object.freeze({
+  exclusive: "for no key update",
+  shared: "for share",
+});
 
 function invalid(table: ManifestRecordActionTable, reason: string): never {
   throw new Error(
-    `Record-action policy for ${table.schema}.${table.name} cannot be deployed: ${reason}. ` +
+    `Record-action policy for ${table.name} cannot be deployed: ${reason}. ` +
       "This is compiled manifest output, so fix the authoring or the compiler rather than this migration.",
   );
 }
@@ -428,13 +481,15 @@ export function recordActionEntities(
     if (!policy?.actions?.length) continue;
     const entity = table.source?.authoringEntityName;
     if (!entity || !ENTITY_NAME.test(entity)) invalid(table, "it declares no usable authoring entity name");
-    if (!IDENTIFIER.test(table.schema) || !IDENTIFIER.test(table.name)) {
+    if (!IDENTIFIER.test(table.schema) || !IDENTIFIER.test(table.table)) {
       invalid(table, "its schema or table name is not a plain lowercase identifier");
     }
-    // The four policies are named after the table. PostgreSQL would truncate
-    // them at 63 bytes and collapse all four into one.
-    if (table.name.length + LONGEST_POLICY_SUFFIX.length > 63) {
-      invalid(table, `its name leaves no room for a "${LONGEST_POLICY_SUFFIX}" policy name within 63 bytes`);
+    // The four policies are named after the PHYSICAL table, as policyName()
+    // renders them -- not the registry name, which carries a schema prefix
+    // for a plugin module's own table. PostgreSQL would truncate them at 63
+    // bytes and collapse all four into one.
+    if (table.table.length + LONGEST_POLICY_SUFFIX.length > 63) {
+      invalid(table, `its table name leaves no room for a "${LONGEST_POLICY_SUFFIX}" policy name within 63 bytes`);
     }
     if (!IDENTIFIER.test(policy.column)) invalid(table, `ACL column "${policy.column}" is not a plain lowercase identifier`);
     // Tenant isolation is enforced INSIDE the function by comparing
@@ -462,7 +517,16 @@ export function recordActionEntities(
       }
     }
     const reads: RecordActionEntity["reads"] = {};
+    const locks: RecordActionEntity["locks"] = {};
     for (const action of policy.actions) {
+      // The compiler emits the mode on every action, so an absent one means
+      // the manifest predates the field rather than that the author chose.
+      // Take the safe mode either way; never guess "shared".
+      const lock = action.lock ?? "exclusive";
+      if (lock !== "exclusive" && lock !== "shared") {
+        invalid(table, `action "${action.name}" declares lock "${lock}", which is neither exclusive nor shared`);
+      }
+      locks[action.name] = lock;
       const projection: Array<{ field: string; column: string }> = [];
       for (const field of [...new Set(action.reads ?? [])].sort()) {
         // The field NAME is a key of the returned jsonb document, so it is
@@ -496,23 +560,24 @@ export function recordActionEntities(
     entities.push({
       entity: entity!,
       schema: table.schema,
-      table: table.name,
+      table: table.table,
       keyColumn: key!.name,
       keyIsUuid: key!.type === "uuid",
       aclColumn: policy.column,
       actions,
       reads,
+      locks,
     });
   }
   return entities.sort((left, right) => left.entity.localeCompare(right.entity));
 }
 
 /**
- * The one row both bodies address: the record this key names, inside the
+ * The one row every body addresses: the record this key names, inside the
  * session's tenant. The key column is the table's single primary key, so this
  * matches at most one row — which is what lets `select ... into` answer
- * without an ordering, and what makes the `FOR SHARE` of the lookup and of
- * the projection the same lock.
+ * without an ordering, and what makes the lock the lookup takes and the lock
+ * the projection takes the same lock.
  */
 function recordPredicate(entity: RecordActionEntity): string {
   const key = entity.keyIsUuid
@@ -521,31 +586,45 @@ function recordPredicate(entity: RecordActionEntity): string {
   return `${key} and t.${ident("tenant_id")} = app.current_tenant()`;
 }
 
-/** The fixed `case` body. Deterministic for a given manifest. */
+/**
+ * The ACL row lock an action's check takes, rendered as its SQL clause.
+ *
+ * An action the manifest carries no mode for predates the field; take the
+ * self-exclusive mode rather than guess the permissive one.
+ */
+function lockClause(entity: RecordActionEntity, action: string): string {
+  return RECORD_ACTION_LOCKS[entity.locks[action] ?? "exclusive"];
+}
+
+/**
+ * The fixed `case` body. Deterministic for a given manifest.
+ *
+ * One branch per (entity, action), not per entity, because the lock mode is a
+ * property of the ACTION: a definition's read-only `follow` and its
+ * record-writing `start` live on the same row and must not be forced to share
+ * a lock strength. The pair is the `case` label, so an entity or action the
+ * compiler did not authorize reaches the `else` and is a plain refusal — no
+ * raise, because an exception would abort the caller's transaction and a
+ * caller could read that as something other than a denial. A key that is not
+ * a key refuses the same way.
+ */
 export function renderRecordActionLookup(entities: readonly RecordActionEntity[]): string {
-  if (entities.length === 0) {
-    return "      -- No entity declares a record action in this deployment.\n      return false;";
-  }
-  const branches = entities.map((entity) => {
-    const allowed = entity.actions.map(actionLiteral).join(", ");
-    return [
-      `        when ${entityLiteral(entity.entity)} then`,
-      // Both guards return rather than raise. An exception would abort the
-      // caller's transaction, which a caller could catch and read as something
-      // other than a denial; a key that is not a key, and an action this
-      // entity does not declare, are plain refusals.
-      `          if action not in (${allowed}) then return false; end if;`,
+  const branches = entities.flatMap((entity) =>
+    entity.actions.map((action) => [
+      `        when ${projectionLabel(entity.entity, action)} then`,
       ...(entity.keyIsUuid
         ? [`          if record_key !~* ${UUID_LITERAL} then return false; end if;`]
         : []),
       `          select t.${ident(entity.aclColumn)} into document`,
       `            from ${ident(entity.schema, entity.table)} t`,
       `           where ${recordPredicate(entity)}`,
-      `           for share;`,
-    ].join("\n");
-  });
+      `           ${lockClause(entity, action)};`,
+    ].join("\n")));
+  if (branches.length === 0) {
+    return "      -- No entity declares a record action in this deployment.\n      return false;";
+  }
   return [
-    "      case entity",
+    "      case entity || ':' || action",
     ...branches,
     "        else return false;",
     "      end case;",
@@ -561,13 +640,16 @@ export function renderRecordActionLookup(entities: readonly RecordActionEntity[]
  * the ACL and tenant columns are refused outright, so the projection cannot
  * name the row's own policy or widen past the record.
  *
- * It repeats the `FOR SHARE` of the lookup rather than inheriting it. The
- * lookup already locked this row in this same transaction — `record_action_read`
+ * It repeats the action's declared lock rather than inheriting it. The lookup
+ * already locked this row in this same transaction — `record_action_read`
  * calls `record_action_allows` first and a SECURITY DEFINER call takes no
  * subtransaction, so the lock is the caller's and is held to commit — and
- * re-locking the row it already holds costs nothing. Stating it here is what
- * makes the projection's guarantee local: whatever reorders the two bodies
- * later, the ACL this payload was authorized against cannot change under it.
+ * re-locking the row it already holds in the same mode costs nothing. Stating
+ * it here is what makes the projection's guarantee local: whatever reorders
+ * the two bodies later, the ACL this payload was authorized against cannot
+ * change under it. Naming the SAME mode is what keeps that free: a weaker
+ * clause here would be a no-op the reader has to reason about, and a stronger
+ * one would reintroduce the upgrade the declaration exists to avoid.
  */
 export function renderRecordActionProjection(
   entities: readonly RecordActionEntity[],
@@ -582,7 +664,7 @@ export function renderRecordActionProjection(
         `          select jsonb_build_object(${object}) into payload`,
         `            from ${ident(entity.schema, entity.table)} t`,
         `           where ${recordPredicate(entity)}`,
-        `           for share;`,
+        `           ${lockClause(entity, action)};`,
       ].join("\n");
     }));
   if (branches.length === 0) {
@@ -1413,7 +1495,7 @@ ${renderRecordActionLookup(entities)}
       payload jsonb;
     begin
       -- The authorization is not re-implemented here: the same lookup decides,
-      -- and the FOR SHARE lock it takes covers this read too, so the
+      -- and the ACL row lock it takes covers this read too, so the
       -- projection cannot come from a row whose grant has since changed.
       if not app.record_action_allows(entity, record_key, action) then
         return null;

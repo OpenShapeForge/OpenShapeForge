@@ -33,6 +33,9 @@ import {
 } from "../migrations/record-actions.js";
 import { databaseRole } from "../database-roles.js";
 import { withDbSession, type DbSessionInput } from "../session.js";
+import { mintApiKey } from "../../auth/api-key/format.js";
+import { resolveApiKeySession } from "../../auth/api-key/resolve.js";
+import { encryptSecret, type SecretKeyring } from "../../platform/secrets.js";
 
 const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL ??
   "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
@@ -56,7 +59,7 @@ const SHARED_ROLE = "Runs.All.Operate";
  */
 const MEMBER_ROLE = `osf_resolver_member_${randomUUID().replaceAll("-", "").slice(0, 10)}`;
 
-/** Three entities, so nothing can pass by being the only branch in the case. */
+/** Four entities, so nothing can pass by being the only branch in the case. */
 const RUN = "ActionRun";
 const DOC = "ActionDoc";
 /**
@@ -67,6 +70,15 @@ const DOC = "ActionDoc";
  * they pass for the wrong reason.
  */
 const TICKET = "ActionTicket";
+/**
+ * The lock-mode entity. Its ACL is `empty: public` for the three human
+ * permissions and it names no view subject, so the row IS readable by the
+ * acting session — the shape an entity takes when it holds its own
+ * application grants beside ordinary human access. That is what makes an
+ * effect's `for update` on the same row possible, and therefore what makes
+ * the lock-upgrade question real rather than hypothetical.
+ */
+const JOB = "ActionJob";
 const runRow = randomUUID();
 const runRowTenantB = randomUUID();
 const docRow = randomUUID();
@@ -77,6 +89,10 @@ const lockRowCheckFirst = randomUUID();
 const lockRowRevokeFirst = randomUUID();
 /** The record the projection is read from while a revocation contends. */
 const lockRowRead = randomUUID();
+/** One record per parallel-holder pairing, for the same reason. */
+const jobRowShared = randomUUID();
+const jobRowExclusive = randomUUID();
+const jobRowSharedFence = randomUUID();
 
 const entities: RecordActionEntity[] = [
   {
@@ -92,16 +108,28 @@ const entities: RecordActionEntity[] = [
         { field: "status", column: "status" },
       ],
     },
+    // `start` writes the record it is authorized on, so it takes the
+    // self-exclusive lock; `follow` only reads, and declares the shared one.
+    // Both are exercised below, including the deadlock `shared` admits.
+    locks: { follow: "shared", start: "exclusive" },
   },
   {
     entity: DOC, schema: "erp", table: "action_docs",
     keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
-    actions: ["publish"], reads: {},
+    actions: ["publish"], reads: {}, locks: { publish: "exclusive" },
+  },
+  {
+    entity: JOB, schema: "erp", table: "action_jobs",
+    keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
+    // The same question twice, once per lock mode, so the pairing below
+    // differs in nothing but the mode the action declared.
+    actions: ["claimExclusive", "claimShared"], reads: {},
+    locks: { claimExclusive: "exclusive", claimShared: "shared" },
   },
   {
     entity: TICKET, schema: "erp", table: "action_tickets",
     keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
-    actions: ["close"], reads: {},
+    actions: ["close"], reads: {}, locks: { close: "exclusive" },
   },
 ];
 
@@ -165,7 +193,7 @@ beforeAll(async () => {
       // The shape the compiler emits for an ACL-bearing entity, including the
       // unchanged view-gated row policy. `action_docs` keeps empty=public, the
       // default a human ACL ships with, so the tests can show it still works.
-      const emptyIsPublic = entity.entity === DOC;
+      const emptyIsPublic = entity.entity === DOC || entity.entity === JOB;
       await sql`
         create table ${table} (
           id uuid primary key,
@@ -236,6 +264,28 @@ beforeAll(async () => {
         })}'::jsonb`)}),
         (${ticketRowTenantB}::uuid, ${tenantB}::uuid, 'ticket-b-secret', ${sql.raw(`'${JSON.stringify({
           actions: { close: { integrations: [integration] } },
+        })}'::jsonb`)})
+    `.execute(conn);
+    // The lock-mode rows: both claims granted to the integration, and no view
+    // subject at all, which under `empty: public` leaves the row readable.
+    await sql`
+      insert into erp.action_jobs (id, tenant_id, secret, acl) values
+        (${jobRowShared}::uuid, ${tenantA}::uuid, 'job-shared', ${sql.raw(`'${JSON.stringify({
+          actions: {
+            claimShared: { integrations: [integration] },
+            claimExclusive: { integrations: [integration] },
+          },
+        })}'::jsonb`)}),
+        (${jobRowExclusive}::uuid, ${tenantA}::uuid, 'job-exclusive', ${sql.raw(`'${JSON.stringify({
+          actions: {
+            claimShared: { integrations: [integration] },
+            claimExclusive: { integrations: [integration] },
+          },
+        })}'::jsonb`)}),
+        (${jobRowSharedFence}::uuid, ${tenantA}::uuid, 'job-fence', ${sql.raw(`'${JSON.stringify({
+          view: { users: [otherPerson] },
+          edit: { users: [otherPerson] },
+          actions: { claimShared: { integrations: [integration] } },
         })}'::jsonb`)})
     `.execute(conn);
     await applyRecordActionsMigration(conn, entities);
@@ -383,6 +433,99 @@ describe("verified principal class decides which subjects apply", () => {
       `.execute(trx)).rows[0]!);
     expect(next).toEqual({ class: "service", principal: null });
     expect(await allows(app.db, withoutPrincipal, RUN, runRow, "start")).toBe(false);
+  }, TEST_TIMEOUT);
+});
+
+
+/**
+ * The application principal through the REAL credential path.
+ *
+ * The integration rows, the key rows, the secret comparison, the role
+ * intersection and the session assembly are all the shipped code; only the
+ * token exchange and the JWKS verification are stubbed, because a realm is
+ * not what is under test. This is what says the `integrations` subject of an
+ * ACL is matched against a value that came out of `platform.api_keys`, and not
+ * out of anything a holder presented.
+ */
+describe("an API-key credential resolves to the integration it names", () => {
+  const keyring: SecretKeyring = {
+    activeKeyId: "k1", keys: new Map([["k1", Buffer.alloc(32, 7)]]),
+  };
+  const serviceAccountUserId = randomUUID();
+
+  async function provisionIntegration(integrationId: string): Promise<void> {
+    const secret = encryptSecret(keyring, integrationId, "clientSecret", "client-secret");
+    await admin.db.connection().execute(async (conn) => {
+      await sql`insert into platform.api_key_integrations
+          (id, tenant_id, display_name, keycloak_client_id, status, granted_roles,
+           client_secret_ciphertext, client_secret_key_id, client_secret_algorithm, created_by)
+        values (${integrationId}::uuid, ${tenantA}::uuid, 'Partner robot',
+          ${`osf-int-${integrationId}`}, 'active', cast('[]' as jsonb),
+          ${secret.ciphertext}, ${secret.keyId}, ${secret.algorithm}, ${randomUUID()}::uuid)
+      `.execute(conn);
+    });
+  }
+
+  async function issueKey(integrationId: string): Promise<string> {
+    const minted = mintApiKey();
+    await admin.db.connection().execute(async (conn) => {
+      await sql`insert into platform.api_keys
+          (id, tenant_id, integration_id, lookup_id, secret_hash, display_name, created_by)
+        values (${randomUUID()}::uuid, ${tenantA}::uuid, ${integrationId}::uuid,
+          ${minted.lookupId}, ${minted.secretHash}, 'key', ${randomUUID()}::uuid)
+      `.execute(conn);
+    });
+    return minted.token;
+  }
+
+  async function resolve(token: string) {
+    return resolveApiKeySession({
+      db: app.db,
+      keyring,
+      issuer: "https://identity.example/realms/test",
+      verifyToken: async () => ({
+        tenantId: tenantA, userId: serviceAccountUserId, roles: [SHARED_ROLE], groups: [],
+      }),
+      resolveScope: () => "tenant",
+      fetch: (async () => new Response(
+        JSON.stringify({ access_token: "token", expires_in: 60 }), { status: 200 },
+      )) as unknown as typeof fetch,
+    }, token);
+  }
+
+  test("the session names the integration and the record action then applies", async () => {
+    await provisionIntegration(integration);
+    const session = await resolve(await issueKey(integration));
+    expect(session).toBeDefined();
+    expect(session!.credential).toBe("api-key");
+    expect(session!.principalKind).toBe("service");
+    expect(session!.appPrincipal).toEqual({ integrationId: integration });
+    // The grant in the fixture names this integration, and here it is being
+    // matched against a value the store produced.
+    expect(await allows(app.db, session as DbSessionInput, RUN, runRow, "start")).toBe(true);
+    // The same session holds SHARED_ROLE, which the doc's person-only
+    // `publish` entry names. An application still gets nothing from it.
+    expect(session!.roles).toContain(SHARED_ROLE);
+    expect(await allows(app.db, session as DbSessionInput, DOC, docRow, "publish")).toBe(false);
+  }, TEST_TIMEOUT);
+
+  test("a second credential of the same integration is the same principal", async () => {
+    const rotated = await resolve(await issueKey(integration));
+    expect(rotated!.appPrincipal).toEqual({ integrationId: integration });
+    expect(await allows(app.db, rotated as DbSessionInput, RUN, runRow, "start")).toBe(true);
+  }, TEST_TIMEOUT);
+
+  test("a different integration is a different principal and holds nothing", async () => {
+    const stranger = randomUUID();
+    await provisionIntegration(stranger);
+    const session = await resolve(await issueKey(stranger));
+    expect(session!.appPrincipal).toEqual({ integrationId: stranger });
+    expect(await allows(app.db, session as DbSessionInput, RUN, runRow, "start")).toBe(false);
+  }, TEST_TIMEOUT);
+
+  test("an unknown credential resolves to no session, so to no principal", async () => {
+    expect(await resolve(mintApiKey().token)).toBeUndefined();
+    expect(await resolve("osf_live_not_a_key")).toBeUndefined();
   }, TEST_TIMEOUT);
 });
 
@@ -666,15 +809,21 @@ describe("the definer role is bounded", () => {
       expect(other).toBe(0);
     });
 
-    test("the lock the lookup takes is still legal under all four policies", async () => {
-      const locked = await asResolver(async (conn) =>
-        (await sql<{ acl: unknown }>`
-          select acl from erp.action_runs
-           where id = ${runRow}::uuid and tenant_id = app.current_tenant()
-           for share
-        `.execute(conn)).rows.length);
-      expect(locked).toBe(1);
-    });
+    // Both declared modes, because the fence's `with check (false)` and the
+    // restrictive `using` have to admit a LOCK while refusing a write, and
+    // `for no key update` — the default mode, and the stronger one — is the
+    // clause most of the rendered branches actually carry.
+    for (const clause of ["for share", "for no key update"]) {
+      test(`the ${clause} lock the lookup takes is still legal under all four policies`, async () => {
+        const locked = await asResolver(async (conn) =>
+          (await sql<{ acl: unknown }>`
+            select acl from erp.action_runs
+             where id = ${runRow}::uuid and tenant_id = app.current_tenant()
+             ${sql.raw(clause)}
+          `.execute(conn)).rows.length);
+        expect(locked).toBe(1);
+      });
+    }
 
     test("it can neither insert nor delete, by privilege and by policy", async () => {
       await expect(asResolver((conn) =>
@@ -802,10 +951,25 @@ describe("the definer role is bounded", () => {
     });
   });
 
-  test("the shipped manifest declares no record-action entity yet, so the lookup denies everything", () => {
-    // Opt-in means opt-in: nothing in this repository's authoring carries the
-    // axis, so no production table is reachable through the function today.
-    expect(recordActionEntities()).toEqual([]);
+  test("the shipped manifest declares exactly one record-action entity", () => {
+    // Opt-in means opt-in. `Notebook`, through the notebook example plugin,
+    // is the only authoring in this repository that carries the axis, with
+    // one action, one declared read field and the safe lock mode, so no
+    // other production table is reachable through the function. Pinned in
+    // full rather than counted: a widened projection, a second action, a
+    // weakened lock, or the registry key leaking in where the physical
+    // table belongs all show up here.
+    expect(recordActionEntities()).toEqual([{
+      entity: "Notebook",
+      schema: "notebook",
+      table: "notebooks",
+      keyColumn: "id",
+      keyIsUuid: true,
+      aclColumn: "permissions",
+      actions: ["deliver"],
+      reads: { deliver: [{ field: "name", column: "name" }] },
+      locks: { deliver: "exclusive" },
+    }]);
   });
 });
 
@@ -816,8 +980,8 @@ describe("the definer role is bounded", () => {
  *
  *   policy change   the ordinary UPDATE of the ACL field takes the row lock
  *                   PostgreSQL gives every UPDATE;
- *   runtime check   `for share` inside app.record_action_allows, in the
- *                   caller's transaction;
+ *   runtime check   the action's declared row lock inside
+ *                   app.record_action_allows, in the caller's transaction;
  *   effect          after the check, in that same transaction, under that
  *                   same lock.
  *
@@ -907,10 +1071,11 @@ describe("the lock ordering serializes a policy change against a check", () => {
   /**
    * The projection is a SECOND statement, after the check that authorized it.
    * It holds because `record_action_read` calls `record_action_allows` first
-   * and a SECURITY DEFINER call takes no subtransaction: the `FOR SHARE` is
-   * the CALLER's, held to commit, and the projection's own `FOR SHARE` on the
-   * same primary key and tenant re-locks a row this transaction already holds.
-   * So a revocation cannot commit between the two, which is what this drives.
+   * and a SECURITY DEFINER call takes no subtransaction: the lock `start`
+   * declared (`exclusive`, so `for no key update`) is the CALLER's, held to
+   * commit, and the projection's own clause on the same primary key and tenant
+   * re-locks in that same mode a row this transaction already holds. So a
+   * revocation cannot commit between the two, which is what this drives.
    */
   test("the payload cannot come from a row a revocation changed mid-call", async () => {
     const reader = createDatabaseRuntime({ databaseUrl: url(scratch, true), maxConnections: 1 });
@@ -971,6 +1136,186 @@ describe("the lock ordering serializes a policy change against a check", () => {
       // live now. A READ COMMITTED re-read after the lock is released is what
       // makes this the committed answer rather than a stale snapshot.
       expect(await checking).toBe(false);
+    } finally {
+      await checker.close();
+      await revoker.close();
+    }
+  }, TEST_TIMEOUT);
+});
+
+/**
+ * What the ACTION's declared lock mode does to two holders in parallel.
+ *
+ * The check and the effect are one transaction, with the check's row lock
+ * taken first. If the effect then needs a stronger lock on that same row, the
+ * strength the check took decides whether two parallel holders serialize or
+ * deadlock:
+ *
+ *   shared     both pass the check holding a shared lock, both try to upgrade,
+ *              and each waits for the other to let go. PostgreSQL detects the
+ *              cycle and aborts one transaction (SQLSTATE 40P01).
+ *   exclusive  the second holder waits at the CHECK. Only one holder is ever
+ *              positioned to upgrade, so there is no cycle to detect.
+ *
+ * Both are driven on two separate restricted connections against real
+ * transactions, and the serialization is asserted on pg_blocking_pids rather
+ * than on a sleep. The deadlock case is here deliberately: it is the proof
+ * that `exclusive` is load-bearing and not a precaution, and the reason it is
+ * the default a silent manifest compiles to.
+ */
+describe("the declared lock decides what two parallel holders do", () => {
+  const machine = () => session({
+    userId: randomUUID(), principalKind: "service",
+    appPrincipal: { integrationId: integration },
+  });
+
+  async function labelledJob<T>(
+    runtime: DatabaseRuntime,
+    label: string,
+    work: (trx: Transaction<DB>) => Promise<T>,
+  ): Promise<T> {
+    return withDbSession(runtime.db, machine(), async (trx) => {
+      await sql`select set_config('application_name', ${label}, false)`.execute(trx);
+      // deadlock_timeout is not settable by the restricted app role, so the
+      // deadlock case waits out the server default (1s) before PostgreSQL
+      // looks for a cycle. That is the real deployment's behaviour too.
+      return work(trx);
+    });
+  }
+
+  async function blocked(label: string): Promise<boolean> {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const count = await admin.db.connection().execute(async (conn) =>
+        (await sql<{ count: number }>`
+          select count(*)::int as count
+            from pg_stat_activity
+           where application_name = ${label}
+             and cardinality(pg_blocking_pids(pid)) > 0
+        `.execute(conn)).rows[0]!.count);
+      if (count > 0) return true;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return false;
+  }
+
+  /** The effect: the row-exclusive lock a handler that writes the record takes. */
+  async function lockForUpdate(trx: Transaction<DB>, row: string): Promise<number> {
+    const result = await sql<{ id: string }>`
+      select id from erp.action_jobs where id = ${row}::uuid for update
+    `.execute(trx);
+    return result.rows.length;
+  }
+
+  test("shared lets both through the check and then deadlocks on the upgrade", async () => {
+    const first = createDatabaseRuntime({ databaseUrl: url(scratch, true), maxConnections: 1 });
+    const second = createDatabaseRuntime({ databaseUrl: url(scratch, true), maxConnections: 1 });
+    try {
+      const bothChecked = Promise.withResolvers<void>();
+      let checked = 0;
+      const holder = (runtime: DatabaseRuntime, label: string) =>
+        labelledJob(runtime, label, async (trx) => {
+          const allowed = (await sql<{ allowed: boolean | null }>`
+            select app.record_action_allows(${JOB}, ${jobRowShared}, 'claimShared') as allowed
+          `.execute(trx)).rows[0]?.allowed === true;
+          expect(allowed).toBe(true);
+          checked += 1;
+          if (checked === 2) bothChecked.resolve();
+          await bothChecked.promise;
+          // Both now hold a SHARED lock on the ACL row and both want it
+          // exclusively. Neither can have it.
+          return lockForUpdate(trx, jobRowShared);
+        });
+      const outcomes = await Promise.allSettled([
+        holder(first, "ra-shared-1"),
+        holder(second, "ra-shared-2"),
+      ]);
+      // Exactly one transaction survives; the other is the deadlock victim.
+      const failures = outcomes.filter((outcome) => outcome.status === "rejected");
+      expect(failures).toHaveLength(1);
+      expect(String((failures[0] as PromiseRejectedResult).reason)).toMatch(/deadlock/i);
+      expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    } finally {
+      await first.close();
+      await second.close();
+    }
+  }, TEST_TIMEOUT);
+
+  test("exclusive serializes at the check, so the upgrade is safe", async () => {
+    const first = createDatabaseRuntime({ databaseUrl: url(scratch, true), maxConnections: 1 });
+    const second = createDatabaseRuntime({ databaseUrl: url(scratch, true), maxConnections: 1 });
+    try {
+      const firstChecked = Promise.withResolvers<void>();
+      const firstDone = Promise.withResolvers<void>();
+      const order: string[] = [];
+      const leader = labelledJob(first, "ra-exclusive-1", async (trx) => {
+        const allowed = (await sql<{ allowed: boolean | null }>`
+          select app.record_action_allows(${JOB}, ${jobRowExclusive}, 'claimExclusive') as allowed
+        `.execute(trx)).rows[0]?.allowed === true;
+        expect(allowed).toBe(true);
+        firstChecked.resolve();
+        await firstDone.promise;
+        const rows = await lockForUpdate(trx, jobRowExclusive);
+        order.push("leader");
+        return rows;
+      });
+      await firstChecked.promise;
+      const follower = labelledJob(second, "ra-exclusive-2", async (trx) => {
+        const allowed = (await sql<{ allowed: boolean | null }>`
+          select app.record_action_allows(${JOB}, ${jobRowExclusive}, 'claimExclusive') as allowed
+        `.execute(trx)).rows[0]?.allowed === true;
+        expect(allowed).toBe(true);
+        const rows = await lockForUpdate(trx, jobRowExclusive);
+        order.push("follower");
+        return rows;
+      });
+      // The follower is held at its CHECK — before it holds anything the
+      // leader needs — which is the whole point of the mode.
+      expect(await blocked("ra-exclusive-2")).toBe(true);
+      firstDone.resolve();
+      expect(await leader).toBe(1);
+      expect(await follower).toBe(1);
+      expect(order).toEqual(["leader", "follower"]);
+    } finally {
+      await first.close();
+      await second.close();
+    }
+  }, TEST_TIMEOUT);
+
+  test("the revocation fence is the same under the shared mode", async () => {
+    // The weaker mode trades parallel holders for nothing else: a concurrent
+    // ACL change still cannot interleave with a check in flight.
+    const checker = createDatabaseRuntime({ databaseUrl: url(scratch, true), maxConnections: 1 });
+    const revoker = createDatabaseRuntime({ databaseUrl: url(scratch, true), maxConnections: 1 });
+    try {
+      const checked = Promise.withResolvers<void>();
+      const effectDone = Promise.withResolvers<void>();
+      const checking = labelledJob(checker, "ra-shared-fence-check", async (trx) => {
+        const allowed = (await sql<{ allowed: boolean | null }>`
+          select app.record_action_allows(${JOB}, ${jobRowSharedFence}, 'claimShared') as allowed
+        `.execute(trx)).rows[0]?.allowed === true;
+        checked.resolve();
+        await effectDone.promise;
+        return allowed;
+      });
+      await checked.promise;
+      const revoking = withDbSession(
+        revoker.db,
+        session({ userId: otherPerson, principalKind: "person" }),
+        async (trx) => {
+          await sql`select set_config('application_name', 'ra-shared-fence-revoke', false)`.execute(trx);
+          await sql`update erp.action_jobs
+            set acl = ${sql.raw(`'${JSON.stringify({
+              view: { users: [otherPerson] }, edit: { users: [otherPerson] }, actions: {},
+            })}'::jsonb`)}
+            where id = ${jobRowSharedFence}::uuid`.execute(trx);
+          return "revoked" as const;
+        },
+      );
+      expect(await blocked("ra-shared-fence-revoke")).toBe(true);
+      effectDone.resolve();
+      expect(await checking).toBe(true);
+      expect(await revoking).toBe("revoked");
+      expect(await allows(app.db, machine(), JOB, jobRowSharedFence, "claimShared")).toBe(false);
     } finally {
       await checker.close();
       await revoker.close();

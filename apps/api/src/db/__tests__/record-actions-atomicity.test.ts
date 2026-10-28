@@ -47,6 +47,7 @@ function entity(reads: RecordActionEntity["reads"] = {
   return {
     entity: "ActionSwap", schema: "erp", table: TABLE,
     keyColumn: "id", keyIsUuid: true, aclColumn: "acl", actions: ["start"], reads,
+    locks: { start: "exclusive" },
   };
 }
 
@@ -111,6 +112,7 @@ describe("the record-action step replaces its grants and policies atomically", (
         {
           entity: "ActionUnbounded", schema: "erp", table: "action_unbounded",
           keyColumn: "id", keyIsUuid: true, aclColumn: "acl", actions: ["start"], reads: {},
+          locks: { start: "exclusive" },
         },
       ])).rejects.toThrow(/row level security is not enabled on it/);
       const unbounded = await sql<{ count: number }>`

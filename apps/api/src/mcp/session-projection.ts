@@ -17,6 +17,8 @@
 import { collectionMutationError } from "../operations/entity/collection-policy.js";
 import { GENERIC_DESCRIBE_TOOL_NAME } from "@openshapeforge/operations";
 import type { DbSessionInput } from "../db/session.js";
+import { entityAdmitsPrincipal } from "../operations/entity/principal-classes.js";
+import type { GeneratedCrudTable } from "../operations/entity/types.js";
 import { getEntityOperationContracts, isGeneratedCrudOperationEnabled } from "../operations/entity/index.js";
 import { EDIT_LEASE_TOOL_NAMES } from "./edit-lease-tools.js";
 import { ONBOARDING_TOOL_NAMES } from "./onboarding.js";
@@ -51,7 +53,11 @@ export function sessionMayInvoke(
     table?.source?.authorization?.roles?.[OPERATION_ROLE[operation]];
   if (!required || required.length === 0) return false;
   const granted = new Set(session.roles ?? []);
-  return required.some((role) => granted.has(role));
+  if (!required.some((role) => granted.has(role))) return false;
+  // The entity's principal-class policy, mirrored from requireEntityOperation
+  // for the same reason the role check is: a tool this session could not call
+  // belongs out of the listing rather than in it as a later refusal.
+  return entityAdmitsPrincipal(table as GeneratedCrudTable, session);
 }
 
 /**

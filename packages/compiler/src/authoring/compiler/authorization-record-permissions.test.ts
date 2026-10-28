@@ -110,21 +110,72 @@ describe("named record actions", () => {
     persisted: { column: key, storageClass: "core" }, ...overrides,
   });
 
-  test("compiles declared actions, sorted, with their principals and reads", () => {
+  test("compiles declared actions, sorted, with their principals, reads and lock", () => {
     const compiled = buildAuthorization(
       withActions(
         [
           { name: "start", principals: ["integration"], reads: ["status", "definition"] },
-          { name: "follow", principals: ["integration", "person"] },
+          { name: "follow", principals: ["integration", "person"], lock: "shared" },
         ],
         [storedField("definition"), storedField("status")],
       ),
       [], [],
     );
+    // `lock` is always emitted, so the manifest states the mode each action
+    // was compiled with rather than leaving the migration to re-apply a
+    // default a later release might change.
     expect(compiled.rowAccess!.recordPermissions!.actions).toEqual([
-      { name: "follow", principals: ["integration", "person"] },
-      { name: "start", principals: ["integration"], reads: ["definition", "status"] },
+      { name: "follow", principals: ["integration", "person"], lock: "shared" },
+      { name: "start", principals: ["integration"], reads: ["definition", "status"], lock: "exclusive" },
     ]);
+  });
+
+  test("refuses a lock mode that is neither exclusive nor shared", () => {
+    expect(() => buildAuthorization(
+      withActions([{ name: "start", principals: ["integration"], lock: "none" }]), [], [],
+    )).toThrow(/must be "exclusive"/);
+  });
+
+  test("an integration action derives a principal-class policy that excludes applications", () => {
+    // The hole: the application's key may hold this entity's read role on its
+    // service account, and generated CRUD and derived search ask only for the
+    // role. An entity that hands an application ONE record by grant has not
+    // agreed to hand it the collection.
+    const compiled = buildAuthorization(
+      withActions([{ name: "start", principals: ["integration"] }]), [], [],
+    );
+    expect(compiled.principalClasses).toEqual(["person", "service", "unknown"]);
+  });
+
+  test("a person-only action derives nothing, and no action derives nothing", () => {
+    expect(buildAuthorization(
+      withActions([{ name: "approve", principals: ["person"] }]), [], [],
+    ).principalClasses).toBeUndefined();
+    expect(buildAuthorization(entity(), [], []).principalClasses).toBeUndefined();
+  });
+
+  test("an authored list wins over the derivation, in either direction", () => {
+    const authored = (classes: string[]) => {
+      const base = withActions([{ name: "start", principals: ["integration"] }]);
+      base.authorization!.principalClasses = classes as never;
+      return base;
+    };
+    // Re-admitting applications is a decision with a reviewer, not an omission.
+    expect(buildAuthorization(authored(["application", "person"]), [], []).principalClasses)
+      .toEqual(["application", "person"]);
+    // And an entity with no action may still close itself.
+    const closed = entity();
+    closed.authorization!.principalClasses = ["person"];
+    expect(buildAuthorization(closed, [], []).principalClasses).toEqual(["person"]);
+  });
+
+  test("refuses an empty or unknown principal class", () => {
+    for (const classes of [[], ["anonymous"], ["person", "robot"]]) {
+      const base = entity();
+      base.authorization!.principalClasses = classes as never;
+      expect(() => buildAuthorization(base, [], []))
+        .toThrow(/authorization\.principalClasses must list at least one of/);
+    }
   });
 
   test("an entity that declares nothing carries no action axis at all", () => {

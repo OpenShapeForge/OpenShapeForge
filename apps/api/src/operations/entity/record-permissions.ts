@@ -448,9 +448,12 @@ export function assertRecordPermission(
  *   - the entity, its ACL column and its declared actions are compiled into
  *     that function. Only an entity name, a record key and an action name
  *     cross the boundary, so nothing a caller supplies can widen it;
- *   - the ACL row is locked `for share` in THIS transaction and held until it
- *     commits. That is the single lock ordering: ACL row first, then the
- *     effect, with a concurrent policy change waiting its turn either side.
+ *   - the ACL row is locked in THIS transaction and held until it commits.
+ *     That is the single lock ordering: ACL row first, then the effect, with
+ *     a concurrent policy change waiting its turn either side. The strength
+ *     is the action's declared `lock` — `exclusive` by default, so two
+ *     parallel holders serialize here instead of deadlocking when the effect
+ *     locks the same record more strongly.
  */
 export async function assertRecordActionInTransaction(
   trx: Transaction<DB>,

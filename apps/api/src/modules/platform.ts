@@ -27,6 +27,7 @@ import type {
 } from "@openshapeforge/plugin-runtime";
 import {
   executeEntityOperation,
+  entityOperationAdmitsPrincipal,
   getEntityOperationContracts,
   tableForEntityOperation,
 } from "../operations/entity/index.js";
@@ -59,6 +60,7 @@ import { operationErrorOf } from "@openshapeforge/operations";
 import { ArtifactStorageRuntime } from "./artifact-storage.js";
 import { runtimeSettings } from "./settings.js";
 import { RecordAccessRuntime } from "./record-access.js";
+import { PrincipalRuntime } from "./principals.js";
 import { createWebhookSecretServices } from "./webhook-secrets.js";
 import { ReadProgressRuntime, type ReadProgressDefinition } from "./read-progress.js";
 import type { RuntimeReadProgress } from "@openshapeforge/plugin-runtime";
@@ -71,6 +73,7 @@ import {
 import { CapabilityGrantNotFoundError } from "../operations/grants-operations.js";
 import { actingRelationId } from "../db/acting-relation.js";
 import { generatedCrudTools, matchNativeCrudTool } from "../mcp/native-crud-tool.js";
+import { withAdmittedRecordAction } from "../operations/entity/record-action-admission.js";
 
 function contractPreconditionFailure(
   definition: RuntimeOperationDefinition,
@@ -258,20 +261,43 @@ function controlDatabaseActorId(issuer: string, subject: string): string {
 }
 
 /**
- * Mint an object-identity capability from a core-verified session. The clone
- * prevents a module from mutating core's session object; freezing every nested
- * authority-bearing array prevents widening the clone.
+ * Mint an object-identity capability from a core-verified session.
+ *
+ * The capability is a DETACHED SNAPSHOT, not a view onto core's session. A
+ * shallow spread would copy only the top level: every nested object the
+ * session carries — `appPrincipal`, `grant`, `administrator`, `relation` —
+ * would remain the very object core holds, and `Object.freeze` on the
+ * capability leaves all of them writable. A module handed such a capability
+ * could assign `session.appPrincipal.integrationId` and thereby rewrite
+ * CORE's own verified session: `principals.application` would report the
+ * module's chosen integration as verified, `applyDbSession` would write it to
+ * `app.app_principal_id`, and `app.record_action_allows` would answer for
+ * another application's grants. The same hole widens a capability grant
+ * (`grant.records`, `grant.subject`) and forges the audited control actor
+ * (`administrator.subject`).
+ *
+ * So every own property whose value is an object is replaced by a deep-frozen
+ * structural clone. The sweep is deliberately generic rather than a list of
+ * today's authority fields: a nested field added to TrustedSessionContext
+ * later is detached by construction instead of by somebody remembering. A
+ * value that cannot be structurally cloned is a session carrying something
+ * other than verified data, and failing here is the right answer.
+ *
+ * Credential-resolution facts (the application principal, the capability
+ * grant, the control administrator, the issuer roles) are snapshots: they are
+ * what the carrier resolved to when the session was established and no core
+ * path rewrites them afterwards. The request-fresh fields below are accessors
+ * for the opposite reason.
  */
 export function createModuleSessionCapability(
   session: TrustedSessionContext,
 ): TrustedSessionContext {
-  const capability = {
-    ...session,
-    groups: Object.freeze([...session.groups]),
-    ...(session.oauthScopes
-      ? { oauthScopes: Object.freeze([...session.oauthScopes]) }
-      : {}),
-  };
+  const capability: Record<string, unknown> = { ...session };
+  for (const [key, value] of Object.entries(capability)) {
+    if (value !== null && typeof value === "object") {
+      capability[key] = deepFreezeClone(value);
+    }
+  }
   // A stateful MCP server lives across HTTP requests. Its login binding is
   // pinned, while roles, scope and domain memberships are the current
   // request's (mcp/stateful-session-authorization.ts): a copy taken here would
@@ -299,10 +325,12 @@ export function createModuleSessionCapability(
   Object.defineProperty(capability, "relation", {
     enumerable: true,
     configurable: false,
-    // A frozen copy per read: a plugin can never rewrite whom core acts as.
+    // A detached deep-frozen clone per read, for the same reason the sweep
+    // above exists: the link carries the identity row this session acts as,
+    // and a plugin can never rewrite whom core acts as.
     get: () => {
       const link = session.relation;
-      return link ? Object.freeze({ ...link, roles: Object.freeze([...(link.roles ?? [])]) }) : link;
+      return link ? deepFreezeClone(link) : link;
     },
   });
   return Object.freeze(capability) as unknown as TrustedSessionContext;
@@ -401,6 +429,9 @@ export class ModulePlatformRuntime {
     this.#readBarriers = sharedReadBarriers(db);
     documentPlatformRuntimes.set(db, this);
     this.#capabilityOperations = options.capabilityOperations;
+    const principals = new PrincipalRuntime({
+      acceptsSession: (session) => this.#acceptsScopedSession(session),
+    });
     const records = new RecordAccessRuntime({
       acceptsSession: (session) => this.#acceptsScopedSession(session),
       currentTransaction: (session) => this.#activeTransaction(session, "Record authorization transaction"),
@@ -445,6 +476,7 @@ export class ModulePlatformRuntime {
         },
       }),
       records: records.services,
+      principals: principals.services,
       settings: runtimeSettings,
       artifacts: this.#artifactStorage.services,
       durableOperations: {
@@ -707,6 +739,7 @@ export class ModulePlatformRuntime {
     Object.defineProperty(this.services, "artifacts", { writable: false, configurable: false });
     Object.defineProperty(this.services, "settings", { writable: false, configurable: false });
     Object.defineProperty(this.services, "records", { writable: false, configurable: false });
+    Object.defineProperty(this.services, "principals", { writable: false, configurable: false });
   }
 
   registerArtifactStorage(modules: readonly RuntimeModule[]): void {
@@ -738,7 +771,13 @@ export class ModulePlatformRuntime {
     const controlSession = isControlRealmSession(session);
     const heldRoles = new Set(session.roles);
     const entityOperations = controlSession ? [] : getEntityOperationContracts().filter((operation) =>
-      operation.authorization.roles.some((role) => heldRoles.has(role))
+      operation.authorization.roles.some((role) => heldRoles.has(role)) &&
+      // The entity's principal-class policy, so an Operation this session
+      // could not invoke is not listed as if it could. The derived
+      // application search enumerates exactly this list before it reads
+      // anything, so an entity that excludes this class is absent from the
+      // search rather than refused inside it.
+      entityOperationAdmitsPrincipal(operation, session)
     );
     const staticOperations = [...this.#staticOperations.values()]
       .filter((registration) => registration.available(session))
@@ -1078,7 +1117,12 @@ export class ModulePlatformRuntime {
       intent: match.definition.intent,
       effects: match.definition.effects,
     });
-    const execute = () => this.#operationCallStack.run(
+    // A provider's own code runs below, so it gets a record-action admission
+    // of its own — which, for a provider Operation, is none: nothing here
+    // authorizes a record action. Without this an enclosing record-action
+    // Operation would lend its authorized target to a provider's handler
+    // (operations/entity/record-action-admission.ts).
+    const execute = () => withAdmittedRecordAction(null, () => this.#operationCallStack.run(
       [...stack, request.operation.id],
       () => this.#readProgress.operation(session, match.definition, options.signal, signal => match.provider.execute({
         session,
@@ -1107,7 +1151,7 @@ export class ModulePlatformRuntime {
               : {},
           ),
       }, request)),
-    );
+    ));
     if (!keyed) {
       // `none` and `natural`: this decision is the pre-effect decision. There
       // is no receipt to claim and nothing core-owned between here and the

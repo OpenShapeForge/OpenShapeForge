@@ -68,6 +68,19 @@ function harness(options: { refuse?: boolean; independent?: boolean } = {}) {
         access.push({ session, request });
         if (options.refuse) throw operationFailure({ code: "FORBIDDEN", message: "Not authorized to access this record." });
       },
+      // Artifact storage authorizes on the record PERMISSIONS alone. The
+      // named-action axis is a different question and no artifact path asks
+      // it, so these fail rather than answer: a provider reaching for one
+      // here would be using an authorization this harness never modelled.
+      async assertAction() {
+        throw new Error("Artifact storage does not authorize on record actions.");
+      },
+      async holdsAction() {
+        throw new Error("Artifact storage does not authorize on record actions.");
+      },
+      async readForAction() {
+        throw new Error("Artifact storage does not read through record actions.");
+      },
     },
     ...(options.independent ? { withStageTransaction: async <T>(_session: Session, work: (transaction: Transaction) => Promise<T>) => work({ id: "independent-stage" }) } : {}),
     acceptsSession: session => live.has(session),

@@ -967,6 +967,9 @@ function buildSubtypeTable(
               ...(contract.authorization.rowAccess?.recordPermissions
                 ? { recordPermissions: { ...contract.authorization.rowAccess.recordPermissions } }
                 : {}),
+              ...(contract.authorization.principalClasses
+                ? { principalClasses: [...contract.authorization.principalClasses] }
+                : {}),
             },
           }
         : {}),
@@ -1797,6 +1800,9 @@ export function compileAuthoringBackendManifest(
                         ...candidate.contract.authorization.rowAccess.recordPermissions,
                       },
                     }
+                  : {}),
+                ...(candidate.contract.authorization.principalClasses
+                  ? { principalClasses: [...candidate.contract.authorization.principalClasses] }
                   : {}),
               },
             }

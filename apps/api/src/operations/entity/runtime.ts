@@ -53,6 +53,7 @@ import type {
   ListPageInput,
 } from "./types.js";
 import { fieldNameForColumn } from "./columns.js";
+import { entityAdmitsPrincipal } from "./principal-classes.js";
 import {
   assertRecordPermission,
   recordActionsAllowRow,
@@ -519,6 +520,25 @@ export function entityOperationRef(
   return { id: operation.id, intent: operation.intent };
 }
 
+/**
+ * Does this entity Operation's entity admit this session's principal class?
+ *
+ * The listing's mirror of the gate in `requireEntityOperation`. An Operation
+ * whose table cannot be resolved is not available either, so a refusal here
+ * answers `false` rather than propagating: the caller is deciding what to
+ * OFFER.
+ */
+export function entityOperationAdmitsPrincipal(
+  operation: EntityOperationRef,
+  session: DbSessionInput,
+): boolean {
+  try {
+    return entityAdmitsPrincipal(tableForEntityOperation(operation), session);
+  } catch {
+    return false;
+  }
+}
+
 export function tableForEntityOperation(operation: EntityOperationRef): GeneratedCrudTable {
   const contract = entityOperationsById.get(operation.id);
   if (!contract) {
@@ -725,7 +745,18 @@ export function getEntityOperationOffers(
       target?.row &&
       recordPermissionsAllowRow(table, target.row, permissions, session),
     );
-  const generatedOffers = entityOperations
+  // The entity's principal-class policy governs the GENERATED operations and
+  // the search derived from them — not the authored plugin Operations below.
+  // That distinction is the whole point: an entity may exclude applications
+  // from its collection and its record read while still offering one an
+  // action-gated Operation on a record it was granted.
+  const admitsPrincipal = entityAdmitsPrincipal(
+    getGeneratedCrudTables().find((candidate) =>
+      candidate.source?.authoringEntityName === entityName) ??
+      ({ source: {} } as GeneratedCrudTable),
+    session,
+  );
+  const generatedOffers = (admitsPrincipal ? entityOperations : [])
     .filter(
       (operation) =>
         operation.entityName === entityName &&

@@ -62,7 +62,8 @@ import {
 } from "./entity/edit-leases.js";
 import { policyOperation } from "./entity/subtype-scope.js";
 import { withConsumedCollectionLeaseInTransaction } from "./entity/collection-lease-context.js";
-import { getGeneratedCrudTables } from "./entity/catalog.js";
+import { getGeneratedCrudTables, recordActionTable } from "./entity/catalog.js";
+import { resolvePrincipalClass } from "../db/session.js";
 import { applyOwnedEntityFields, assertOwnedTarget, captureOwnedTarget } from "./entity/owned-fields.js";
 import { getEntityOperationOffers } from "./entity/runtime.js";
 import { entityBusinessUnavailability } from "./entity/availability.js";
@@ -73,7 +74,12 @@ import {
   assertRecordPermission,
   assertRecordPermissionInTransaction,
   type RecordPermissionAction,
+  recordActionDeclaration,
 } from "./entity/record-permissions.js";
+import {
+  withAdmittedRecordAction,
+  type AdmittedRecordAction,
+} from "./entity/record-action-admission.js";
 import { normalizeTimestampToken } from "../db/timestamps.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import { issueOperationPrerequisiteReceipt } from "./prerequisite-receipts.js";
@@ -791,6 +797,53 @@ export function requireOperationAuthorization(
   if (requiredScopes.some((scope) => !heldScopes.has(scope))) {
     throw new HttpError(403, "INSUFFICIENT_SCOPE", "Session lacks a required OAuth scope.");
   }
+  if (!recordActionPrincipalReachable(operation, session)) {
+    throw new HttpError(
+      403,
+      "FORBIDDEN",
+      "This Operation is authorized by a record action no session of this kind can hold.",
+    );
+  }
+}
+
+/**
+ * Could this session's verified principal class EVER hold the action this
+ * Operation requires?
+ *
+ * An action declares the principal kinds a grant of it may name: `person`
+ * admits the ACL's users/groups/roles subjects, `integration` admits a
+ * resolved API-key integration, and a `service` or unclassified session
+ * satisfies neither. So an application-only action is unreachable to a person
+ * no matter which record it names, and vice versa.
+ *
+ * The record check reaches the same answer — `recordActionAllows` matches the
+ * class before it looks at a subject — so this adds no new refusal. What it
+ * adds is WHERE: an Operation nothing about this session could ever satisfy is
+ * refused before a record is consulted, and is therefore absent from the
+ * Operation listing and the MCP catalogue rather than advertised and then
+ * refused. A target or declaration that cannot be resolved answers `false`:
+ * an Operation whose action the manifest does not carry is unreachable, not
+ * open.
+ */
+function recordActionPrincipalReachable(
+  operation: OperationContract,
+  session: TrustedSessionContext,
+): boolean {
+  if (operation.auth.mode !== "session" || !operation.auth.recordAction) return true;
+  const entityName = operation.target?.entityName;
+  const table = entityName ? recordActionTable(entityName) : undefined;
+  const declaration = table
+    ? recordActionDeclaration(table, operation.auth.recordAction)
+    : undefined;
+  if (!declaration) return false;
+  switch (resolvePrincipalClass(session)) {
+    case "person":
+      return declaration.principals.includes("person");
+    case "application":
+      return declaration.principals.includes("integration");
+    default:
+      return false;
+  }
 }
 
 function asInput(value: unknown): Record<string, unknown> {
@@ -978,7 +1031,24 @@ async function invokeCustomOperationWithControls(
   return invokeGuardedCustomOperation(bound, input, context, invokeHandler);
 }
 
-async function invokeGuardedCustomOperation(
+/**
+ * Every custom Operation handler runs with ITS OWN record-action admission
+ * and never with an enclosing one (entity/record-action-admission.ts). A
+ * handler that dispatches a second Operation would otherwise lend its
+ * authorized target to that Operation's handler, and a second plugin could
+ * read a record it was never authorized on.
+ */
+function invokeGuardedCustomOperation(
+  bound: Bound,
+  input: Readonly<Record<string, unknown>>,
+  context: Parameters<ModuleOperationHandler>[1],
+  invokeHandler: (handlerInput: Record<string, unknown>) => Promise<ModuleOperationSuccessResult>,
+): Promise<ModuleOperationSuccessResult> {
+  return withAdmittedRecordAction(null, () =>
+    guardedCustomOperation(bound, input, context, invokeHandler));
+}
+
+async function guardedCustomOperation(
   bound: Bound,
   input: Readonly<Record<string, unknown>>,
   context: Parameters<ModuleOperationHandler>[1],
@@ -1133,6 +1203,24 @@ async function invokeGuardedCustomOperation(
     confirmationToken = requireStringControl(input, "confirmationToken");
     confirmationAnswer = requireStringControl(input, "confirmationAnswer");
   }
+  // The record and the actions this invocation was authorized on, for the
+  // handler's bounded read and for nothing else. Established only where it is
+  // established at all: below, inside the Operation's transaction, after the
+  // decisive `assertRecordActionInTransaction` has passed and under the
+  // ACL-row lock it took. An Operation that requires no action admits none,
+  // and `invokeGuardedCustomOperation` already cleared whatever an enclosing
+  // dispatch had admitted.
+  const admitted: AdmittedRecordAction | null =
+    recordActions.length > 0 && context.session && operation.target?.entityName
+      ? {
+        session: context.session,
+        entityName: operation.target.entityName,
+        id: targetValue,
+        actions: new Set(recordActions),
+      }
+      : null;
+  const runHandler = (handlerInput: Record<string, unknown>) =>
+    withAdmittedRecordAction(admitted, () => invokeHandler(handlerInput));
   return withModuleOperationTransaction(
     context.platform,
     context.session,
@@ -1174,7 +1262,7 @@ async function invokeGuardedCustomOperation(
         if (operation.implementation?.type === "collection") {
           return withConsumedCollectionLeaseInTransaction(trx, context.session!, {
             operation: protectedOperation, targetId: targetValue, expectedVersion, leaseToken,
-          }, () => invokeHandler(customHandlerInput(operation, input)));
+          }, () => runHandler(customHandlerInput(operation, input)));
         }
         await consumeEntityEditLeaseInTransaction(trx, context.session!, {
           operation: protectedOperation,
@@ -1192,7 +1280,7 @@ async function invokeGuardedCustomOperation(
           confirmationAnswer,
         });
       }
-      return invokeHandler(customHandlerInput(operation, input));
+      return runHandler(customHandlerInput(operation, input));
     },
   );
 }

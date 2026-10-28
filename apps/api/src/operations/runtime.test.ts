@@ -63,19 +63,64 @@ const versioningRuntime = versioningPluginRuntime as unknown as RuntimeModule;
 const notebookRuntime: RuntimeModule = (await import(new URL(
   "../../../../examples/plugins/notebook/runtime.ts", import.meta.url,
 ).pathname)).default;
+/**
+ * The notebook example plugin carries two canonical Operations — `import` and
+ * the record-action-gated `Notebook.deliver` — and the binder requires a
+ * handler for every Operation of a module that supplies any. A stub here
+ * exercises one of them, so the sibling gets a handler that fails if it is
+ * ever reached: the stub stays about its own Operation without the binder
+ * having to relax its "all or none" rule, which is the rule under test at
+ * "an operation module must supply every handler" above.
+ *
+ * Only a stub that already declares `operationHandlers` is completed. A bare
+ * `{ name: "notebook" }` is a module supplying nothing and must still be
+ * refused.
+ */
+function completeNotebookStub(module: RuntimeModule): RuntimeModule {
+  if (module.name !== "notebook" || !module.operationHandlers) return module;
+  if ("deliverToNotebook" in module.operationHandlers) return module;
+  return {
+    ...module,
+    operationHandlers: {
+      deliverToNotebook: () => {
+        throw new Error("This test does not exercise Notebook.deliver.");
+      },
+      ...module.operationHandlers,
+    },
+  };
+}
+
 const completeModuleSets = new WeakMap<readonly RuntimeModule[], RuntimeModule[]>();
 function withDocuments(modules: readonly RuntimeModule[]): RuntimeModule[] {
   let complete = completeModuleSets.get(modules);
   if (!complete) {
-    complete = [accountsRuntime, documentsRuntime, versioningRuntime, ...modules];
+    complete = [
+      accountsRuntime, documentsRuntime, versioningRuntime,
+      ...modules.map(completeNotebookStub),
+    ];
     completeModuleSets.set(modules, complete);
+  }
+  return complete;
+}
+
+/**
+ * The same completion for a module set handed straight to the binder, cached
+ * on the caller's array so the binder's own per-set caching still sees one
+ * identity per set.
+ */
+const completedStubSets = new WeakMap<readonly RuntimeModule[], RuntimeModule[]>();
+function withCompleteStubs(modules: readonly RuntimeModule[]): RuntimeModule[] {
+  let complete = completedStubSets.get(modules);
+  if (!complete) {
+    complete = modules.map(completeNotebookStub);
+    completedStubSets.set(modules, complete);
   }
   return complete;
 }
 const bindOperationHandlers: typeof bindCanonicalOperationHandlers = (modules, operations) =>
   operations === undefined
     ? bindCanonicalOperationHandlers(withDocuments(modules))
-    : bindCanonicalOperationHandlers(modules, operations);
+    : bindCanonicalOperationHandlers(withCompleteStubs(modules), operations);
 
 const session = {
   tenantId: "11111111-1111-4111-8111-111111111111",
@@ -233,6 +278,22 @@ const declaredConflict = {
     details: { currentVersion: 3 },
   },
 };
+
+/**
+ * `Notebook.deliver` is contracted on the same `notebook` module as
+ * `notebook.import`, so `bindOperationHandlers` requires both whenever a test
+ * stubs that module. These tests exercise `notebook.import`; this stands in
+ * for the shipped delivery handler so the binding is complete, and asserts
+ * nothing of its own.
+ */
+const deliverToNotebook = async () => ({
+  value: {
+    status: "accepted",
+    deliveryId: "55555555-5555-4555-8555-555555555555",
+    notebookName: "stub",
+    priorDeliveries: 0,
+  },
+});
 
 describe("canonical operation runtime", () => {
   test("owner availability is rechecked inside the same transaction as execution", async () => {
@@ -449,6 +510,7 @@ describe("canonical operation runtime", () => {
     const module: RuntimeModule = {
       name: "notebook",
       operationHandlers: {
+        deliverToNotebook,
         importNotebook: async (input) => ({
           value: { status: "accepted", importId: "11111111-1111-4111-8111-111111111111", notebookId: input.notebookId },
         }),
@@ -475,6 +537,7 @@ describe("canonical operation runtime", () => {
     const module: RuntimeModule = {
       name: "notebook",
       operationHandlers: {
+        deliverToNotebook,
         importNotebook: async (input, context) => {
           if (!context.session || !context.platform) {
             throw new Error("Expected an authenticated database operation.");
@@ -570,6 +633,7 @@ describe("canonical operation runtime", () => {
     const bound = bindOperationHandlers([{
       name: "notebook",
       operationHandlers: {
+        deliverToNotebook,
         importNotebook: async (input, context) => {
           expect(context.session).toBe(liveSession);
           expect(await context.platform!.mcp.authorize(context.session!, {
@@ -631,6 +695,7 @@ describe("canonical operation runtime", () => {
     const bound = bindOperationHandlers([{
       name: "notebook",
       operationHandlers: {
+        deliverToNotebook,
         importNotebook: async () => {
           invoked = true;
           return { value: {} };
@@ -661,6 +726,7 @@ describe("canonical operation runtime", () => {
     const nestedBase = bindOperationHandlers([{
       name: "notebook",
       operationHandlers: {
+        deliverToNotebook,
         importNotebook: async () => {
           nestedInvoked = true;
           return { value: {} };
@@ -677,6 +743,7 @@ describe("canonical operation runtime", () => {
     const outer = bindOperationHandlers([{
       name: "notebook",
       operationHandlers: {
+        deliverToNotebook,
         importNotebook: async (input) => {
           await expect(invokeOperation(nested, input, {
             transport: "graphql",
@@ -713,7 +780,7 @@ describe("canonical operation runtime", () => {
     const operation = {
       ...bindOperationHandlers([{
         name: "notebook",
-        operationHandlers: { importNotebook: async () => ({ value: {} }) },
+        operationHandlers: { deliverToNotebook, importNotebook: async () => ({ value: {} }) },
       }]).get("notebook.import")!.operation,
       auth: { mode: "session" as const, roles: ["Organization.All.ReadWrite"], scopes: ["notebook:write"] },
     };
@@ -798,6 +865,7 @@ describe("canonical operation runtime", () => {
     const bound = bindOperationHandlers([{
       name: "notebook",
       operationHandlers: {
+        deliverToNotebook,
         importNotebook: async (input) => ({
           status: 201,
           value: { status: "accepted", importId: "11111111-1111-4111-8111-111111111111", notebookId: input.notebookId },
@@ -953,14 +1021,14 @@ describe("canonical operation runtime", () => {
   test("does not advertise an uncontracted runtime handler", () => {
     expect(() => bindOperationHandlers([{
       name: "notebook",
-      operationHandlers: { importNotebook: () => ({ value: {} }), hidden: () => ({ value: {} }) },
+      operationHandlers: { deliverToNotebook, importNotebook: () => ({ value: {} }), hidden: () => ({ value: {} }) },
     }])).toThrow(/absent from its compiler contract: hidden/);
   });
 
   test("caches one immutable handler binding per initialized module set", () => {
     const modules: RuntimeModule[] = [{
       name: "notebook",
-      operationHandlers: { importNotebook: async () => ({ value: {} }) },
+      operationHandlers: { deliverToNotebook, importNotebook: async () => ({ value: {} }) },
     }];
     expect(bindOperationHandlers(modules)).toBe(bindOperationHandlers(modules));
   });
@@ -1521,6 +1589,7 @@ test("GraphQL and MCP project declared handler results as transport errors", asy
   const module: RuntimeModule = {
     name: "notebook",
     operationHandlers: {
+      deliverToNotebook,
       importNotebook: () => ({
         ok: false,
         status: 409,
@@ -1597,6 +1666,7 @@ test("MCP projects a handler's content blocks next to the canonical value", asyn
   const module: RuntimeModule = {
     name: "notebook",
     operationHandlers: {
+      deliverToNotebook,
       importNotebook: () => ({
         value,
         mcp: { content: [{ type: "text", text: "one image" }, image] },
@@ -1645,6 +1715,7 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
   const module: RuntimeModule = {
     name: "notebook",
     operationHandlers: {
+      deliverToNotebook,
       importNotebook: (input, context) => {
         calls.push({ input, userId: context.session?.userId });
         return { value };
@@ -1775,7 +1846,15 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
         name: "osf_search_operations",
         arguments: { query: "import a notebook body" },
       });
-      expect(hidden.structuredContent).toEqual({ operations: [] });
+      // The role-less session reaches no ROLE-gated Operation. It is not an
+      // empty catalogue: `Notebook.deliver` is authorized by the record's own
+      // named action and declares no roles at all
+      // (`anyAuthenticatedSession`), so every authenticated session sees it
+      // offered and holds it on exactly the records whose ACL names it.
+      const hiddenKeys = (hidden.structuredContent as { operations: { key: string }[] })
+        .operations.map((operation) => operation.key);
+      expect(hiddenKeys).not.toContain("notebook.import");
+      expect(hiddenKeys.every((key) => key === "Notebook.deliver")).toBe(true);
       const deniedGeneric = await deniedClient.callTool({
         name: "osf_execute_operation",
         arguments: {
@@ -2043,7 +2122,7 @@ test("rejects an MCP projection that is not well-formed content", async () => {
   ]) {
     const module: RuntimeModule = {
       name: "notebook",
-      operationHandlers: { importNotebook: () => ({ value, mcp }) as ModuleOperationResult },
+      operationHandlers: { deliverToNotebook, importNotebook: () => ({ value, mcp }) as ModuleOperationResult },
     };
     const bound = bindOperationHandlers([module]).get("notebook.import")!;
     await expect(invokeOperation(bound, input, { transport: "mcp", session })).rejects.toMatchObject({

@@ -76,7 +76,10 @@ function manifestTable(
 ): ManifestRecordActionTable {
   return {
     schema: "erp",
+    // A core table's registry name IS its physical table; only a plugin
+    // module's own table is registered as `<schema>.<table>`.
     name,
+    table: name,
     tenantScoped: true,
     columns: COLUMNS,
     source: {

@@ -359,6 +359,8 @@ describe("canonical operation database sessions", () => {
           throw new Error("Expected a session-authenticated operation on every transport.");
         }
         const role = operation.auth.roles[0]!;
+        const pluginOperations = listOperationContracts()
+          .filter((entry) => entry.plugin === operation.plugin);
         const notebookId = randomUUID();
         const observations: Observation[] = [];
         let mcpAuthorization: unknown;
@@ -419,9 +421,44 @@ describe("canonical operation database sessions", () => {
             },
           };
         };
+        // The REST surface below is registered against an explicit
+        // single-Operation catalog, so this module carries exactly that one
+        // handler: a handler the supplied catalog does not contract is a
+        // binding error in its own right.
         const module: RuntimeModule = {
           name: operation.plugin,
-          operationHandlers: { [operation.handler]: handler },
+          operationHandlers: {
+            [operation.handler]: handler,
+            // The plugin owns more than the one Operation under test, and a
+            // module that supplies any handler must supply all of them. The
+            // siblings get a handler that fails if it is ever reached.
+            ...Object.fromEntries(
+              listOperationContracts()
+                .filter((entry) =>
+                  entry.plugin === operation.plugin && entry.handler !== operation.handler)
+                .map((entry) => [entry.handler, () => {
+                  throw new Error(`This test does not exercise ${entry.key}.`);
+                }]),
+            ),
+          },
+        };
+        // The GraphQL schema and the MCP server are built from the GENERATED
+        // catalog, which contracts a second Operation on this module
+        // (`Notebook.deliver`), so those surfaces need it bound. It stands in
+        // for the shipped delivery handler and asserts nothing of its own.
+        const contracted: RuntimeModule = {
+          ...module,
+          operationHandlers: {
+            ...module.operationHandlers,
+            deliverToNotebook: async () => ({
+              value: {
+                status: "accepted",
+                deliveryId: randomUUID(),
+                notebookName: "stub",
+                priorDeliveries: 0,
+              },
+            }),
+          },
         };
         const verifiedSession: TrustedSessionContext = {
           tenantId,
@@ -452,7 +489,11 @@ describe("canonical operation database sessions", () => {
             rest,
             [module],
             { db, platform: restPlatform.services },
-            [operation],
+            // The plugin's whole set, not just the Operation under test: the
+            // binder requires a handler for every Operation of a module that
+            // supplies any, and refuses a handler the given list does not
+            // declare. A narrowed list would hit one rule or the other.
+            pluginOperations,
           );
           try {
             const response = await rest.inject({
@@ -476,7 +517,7 @@ describe("canonical operation database sessions", () => {
 
           const graphqlPlatform = new ModulePlatformRuntime(db);
           const schema = buildGraphqlSchema(
-            [accountsRuntime, documentsRuntime, versioningRuntime, module],
+            [accountsRuntime, documentsRuntime, versioningRuntime, contracted],
             { db, platform: graphqlPlatform.services },
           );
           const graphqlResult = await graphql({
@@ -499,7 +540,7 @@ describe("canonical operation database sessions", () => {
           const server = __buildGeneratedMcpServerForTests({
             db,
             session: verifiedSession,
-            modules: [accountsRuntime,documentsRuntime, versioningRuntime, module],
+            modules: [accountsRuntime,documentsRuntime, versioningRuntime, contracted],
             modulePlatform: mcpPlatform,
           });
           const client = new Client(

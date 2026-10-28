@@ -970,7 +970,30 @@ function resolvedRowEmpty(rowAccess: JsonObject): "public" | "restricted" {
     : "public";
 }
 
+/**
+ * A later layer may close an entity's generic routes to a principal class and
+ * may never re-open one. Adding a class back is a widening of exactly the
+ * kind this axis exists to prevent, and the layer doing it cannot see the
+ * grants the first author relies on.
+ *
+ * An absent list means every class, so a first layer that authored none
+ * constrains nothing — a later layer is free to declare one.
+ */
+function assertPrincipalClassesOnlyNarrow(
+  base: JsonObject,
+  merged: JsonObject,
+  origin: string,
+): void {
+  assertOrListOnlyNarrows(
+    objectProperty(base, "authorization")?.principalClasses,
+    objectProperty(merged, "authorization")?.principalClasses,
+    "authorization.principalClasses",
+    origin,
+  );
+}
+
 function assertRowAccessOnlyNarrows(base: JsonObject, merged: JsonObject, origin: string): void {
+  assertPrincipalClassesOnlyNarrow(base, merged, origin);
   const before = objectProperty(objectProperty(base, "authorization"), "rowAccess");
   if (!before || before.enabled !== true) return;
   const after = objectProperty(objectProperty(merged, "authorization"), "rowAccess");
@@ -1105,7 +1128,9 @@ function assertSessionAuthOnlyNarrows(
  * and every Operation requiring it. Widening `principals` would let a kind of
  * principal the first author excluded be named, which is exactly the
  * person-versus-application boundary the axis exists to hold. Widening `reads`
- * would disclose a field the first author did not put in the projection.
+ * would disclose a field the first author did not put in the projection. And
+ * weakening `lock` would relax a concurrency guarantee on an effect whose SQL
+ * the first author owns and this layer cannot see.
  */
 function assertRecordActionsOnlyNarrow(
   before: unknown,
@@ -1127,13 +1152,27 @@ function assertRecordActionsOnlyNarrow(
     const path = `authorization.rowAccess.recordPermissions.actions.${name}`;
     const afterAction = afterActions.get(name);
     if (!afterAction) throw new Error(`${origin} removes ${path}.`);
-    assertAndListOnlyNarrows(
+    // Both lists WIDEN by growing: one more principal kind is one more kind
+    // that may be named, and one more read is one more field disclosed. So
+    // they are OR lists — a later layer may drop an entry and may never add
+    // one. (They were AND-checked when the axis landed, which refused the
+    // narrowing and admitted the widening.)
+    assertOrListOnlyNarrows(
       beforeAction.principals,
       afterAction.principals,
       `${path}.principals`,
       origin,
     );
-    assertAndListOnlyNarrows(beforeAction.reads, afterAction.reads, `${path}.reads`, origin);
+    assertOrListOnlyNarrows(beforeAction.reads, afterAction.reads, `${path}.reads`, origin);
+    // "exclusive" is the deadlock-safe mode and the default, so a later layer
+    // moving an action to "shared" relaxes a concurrency guarantee the first
+    // author relied on — on an effect whose SQL that author owns and this
+    // layer cannot see. Tightening the other way is always allowed.
+    const beforeLock = beforeAction.lock ?? "exclusive";
+    const afterLock = afterAction.lock ?? "exclusive";
+    if (beforeLock === "exclusive" && afterLock !== "exclusive") {
+      throw new Error(`${origin} weakens ${path}.lock from exclusive to ${String(afterLock)}.`);
+    }
   }
 }
 

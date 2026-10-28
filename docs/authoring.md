@@ -234,6 +234,7 @@ action:
           reads: [definition, status]
         - name: follow
           principals: [integration, person]
+          lock: shared
 ```
 
 and granted per record, under the ACL's own `actions` member:
@@ -281,12 +282,76 @@ What is true of this axis, and is the reason it is separate:
   compile time. An action with no `reads` authorizes an effect and discloses
   nothing.
 
+- **`lock` is the concurrency contract.** The check locks the record's ACL row
+  and holds it for the rest of the transaction, and the effect then runs under
+  that lock. `exclusive`, the default, takes a self-exclusive row lock: two
+  holders of the same action on the same record serialize at the check, so an
+  effect that goes on to lock that record more strongly — an ordinary
+  `select … for update` on it, or an entity update of it — cannot deadlock on
+  the upgrade. `shared` lets concurrent holders through together, which is the
+  right trade for an action whose effect only reads: `follow` above polls a
+  status and never writes the definition. Choosing `shared` for an effect that
+  *does* upgrade is a deadlock under parallel calls, and the compiler cannot
+  see an effect's SQL to warn you — which is why the default is the safe mode
+  and a later authoring layer may tighten `lock` but never weaken it. Both
+  modes fence a concurrent ACL change identically.
+
+### Which principal classes the generic routes admit
+
+A role list answers "what may this session do". It cannot answer "what sort of
+session is this", because a service account and the person beside it can hold
+the very same role. Once an application is a first-class principal that gap
+matters: an entity may hand an application one named action on one record,
+while the application's key holds the entity's ordinary read role on its
+service account — and generated CRUD, the search derived from it and the
+generic MCP tools ask only for the role. The collection would then return every
+record of the entity and make the per-record grant decorative.
+
+So an entity may declare which classes its **generated CRUD and derived
+search** admit:
+
+```yaml
+authorization:
+  roles: { read: [...], create: [...], update: [...], delete: [...] }
+  principalClasses: [person, service, unknown]
+```
+
+The four classes are the server's own classification, never anything a caller
+states: `person` a verified human identity, `application` a resolved API-key
+integration, `service` a verified client-credentials principal with no
+integration behind it (configured organization automation included), and
+`unknown` a carrier the server could not classify (docs/api.md).
+
+- **Omitted admits every class**, which is what every entity did before this
+  existed. One derived exception: an entity that declares a named action for
+  `integration` principals compiles to every class *except* `application`.
+  Such an entity has decided an application reaches it by grant, one record at
+  a time; the default stops the collection from undoing that, without the
+  entity having to remember to. Writing the list out re-admits applications
+  deliberately — a decision with a reviewer rather than an omission.
+- **It narrows only.** An admitted class still faces the entity's roles, the
+  Operation's scopes and the record ACL. Nothing here admits a session those
+  would refuse, and nothing here is a substitute for them.
+- **It covers every generic route at once**, because they share one gate
+  (`requireEntityOperation`): the REST routes, the GraphQL resolvers, the
+  generic MCP tools, the change stream, and the entity `list` Operations the
+  derived `application.search` executes. An excluded class is also absent from
+  the Operation listing and the MCP tool listing, so it is not advertised and
+  then refused.
+- **It does not touch authored Operations.** A plugin Operation gated on
+  `auth.recordAction` stays available to the application that was granted the
+  action — which is the arrangement the policy exists to protect.
+- **It is per entity, not per credential.** Excluding applications from one
+  entity leaves the key's access to every other entity exactly as it was. A
+  snapshot or version entity that stores the same content needs the same
+  declaration; `NotebookVersion` in `examples/plugins/notebook` is that case
+  authored explicitly.
+
 A record-scoped plugin Operation requires one with
 `auth.recordAction: <name>`; the entity must declare it, and the check is a
-live read inside the Operation's transaction (docs/operations.md). The lookup
-locks the record's ACL row for the rest of that transaction, which is the
-single ordering a concurrent policy change also follows, so a grant and its
-removal cannot interleave with the effect in either direction.
+live read inside the Operation's transaction (docs/operations.md). The lock
+above is the single ordering a concurrent policy change also follows, so a
+grant and its removal cannot interleave with the effect in either direction.
 
 Notes on what the compiler does with this:
 

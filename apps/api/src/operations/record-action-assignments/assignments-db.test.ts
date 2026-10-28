@@ -852,22 +852,25 @@ describe("a grant and a concurrent disable resolve one way, never both", () => {
     // The disable takes the integration's row lock and holds it. The grant
     // reaches `for share` on the same row and waits; when the disable commits
     // it re-reads and no longer matches `active`.
+    const locked = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
     const disable = admin.db.connection().execute(async (conn) => {
       await sql`begin`.execute(conn);
       await sql`
         update platform.api_key_integrations set status = 'disabled'
          where id = ${raceIntegration}::uuid
       `.execute(conn);
-      // Long enough for the grant below to have taken the ACL row lock and to
-      // be waiting on the integration row. Not a poll of the grant's state:
-      // either ordering is a valid outcome of this test's assertion, and the
-      // assertion is about what the grant DECIDES, not about the timing.
-      await Bun.sleep(750);
+      locked.resolve();
+      await release.promise;
       await sql`commit`.execute(conn);
     });
+    await locked.promise;
     const grant = setAssignment(session(), { assignment: target(raceIntegration), assigned: true })
       .then(() => "granted" as const, () => "refused" as const);
+    const beforeCommit = await Promise.race([grant, Bun.sleep(100).then(() => "waiting" as const)]);
+    release.resolve();
     const [, outcome] = await Promise.all([disable, grant]);
+    expect(beforeCommit).toBe("waiting");
     expect(outcome).toBe("refused");
     expect(await storedAcl(RUN, raceRun)).not.toHaveProperty("actions");
     expect(await allows(RUN, raceRun, "start", raceIntegration)).toBe(false);

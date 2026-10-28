@@ -15,6 +15,33 @@ authorization:
     create: [Organization.All.ReadWrite]
     update: [Organization.All.ReadWrite]
     delete: [Organization.All.ReadWrite]
+  # The shared record ACL, and the second (non-workflow) use of the named-action
+  # axis in this repository. `empty: public` keeps the human permissions exactly
+  # as they were before the ACL existed: a notebook with the default empty
+  # document stays readable and writable to its role holders. The action is the
+  # part that is not public - an absent or empty `actions.deliver` entry denies
+  # whatever `empty` says - so an external application reaches `notebook.deliver`
+  # on one notebook at a time, by explicit grant, without the notebook becoming
+  # readable through generated CRUD, search or any other route.
+  rowAccess:
+    enabled: true
+    empty: public
+    recordPermissions:
+      field: permissions
+      empty: public
+      createRequires: [view, edit]
+      actions:
+        - name: deliver
+          principals: [integration]
+          # The delivery row records the notebook's name as it stood when the
+          # delivery was accepted, so the handler needs that one field and
+          # nothing else. The body is deliberately absent: an application that
+          # may deliver TO a notebook has no business reading its contents.
+          reads: [name]
+          # The handler writes a plugin-owned row keyed on this notebook and
+          # takes no stronger lock on the notebook itself, but the delivery is
+          # an effect and the safe mode is what an effect should default to.
+          lock: exclusive
 displayTemplate: "{{name}}"
 filterField: name
 versioning:
@@ -33,6 +60,12 @@ fields:
     osfType: string
     label: { en: Body, nl: Inhoud }
     persisted: { column: body, storageClass: core }
+  - key: permissions
+    osfType: object
+    required: true
+    label: { en: Permissions, nl: Rechten }
+    defaultValue: {}
+    persisted: { column: permissions, storageClass: core }
 operations:
   list:
     name: List notebooks
@@ -69,6 +102,64 @@ operations:
     implementation: { type: entity, action: delete }
     effects: { data: delete, external: none }
     reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  deliver:
+    name: { en: Deliver to notebook, nl: Aanleveren bij notitieboek }
+    description: >-
+      Record one external delivery against a notebook. Authorized by the
+      notebook's named `deliver` action rather than by a role, so a verified
+      application reaches exactly the notebooks it was granted and no others,
+      without the notebook becoming readable.
+    implementation: { type: plugin, plugin: notebook, handler: deliverToNotebook }
+    target: { scope: record, inputField: notebookId }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [notebookId, reference]
+        properties:
+          notebookId:
+            type: string
+            format: uuid
+            x-osf-reference: { entity: Notebook }
+            x-osf-i18n: { title: { en: Notebook, nl: Notitieboek } }
+          reference:
+            type: string
+            minLength: 1
+            maxLength: 200
+            x-osf-i18n: { title: { en: Delivery reference, nl: Aanleverreferentie } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [status, deliveryId, notebookName, priorDeliveries]
+        properties:
+          status:
+            enum: [accepted, duplicate]
+            x-osf-i18n: { title: { en: Status, nl: Status } }
+          deliveryId:
+            type: string
+            format: uuid
+            x-osf-i18n: { title: { en: Delivery, nl: Aanlevering } }
+          notebookName:
+            type: string
+            x-osf-i18n: { title: { en: Notebook, nl: Notitieboek } }
+          priorDeliveries:
+            type: integer
+            minimum: 0
+            x-osf-i18n: { title: { en: Earlier deliveries, nl: Eerdere aanleveringen } }
+    errors:
+      - { status: 400, code: BAD_USER_INPUT, description: The delivery input is invalid. }
+      - { status: 401, code: UNAUTHENTICATED, description: Authentication is required. }
+      - { status: 403, code: FORBIDDEN, description: This session holds no deliver action on this notebook. }
+      - { status: 503, code: DATABASE_NOT_CONFIGURED, description: The database is unavailable. }
+    # No roles at all: the record's named action is the authorization, and it
+    # admits an integration only. `anyAuthenticatedSession` is what says that
+    # out loud rather than leaving an omitted role list to fail open.
+    auth: { mode: session, anyAuthenticatedSession: true, recordAction: deliver }
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: keyed, inputField: reference } }
     confirmation: { mode: none }
 interfaces:
   rest: {}

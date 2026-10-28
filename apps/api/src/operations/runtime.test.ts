@@ -63,19 +63,64 @@ const versioningRuntime = versioningPluginRuntime as unknown as RuntimeModule;
 const notebookRuntime: RuntimeModule = (await import(new URL(
   "../../../../examples/plugins/notebook/runtime.ts", import.meta.url,
 ).pathname)).default;
+/**
+ * The notebook example plugin carries two canonical Operations — `import` and
+ * the record-action-gated `Notebook.deliver` — and the binder requires a
+ * handler for every Operation of a module that supplies any. A stub here
+ * exercises one of them, so the sibling gets a handler that fails if it is
+ * ever reached: the stub stays about its own Operation without the binder
+ * having to relax its "all or none" rule, which is the rule under test at
+ * "an operation module must supply every handler" above.
+ *
+ * Only a stub that already declares `operationHandlers` is completed. A bare
+ * `{ name: "notebook" }` is a module supplying nothing and must still be
+ * refused.
+ */
+function completeNotebookStub(module: RuntimeModule): RuntimeModule {
+  if (module.name !== "notebook" || !module.operationHandlers) return module;
+  if ("deliverToNotebook" in module.operationHandlers) return module;
+  return {
+    ...module,
+    operationHandlers: {
+      deliverToNotebook: () => {
+        throw new Error("This test does not exercise Notebook.deliver.");
+      },
+      ...module.operationHandlers,
+    },
+  };
+}
+
 const completeModuleSets = new WeakMap<readonly RuntimeModule[], RuntimeModule[]>();
 function withDocuments(modules: readonly RuntimeModule[]): RuntimeModule[] {
   let complete = completeModuleSets.get(modules);
   if (!complete) {
-    complete = [accountsRuntime, documentsRuntime, versioningRuntime, ...modules];
+    complete = [
+      accountsRuntime, documentsRuntime, versioningRuntime,
+      ...modules.map(completeNotebookStub),
+    ];
     completeModuleSets.set(modules, complete);
+  }
+  return complete;
+}
+
+/**
+ * The same completion for a module set handed straight to the binder, cached
+ * on the caller's array so the binder's own per-set caching still sees one
+ * identity per set.
+ */
+const completedStubSets = new WeakMap<readonly RuntimeModule[], RuntimeModule[]>();
+function withCompleteStubs(modules: readonly RuntimeModule[]): RuntimeModule[] {
+  let complete = completedStubSets.get(modules);
+  if (!complete) {
+    complete = modules.map(completeNotebookStub);
+    completedStubSets.set(modules, complete);
   }
   return complete;
 }
 const bindOperationHandlers: typeof bindCanonicalOperationHandlers = (modules, operations) =>
   operations === undefined
     ? bindCanonicalOperationHandlers(withDocuments(modules))
-    : bindCanonicalOperationHandlers(modules, operations);
+    : bindCanonicalOperationHandlers(withCompleteStubs(modules), operations);
 
 const session = {
   tenantId: "11111111-1111-4111-8111-111111111111",

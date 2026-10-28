@@ -578,6 +578,12 @@ export type TableSourceDefinition = {
        */
       actions?: import("./authoring/types/common.js").RowAccessRecordActionConfig[];
     };
+    /**
+     * Principal classes this entity's generated CRUD and derived search
+     * admit. Absent means every class, which is what an entity without a
+     * record action compiles to.
+     */
+    principalClasses?: import("./authoring/types/common.js").EntityPrincipalClass[];
   };
   relationshipStatus?: {
     emittedReferences: string[];

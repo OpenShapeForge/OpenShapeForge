@@ -21,7 +21,7 @@ type Table = ManifestRecordActionTable;
 
 function table(overrides: Partial<Table> = {}): Table {
   return {
-    schema: "erp", name: "runs", tenantScoped: true,
+    schema: "erp", name: "runs", table: "runs", tenantScoped: true,
     columns: [
       { name: "id", type: "uuid", primaryKey: true },
       { name: "tenant_id", type: "uuid" },
@@ -65,6 +65,7 @@ describe("the record-action registry", () => {
       keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
       actions: ["start"],
       reads: { start: [{ field: "definition", column: "definition" }] },
+      locks: { start: "exclusive" },
     }]);
   });
 
@@ -94,7 +95,10 @@ describe("the record-action registry", () => {
     const refusals: Array<[Table, RegExp]> = [
       [{ ...table(), tenantScoped: false }, /requires a tenant-scoped table/],
       [{ ...table(), schema: "Erp" }, /not a plain lowercase identifier/],
-      [{ ...table(), name: "runs; drop table x" }, /not a plain lowercase identifier/],
+      [{ ...table(), table: "runs; drop table x" }, /not a plain lowercase identifier/],
+      // A table in a plugin module's own schema is REGISTERED as
+      // `<schema>.<table>`; the DDL has to name the physical table.
+      [{ ...table(), name: "notebook.runs", table: "runs; x" }, /not a plain lowercase identifier/],
       [
         { ...table(), source: { ...table().source, authoringEntityName: "run" } } as Table,
         /no usable authoring entity name/,
@@ -156,9 +160,13 @@ describe("the record-action registry", () => {
         } as Table,
         /no single plain-identifier primary key/,
       ],
-      // A table name that leaves no room for the policy names, which
-      // PostgreSQL would truncate into one another.
-      [{ ...table(), name: `runs_${"x".repeat(45)}` }, /within 63 bytes/],
+      // A PHYSICAL table name that leaves no room for the policy names, which
+      // PostgreSQL would truncate into one another. The registry key is only
+      // ever a message, so its length is not the bound.
+      [
+        { ...table(), name: `runs_${"x".repeat(45)}`, table: `runs_${"x".repeat(45)}` },
+        /within 63 bytes/,
+      ],
       // A field name is a key of the returned document and is interpolated as
       // a literal; `sourceField` reaches the manifest without passing the
       // authoring loader's field-key pattern.
@@ -193,14 +201,25 @@ describe("the record-action registry", () => {
   });
 
   test("refuses two tables that answer to one entity name", () => {
-    const second = { ...table(), name: "archived_runs" } as Table;
+    const second = { ...table(), name: "archived_runs", table: "archived_runs" } as Table;
     expect(() => recordActionEntities([table(), second]))
       .toThrow(/entity name "Run" is already declared by another table/);
   });
 
+  test("names the physical table of an entity registered under its own schema", () => {
+    // `name` is the registry key (`notebook.notebooks`), `table` the physical
+    // relation. Interpolating the registry key would emit
+    // `notebook.notebook.notebooks` and refuse the migration.
+    const [entity] = recordActionEntities([
+      { ...table(), schema: "notebook", name: "notebook.runs", table: "runs" } as Table,
+    ]);
+    expect(entity).toMatchObject({ schema: "notebook", table: "runs" });
+    expect(renderRecordActionLookup([entity!])).toContain(`from "notebook"."runs" t`);
+  });
+
   test("orders entities and actions so the rendered body is deterministic", () => {
     const second = {
-      ...table(), name: "docs",
+      ...table(), name: "docs", table: "docs",
       source: {
         authoringEntityName: "Doc",
         authorization: {
@@ -226,19 +245,53 @@ describe("the record-action registry", () => {
 describe("the rendered lookup", () => {
   const entities = recordActionEntities([table()]);
 
-  test("is a fixed case over the declared entities and their declared actions", () => {
+  test("is a fixed case over each declared entity and action pair", () => {
     const body = renderRecordActionLookup(entities);
-    expect(body).toContain("case entity");
-    expect(body).toContain("when 'Run' then");
-    expect(body).toContain("if action not in ('start') then return false; end if;");
+    expect(body).toContain("case entity || ':' || action");
+    expect(body).toContain("when 'Run:start' then");
     expect(body).toContain(`from "erp"."runs" t`);
     expect(body).toContain(`t."tenant_id" = app.current_tenant()`);
-    expect(body).toContain("for share");
+    // The pair IS the label, so no separate action guard is rendered: an
+    // undeclared action cannot reach a branch to be refused inside.
+    expect(body).not.toContain("action not in");
     expect(body).toContain("else return false;");
     // No parameterized identifier: a caller cannot name a table or a column.
     expect(body).not.toContain("format(");
     expect(body).not.toContain("execute ");
     expect(body).not.toContain("bypass_rls");
+  });
+
+  test("takes the action's declared lock, defaulting to the one that cannot deadlock", () => {
+    // The default: a holder whose effect writes the record is the common case
+    // and `for share` would let two of them deadlock on the upgrade.
+    expect(renderRecordActionLookup(entities)).toContain("for no key update;");
+    expect(renderRecordActionLookup(entities)).not.toContain("for share");
+    const [declared] = recordActionEntities([
+      withPolicy({
+        column: "acl",
+        actions: [
+          { name: "follow", principals: ["integration"], lock: "shared" },
+          { name: "start", principals: ["integration"], lock: "exclusive" },
+        ],
+      }),
+    ]);
+    expect(declared!.locks).toEqual({ follow: "shared", start: "exclusive" });
+    const body = renderRecordActionLookup([declared!]);
+    // Per action, not per entity: both live on the same row and the read-only
+    // one must not be forced to serialize with the writing one.
+    expect(body).toContain("when 'Run:follow' then");
+    expect(body.split("when 'Run:follow' then")[1]!.split("when 'Run:start' then")[0])
+      .toContain("for share;");
+    expect(body.split("when 'Run:start' then")[1]).toContain("for no key update;");
+  });
+
+  test("refuses a lock mode that is neither", () => {
+    expect(() => recordActionEntities([
+      withPolicy({
+        column: "acl",
+        actions: [{ name: "start", principals: ["integration"], lock: "none" }],
+      }),
+    ])).toThrow(/declares lock "none"/);
   });
 
   test("guards a uuid key before casting, so a malformed key denies", () => {
@@ -265,13 +318,26 @@ describe("the rendered read projection", () => {
     expect(body).not.toContain(`"tenant_id")`);
   });
 
-  test("locks the same row the lookup locked, by the same predicate", () => {
+  test("locks the same row the lookup locked, by the same predicate and mode", () => {
     const body = renderRecordActionProjection(recordActionEntities([table()]));
     const lookup = renderRecordActionLookup(recordActionEntities([table()]));
     const predicate = `where t."id" = record_key::uuid and t."tenant_id" = app.current_tenant()`;
     expect(body).toContain(predicate);
     expect(lookup).toContain(predicate);
-    expect(body).toContain("for share;");
+    // The action's declared mode, not a fixed one: a weaker clause would be a
+    // no-op on a row this transaction already holds more strongly, and a
+    // stronger one would reintroduce the upgrade the declaration avoids.
+    expect(body).toContain("for no key update;");
+    const [shared] = recordActionEntities([
+      withPolicy({
+        column: "acl",
+        actions: [{
+          name: "follow", principals: ["integration"],
+          reads: ["definition"], lock: "shared",
+        }],
+      }),
+    ]);
+    expect(renderRecordActionProjection([shared!])).toContain("for share;");
   });
 
   test("an action with no declared reads has no branch", () => {

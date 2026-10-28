@@ -37,7 +37,10 @@ async function fixture(count: number, roles: string[], run: (client: Client) => 
   }] }]);
   const server = __buildGeneratedMcpServerForTests({ db, modulePlatform: platform,
     session: { tenantId, userId: "22222222-2222-4222-8222-222222222222", roles, groups: [], scope: "self", credential: "trusted-context" } as never,
-    modules: [accountsRuntime, documentsRuntime as never, versioningRuntime as never, { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }) } }],
+    modules: [accountsRuntime, documentsRuntime as never, versioningRuntime as never, { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }),
+      // The entity now carries a second canonical Operation; a module that
+      // supplies any handler must supply all of them.
+      deliverToNotebook: () => { throw new Error("This test does not exercise Notebook.deliver."); } } }],
     operationToolProjection: { mode: "searchable", search: "osf_search_operations", execute: "osf_execute_operation" },
   });
   const client = new Client({ name: "service-management", version: "1" }, { capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } } } });

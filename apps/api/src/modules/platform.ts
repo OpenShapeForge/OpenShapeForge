@@ -27,6 +27,7 @@ import type {
 } from "@openshapeforge/plugin-runtime";
 import {
   executeEntityOperation,
+  entityOperationAdmitsPrincipal,
   getEntityOperationContracts,
   tableForEntityOperation,
 } from "../operations/entity/index.js";
@@ -59,6 +60,7 @@ import { operationErrorOf } from "@openshapeforge/operations";
 import { ArtifactStorageRuntime } from "./artifact-storage.js";
 import { runtimeSettings } from "./settings.js";
 import { RecordAccessRuntime } from "./record-access.js";
+import { PrincipalRuntime } from "./principals.js";
 import { createWebhookSecretServices } from "./webhook-secrets.js";
 import { ReadProgressRuntime, type ReadProgressDefinition } from "./read-progress.js";
 import type { RuntimeReadProgress } from "@openshapeforge/plugin-runtime";
@@ -401,6 +403,9 @@ export class ModulePlatformRuntime {
     this.#readBarriers = sharedReadBarriers(db);
     documentPlatformRuntimes.set(db, this);
     this.#capabilityOperations = options.capabilityOperations;
+    const principals = new PrincipalRuntime({
+      acceptsSession: (session) => this.#acceptsScopedSession(session),
+    });
     const records = new RecordAccessRuntime({
       acceptsSession: (session) => this.#acceptsScopedSession(session),
       currentTransaction: (session) => this.#activeTransaction(session, "Record authorization transaction"),
@@ -445,6 +450,7 @@ export class ModulePlatformRuntime {
         },
       }),
       records: records.services,
+      principals: principals.services,
       settings: runtimeSettings,
       artifacts: this.#artifactStorage.services,
       durableOperations: {
@@ -707,6 +713,7 @@ export class ModulePlatformRuntime {
     Object.defineProperty(this.services, "artifacts", { writable: false, configurable: false });
     Object.defineProperty(this.services, "settings", { writable: false, configurable: false });
     Object.defineProperty(this.services, "records", { writable: false, configurable: false });
+    Object.defineProperty(this.services, "principals", { writable: false, configurable: false });
   }
 
   registerArtifactStorage(modules: readonly RuntimeModule[]): void {
@@ -738,7 +745,13 @@ export class ModulePlatformRuntime {
     const controlSession = isControlRealmSession(session);
     const heldRoles = new Set(session.roles);
     const entityOperations = controlSession ? [] : getEntityOperationContracts().filter((operation) =>
-      operation.authorization.roles.some((role) => heldRoles.has(role))
+      operation.authorization.roles.some((role) => heldRoles.has(role)) &&
+      // The entity's principal-class policy, so an Operation this session
+      // could not invoke is not listed as if it could. The derived
+      // application search enumerates exactly this list before it reads
+      // anything, so an entity that excludes this class is absent from the
+      // search rather than refused inside it.
+      entityOperationAdmitsPrincipal(operation, session)
     );
     const staticOperations = [...this.#staticOperations.values()]
       .filter((registration) => registration.available(session))

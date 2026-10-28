@@ -28,7 +28,10 @@
  */
 import type { Duplex } from "node:stream";
 import type { RuntimeSettingsService } from "@openshapeforge/plugin-runtime";
-import type { RuntimeRecordAccessServices } from "@openshapeforge/plugin-runtime";
+import type {
+  RuntimePrincipalServices,
+  RuntimeRecordAccessServices,
+} from "@openshapeforge/plugin-runtime";
 import type {
   ModuleOperationErrorResult as PublicModuleOperationErrorResult,
   ModuleOperationContextContract,
@@ -269,6 +272,7 @@ export type ModulePlatformServices = {
   readonly readProgress?: RuntimeReadProgressServices<TrustedSessionContext>;
   readonly webhookSecrets?: RuntimeWebhookSecretServices<TrustedSessionContext>;
   readonly records: RuntimeRecordAccessServices<TrustedSessionContext>;
+  readonly principals: RuntimePrincipalServices<TrustedSessionContext>;
   readonly settings: RuntimeSettingsService;
   readonly artifacts: RuntimeArtifactServices<TrustedSessionContext>;
   durableOperations?: {

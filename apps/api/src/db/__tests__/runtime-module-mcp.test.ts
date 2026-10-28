@@ -859,6 +859,11 @@ describe("generated MCP runtime module security boundary", () => {
         const notebookModule: RuntimeModule = {
           name: "notebook",
           operationHandlers: {
+            // The entity carries a second canonical Operation; a module that
+            // supplies any handler must supply all of them.
+            deliverToNotebook: () => {
+              throw new Error("This test does not exercise Notebook.deliver.");
+            },
             importNotebook: async (input) => {
               notebookCalls += 1;
               return {

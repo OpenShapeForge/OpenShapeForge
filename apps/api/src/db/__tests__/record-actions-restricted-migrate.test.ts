@@ -109,6 +109,7 @@ test("the restricted migrate role installs the lookup, its grants and its polici
       keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
       actions: ["start"],
       reads: { start: [{ field: "definition", column: "definition" }] },
+      locks: { start: "exclusive" },
     }]);
     expect(installed.map((entity) => entity.entity)).toEqual(["RestrictedRun"]);
 
@@ -200,6 +201,7 @@ test("the restricted migrate role installs the lookup, its grants and its polici
       keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
       actions: ["start"],
       reads: { start: [{ field: "definition", column: "definition" }] },
+      locks: { start: "exclusive" },
     }]);
   });
 }, TEST_TIMEOUT);
@@ -215,7 +217,7 @@ test("it refuses to grant anything on a table whose row security is not forced",
     const entity = (table: string) => [{
       entity: "Unbounded", schema: "erp", table,
       keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
-      actions: ["start"], reads: {},
+      actions: ["start"], reads: {}, locks: { start: "exclusive" as const },
     }];
     for (const [table, pattern] of [
       ["rls_absent_runs", /row level security is not enabled on it/],

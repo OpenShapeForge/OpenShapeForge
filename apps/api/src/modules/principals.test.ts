@@ -101,12 +101,19 @@ describe("the module-facing principal classification", () => {
 
   test("a verified person and a linked web-tier session stay persons", () => {
     const bearer = base({ principalKind: "person" });
-    const web = base({ credential: "trusted-context", ...linked(userId) });
+    const web = base({ credential: "trusted-context", principalKind: "person", ...linked(userId) });
     const { services } = harness(bearer, web);
     expect(services.classOf(bearer)).toBe("person");
     expect(services.classOf(web)).toBe("person");
     expect(services.application(bearer)).toBeUndefined();
     expect(services.application(web)).toBeUndefined();
+  });
+
+  test("a linked identity without a verified person kind remains unknown", () => {
+    const session = base({ credential: "trusted-context", ...linked(userId) });
+    const { services } = harness(session);
+    expect(services.classOf(session)).toBe("unknown");
+    expect(services.application(session)).toBeUndefined();
   });
 
   test("a capability grant and an unclassifiable carrier are neither", () => {

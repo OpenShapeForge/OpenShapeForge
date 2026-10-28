@@ -259,20 +259,43 @@ function controlDatabaseActorId(issuer: string, subject: string): string {
 }
 
 /**
- * Mint an object-identity capability from a core-verified session. The clone
- * prevents a module from mutating core's session object; freezing every nested
- * authority-bearing array prevents widening the clone.
+ * Mint an object-identity capability from a core-verified session.
+ *
+ * The capability is a DETACHED SNAPSHOT, not a view onto core's session. A
+ * shallow spread would copy only the top level: every nested object the
+ * session carries — `appPrincipal`, `grant`, `administrator`, `relation` —
+ * would remain the very object core holds, and `Object.freeze` on the
+ * capability leaves all of them writable. A module handed such a capability
+ * could assign `session.appPrincipal.integrationId` and thereby rewrite
+ * CORE's own verified session: `principals.application` would report the
+ * module's chosen integration as verified, `applyDbSession` would write it to
+ * `app.app_principal_id`, and `app.record_action_allows` would answer for
+ * another application's grants. The same hole widens a capability grant
+ * (`grant.records`, `grant.subject`) and forges the audited control actor
+ * (`administrator.subject`).
+ *
+ * So every own property whose value is an object is replaced by a deep-frozen
+ * structural clone. The sweep is deliberately generic rather than a list of
+ * today's authority fields: a nested field added to TrustedSessionContext
+ * later is detached by construction instead of by somebody remembering. A
+ * value that cannot be structurally cloned is a session carrying something
+ * other than verified data, and failing here is the right answer.
+ *
+ * Credential-resolution facts (the application principal, the capability
+ * grant, the control administrator, the issuer roles) are snapshots: they are
+ * what the carrier resolved to when the session was established and no core
+ * path rewrites them afterwards. The request-fresh fields below are accessors
+ * for the opposite reason.
  */
 export function createModuleSessionCapability(
   session: TrustedSessionContext,
 ): TrustedSessionContext {
-  const capability = {
-    ...session,
-    groups: Object.freeze([...session.groups]),
-    ...(session.oauthScopes
-      ? { oauthScopes: Object.freeze([...session.oauthScopes]) }
-      : {}),
-  };
+  const capability: Record<string, unknown> = { ...session };
+  for (const [key, value] of Object.entries(capability)) {
+    if (value !== null && typeof value === "object") {
+      capability[key] = deepFreezeClone(value);
+    }
+  }
   // A stateful MCP server lives across HTTP requests. Its login binding is
   // pinned, while roles, scope and domain memberships are the current
   // request's (mcp/stateful-session-authorization.ts): a copy taken here would
@@ -300,10 +323,12 @@ export function createModuleSessionCapability(
   Object.defineProperty(capability, "relation", {
     enumerable: true,
     configurable: false,
-    // A frozen copy per read: a plugin can never rewrite whom core acts as.
+    // A detached deep-frozen clone per read, for the same reason the sweep
+    // above exists: the link carries the identity row this session acts as,
+    // and a plugin can never rewrite whom core acts as.
     get: () => {
       const link = session.relation;
-      return link ? Object.freeze({ ...link, roles: Object.freeze([...(link.roles ?? [])]) }) : link;
+      return link ? deepFreezeClone(link) : link;
     },
   });
   return Object.freeze(capability) as unknown as TrustedSessionContext;

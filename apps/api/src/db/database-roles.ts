@@ -14,32 +14,48 @@
  *
  * TWO OPENSHAPEFORGE DATABASES IN ONE CLUSTER
  * -------------------------------------------
- * {@link readRoleMembers} is where a cluster-wide object meets a per-database
- * check. The member list is cluster-wide; both yardsticks a member is held
- * against are per database — the migrate identity the check is connected as,
- * and `datdba`. The same member list must therefore be accounted for in BOTH
- * databases, which is a condition on the MIGRATE IDENTITIES and the
- * memberships they hold, and not on the owners being equal or distinct:
+ * {@link readUnintendedDefinerMembers} is where a cluster-wide object meets a
+ * per-database check. The member list is cluster-wide; both yardsticks a
+ * member is held against are per database — the migrate identity the check is
+ * connected as, and `datdba`. The same member list must therefore be
+ * accounted for in BOTH databases.
+ *
+ * What it is accounted for against is a PREDICATE ON EACH MEMBER, evaluated
+ * once per database, and not a count of owners or of migrate identities. A
+ * reachable member is admitted in a database when it is SUPERUSER, when it IS
+ * `current_user` there — the migrate identity the check is connected as — or
+ * when it IS that database's `datdba`; the last two by NAME. Every other
+ * reachable role is refused. A role that merely HOLDS an owner's privileges is
+ * not admitted: as a definer member it would gain ownership of that role's
+ * SECURITY DEFINER functions, which the privileges alone do not confer.
+ *
+ * A cluster therefore passes exactly when every member of the definer roles
+ * satisfies that predicate in every OpenShapeForge database on it:
  *
  *   - ONE migrate identity for both databases satisfies the contract however
- *     their owners differ. It is the only member, and each database
- *     recognises it as the identity it is connected as;
- *   - TWO migrate identities, both members and neither a SUPERUSER, never
- *     satisfy it. The three grounds this check accepts are: the member is
- *     SUPERUSER, it IS the migrate identity the check is connected as, or it
- *     IS the owner of the current database — the last two by NAME. A role that
- *     merely HOLDS an owner's privileges is not admitted: as a definer member
- *     it would gain ownership of that role's SECURITY DEFINER functions, which
- *     the privileges alone do not confer. So in each database the other's
- *     migrator is none of the three, and both refuse, each naming it against
- *     all three definer roles. That refusal is symmetric: no provisioning
- *     order satisfies both, the `revoke` each error names would break the
- *     other database, and two roles cannot be members of each other.
+ *     their owners differ, as long as it is the only member: each database
+ *     recognises it as the identity it is connected as. TESTED;
+ *   - TWO migrate identities, both members and neither a SUPERUSER, are
+ *     refused when each owns the database it migrates. In each database the
+ *     other's migrator is none of the three grounds, so both refuse, each
+ *     naming it against all three definer roles. That refusal is symmetric:
+ *     no provisioning order satisfies both, the `revoke` each error names
+ *     would break the other database, and two roles cannot be members of each
+ *     other. Granting one migrator the other database's owner does not change
+ *     it — privileges are not identity. TESTED, in both directions;
+ *   - two migrate identities are NOT refused by this predicate when each IS
+ *     the other database's owner by name: the database M1 migrates is owned by
+ *     M2 and the database M2 migrates is owned by M1, so each database admits
+ *     one member as its `current_user` and the other as its `datdba`.
+ *     UNTESTED, and stated here only so the refusal above is not read as a ban
+ *     on two migrate identities as such. Nothing here establishes that the
+ *     rest of a migration run holds when the migrate identity does not own
+ *     the database it migrates, and the contract this file checks is not the
+ *     only condition such a deployment has to meet.
  *
- * Sharing an owner does not change that, and distinct owners are not what
- * fails: what counts is what each member of the definer roles IS in the
- * database doing the checking. Granting one migrator the other database's
- * owner does not help either — privileges are not identity.
+ * Sharing an owner is not what passes and distinct owners are not what fails:
+ * what counts is what each member of the definer roles IS in the database
+ * doing the checking.
  *
  * Verified in __tests__/database-role-contract.test.ts on PostgreSQL 17.11: it
  * provisions a second database in the test cluster and runs
@@ -48,7 +64,9 @@
  * same two databases with distinct owners under ONE migrate identity pass in
  * both; and a second migrate identity is still refused in the database whose
  * owner's privileges it has been granted, as is the first database's migrator
- * there.
+ * there. __tests__/definer-role-membership.test.ts adds the case of a definer
+ * member that is a database owner: admitted in the database it owns, refused
+ * in its sibling. No test covers the cross-owned topology above.
  *
  * The check cannot admit a member on the strength of its being SOME database's
  * owner, nor for holding an owner's privileges: either would let the owner of
@@ -313,11 +331,19 @@ export async function readUnintendedDefinerMembers(
  *
  * Roles are cluster-wide; the definer roles are named once in the manifest and
  * shared by every OpenShapeForge database on the cluster, while "this
- * database's owner" is per database. So a second OpenShapeForge database with
- * a DIFFERENT owner makes each database refuse the other's owner, and that is
- * the supported policy rather than an oversight: admitting any database owner
- * would admit whoever a `CREATEDB` role made one. The sentence says so when it
- * applies, so the refusal is not mistaken for a broken grant.
+ * database's owner" is per database. So a definer member that owns ANOTHER
+ * database on the cluster is admitted there and refused here, and that is the
+ * supported policy rather than an oversight: admitting any database owner
+ * would admit whoever a `CREATEDB` role made one.
+ *
+ * The extra sentence is emitted for exactly that member, so the refusal is not
+ * mistaken for a broken grant. It names the arrangement that always satisfies
+ * the contract — one owner and one migrate identity per cluster, or a cluster
+ * each — as operator advice; it is deliberately stricter than the predicate
+ * this check applies, which admits each database's own `current_user` and
+ * `datdba` and so also passes a shared cluster whose databases differ in owner
+ * under one migrate identity. The precise rule is in the file header and in
+ * docs/migrations.md.
  */
 export function explainDefinerMember(
   row: UnintendedDefinerMember,

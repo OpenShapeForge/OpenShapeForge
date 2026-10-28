@@ -184,6 +184,11 @@ describe("database role contract", () => {
    * a second migrate identity is refused even in the database whose owner's
    * privileges it has been granted — because holding an owner's privileges is
    * not being that owner.
+   *
+   * What they do NOT cover: two migrate identities that each ARE the other
+   * database's owner by name. The predicate admits both members in both
+   * databases there, so the refusal below is a refusal of this topology and
+   * not of two migrate identities as such. No test provisions that one.
    */
   test("a second migrate identity is refused in both databases; a second owner is not", async () => {
     const secondDatabase = `role_contract_second_${suffix}`;
@@ -202,8 +207,8 @@ describe("database role contract", () => {
       await admin.unsafe(`create database ${secondDatabase} owner ${secondMigrator}`);
       // Each database owned by, and migrated as, its own non-superuser role.
       // Both migrators must be members of the definer roles, so each database
-      // sees the other's migrator as a member it can account for neither as
-      // its own migrate identity nor as a holder of its owner's privileges.
+      // sees the other's migrator as a member that is neither the identity it
+      // is connected as nor its own `datdba` — the two names it admits.
       const provisioned = await adminRuntime.db.connection().execute((db) =>
         provisionDatabaseRoles(db, { passwords: {}, migratorRole: secondMigrator }),
       );

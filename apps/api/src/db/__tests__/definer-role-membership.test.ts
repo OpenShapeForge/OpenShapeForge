@@ -677,18 +677,26 @@ test("a membership carrying only ADMIN OPTION is a path and is refused", async (
 }, TEST_TIMEOUT);
 
 /**
- * THE SUPPORTED TOPOLOGY, and what it costs.
+ * A DATABASE OWNER ON A SHARED CLUSTER, and what the rule costs.
  *
  * Roles are cluster-wide: the definer roles are named once in the manifest
  * and shared by every OpenShapeForge database on the cluster. "This
- * database's owner" is not — so two OpenShapeForge databases with DIFFERENT
- * owners each refuse the other's owner, and that is the policy rather than an
- * oversight: admitting any database owner would admit whoever a CREATEDB role
- * made one. A deployment that puts two of them on one cluster gives them one
- * owner and one migrate identity, or one cluster each. The refusal says so,
- * so it is not mistaken for a broken grant.
+ * database's owner" is not — so a definer member that owns ANOTHER database on
+ * the cluster is admitted there and refused here, which is what this test
+ * asserts in both directions. That is the policy rather than an oversight:
+ * admitting any database owner would admit whoever a CREATEDB role made one.
+ *
+ * The sentence the refusal adds, and that this test pins, names the
+ * arrangement that always satisfies the contract — one owner and one migrate
+ * identity per cluster, or one cluster each — as operator advice. It is
+ * stricter than the predicate the check applies: a member is admitted when it
+ * is a superuser, IS this database's current_user or IS this database's
+ * datdba, so distinct owners under ONE migrate identity also pass (see
+ * database-role-contract.test.ts). Differing owners alone are not what fails;
+ * being a member of a definer role in a database that is neither yours to
+ * migrate nor yours to own is.
  */
-test("two databases with different owners on one cluster must share one owner", async () => {
+test("a definer member owning another database is admitted there, refused here", async () => {
   await server.unsafe(`grant ${RESOLVER_ROLE} to ${ownerRole} with inherit true, set true`);
   try {
     // Legitimate where ownerRole owns the database.

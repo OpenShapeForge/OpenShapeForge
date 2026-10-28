@@ -197,7 +197,8 @@ The role contract covers attributes and membership too. No declared role may be
 role must be `NOINHERIT` and a member of nothing, since its functions are
 `SECURITY DEFINER` and would otherwise run with whatever it inherits; and the
 only roles that may *act as* a definer role are the migrate identity and the
-owner of the current database, both compared by role **name**.
+owner of the current database, both compared by role **name**, besides a
+superuser, which the check cannot bound either way.
 
 Comparing by name is the rule, not a detail. `pg_has_role(current_user, X,
 'USAGE')` answers "does the caller hold X's privileges", which is true for
@@ -278,48 +279,68 @@ That membership rule is the point where a cluster-wide object meets a
 per-database check. Roles and role memberships live in the cluster, but both
 things the rule holds a member against are per database: the migrate identity
 step 0 is connected as, and `datdba`. The same member list must therefore be
-accounted for in **both** databases, which makes a shared cluster a condition
-on the **migrate identities** and the memberships they hold — not on the owners
-being equal or distinct.
+accounted for in **both** databases.
+
+What it is accounted for against is a **predicate on each member**, evaluated
+once per database — not a count of owners or of migrate identities. A reachable
+member passes in a database on one of three grounds: it is a superuser (outside
+row security and privilege checks regardless of membership), it **is** the
+migrate identity step 0 is connected as, or it **is** the owner of that
+database — the last two by role **name**. Every other reachable role is
+refused. A role that merely *holds* an owner's privileges is not admitted,
+because as a definer member it would gain ownership of that role's `SECURITY
+DEFINER` functions, which the privileges alone do not confer.
+
+A cluster passes exactly when every member of the definer roles satisfies that
+predicate in every OpenShapeForge database on it. Three shapes are worth
+naming:
 
 - **One migrate identity for both databases** satisfies the contract however
-  their owners differ. It is the only member of the definer roles, and each
-  database recognises it as the identity it is connected as.
+  their owners differ, as long as it is the only member of the definer roles:
+  each database recognises it as the identity it is connected as. **Tested.**
 - **Two migrate identities**, both members of the definer roles and neither a
-  superuser, never satisfy it. A member passes on one of three grounds: it is a
-  superuser (outside row security and privilege checks regardless of
-  membership), it **is** the migrate identity step 0 is connected as, or it
-  **is** the owner of the current database — the last two by role **name**. A
-  role that merely *holds* an owner's privileges is not admitted, because as a
-  definer member it would gain ownership of that role's `SECURITY DEFINER`
-  functions, which the privileges alone do not confer. So in each database the
-  other's migrator is none of the three, and step 0 refuses in both, each
-  naming the other's migrator against all three definer roles. That refusal is
-  symmetric — no provisioning order satisfies both, the `revoke` each error
-  names would break the other database, and two roles cannot be members of
-  each other, so no repair keeps both.
+  superuser, are refused when **each owns the database it migrates**. In each
+  database the other's migrator is none of the three grounds, so step 0 refuses
+  in both, each naming the other's migrator against all three definer roles.
+  That refusal is symmetric — no provisioning order satisfies both, the
+  `revoke` each error names would break the other database, and two roles
+  cannot be members of each other, so no repair keeps both. Granting one
+  migrator the other database's owner does not help either: privileges are not
+  identity. **Tested**, in both directions.
+- **Two migrate identities that are each the other database's owner** are not
+  refused by this predicate: if the database `m1` migrates is owned by `m2` and
+  the database `m2` migrates is owned by `m1`, each database admits one member
+  as its own `current_user` and the other as its own `datdba`. **Untested** —
+  no test provisions it, and the role contract is not the only condition such a
+  deployment must meet: nothing here establishes that the rest of a migration
+  run holds when the migrate identity does not own the database it migrates. It
+  is named so the refusal above is not read as a ban on two migrate identities
+  as such, and it is not a configuration to adopt on the strength of this
+  paragraph.
 
-Sharing an owner does not change that, and distinct owners are not what fails:
+Sharing an owner is not what passes and distinct owners are not what fails:
 what counts is what each member of the definer roles **is** in the database
-doing the checking. Granting one migrator the other database's owner does not
-help either — privileges are not identity.
+doing the checking.
 
-Verified by `database-role-contract.test.ts` on PostgreSQL 17.11: it provisions
-a second database in the test cluster and runs `verifyDatabaseRoles` in both
-databases. Two databases each owned by the distinct non-superuser role that
-migrates it refuse symmetrically; the same two databases with distinct owners
-under **one** migrate identity pass in both; and a second migrate identity is
-still refused in the database whose owner's privileges it has been granted,
-while the first database refuses it too. The check cannot admit a member for
-being *some* database's owner, nor for holding an owner's privileges: either
-would let the owner of any database in the cluster — or anyone granted that
-owner — hold the definer roles' grants in this one.
+What is verified, by `database-role-contract.test.ts` on PostgreSQL 17.11: it
+provisions a second database in the test cluster and runs `verifyDatabaseRoles`
+in both databases. Two databases each owned by the distinct non-superuser role
+that migrates it refuse symmetrically; the same two databases with distinct
+owners under **one** migrate identity pass in both; and a second migrate
+identity is still refused in the database whose owner's privileges it has been
+granted, while the first database refuses it too. `definer-role-membership.test.ts`
+adds the owner case directly: a definer member that is a database owner is
+admitted in the database it owns and refused in its sibling. The check cannot
+admit a member for being *some* database's owner, nor for holding an owner's
+privileges: either would let the owner of any database in the cluster — or
+anyone granted that owner — hold the definer roles' grants in this one.
 
 One cluster per deployment, which is what `db:provision-roles` ("once per
 cluster") assumes, needs none of this. For two deployments on shared hardware,
 separate clusters are the arrangement to reach for first; a shared cluster
-works only under the condition above, and the migrate identities — not the
-database owners alone — are what to check before relying on it.
+works only under the predicate above, and what to check before relying on it is
+each definer member's standing in each database — the migrate identities and
+the memberships they hold, not the database owners alone.
 
 The record-action step's privilege guarantees are per-database for the same
 reason. It reads `pg_class`, `pg_attribute` and `pg_policy`, all of which are
@@ -343,28 +364,37 @@ db:provision-roles` through the administrator connection.
 Locally and in CI the migrate role owns the instance, so the migrate URL
 doubles as the administrator connection when no admin URL is set.
 
-### One cluster, one owner
+### A database owner on a shared cluster
 
 Roles are cluster-wide: the definer roles are named once in the manifest and
 shared by every OpenShapeForge database on the cluster. "The owner of the
-current database" is not. Two OpenShapeForge databases with **different**
-owners therefore each refuse the other's owner as a member of the shared
-definer roles, and that is the supported policy rather than an oversight:
-admitting any database owner would admit whoever a `CREATEDB` role made one.
-Give the databases on a cluster one owner and one migrate identity, or a
-cluster each. The refusal says so when the reported role owns another database
-on the cluster, so it is not mistaken for a broken grant.
+current database" is not. A role that is a member of the definer roles and owns
+**another** database on the cluster is therefore admitted there and refused
+here, and that is the supported policy rather than an oversight: admitting any
+database owner would admit whoever a `CREATEDB` role made one. The refusal says
+so when the reported role owns another database, so it is not mistaken for a
+broken grant, and the sentence it adds names the arrangement that always
+satisfies the contract: one owner and one migrate identity per cluster, or a
+cluster each. That advice is deliberately stricter than the predicate the check
+applies — see the section above for the rule itself, under which a cluster
+whose databases differ in owner passes under one migrate identity.
+
+Differing owners alone do not cause a refusal: an owner is only measured
+against the predicate if it is a member of the definer roles, or reaches one
+through another member. An owner that holds no definer-role membership is never
+reported.
 
 What this costs an existing deployment, exactly: a single-database cluster
 whose migrate identity is its database owner is unaffected, and so is one whose
 migrate identity is a direct member of the definer roles with `INHERIT` and
 `SET`. `db:migrate` now refuses, before touching the schema, when a role that
-is neither the migrate identity nor the database owner can reach a definer role
-— including through either of those two — when the migrate identity's own grant
-is indirect or carries neither option, and when a sibling OpenShapeForge
-database on the same cluster has a different owner. Each refusal names the
-exact `grant` or `revoke` — one per route, so run all of them; none of them is
-applied for you. Run
+is neither the migrate identity nor this database's owner can reach a definer
+role — including through either of those two — and when the migrate identity's
+own grant is indirect or carries neither option. On a shared cluster that
+includes a sibling database's owner or migrate identity, when it is a definer
+member and is neither this database's `current_user` nor its owner. Each
+refusal names the exact `grant` or `revoke` — one per route, so run all of
+them; none of them is applied for you. Run
 `db:provision-roles -- --print` and the reported statements against the cluster
 before the upgrade window if any of those shapes may be present.
 

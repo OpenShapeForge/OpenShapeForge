@@ -202,36 +202,61 @@ the `revoke` that fixes it. Adding a role is a host provisioning step:
 `db:provision-roles` before the next `db:migrate`, or step 0 refuses the chain
 and names the statements.
 
-### One cluster holds one OpenShapeForge database per owner
+### Two OpenShapeForge databases in one cluster
 
 That membership rule is the point where a cluster-wide object meets a
-per-database check, and it bounds what a cluster may host. Roles and role
-memberships live in the cluster; `datdba` — the owner the rule compares a
-member against — belongs to one database. So **a cluster cannot host two
-OpenShapeForge databases with distinct owners.** Each database's migrate role
-must be a member of the definer roles, and from the other database that
-membership is a role which is neither its own migrate identity nor a holder of
-its owner's privileges. Step 0 refuses both databases, and the `revoke` each
-one names would break the other.
+per-database check. Roles and role memberships live in the cluster, but both
+things the rule holds a member against are per database: the migrate identity
+step 0 is connected as, and `datdba`. The same member list must therefore be
+accounted for in **both** databases, which makes a shared cluster a condition
+on the **migrate identities** and the memberships they hold — not on the owners
+being equal or distinct.
 
-Verified on PostgreSQL 17.11 with `verifyDatabaseRoles` itself: two databases
-owned by distinct non-superuser roles, both migrators provisioned, and each
-database reports the other's migrator as an undeclared member of all three
-definer roles. The refusal is symmetric, so there is no order of provisioning
-that satisfies both.
+- **One migrate identity for both databases** satisfies the contract however
+  their owners differ. It is the only member of the definer roles, and each
+  database recognises it as the identity it is connected as.
+- **Two migrate identities** satisfy it only where each database can account
+  for the other's. A member passes on one of three grounds: it is a superuser
+  (outside row security and privilege checks regardless of membership), it is a
+  role the connected migrate identity itself inherits, or it holds that
+  database's owner privileges. Where each database is owned by the role that
+  migrates it, none of the three covers the other's migrator, so step 0 refuses
+  in both, each naming the other's migrator against all three definer roles.
+  That refusal is symmetric — no provisioning order satisfies both, the
+  `revoke` each error names would break the other database, and two roles
+  cannot be members of each other, so no repair keeps both.
 
-Two databases that share one owner are fine — the same verification passes for
-both — and so is one cluster per deployment, which is what
-`db:provision-roles` ("once per cluster") assumes. For separate deployments on
-shared hardware, use separate clusters rather than a shared one; nothing here
-is a claim that a shared cluster works with distinct owners.
+Two databases that share one owner pass where each is migrated as an identity
+holding that owner's privileges — the usual deployment shape, in which the
+migrate role owns the database it migrates — and are refused where neither
+identity is covered on any of those grounds, exactly as two distinct owners
+are. Sharing an owner is not sufficient on its own, and distinct owners are not
+what fails: what counts is what each member of the definer roles is in the
+database doing the checking.
+
+Verified by `database-role-contract.test.ts` on PostgreSQL 17.11 and 16.15: it
+provisions a second database in the test cluster and runs `verifyDatabaseRoles`
+in both databases. Two databases each owned by the distinct non-superuser role
+that migrates it refuse symmetrically; the same two databases with distinct
+owners under one migrate identity pass in both; and a second migrate identity
+granted the second database's owner is accepted there while the first database,
+whose owner privileges it does not hold, still refuses it. The check cannot
+admit a member for being *some* database's owner: that would let the owner of
+any database in the cluster hold the definer roles' grants in this one.
+
+One cluster per deployment, which is what `db:provision-roles` ("once per
+cluster") assumes, needs none of this. For two deployments on shared hardware,
+separate clusters are the arrangement to reach for first; a shared cluster
+works only under the condition above, and the migrate identities — not the
+database owners alone — are what to check before relying on it.
 
 The record-action step's privilege guarantees are per-database for the same
 reason. It reads `pg_class`, `pg_attribute` and `pg_policy`, all of which are
 per-database, so "the resolver holds exactly what this manifest declares" is a
 statement about the database being migrated. The resolver is one cluster-wide
 role, and its grants in a sibling database are neither visible to nor revocable
-from this one.
+from this one; what bounds them there is that database's own migrate run. In a
+database no OpenShapeForge migration manages, nothing here bounds them at all.
 
 ```sh
 OPENSHAPEFORGE_ADMIN_DATABASE_URL=postgres://admin:...@host/db \

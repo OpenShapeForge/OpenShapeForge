@@ -201,13 +201,16 @@ import { WORKER_ROLE } from "./worker-role.js";
  * here nor revocable from here, and the stale-grant cleanup below reaches only
  * this database's tables.
  *
- * That is not a gap this step could close, and the role contract makes it one
- * it does not have to: a cluster cannot hold two OpenShapeForge databases with
- * distinct owners, because each one's migrate role is a member of the definer
- * roles and the other database sees that membership as an undeclared member of
- * its own. `verifyDatabaseRoles` refuses both, symmetrically — verified on
- * PostgreSQL 17.11. See database-roles.ts and docs/migrations.md; nothing here
- * claims a shared cluster with distinct owners works.
+ * That is not a gap this step could close, and the role contract does not close
+ * it either: two OpenShapeForge databases in one cluster are admitted whenever
+ * every member of the definer roles is accounted for in both, which one
+ * migrate identity migrating both satisfies however their owners differ. So a
+ * sibling database is a real possibility rather than an excluded one, and what
+ * bounds the resolver there is that the sibling's own migrate run makes this
+ * same exact-privilege statement about the sibling. In a database no
+ * OpenShapeForge migration manages, nothing here bounds the resolver at all.
+ * See database-roles.ts and docs/migrations.md for the membership condition;
+ * nothing here claims the resolver's privileges are bounded cluster-wide.
  *
  * ONE TRANSACTION
  * ---------------

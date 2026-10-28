@@ -686,10 +686,30 @@ it and a producer that authenticated nobody cannot borrow one. apps/web signs
 `person` on one property it can check — the session holds the id token of an
 OIDC authorization-code login, which a client-credentials grant never mints;
 the health probe and every other internal producer sign no class and are
-refused here. Every other credential is refused outright. v3 is not
-backward-compatible by design: a tier still signing v2 reads as unauthenticated
-rather than as an unclassified principal, so both tiers are redeployed
-together.
+refused here. Every other credential is refused outright.
+
+The verifier accepts **both v3 and v2** (`ACCEPTED_PAYLOAD_VERSIONS` in
+`packages/auth/src/trusted-context.ts`), because the tiers that produce bundles
+release separately from this package: a host's web tier, its MCP app and its
+operational scripts sign v2 until they are redeployed, and rejecting v2 does
+not fail those hops closed in some harmless way — it reads every one of them as
+unauthenticated, so ordinary work stops across a deployment mid-upgrade. What
+v2 can never do is carry a principal class. The class is not in its signed
+payload, so a v2 bundle names an identity and says NOTHING about how it was
+authenticated; the verifier therefore discards the `x-user-principal-kind`
+header on a v2 match rather than reading it off the wire. Honouring it would
+invert the whole control: anyone able to replay a captured v2 bundle could
+append `person` and reach this surface. A v2 hop keeps doing the ordinary work
+it always did and reaches credential management — or anything else reserved for
+a verified human — only once its producer signs v3. The two payloads cannot be
+confused (six fields beginning `v2` against seven beginning `v3`), and v1,
+whose groups sat outside the signature, stays refused.
+
+Nothing else may stand in for that class. In particular an identity link is
+not evidence of an interactive human login: a Relation can be linked by an
+administrator, can sit at `pending_confirmation`, and belongs to a service
+identity as readily as to a person. `ceiling.ts` asks for the signed class and
+for nothing else.
 
 Every response that carries a credential — the two `/api/api-keys` 201s, the
 canonical minting Operations and the two GraphQL mint mutations — is sent with
@@ -717,16 +737,53 @@ half-managing its integrations.
 
 `create-integration` registers an external party and hands over its first
 credential. Its result keeps the two halves apart: `integration` is ordinary
-metadata, re-read from the written row, and `credential` is the one-time
-secret. It is the only Operation here that declares `external: write` and the
-only one that can report `502 PROVISIONING_FAILED`; a realm that refuses leaves
-the intent row at `pending`, which authenticates nothing and is what the
+metadata and `credential` is the one-time secret. The metadata comes out of the
+SAME transaction that mints the key, from the activation statement's own
+`RETURNING`, and not from a read-back afterwards — the plaintext credential
+exists exactly once, in that answer, so any statement between minting it and
+returning it is a step whose failure loses the secret while the mint has
+committed, and whose retry provisions a second realm client and a second
+credential. It is the only Operation here that declares `external: write` and
+the only one that can report `502 PROVISIONING_FAILED`; a realm that refuses
+leaves the intent row at `pending`, which authenticates nothing and is what the
 reconciler sweeps.
+
+**One transaction per request.** A writing canonical Operation is dispatched
+inside the database session core opened for the session it verified — carrying
+the identity link, the audit identity and the resolved access scope — and the
+provisioning service JOINS that session rather than opening a second one next
+to it (`activeDbSessionContext` in `apps/api/src/db/session.ts`). It passes the
+active session back verbatim, after checking that its tenant and user are the
+ones the ceiling already decided on; the joined session is never an
+authorization source, and a mismatch fails loudly rather than running one
+principal's statements under another's. Rebuilding a session from what the
+service holds cannot work here: a rebuilt one has none of those three fields,
+and a trusted-context person resolves to scope `self` rather than `tenant`, so
+`withDbSession` refuses the substitution. Both api-key tables are fenced on the
+tenant alone, so joining a narrower scope changes no row the service may read.
+
+The one exception is the intent row, which keeps its own transaction. It has to
+be durable BEFORE the realm is touched: nested, it would roll back together
+with the step that failed, leaving a realm client that no `pending` row names
+and that the reconciler could therefore neither finish nor sweep.
+
+**Cursors are opaque, not trusted.** Both halves of a keyset reach a typed
+expression — the id a `uuid` column, a date sort's value a `timestamptz` cast —
+so `decodeCursor` checks each against the shape the database renders before
+anything is bound. The query fingerprint does not cover this: it keeps a cursor
+from resuming the wrong SET and is deliberately not a security boundary, being
+derived from public inputs. A malformed cursor is the declared `400 VALIDATION`
+rather than PostgreSQL's invalid-input-syntax error surfacing as a 500.
 
 **Credential lifetime.** Three bounds, kept apart in
 `auth/api-key/lifetime.ts` because they answer different questions.
 
-*The contract's bound.* Both minting Operations bound `expiresInDays` to
+*The contract's bound.* This is the canonical catalog's OWN policy and applies
+to nothing else. The older `/api/api-keys` REST mount and the GraphQL mint
+mutations keep no host maximum of their own and still accept any positive
+number of days and `null`; the catalog's 366 is not retroactively imposed on
+them, and adopting the catalog does not change what an existing client of those
+endpoints may ask for. Both minting Operations bound `expiresInDays` to
 1..366 and do not accept `null`. `null` reached the service as "never
 expires", which is not something a generic integration form may request on
 anyone's behalf; omitting the field takes the deployment default. The bound is
@@ -766,6 +823,49 @@ The reads also carry generic `interfaces.web.entities` declarations
 (`ApiKeyIntegration`, and `ApiKeyCredential` nested under it), with keyset
 cursor paging, sorting and name/status filters, plus the revoke and disable
 record actions.
+
+**What is proven, and what is not.** The suites below run against a real
+PostgreSQL and, where stated, a booted application; the realm half is a stub
+HTTP server speaking the slice of the Keycloak Admin API the provisioning path
+calls.
+
+Proven:
+
+- a v2 producer reproduced literally reaches the current verifier, verifies,
+  and arrives unclassified — including with `x-user-principal-kind` appended —
+  while forged, tampered, stale, unsigned and v1 bundles are refused
+  (`packages/auth/src/trusted-context-v2-compat.test.ts`);
+- the four writing Operations and the reads succeed over the booted HTTP
+  dispatcher for a signed v3 person whose login is linked to a Relation, with
+  the service's rows shown to belong to the dispatcher's transaction by
+  comparing each row's `xmin` against that transaction's `txid_current()`
+  (`apps/api/src/operations/api-key-dispatcher-db.test.ts`);
+- a failure after the handler discards the credential with the caller's
+  transaction while the `pending` intent row survives; a realm that refuses
+  leaves one `pending` row, no credential, one realm client and a declared
+  `502`;
+- a malformed cursor id or date is the declared `400` before any cast, and a
+  cursor the listing issued still walks a date-sorted page one row at a time;
+- `no-store` on both minting surfaces of a booted stack, and the carrier
+  refusal of an unclassified bundle on both
+  (`apps/api/src/auth/api-key/credential-no-store-db.test.ts`).
+
+Not proven here, and still open:
+
+- **No real interactive login is exercised.** Every suite signs its own
+  in-mesh bundle with the deployment secret. That the web tier signs `person`
+  for exactly an authorization-code session, and for nothing else, rests on
+  `apps/web/src/lib/server/principal-kind.ts` and its unit test, not on a
+  browser login against a real Keycloak. A host upgrade that reaches
+  credential management therefore needs its own end-to-end login evidence.
+- **No real Keycloak.** The realm is a stub, so realm-side behaviour under
+  partial failure, concurrency or a realm reset is not covered beyond what the
+  reconciler's own tests assert.
+- **A crash, as opposed to an error, is not simulated.** The `pending` row is
+  shown durable across a failed realm call and a rolled-back caller
+  transaction; a process killed mid-provisioning is reasoned about, not tested.
+- **The web projection of the two minting Operations is still absent** — see
+  below.
 
 **Neither minting Operation is projected to web.** The secret property of both
 carries the existing schema marker `x-osf-presentation: {component:

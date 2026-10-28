@@ -349,15 +349,8 @@ operations:
     id: api-keys.create-integration
     name: { en: Add an integration, nl: Integratie toevoegen }
     description:
-      en: 'Registers one external party against this organization and hands over its FIRST credential: a service
-        account is provisioned in the realm, bounded by the roles the caller itself holds, and one credential is
-        minted for it. RETURNS THE SECRET ONCE, under `credential`; everything under `integration` is ordinary
-        metadata that every later read reports too. The credential is hashed at rest and cannot be read again.'
-      nl: 'Registreert één externe partij bij deze organisatie en geeft de EERSTE credential mee: er wordt een
-        serviceaccount in het realm aangemaakt, begrensd door de rollen die de aanvrager zelf heeft, en daarvoor
-        wordt één credential uitgegeven. GEEFT HET SECRET ÉÉNMAAL TERUG, onder `credential`; alles onder
-        `integration` is gewone metadata die elke latere leesactie ook teruggeeft. De credential is gehasht
-        opgeslagen en is niet opnieuw op te vragen.'
+      en: Create an integration and its first API key. Copy the key when it appears; you cannot view it again later.
+      nl: Maak een integratie en de eerste API-sleutel aan. Kopieer de sleutel zodra deze verschijnt; je kunt hem later niet opnieuw bekijken.
     implementation: { type: plugin, plugin: osf-api-keys, handler: createIntegration }
     input:
       schema:
@@ -446,7 +439,11 @@ operations:
               secret:
                 type: string
                 description: The credential itself, returned exactly once and never recoverable. Treat as a password, not as data.
-                x-osf-i18n: { title: { en: Secret, nl: Secret } }
+                x-osf-i18n:
+                  title: { en: API key, nl: API-sleutel }
+                  description:
+                    en: Copy this key now. You cannot view it again after closing.
+                    nl: Kopieer deze sleutel nu. Na het sluiten kun je hem niet opnieuw bekijken.
                 x-osf-presentation: { component: FieldSecret }
               expiresAt:
                 type: string
@@ -470,14 +467,8 @@ operations:
     id: api-keys.issue-credential
     name: { en: Issue a credential, nl: Credential uitgeven }
     description:
-      en: 'Issues one additional credential against an existing active integration — the rotation primitive: two
-        keys live at once and the old one is revoked after the external party has cut over. RETURNS THE SECRET
-        ONCE. It is hashed at rest and cannot be read again, so it must be handed to the external party and
-        never stored, logged or echoed.'
-      nl: 'Geeft één extra credential uit op een bestaande actieve integratie — de rotatiestap: twee keys leven
-        tegelijk en de oude wordt ingetrokken nadat de externe partij is overgestapt. GEEFT HET SECRET ÉÉNMAAL
-        TERUG. Het is gehasht opgeslagen en is niet opnieuw op te vragen; geef het aan de externe partij en sla
-        het nergens op, log het niet en echo het niet.'
+      en: Issue an additional API key. Copy it when it appears; you cannot view it again later. Once the application uses the new key, you can revoke the old one.
+      nl: Geef een extra API-sleutel uit. Kopieer hem zodra hij verschijnt; je kunt hem later niet opnieuw bekijken. Zodra de applicatie de nieuwe sleutel gebruikt, kun je de oude intrekken.
     implementation: { type: plugin, plugin: osf-api-keys, handler: issueCredential }
     input:
       schema:
@@ -633,7 +624,7 @@ interfaces:
         recordRoute: /api-key-integrations/:integrationId/credentials/:id
         idField: id
         displayField: displayName
-        fields: [id, integrationName, displayName, status, roleSubset, createdAt, expiresAt, revokedAt, lastUsedAt]
+        fields: [displayName, status, integrationName, createdAt, expiresAt, lastUsedAt, revokedAt, roleSubset, id]
         columns: [displayName, status, expiresAt, lastUsedAt]
         operations:
           list: { operation: listCredentials, resultField: credentials, bindings: { integrationId: integrationId } }

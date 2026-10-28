@@ -103,10 +103,25 @@ describe("shipped integration and API-key catalog", () => {
   });
 
   test("does not guess a text collection for open, object, or enumerated array items", () => {
-    for (const items of [{}, { type: "object", properties: { name: { type: "string" } } }, { type: "string", enum: ["admin", "reader"] }]) {
+    for (const items of [{}, { type: "object", properties: { name: { type: "string" } } }, { type: "string", enum: ["admin", "reader"] }, { type: ["string", "null"] }, { type: "string", format: "date" }]) {
       const catalog = structuredClone(apiKeyCatalog());
       const schema = catalog.operations.listIntegrations!.output!.schema as any;
       schema.properties.integrations.items.properties.grantedRoles.items = items;
+      expect(manifest(catalog).entities.ApiKeyIntegration!.fields.grantedRoles).toMatchObject({
+        osfType: "array", baseType: "array", cardinality: "one",
+      });
+    }
+  });
+
+  test("preserves existing projection for enum or presentation on the array itself", () => {
+    for (const extra of [
+      { "x-osf-i18n": { title: { en: "Roles", nl: "Rollen" }, enum: { admin: { en: "Admin", nl: "Beheerder" } } } },
+      { "x-osf-presentation": { component: "FieldMultipleChoice" } },
+      { "x-osf-exact": { enum: ["admin"] } },
+    ]) {
+      const catalog = structuredClone(apiKeyCatalog());
+      const schema = catalog.operations.listIntegrations!.output!.schema as any;
+      Object.assign(schema.properties.integrations.items.properties.grantedRoles, extra);
       expect(manifest(catalog).entities.ApiKeyIntegration!.fields.grantedRoles).toMatchObject({
         osfType: "array", baseType: "array", cardinality: "one",
       });

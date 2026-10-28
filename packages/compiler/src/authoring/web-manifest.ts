@@ -1627,18 +1627,19 @@ function projectStandalone(
         // their own semantics can be projected completely.
         const candidate = rawType === "array" && schema.items && typeof schema.items === "object" && !Array.isArray(schema.items)
           ? schema.items as typeof schema : undefined;
-        const itemSchema = candidate?.type === "string" && candidate.format === undefined && candidate.enum === undefined
+        const plainStringArray = candidate?.type === "string" && candidate.format === undefined && candidate.enum === undefined
           && candidate["x-osf-type"] === undefined && candidate["x-osf-reference"] === undefined
           && candidate["x-osf-typed-by"] === undefined && candidate["x-osf-presentation"] === undefined
-          && candidate["x-osf-exact"] === undefined ? candidate : undefined;
-        const itemType = itemSchema?.type;
-        const fieldSchema = itemSchema ?? schema;
-        const fieldType = itemSchema ? itemType : rawType;
-        const baseType = fieldSchema.format === "date-time"
+          && candidate["x-osf-exact"] === undefined && schema.format === undefined && schema.enum === undefined
+          && !Object.keys(i18n?.enum ?? {}).length && !target
+          && schema["x-osf-type"] === undefined && schema["x-osf-reference"] === undefined
+          && schema["x-osf-typed-by"] === undefined && schema["x-osf-presentation"] === undefined
+          && schema["x-osf-exact"] === undefined;
+        const baseType = plainStringArray ? "string" : schema.format === "date-time"
           ? "datetime"
-          : fieldSchema.format === "date"
+          : schema.format === "date"
             ? "date"
-            : typeof fieldType === "string" ? fieldType : "string";
+            : typeof rawType === "string" ? rawType : "string";
         const enumValues = Array.isArray(schema.enum)
           ? schema.enum.filter((value): value is string => typeof value === "string")
           : Object.keys(i18n?.enum ?? {});
@@ -1656,7 +1657,7 @@ function projectStandalone(
             })),
           } : {}),
           ...(target ? { relationship: { targetEntityId: target.contract.entity.name } } : {}),
-          cardinality: itemSchema ? "many" as const : "one" as const,
+          cardinality: plainStringArray ? "many" as const : "one" as const,
           required: false,
           supports: { read: true, create: false, update: false },
         }];

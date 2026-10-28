@@ -59,6 +59,8 @@ const docRow = randomUUID();
 /** One record per concurrent interleaving, so neither disturbs the other. */
 const lockRowCheckFirst = randomUUID();
 const lockRowRevokeFirst = randomUUID();
+/** The record the projection is read from while a revocation contends. */
+const lockRowRead = randomUUID();
 
 const entities: RecordActionEntity[] = [
   {
@@ -181,7 +183,8 @@ beforeAll(async () => {
         (${runRow}::uuid, ${tenantA}::uuid, 'run-a-secret', 'graph-a', 'ready', ${sql.raw(`'${grantToIntegration(integration)}'::jsonb`)}),
         (${runRowTenantB}::uuid, ${tenantB}::uuid, 'run-b-secret', 'graph-b', 'ready', ${sql.raw(`'${grantToIntegration(integration)}'::jsonb`)}),
         (${lockRowCheckFirst}::uuid, ${tenantA}::uuid, 'lock-1', 'graph-1', 'ready', ${sql.raw(`'${grantToIntegration(integration)}'::jsonb`)}),
-        (${lockRowRevokeFirst}::uuid, ${tenantA}::uuid, 'lock-2', 'graph-2', 'ready', ${sql.raw(`'${grantToIntegration(integration)}'::jsonb`)})
+        (${lockRowRevokeFirst}::uuid, ${tenantA}::uuid, 'lock-2', 'graph-2', 'ready', ${sql.raw(`'${grantToIntegration(integration)}'::jsonb`)}),
+        (${lockRowRead}::uuid, ${tenantA}::uuid, 'lock-3', 'graph-3', 'ready', ${sql.raw(`'${grantToIntegration(integration)}'::jsonb`)})
     `.execute(conn);
     // A person-only action grant that names a ROLE, beside an integration
     // grant for a different integration. Nothing here grants view.
@@ -430,19 +433,34 @@ describe("the definer role is bounded", () => {
       // `secret` is declared by no action, so the resolver cannot read it at
       // all — the projection is bounded by a privilege, not only by SQL.
       expect(columns.rows.map((row) => row.column_name)).not.toContain("secret");
-      // The lock privilege exists so FOR SHARE is legal; the policy is what
-      // makes a write impossible.
-      const policies = await sql<{ policyname: string; cmd: string; withcheck: string | null }>`
-        select policyname, cmd, with_check as withcheck
+      // The lock privilege exists so FOR SHARE is legal; the policies are what
+      // make a write impossible.
+      const policies = await sql<{
+        policyname: string; cmd: string; permissive: string;
+        qual: string | null; withcheck: string | null;
+      }>`
+        select policyname, cmd, permissive, qual, with_check as withcheck
           from pg_policies
          where schemaname = 'erp' and tablename = 'action_runs'
            and ${RESOLVER_ROLE} = any(roles)
          order by policyname
       `.execute(conn);
-      expect(policies.rows.map((row) => [row.policyname, row.cmd, row.withcheck])).toEqual([
-        ["action_runs_record_action_lock", "UPDATE", "false"],
-        ["action_runs_record_action_read", "SELECT", null],
+      expect(policies.rows.map((row) => [row.policyname, row.cmd, row.permissive])).toEqual([
+        ["action_runs_record_action_fence", "ALL", "RESTRICTIVE"],
+        ["action_runs_record_action_lock", "UPDATE", "PERMISSIVE"],
+        ["action_runs_record_action_read", "SELECT", "PERMISSIVE"],
       ]);
+      // The two permissive policies are tenant-fenced rather than `true`:
+      // being OR-ed with the generated row policy, `true` admitted every
+      // tenant's rows to every statement running as the resolver.
+      const [fence, lock, read] = policies.rows;
+      expect(read!.qual).toContain("app.current_tenant()");
+      expect(lock!.qual).toContain("app.current_tenant()");
+      expect(lock!.withcheck).toBe("false");
+      // And the write is refused by a RESTRICTIVE check, which is AND-ed and
+      // therefore cannot be widened by a permissive policy.
+      expect(fence!.withcheck).toContain(`CURRENT_USER <> '${RESOLVER_ROLE}'`);
+      expect(fence!.qual).toContain("app.current_tenant()");
     });
     await expect(
       app.db.connection().execute((conn) => sql.raw(`set role ${RESOLVER_ROLE}`).execute(conn)),
@@ -463,6 +481,103 @@ describe("the definer role is bounded", () => {
       expect(grants.rows.map((row) => row.grantee)).not.toContain("PUBLIC");
     });
   }, TEST_TIMEOUT);
+
+  /**
+   * The privileges, exercised AS the resolver rather than inferred from
+   * catalog rows. `set local role` is the only way to reach that role at all —
+   * it is NOLOGIN, the app role cannot assume it (asserted above), and only a
+   * member may — so these run on the admin connection and roll back.
+   *
+   * What they are for: PostgreSQL combines PERMISSIVE policies with OR, and
+   * `erp.action_runs` carries the generated `action_runs_row_scope` policy,
+   * which names no role and whose write check is satisfied by any row of the
+   * session's own tenant. A role-targeted `with check (false)` is OR-ed with
+   * that and refuses nothing.
+   */
+  describe("and its privileges are bounded by a RESTRICTIVE policy, not an OR-ed one", () => {
+    const REWRITTEN = JSON.stringify({ actions: { start: { integrations: [randomUUID()] } } });
+
+    /** One connection, current_user = the resolver, always rolled back. */
+    async function asResolver<T>(
+      work: (conn: Kysely<DB>) => Promise<T>,
+      options: { tenant?: string; dropFence?: boolean } = {},
+    ): Promise<T> {
+      return admin.db.connection().execute(async (conn) => {
+        await sql`begin`.execute(conn);
+        try {
+          if (options.dropFence) {
+            await sql`drop policy action_runs_record_action_fence on erp.action_runs`.execute(conn);
+          }
+          await sql.raw(`set local role ${RESOLVER_ROLE}`).execute(conn);
+          await sql`select set_config('app.tenant_id', ${options.tenant ?? tenantA}, true)`
+            .execute(conn);
+          return await work(conn);
+        } finally {
+          await sql`rollback`.execute(conn);
+        }
+      });
+    }
+
+    const rewriteAcl = (conn: Kysely<DB>) =>
+      sql`update erp.action_runs set acl = ${sql.raw(`'${REWRITTEN}'::jsonb`)}
+        where id = ${runRow}::uuid`.execute(conn);
+
+    test("the ACL column grant cannot be used to write", async () => {
+      await expect(asResolver(rewriteAcl)).rejects.toThrow(
+        /violates row-level security policy "action_runs_record_action_fence"/,
+      );
+      // Unchanged, and the grant that was there is still there.
+      const acl = await admin.db.connection().execute(async (conn) =>
+        (await sql<{ acl: Record<string, unknown> }>`
+          select acl from erp.action_runs where id = ${runRow}::uuid
+        `.execute(conn)).rows[0]!.acl);
+      expect(acl).toHaveProperty("actions.start.integrations", [integration]);
+    });
+
+    test("and the fence is what refuses it: without it, the row policy admits the write", async () => {
+      // The finding this closes, demonstrated rather than argued. Everything
+      // here is rolled back, so the fixture is untouched.
+      const written = await asResolver(
+        async (conn) => Number((await rewriteAcl(conn)).numAffectedRows ?? 0),
+        { dropFence: true },
+      );
+      expect(written).toBe(1);
+    });
+
+    test("the read grant reaches one tenant, not every tenant", async () => {
+      const tenants = await asResolver(async (conn) =>
+        (await sql<{ tenant: string }>`
+          select distinct tenant_id::text as tenant from erp.action_runs
+        `.execute(conn)).rows.map((row) => row.tenant));
+      expect(tenants).toEqual([tenantA]);
+      // The same row, from the other tenant's session: not visible either.
+      const other = await asResolver(async (conn) =>
+        (await sql<{ count: number }>`
+          select count(*)::int as count from erp.action_runs where id = ${runRow}::uuid
+        `.execute(conn)).rows[0]!.count, { tenant: tenantB });
+      expect(other).toBe(0);
+    });
+
+    test("the lock the lookup takes is still legal under all three policies", async () => {
+      const locked = await asResolver(async (conn) =>
+        (await sql<{ acl: unknown }>`
+          select acl from erp.action_runs
+           where id = ${runRow}::uuid and tenant_id = app.current_tenant()
+           for share
+        `.execute(conn)).rows.length);
+      expect(locked).toBe(1);
+    });
+
+    test("it can neither insert nor delete, by privilege and by policy", async () => {
+      await expect(asResolver((conn) =>
+        sql`insert into erp.action_runs (id, tenant_id, secret, acl)
+          values (${randomUUID()}::uuid, ${tenantA}::uuid, 'forged', '{}'::jsonb)`.execute(conn),
+      )).rejects.toThrow(/permission denied for table action_runs/);
+      await expect(asResolver((conn) =>
+        sql`delete from erp.action_runs where id = ${runRow}::uuid`.execute(conn),
+      )).rejects.toThrow(/permission denied for table action_runs/);
+    });
+  });
 
   test("the shipped manifest declares no record-action entity yet, so the lookup denies everything", () => {
     // Opt-in means opt-in: nothing in this repository's authoring carries the
@@ -566,6 +681,48 @@ describe("the lock ordering serializes a policy change against a check", () => {
     }
   }, TEST_TIMEOUT);
 
+  /**
+   * The projection is a SECOND statement, after the check that authorized it.
+   * It holds because `record_action_read` calls `record_action_allows` first
+   * and a SECURITY DEFINER call takes no subtransaction: the `FOR SHARE` is
+   * the CALLER's, held to commit, and the projection's own `FOR SHARE` on the
+   * same primary key and tenant re-locks a row this transaction already holds.
+   * So a revocation cannot commit between the two, which is what this drives.
+   */
+  test("the payload cannot come from a row a revocation changed mid-call", async () => {
+    const reader = createDatabaseRuntime({ databaseUrl: url(scratch, true), maxConnections: 1 });
+    const revoker = createDatabaseRuntime({ databaseUrl: url(scratch, true), maxConnections: 1 });
+    try {
+      const read = Promise.withResolvers<void>();
+      const effectDone = Promise.withResolvers<void>();
+      const reading = labelled(reader, machine(), "ra-read-first", async (trx) => {
+        const payload = (await sql<{ payload: Record<string, unknown> | null }>`
+          select app.record_action_read(${RUN}, ${lockRowRead}, 'start') as payload
+        `.execute(trx)).rows[0]?.payload ?? null;
+        read.resolve();
+        await effectDone.promise;
+        return payload;
+      });
+      await read.promise;
+      const revoking = labelled(revoker, editor(), "ra-revoke-read", async (trx) => {
+        await sql`update erp.action_runs set acl = ${sql.raw(`'${revokedAcl()}'::jsonb`)}
+          where id = ${lockRowRead}::uuid`.execute(trx);
+        return "revoked" as const;
+      });
+      // The read transaction is still open, so the revocation is waiting on
+      // the lock the lookup took — not on a sleep.
+      await awaitBlocked("ra-revoke-read");
+      effectDone.resolve();
+      expect(await reading).toEqual({ definition: "graph-3", status: "ready" });
+      expect(await revoking).toBe("revoked");
+      // And after it commits, the same call discloses nothing.
+      expect(await allows(app.db, machine(), RUN, lockRowRead, "start")).toBe(false);
+    } finally {
+      await reader.close();
+      await revoker.close();
+    }
+  }, TEST_TIMEOUT);
+
   test("revoke first: the check waits and then reads the revocation", async () => {
     const checker = createDatabaseRuntime({ databaseUrl: url(scratch, true), maxConnections: 1 });
     const revoker = createDatabaseRuntime({ databaseUrl: url(scratch, true), maxConnections: 1 });
@@ -609,8 +766,8 @@ describe("existing human behaviour is unchanged", () => {
     // action_docs is empty=public and its ACL grants no view: still public.
     expect(await readable(stranger, "action_docs")).toBe(1);
     // action_runs is empty=restricted and names otherPerson for view on all
-    // three tenant-A rows; the fourth belongs to the other tenant.
-    expect(await readable(viewer, "action_runs")).toBe(3);
+    // four tenant-A rows; the fifth belongs to the other tenant.
+    expect(await readable(viewer, "action_runs")).toBe(4);
     expect(await readable(stranger, "action_runs")).toBe(0);
     // Holding an action never adds a row to either answer.
     const machine = session({

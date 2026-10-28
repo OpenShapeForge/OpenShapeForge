@@ -113,10 +113,25 @@ A definer role exists so one function can read what its caller may not, and
 owns nothing else. `openshapeforge_record_action_resolver` is the narrowest of
 them: per entity that declares a record action it holds column-level `SELECT`
 on the key, the tenant column, the ACL column and that action's declared read
-fields, plus the `UPDATE` privilege `SELECT … FOR SHARE` requires behind a
-`WITH CHECK (false)` policy — so it may lock an ACL row to serialize a check
-against a concurrent policy change, and may never write one. Its two functions
-are not executable by the worker connection or by `PUBLIC`. Adding a role is a
+fields, plus the `UPDATE` privilege `SELECT … FOR SHARE` requires — so it may
+lock an ACL row to serialize a check against a concurrent policy change, and
+may never write one. Its two functions are not executable by the worker
+connection or by `PUBLIC`.
+
+Those grants are bounded by three policies per entity, and the load-bearing
+one is `AS RESTRICTIVE`. Permissive policies are combined with `OR`, and every
+tenant-scoped table already carries the generated row policy, which names no
+role and whose write check any row of the session's own tenant satisfies; a
+role-targeted `WITH CHECK (false)` is OR-ed with it and refuses nothing. So
+beside the two permissive policies that admit the resolver to its own tenant's
+rows for `SELECT` and for the lock, `<table>_record_action_fence` is a
+restrictive `FOR ALL` policy whose check is `current_user <> '<resolver>'`:
+AND-ed, and therefore not widenable by any policy added later. The
+`current_user` test rather than the policy's `TO` list is deliberate — RLS
+matches `TO` with `has_privs_of_role`, so a `TO <resolver>` policy also covers
+the migrate role, which the contract makes a member of every definer role. The
+migration refuses to grant anything on a table whose row security is not
+enabled *and* forced, because a policy bounds nothing there. Adding a role is a
 host provisioning step: `db:provision-roles` before the next `db:migrate`, or
 step 0 refuses the chain and names the statements.
 

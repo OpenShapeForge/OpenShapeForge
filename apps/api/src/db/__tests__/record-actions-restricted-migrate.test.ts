@@ -143,17 +143,42 @@ test("the restricted migrate role installs the lookup, its grants and its polici
       { column_name: "acl", privilege_type: "UPDATE" },
     ]);
 
-    const policies = await sql<{ policyname: string; cmd: string; withcheck: string | null }>`
-      select policyname, cmd, with_check as withcheck
+    // CREATE POLICY ... AS RESTRICTIVE is a privileged statement too, and the
+    // fence is the one that bounds the column grants above.
+    const policies = await sql<{ policyname: string; cmd: string; permissive: string }>`
+      select policyname, cmd, permissive
         from pg_policies
        where schemaname = 'erp' and tablename = 'restricted_runs'
          and ${RESOLVER_ROLE} = any(roles)
        order by policyname
     `.execute(conn);
     expect(policies.rows).toEqual([
-      { policyname: "restricted_runs_record_action_lock", cmd: "UPDATE", withcheck: "false" },
-      { policyname: "restricted_runs_record_action_read", cmd: "SELECT", withcheck: null },
+      { policyname: "restricted_runs_record_action_fence", cmd: "ALL", permissive: "RESTRICTIVE" },
+      { policyname: "restricted_runs_record_action_lock", cmd: "UPDATE", permissive: "PERMISSIVE" },
+      { policyname: "restricted_runs_record_action_read", cmd: "SELECT", permissive: "PERMISSIVE" },
     ]);
+
+    // The fence is scoped `to <resolver>`, and RLS matches a policy's TO list
+    // with has_privs_of_role — so it applies to THIS role as well, which the
+    // contract makes a member of every definer role. The migrate role must
+    // still be able to write the tables it migrates and seeds, which is what
+    // the `current_user <> '<resolver>'` disjunct is for.
+    const member = await sql<{ member: boolean }>`
+      select pg_has_role(current_user, ${RESOLVER_ROLE}, 'USAGE') as member
+    `.execute(conn);
+    expect(member.rows[0]!.member).toBe(true);
+    const tenant = randomUUID();
+    await sql`select set_config('app.tenant_id', ${tenant}, false)`.execute(conn);
+    await sql`
+      insert into erp.restricted_runs (id, tenant_id, secret, definition, acl)
+      values (${randomUUID()}::uuid, ${tenant}::uuid, 'seeded', 'graph', '{}'::jsonb)
+    `.execute(conn);
+    const updated = await sql`
+      update erp.restricted_runs set acl = '{"view": {"users": []}}'::jsonb
+       where tenant_id = ${tenant}::uuid
+    `.execute(conn);
+    expect(Number(updated.numAffectedRows ?? 0)).toBe(1);
+    await sql`delete from erp.restricted_runs where tenant_id = ${tenant}::uuid`.execute(conn);
 
     // EXECUTE ends up where it should, after the two privilege sweeps that
     // run before this step would otherwise have widened it.
@@ -176,5 +201,41 @@ test("the restricted migrate role installs the lookup, its grants and its polici
       actions: ["start"],
       reads: { start: [{ field: "definition", column: "definition" }] },
     }]);
+  });
+}, TEST_TIMEOUT);
+
+/**
+ * The policies bound the column grants, and a policy binds nothing while row
+ * security is off or unforced on the table. The generated schema always emits
+ * both for a tenant-scoped table, so this is the case that proves the step
+ * refuses to hand out the grants rather than trusting that.
+ */
+test("it refuses to grant anything on a table whose row security is not forced", async () => {
+  await migrate.db.connection().execute(async (conn) => {
+    const entity = (table: string) => [{
+      entity: "Unbounded", schema: "erp", table,
+      keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
+      actions: ["start"], reads: {},
+    }];
+    for (const [table, pattern] of [
+      ["rls_absent_runs", /row level security is not enabled on it/],
+      ["rls_unforced_runs", /row level security is not FORCED on it/],
+    ] as const) {
+      await sql.raw(`
+        create table erp.${table} (
+          id uuid primary key, tenant_id uuid not null, acl jsonb not null default '{}'::jsonb)
+      `).execute(conn);
+      if (table === "rls_unforced_runs") {
+        await sql.raw(`alter table erp.${table} enable row level security`).execute(conn);
+      }
+      await expect(applyRecordActionsMigration(conn, entity(table))).rejects.toThrow(pattern);
+      // And nothing was granted on the way to the refusal.
+      const granted = await sql<{ count: number }>`
+        select count(*)::int as count from information_schema.column_privileges
+         where grantee = ${RESOLVER_ROLE} and table_name = ${table}
+      `.execute(conn);
+      expect(granted.rows[0]!.count).toBe(0);
+      await sql.raw(`drop table erp.${table}`).execute(conn);
+    }
   });
 }, TEST_TIMEOUT);

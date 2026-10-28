@@ -39,12 +39,50 @@ import { WORKER_ROLE } from "./worker-role.js";
  *
  *   - `select (<key>, tenant_id, <acl column>)` — column-level, so a `secret`
  *     column on the same row is "permission denied for table", not a leak;
- *   - `update (<acl column>)` with a `for update using (true) with check
- *     (false)` policy. UPDATE privilege is what PostgreSQL requires for `FOR
- *     SHARE`, and `with check (false)` is what makes the write impossible: the
- *     resolver may LOCK an ACL row and may never change one;
- *   - `for select to <resolver> using (true)` — the row is visible to the
- *     resolver only, never to the app role, and only through this function.
+ *   - `update (<acl column>)`, because UPDATE privilege is what PostgreSQL
+ *     requires for `FOR SHARE` (an empty modified-column set is admitted by
+ *     any column-level UPDATE grant). The resolver may LOCK an ACL row;
+ *   - three policies, below, that bound what those privileges can reach.
+ *
+ * WHY THE PERMISSIVE PAIR IS NOT ENOUGH
+ * -------------------------------------
+ * PostgreSQL combines PERMISSIVE policies with OR, and every tenant-scoped
+ * table already carries the generated `<table>_row_scope` (or
+ * `<table>_tenant_isolation`) policy, which names no role and therefore
+ * applies to the resolver as well. Its write check is `app.bypass_rls() OR
+ * tenant_id = app.current_tenant()`, which is TRUE for the very row the
+ * resolver is looking at. A role-targeted `for update ... with check (false)`
+ * is OR-ed with that and changes nothing: verified on PostgreSQL 17.11, the
+ * resolver rewrote an ACL document through the column grant. The same OR made
+ * `for select ... using (true)` a cross-tenant read of every row of the table.
+ *
+ * So the bound is a RESTRICTIVE policy, which combines with AND and can
+ * therefore not be widened by any policy that exists now or is added later:
+ *
+ *   `<table>_record_action_read`   permissive, `for select to <resolver>`,
+ *                                  `using (tenant_id = app.current_tenant())`
+ *                                  — admits the one tenant's rows that the
+ *                                  view-gated row policy would hide;
+ *   `<table>_record_action_lock`   permissive, `for update to <resolver>`,
+ *                                  same tenant predicate, `with check
+ *                                  (false)` — admits `FOR SHARE` on those
+ *                                  rows and no new row version;
+ *   `<table>_record_action_fence`  RESTRICTIVE, `for all to <resolver>`,
+ *                                  `using (current_user <> '<resolver>' or
+ *                                  tenant_id = app.current_tenant())`,
+ *                                  `with check (current_user <> '<resolver>')`
+ *                                  — every statement running AS the resolver
+ *                                  sees one tenant and writes nothing, on
+ *                                  select, insert, update and delete alike.
+ *
+ * The `current_user <> '<resolver>'` disjunct is not decoration. RLS matches a
+ * policy's `TO` list with `has_privs_of_role`, so a `to <resolver>` policy
+ * also applies to the MIGRATE role, which the role contract makes a member of
+ * every definer role (database-roles.ts). Without the exemption the fence
+ * would silently stop the migrate role from seeding or migrating data in any
+ * entity that declares an action. Scoping the policy `to <resolver>` keeps it
+ * off the app and worker roles' hot path entirely — neither is a member — and
+ * the disjunct then exempts the one member that is not the definer itself.
  *
  * EXECUTE is revoked from PUBLIC and from the worker role, and granted to the
  * app role alone: no worker-side action check is supported yet. That revoke is
@@ -392,6 +430,51 @@ export function renderRecordActionProjection(
   ].join("\n");
 }
 
+/**
+ * Row security must be ENABLED and FORCED on the entity table, and the
+ * resolver must not hold the owner's privileges on it.
+ *
+ * Without row security the three policies below are inert comments and the
+ * column grants are an unconditional cross-tenant read plus an ACL write.
+ * Without FORCE, a role holding the owner's privileges skips every policy —
+ * which is also why the owner is checked rather than assumed.
+ */
+async function assertRowSecurityBounds(
+  db: OpenShapeForgeDatabase,
+  entity: RecordActionEntity,
+): Promise<void> {
+  const state = await sql<{
+    enabled: boolean;
+    forced: boolean;
+    owner: string;
+    resolver_owns: boolean;
+  }>`
+    select c.relrowsecurity as enabled, c.relforcerowsecurity as forced,
+           owner.rolname as owner,
+           pg_has_role(${RESOLVER_ROLE}, c.relowner, 'USAGE') as resolver_owns
+      from pg_class c
+      join pg_namespace n on n.oid = c.relnamespace
+      join pg_roles owner on owner.oid = c.relowner
+     where n.nspname = ${entity.schema} and c.relname = ${entity.table}
+  `.execute(db);
+  const row = state.rows[0];
+  const reason = !row
+    ? "the table does not exist"
+    : !row.enabled
+      ? "row level security is not enabled on it"
+      : !row.forced
+        ? "row level security is not FORCED on it"
+        : row.resolver_owns
+          ? `its owner ${row.owner} is a role the resolver holds the privileges of`
+          : undefined;
+  if (reason === undefined) return;
+  throw new Error(
+    `Record-action policy for ${entity.schema}.${entity.table} cannot be deployed: ${reason}. ` +
+      "The resolver's column grants are only bounded by its policies, and a policy only " +
+      "applies while row security is enabled and forced for the role that reads.",
+  );
+}
+
 export async function applyRecordActionsMigration(
   db: OpenShapeForgeDatabase,
   entities: readonly RecordActionEntity[] = recordActionEntities(),
@@ -400,10 +483,27 @@ export async function applyRecordActionsMigration(
   await sql`grant usage on schema app to ${sql.id(RESOLVER_ROLE)}`.execute(db);
   await sql`grant create on schema app to ${sql.id(RESOLVER_ROLE)}`.execute(db);
 
+  // Inside a policy the resolver is a string, not an identifier.
+  const resolverLiteral = literal(RESOLVER_ROLE);
+  const tenantFence = `${ident("tenant_id")} = app.current_tenant()`;
+  const notTheResolver = `current_user <> ${resolverLiteral}`;
+
   for (const entity of entities) {
     const target = sql.id(entity.schema, entity.table);
-    const readPolicy = `${entity.table}_record_action_read`;
-    const lockPolicy = `${entity.table}_record_action_lock`;
+    const policy = (suffix: string) => {
+      const name = `${entity.table}_record_action_${suffix}`;
+      // Truncation at 63 bytes would collapse the three names into one and
+      // leave the table with whichever policy was created last.
+      if (name.length > 63) unrenderable(name, "the policy name exceeds 63 bytes");
+      return sql.id(name);
+    };
+    // A policy only bounds a privilege while row security is ON and applies to
+    // the role reading. Both are true by construction — the generated schema
+    // emits ENABLE and FORCE ROW LEVEL SECURITY for every tenant-scoped table
+    // and the registry refuses a table that is not tenant-scoped — and this
+    // asserts it anyway, because the step after it hands out a column grant
+    // that is a real read and a real write if the assertion is false.
+    await assertRowSecurityBounds(db, entity);
     await sql`grant usage on schema ${sql.id(entity.schema)} to ${sql.id(RESOLVER_ROLE)}`.execute(db);
     // Exactly the columns the two questions need: the key and tenant to find
     // the row, the ACL to decide, and the union of the declared read
@@ -414,22 +514,37 @@ export async function applyRecordActionsMigration(
     )].sort();
     const selectable = [entity.keyColumn, "tenant_id", entity.aclColumn, ...readColumns]
       .filter((column, index, all) => all.indexOf(column) === index)
-      .map((column) => `"${column}"`)
+      .map((column) => ident(column))
       .join(", ");
     await sql.raw(
-      `grant select (${selectable}) on ${entity.schema}.${entity.table} to ${RESOLVER_ROLE}`,
+      `grant select (${selectable}) on ${ident(entity.schema, entity.table)} to ${ident(RESOLVER_ROLE)}`,
     ).execute(db);
-    // The lock privilege and nothing more: see the header. The WITH CHECK
-    // below is what makes a write impossible even with the column grant.
+    // The lock privilege and nothing more: UPDATE is what PostgreSQL requires
+    // for FOR SHARE. The fence policy below is what makes the write
+    // impossible; the column grant alone would not.
     await sql.raw(
-      `grant update ("${entity.aclColumn}") on ${entity.schema}.${entity.table} to ${RESOLVER_ROLE}`,
+      `grant update (${ident(entity.aclColumn)}) on ${ident(entity.schema, entity.table)} to ${ident(RESOLVER_ROLE)}`,
     ).execute(db);
-    await sql`drop policy if exists ${sql.id(readPolicy)} on ${target}`.execute(db);
-    await sql`create policy ${sql.id(readPolicy)} on ${target}
-      for select to ${sql.id(RESOLVER_ROLE)} using (true)`.execute(db);
-    await sql`drop policy if exists ${sql.id(lockPolicy)} on ${target}`.execute(db);
-    await sql`create policy ${sql.id(lockPolicy)} on ${target}
-      for update to ${sql.id(RESOLVER_ROLE)} using (true) with check (false)`.execute(db);
+    // Permissive: admits the resolver to the rows the view-gated row policy
+    // hides from the app role, within this session's tenant and no further.
+    await sql`drop policy if exists ${policy("read")} on ${target}`.execute(db);
+    await sql`create policy ${policy("read")} on ${target}
+      for select to ${sql.id(RESOLVER_ROLE)} using (${sql.raw(tenantFence)})`.execute(db);
+    await sql`drop policy if exists ${policy("lock")} on ${target}`.execute(db);
+    await sql`create policy ${policy("lock")} on ${target}
+      for update to ${sql.id(RESOLVER_ROLE)}
+      using (${sql.raw(tenantFence)}) with check (false)`.execute(db);
+    // RESTRICTIVE, and therefore the actual bound: permissive policies are
+    // OR-ed, so the generated row policy — which names no role and whose write
+    // check is satisfied by the resolver's own tenant — would otherwise hand
+    // back both the cross-tenant read and the ACL write the two policies above
+    // appear to refuse. `current_user` rather than the TO list exempts the
+    // migrate role, which the role contract makes a member of this role.
+    await sql`drop policy if exists ${policy("fence")} on ${target}`.execute(db);
+    await sql`create policy ${policy("fence")} on ${target}
+      as restrictive for all to ${sql.id(RESOLVER_ROLE)}
+      using (${sql.raw(notTheResolver)} or ${sql.raw(tenantFence)})
+      with check (${sql.raw(notTheResolver)})`.execute(db);
   }
 
   await sql.raw(`

@@ -81,6 +81,6 @@ test("sends the cut name in the create request, and the full id", async () => {
   expect(bodies[0]!.protocolMappers).toContainEqual({
     name: "test-api-audience", protocol: "openid-connect",
     protocolMapper: "oidc-audience-mapper", consentRequired: false,
-    config: { "included.client.audience": "test-api", "id.token.claim": "false", "access.token.claim": "true" },
+    config: { "included.custom.audience": "test-api", "id.token.claim": "false", "access.token.claim": "true" },
   });
 });

@@ -375,7 +375,7 @@ operations:
             type: array
             uniqueItems: true
             items: { type: string, minLength: 1 }
-            description: Optional roles the integration's service account receives. Every one must already be held by the caller; an empty list leaves access to explicit record-action grants.
+            description: Roles the integration's service account receives. Every one must already be held by the caller. An empty list grants no general roles; separately authorized record actions and operations open to authenticated sessions may still be available.
             x-osf-i18n: { title: { en: Roles, nl: Rollen } }
           expiresInDays: &expiresInDays
             type: integer

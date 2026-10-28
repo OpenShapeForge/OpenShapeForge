@@ -386,14 +386,20 @@ describe("integration catalog Operations", () => {
     });
 
     test("refuses role-free creation before provisioning when API audience is absent", async () => {
+      const previousAudience = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE;
       delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE;
-      const store = fixtureStore();
-      const result = failure((await run("createIntegration", {
-        displayName: "No audience", roles: [],
-      }, { store })).result);
-      expect(result).toMatchObject({ status: 400, code: "VALIDATION" });
-      expect(store.integrations).toEqual([]);
-      expect(realm.requests).toEqual([]);
+      try {
+        const store = fixtureStore();
+        const result = failure((await run("createIntegration", {
+          displayName: "No audience", roles: [],
+        }, { store })).result);
+        expect(result).toMatchObject({ status: 400, code: "VALIDATION" });
+        expect(store.integrations).toEqual([]);
+        expect(realm.requests).toEqual([]);
+      } finally {
+        if (previousAudience === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE;
+        else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = previousAudience;
+      }
     });
   });
 

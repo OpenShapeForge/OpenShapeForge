@@ -34,6 +34,8 @@ export type ResolvedApiKey = {
   keycloakClientId: string;
   /** The integration's name: what its service account's identity is called. */
   displayName: string;
+  /** An integration explicitly configured without general roles. */
+  roleFree: boolean;
   clientSecret: StoredSecret;
 };
 
@@ -63,10 +65,16 @@ type IntegrationRow = {
   keycloak_client_id: string;
   display_name: string;
   status: string;
+  granted_roles: unknown;
   client_secret_ciphertext: string | null;
   client_secret_key_id: string | null;
   client_secret_algorithm: string | null;
 };
+
+/** Only an explicitly stored empty array opts into a role-free session. */
+export function isRoleFreeIntegration(value: unknown): boolean {
+  return Array.isArray(value) && value.length === 0;
+}
 
 /** A tenant no row belongs to, so a miss still opens the fenced session. */
 const DECOY_TENANT_ID = "00000000-0000-4000-8000-000000000000";
@@ -140,7 +148,7 @@ export async function resolveApiKey(
 
   const integration = await withCredentialResolutionSession(db, row.tenant_id, async (trx) => {
     const result = await sql<IntegrationRow>`
-      select keycloak_client_id, display_name, status,
+      select keycloak_client_id, display_name, status, granted_roles,
              client_secret_ciphertext, client_secret_key_id, client_secret_algorithm
         from platform.api_key_integrations
        where id = ${row.integration_id}
@@ -170,6 +178,7 @@ export async function resolveApiKey(
       roleSubset: parseRoleSubset(row.role_subset),
       keycloakClientId: integration.keycloak_client_id,
       displayName: integration.display_name,
+      roleFree: isRoleFreeIntegration(integration.granted_roles),
       clientSecret: {
         ciphertext: integration.client_secret_ciphertext,
         keyId: integration.client_secret_key_id,

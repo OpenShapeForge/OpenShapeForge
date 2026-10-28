@@ -214,7 +214,7 @@ export class KeycloakAdmin {
         protocolMapper: "oidc-audience-mapper",
         consentRequired: false,
         config: {
-          "included.client.audience": this.config.apiAudience,
+          "included.custom.audience": this.config.apiAudience,
           "id.token.claim": "false",
           "access.token.claim": "true",
         },

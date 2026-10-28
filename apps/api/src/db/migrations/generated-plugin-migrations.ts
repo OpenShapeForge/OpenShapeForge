@@ -24,6 +24,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { sql, type Kysely } from "kysely";
 import { ensureCheckConstraint } from "./sql-invariants.js";
+import { APP_ROLE } from "./app-role.js";
 
 export type GeneratedPluginMigration = {
   plugin: string;
@@ -165,6 +166,10 @@ export async function applyGeneratedPluginMigrations(
     const owned = parseCompilerConstraint(migration.sql);
     await sql`begin`.execute(db);
     try {
+      // Plugin DDL can scope database policies to the host's configured
+      // runtime role without guessing its name. The setting is transaction
+      // local and is supplied by the host, not by request/session input.
+      await sql`select set_config('osf.migration_app_role', ${APP_ROLE}, true)`.execute(db);
       const expression = owned && checkExpression(owned.definition);
       if (owned && expression !== undefined) {
         await ensureCheckConstraint(db, { table: owned.table, name: owned.name, expression });

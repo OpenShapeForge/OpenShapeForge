@@ -319,15 +319,15 @@ interfaces:
             clearable: true
       openedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       closedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       archiveActionAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       retentionUntil:
         render:

@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 import type { ModuleEgressRequest, RuntimeModule } from "../contract.js";
 import {
   createModuleEgressInvocation,
+  missingEgressOwnerDiagnostic,
   fetchValidatedOutbound,
 } from "../egress.js";
 import externalRuntimeModule, {
@@ -24,6 +25,11 @@ const source = {
 };
 
 describe("canonical runtime-module egress boundary", () => {
+  it("identifies missing production egress configuration at startup without affecting offline deployments", () => {
+    expect(missingEgressOwnerDiagnostic("production", undefined)).toMatchObject({ code: "EGRESS_OWNER_REQUIRED" });
+    expect(missingEgressOwnerDiagnostic("production", {})).toBeUndefined();
+    expect(missingEgressOwnerDiagnostic("development", undefined)).toBeUndefined();
+  });
   it("delivers the exact trusted context and preserves Request semantics and signal", async () => {
     const signal = new AbortController().signal;
     let seen: ModuleEgressRequest | undefined;
@@ -483,4 +489,22 @@ describe("canonical runtime-module egress boundary", () => {
     expect(secondInvocation.consumeFailure(replayed)).toBeUndefined();
     expect(firstInvocation.consumeFailure(replayed)).toBeUndefined();
   });
+});
+
+it("production refuses every unowned outbound request before DNS or fetch", async () => {
+  const previous = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  let calls = 0;
+  try {
+    for (const host of ["127.0.0.1", "169.254.169.254", "10.1.2.3", "rebind.example"]) {
+      await expect(fetchValidatedOutbound({ target:`https://${host}/`, init:{}, allowlist:[host],
+        fallback:async()=>{calls++;return new Response();}, denied:()=>Error('denied')
+      })).rejects.toMatchObject({code:"EGRESS_OWNER_REQUIRED"});
+    }
+    await expect(fetchValidatedOutbound({target:"http://provider.example/token", init:{}, allowlist:["provider.example"],
+      dispatch:{owner:{fetch:async()=>{calls++;return new Response();}},purpose:"oauth",scope},
+      fallback:async()=>{calls++;return new Response();},denied:()=>Error('denied')
+    })).rejects.toMatchObject({code:"EGRESS_DENIED"});
+    expect(calls).toBe(0);
+  } finally { if(previous === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV=previous; }
 });

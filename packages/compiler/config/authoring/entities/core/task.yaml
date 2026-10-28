@@ -926,15 +926,15 @@ interfaces:
           component: EntityReferenceDisplay
       startDateTime:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       dueDateTime:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       completedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       outcome:
         render:

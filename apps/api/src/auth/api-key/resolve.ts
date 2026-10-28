@@ -33,6 +33,7 @@ export type ApiKeyResolverDeps = {
   db: OpenShapeForgeDatabase;
   keyring: SecretKeyring;
   issuer: string;
+  tokenUrl?: string | undefined;
   /** Verifies a Keycloak token exactly as the interactive bearer path does. */
   verifyToken: (token: string, credential: { tenantId: string; keycloakClientId: string }) => Promise<{
     tenantId: string | null;
@@ -61,6 +62,11 @@ export function intersectRoles(
   return subset.filter((role) => grantedSet.has(role));
 }
 
+/** Empty stored grants mean role-free; all other legacy inputs retain their prior semantics. */
+export function integrationRoles(granted: readonly string[], subset: readonly string[] | null, roleFree: boolean): string[] {
+  return roleFree ? [] : intersectRoles(granted, subset);
+}
+
 export async function resolveApiKeySession(
   deps: ApiKeyResolverDeps,
   candidate: string,
@@ -77,6 +83,7 @@ export async function resolveApiKeySession(
     token = await exchangeForToken(
       {
         issuer: deps.issuer,
+        ...(deps.tokenUrl ? { tokenUrl: deps.tokenUrl } : {}),
         keyring: deps.keyring,
         ...(deps.fetch ? { fetch: deps.fetch } : {}),
       },
@@ -120,7 +127,10 @@ export async function resolveApiKeySession(
   }
   if (!identity.userId) return undefined;
 
-  const roles = intersectRoles(identity.roles, key.roleSubset);
+  // Keycloak attaches realm/account defaults even when no client roles were
+  // granted. An explicitly role-free integration must not inherit them.
+  // Keep the existing role-bearing path, including its composite semantics.
+  const roles = integrationRoles(identity.roles, key.roleSubset, key.roleFree);
 
   // Telemetry, never a gate: a failed write here must not fail an authenticated
   // request, and nothing on the hot path reads these columns back.
@@ -142,5 +152,22 @@ export async function resolveApiKeySession(
     relationGroupIds: [],
     scope: deps.resolveScope(roles, identity.groups),
     credential: "api-key",
+    // A resolved API key is an application, never a person: the token it
+    // exchanged for is a client-credentials token of the integration's own
+    // service account. Stating it keeps the audit actor "integration" even
+    // when this session is resolved inside another one's audit context, and
+    // it is what a record-action policy classifies on.
+    principalKind: "service",
+    // The integration AND the credential, both read from the rows the store
+    // resolved under tenant-fenced RLS — never from the request.
+    //
+    // `integration_id` is what a record-action policy names: it survives
+    // rotation and revocation of this particular credential, while
+    // `display_name` is a mutable label nothing may authorize on. `keyId` is
+    // the opposite property and is carried for the opposite reason — it is
+    // the one value that can still be checked for revocation and expiry while
+    // an Operation is in flight (db/migrations/record-actions.ts,
+    // `app.record_action_principal_live`). Neither is the secret.
+    appPrincipal: { integrationId: key.integrationId, credentialId: key.keyId },
   };
 }

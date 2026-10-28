@@ -60,6 +60,7 @@ import {
 } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import YAML from "yaml";
+import { RECORD_ACTION_DEFAULT_PRINCIPAL_CLASSES } from "./principal-classes.js";
 import { packagedConfigFallback } from "../packaged-config.js";
 import {
   AUTHORIZATION_PATCH_KIND,
@@ -970,7 +971,50 @@ function resolvedRowEmpty(rowAccess: JsonObject): "public" | "restricted" {
     : "public";
 }
 
+/**
+ * A later layer may close an entity's generic routes to a principal class and
+ * may never re-open one. Adding a class back is a widening of exactly the
+ * kind this axis exists to prevent, and the layer doing it cannot see the
+ * grants the first author relies on.
+ *
+ * An absent list admits every class except when integration actions derive
+ * an application exclusion; a later layer may not reopen that derived boundary.
+ * If a patch removes the actions that derived it, write the inherited exclusion
+ * into the merged document so compilation preserves the same restriction.
+ */
+function materializeAndAssertPrincipalClasses(
+  base: JsonObject,
+  merged: JsonObject,
+  origin: string,
+): void {
+  const effective = (entity: JsonObject): JsonValue | undefined => {
+    const authorization = objectProperty(entity, "authorization");
+    if (authorization?.principalClasses !== undefined) return authorization.principalClasses;
+    const rowAccess = objectProperty(authorization, "rowAccess");
+    if (rowAccess?.enabled !== true) return undefined;
+    const permissions = objectProperty(rowAccess, "recordPermissions");
+    const actions = Array.isArray(permissions?.actions) ? permissions.actions : [];
+    const excludesApplication = actions.some((action) =>
+      action && typeof action === "object" && Array.isArray((action as JsonObject).principals)
+        && ((action as JsonObject).principals as unknown[]).includes("integration"));
+    return excludesApplication ? [...RECORD_ACTION_DEFAULT_PRINCIPAL_CLASSES] : undefined;
+  };
+  const prior = effective(base);
+  const next = effective(merged);
+  // Removing the last integration action must not reopen generic CRUD to
+  // applications. Materialize the former derived restriction before compiling.
+  if (prior !== undefined && next === undefined &&
+      objectProperty(base, "authorization")?.principalClasses === undefined) {
+    const authorization = objectProperty(merged, "authorization");
+    if (authorization && authorization.principalClasses === undefined) {
+      authorization.principalClasses = structuredClone(prior);
+    }
+  }
+  assertOrListOnlyNarrows(prior, effective(merged), "authorization.principalClasses", origin);
+}
+
 function assertRowAccessOnlyNarrows(base: JsonObject, merged: JsonObject, origin: string): void {
+  materializeAndAssertPrincipalClasses(base, merged, origin);
   const before = objectProperty(objectProperty(base, "authorization"), "rowAccess");
   if (!before || before.enabled !== true) return;
   const after = objectProperty(objectProperty(merged, "authorization"), "rowAccess");
@@ -1025,6 +1069,7 @@ function assertRowAccessOnlyNarrows(base: JsonObject, merged: JsonObject, origin
     "authorization.rowAccess.recordPermissions.createRequires",
     origin,
   );
+  assertRecordActionsOnlyNarrow(beforeAcl.actions, afterAcl.actions, origin);
 
   const beforeField = keyedObjects(base.fields).get(String(beforeAcl.field));
   const afterField = keyedObjects(merged.fields).get(String(afterAcl.field));
@@ -1084,6 +1129,72 @@ function assertSessionAuthOnlyNarrows(
     `${path}.recordPermission`,
     origin,
   );
+  // Which named action an Operation requires is its contract, not a knob: a
+  // later layer that renamed it would silently point the check at an action
+  // nobody has been granted, or at one everybody has.
+  assertExactWhenPresent(
+    before.recordAction,
+    after.recordAction,
+    `${path}.recordAction`,
+    origin,
+  );
+}
+
+/**
+ * A later layer may DECLARE a new record action — that grants nothing on its
+ * own, since a record must still name a subject and an Operation must still
+ * require it — but it may not loosen one an earlier layer declared.
+ *
+ * Removing an action would strand every grant already stored under its name
+ * and every Operation requiring it. Widening `principals` would let a kind of
+ * principal the first author excluded be named, which is exactly the
+ * person-versus-application boundary the axis exists to hold. Widening `reads`
+ * would disclose a field the first author did not put in the projection. And
+ * weakening `lock` would relax a concurrency guarantee on an effect whose SQL
+ * the first author owns and this layer cannot see.
+ */
+function assertRecordActionsOnlyNarrow(
+  before: unknown,
+  after: unknown,
+  origin: string,
+): void {
+  const declared = (value: unknown): Map<string, JsonObject> => {
+    const entries = Array.isArray(value) ? value : [];
+    return new Map(
+      entries
+        .filter((entry): entry is JsonObject => Boolean(entry) && typeof entry === "object")
+        .map((entry) => [String((entry as JsonObject).name), entry as JsonObject]),
+    );
+  };
+  const beforeActions = declared(before);
+  if (beforeActions.size === 0) return;
+  const afterActions = declared(after);
+  for (const [name, beforeAction] of beforeActions) {
+    const path = `authorization.rowAccess.recordPermissions.actions.${name}`;
+    const afterAction = afterActions.get(name);
+    if (!afterAction) throw new Error(`${origin} removes ${path}.`);
+    // Both lists WIDEN by growing: one more principal kind is one more kind
+    // that may be named, and one more read is one more field disclosed. So
+    // they are OR lists — a later layer may drop an entry and may never add
+    // one. (They were AND-checked when the axis landed, which refused the
+    // narrowing and admitted the widening.)
+    assertOrListOnlyNarrows(
+      beforeAction.principals,
+      afterAction.principals,
+      `${path}.principals`,
+      origin,
+    );
+    assertOrListOnlyNarrows(beforeAction.reads ?? [], afterAction.reads ?? [], `${path}.reads`, origin);
+    // "exclusive" is the deadlock-safe mode and the default, so a later layer
+    // moving an action to "shared" relaxes a concurrency guarantee the first
+    // author relied on — on an effect whose SQL that author owns and this
+    // layer cannot see. Tightening the other way is always allowed.
+    const beforeLock = beforeAction.lock ?? "exclusive";
+    const afterLock = afterAction.lock ?? "exclusive";
+    if (beforeLock === "exclusive" && afterLock !== "exclusive") {
+      throw new Error(`${origin} weakens ${path}.lock from exclusive to ${String(afterLock)}.`);
+    }
+  }
 }
 
 function assertOperationOnlyNarrows(

@@ -69,3 +69,21 @@ require an edit lease.
 This port is not an upload transport. Compiler settings, storage module
 initialization and interface upload handling must still be composed and proven
 together. It defines no new retention, legal-hold, file-size or expiry defaults.
+
+### HTTP download capacity
+
+An API process admits at most four concurrent artifact downloads, and at most
+two for any one tenant. A request beyond either limit receives HTTP 429 with
+`ARTIFACT_DOWNLOAD_LIMIT`; callers can retry later. A slot stays occupied until
+both the provider read has settled and the response has finished or closed,
+so a disconnected client cannot make still-running reads unbounded. These
+limits are process-local, not a cluster-wide quota. A provider that never
+returns can retain a slot indefinitely; provider cancellation is cooperative. Isolation across tenants limits one tenant's impact,
+but simultaneous stalled providers in multiple tenants can still exhaust the
+process-wide budget. HTTP requests signal cancellation on disconnect or after
+30 seconds; a cooperative provider must stop and complete transaction cleanup
+before its slot is released. A timed-out provider read returns HTTP 504 with
+`ARTIFACT_DOWNLOAD_TIMEOUT`. If buffering has finished and the client is still
+receiving bytes at the deadline, the response socket is closed. Providers and filesystem/kernel operations that
+ignore cancellation can still retain capacity indefinitely; the signal is not a
+hard process-level termination guarantee.

@@ -175,6 +175,32 @@ for one tab and is normalized to the same record layout; do not combine it with
 `layout`. Named views are embedded read presentations, not additional routes or
 write Operations. The optional `title` defaults to the standard record title.
 
+### Extending an Operation-backed entity from another catalog
+
+A host or plugin can place its own Operation-backed child entity below an
+Operation-backed entity owned by another catalog. The child stays in the
+owning catalog; `entityExtensions` contributes only the related route to the
+parent after all catalogs have been composed:
+
+```yaml
+interfaces:
+  web:
+    entities:
+      TenantSeedInstallation:
+        # normal Operation-backed entity definition
+    entityExtensions:
+      PlatformTenant:
+        related:
+          - entity: TenantSeedInstallation
+            label: { en: Seed installations, nl: Seed-installaties }
+            route: /tenants/:slug/seeds
+```
+
+Both the parent and child must resolve to Operation-backed entities in the
+composed manifest. The compiler rejects an unknown parent, an unknown child,
+and duplicate child or route contributions. This composes navigation only;
+the child catalog still owns its Operations, authorization and input bindings.
+
 ### Action-specific record permissions
 
 An entity can let one persisted JSON field further narrow its ordinary tenant
@@ -214,6 +240,169 @@ cannot reopen. A record-scoped plugin Operation can add
 or leases are issued and again inside the write transaction. This semantic
 action is independent of its SQL verb, so an archive implemented with UPDATE
 can truthfully require `delete`.
+
+### Named record actions
+
+The three permissions answer "who may see, change and remove this record".
+Some records also need "who may *do this particular thing* to it" — start it,
+follow it, publish it — for a party that has no business reading or changing
+it at all. That is a second, independent axis, declared per entity and per
+action:
+
+```yaml
+    recordPermissions:
+      field: authorization
+      empty: public
+      createRequires: [view, edit]
+      actions:
+        - name: start
+          principals: [integration]
+          reads: [definition, status]
+        - name: follow
+          principals: [integration, person]
+          lock: shared
+```
+
+and granted per record, under the ACL's own `actions` member:
+
+```json
+{
+  "view":   { "users": ["<person>"] },
+  "edit":   { "users": ["<person>"] },
+  "actions": {
+    "start":  { "integrations": ["<integration id>"] },
+    "follow": { "integrations": ["<integration id>"], "roles": ["Runs.All.Follow"] }
+  }
+}
+```
+
+What is true of this axis, and is the reason it is separate:
+
+- **Independent in both directions.** Holding `view` grants no action, and
+  holding an action grants no `view`, `edit` or `delete`. A holder of `start`
+  cannot read the record through any generic API, because the row-scope policy
+  that gates every read is unchanged and still asks for `view`.
+- **Never public.** An absent `actions` member, an absent entry, an entry
+  naming nobody and a malformed document are all denials, whatever the entity
+  authored for `empty`. `empty: public` is about the three permissions only.
+- **Matched against the verified principal class.** `users`, `groups` and
+  `roles` are satisfiable only by a session the server classified as a person;
+  `integrations` only by one carrying a resolved API-key integration. A service
+  account holding the same role as a person therefore acquires nothing here,
+  and a carrier the server could not classify holds no action at all. "Classified
+  as a person" means the server positively verified a human login — the bearer
+  path's verdict, or the class a trusted-context producer signed into its
+  bundle. An identity ↔ Relation link is not that verdict, whatever party it
+  names, so a session holding only a link holds no person action
+  (docs/api.md).
+- **Keyed on the integration, not the credential.** An `integrations` entry
+  names `platform.api_key_integrations.id`, which survives key rotation and is
+  independent of the integration's display name. A direct bearer token of the
+  same integration's Keycloak service account is *not* an application
+  principal and satisfies no action — see docs/api.md.
+- **Opt-in.** An entity that declares no `actions` can carry none: a write
+  naming an undeclared action, or a principal kind the action does not admit,
+  is refused with `VALIDATION`. Assigning one is an ordinary ACL edit and so
+  needs the record's `edit` permission; an editor may grant any action the
+  entity declares, exactly as it may already rewrite view/edit/delete.
+- **`reads` is the whole execution capability.** An action that must work with
+  the record declares the fields it needs; core returns exactly those fields of
+  exactly that record, through the same owner-scoped lookup that authorized the
+  action. The ACL field, a classified, computed, localized or unpersisted
+  field, a relationship and a field with its own authorization are refused at
+  compile time. An action with no `reads` authorizes an effect and discloses
+  nothing.
+
+- **`lock` is the concurrency contract.** The check locks the record's ACL row
+  and holds it for the rest of the transaction, and the effect then runs under
+  that lock. `exclusive`, the default, takes a self-exclusive row lock: two
+  holders of the same action on the same record serialize at the check, so an
+  effect that goes on to lock that record more strongly — an ordinary
+  `select … for update` on it, or an entity update of it — cannot deadlock on
+  the upgrade. `shared` lets concurrent holders through together, which is the
+  right trade for an action whose effect only reads: `follow` above polls a
+  status and never writes the definition. Choosing `shared` for an effect that
+  *does* upgrade is a deadlock under parallel calls, and the compiler cannot
+  see an effect's SQL to warn you — which is why the default is the safe mode
+  and a later authoring layer may tighten `lock` but never weaken it. Both
+  modes fence a concurrent ACL change identically.
+
+### Which principal classes the generic routes admit
+
+A role list answers "what may this session do". It cannot answer "what sort of
+session is this", because a service account and the person beside it can hold
+the very same role. Once an application is a first-class principal that gap
+matters: an entity may hand an application one named action on one record,
+while the application's key holds the entity's ordinary read role on its
+service account — and generated CRUD, the search derived from it and the
+generic MCP tools ask only for the role. The collection would then return every
+record of the entity and make the per-record grant decorative.
+
+So an entity may declare which classes its **generated CRUD and derived
+search** admit:
+
+```yaml
+authorization:
+  roles: { read: [...], create: [...], update: [...], delete: [...] }
+  principalClasses: [person, service, unknown]
+```
+
+The four classes are the server's own classification, never anything a caller
+states: `person` a login the server positively verified to be a human,
+`application` a resolved API-key integration, `service` a verified
+client-credentials principal with no integration behind it (configured
+organization automation included), and `unknown` a carrier the server could
+not classify (docs/api.md). A linked Relation is not a classification, so a
+trusted-context producer that has not been redeployed to sign the principal
+class is `unknown` however its user is linked — which matters only if you
+write `person` out of this list, since the derived default always admits
+`unknown`.
+
+- **Omitted admits every class**, which is what every entity did before this
+  existed. One derived exception: an entity that declares a named action for
+  `integration` principals compiles to every class *except* `application`.
+  Such an entity has decided an application reaches it by grant, one record at
+  a time; the default stops the collection from undoing that, without the
+  entity having to remember to. Writing the list out re-admits applications
+  deliberately — a decision with a reviewer rather than an omission.
+- **It narrows only.** An admitted class still faces the entity's roles, the
+  Operation's scopes and the record ACL. Nothing here admits a session those
+  would refuse, and nothing here is a substitute for them.
+- **It covers every generic route at once**, because they share one gate
+  (`requireEntityOperation`): the REST routes, the GraphQL resolvers, the
+  generic MCP tools, the change stream, and the entity `list` Operations the
+  derived `application.search` executes. An excluded class is also absent from
+  the Operation listing and the MCP tool listing, so it is not advertised and
+  then refused.
+- **It does not touch authored Operations.** A plugin Operation gated on
+  `auth.recordAction` stays available to the application that was granted the
+  action — which is the arrangement the policy exists to protect.
+- **It is per entity, not per credential.** Excluding applications from one
+  entity leaves the key's access to every other entity exactly as it was. A
+  snapshot or version entity that stores the same content needs the same
+  declaration; `NotebookVersion` in `examples/plugins/notebook` is that case
+  authored explicitly.
+
+A record-scoped plugin Operation requires one with
+`auth.recordAction: <name>`; the entity must declare it, and the check is a
+live read inside the Operation's transaction (docs/operations.md). The lock
+above is the single ordering a concurrent policy change also follows, so a
+grant and its removal cannot interleave with the effect in either direction.
+
+The same check also re-reads the CREDENTIAL behind the session, because the
+grant deliberately names the integration and therefore survives rotation. For
+an application principal the check verifies and locks the presented
+`platform.api_keys` row and its integration — unrevoked, unexpired, integration
+`active` — in that same transaction, integration row first. So revoking the key
+or disabling the integration either waits for an effect in flight or is read by
+one that starts after it, and a withdrawn credential authorizes nothing even
+while the record's grant is untouched. The reading is point-in-time: an
+invocation already admitted commits even if the credential EXPIRES while its
+effect runs, while every later check — the bounded read's included — refuses.
+Nothing is authored for this: it applies wherever a named action does, and no
+other principal class carries a credential it could affect. See
+[api.md](api.md) for the carrier and semantics and
+`db/migrations/record-actions.ts` for the lock order.
 
 Notes on what the compiler does with this:
 
@@ -509,7 +698,8 @@ context-full entity at load time. It contributes:
 | `externalId` | `external_id` | id of the record in a connected source system |
 | `sourceAuthority` | `source_authority` | responsible authority / data steward |
 | `sourceOrganization` | `source_organization` | owning external organization |
-| `sourceAdministration` | `source_administration` | sub-ledger within the source |
+| `sourceAdministration` | `source_administration` | sub-ledger within the source; the identifier source identity, deduplication and the watermark are keyed on |
+| `sourceAdministrationName` | `source_administration_name` | the readable name of that administration, for display beside the identifier; renaming it does not change source identity |
 | `sourceVersion` | `source_version` | the source's change marker, sortable as text; the highest per source and administration is the incremental-import watermark |
 
 Redeclaring one of these fields in an entity is a compile error
@@ -986,3 +1176,50 @@ A single `osfType: Document` reference can declare `document: { content: file, m
 Web reuses Document upload, storage and the variant block editor. Uploading creates an ordinary Document; saving the referring form assigns its identity. Cancelling the referring form leaves its previous reference intact; the newly uploaded Document remains in the document library. Blocks retain their own explicit save operations.
 
 A blueprint may include policy-bearing Document properties. Publication captures portable metadata, file bytes and local block content, excluding source identity and permissions. Copy/reset creates destination-tenant Documents and stages/binds new artifacts through canonical Operations in the destination transaction. The source tenant's Document/artifact identifiers are never assigned to a receiving tenant. Classification codes and block definitions must be available in the destination. Existing scalar-only blueprints are unchanged.
+
+## References between Operation-backed web entities
+
+An Operation catalog's result property can declare a single reference to another
+Operation-backed web entity using the existing `x-osf-type` and
+`x-osf-reference` annotations together. `valueField` must be the target's
+authored `idField`; this is the identifier carried in the source property.
+
+```yaml
+integrationId:
+  type: string
+  format: uuid
+  x-osf-type: ApiKeyIntegration
+  x-osf-reference: { entity: ApiKeyIntegration, valueField: integrationId }
+```
+
+The target must have a readable record route with one parameter, and its get
+Operation must accept the target identity through that route and its declared
+bindings. Source and target reads must use the same web authentication mode
+(session, control or public), as for related links; this is the realm distinction
+available in the authored Operation contract. The target's own read authorization
+still applies. Collection-valued references and routes needing multiple parameters
+are not supported by this projection.
+This metadata supplies an identifier, not an embedded target record or a grant
+to read it. List inputs bound from route context are not offered as user filters.
+
+Operation-backed web entities can optionally set `recordLayout` using the same
+record-layout vocabulary as entity views. This projection currently supports
+`main-context` and `inbox-main-context`, one content tab, and named groups of
+projected fields. Fields needed for identity and bindings can remain in `fields`
+without being placed in the visible groups. Other layout properties and multiple
+content tabs are rejected explicitly; related route tabs remain unchanged.
+Omitting `recordLayout` preserves the existing default.
+
+## Record-action test composition
+
+The default `authoring.config.yaml` is the production composition. The
+repository's two `ExternalProcessRun` and `MeterConnection` sample entities
+are test fixtures and are not compiled into the API image. To run this
+repository's record-action DB and end-to-end tests locally, copy
+`test/fixtures/authoring/test-composition.yaml` to the ignored
+`authoring.config.local.yaml`, then run `bun run generate`. Remove the local
+file and regenerate to return to the default composition. Do not replace an
+existing local overlay without preserving its contents. CI opts into the test
+layer explicitly; `.dockerignore` keeps local overlays out of production
+images. `bun scripts/check-test-fixture-composition.ts production` (or `test`)
+checks the currently generated database, REST, GraphQL, MCP and web artifacts.

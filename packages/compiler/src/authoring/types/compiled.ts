@@ -637,6 +637,12 @@ export interface CompiledAuthorization {
   compositeRoles: CompiledAuthorizationRole[];
   fieldAuthorizations: CompiledFieldAuthorization[];
   profileAuthorizations: Record<string, { readRoles: string[] }>;
+  /**
+   * The principal classes this entity's generated CRUD and derived search
+   * admit. Absent means every class, which is what an entity that declares no
+   * record action and authors no list compiles to.
+   */
+  principalClasses?: import("./common.js").EntityPrincipalClass[];
   /** Owning references whose target's read roles gate the rows they carry; lowered to a restrictive policy in the backend manifest. */
   ownerAxis?: { fields: string[]; command?: { setting: string; values: string[] } };
   rowAccess?: {
@@ -666,6 +672,8 @@ export interface CompiledAuthorization {
       empty: "public" | "restricted";
       createRequires: import("./common.js").RecordPermissionAction[];
       defaultValue?: Record<string, unknown>;
+      /** Named actions the ACL may grant; absent unless the entity opted in. */
+      actions?: import("./common.js").RowAccessRecordActionConfig[];
     };
   };
 }

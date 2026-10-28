@@ -36,6 +36,7 @@ import type {
   CompiledAuthorizationRole,
   CompiledFieldAuthorization,
 } from "../types/compiled.js";
+import { PRINCIPAL_CLASSES, RECORD_ACTION_DEFAULT_PRINCIPAL_CLASSES } from "../principal-classes.js";
 import { fieldSqlType, isCollectionField } from "./helpers.js";
 import { buildCrud } from "./crud.js";
 
@@ -289,11 +290,27 @@ export function buildAuthorization(
             `Use an object with optional view/edit/delete members whose users/groups/roles values are arrays of non-empty strings.`,
         );
       }
+      const actions = compileRecordActions(
+        coreEntity, recordPermissions.actions, allAuthoringFields, recordPermissions.field,
+        new Set(profiles.flatMap((profile) => (profile.fields ?? []).map((field) => field.key))),
+      );
+      if (
+        field.defaultValue !== undefined &&
+        !defaultRecordActionsAreDeclared(field.defaultValue, actions)
+      ) {
+        throw new AuthorizationCompileError(
+          coreEntity.entity,
+          `authorization.rowAccess.recordPermissions field "${recordPermissions.field}" has a defaultValue ` +
+            `granting an action this entity does not declare, or naming a principal kind that action does not admit. ` +
+            `Declare the action under authorization.rowAccess.recordPermissions.actions first.`,
+        );
+      }
       compiledRecordPermissions = {
         field: recordPermissions.field,
         column: field.persisted.column,
         empty: recordPermissions.empty,
         createRequires: [...recordPermissions.createRequires],
+        ...(actions.length > 0 ? { actions } : {}),
         ...(field.defaultValue !== undefined
           ? { defaultValue: structuredClone(field.defaultValue) as Record<string, unknown> }
           : {}),
@@ -354,6 +371,12 @@ export function buildAuthorization(
     };
   }
 
+  const principalClasses = compilePrincipalClasses(
+    coreEntity,
+    authConfig.principalClasses,
+    compiledRecordActionsFor(rowAccess),
+  );
+
   return {
     entitySlug: slug,
     roles,
@@ -362,25 +385,267 @@ export function buildAuthorization(
     profileAuthorizations,
     rowAccess,
     ...(ownerAxis ? { ownerAxis } : {}),
+    ...(principalClasses ? { principalClasses } : {}),
   };
+}
+
+
+
+function compiledRecordActionsFor(
+  rowAccess: CompiledAuthorization["rowAccess"],
+): ReadonlyArray<{ principals: string[] }> {
+  return rowAccess?.recordPermissions?.actions ?? [];
+}
+
+/**
+ * Which principal classes may use this entity's generated CRUD and the search
+ * derived from it.
+ *
+ * An authored list is taken as written, after validation. What is NOT authored
+ * is the interesting part:
+ *
+ *   - an entity with no record action compiles to `undefined`: every class is
+ *     admitted, exactly as before this axis existed. 117 entities keep
+ *     byte-identical output;
+ *   - an entity that declares an action for `integration` principals compiles
+ *     to every class EXCEPT `application`. Such an entity has decided that an
+ *     application reaches it one record at a time, by grant. Leaving the
+ *     collection, the record read and the derived search open to any key whose
+ *     service account happens to hold the entity's role would hand it every
+ *     record of the entity and make the per-record grant decorative. The
+ *     default closes that without the entity having to remember to.
+ *
+ * Re-admitting `application` is a deliberate authored list, which is the
+ * point: it is a decision with a reviewer, not an omission.
+ */
+function compilePrincipalClasses(
+  coreEntity: CoreEntity,
+  authored: import("../types/common.js").EntityPrincipalClass[] | undefined,
+  actions: ReadonlyArray<{ principals: string[] }>,
+): import("../types/common.js").EntityPrincipalClass[] | undefined {
+  if (authored !== undefined) {
+    const classes = [...new Set(authored)];
+    if (classes.length === 0 ||
+      classes.some((candidate) => !PRINCIPAL_CLASSES.includes(candidate as never))) {
+      throw new AuthorizationCompileError(
+        coreEntity.entity,
+        `authorization.principalClasses must list at least one of ${PRINCIPAL_CLASSES.join(", ")}. ` +
+          `An empty list would deny every session, which is spelled by disabling the entity's ` +
+          `generated CRUD rather than by an unsatisfiable principal policy.`,
+      );
+    }
+    return classes.sort();
+  }
+  const admitsApplications = actions.some((action) => action.principals.includes("integration"));
+  if (!admitsApplications) return undefined;
+  return [...RECORD_ACTION_DEFAULT_PRINCIPAL_CLASSES];
+}
+
+const RECORD_ACTION_NAME = /^[a-z][A-Za-z0-9]*$/;
+const RECORD_PERMISSIONS = ["view", "edit", "delete"];
+
+/**
+ * Validate and normalize the entity's declared record actions.
+ *
+ * Must agree with the authoring schema, `app.record_permissions_valid` and
+ * the API's parser: a name is a lowerCamel identifier that never restates a
+ * record permission, and an action admits at least one principal kind. The
+ * compiler is where a typo becomes a build failure rather than a grant
+ * nothing ever honours.
+ */
+function compileRecordActions(
+  coreEntity: CoreEntity,
+  authored: import("../types/common.js").RowAccessRecordActionConfig[] | undefined,
+  fields: ReadonlyArray<Record<string, unknown>>,
+  aclField: string,
+  profileFields: ReadonlySet<string>,
+): import("../types/common.js").RowAccessRecordActionConfig[] {
+  if (!authored || authored.length === 0) return [];
+  const seen = new Set<string>();
+  return authored.map((action) => {
+    if (typeof action?.name !== "string" || !RECORD_ACTION_NAME.test(action.name) ||
+      RECORD_PERMISSIONS.includes(action.name)) {
+      throw new AuthorizationCompileError(
+        coreEntity.entity,
+        `authorization.rowAccess.recordPermissions.actions name ${JSON.stringify(action?.name)} must be a ` +
+          `lowerCamel identifier matching /^[a-z][A-Za-z0-9]*$/ and must not be view, edit or delete — ` +
+          `the named-action axis is independent of the record permissions and may not shadow one.`,
+      );
+    }
+    if (seen.has(action.name)) {
+      throw new AuthorizationCompileError(
+        coreEntity.entity,
+        `authorization.rowAccess.recordPermissions.actions declares "${action.name}" twice.`,
+      );
+    }
+    seen.add(action.name);
+    const principals = [...new Set(action.principals ?? [])];
+    if (principals.length === 0 ||
+      principals.some((principal) => principal !== "person" && principal !== "integration")) {
+      throw new AuthorizationCompileError(
+        coreEntity.entity,
+        `authorization.rowAccess.recordPermissions.actions "${action.name}" must declare at least one of ` +
+          `"person" or "integration" in principals. An action nobody may be granted is a dead policy, ` +
+          `and an undeclared principal kind is refused at write time.`,
+      );
+    }
+    const reads = compileRecordActionReads(coreEntity, action, fields, aclField, profileFields);
+    // The lock the check takes, always emitted. Leaving it implicit would put
+    // the deadlock-safe default in three places (schema, compiler, migration)
+    // and make a changed default silently rewrite deployed SQL; carrying it
+    // means the manifest states which mode each action was compiled with.
+    if (action.lock !== undefined && action.lock !== "exclusive" && action.lock !== "shared") {
+      throw new AuthorizationCompileError(
+        coreEntity.entity,
+        `authorization.rowAccess.recordPermissions.actions "${action.name}" declares lock ` +
+          `${JSON.stringify(action.lock)}; it must be "exclusive" (the default, which cannot deadlock) ` +
+          `or "shared" (only for an effect that provably never locks the record more strongly).`,
+      );
+    }
+    const labels = compileRecordActionLabels(coreEntity, action);
+    return {
+      name: action.name,
+      ...(labels ? { labels } : {}),
+      principals: principals.sort(),
+      ...(reads.length > 0 ? { reads } : {}),
+      lock: action.lock ?? "exclusive",
+    };
+  }).sort((left, right) => left.name.localeCompare(right.name));
+}
+
+/**
+ * The action's own label, in every language it was authored in.
+ *
+ * Optional by design: the fallback is the action NAME, which every action has
+ * and which no surface had to invent. What is NOT optional is that a label,
+ * once authored, is a real translation — an empty string would render as a
+ * nameless choice, so it is refused here rather than shipped.
+ */
+function compileRecordActionLabels(
+  coreEntity: CoreEntity,
+  action: import("../types/common.js").RowAccessRecordActionConfig,
+): import("../types/common.js").LocalizedText | undefined {
+  const labels = action.labels;
+  if (!labels) return undefined;
+  const entries = Object.entries(labels);
+  if (entries.length === 0) return undefined;
+  for (const [language, text] of entries) {
+    if (typeof text !== "string" || text.trim().length === 0) {
+      throw new AuthorizationCompileError(
+        coreEntity.entity,
+        `authorization.rowAccess.recordPermissions.actions "${action.name}" labels.${language} is empty. ` +
+          `Author a label a person can read, or omit labels entirely and let the action name stand.`,
+      );
+    }
+  }
+  return { ...labels };
+}
+
+/**
+ * The fields a holder of this action may read, validated against what the
+ * projection can safely carry.
+ *
+ * Each refusal below is a way the projection could otherwise become a read of
+ * something the action never authorized: the ACL itself (who else holds what),
+ * a classified field (PII, a BSN, a confidential value), a computed or
+ * localized field (resolved elsewhere, so the stored column is not the value),
+ * a relationship (another record), and anything unpersisted (no column to
+ * read). A field that survives all of them is one plain stored column of the
+ * one row the action names.
+ */
+function compileRecordActionReads(
+  coreEntity: CoreEntity,
+  action: import("../types/common.js").RowAccessRecordActionConfig,
+  fields: ReadonlyArray<Record<string, unknown>>,
+  aclField: string,
+  profileFields: ReadonlySet<string>,
+): string[] {
+  const reads = [...new Set(action.reads ?? [])].sort();
+  const refuse = (key: string, reason: string): never => {
+    throw new AuthorizationCompileError(
+      coreEntity.entity,
+      `authorization.rowAccess.recordPermissions.actions "${action.name}" cannot read "${key}": ${reason}. ` +
+        `A record action's read projection carries plain stored columns of the record it names and nothing else.`,
+    );
+  };
+  for (const key of reads) {
+    if (key === aclField) refuse(key, "it is the record ACL itself");
+    if (profileFields.has(key)) refuse(key, "it belongs to a profile with its own authorization");
+    const field = fields.find((candidate) => candidate.key === key);
+    if (!field) refuse(key, "it is not a field of this entity");
+    if (!(field!.persisted as { column?: string } | undefined)?.column) {
+      refuse(key, "it is not persisted, so there is no column to read");
+    }
+    if (field!.relationship) refuse(key, "it is a relationship, which would reach another record");
+    if (field!.computed) refuse(key, "it is computed rather than stored");
+    if (field!.localized) refuse(key, "it is localized, so the stored column is not the value");
+    if (field!.classification) {
+      refuse(key, `it is classified ${JSON.stringify(field!.classification)}`);
+    }
+    if (field!.authorization || field!.permissions) {
+      refuse(key, "it carries its own field authorization, which this projection cannot apply");
+    }
+  }
+  return reads;
+}
+
+function isValidSubjectSets(value: unknown, allowIntegrations: boolean): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  const allowed = allowIntegrations
+    ? ["users", "groups", "roles", "integrations"]
+    : ["users", "groups", "roles"];
+  if (Object.keys(record).some((key) => !allowed.includes(key))) return false;
+  return Object.values(record).every((entries) =>
+    Array.isArray(entries) &&
+    entries.every((entry) => typeof entry === "string" && entry.length > 0)
+  );
 }
 
 function isValidRecordPermissionsDocument(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const document = value as Record<string, unknown>;
-  if (Object.keys(document).some((key) => !["view", "edit", "delete"].includes(key))) {
+  if (Object.keys(document).some((key) =>
+    key !== "actions" && !RECORD_PERMISSIONS.includes(key))) {
     return false;
   }
-  return Object.values(document).every((subjects) => {
-    if (!subjects || typeof subjects !== "object" || Array.isArray(subjects)) return false;
-    const record = subjects as Record<string, unknown>;
-    if (Object.keys(record).some((key) => !["users", "groups", "roles"].includes(key))) {
-      return false;
+  for (const [key, member] of Object.entries(document)) {
+    if (key === "actions") {
+      if (!member || typeof member !== "object" || Array.isArray(member)) return false;
+      for (const [name, subjects] of Object.entries(member as Record<string, unknown>)) {
+        if (!RECORD_ACTION_NAME.test(name) || RECORD_PERMISSIONS.includes(name)) return false;
+        if (!isValidSubjectSets(subjects, true)) return false;
+      }
+      continue;
     }
-    return Object.values(record).every((entries) =>
-      Array.isArray(entries) &&
-      entries.every((entry) => typeof entry === "string" && entry.length > 0)
-    );
+    if (!isValidSubjectSets(member, false)) return false;
+  }
+  return true;
+}
+
+/**
+ * A seeded ACL may only grant actions the entity declares, to principal kinds
+ * that action admits — the same rule the runtime enforces on every write. A
+ * default that violates it would seed a grant no write could ever restore.
+ */
+function defaultRecordActionsAreDeclared(
+  value: unknown,
+  actions: import("../types/common.js").RowAccessRecordActionConfig[],
+): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return true;
+  const granted = (value as Record<string, unknown>).actions;
+  if (!granted || typeof granted !== "object" || Array.isArray(granted)) return true;
+  return Object.entries(granted as Record<string, unknown>).every(([name, subjects]) => {
+    const declaration = actions.find((action) => action.name === name);
+    if (!declaration) return false;
+    const sets = (subjects ?? {}) as Record<string, unknown[]>;
+    const names = (kind: "person" | "integration") =>
+      kind === "integration"
+        ? [sets.integrations]
+        : [sets.users, sets.groups, sets.roles];
+    return (["person", "integration"] as const).every((kind) =>
+      declaration.principals.includes(kind) ||
+      names(kind).every((entries) => !Array.isArray(entries) || entries.length === 0));
   });
 }
 

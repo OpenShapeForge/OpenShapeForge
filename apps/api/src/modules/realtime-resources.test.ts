@@ -1,9 +1,18 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
-import { moduleRealtimeAuthorizer } from "./realtime-resources.js";
+import { moduleRealtimeAuthorizer, moduleRealtimeResources } from "./realtime-resources.js";
 import type { ModulePlatformRuntime } from "./platform.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { getGeneratedCrudTables } from "../operations/entity/catalog.js";
+
+test("realtime label paths require both valid locales at registration", () => {
+  const resource = { entity: "PrivateFixture", readOperationId: "fixture.get", idInputField: "id" };
+  for (const labelFields of [{ en: ["name"] }, { en: ["name"], nl: "name" }, { en: ["name"], nl: [42] }, null]) {
+    expect(() => moduleRealtimeResources([{ name: "fixture", realtimeResources: [{ ...resource, labelFields }] }] as never)).toThrow();
+  }
+  expect(moduleRealtimeResources([{ name: "fixture", realtimeResources: [{ ...resource, labelFields: { en: ["name"], nl: ["details.name"] } }] }] as never).has("PrivateFixture")).toBe(true);
+  expect(moduleRealtimeResources([{ name: "fixture", realtimeResources: [resource] }] as never).has("PrivateFixture")).toBe(true);
+});
 
 test("private realtime hints require the current canonical harmless read", async () => {
   const session = {

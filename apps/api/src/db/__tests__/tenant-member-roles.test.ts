@@ -175,6 +175,26 @@ describe("tenant member roles from the control plane", () => {
           .rejects.toMatchObject({ status: 409, detail: "NO_PENDING_LINK" });
         expect(await patRow()).toMatchObject({ status: "pending_confirmation" });
         await setPatRoles("{}");
+        const duplicateId = randomUUID();
+        await sql`insert into erp.relations (id, tenant_id, display_name, relation_type, status) values (${duplicateId}, ${TENANT}, 'Pat Duplicate', 'person', 'active')`.execute(adminDb);
+        await sql`insert into erp.contact_details (tenant_id, relation_id, type, value, is_primary) values (${TENANT}, ${duplicateId}, 'email', 'pat@example.com', true)`.execute(adminDb);
+        try {
+          expect(await getTenantMember(patDeps, "acme", pendingSubject)).toMatchObject({ linkStatus: "pending_confirmation", candidateRelationName: null });
+          expect((await listTenantMembers(patDeps, "acme")).members.find(member => member.memberId === pendingSubject)?.candidateRelationName).toBeNull();
+          await expect(changeTenantMemberRoles(patDeps, "acme", pendingSubject, ["org_admin"], "assign")).rejects.toMatchObject({ status: 409, code: "MEMBER_LINK_PENDING", message: expect.stringMatching(/no longer uniquely matches.*link_identity/) });
+          await expect(confirmTenantMemberLink(patDeps, "acme", pendingSubject)).rejects.toMatchObject({ status: 409, detail: "NO_PENDING_LINK" });
+        } finally {
+          await sql`delete from erp.contact_details where tenant_id = ${TENANT} and relation_id = ${duplicateId}`.execute(adminDb);
+          await sql`delete from erp.relations where tenant_id = ${TENANT} and id = ${duplicateId}`.execute(adminDb);
+        }
+        // The operator reads the member from Keycloak at confirmation time;
+        // an old candidate does not prove a newly changed or unverified email.
+        const changedDeps = { ...patDeps, members: membersClient(pendingSubject, "changed@example.com") };
+        await expect(confirmTenantMemberLink(changedDeps, "acme", pendingSubject)).rejects.toMatchObject({ status: 409, detail: "NO_PENDING_LINK" });
+        const unverifiedMembers = membersClient(pendingSubject, "pat@example.com");
+        const readMember = unverifiedMembers.getMember;
+        unverifiedMembers.getMember = async (...args) => { const member = await readMember(...args); return member ? { ...member, emailVerified: false } : member; };
+        await expect(confirmTenantMemberLink({ ...patDeps, members: unverifiedMembers }, "acme", pendingSubject)).rejects.toMatchObject({ status: 409, detail: "NO_PENDING_LINK" });
         // Confirming links exactly that candidate, as the operator; then roles can be written.
         const confirmed = await confirmTenantMemberLink(patDeps, "acme", pendingSubject);
         expect(confirmed).toMatchObject({ linkStatus: "linked", relationName: "Pat Existing", candidateRelationName: null });
@@ -273,7 +293,7 @@ describe("tenant member roles from the control plane", () => {
           insert into platform.employee_invitations (tenant_id, email, roles, invited_by)
           values (${TENANT}, 'nora@example.com', ARRAY['org_admin'], 'test-admin')
         `.execute(adminDb);
-        await confirmPendingLink(appDb, { ...noraSession, relation: back });
+        await confirmPendingLink(appDb, { ...noraSession, relation: back, verifiedEmail: claims.email });
         __resetIdentityLinkForTests();
         const again = await resolveIdentityLink(appDb, noraSession, claims);
         expect(again!.roles).toEqual([IDENTITY_LINK_ADMIN_ROLE, "org_admin"]);

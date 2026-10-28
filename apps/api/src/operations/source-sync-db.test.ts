@@ -5,7 +5,11 @@
  * page of ledger records from one source lands once and is updated in place,
  * references by externalId resolve within the same source, a page is all or
  * nothing, an older replay never overwrites newer data, the watermark is read
- * back from the data, and the target entity's own roles decide.
+ * back from the data, and the target entity's own roles decide. The readable
+ * sourceAdministrationName a call supplies is written to every record it
+ * touches without becoming part of source identity: renaming an administration
+ * matches the same records and resumes the same cursor. A call that omits the
+ * name leaves the stored one alone, whatever its records carry.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -54,7 +58,10 @@ const account = (externalId: string, code: string, version: number, name = `Acco
 });
 
 async function rows(table: string, tenantId: string) {
-  return (await sql<{ external_id: string; name?: string; ledger_account_id?: string; ledger_posting_id?: string }>`
+  return (await sql<{
+    external_id: string; name?: string; ledger_account_id?: string; ledger_posting_id?: string;
+    source_administration: string | null; source_administration_name: string | null;
+  }>`
     select * from ${sql.id("erp", table)} where tenant_id = ${tenantId}::uuid order by external_id`.execute(privileged.db)).rows;
 }
 
@@ -219,6 +226,84 @@ describe("source-sync Operations", () => {
     await run("applySourcePage", page, session);
     expect(calls).toBe(2);
     expect(await rows("ledger_accounts", tenantId)).toEqual([]);
+  });
+
+  test("a renamed administration keeps one identity and one watermark lane", async () => {
+    const tenantId = await tenant(), session = sessionFor(tenantId);
+    await run("upsertBySource", {
+      entity: "LedgerAccount", ...SOURCE, sourceAdministrationName: "Acme Holding BV",
+      records: [account("a1", "1000", 7)],
+    }, session);
+    expect((await rows("ledger_accounts", tenantId)).map((row) => [row.source_administration, row.source_administration_name]))
+      .toEqual([["01", "Acme Holding BV"]]);
+
+    // The same administration id under a new readable name: the stored name
+    // follows the page, the record is matched and the cursor stays one lane.
+    const renamed = await run("upsertBySource", {
+      entity: "LedgerAccount", ...SOURCE, sourceAdministrationName: "Acme Holding N.V.",
+      records: [account("a1", "1000", 9), account("a2", "8000", 11)],
+    }, session);
+    expect(renamed).toMatchObject({ created: 1, updated: 1, skipped: 0 });
+    expect((await rows("ledger_accounts", tenantId)).map((row) => [row.external_id, row.source_administration_name]))
+      .toEqual([["a1", "Acme Holding N.V."], ["a2", "Acme Holding N.V."]]);
+    expect(await run("sourceWatermark", { entity: "LedgerAccount", ...SOURCE }, session))
+      .toEqual({ since: "11", sourceVersion: "00000000000000000011" });
+  });
+
+  test("the call owns the administration name: a record may not contradict it, and omitting it writes none", async () => {
+    const tenantId = await tenant(), session = sessionFor(tenantId);
+    await expect(run("upsertBySource", {
+      entity: "LedgerAccount", ...SOURCE, sourceAdministrationName: "Acme Holding BV",
+      records: [{ ...account("a1", "1000", 1), sourceAdministrationName: "Beta Holding BV" }],
+    }, session)).rejects.toMatchObject({ operationError: { code: "BAD_USER_INPUT" } });
+    expect(await rows("ledger_accounts", tenantId)).toEqual([]);
+    await run("upsertBySource", { entity: "LedgerAccount", ...SOURCE, records: [account("a1", "1000", 1)] }, session);
+    expect((await rows("ledger_accounts", tenantId)).map((row) => row.source_administration_name)).toEqual([null]);
+  });
+
+  test("a call without the administration name leaves the stored name alone, whatever the records carry", async () => {
+    const tenantId = await tenant(), session = sessionFor(tenantId);
+    await run("upsertBySource", {
+      entity: "LedgerAccount", ...SOURCE, sourceAdministrationName: "Acme Holding BV",
+      records: [account("a1", "1000", 1), account("a2", "8000", 1)],
+    }, session);
+
+    // The field is the call's, not the record's: omitting it means "leave it
+    // alone", so neither a stale name nor an explicit null reaches the write.
+    const updated = await run("upsertBySource", {
+      entity: "LedgerAccount", ...SOURCE,
+      records: [
+        { ...account("a1", "1000", 2), sourceAdministrationName: "Beta Holding BV" },
+        { ...account("a2", "8000", 2), sourceAdministrationName: null },
+      ],
+    }, session);
+    expect(updated).toMatchObject({ created: 0, updated: 2, skipped: 0 });
+    expect((await rows("ledger_accounts", tenantId)).map((row) => [row.external_id, row.source_administration_name]))
+      .toEqual([["a1", "Acme Holding BV"], ["a2", "Acme Holding BV"]]);
+
+    // The same through an atomic page, which forwards only what the page named.
+    await run("applySourcePage", {
+      ...SOURCE,
+      batches: [{ entity: "LedgerAccount", action: "upsert", records: [{ ...account("a1", "1000", 3), sourceAdministrationName: null }] }],
+    }, session);
+    expect((await rows("ledger_accounts", tenantId)).map((row) => row.source_administration_name))
+      .toEqual(["Acme Holding BV", "Acme Holding BV"]);
+  });
+
+  test("an atomic page writes the administration name across its batches", async () => {
+    const tenantId = await tenant(), session = sessionFor(tenantId);
+    await run("applySourcePage", {
+      ...SOURCE, sourceAdministrationName: "Acme Holding BV",
+      batches: [
+        { entity: "LedgerAccount", action: "upsert", records: [account("a1", "1000", 1)] },
+        { entity: "LedgerPosting", action: "upsert", records: [{
+          externalId: "e1", postingDate: "2026-09-26", status: "posted", sourceType: "acme-erp",
+          sourceVersion: "00000000000000000002",
+        }] },
+      ],
+    }, session);
+    expect((await rows("ledger_accounts", tenantId)).map((row) => row.source_administration_name)).toEqual(["Acme Holding BV"]);
+    expect((await rows("ledger_postings", tenantId)).map((row) => row.source_administration_name)).toEqual(["Acme Holding BV"]);
   });
 
   test("atomic pages retain entity authorization and tenant isolation", async () => {

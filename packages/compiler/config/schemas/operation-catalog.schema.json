@@ -166,6 +166,7 @@
                   "title": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
                   "route": { "type": "string", "pattern": "^/[a-z][a-zA-Z0-9_/:.-]*$" },
                   "recordRoute": { "type": "string", "pattern": "^/[a-z][a-zA-Z0-9_/:.-]*$" },
+                  "recordLayout": { "$ref": "core-entity.schema.json#/$defs/webViewsV2/properties/record/properties/layout" },
                   "idField": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
                   "displayField": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
                   "fields": {
@@ -190,6 +191,32 @@
                   },
                   "related": {
                     "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["entity", "label", "route"],
+                      "properties": {
+                        "entity": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" },
+                        "label": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+                        "route": { "type": "string", "pattern": "^/[a-z][a-zA-Z0-9_/:.-]*$" }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "entityExtensions": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": { "pattern": "^[A-Z][A-Za-z0-9]*$" },
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["related"],
+                "properties": {
+                  "related": {
+                    "type": "array",
+                    "minItems": 1,
                     "items": {
                       "type": "object",
                       "additionalProperties": false,

@@ -22,3 +22,30 @@ test('collection members become individual choices',async()=>{
  const result=await handler({entity:'History',field:'tags'},{session:{tenantId:'t'},platform:{operations:{list:async()=>[definition],execute:async()=>({data:{items:[{tags:['one','two']},{tags:['two']}],nextCursor:null}})}}} as any);
  expect(result).toEqual({value:{items:[{value:'one',label:'one'},{value:'two',label:'two'}],nextCursor:null}});
 });
+test('private resource choices use their authorized localized label projection',async()=>{
+ const read={id:'fixture.get',intent:'get',input:{kind:'json-schema',schema:{}}};
+ const localized=nativeCollectionOptionsHandler(op as any,[{name:'fixture',realtimeResources:[{
+  entity:'PrivateFixture',readOperationId:'fixture.get',idInputField:'recordId',
+  labelFields:{en:['localized.name.en','name'],nl:['localized.name.nl','name']},
+ }]}] as any);
+ const calls:any[]=[];
+ const result=await localized({entity:'History',field:'actor',referenceEntity:'PrivateFixture',locale:'nl'},{session:{tenantId:'t'},platform:{operations:{
+  list:async()=>[definition,read],
+  execute:async(_session:any,request:any)=>{calls.push(request);return request.operation.id==='History.list'
+   ?{data:{items:[{actor:'run-1'}],nextCursor:null}}
+   :{data:{id:'run-1',name:'Approval',localized:{name:{en:'Approval',nl:'Goedkeuring'}}}};},
+ }}} as any);
+ expect(calls[1]).toMatchObject({operation:{id:'fixture.get'},input:{recordId:'run-1'}});
+ expect(result).toEqual({value:{items:[{value:'run-1',label:'Goedkeuring'}],nextCursor:null}});
+});
+test('private resource choices retain the ID when the canonical read is denied',async()=>{
+ const read={id:'fixture.get',intent:'get',input:{kind:'json-schema',schema:{}}};
+ const localized=nativeCollectionOptionsHandler(op as any,[{name:'fixture',realtimeResources:[{
+  entity:'PrivateFixture',readOperationId:'fixture.get',idInputField:'recordId',labelFields:{en:['name'],nl:['name']},
+ }]}] as any);
+ const result=await localized({entity:'History',field:'actor',referenceEntity:'PrivateFixture',locale:'en'},{session:{tenantId:'t'},platform:{operations:{
+  list:async()=>[definition,read],execute:async(_session:any,request:any)=>request.operation.id==='History.list'
+   ?{data:{items:[{actor:'run-1'}],nextCursor:null}}:{error:{code:'FORBIDDEN',message:'Denied'}},
+ }}} as any);
+ expect(result).toEqual({value:{items:[{value:'run-1',label:'run-1'}],nextCursor:null}});
+});

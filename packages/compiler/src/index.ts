@@ -54,6 +54,7 @@ import { buildModuleRegistry, MODULE_REGISTRY_PATH, renderModuleRegistry } from 
 import { MAX_DEDICATED_TOOLS, renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
 import { loadAuthoringConfig } from "./authoring/layers.js";
 import { loadOperationCatalogs } from "./authoring/operation-catalog.js";
+import { recordActionGrantVariants, withRecordActionGrants } from "./record-action-grants.js";
 import { assertTransitionAgreements, assertTransitionReferencedPreconditions } from "./authoring/compiler/transitions-corpus.js";
 import { withOwnedChildErrors } from "./authoring/compiler/entity-operation-errors.js";
 import {
@@ -401,13 +402,23 @@ export async function collectAllArtifacts(
     authoringDir,
     webPresent,
   };
-  const moduleOperationCatalogs = loadOperationCatalogs(authoringDir)
-    .map(({ document }) => document);
+  // The first-grant form is generated from the entities that declare the
+  // named-action axis for an application (record-action-grants.ts), so the
+  // catalogs are transformed before anything lowers or projects them: the
+  // compiled contract, the REST and MCP addresses and the web manifest all
+  // read one catalog.
+  const moduleOperationCatalogs = withRecordActionGrants(
+    loadOperationCatalogs(authoringDir).map(({ document }) => document),
+    recordActionGrantVariants(entities, manifest.tables),
+  );
   const operations = [
     ...collectBlueprintOperations(entities),
     ...collectJobOperations(),
     ...collectPluginOperations(plugins, operationContext),
-    ...collectAuthoredEntityPluginOperations(entities, operationContext, referentiedata),
+    // The catalogs travel with the entities: application search offers a
+    // catalog's web collection as a page beside the core entities, and both
+    // halves of its one source list are compiled together.
+    ...collectAuthoredEntityPluginOperations(entities, operationContext, referentiedata, moduleOperationCatalogs),
     ...collectAuthoredModulePluginOperations(moduleOperationCatalogs, operationContext),
   ].sort((left, right) => left.key.localeCompare(right.key));
   for (let index = 1; index < operations.length; index += 1) {
@@ -513,7 +524,9 @@ export async function collectAllArtifacts(
     operations: [
       {
         path: "apps/api/src/generated/operations/audit.json",
-        contents: JSON.stringify({ version: 1, timelines: Object.fromEntries(entities
+        contents: JSON.stringify({ version: 1, entityNames: Object.fromEntries(entities
+          .toSorted((a,b) => a.contract.entity.id < b.contract.entity.id ? -1 : a.contract.entity.id > b.contract.entity.id ? 1 : 0)
+          .map(entity => [entity.contract.entity.id, entity.contract.entity.name])), timelines: Object.fromEntries(entities
           .filter(entity => entity.contract.audit?.timeline)
           .toSorted((a,b) => a.contract.entity.name < b.contract.entity.name ? -1 : a.contract.entity.name > b.contract.entity.name ? 1 : 0)
           .map(entity => [entity.contract.entity.name, entity.contract.audit!.timeline])) }, null, 2) + "\n",

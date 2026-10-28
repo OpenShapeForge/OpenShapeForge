@@ -26,7 +26,10 @@ function build() {
   const db = {} as never;
   const platform = new ModulePlatformRuntime(db);
   const server = __buildGeneratedMcpServerForTests({ db, session, modulePlatform: platform,
-    modules: [accountsRuntime, documentsRuntime as never, versioningRuntime as never, { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }) } }],
+    modules: [accountsRuntime, documentsRuntime as never, versioningRuntime as never, { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }),
+      // The entity now carries a second canonical Operation; a module that
+      // supplies any handler must supply all of them.
+      deliverToNotebook: () => { throw new Error("This test does not exercise Notebook.deliver."); } } }],
     operationToolProjection: { mode: "searchable", search: "osf_search_operations", execute: "osf_execute_operation" },
   });
   return { server, platform };

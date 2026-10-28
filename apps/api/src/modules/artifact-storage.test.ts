@@ -58,12 +58,28 @@ function harness(options: { refuse?: boolean; independent?: boolean } = {}) {
   const access: { session: Session; request: RuntimeRecordAccessRequest }[] = [];
   const runtime = new ArtifactStorageRuntime<Session, Transaction>({
     records: {
+      async assertAccessMany(session, request) {
+        for (const id of request.ids) await this.assertAccess(session, {entityName: request.entityName, intent: request.intent, id});
+      },
       projectStoredFields(_session, request) {
         return request.fields;
       },
       async assertAccess(session, request) {
         access.push({ session, request });
         if (options.refuse) throw operationFailure({ code: "FORBIDDEN", message: "Not authorized to access this record." });
+      },
+      // Artifact storage authorizes on the record PERMISSIONS alone. The
+      // named-action axis is a different question and no artifact path asks
+      // it, so these fail rather than answer: a provider reaching for one
+      // here would be using an authorization this harness never modelled.
+      async assertAction() {
+        throw new Error("Artifact storage does not authorize on record actions.");
+      },
+      async holdsAction() {
+        throw new Error("Artifact storage does not authorize on record actions.");
+      },
+      async readForAction() {
+        throw new Error("Artifact storage does not read through record actions.");
       },
     },
     ...(options.independent ? { withStageTransaction: async <T>(_session: Session, work: (transaction: Transaction) => Promise<T>) => work({ id: "independent-stage" }) } : {}),
@@ -371,4 +387,10 @@ describe("ArtifactStorageRuntime", () => {
       );
     }
   });
+});
+
+test("artifact descriptors above the upload ceiling are refused", async () => {
+  const h=harness(); const session={id:'size-limit'}; h.live.add(session);
+  h.runtime.configure([{name:'storage',artifactStorage:provider({stage:async()=>({...descriptor,byteSize:64*1024*1024+1})})}],[providerId]);
+  await expectFailure(h.runtime.services.stage(session,stageInput),'HANDLER_CONTRACT_VIOLATION');
 });

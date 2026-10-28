@@ -4,17 +4,18 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import Fastify from "fastify";
 import { __resetSessionResolverForTests } from "../auth/identity.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
-import { registerArtifactRestRoutes } from "./rest-routes.js";
+import { activeArtifactServices, registerArtifactRestRoutes } from "./rest-routes.js";
+import { ArtifactStorageRuntime } from "../modules/artifact-storage.js";
 import { ARTIFACT_UPLOAD_LIMIT_BYTES, assertUploadFileName, limitUploadBody } from "./upload-input.js";
 
 const SECRET = "artifact-route-test-secret";
 const ARTIFACT_ID = "1658ad0b-e44b-4ef3-86ca-953dc6783885";
 const DOCUMENT_ID = "6180f0f3-b637-4b9b-ac44-eb00cf30570a";
 
-function authorizationHeaders(): Record<string, string> {
+function authorizationHeaders(tenantId = "tenant-a"): Record<string, string> {
   const headers = new Headers({ "content-type": "application/octet-stream", "x-file-name": encodeURIComponent("bewijs.pdf") });
   applyTrustedContextHeaders(headers, {
-    tenantId: "tenant-a",
+    tenantId,
     userId: "user-a",
     roles: ["CaseFile.All.ReadWrite"],
   }, { secret: SECRET });
@@ -140,4 +141,155 @@ describe("artifact REST adapter", () => {
       expect(() => assertUploadFileName(name)).toThrow("The file name is invalid.");
     }
   });
+test("a response closed before authentication consumes no provider slot", async () => {
+  const app = Fastify(); let first = true, reads = 0;
+  app.addHook("onRequest", async (_request, reply) => { if (first) { first = false; reply.raw.destroy(); } });
+  registerArtifactRestRoutes(app, { artifacts: {
+    stage: async () => { throw Error("unused"); }, bind: async () => { throw Error("unused"); },
+    read: async (_session, input) => {
+      reads++;
+      return { descriptor: { artifactId: ARTIFACT_ID, version: 1, fileName: "a.bin", mediaType: "application/octet-stream", sha256: "a".repeat(64), byteSize: 1 }, bytes: Uint8Array.of(1), owner: input.owner };
+    },
+  } });
+  const path = `/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`;
+  try {
+    await app.inject({ method: "GET", url: path, headers: authorizationHeaders() }).catch(() => {});
+    expect(reads).toBe(0);
+    expect((await app.inject({ method: "GET", url: path, headers: authorizationHeaders() })).statusCode).toBe(200);
+    expect(reads).toBe(1);
+  } finally { await app.close(); }
+});
+
+test("a stalled tenant cannot occupy every download slot", async () => {
+  const app = Fastify();
+  let finish!: () => void, started!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  const bothStarted = new Promise<void>((resolve) => { started = resolve; });
+  let pendingA = 0;
+  registerArtifactRestRoutes(app, { artifacts: {
+    stage: async () => { throw Error("unused"); }, bind: async () => { throw Error("unused"); },
+    read: async (session, input) => {
+      if (session.tenantId === "tenant-a") { if (++pendingA === 2) started(); await gate; }
+      const bytes = Uint8Array.of(1);
+      return { descriptor: { artifactId: ARTIFACT_ID, version: 1, fileName: "a.bin", mediaType: "application/octet-stream", sha256: "a".repeat(64), byteSize: 1 }, bytes, owner: input.owner };
+    },
+  } });
+  const path = `/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`;
+  const request = (tenant: string) => app.inject({ method: "GET", url: path, headers: authorizationHeaders(tenant) });
+  const pending = [Promise.resolve(request("tenant-a")), Promise.resolve(request("tenant-a"))];
+  try {
+    await bothStarted;
+    expect((await request("tenant-a")).statusCode).toBe(429);
+    expect((await request("tenant-b")).statusCode).toBe(200);
+  } finally { finish(); await Promise.all(pending); await app.close(); }
+});
+
+test("a cooperative provider stops on deadline before its slot is released", async () => {
+  const app = Fastify(); let started = 0, cleaned = 0;
+  registerArtifactRestRoutes(app, { downloadTimeoutMs: 20, artifacts: {
+    stage: async () => { throw Error("unused"); }, bind: async () => { throw Error("unused"); },
+    read: async (_session, input, options) => {
+      started++;
+      if (started > 1) return { descriptor: { artifactId: ARTIFACT_ID, version: 1, fileName: "a.bin", mediaType: "application/octet-stream", sha256: "a".repeat(64), byteSize: 1 }, bytes: Uint8Array.of(1), owner: input.owner };
+      try { await new Promise<void>((_resolve, reject) => options!.signal!.addEventListener("abort", () => reject(options!.signal!.reason), { once: true })); }
+      finally { cleaned++; }
+      throw Error("unreachable");
+    },
+  } });
+  const path = `/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`;
+  try {
+    const response = await app.inject({ method: "GET", url: path, headers: authorizationHeaders() });
+    expect(response.statusCode).toBe(504);
+    expect(response.json().error.code).toBe("ARTIFACT_DOWNLOAD_TIMEOUT");
+    expect(started).toBe(1);
+    expect(cleaned).toBe(1);
+    expect((await app.inject({ method: "GET", url: path, headers: authorizationHeaders() })).statusCode).toBe(200);
+  } finally { await app.close(); }
+});
+
+test("a provider failure is not rewritten as a timeout merely because the signal fired", async () => {
+  const app = Fastify();
+  registerArtifactRestRoutes(app, { downloadTimeoutMs: 5, artifacts: {
+    stage: async () => { throw Error("unused"); }, bind: async () => { throw Error("unused"); },
+    read: async () => { await new Promise((resolve) => setTimeout(resolve, 15)); throw new Error("provider failed"); },
+  } });
+  try {
+    const response = await app.inject({ method: "GET", url: `/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`, headers: authorizationHeaders() });
+    expect(response.statusCode).toBe(500);
+    expect(response.json().error.code).not.toBe("ARTIFACT_DOWNLOAD_TIMEOUT");
+  } finally { await app.close(); }
+});
+
+test("deadline abort flows through storage runtime and finishes transaction cleanup", async () => {
+  const app = Fastify();
+  let transactionOpen = false, providerStopped = false;
+  const runtime = new ArtifactStorageRuntime<TrustedSessionContext, object>({
+    acceptsSession: () => true, currentTransaction: () => undefined,
+    withTransaction: async (_session, work) => {
+      transactionOpen = true;
+      try { return await work({}); } finally { transactionOpen = false; }
+    },
+    records: { assertAccess: async () => {} } as never,
+  });
+  runtime.configure([{ name: "test-storage", artifactStorage: {
+    providerId: "test", stage: async () => { throw Error("unused"); }, bind: async () => { throw Error("unused"); },
+    read: async (_context, _input, options) => {
+      try { await new Promise<void>((_resolve, reject) => options!.signal!.addEventListener("abort", () => reject(options!.signal!.reason), { once: true })); }
+      finally { providerStopped = true; }
+      throw Error("unreachable");
+    },
+  } }], ["test"]);
+  let activeBoundaryEntered = false;
+  const artifacts = activeArtifactServices(runtime.services, async (session, work) => { activeBoundaryEntered = true; return work(session); });
+  registerArtifactRestRoutes(app, { artifacts, downloadTimeoutMs: 20 });
+  try {
+    const response = await app.inject({ method: "GET", url: `/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`, headers: authorizationHeaders() });
+    expect(response.statusCode).toBe(504);
+    expect(activeBoundaryEntered).toBe(true);
+    expect(providerStopped).toBe(true);
+    expect(transactionOpen).toBe(false);
+  } finally { await app.close(); }
+});
+
+test("download capacity includes in-flight reads and recovers after they finish",async()=>{
+ const app=Fastify(); let release!:()=>void;const gate=new Promise<void>(r=>{release=r;});let entered=0;
+ let enteredAll!:()=>void; const all=new Promise<void>(r=>{enteredAll=r;});
+ registerArtifactRestRoutes(app,{artifacts:{stage:async()=>{throw Error('unused');},bind:async()=>{throw Error('unused');},read:async(_s,input)=>{
+  if(++entered===4)enteredAll();await gate;const bytes=Uint8Array.of(1,2,3);
+  return {descriptor:{artifactId:ARTIFACT_ID,version:1,fileName:'test.bin',mediaType:'application/octet-stream',sha256:'a'.repeat(64),byteSize:3},bytes,owner:input.owner};
+ }}});
+ const headers=authorizationHeaders();delete headers['content-type'];
+ const request=(tenant = "tenant-a")=>app.inject({method:'GET',url:`/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`,headers:tenant === "tenant-a" ? headers : authorizationHeaders(tenant)});
+ const pending=Array.from({length:4},(_,i)=>Promise.resolve(request(i < 2 ? "tenant-a" : "tenant-b")));
+ await all;
+ try {expect((await request()).statusCode).toBe(429); expect((await request("tenant-c")).statusCode).toBe(429);}finally{release();}
+ expect((await Promise.all(pending)).map(x=>x.statusCode)).toEqual([200,200,200,200]);
+ expect((await request()).statusCode).toBe(200);await app.close();
+});
+
+ test("a response close cannot release reads still buffering provider data", async () => {
+   const app = Fastify();
+   const responses: import("node:http").ServerResponse[] = [];
+   let finishRead!: () => void, allStarted!: () => void;
+   const gate = new Promise<void>(r => { finishRead = r; });
+   const startedGate = new Promise<void>(r => { allStarted = r; });
+   let started = 0;
+   app.addHook("onRequest", async (_request, reply) => { responses.push(reply.raw); });
+   registerArtifactRestRoutes(app, {artifacts:{stage:async()=>{throw Error("unused");},bind:async()=>{throw Error("unused");},read:async(_s,input)=>{
+     if (++started === 4) allStarted();
+     await gate;
+     return {descriptor:{artifactId:ARTIFACT_ID,version:1,fileName:"a.bin",mediaType:"application/octet-stream",sha256:"a".repeat(64),byteSize:1},bytes:Uint8Array.of(1),owner:input.owner};
+   }}});
+   const headers = authorizationHeaders(); delete headers["content-type"];
+   const path = `/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`;
+   const pending = Array.from({length:4},(_,i)=>Promise.resolve(app.inject({method:"GET",url:path,headers:i < 2 ? headers : authorizationHeaders("tenant-b")})).catch(error => { expect(error.code).toBe("LIGHT_ECONNRESET"); }));
+   try {
+     await startedGate;
+     // Deterministically reproduce the socket-close event while storage is suspended.
+     for (const response of responses) response.emit("close");
+     expect((await app.inject({method:"GET",url:path,headers})).statusCode).toBe(429);
+     expect(started).toBe(4);
+   } finally { finishRead(); await Promise.all(pending); await app.close(); }
+ });
+
 });

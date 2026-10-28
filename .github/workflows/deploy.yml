@@ -83,6 +83,13 @@ permissions:
   packages: read # pull the private GHCR images with GITHUB_TOKEN
 
 env:
+  DEPLOY_API_HOST: ${{ inputs.api_host }}
+  DEPLOY_AUTH_HOST: ${{ inputs.auth_host }}
+  DEPLOY_BEARER_AUDIENCE: ${{ inputs.bearer_audience }}
+  DEPLOY_DEPLOY_KEYCLOAK: ${{ inputs.deploy_keycloak }}
+  DEPLOY_IMAGE_TAG: ${{ inputs.image_tag }}
+  DEPLOY_REALM_MODE: ${{ inputs.realm_mode }}
+  DEPLOY_TLS_ISSUER: ${{ inputs.tls_issuer }}
   NAMESPACE: openshapeforge
   RELEASE: openshapeforge
   REGION: nl-ams
@@ -141,18 +148,18 @@ jobs:
           PROTECTED_HOSTS: "api.openshapeforge.eu auth.openshapeforge.eu"
         run: |
           fail=0
-          for host in "${{ inputs.api_host }}" "${{ inputs.auth_host }}"; do
+          for host in "$DEPLOY_API_HOST" "$DEPLOY_AUTH_HOST"; do
             [ -n "$host" ] || continue
             case " $PROTECTED_HOSTS " in
               *" $host "*) ;;
               *) continue ;;
             esac
-            if [ "${{ inputs.tls_issuer }}" != "letsencrypt-prod" ]; then
-              echo "::error::$host is a live hostname, but tls_issuer is '${{ inputs.tls_issuer }}'. Staging certificates are issued from an untrusted root and every client would see a TLS error."
+            if [ "$DEPLOY_TLS_ISSUER" != "letsencrypt-prod" ]; then
+              echo "::error::$host is a live hostname, but tls_issuer is '$DEPLOY_TLS_ISSUER'. Staging certificates are issued from an untrusted root and every client would see a TLS error."
               fail=1
             fi
-            if [ "${{ inputs.realm_mode }}" != "production" ]; then
-              echo "::error::$host is a live hostname, but realm_mode is '${{ inputs.realm_mode }}'. A development realm carries this repository's committed client secrets and must never be reachable publicly."
+            if [ "$DEPLOY_REALM_MODE" != "production" ]; then
+              echo "::error::$host is a live hostname, but realm_mode is '$DEPLOY_REALM_MODE'. A development realm carries this repository's committed client secrets and must never be reachable publicly."
               fail=1
             fi
           done
@@ -297,6 +304,7 @@ jobs:
       - name: Create GHCR pull secret
         env:
           PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
+          IMAGE_TAG: ${{ steps.tag.outputs.tag }}
         run: |
           if [ -n "${{ secrets.GHCR_PULL_TOKEN }}" ]; then
             echo "using GHCR_PULL_TOKEN (durable)"
@@ -312,7 +320,7 @@ jobs:
       - name: Resolve image tag
         id: tag
         run: |
-          tag="${{ inputs.image_tag }}"
+          tag="$DEPLOY_IMAGE_TAG"
           if [ -z "$tag" ]; then
             # Matches docker/metadata-action's type=sha (7-char short sha).
             tag="sha-$(echo "${GITHUB_SHA}" | cut -c1-7)"
@@ -326,10 +334,11 @@ jobs:
       - name: Verify images exist in GHCR
         env:
           PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
+          IMAGE_TAG: ${{ steps.tag.outputs.tag }}
         run: |
           echo "$PULL_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           for img in openshapeforge-api openshapeforge-keycloak; do
-            ref="ghcr.io/openshapeforge/$img:${{ steps.tag.outputs.tag }}"
+            ref="ghcr.io/openshapeforge/$img:$IMAGE_TAG"
             if ! docker manifest inspect "$ref" >/dev/null 2>&1; then
               echo "::error::image not found: $ref"
               exit 1
@@ -427,10 +436,10 @@ jobs:
           fi
           internal="http://${RELEASE}-keycloak:8080/realms/${realm}"
 
-          if [ -n "${{ inputs.auth_host }}" ]; then
+          if [ -n "$DEPLOY_AUTH_HOST" ]; then
             # Keycloak is public: it stamps `iss` with its external URL, so the
             # API must verify against THAT, not the Service name.
-            issuer="https://${{ inputs.auth_host }}/realms/${realm}"
+            issuer="https://$DEPLOY_AUTH_HOST/realms/${realm}"
           else
             issuer="$internal"
           fi
@@ -447,13 +456,18 @@ jobs:
           echo "  jwks   (back-channel, internal):   $internal/protocol/openid-connect/certs"
 
       - name: Helm upgrade --install
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.tag }}
+          BEARER_ISSUER: ${{ steps.issuer.outputs.issuer }}
+          BEARER_JWKS: ${{ steps.issuer.outputs.jwks }}
+          PUBLIC_REALM: ${{ steps.issuer.outputs.realm }}
         run: |
           bearer_args=()
-          if [ "${{ inputs.deploy_keycloak }}" = "true" ]; then
+          if [ "$DEPLOY_DEPLOY_KEYCLOAK" = "true" ]; then
             bearer_args=(
-              --set auth.bearer.issuer="${{ steps.issuer.outputs.issuer }}"
-              --set auth.bearer.jwksUri="${{ steps.issuer.outputs.jwks }}"
-              --set auth.bearer.audience="${{ inputs.bearer_audience }}"
+              --set auth.bearer.issuer="$BEARER_ISSUER"
+              --set auth.bearer.jwksUri="$BEARER_JWKS"
+              --set auth.bearer.audience="$DEPLOY_BEARER_AUDIENCE"
             )
           fi
 
@@ -462,19 +476,19 @@ jobs:
           # chart only declares the Ingress and names the issuer that should
           # fulfil it. An empty api_host leaves the release ClusterIP-only.
           ingress_args=()
-          host="${{ inputs.api_host }}"
+          host="$DEPLOY_API_HOST"
           if [ -n "$host" ]; then
             ingress_args=(
               --set ingress.enabled=true
               --set ingress.className=nginx
-              --set "ingress.annotations.cert-manager\.io/cluster-issuer=${{ inputs.tls_issuer }}"
+              --set "ingress.annotations.cert-manager\.io/cluster-issuer=$DEPLOY_TLS_ISSUER"
               --set "ingress.hosts[0].host=$host"
               --set "ingress.hosts[0].paths[0].path=/"
               --set "ingress.hosts[0].paths[0].pathType=Prefix"
               --set "ingress.tls[0].secretName=openshapeforge-api-tls"
               --set "ingress.tls[0].hosts[0]=$host"
             )
-            echo "serving on https://$host (issuer: ${{ inputs.tls_issuer }})"
+            echo "serving on https://$host (issuer: $DEPLOY_TLS_ISSUER)"
           else
             echo "no api_host given — ClusterIP only, no Ingress"
           fi
@@ -486,14 +500,14 @@ jobs:
           # without it Keycloak builds redirect and issuer URLs from the
           # in-cluster request and advertises http:// on the wrong host.
           auth_args=()
-          ahost="${{ inputs.auth_host }}"
-          if [ "${{ inputs.deploy_keycloak }}" = "true" ] && [ -n "$ahost" ]; then
+          ahost="$DEPLOY_AUTH_HOST"
+          if [ "$DEPLOY_DEPLOY_KEYCLOAK" = "true" ] && [ -n "$ahost" ]; then
             auth_args=(
               --set keycloak.hostname="https://$ahost"
               --set keycloak.proxyHeaders=xforwarded
               --set keycloak.ingress.enabled=true
               --set keycloak.ingress.className=nginx
-              --set "keycloak.ingress.annotations.cert-manager\.io/cluster-issuer=${{ inputs.tls_issuer }}"
+              --set "keycloak.ingress.annotations.cert-manager\.io/cluster-issuer=$DEPLOY_TLS_ISSUER"
               --set "keycloak.ingress.hosts[0].host=$ahost"
               # WHICH prefixes are public is the chart's decision, not this
               # workflow's: naming the realm makes it route that realm's OIDC
@@ -503,19 +517,19 @@ jobs:
               # /realms/<realm>/openshapeforge match no rule and never reach
               # Keycloak. This used to pass /realms/<realm> as a single prefix,
               # which routed the SPI to the internet — the finding S8 closes.
-              --set "keycloak.ingress.publicRealm=${{ steps.issuer.outputs.realm }}"
+              --set "keycloak.ingress.publicRealm=$PUBLIC_REALM"
               --set "keycloak.ingress.tls[0].secretName=openshapeforge-keycloak-tls"
               --set "keycloak.ingress.tls[0].hosts[0]=$ahost"
             )
-            echo "keycloak public at https://$ahost (OIDC surface of ${{ steps.issuer.outputs.realm }} + /resources only; admin console and configuration SPI unrouted)"
+            echo "keycloak public at https://$ahost (OIDC surface of $PUBLIC_REALM + /resources only; admin console and configuration SPI unrouted)"
           fi
           helm upgrade --install "$RELEASE" ./deploy/helm/openshapeforge-api \
             --namespace "$NAMESPACE" \
             --values secrets.values.yaml \
-            --set image.tag="${{ steps.tag.outputs.tag }}" \
+            --set image.tag="$IMAGE_TAG" \
             --set 'global.imagePullSecrets[0].name=ghcr-pull' \
-            --set keycloak.enabled=${{ inputs.deploy_keycloak }} \
-            --set keycloak.image.tag="${{ steps.tag.outputs.tag }}" \
+            --set keycloak.enabled=$DEPLOY_DEPLOY_KEYCLOAK \
+            --set keycloak.image.tag="$IMAGE_TAG" \
             --set-file keycloak.realm.json="keycloak/${TENANT_REALM}-realm.json" \
             "${bearer_args[@]}" \
             "${ingress_args[@]}" \

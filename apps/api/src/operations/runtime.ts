@@ -62,16 +62,24 @@ import {
 } from "./entity/edit-leases.js";
 import { policyOperation } from "./entity/subtype-scope.js";
 import { withConsumedCollectionLeaseInTransaction } from "./entity/collection-lease-context.js";
-import { getGeneratedCrudTables } from "./entity/catalog.js";
+import { getGeneratedCrudTables, recordActionTable } from "./entity/catalog.js";
+import { resolvePrincipalClass } from "../db/session.js";
 import { applyOwnedEntityFields, assertOwnedTarget, captureOwnedTarget } from "./entity/owned-fields.js";
 import { getEntityOperationOffers } from "./entity/runtime.js";
 import { entityBusinessUnavailability } from "./entity/availability.js";
 import type { EntityOperationContract, GeneratedCrudTable } from "./entity/types.js";
 import {
+  assertRecordAction,
+  assertRecordActionInTransaction,
   assertRecordPermission,
   assertRecordPermissionInTransaction,
   type RecordPermissionAction,
+  recordActionDeclaration,
 } from "./entity/record-permissions.js";
+import {
+  withAdmittedRecordAction,
+  type AdmittedRecordAction,
+} from "./entity/record-action-admission.js";
 import { normalizeTimestampToken } from "../db/timestamps.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import { issueOperationPrerequisiteReceipt } from "./prerequisite-receipts.js";
@@ -83,6 +91,11 @@ import type { DB } from "../generated/db/types.js";
 import { evaluateOperationAvailability } from "./availability.js";
 import { assertOperationAdmitted } from "./execution-policy.js";
 import { nativeEntityTypeListHandler } from "./entity-type-list.js";
+import { API_KEYS_PLUGIN, apiKeyOperationHandler } from "./api-key-operations.js";
+import {
+  RECORD_ACTIONS_PLUGIN,
+  recordActionsOperationHandler,
+} from "./record-action-assignments/operations.js";
 import { GRANTS_PLUGIN, grantsOperationHandler } from "./grants-operations.js";
 import { SOURCE_SYNC_PLUGIN, sourceSyncOperationHandler } from "./source-sync-operations.js";
 import { EDIT_LEASES_PLUGIN, editLeaseOperationHandler } from "./edit-lease-operations.js";
@@ -139,6 +152,12 @@ export type OperationContract = {
         scopes?: string[];
         recordPermission?: RecordPermissionAction;
         recordPermissions?: readonly RecordPermissionAction[];
+        /**
+         * A named action on the target record, independent of its `view`:
+         * see docs/operations.md. Checked beside any recordPermissions, never
+         * instead of them.
+         */
+        recordAction?: string;
       }
     | { mode: "capability" }
     | { mode: "custom"; scheme: string; description: string; securityScheme: Record<string, unknown> };
@@ -649,6 +668,28 @@ export function bindOperationHandlers(
       bound.set(operation.key, { operation, handler: grantsOperationHandler(operation) });
       continue;
     }
+    // The integration/API-key catalog is core as well: its handlers
+    // (operations/api-key-operations.ts) call the one provisioning service and
+    // therefore the one privilege ceiling, so they bind wherever the
+    // authentication path they provision for binds.
+    if (operation.plugin === API_KEYS_PLUGIN) {
+      if (modulesByName.has(API_KEYS_PLUGIN)) throw new Error("The core API key catalog runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: apiKeyOperationHandler(operation) });
+      continue;
+    }
+    // The named record-action axis is core as well, BOTH halves of it: the
+    // one Operation that may write the axis
+    // (operations/record-action-operations.ts) and the manager's view of what
+    // it wrote (operations/record-action-assignments). Emphatically not
+    // replaceable — a plugin standing in for the writer would be a second
+    // writer of the axis, which is the one thing the single-writer design
+    // exists to prevent — and bound once, so one plugin name cannot acquire
+    // two differently-guarded bindings.
+    if (operation.plugin === RECORD_ACTIONS_PLUGIN) {
+      if (modulesByName.has(RECORD_ACTIONS_PLUGIN)) throw new Error("The core record action runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: recordActionsOperationHandler(operation) });
+      continue;
+    }
     // Importing records from an external source system by their base source
     // fields is core: it writes through the entities' own CRUD, so it binds
     // wherever those entities do (operations/source-sync-operations.ts).
@@ -674,7 +715,7 @@ export function bindOperationHandlers(
       continue;
     }
     if (operation.implementation?.type === "collection-options") {
-      bound.set(operation.key, { operation, handler: nativeCollectionOptionsHandler(operation) });
+      bound.set(operation.key, { operation, handler: nativeCollectionOptionsHandler(operation, modules) });
       continue;
     }
     if (operation.implementation?.type === "application-search") {
@@ -783,6 +824,53 @@ export function requireOperationAuthorization(
   if (requiredScopes.some((scope) => !heldScopes.has(scope))) {
     throw new HttpError(403, "INSUFFICIENT_SCOPE", "Session lacks a required OAuth scope.");
   }
+  if (!recordActionPrincipalReachable(operation, session)) {
+    throw new HttpError(
+      403,
+      "FORBIDDEN",
+      "This Operation is authorized by a record action no session of this kind can hold.",
+    );
+  }
+}
+
+/**
+ * Could this session's verified principal class EVER hold the action this
+ * Operation requires?
+ *
+ * An action declares the principal kinds a grant of it may name: `person`
+ * admits the ACL's users/groups/roles subjects, `integration` admits a
+ * resolved API-key integration, and a `service` or unclassified session
+ * satisfies neither. So an application-only action is unreachable to a person
+ * no matter which record it names, and vice versa.
+ *
+ * The record check reaches the same answer — `recordActionAllows` matches the
+ * class before it looks at a subject — so this adds no new refusal. What it
+ * adds is WHERE: an Operation nothing about this session could ever satisfy is
+ * refused before a record is consulted, and is therefore absent from the
+ * Operation listing and the MCP catalogue rather than advertised and then
+ * refused. A target or declaration that cannot be resolved answers `false`:
+ * an Operation whose action the manifest does not carry is unreachable, not
+ * open.
+ */
+function recordActionPrincipalReachable(
+  operation: OperationContract,
+  session: TrustedSessionContext,
+): boolean {
+  if (operation.auth.mode !== "session" || !operation.auth.recordAction) return true;
+  const entityName = operation.target?.entityName;
+  const table = entityName ? recordActionTable(entityName) : undefined;
+  const declaration = table
+    ? recordActionDeclaration(table, operation.auth.recordAction)
+    : undefined;
+  if (!declaration) return false;
+  switch (resolvePrincipalClass(session)) {
+    case "person":
+      return declaration.principals.includes("person");
+    case "application":
+      return declaration.principals.includes("integration");
+    default:
+      return false;
+  }
 }
 
 function asInput(value: unknown): Record<string, unknown> {
@@ -841,7 +929,8 @@ async function assertCurrentRecordPermission(
   trx: Transaction<DB>,
 ): Promise<void> {
   const recordPermissions = operationRecordPermissions(operation);
-  if (recordPermissions.length === 0) return;
+  const recordActions = operationRecordActions(operation);
+  if (recordPermissions.length === 0 && recordActions.length === 0) return;
   if (!operation.target || operation.target.scope !== "record" ||
     !operation.target.inputField || !context.session || !context.db) {
     throw operationFailure({
@@ -870,6 +959,15 @@ async function assertCurrentRecordPermission(
       permission,
     );
   }
+  for (const action of recordActions) {
+    await assertRecordActionInTransaction(
+      trx,
+      context.session,
+      targetTable(operation),
+      targetValue,
+      action,
+    );
+  }
 }
 
 function operationRecordPermissions(
@@ -878,6 +976,16 @@ function operationRecordPermissions(
   if (operation.auth.mode !== "session") return [];
   return operation.auth.recordPermissions ??
     (operation.auth.recordPermission ? [operation.auth.recordPermission] : []);
+}
+
+/**
+ * The named record actions this Operation requires. A separate list from the
+ * record PERMISSIONS above because the two are checked independently: an
+ * action never implies `view`, so satisfying one says nothing about the other.
+ */
+function operationRecordActions(operation: OperationContract): readonly string[] {
+  if (operation.auth.mode !== "session") return [];
+  return operation.auth.recordAction ? [operation.auth.recordAction] : [];
 }
 
 function protectedCustomOperation(
@@ -950,7 +1058,24 @@ async function invokeCustomOperationWithControls(
   return invokeGuardedCustomOperation(bound, input, context, invokeHandler);
 }
 
-async function invokeGuardedCustomOperation(
+/**
+ * Every custom Operation handler runs with ITS OWN record-action admission
+ * and never with an enclosing one (entity/record-action-admission.ts). A
+ * handler that dispatches a second Operation would otherwise lend its
+ * authorized target to that Operation's handler, and a second plugin could
+ * read a record it was never authorized on.
+ */
+function invokeGuardedCustomOperation(
+  bound: Bound,
+  input: Readonly<Record<string, unknown>>,
+  context: Parameters<ModuleOperationHandler>[1],
+  invokeHandler: (handlerInput: Record<string, unknown>) => Promise<ModuleOperationSuccessResult>,
+): Promise<ModuleOperationSuccessResult> {
+  return withAdmittedRecordAction(null, () =>
+    guardedCustomOperation(bound, input, context, invokeHandler));
+}
+
+async function guardedCustomOperation(
   bound: Bound,
   input: Readonly<Record<string, unknown>>,
   context: Parameters<ModuleOperationHandler>[1],
@@ -968,12 +1093,14 @@ async function invokeGuardedCustomOperation(
     });
   }
   const recordPermissions = operationRecordPermissions(operation);
+  const recordActions = operationRecordActions(operation);
   const forcesTransaction = operationIntent(operation) !== "invoke";
   const hasGuard = Boolean(
     bound.availability ||
     operation.concurrency ||
     confirmation.mode === "challenge" ||
     recordPermissions.length > 0 ||
+    recordActions.length > 0 ||
     forcesTransaction,
   );
   if (!hasGuard) return invokeHandler(customHandlerInput(operation, input));
@@ -982,7 +1109,8 @@ async function invokeGuardedCustomOperation(
     operation.target?.scope === "collection" &&
     !operation.concurrency &&
     confirmation.mode !== "challenge" &&
-    recordPermissions.length === 0
+    recordPermissions.length === 0 &&
+    recordActions.length === 0
   ) {
     if (!context.session || !context.db || !context.platform) {
       throw operationFailure({
@@ -1041,7 +1169,8 @@ async function invokeGuardedCustomOperation(
     : undefined;
   // Source-backed record Operations can have business availability without a
   // generated CRUD table. Only platform-owned record guards require one.
-  const table = recordPermissions.length > 0 || expectedVersion || confirmation.mode === "challenge"
+  const table = recordPermissions.length > 0 || recordActions.length > 0 ||
+    expectedVersion || confirmation.mode === "challenge"
     ? targetTable(operation)
     : undefined;
   // A subtype target's leases and challenges are the base record's
@@ -1057,6 +1186,13 @@ async function invokeGuardedCustomOperation(
       targetValue,
       permission,
     );
+  }
+  // Refuse before a challenge or a lease is issued. This read is in its own
+  // transaction, so it is an early answer and never the authoritative one —
+  // the check inside the Operation's transaction below is, and it is the one
+  // holding the lock when the effect runs.
+  for (const action of recordActions) {
+    await assertRecordAction(context.db, context.session, table!, targetValue, action);
   }
   let confirmationToken: string | undefined;
   let confirmationAnswer: string | undefined;
@@ -1094,6 +1230,24 @@ async function invokeGuardedCustomOperation(
     confirmationToken = requireStringControl(input, "confirmationToken");
     confirmationAnswer = requireStringControl(input, "confirmationAnswer");
   }
+  // The record and the actions this invocation was authorized on, for the
+  // handler's bounded read and for nothing else. Established only where it is
+  // established at all: below, inside the Operation's transaction, after the
+  // decisive `assertRecordActionInTransaction` has passed and under the
+  // ACL-row lock it took. An Operation that requires no action admits none,
+  // and `invokeGuardedCustomOperation` already cleared whatever an enclosing
+  // dispatch had admitted.
+  const admitted: AdmittedRecordAction | null =
+    recordActions.length > 0 && context.session && operation.target?.entityName
+      ? {
+        session: context.session,
+        entityName: operation.target.entityName,
+        id: targetValue,
+        actions: new Set(recordActions),
+      }
+      : null;
+  const runHandler = (handlerInput: Record<string, unknown>) =>
+    withAdmittedRecordAction(admitted, () => invokeHandler(handlerInput));
   return withModuleOperationTransaction(
     context.platform,
     context.session,
@@ -1105,6 +1259,15 @@ async function invokeGuardedCustomOperation(
           table!,
           targetValue,
           permission,
+        );
+      }
+      for (const action of recordActions) {
+        await assertRecordActionInTransaction(
+          trx,
+          context.session!,
+          table!,
+          targetValue,
+          action,
         );
       }
       if (expectedVersion) {
@@ -1126,7 +1289,7 @@ async function invokeGuardedCustomOperation(
         if (operation.implementation?.type === "collection") {
           return withConsumedCollectionLeaseInTransaction(trx, context.session!, {
             operation: protectedOperation, targetId: targetValue, expectedVersion, leaseToken,
-          }, () => invokeHandler(customHandlerInput(operation, input)));
+          }, () => runHandler(customHandlerInput(operation, input)));
         }
         await consumeEntityEditLeaseInTransaction(trx, context.session!, {
           operation: protectedOperation,
@@ -1144,7 +1307,7 @@ async function invokeGuardedCustomOperation(
           confirmationAnswer,
         });
       }
-      return invokeHandler(customHandlerInput(operation, input));
+      return runHandler(customHandlerInput(operation, input));
     },
   );
 }

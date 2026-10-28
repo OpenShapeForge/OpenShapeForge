@@ -47,6 +47,7 @@ import {
 import { expectedDeleteOutcome } from "./e2e/reference-policy.js";
 import {
   createOffersField,
+  concealsMissingRecord,
   isEntityBackedCreate,
   leaseRequired,
   placeholderControls,
@@ -209,8 +210,9 @@ for (const table of tables) {
       // exist: the lease service answers NOT_FOUND before any mutation runs.
       test("delete of a nonexistent row is refused at the lease", async () => {
         const refused = await requestLease(tenantA, table, randomUUID(), "delete");
-        expect(refused.status).toBe(404);
-        expect(refused.body.error.code).toBe("NOT_FOUND");
+        const aclRefusal = concealsMissingRecord(table, "delete", true);
+        expect(refused.status).toBe(aclRefusal ? 403 : 404);
+        expect(refused.body.error.code).toBe(aclRefusal ? "FORBIDDEN" : "NOT_FOUND");
       });
     } else {
       test("delete of a nonexistent row returns false", async () => {
@@ -219,7 +221,12 @@ for (const table of tables) {
           deleteDoc(table),
           deleteVariables(table, randomUUID(), placeholderControls(table, "delete")),
         );
-        expect(deletedOf(table, result)).toBe(false);
+        if (concealsMissingRecord(table, "delete", false)) {
+          // Record permission checks intentionally conceal whether the row exists.
+          expectOperationError(table, result, graphql.deleteMutationName, "FORBIDDEN");
+        } else {
+          expect(deletedOf(table, result)).toBe(false);
+        }
       });
     }
 

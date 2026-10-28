@@ -53,6 +53,19 @@ export type WebSchemaOperationRef<
     entityName: string;
     scope: "collection" | "record";
     inputField?: string;
+    /**
+     * Operation input key -> route parameter of the collection's own route,
+     * for a `collection`-scoped action on a PARAMETERIZED collection.
+     *
+     * A collection reached at `/integrations/:integrationId/record-actions`
+     * already binds that parameter into its list Operation
+     * (`operationSource.collection.bindings`); an action invoked on that
+     * collection is invoked in the same context, so it binds the same way.
+     * A host fills these inputs from the current route and must not present
+     * them as fields to type — the parameter is the page the user is on, and
+     * the server re-authorizes it regardless.
+     */
+    routeBindings?: Record<string, string>;
   };
   input: { kind: "json-schema"; schema: Readonly<Record<string, unknown>> };
   output: { kind: "json-schema"; schema: Readonly<Record<string, unknown>> };
@@ -406,6 +419,14 @@ export type WebEntityInterface = {
       query?: {
         input: WebCollectionQueryContract;
         nextCursorField: string;
+        /**
+         * Where to read the collection's total from. ABSENT when the backing
+         * Operation declares its total as unknown — a listing bounded by the
+         * caller's own row authorization cannot state one without reading past
+         * that authorization. A renderer with no field here derives progress
+         * from `nextCursorField` and must not substitute the number of rows it
+         * has loaded for a total it was not given.
+         */
         totalCountField?: string;
       };
     };
@@ -446,6 +467,13 @@ export type WebStandaloneOperationRef = Omit<WebSchemaOperationRef<"invoke">, "t
     entityName: string;
     scope: "collection" | "record";
     inputField?: string;
+    /**
+     * Operation input key -> route parameter of the collection's own route,
+     * for a `collection`-scoped action on a PARAMETERIZED collection. Filled
+     * from the route the action is invoked on; see the same field on
+     * {@link WebSchemaOperationRef}.
+     */
+    routeBindings?: Record<string, string>;
   };
   /** Who may invoke it; the web hides what the session cannot invoke. */
   auth:

@@ -154,6 +154,7 @@ export function resolveRender(
     ?? (field.readOnly ? semType?.render?.display : semType?.render?.input)
     ?? (semType?.kind === "entityId" ? (field.readOnly ? "EntityReferenceDisplay" : "EntityReferenceSelect") : undefined)
     ?? defaultEntry?.component ?? "Input";
+  assertCurrentPresentationComponent(component, field.key);
   const declared = catalog.components[component];
   if (component.startsWith("Field") && !declared && Object.keys(catalog.components).length) throw new Error(`${field.key}: unknown presentation component ${component}.`);
   // Currency also carries canonical numeric value context; changing the renderer must not erase it.
@@ -174,4 +175,10 @@ export function resolveRender(
   }
   return { component, ...(Object.keys(props).length ? {props: structuredClone(props)} : {}) };
 
+}
+
+export function assertCurrentPresentationComponent(component: string, owner: string): void {
+  if (component === "DateTimePicker") {
+    throw new Error(`${owner}: presentation component DateTimePicker is obsolete; use FieldDateAndTime.`);
+  }
 }

@@ -15,12 +15,38 @@ export type GeneratedCrudExposureOperation = "list" | "get" | "create" | "update
 
 export type GeneratedCrudAuthorization = {
   roles: Record<GeneratedCrudOperation, string[]>;
+  /**
+   * The principal classes this entity's generated CRUD and derived search
+   * admit (`operations/entity/principal-classes.ts`). Absent means every
+   * class, which is what an entity that declares no record action compiles
+   * to — so the axis cannot regress an existing entity.
+   */
+  principalClasses?: Array<"person" | "application" | "service" | "unknown">;
   recordPermissions?: {
     field: string;
     column: string;
     empty: "public" | "restricted";
     createRequires: Array<"view" | "edit" | "delete">;
     defaultValue?: Record<string, unknown>;
+    /**
+     * The named actions this entity's ACL may grant, and which principal
+     * kinds each admits. Absent on every entity that did not opt in, which is
+     * what makes the axis unable to regress an existing policy.
+     */
+    actions?: Array<{
+      name: string;
+      principals: Array<"person" | "integration">;
+      /** Fields a holder of this action may read; absent discloses nothing. */
+      reads?: string[];
+      /**
+       * The ACL row lock the authorization check takes. `exclusive` (the
+       * compiled default) serializes two holders of the same action on the
+       * same record, so an effect that later locks that record more strongly
+       * cannot deadlock on the upgrade; `shared` lets them pass together and
+       * is only safe for an effect that never upgrades.
+       */
+      lock?: "exclusive" | "shared";
+    }>;
   };
 };
 
@@ -153,8 +179,12 @@ export type GeneratedCrudTable = {
       }>;
     }>;
     authoringEntityName?: string;
+    /** The entity's authored slug; the key its web page configs are seeded under. */
+    authoringEntitySlug?: string;
     /** The entity's authored name in both languages, for what a person reads. */
     labels?: { en?: string; nl?: string };
+    /** The authored record title, e.g. `{{displayName}}`; names fields, not columns. */
+    displayTemplate?: string;
     versioning?: {
       strategy: "publishedSnapshot";
       versionEntity: string;

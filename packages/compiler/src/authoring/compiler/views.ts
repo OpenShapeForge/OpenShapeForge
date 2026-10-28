@@ -49,6 +49,7 @@ import {
   resolveViewGroups,
   type ResolvedViewGroup,
 } from "../view-groups.js";
+import { assertCurrentPresentationComponent } from "./model.js";
 
 export function buildViews(
   coreEntity: LoadedArtifacts["coreEntity"],
@@ -123,8 +124,8 @@ function compileFields(
     return {
       key: f.key,
       ...(hasRender ? { renderOverride: typeof f.render === "string"
-        ? vr(catalog, f.render)
-        : { ...vr(catalog, f.render!.component), ...(f.render!.props ? { props: structuredClone(f.render!.props) } : {}) } } : {}),
+        ? vr(catalog, f.render, f.key)
+        : { ...vr(catalog, f.render!.component, f.key), ...(f.render!.props ? { props: structuredClone(f.render!.props) } : {}) } } : {}),
       ...(displayMode ? { fieldDisplayMode: displayMode } : {}),
     };
   });
@@ -145,9 +146,10 @@ function compileRelationshipUsage(
   };
 }
 
-function vr(catalog: ComponentCatalog, element: string): CompiledViewRender {
+function vr(catalog: ComponentCatalog, element: string, owner = element): CompiledViewRender {
   const def = catalog.viewDefaults[element];
   const componentName = def?.component ?? element;
+  assertCurrentPresentationComponent(componentName, owner);
   return { component: componentName };
 }
 

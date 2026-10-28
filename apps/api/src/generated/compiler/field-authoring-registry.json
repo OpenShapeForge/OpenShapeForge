@@ -26573,6 +26573,20 @@
           }
         },
         {
+          "key": "permissions",
+          "osfType": "object",
+          "required": true,
+          "label": {
+            "en": "Permissions",
+            "nl": "Rechten"
+          },
+          "defaultValue": {},
+          "persisted": {
+            "column": "permissions",
+            "storageClass": "core"
+          }
+        },
+        {
           "key": "versions",
           "label": {
             "en": "Versions",
@@ -42427,6 +42441,24 @@
         "nl": "Rollen"
       }
     },
+    "ApiKeyIntegration": {
+      "kind": "provider",
+      "entity": "ApiKeyIntegration",
+      "baseType": "object",
+      "label": {
+        "en": "API integrations",
+        "nl": "API-integraties"
+      }
+    },
+    "ApiKeyCredential": {
+      "kind": "provider",
+      "entity": "ApiKeyCredential",
+      "baseType": "object",
+      "label": {
+        "en": "Credentials",
+        "nl": "Credentials"
+      }
+    },
     "PlatformTenant": {
       "kind": "provider",
       "entity": "PlatformTenant",
@@ -42470,6 +42502,15 @@
       "label": {
         "en": "Services",
         "nl": "Services"
+      }
+    },
+    "RecordActionAssignment": {
+      "kind": "provider",
+      "entity": "RecordActionAssignment",
+      "baseType": "object",
+      "label": {
+        "en": "Record actions",
+        "nl": "Recordacties"
       }
     }
   },

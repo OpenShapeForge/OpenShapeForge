@@ -668,7 +668,10 @@ describe("web manifest projection", () => {
   test("a system-written reference key from the corpus is never create-writable and its collection offers no create", () => {
     // Comment.authorId is authored readOnly (attribution, not an input); the
     // derived Relation.comments collection therefore cannot pre-fill it.
-    const entries = ["comment", "relation", "account"].map((slug) => ({
+    // The corpus has to carry every entity the real catalogs point a reference
+    // picker at (RelationGroup, from the accounts catalog): buildWebManifest
+    // refuses an x-osf-reference to an entity it was not given.
+    const entries = ["comment", "relation", "account", "relation-group"].map((slug) => ({
       slug, path: `entities/core/${slug}.yaml`, origin: "core" as const, contract: compile(loadEntity(authoringDir, slug)),
     }));
     const authorId = entries[0]!.contract.model.fields.find(({ key }) => key === "authorId")!;
@@ -1495,6 +1498,11 @@ describe("standalone Operation pages", () => {
             },
           },
         },
+        entityExtensions: {
+          Tenant: {
+            related: [{ entity: "Tenant", label: text("Related tenants", "Gerelateerde tenants"), route: "/tenants" }],
+          },
+        },
       } },
     };
     const manifest = buildWebManifest([], {}, standalone(operationEntities));
@@ -1526,11 +1534,213 @@ describe("standalone Operation pages", () => {
       { value: "EXPIRED", label: text("Expired", "Verlopen") },
     ]);
     expect(manifest.entities.Tenant?.fields.sentAt?.baseType).toBe("datetime");
+    expect(manifest.entities.Tenant?.operationSource?.related).toEqual([{
+      entityId: "Tenant",
+      label: text("Related tenants", "Gerelateerde tenants"),
+      route: "/tenants",
+    }]);
+
+    const scoped = structuredClone(operationEntities);
+    scoped.interfaces.web!.entities!.Tenant!.operations.list.bindings = { slug: "slug" };
+    const scopedQuery = buildWebManifest([], {}, standalone(scoped)).entities.Tenant!.operationSource!.collection.query!;
+    expect(scopedQuery.input.filterFields).toEqual(["name", "status"]);
+
+    const custom = structuredClone(operationEntities);
+    custom.interfaces.web!.entities!.Tenant!.recordLayout = {
+      preset: "main-context", tabs: [{ id: "overview", label: text("Overview", "Overzicht"), groups: [
+        { id: "summary", title: text("Summary", "Samenvatting"), fields: ["name", "status"] },
+      ] }],
+    };
+    const arranged = buildWebManifest([], {}, standalone(custom)).entities.Tenant!;
+    expect(arranged.views.record).toMatchObject({ preset: "main-context", layout: { tabs: [{ id: "overview", label: text("Overview", "Overzicht"), groups: [{ id: "summary", fields: ["name", "status"] }] }] } });
+    expect(arranged.operationSource).toEqual(manifest.entities.Tenant!.operationSource);
+    expect(arranged.views.record!.operations).toEqual(manifest.entities.Tenant!.views.record!.operations);
+    custom.interfaces.web!.entities!.Tenant!.recordLayout!.tabs.push({ id: "extra", groups: [{ id: "other", fields: ["slug"] }] });
+    expect(() => buildWebManifest([], {}, standalone(custom))).toThrow(/exactly one content tab/);
+    custom.interfaces.web!.entities!.Tenant!.recordLayout!.tabs.pop();
+    custom.interfaces.web!.entities!.Tenant!.recordLayout!.workspaceTabs = false;
+    expect(() => buildWebManifest([], {}, standalone(custom))).toThrow(/workspaceTabs/);
 
     const canonicalTenant = entity("Tenant", "tenant", [field("name")], coreView());
     const composed = buildWebManifest([canonicalTenant], {}, standalone(operationEntities));
     expect(composed.entities.Tenant?.operationSource).toBeUndefined();
     expect(composed.entities.Tenant?.entityId).toBe("Tenant");
+  });
+
+  /** One operation-backed Tenant collection, with the parts a test varies. */
+  const tenantCollection = (options: {
+    totalCount: Record<string, unknown>;
+    listInput?: Record<string, unknown>;
+    listBindings?: Record<string, string>;
+    route?: string;
+    collectionActions?: string[];
+    actionInputs?: Record<string, Record<string, unknown>>;
+  }): OperationCatalogDefinition => {
+    const listTenants = controlCatalog.operations.listTenants!;
+    const operations: Record<string, typeof listTenants> = {
+      ...controlCatalog.operations,
+      listTenants: {
+        ...listTenants,
+        input: { schema: options.listInput ?? { type: "object", additionalProperties: false, properties: {
+          sortField: { type: "string", enum: ["slug"], default: "slug" },
+          sortDirection: { type: "string", enum: ["asc", "desc"], default: "asc" },
+          first: { type: "integer", minimum: 1, maximum: 100, default: 25 },
+          after: { type: "string" },
+        } } },
+        output: { schema: { type: "object", additionalProperties: false, properties: {
+          tenants: { type: "array", items: { type: "object", additionalProperties: false, properties: {
+            slug: { type: "string", "x-osf-i18n": { title: text("Slug") } },
+          }, required: ["slug"] } },
+          totalCount: options.totalCount,
+          nextCursor: { type: ["string", "null"] },
+        }, required: ["tenants", "totalCount", "nextCursor"] } },
+      },
+    };
+    for (const [key, schema] of Object.entries(options.actionInputs ?? {})) {
+      operations[key] = { ...controlCatalog.operations[key]!, input: { schema } };
+    }
+    const route = options.route ?? "/tenants";
+    return {
+      ...controlCatalog,
+      operations,
+      interfaces: { ...controlCatalog.interfaces, web: { pages: {}, operations: {}, entities: {
+        Tenant: {
+          title: text("Tenants"), route, recordRoute: `${route}/:slug`,
+          idField: "slug", displayField: "slug", fields: ["slug"], columns: ["slug"],
+          operations: {
+            list: { operation: "listTenants", resultField: "tenants",
+              ...(options.listBindings ? { bindings: options.listBindings } : {}) },
+            ...(options.collectionActions ? { collectionActions: options.collectionActions } : {}),
+          },
+        },
+      } } },
+    };
+  };
+
+  test("a nullable totalCount projects an UNKNOWN total rather than a field to read it from", () => {
+    // The honest shape for a listing bounded by the caller's own row
+    // authorization: it cannot state a total without reading past that
+    // authorization, and a count of only the visible rows is not a total. The
+    // contract then names no field, so a renderer derives progress from the
+    // cursor instead of substituting the rows it has loaded for a total.
+    const unknown = buildWebManifest([], {}, standalone(tenantCollection({
+      totalCount: { type: ["integer", "null"] },
+    }))).entities.Tenant?.operationSource?.collection.query;
+    expect(unknown?.nextCursorField).toBe("nextCursor");
+    expect(unknown).not.toHaveProperty("totalCountField");
+
+    // The ordinary case is untouched: a non-nullable totalCount still names
+    // the field, so this is an opt-in of the Operation's own schema and not a
+    // change of the default.
+    expect(buildWebManifest([], {}, standalone(tenantCollection({
+      totalCount: { type: "integer" },
+    }))).entities.Tenant?.operationSource?.collection.query?.totalCountField).toBe("totalCount");
+  });
+
+  test("a collection action inherits the parameterized collection's own route bindings", () => {
+    // The action is invoked on the page the user is already on, so the page's
+    // route parameter is context it should not have to be typed. Narrowed to
+    // the inputs the action declares: an action that does not take the
+    // parameter gets no binding, and nothing new is authored for either case.
+    const catalog = tenantCollection({
+      totalCount: { type: "integer" },
+      route: "/operators/:operatorId/tenants",
+      listBindings: { operatorId: "operatorId" },
+      listInput: { type: "object", additionalProperties: false, required: ["operatorId"], properties: {
+        operatorId: { type: "string", format: "uuid" },
+        sortField: { type: "string", enum: ["slug"], default: "slug" },
+        sortDirection: { type: "string", enum: ["asc", "desc"], default: "asc" },
+        first: { type: "integer", minimum: 1, maximum: 100, default: 25 },
+        after: { type: "string" },
+      } },
+      collectionActions: ["updateTenant", "getTenant"],
+      actionInputs: {
+        // Takes the parameter: bound.
+        updateTenant: { type: "object", additionalProperties: false, required: ["operatorId", "slug"], properties: {
+          operatorId: { type: "string", format: "uuid" },
+          slug: { type: "string" },
+        } },
+        // Does not take it: no binding, rather than one that names an input
+        // the Operation would reject.
+        getTenant: { type: "object", additionalProperties: false, required: ["slug"], properties: {
+          slug: { type: "string" },
+        } },
+      },
+    });
+    const actions = buildWebManifest([], {}, standalone(catalog))
+      .entities.Tenant?.views.collection.operations.actions ?? [];
+    expect(actions.map((action) => action.target)).toEqual([
+      { entityId: "Tenant", entityName: "Tenant", scope: "collection", routeBindings: { operatorId: "operatorId" } },
+      { entityId: "Tenant", entityName: "Tenant", scope: "collection" },
+    ]);
+  });
+
+  test("a reference picker must name an entity this deployment declares", () => {
+    // `x-osf-reference` is the whole control of a pick-a-record form: the host
+    // resolves the target's own collection to populate it. Nothing else
+    // checked the name, so a catalog could point at an entity no layer ships
+    // — or one only an overlay ships — and still compile.
+    const catalog = tenantCollection({
+      totalCount: { type: "integer" },
+      collectionActions: ["updateTenant"],
+      actionInputs: {
+        updateTenant: { type: "object", additionalProperties: false, required: ["slug"], properties: {
+          slug: { type: "string", "x-osf-reference": { entity: "NoSuchEntity", valueField: "id" } },
+        } },
+      },
+    });
+    expect(() => buildWebManifest([], {}, standalone(catalog)))
+      .toThrow(/references unknown entity "NoSuchEntity"/);
+    // An operation-backed web entity any catalog declares is a valid target,
+    // the same as a core one.
+    const toItsOwn = tenantCollection({
+      totalCount: { type: "integer" },
+      collectionActions: ["updateTenant"],
+      actionInputs: {
+        updateTenant: { type: "object", additionalProperties: false, required: ["slug"], properties: {
+          slug: { type: "string", "x-osf-reference": { entity: "Tenant", valueField: "slug" } },
+        } },
+      },
+    });
+    expect(() => buildWebManifest([], {}, standalone(toItsOwn))).not.toThrow();
+  });
+
+  test("a picker inside a nested object, a list or a variant is checked the same way", () => {
+    // A control is as dead one level down as it is at the root, and a host
+    // renders all of these — a discriminated variant among them, which is the
+    // shape a generated choice-of-record-type form takes.
+    const nested = (target: Record<string, unknown>) => tenantCollection({
+      totalCount: { type: "integer" },
+      collectionActions: ["updateTenant"],
+      actionInputs: {
+        updateTenant: { type: "object", additionalProperties: false, required: ["slug"], properties: {
+          slug: { type: "string" },
+          target,
+        } },
+      },
+    });
+    const picker = (entity: string) => ({ type: "string", "x-osf-reference": { entity, valueField: "id" } });
+    for (const target of [
+      { type: "object", properties: { recordId: picker("NoSuchEntity") } },
+      { type: "array", items: picker("NoSuchEntity") },
+      { type: "object", oneOf: [
+        { properties: { kind: { const: "known" }, knownId: picker("Tenant") } },
+        { properties: { kind: { const: "other" }, otherId: picker("NoSuchEntity") } },
+      ] },
+    ]) {
+      expect(() => buildWebManifest([], {}, standalone(nested(target))))
+        .toThrow(/references unknown entity "NoSuchEntity"/);
+    }
+    // The path says where it is, rather than naming the property a reader
+    // would have to go looking for.
+    expect(() => buildWebManifest([], {}, standalone(nested({
+      type: "object", properties: { recordId: picker("NoSuchEntity") },
+    })))).toThrow(/input "target\/recordId"/);
+    // And a variant whose every branch names a declared entity compiles.
+    expect(() => buildWebManifest([], {}, standalone(nested({ type: "object", oneOf: [
+      { properties: { kind: { const: "known" }, knownId: picker("Tenant") } },
+      { properties: { kind: { const: "other" }, otherId: picker("Tenant") } },
+    ] })))).not.toThrow();
   });
 
   test("a result property typed as an entity is that entity's belongsTo, like a core reference field", () => {
@@ -1567,6 +1777,90 @@ describe("standalone Operation pages", () => {
     expect(tenant.fields.status).toMatchObject({ osfType: "string" });
     expect(tenant.fields.status?.relationship).toBeUndefined();
     expect(Object.keys(tenant.relationships)).toEqual(["relationId"]);
+  });
+
+  test("projects operation-backed references from authored result types, preserving the target read policy", () => {
+    const catalog = parse(readFileSync(join(authoringDir, "operations/api-key-integrations.yaml"), "utf8")) as OperationCatalogDefinition;
+    catalog.interfaces.web!.entities!.ApiKeyIntegration!.related = catalog.interfaces.web!.entities!.ApiKeyIntegration!.related!.filter((item) => item.entity === "ApiKeyCredential");
+    const manifest = buildWebManifest([], {}, standalone(catalog));
+    const credential = manifest.entities.ApiKeyCredential!;
+    const integration = manifest.entities.ApiKeyIntegration!;
+    expect(credential.views.record).toMatchObject({ preset: "main-context", layout: { tabs: [{ id: "overview", groups: [
+      { id: "details", fields: ["displayName", "status", "integrationId"] },
+      { id: "validity", fields: ["createdAt", "expiresAt", "lastUsedAt", "revokedAt", "roleSubset"] },
+    ] }] } });
+    expect(integration.operationSource!.related).toMatchObject([{ entityId: "ApiKeyCredential", route: "/api-key-integrations/:integrationId/credentials" }]);
+    expect(integration.views.record!.preset).toBe("inbox-main-context");
+    expect(credential.fields.integrationId).toMatchObject({ osfType: "ApiKeyIntegration", relationship: { targetEntityId: "ApiKeyIntegration" } });
+    expect(credential.relationships.integrationId).toMatchObject({ kind: "belongsTo", recordField: "integrationId", targetEntityId: "ApiKeyIntegration", operations: { get: integration.views.record!.operations.read } });
+    expect(integration.operationSource!.record!.bindings).toEqual({ integrationId: "integrationId" });
+    expect(credential.relationships.integrationId!.source).toEqual({ kind: "provider", bindings: { integrationId: "integrationId" } });
+  });
+
+  test("supports another operation-backed reference and refuses composite target routes", () => {
+    const list = controlCatalog.operations.listTenants!;
+    const catalog: OperationCatalogDefinition = {
+      ...controlCatalog,
+      operations: { ...controlCatalog.operations, listTenants: { ...list, output: { schema: { type: "object", properties: {
+        tenants: { type: "array", items: { type: "object", properties: {
+          slug: { type: "string" }, parent: { type: "string", "x-osf-type": "Tenant", "x-osf-reference": { entity: "Tenant", valueField: "slug" } },
+        } } },
+      } } } } },
+      interfaces: { ...controlCatalog.interfaces, web: { entities: {
+        Tenant: { title: text("Tenant"), route: "/tenants", recordRoute: "/tenants/:tenantKey", idField: "slug", displayField: "slug",
+          fields: ["slug", "parent"], columns: ["slug"], operations: {
+            list: { operation: "listTenants", resultField: "tenants" }, get: { operation: "getTenant", bindings: { slug: "tenantKey" } },
+          } },
+      } } },
+    };
+    const manifest = buildWebManifest([], {}, standalone(catalog));
+    expect(manifest.entities.Tenant!.relationships.parent).toMatchObject({ targetEntityId: "Tenant", recordField: "parent", kind: "belongsTo", source: { kind: "provider", bindings: { slug: "parent" } } });
+    const owner = structuredClone(catalog);
+    const target = structuredClone(catalog);
+    target.plugin = "zz-target";
+    target.interfaces.mcp = { operations: {} };
+    for (const placement of Object.values(target.interfaces.rest!.operations!)) if (placement && placement.path) placement.path = placement.path.replace("/api/control/", "/api/zz-target/");
+    for (const [key, operation] of Object.entries(target.operations)) {
+      operation.id = `zz-target.${key}`;
+      operation.implementation = { type: "plugin", plugin: "zz-target", handler: key };
+    }
+    const targetEntity = target.interfaces.web!.entities!.Tenant!;
+    targetEntity.fields = ["slug"];
+    target.interfaces.web!.entities = { Provider: targetEntity };
+    const ownerList = owner.operations.listTenants!.output!.schema as any;
+    ownerList.properties.tenants.items.properties.parent = { type: ["string", "null"], "x-osf-type": "Provider", "x-osf-reference": { entity: "Provider", valueField: "slug" } };
+    ownerList.properties.tenants.items.properties.slug["x-osf-type"] = "Tenant";
+    ownerList.properties.tenants.items.properties.slug["x-osf-reference"] = { entity: "Tenant", valueField: "slug" };
+    const sources = [owner, target];
+    const project = () => buildWebManifest([], {}, { catalogs: sources, operations: collectAuthoredModulePluginOperations(sources, operationContext) });
+    const crossCatalog = project().entities.Tenant!;
+    expect(crossCatalog.relationships.parent).toMatchObject({ targetEntityId: "Provider", source: { bindings: { slug: "parent" } } });
+    expect(crossCatalog.relationships.slug).toBeUndefined();
+    target.operations.getTenant!.auth = { mode: "session", roles: ["member"] };
+    expect(project).toThrow(/cross authentication realms/);
+    target.operations.getTenant!.auth = { mode: "control", roles: ["platform-operator"] };
+    ownerList.properties.tenants.items.properties.parent["x-osf-reference"].valueField = "notId";
+    expect(project).toThrow(/must identify Provider by its idField/);
+    ownerList.properties.tenants.items.properties.parent["x-osf-reference"].valueField = "slug";
+    ownerList.properties.tenants.items.properties.parent.type = "array";
+    expect(project().entities.Tenant!.relationships.parent).toBeUndefined();
+    ownerList.properties.tenants.items.properties.parent.type = "string";
+    delete ownerList.properties.tenants.items.properties.parent["x-osf-type"];
+    expect(project().entities.Tenant!.relationships.parent).toBeUndefined();
+    ownerList.properties.tenants.items.properties.parent.type = "array";
+    expect(project().entities.Tenant!.relationships.parent).toBeUndefined();
+    ownerList.properties.tenants.items.properties.parent = { type: "string", "x-osf-type": "Provider", "x-osf-reference": { entity: "Provider", valueField: "slug" } };
+    const ownerGet = owner.interfaces.web!.entities!.Tenant!.operations.get!;
+    delete owner.interfaces.web!.entities!.Tenant!.operations.get;
+    expect(project().entities.Tenant!.relationships.parent).toBeDefined();
+    owner.interfaces.web!.entities!.Tenant!.operations.get = ownerGet;
+    delete target.interfaces.web!.entities!.Provider!.operations.get;
+    expect(project).toThrow(/needs a readable target/);
+    catalog.interfaces.web!.entities!.Tenant!.recordRoute = "/tenants/:organization/:tenantKey";
+    expect(() => buildWebManifest([], {}, standalone(catalog))).toThrow(/single record route parameter/);
+    catalog.interfaces.web!.entities!.Tenant!.recordRoute = "/tenants/:tenantKey";
+    catalog.interfaces.web!.entities!.Tenant!.operations.get!.bindings = {};
+    expect(() => buildWebManifest([], {}, standalone(catalog))).toThrow(/required input/);
   });
 
   test("projects catalog pages and their Operations next to the entities", () => {

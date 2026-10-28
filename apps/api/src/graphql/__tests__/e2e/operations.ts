@@ -95,6 +95,13 @@ export function leaseRequired(table: GeneratedTable, intent: MutationIntent): bo
   return operationContractFor(table, intent)?.concurrency?.editLease !== undefined;
 }
 
+/** The lease endpoint checks Operation permissions before looking up the row;
+ * a direct mutation also checks the entity's row policy before its lookup. */
+export function concealsMissingRecord(table: GeneratedTable, intent: MutationIntent, viaLease: boolean): boolean {
+  const permissions = operationContractFor(table, intent)?.authorization.recordPermissions ?? [];
+  return permissions.length > 0 || (!viaLease && Boolean(table.source?.authorization?.recordPermissions));
+}
+
 export function acknowledgementRequired(
   table: GeneratedTable,
   intent: MutationIntent,

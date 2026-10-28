@@ -104,9 +104,292 @@ migrate role, which on a managed instance has neither `SUPERUSER` nor
 `CREATEROLE`. So the chain never creates a role. The compiler declares the
 roles the generated schema depends on in `apps/api/src/generated/db/manifest.json`
 under `databaseRoles` — the runtime login role, the worker login role and the
-`nologin` definer role that owns the cross-tenant blueprint read function —
-and step 0 verifies them, failing *before any schema exists* with the exact
-administrator statements that satisfy the contract.
+`nologin` definer roles that own the cross-tenant blueprint read function, the
+identity-registry point lookups and the record-action lookup — and step 0
+verifies them, failing *before any schema exists* with the exact administrator
+statements that satisfy the contract.
+
+A definer role exists so one function can read what its caller may not, and
+owns nothing else. `openshapeforge_record_action_resolver` is the narrowest of
+them: per entity that declares a record action it holds column-level `SELECT`
+on the key, the tenant column, the ACL column and that action's declared read
+fields, plus the `UPDATE` privilege `SELECT … FOR SHARE` requires — so it may
+lock an ACL row to serialize a check against a concurrent policy change, and
+may never write one. Its two functions are not executable by the worker
+connection or by `PUBLIC`.
+
+The same step installs one function that is deliberately NOT a definer and not
+the resolver's: `app.record_action_principal_live()`, the credential fence a
+record action asks before the lookup ([authoring.md](authoring.md)). It reads
+and locks `platform.api_key_integrations` and `platform.api_keys` as its
+CALLER, which is the restricted runtime role under the ordinary tenant
+policies on both tables, so it needs no privilege of its own and widens no
+definer's reach. It is not executable by the worker connection or by `PUBLIC`
+either.
+
+Those grants are bounded by four policies per entity, and the load-bearing
+ones are `AS RESTRICTIVE`. Permissive policies are combined with `OR`, and
+every tenant-scoped table already carries the generated row policy, which names
+no role and whose write check any row of the session's own tenant satisfies; a
+role-targeted `WITH CHECK (false)` is OR-ed with it and refuses nothing. So
+beside the two permissive policies that admit the resolver to its own tenant's
+rows for `SELECT` and for the lock, `<table>_record_action_fence` is a
+restrictive `FOR ALL` policy — AND-ed, and therefore not widenable by any
+policy added later — and `<table>_record_action_delete_fence` is a restrictive
+`FOR DELETE` policy, because a `FOR ALL` policy's `WITH CHECK` is applied to
+`INSERT` and `UPDATE` only while `DELETE` is bounded by `USING`, which the
+`FOR ALL` fence has to leave true for the tenant's own rows or `FOR SHARE`
+stops working.
+
+Both fences exempt one thing: a session holding the privileges of the table's
+own owner, read from `pg_class` at evaluation time. That is a privilege, not a
+role name, and the distinction matters. RLS matches `TO` with
+`has_privs_of_role`, so a `TO <resolver>` policy also covers every member of
+the resolver — the migrate role, which the contract makes a member of every
+definer role, and anything else a deployment grants it. An exemption written as
+`current_user <> '<resolver>'` covered all of them, and a second member then
+held `UPDATE (<acl column>)` with nothing refusing it. The owner's privileges
+exempt the migrate role that created the table (and any second migrator) while
+staying false for the resolver and for a member that owns nothing. The step
+refuses to grant anything on a table whose row security is not enabled *and*
+forced, or whose owner is a role the resolver holds the privileges of, because
+in either case the policies bound nothing.
+
+Privileges are replaced, not added to: the step revokes everything on the table
+from the resolver, grants exactly the declared column `SELECT` and the ACL
+column `UPDATE`, then reads `pg_class.relacl` and `pg_attribute.attacl` back
+and fails if the result is not that exact set. `TRUNCATE` is why — it ignores
+row security completely, so no policy bounds it — and a grant made by a second
+grantor survives the owner's revoke. `revoke all` does reach column grants, so
+an entity that stops reading a field loses that column `SELECT` on the next
+migrate.
+
+`PUBLIC` is a grantee like any other, and the resolver holds everything
+`PUBLIC` holds — a `revoke` addressed to the resolver does not reach it. So the
+step reads `PUBLIC`'s privileges from the same two ACL columns, with
+`acldefault` standing in where the column is `NULL` (which means the built-in
+default, not "nothing"), and **refuses the table** before its first grant if
+`PUBLIC` holds anything on it. It does not revoke the grant: a `PUBLIC` grant
+belongs to every role in the cluster, so a migration silently revoking it would
+be taking a privilege away from whoever it was made for. The error names the
+`revoke … from public` an administrator runs if the grant was a mistake.
+Reaching the resolver's inherited `PUBLIC` privileges needs an explicit
+`PUBLIC` grant on an entity table *and* the ability to execute as the resolver,
+so this closes a gap between the claimed and the actual privilege set rather
+than an externally reachable hole.
+
+The per-entity loop only visits the entities the manifest declares today, which
+leaves nothing behind for an entity whose projection changed but does leave the
+grants and the four policies of an entity the new manifest **dropped** — or of
+one whose last action was dropped, which is the same thing one step earlier.
+The step therefore also takes back the resolver's grants on every table it
+still reaches that no declared entity names, and drops the record-action
+policies there by the name the catalog holds, so a renamed table is covered
+too. Only the resolver's own grants: another grantee's privileges on the same
+table, and `PUBLIC`'s, are left exactly as the deployment set them. Schema
+`USAGE` stays granted — it is not a table privilege and opens nothing on a
+table the resolver holds nothing on.
+
+The whole step is one transaction: the grants, the four policies per entity,
+that cleanup and both function bodies. The migration lock is a *session*
+advisory lock, so without it a concurrent session could observe the table
+between `DROP POLICY` and `CREATE POLICY`, or — across entities — the new
+grants under the *old* function bodies, whose branches read columns the new
+grant set no longer covers. The cost is that the `ACCESS EXCLUSIVE` locks
+`CREATE POLICY` takes are held until the step commits, so a long-running reader
+of one entity table delays the DDL on all of them and a session holding row
+locks across two can deadlock with the step. Either way the step rolls back and
+the deployment stays on the grants and policies it had.
+
+The role contract covers attributes and membership too. No declared role may be
+`SUPERUSER`, `BYPASSRLS`, `CREATEROLE`, `CREATEDB` or `REPLICATION`; a definer
+role must be `NOINHERIT` and a member of nothing, since its functions are
+`SECURITY DEFINER` and would otherwise run with whatever it inherits; and the
+only roles that may *act as* a definer role are the migrate identity and the
+owner of the current database, both compared by role **name**, besides a
+superuser, which the check cannot bound either way.
+
+Comparing by name is the rule, not a detail. `pg_has_role(current_user, X,
+'USAGE')` answers "does the caller hold X's privileges", which is true for
+every role granted *to* the migrate role and true for every role when the
+caller is a superuser — so using it to ask "is this member the migrator?"
+admitted a helper role granted to both the migrate role and a definer role, and
+admitted every member of every definer role whenever a superuser ran the check.
+A member of the record-action resolver inherits its column grants, is matched by
+the policies written `TO` it, and *owns* its two `SECURITY DEFINER` functions,
+because object ownership is resolved with `has_privs_of_role` as well: with the
+`CREATE` on schema `app` that the same membership carries it can
+`CREATE OR REPLACE app.record_action_allows` and decide every record action
+itself. The fences bound that member's writes to entity tables; nothing bounds
+a replaced function body.
+
+"Act as" is **reachability in the membership graph**, not a direct grant. The
+two admitted roles are ordinary roles, so a third role granted one of *them*
+reaches the definer role through it: with `grant <definer> to <owner>` and
+`grant <owner> to <third>`, that third role runs `set role <owner>; set role
+<definer>; create or replace app.record_action_allows(...)` and decides every
+record action — while a direct scan of `pg_auth_members` shows it as a member
+of nothing. So the check walks outwards from each definer role transitively,
+through the admitted roles as well, and reports every role on a path that is
+neither of the two, with the chain it travels and the `revoke` that cuts that
+route. Superusers are not reported — they are outside row security and every
+privilege check regardless — but the walk still passes *through* them.
+
+One role can reach a definer role by **several routes**, and a `revoke` cuts
+exactly one of them: the first hop of the route it is read off. Granted both
+admitted roles — `grant <owner> to <third>` and `grant <migrate> to <third>` —
+that third role is there twice over, and following one printed remedy would
+leave the other route live. So the refusal names one route per distinct first
+hop out of the reported role, each with its own `revoke`, and says that every
+statement has to be run. Running all of them removes every edge by which a
+reported role reaches a definer role; it is not an iterative hunt. The walk
+stops at 16 hops, and that is not a way past the check: the nearest reported
+role on a longer chain fails it and carries the `revoke` that cuts the chain,
+so hiding behind the bound means 16 *admitted* hops — 16 superusers, since the
+migrate identity and the database owner are one role each.
+
+What the 16 hops do **not** do is bound the walk's cost. Reading one row per
+route off an enumeration of paths costs the number of paths, and on a dense
+acyclic lattice that is exponential in its depth: eight layers of six roles,
+every role granted to every role in the next, is 258 edges and 2,015,538
+paths, and the enumeration spent 20s producing the 258 rows. Each further layer
+multiplies the path count by six and leaves the row count linear — a grant
+graph large enough would refuse a deployment its migration rather than report a
+verdict on it. So the walk is over **roles**:
+`UNION` rather than `UNION ALL`, keyed on `(definer role, role, depth)`, so a
+role that several grants lead to is visited once per level instead of once per
+path. Its shortest-distance tree is reconstructed after it and the routes are
+read off each reached role's outgoing edges, which is where the one row per
+first hop comes from. The rows are the ones the enumeration produced — same
+triples, same shortest chain length each — and nothing is capped: a role
+reachable by ten routes still gets ten rows and ten `revoke`s. The cost is now
+bounded by the size of the grant graph, as
+`apps/api/src/db/__tests__/definer-role-reachability.test.ts` measures on that
+same lattice.
+
+No membership option makes an edge safe, so the walk does not look at them.
+`INHERIT` hands over the definer role's privileges and the ownership of its
+functions, `SET` lets the member become it, and `ADMIN` alone is enough because
+the member may `grant <role> to <itself> with inherit true, set true`. An edge
+carrying none of the three confers nothing today and has no purpose on the path
+to a definer role either, so it is reported rather than classified as harmless.
+
+For the same reason the migrate identity's own membership must be a **direct**
+grant carrying `INHERIT` and `SET`
+(`grant <definer> to <migrate role> with inherit true, set true`), or the
+migrate role must be a superuser, which needs no grant. Both halves are read
+off the edge itself: `pg_has_role` answers for the whole graph, so a direct
+grant carrying neither option passes it whenever a third role supplies the
+privilege. One `(role, member)` pair may carry several grants from different
+grantors — a `createrole_self_grant` edge beside the host's, for instance — and
+holding one that carries both options satisfies the contract.
+
+Both options are read from `pg_auth_members.inherit_option` and
+`.set_option`, which exist from **PostgreSQL 16** — the floor the database
+suite runs on in CI, and therefore the oldest server this contract supports.
+On an older server the check errors on the missing columns rather than passing;
+upgrade the cluster to 16 or later before `db:migrate`.
+
+Anything else is reported with the `alter role`, `grant` or `revoke` that fixes
+it — and only reported. The chain runs as the migrate role, which is
+deliberately not a role administrator, so it fails closed rather than changing
+an attribute or revoking a membership an operator set. The record-action step
+repeats this check on the resolver before it grants anything, because a host
+can call that step directly.
+
+An attribute deviation is reported as **one `alter role` per role**, naming
+that role and only the attributes it must not keep —
+`alter role openshapeforge_record_action_resolver nosuperuser nocreatedb;` for
+a role that is a superuser and may create databases, and nothing for the
+attributes that are already right. No other role is named, and the statement is
+never run for you. `db:provision-roles` does not stand in for it: the script
+creates the roles that do not exist and grants the migrate identity its
+membership, and a role that already exists keeps the attribute that failed, so
+the next `db:migrate` refuses on it again until the printed `alter role` is run.
+Postgres reserves `SUPERUSER`, `REPLICATION` and `BYPASSRLS` to superusers, so
+the refusal says when a `CREATEROLE` administrator connection is not enough for
+the statement it just printed.
+
+Adding a role is a host provisioning step:
+`db:provision-roles` before the next `db:migrate`, or step 0 refuses the chain
+and names the statements.
+
+### Two OpenShapeForge databases in one cluster
+
+That membership rule is the point where a cluster-wide object meets a
+per-database check. Roles and role memberships live in the cluster, but both
+things the rule holds a member against are per database: the migrate identity
+step 0 is connected as, and `datdba`. The same member list must therefore be
+accounted for in **both** databases.
+
+What it is accounted for against is a **predicate on each member**, evaluated
+once per database — not a count of owners or of migrate identities. A reachable
+member passes in a database on one of three grounds: it is a superuser (outside
+row security and privilege checks regardless of membership), it **is** the
+migrate identity step 0 is connected as, or it **is** the owner of that
+database — the last two by role **name**. Every other reachable role is
+refused. A role that merely *holds* an owner's privileges is not admitted,
+because as a definer member it would gain ownership of that role's `SECURITY
+DEFINER` functions, which the privileges alone do not confer.
+
+A cluster passes exactly when every member of the definer roles satisfies that
+predicate in every OpenShapeForge database on it. Three shapes are worth
+naming:
+
+- **One migrate identity for both databases** satisfies the contract however
+  their owners differ, as long as it is the only member of the definer roles:
+  each database recognises it as the identity it is connected as. **Tested.**
+- **Two migrate identities**, both members of the definer roles and neither a
+  superuser, are refused when **each owns the database it migrates**. In each
+  database the other's migrator is none of the three grounds, so step 0 refuses
+  in both, each naming the other's migrator against all three definer roles.
+  That refusal is symmetric — no provisioning order satisfies both, the
+  `revoke` each error names would break the other database, and two roles
+  cannot be members of each other, so no repair keeps both. Granting one
+  migrator the other database's owner does not help either: privileges are not
+  identity. **Tested**, in both directions.
+- **Two migrate identities that are each the other database's owner** are not
+  refused by this predicate: if the database `m1` migrates is owned by `m2` and
+  the database `m2` migrates is owned by `m1`, each database admits one member
+  as its own `current_user` and the other as its own `datdba`. **Untested** —
+  no test provisions it, and the role contract is not the only condition such a
+  deployment must meet: nothing here establishes that the rest of a migration
+  run holds when the migrate identity does not own the database it migrates. It
+  is named so the refusal above is not read as a ban on two migrate identities
+  as such, and it is not a configuration to adopt on the strength of this
+  paragraph.
+
+Sharing an owner is not what passes and distinct owners are not what fails:
+what counts is what each member of the definer roles **is** in the database
+doing the checking.
+
+What is verified, by `database-role-contract.test.ts` on PostgreSQL 17.11: it
+provisions a second database in the test cluster and runs `verifyDatabaseRoles`
+in both databases. Two databases each owned by the distinct non-superuser role
+that migrates it refuse symmetrically; the same two databases with distinct
+owners under **one** migrate identity pass in both; and a second migrate
+identity is still refused in the database whose owner's privileges it has been
+granted, while the first database refuses it too. `definer-role-membership.test.ts`
+adds the owner case directly: a definer member that is a database owner is
+admitted in the database it owns and refused in its sibling. The check cannot
+admit a member for being *some* database's owner, nor for holding an owner's
+privileges: either would let the owner of any database in the cluster — or
+anyone granted that owner — hold the definer roles' grants in this one.
+
+One cluster per deployment, which is what `db:provision-roles` ("once per
+cluster") assumes, needs none of this. For two deployments on shared hardware,
+separate clusters are the arrangement to reach for first; a shared cluster
+works only under the predicate above, and what to check before relying on it is
+each definer member's standing in each database — the migrate identities and
+the memberships they hold, not the database owners alone.
+
+The record-action step's privilege guarantees are per-database for the same
+reason. It reads `pg_class`, `pg_attribute` and `pg_policy`, all of which are
+per-database, so "the resolver holds exactly what this manifest declares" is a
+statement about the database being migrated. The resolver is one cluster-wide
+role, and its grants in a sibling database are neither visible to nor revocable
+from this one; what bounds them there is that database's own migrate run. In a
+database no OpenShapeForge migration manages, nothing here bounds them at all.
 
 ```sh
 OPENSHAPEFORGE_ADMIN_DATABASE_URL=postgres://admin:...@host/db \
@@ -121,6 +404,48 @@ operator explicitly rotates them with `*_PASSWORD_ROTATE=1 bun run
 db:provision-roles` through the administrator connection.
 Locally and in CI the migrate role owns the instance, so the migrate URL
 doubles as the administrator connection when no admin URL is set.
+
+### A database owner on a shared cluster
+
+Roles are cluster-wide: the definer roles are named once in the manifest and
+shared by every OpenShapeForge database on the cluster. "The owner of the
+current database" is not. A role that is a member of the definer roles and owns
+**another** database on the cluster is therefore admitted there and refused
+here, and that is the supported policy rather than an oversight: admitting any
+database owner would admit whoever a `CREATEDB` role made one. The refusal says
+so when the reported role owns another database, so it is not mistaken for a
+broken grant, and the sentence it adds states the predicate the check applies:
+a member is admitted in a database only when it **is** that database's migrate
+identity or owner, so owning another one admits it there and not here. The
+remedy is the `revoke` the refusal already carries, or separate clusters.
+
+That sentence does not ask for one owner and one migrate identity across the
+cluster. Such a cluster satisfies the contract, but it is not what the check
+requires — a cluster whose databases differ in owner passes under one migrate
+identity, as does one whose two migrate identities each own the other's
+database. See the section above for the rule itself.
+
+Differing owners alone do not cause a refusal: an owner is only measured
+against the predicate if it is a member of the definer roles, or reaches one
+through another member. An owner that holds no definer-role membership is never
+reported.
+
+What this costs an existing deployment, exactly: a single-database cluster
+whose migrate identity is its database owner is unaffected, and so is one whose
+migrate identity is a direct member of the definer roles with `INHERIT` and
+`SET`. `db:migrate` now refuses, before touching the schema, when a role that
+is neither the migrate identity nor this database's owner can reach a definer
+role — including through either of those two — and when the migrate identity's
+own grant is indirect or carries neither option. On a shared cluster that
+includes a sibling database's owner or migrate identity, when it is a definer
+member and is neither this database's `current_user` nor its owner. It also
+refuses when a declared role that already exists carries `SUPERUSER`,
+`BYPASSRLS`, `CREATEROLE`, `CREATEDB` or `REPLICATION`, or the wrong login
+flag, which `db:provision-roles` does not repair. Each refusal names the exact
+`alter role`, `grant` or `revoke` — one per deviating role and one per route,
+so run all of them; none of them is applied for you. Run
+`db:provision-roles -- --print` and the reported statements against the cluster
+before the upgrade window if any of those shapes may be present.
 
 ## `db:reset` (development)
 
@@ -352,3 +677,25 @@ additive roll-forward and its refusals, versioned migrations and their
 baseline, constraint reconciliation, the one-source-of-truth invariant, the
 hand-written `CHECK` replacement, `db:reset` and the bootstrap — against
 throwaway scratch databases ([testing.md](testing.md#migration-tests)).
+
+### Removing the record-action test fixture composition
+
+Production no longer includes the `ExternalProcessRun` and `MeterConnection`
+fixture entities. Before upgrading a database previously used with a build that
+included this test composition, inspect it with the database owner:
+
+```sql
+select to_regclass('erp.external_process_runs'),
+       to_regclass('erp.meter_connections');
+```
+
+Verify the actual schema and table names against that build's database manifest;
+these examples alone do not establish absence in other schemas. If fixture
+objects exist in a manifest-covered schema, the migration refuses to advance the
+generated-schema checksum and retains the objects and their data. Keep the
+previous deployment available, take a verified backup, and have the owner assess
+records, foreign keys and consumers. A reviewed versioned migration and an
+explicit data disposition are required before retrying; do not reset or drop
+objects as an automatic upgrade step. This is an operator intervention, not an
+automated carry-forward. Databases without these objects can use the normal
+additive migration path.

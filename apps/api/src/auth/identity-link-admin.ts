@@ -13,7 +13,7 @@ import { UUID_PATTERN } from "../db/session.js";
 import { withDbSession, registerDbSessionAfterCommit } from "../db/session.js";
 import { HttpError } from "../rest/http-error.js";
 import { actingPartyColumns, actingPartyTable } from "./identity-contract.js";
-import { confirmCandidateLink } from "./identity-link-store.js";
+import { confirmCandidateLink, relationsWithEmail } from "./identity-link-store.js";
 import {
   invalidateIdentityLink,
   readLinkRow,
@@ -33,7 +33,7 @@ import { protectDirectAdministrator } from './member-administrator.js';
  */
 export async function confirmPendingLink(
   db: OpenShapeForgeDatabase,
-  session: SessionInput & { relation?: IdentityLinkState | null | undefined },
+  session: SessionInput & { relation?: IdentityLinkState | null | undefined; verifiedEmail?: string | undefined },
 ): Promise<IdentityLinkState> {
   const current = session.relation;
   if (!current) {
@@ -53,8 +53,15 @@ export async function confirmPendingLink(
       "There is no candidate Relation to confirm; ask an organization administrator to link you.",
     );
   }
+  if (!session.verifiedEmail) {
+    throw new HttpError(409, "NO_CANDIDATE", "Confirming this link requires a verified email in the current bearer session.");
+  }
   const state = await withDbSession(db, session, async (trx) => {
-    if (!(await confirmCandidateLink(trx, current.identityId, session.tenantId, current.identityId))) {
+    const candidates = await relationsWithEmail(trx, session.tenantId, session.verifiedEmail!);
+    if (candidates.length !== 1 || candidates[0]?.id !== current.candidateRelationId) {
+      throw new HttpError(409, "NO_CANDIDATE", "The candidate no longer matches the verified email; ask an organization administrator to link you.");
+    }
+    if (!(await confirmCandidateLink(trx, current.identityId, session.tenantId, current.identityId, current.candidateRelationId))) {
       throw new HttpError(409, "NO_CANDIDATE", "There is no pending candidate to confirm any more.");
     }
     const updated = await readLinkRow(trx, current.identityId, session.tenantId);
@@ -201,16 +208,16 @@ export type PendingRoleAssignment = {
 };
 
 /**
- * An identity this organization has recorded but not linked and not waiting
- * on anyone's confirmation: an integration's service account (no e-mail at
- * all), or a token without one. Named by its identity id, which is what
- * `link_identity` takes for it. A pending row with a candidate is the
- * person's own to confirm (`confirm_my_link`) and is not listed here.
+ * An identity this organization has recorded but not linked, including one
+ * whose pending candidate is no longer confirmable. The identity id is the
+ * stable handle for `link_identity`, even when no verified email is available.
  */
 export type UnlinkedIdentity = {
   identityId: string;
   displayName: string | null;
   email: string | null;
+  /** Last recorded mailbox match; confirmation always revalidates current proof. */
+  candidateStatus: "none" | "awaiting_confirmation" | "review_required";
 };
 
 export async function listUnlinkedIdentities(
@@ -225,21 +232,24 @@ export async function listUnlinkedIdentities(
     );
   }
   return withDbSession(db, session, async (trx) => {
-    const result = await sql<{ identity_id: string; display_name: string | null; email: string | null }>`
-      select ir.identity_id, i.display_name, i.email
+    const result = await sql<{ identity_id: string; display_name: string | null; email: string | null; candidate_relation_id: string | null }>`
+      select ir.identity_id, i.display_name, i.email, ir.candidate_relation_id
         from platform.identity_relations ir
         join platform.identities i on i.id = ir.identity_id
        where ir.tenant_id = ${session.tenantId}
          and ir.status = 'pending_confirmation'
          and ir.relation_id is null
-         and ir.candidate_relation_id is null
        order by i.created_at asc
     `.execute(trx);
-    return result.rows.map((row) => ({
+    return Promise.all(result.rows.map(async (row) => ({
       identityId: row.identity_id,
       displayName: row.display_name,
       email: row.email,
-    }));
+      candidateStatus: !row.candidate_relation_id ? "none" as const : await (async () => {
+        const matches = row.email ? await relationsWithEmail(trx, session.tenantId, row.email) : [];
+        return matches.length === 1 && matches[0]?.id === row.candidate_relation_id ? "awaiting_confirmation" as const : "review_required" as const;
+      })(),
+    })));
   });
 }
 

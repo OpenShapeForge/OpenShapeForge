@@ -8,12 +8,12 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
 import type { GeneratedCrudTable } from "../../operations/entity/types.js";
 import type { RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
 
-type Config = { entity: string; aggregate: string; schema: string; table: string; pk: string;
+type Config = { entity: string; entityIds: string[]; aggregate: string; schema: string; table: string; pk: string;
   fields: Record<string, { name: string; hidden: boolean; exact: boolean }>; visibility: string[];
   parents: Array<{ column: string; entity: string }> };
 
 type Timelines = Readonly<Record<string, { include?: readonly string[]; parents?: readonly string[] }>>;
-export function auditTableConfigs(tables: readonly GeneratedCrudTable[], timelines: Timelines = auditCatalog.timelines): Config[] {
+export function auditTableConfigs(tables: readonly GeneratedCrudTable[], timelines: Timelines = auditCatalog.timelines, entityNames: Readonly<Record<string, string>> = auditCatalog.entityNames): Config[] {
   const business = tables.filter(table => table.source?.authoringEntityName && table.primaryKey && table.tenantScoped);
   const parentEdges = new Map<string, Array<{ parent: GeneratedCrudTable; column: string }>>();
   for (const parent of business) {
@@ -44,7 +44,8 @@ export function auditTableConfigs(tables: readonly GeneratedCrudTable[], timelin
       .filter(carrier => carrier.schema === table.schema && carrier.table === table.table)
       .flatMap(carrier => Object.values(carrier.definitions).flatMap(definition => definition.references
         .flatMap(reference => [reference.column, ...(reference.parameterColumn ? [reference.parameterColumn] : [])]))));
-    return { entity: table.source!.authoringEntityName!, aggregate: table.source!.graphql?.singleQueryName ?? table.source!.authoringEntityName!,
+    return { entity: table.source!.authoringEntityName!,
+      entityIds: Object.entries(entityNames).filter(([, name]) => name === table.source!.authoringEntityName).map(([id]) => id).sort(), aggregate: table.source!.graphql?.singleQueryName ?? table.source!.authoringEntityName!,
       schema: table.schema, table: table.table, pk: table.primaryKey!, visibility: (table.realtime?.visibilityColumns ?? []).filter(name => {
         const column = table.columns.find(column => column.name === name);
         return column && !physicalColumns.has(name) && (!table.retention || name === "id" || name.endsWith("_id")) && !column.classification && !column.fieldPolicy && !/password|secret|token|credential|private.?key|cipher|encrypted/i.test(name);
@@ -86,7 +87,9 @@ async function installAuditHistory(db: OpenShapeForgeDatabase, tables: readonly 
 
     create or replace function platform.audit_entity_name(aggregate text) returns text
     language sql immutable set search_path=pg_catalog as ${tag}
-      select value->>'entity' from jsonb_each(${registrySql}::jsonb) where key=aggregate or value->>'aggregate'=aggregate limit 1
+      select min(value->>'entity') from jsonb_each(${registrySql}::jsonb)
+      where key=aggregate or value->>'aggregate'=aggregate or value->'entityIds' ? aggregate
+      having count(distinct value->>'entity')=1
     ${tag};
 
     create or replace function platform.audit_redact(value jsonb) returns jsonb

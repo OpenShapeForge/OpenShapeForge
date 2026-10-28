@@ -12,10 +12,24 @@ function config(realm = "example", issuer = `https://identity.example.test/realm
 }
 
 describe("host realm boundary", () => {
-  test("accepts only the exact host issuer", () => {
-    expect(() => assertHostRealm(config())).not.toThrow();
-    for (const issuer of ["https://other.example.test/realms/example", "https://identity.example.test/realms/other", "https://identity.example.test/realms/example/extra"]) {
+  test("distinguishes the managed tenant realm from a dedicated control realm on the same origin", () => {
+    expect(assertHostRealm(config())).toBe("tenant-realm-admin");
+    expect(assertHostRealm(config("example", "https://identity.example.test/realms/example-control")))
+      .toBe("dedicated-control-realm");
+    for (const issuer of ["https://other.example.test/realms/example", "https://identity.example.test/realms/example/extra", "https://identity.example.test/realms/master", "https://identity.example.test/realms/bad%2Frealm"]) {
       expect(() => assertHostRealm(config("example", issuer))).toThrow();
+    }
+  });
+  test("accepts the configured Keycloak path without accepting sibling or root paths", () => {
+    const scoped = (issuer: string, baseUrl = "https://identity.example.test/auth/") => ({ ...config("example", issuer), keycloak: {
+      ...config().keycloak, baseUrl,
+    } });
+    expect(assertHostRealm(scoped("https://identity.example.test/auth/realms/example"))).toBe("tenant-realm-admin");
+    expect(assertHostRealm(scoped("https://identity.example.test/auth/realms/example", "https://identity.example.test/auth"))).toBe("tenant-realm-admin");
+    expect(() => assertHostRealm(scoped("foo://other/auth/realms/example", "foo://id/auth"))).toThrow();
+    expect(assertHostRealm(scoped("https://identity.example.test/auth/realms/example-control"))).toBe("dedicated-control-realm");
+    for (const issuer of ["https://identity.example.test/realms/example", "https://identity.example.test/auth-other/realms/example", "https://identity.example.test/auth/realms/example/extra", "https://identity.example.test/auth/realms/master", "https://other.example.test/auth/realms/example"]) {
+      expect(() => assertHostRealm(scoped(issuer))).toThrow();
     }
   });
   test("never admits master or path aliases", () => {

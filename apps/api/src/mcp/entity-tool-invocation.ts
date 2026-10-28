@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { completeEntitySecureInput } from "../operations/entity/runtime.js";
 /**
  * Executing an entity CRUD tool: argument checks, the write guards that
  * exist only on this transport, and the delegation to the shared CRUD core.
@@ -18,10 +19,8 @@ import type { Tool } from "@modelcontextprotocol/server";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import {
-  createGeneratedEntityAfterElicitation,
   entityOperationContract,
   executeEntityOperation,
-  currentRecordOffers,
   requireCreateOperationConfirmation,
 } from "../operations/entity/index.js";
 import { assertEntityValuesValid } from "../operations/entity/input-validation.js";
@@ -171,6 +170,7 @@ export async function invokeTool(
       });
       await assertPublishableWrite(db, session, tables, table, values);
       if (elicitationCompleted && elicitField) {
+        if (args.blueprintId !== undefined) throw new HttpError(400, "BAD_USER_INPUT", "Secure completion does not accept a blueprint.");
         // The elicitation write does not pass through executeEntityOperation,
         // so it is not the path that resolves a binding. Refuse rather than
         // store a create whose bindings were never resolved.
@@ -178,32 +178,16 @@ export async function invokeTool(
           throw new HttpError(400, "BAD_USER_INPUT",
             "A create that collects a value securely does not take field bindings; bind the field afterwards.");
         }
-        const row = await createGeneratedEntityAfterElicitation(db, session, {
-              table: table.name,
-              values,
-              into: elicitField,
-            });
-        const data = serializeRowForEntity(entity, table, row);
-        return ok({
-          data,
-          operations: await currentRecordOffers(
-            db,
-            session,
-            entity?.entity ?? table.source?.authoringEntityName ?? table.name,
-            table,
-            {
-              id: String(data.id ?? ""),
-              row,
-              ...(typeof data.updatedAt === "string"
-                ? { version: data.updatedAt }
-                : {}),
-            },
-            ["get", "update", "delete"].filter((intent) =>
-              offerIntents.includes(intent as McpOperation),
-            ) as McpOperation[],
-          ),
-        });
+        const result = await completeEntitySecureInput(db, session, {
+          operation: operationRef("create"), offerIntents,
+          input: { values: modelValues, ...(typeof args.confirmed === "boolean" ? { confirmed: args.confirmed } : {}) },
+        }, { into: elicitField, value: values[elicitField] });
+        if (result.intent !== "create") throw new Error("Unexpected entity result.");
+        if ("error" in result) throw new OperationFailure(result.error);
+        if (!result.data) throw new Error("Secure create returned no record.");
+        return ok({ data: serializeRowForEntity(entity, table, result.data), operations: result.operations });
       }
+
       const result = await executeEntityOperation(db, session, {
         operation: operationRef("create"),
         offerIntents,

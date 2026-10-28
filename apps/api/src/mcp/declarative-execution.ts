@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { readBoundedResponse } from "../modules/outbound-response.js";
 /**
  * Declarative execution of derived tools — stored rows all the way down.
  *
@@ -751,7 +752,12 @@ async function clientCredentialsToken(input: {
     );
   }
 
-  const cacheKey = `${tokenUrl.href}\u0000${clientId}`;
+  const cacheKey = createHash("sha256").update(JSON.stringify([
+    input.egressDispatch?.scope.tenantId, tokenUrl.href, clientId, clientSecret, config.scopes,
+  ])).digest("hex");
+  for (const [key, entry] of oauthTokenCache) {
+    if (entry.expiresAtMs <= Date.now()) oauthTokenCache.delete(key);
+  }
   const cached = oauthTokenCache.get(cacheKey);
   if (cached && cached.expiresAtMs > Date.now()) return cached.token;
 
@@ -780,7 +786,7 @@ async function clientCredentialsToken(input: {
     input.egressDispatch,
   );
   requestSignal.throwIfAborted();
-  const text = await response.text();
+  const text = await readBoundedResponse(response, 1024 * 1024);
   requestSignal.throwIfAborted();
   if (!response.ok) {
     throw new HttpError(
@@ -799,7 +805,7 @@ async function clientCredentialsToken(input: {
       "Token endpoint response is not JSON.",
     );
   }
-  if (typeof payload.access_token !== "string") {
+  if (typeof payload.access_token !== "string" || payload.access_token.length === 0 || payload.access_token.length > 16 * 1024) {
     throw new HttpError(
       502,
       "TOKEN_ENDPOINT_ERROR",
@@ -808,9 +814,10 @@ async function clientCredentialsToken(input: {
   }
   const expiresInS =
     typeof payload.expires_in === "number" ? payload.expires_in : 300;
+  if (oauthTokenCache.size >= 256) oauthTokenCache.delete(oauthTokenCache.keys().next().value!);
   oauthTokenCache.set(cacheKey, {
     token: payload.access_token,
-    expiresAtMs: Date.now() + Math.max(0, expiresInS - 60) * 1000,
+    expiresAtMs: Date.now() + Math.max(0, Math.min(Number.isFinite(expiresInS) ? expiresInS : 300, 3600) - 60) * 1000,
   });
   return payload.access_token;
 }
@@ -1862,7 +1869,7 @@ export async function executeBinding(
       throw providerFailure(operationRow, response);
     }
     try {
-      text = await response.text();
+      text = await readBoundedResponse(response, 20 * 1024 * 1024);
       requestSignal.throwIfAborted();
     } catch (error) {
       input.signal?.throwIfAborted();

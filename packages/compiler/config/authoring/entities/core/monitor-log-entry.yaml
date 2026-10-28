@@ -227,7 +227,7 @@ interfaces:
     fields:
       loggedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       message:
         render:

@@ -1,5 +1,5 @@
-import { applyDefaultTemplates } from "./default-template.js";
 // SPDX-License-Identifier: BUSL-1.1
+import { applyDefaultTemplates } from "./default-template.js";
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DB } from "../../generated/db/types.js";
@@ -45,6 +45,8 @@ import {
   assertCreateRecordPermissions,
   assertRecordPermissionInTransaction,
   assertUpdateRecordPermissions,
+  reconcileRecordActionAxisWrite,
+  storedRecordPermissions,
 } from "./record-permissions.js";
 import {
   derivedOnCreateColumn,
@@ -161,6 +163,7 @@ export async function createGeneratedEntityAfterElicitation(
     table: string;
     values: Record<string, unknown>;
     into: string;
+    trusted?: { operation: string; values: Record<string, unknown> };
   },
 ): Promise<GeneratedEntityRow> {
   const table = readGeneratedCrudTable(input.table, "create", session);
@@ -174,7 +177,13 @@ export async function createGeneratedEntityAfterElicitation(
     );
   }
   assertCreateRecordPermissions(table, session, input.values);
-  const values = normalizeWritableValues(table, input.values, "create");
+  const modelValues = Object.fromEntries(Object.entries(input.values).filter(([field]) => field !== input.into));
+  assertCallerTopLevelFields(table, session, modelValues, "create");
+  const values = prepareProtectedFieldWrites(table, session,
+    normalizeWritableValues(table, modelValues, "create"), "create");
+  const secure = normalizeWritableValues(table, { [input.into]: input.values[input.into] }, "create");
+  for (const [field, value] of secure) values.set(field, value);
+  if (input.trusted) addTrustedOperationValues(table, values, input.trusted.operation, input.trusted.values);
   return insertGeneratedRow(db, session, table, values);
 }
 
@@ -281,6 +290,15 @@ async function insertGeneratedRowInTransaction(
   const prepared = await prepareTypedValueWrite(trx, session, table, entityPrepared);
   // A value typed by a stored FieldDefinition is checked against it here, so
   // the pair holds however the write arrived.
+
+  // The record's named actions are the entity's to seed and the delegation
+  // Operation's to change; a create may carry the authored default and
+  // nothing else, however the column's value was assembled above.
+  reconcileRecordActionAxisWrite(
+    table,
+    prepared,
+    table.source?.authorization?.recordPermissions?.defaultValue,
+  );
 
   await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
   await assertPublishableRelatedMutationInTransaction(trx, session, table, {
@@ -499,6 +517,19 @@ async function applyGeneratedRowUpdate(
     const prepared = await prepareTypedValueWrite(trx, session, table, entityPrepared, current ?? undefined);
     // Either half of a typed-value pair may be the one that changes; the row
     // under the lock supplies the other.
+
+    // The named-action axis is not writable here. The row is locked, so the
+    // axis compared against is the one that will still be in force when this
+    // write lands: a grant, a revocation and a document whose axis has moved
+    // on since the caller read it are all refused, and a document that does
+    // not state the axis keeps what is in force rather than clearing it.
+    // Unconditional, and with no axis in force when there is no row: a
+    // missing row must refuse a grant rather than skip the comparison. An
+    // ACL entity cannot actually reach here without one — the `edit` assert
+    // above already refused — and this does not rely on that.
+    reconcileRecordActionAxisWrite(
+      table, prepared, current ? storedRecordPermissions(table, current) : undefined,
+    );
 
     await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
     if (current) {

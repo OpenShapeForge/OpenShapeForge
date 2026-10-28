@@ -66,7 +66,7 @@ export function formatRendererDisplayValue(
     }
   }
 
-  if (component === "DateTimePicker" && typeof value === "string") {
+  if (component === "FieldDateAndTime" && typeof value === "string") {
     const date = new Date(value);
     if (!Number.isNaN(date.getTime())) {
       return date.toLocaleString(lang === "nl" ? "nl-NL" : "en-US");

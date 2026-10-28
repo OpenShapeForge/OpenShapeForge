@@ -33,7 +33,7 @@ import { DEFAULT_MCP_CLIENTS } from "./organization-scopes.js";
 
 /** Environment variables the control plane reads. */
 export type ControlPlaneEnv = {
-  /** Keycloak origin, e.g. `http://localhost:8181`. No trailing path. */
+  /** Keycloak base URL, e.g. `http://localhost:8181` or `https://id.example/auth`. */
   OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL?: string | undefined;
   /**
    * Optional TLS ingress used only for network routing. Requests retain the
@@ -193,6 +193,15 @@ function asOrigin(value: string): string | null {
   }
 }
 
+/** Normalize a credential-free HTTP(S) Keycloak base, preserving a proxy path. */
+export function normalizeKeycloakBase(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) return null;
+    return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+  } catch { return null; }
+}
+
 export function readControlPlaneConfig(
   env: ControlPlaneEnv = process.env as ControlPlaneEnv,
 ): ControlPlaneConfigResult {
@@ -215,7 +224,8 @@ export function readControlPlaneConfig(
   if (!operatorClientId) missing.push("OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID");
   if (!publicOrigin) missing.push("OPENSHAPEFORGE_PUBLIC_ORIGIN");
 
-  const normalizedBaseUrl = baseUrl ? asOrigin(baseUrl.replace(/\/+$/, "")) : null;
+  const normalizedBaseUrl = baseUrl ? normalizeKeycloakBase(baseUrl) : null;
+  if (baseUrl && !normalizedBaseUrl) missing.push("OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL (invalid HTTP(S) base URL)");
   const normalizedConnectUrl = connectUrl ? asOrigin(connectUrl.replace(/\/+$/, "")) : null;
   if (connectUrl && (!normalizedBaseUrl?.startsWith("https://") || !normalizedConnectUrl?.startsWith("https://"))) {
     missing.push(
@@ -250,7 +260,7 @@ export function readControlPlaneConfig(
       keycloak: {
         // Normalised once here so every caller can join paths without guessing
         // whether the operator wrote a trailing slash.
-        baseUrl: baseUrl!.replace(/\/+$/, ""),
+        baseUrl: normalizedBaseUrl!,
         ...(normalizedConnectUrl ? { connectUrl: normalizedConnectUrl } : {}),
         tenantRealm:
           trimmed(env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM) ?? DEFAULT_TENANT_REALM,

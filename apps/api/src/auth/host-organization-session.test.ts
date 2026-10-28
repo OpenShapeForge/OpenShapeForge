@@ -362,6 +362,21 @@ describe("host organization binding through real bearer verification and resolve
     expect((await resolveSessionContext(dynamic, { mcpAppResource: true })).credential).toBe("none");
   });
 
+  test("a refused sign-in does not expose an unverified address", async () => {
+    const address = "unverified.private@example.test";
+    __setIdentityLinkForTests(async (session, claims) => { throw notInvited(session as never, claims); });
+    const logged: string[] = [];
+    const warn = spyOn(console, "warn").mockImplementation((...args: unknown[]) => { logged.push(args.map(String).join(" ")); });
+    try {
+      let refusal: unknown;
+      try { await resolveSessionContext(await headers({ email: address, email_verified: false })); }
+      catch (error) { refusal = error; }
+      expect(refusal).toMatchObject({ code: "NOT_INVITED" });
+      expect(String(refusal)).not.toContain(address);
+      expect(logged.filter((line) => line.includes(address))).toEqual([]);
+    } finally { warn.mockRestore(); }
+  });
+
   test("required audience rejects API keys before key configuration or database access", async () => {
     expect((await resolveSessionContext(new Headers({ authorization: `Bearer ${mintApiKey().token}` }), {
       requiredAudience: RESOURCE,
@@ -374,7 +389,7 @@ describe("host organization binding through real bearer verification and resolve
     const logged: string[] = [];
     const warn = spyOn(console, "warn").mockImplementation((...args: unknown[]) => { logged.push(args.map(String).join(" ")); });
     try {
-      await expect(resolveSessionContext(await headers({ email: address }))).rejects.toMatchObject({
+      await expect(resolveSessionContext(await headers({ email: address, email_verified: true }))).rejects.toMatchObject({
         code: "NOT_INVITED", message: expect.stringContaining(address),
       });
     } finally {

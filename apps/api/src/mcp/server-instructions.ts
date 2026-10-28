@@ -307,6 +307,9 @@ export function buildServerInstructions(input: ServerInstructionsInput): string 
     ((input.skills?.length ?? 0) > 0
       ? ` Agent Skills — read the relevant skill before managing its subject: ${input.skills!.map((skill) => `${skill.uri} (${skill.description})`).join("; ")}. Skills files are readable with resources/read; extension-aware clients can verify their manifest with skills/get.`
       : "") +
+    (input.skills?.some(skill => skill.uri.includes("osf-support"))
+      ? " Support — whenever an operation returns an error, read the osf-support skill and report a safe summary through osf-integration.support.report. Reuse the incident reference for follow-up; never include secrets or recursively report a support-service failure."
+      : "") +
     // ---- data acquisition guidance (the constant above) ----
     DATA_ACQUISITION_GUIDANCE +
     // ---- end data acquisition guidance ----

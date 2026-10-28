@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { readBoundedResponse } from "../modules/outbound-response.js";
 /**
  * The token half of the entity OAuth flow: exchanging the authorization
  * code at the provider and refreshing an expired access token, both
@@ -79,7 +80,7 @@ export async function exchangeCodeForTokens(
     fetchImpl,
     egress,
   );
-  const text = await response.text();
+  const text = await readBoundedResponse(response, 1024 * 1024);
   if (!response.ok) {
     throw new HttpError(
       502,

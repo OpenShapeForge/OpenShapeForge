@@ -129,6 +129,19 @@ describe("readControlPlaneConfig", () => {
     expect(result.config.keycloak.connectUrl).toBe("https://identity-ingress.example.test");
   });
 
+  it("accepts a prefixed Keycloak base with a separate HTTPS connect origin", () => {
+    const result = readControlPlaneConfig({ ...complete,
+      OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL: "https://identity.example.test/auth/",
+      OPENSHAPEFORGE_CONTROL_KEYCLOAK_CONNECT_URL: "https://ingress.example.test",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.config.keycloak.baseUrl).toBe("https://identity.example.test/auth");
+  });
+  it("refuses invalid or credentialed Keycloak bases even without a connect route", () => {
+    for (const base of ["https://u:p@identity.example.test/auth", "https://identity.example.test/auth?x=1", "https://identity.example.test/auth#x", "foo://identity.example.test/auth", "invalid"]) {
+      expect(readControlPlaneConfig({ ...complete, OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL: base }).ok).toBe(false);
+    }
+  });
   it("refuses a connect route that would weaken transport encryption", () => {
     const result = readControlPlaneConfig({
       ...complete,

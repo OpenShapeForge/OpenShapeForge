@@ -11,6 +11,33 @@ import { boundedReadTransaction } from "./bounded-read-transaction.js";
 
 export type DbSessionScope = "tenant" | "group" | "self";
 
+/**
+ * What kind of principal the SERVER decided this session is.
+ *
+ * The named-action axis of the record ACL matches a subject kind against this
+ * and nothing else, so every class has to rest on something the server
+ * established about HOW the principal authenticated — never on anything a
+ * caller can assert, and never on a fact about some other row:
+ *
+ *   person       the server's own positive verdict that a human authenticated:
+ *                the bearer path's reading of verified token claims
+ *                (`auth/bearer-session.ts`), or the class a trusted-context
+ *                producer signed INSIDE its bundle's HMAC (packages/auth,
+ *                payload v3). There is no third way to reach it.
+ *   application  a resolved API-key integration, and only that
+ *   service      a verified client-credentials principal with no integration
+ *                behind it — organization automation included
+ *   unknown      a carrier whose principal this deployment did not classify —
+ *                a trusted-context bundle still signing payload v2 among them,
+ *                whatever Relation its subject happens to be linked to
+ *
+ * `unknown` is spelled out rather than left empty so no consumer can read a
+ * missing value as a permissive one. It holds no named action; neither does
+ * `service`. None of this changes a role check, a scope or the view/edit/delete
+ * permissions — those behave for every existing session exactly as before.
+ */
+export type DbPrincipalClass = "person" | "application" | "service" | "unknown";
+
 const MAX_SESSION_GROUPS = 256;
 const MAX_RELATION_GROUPS = 256;
 
@@ -44,6 +71,29 @@ export type DbSessionInput = {
    * groups and are never expanded through the platform org-unit hierarchy.
    */
   relationGroupIds?: readonly string[] | null;
+  /**
+   * The verified application this session acts as, when it acts as one
+   * (auth/trusted-context.ts, {@link VerifiedAppPrincipal}). Only the API-key
+   * carrier produces it; every other credential leaves it absent and the
+   * `app.app_principal_id` GUC empty, so a record-action policy matches
+   * nobody. Declared structurally so the database layer keeps no dependency
+   * on the auth layer.
+   *
+   * `credentialId` is the `platform.api_keys` row the carrier presented. It
+   * reaches `app.app_credential_id`, which the record-action fence re-reads
+   * for revocation and expiry inside the action's own transaction; the
+   * integration id alone cannot answer that, because it is chosen to survive
+   * rotation.
+   */
+  appPrincipal?: { integrationId: string; credentialId: string } | null;
+  /**
+   * What the bearer verifier made of the token's claims, or what a
+   * trusted-context producer signed into its bundle, when the carrier states
+   * it at all. Server-derived, and the ONLY route to the `person` class
+   * ({@link resolvePrincipalClass}); a carrier that states nothing is
+   * `unknown`, whatever else it holds.
+   */
+  principalKind?: "person" | "service";
   scope?: DbSessionScope | null;
 } & NonNullable<ActingRelationSource>;
 
@@ -57,6 +107,12 @@ export type DbSessionContext = {
   relationGroupIds: readonly string[];
   /** The acting Relation (acting-relation.ts); `app.current_relation_id()`. */
   relationId: string | null;
+  /** The verified application id; `app.current_app_principal()`. */
+  appPrincipalId: string | null;
+  /** The verified credential row id; `app.current_app_credential()`. */
+  appCredentialId: string | null;
+  /** The verified principal class; `app.current_principal_class()`. */
+  principalClass: DbPrincipalClass;
   scope: DbSessionScope;
 };
 
@@ -100,6 +156,85 @@ export function registerDbSessionAfterCommit(hook: DbSessionAfterCommitHook) {
 /** The database that opened the active session, so nested readers reuse its transaction. */
 export function currentDbSessionDatabase(): Kysely<unknown> | undefined {
   return activeDbSession.getStore()?.db;
+}
+
+/**
+ * The sessions this module derived, as the objects it froze.
+ *
+ * Membership is the capability a rejoin requires ({@link rejoinActiveSession}).
+ * Only {@link createDbSessionContext} adds to it, and a `WeakSet` holds no key
+ * a caller can enumerate, copy or forge, so an object that is in it is one
+ * this module built from a carrier's own facts — and nothing outside this
+ * module can put one there or take one out.
+ */
+const derivedSessions = new WeakSet<DbSessionContext>();
+
+/**
+ * Freeze a derived session, and brand it as this module's.
+ *
+ * The derived session leaves this module in two places — the second argument
+ * of every {@link withDbSession} callback, and {@link activeDbSessionContext}
+ * — and both used to hand out the MUTABLE object the transaction's GUCs had
+ * been written from. Editing one field of it (`tenantId`, `userId`, `roles`,
+ * `principalClass`, `appPrincipalId`) changed what every service-level check
+ * beside those GUCs then read, and handing it back with `independent: true`
+ * opened a SECOND transaction whose settings were written from the edited
+ * fields — with the nested fence below comparing the object against itself,
+ * field by field, and agreeing every time.
+ *
+ * Frozen, that assignment throws (a module is strict code) instead of
+ * succeeding quietly, and the three arrays are frozen too, so a `push` onto
+ * `roles` is not the way around it either. The object stays the one the
+ * carrier's facts produced, for as long as the transaction it opened lives.
+ */
+function sealSession(session: DbSessionContext): DbSessionContext {
+  Object.freeze(session.roles);
+  Object.freeze(session.groups);
+  Object.freeze(session.relationGroupIds);
+  Object.freeze(session);
+  derivedSessions.add(session);
+  return session;
+}
+
+/**
+ * The session the active transaction on `db` was opened with, if any.
+ *
+ * For the one case {@link withDbSession} cannot serve: work that must run in
+ * the caller's transaction but does not itself hold the context that
+ * transaction was established from. Such a caller would have to REBUILD a
+ * session from what it does hold — and a rebuilt session drops the identity
+ * link, the audit identity and the RelationGroup memberships the resolver
+ * put there, which is exactly the substitution the nested-session fence
+ * below refuses. Asking for the active session instead and passing it back
+ * verbatim joins the transaction without replacing anything in it.
+ *
+ * The same holds for the two fields the record ACL reads — the verified
+ * application principal and the principal class. Both are DERIVED here from
+ * what the carrier supplied ({@link resolvePrincipalClass}), and neither is a
+ * field of this type, so re-deriving a session from a context would classify
+ * every verified person as `unknown` — a context carries no `principalKind`,
+ * and no other fact reaches that class — and strip an application principal
+ * to null. {@link withDbSession} therefore recognises this exact object and
+ * reuses it rather than deriving anything from it.
+ *
+ * What comes back is the FROZEN session ({@link sealSession}), so a caller
+ * reads it and cannot edit it: an assignment to a field of it throws, and the
+ * role, group and RelationGroup arrays are frozen as well. That matters here
+ * more than anywhere else, because this object is the one a rejoin is
+ * recognised by — an editable one would have made this accessor a way to
+ * rewrite the active session's tenant, roles or principal class and then open
+ * an independent transaction from the result.
+ *
+ * This is NOT an authorization source. It reports what the active database
+ * session already is; a caller still decides on the session core verified
+ * and handed it, and must satisfy itself that the two name the same
+ * principal before joining (api-key/service.ts does both).
+ */
+export function activeDbSessionContext<TDatabase>(
+  db: Kysely<TDatabase>,
+): DbSessionContext | undefined {
+  const active = activeDbSession.getStore();
+  return active && active.db === (db as unknown as Kysely<unknown>) ? active.session : undefined;
 }
 
 /** RFC 4122 shape, the one every id this layer accepts must have. */
@@ -157,12 +292,42 @@ function normalizeScope(scope: DbSessionScope | null | undefined): DbSessionScop
   return "self";
 }
 
+/**
+ * The identity ↔ Relation link a carrier supplied, narrowed to what this
+ * layer reads off it — the identity, its issuer and whose link it is, and
+ * nothing about the party. A plugin sees `relation` as `unknown`; the auth
+ * layer builds it in one place (`auth/identity-link-store.ts`, `toState`).
+ */
+type SessionIdentityLink = {
+  identityId?: unknown;
+  issuer?: unknown;
+  subject?: unknown;
+  status?: unknown;
+};
+
+/**
+ * The link, when it is THIS session's own and this server read it back.
+ *
+ * It establishes the identity half and only that: a row of
+ * `platform.identity_relations` naming this session's subject was read under
+ * RLS, so there is an identity row to audit and a party to act as. It
+ * establishes nothing about the KIND of principal behind that identity, which
+ * is why {@link resolvePrincipalClass} does not consult it.
+ */
+function verifiedLink(input: DbSessionInput): SessionIdentityLink | null {
+  const link = input.relation as SessionIdentityLink | null | undefined;
+  if (!link || typeof link !== "object") return null;
+  return ["linked", "pending_confirmation"].includes(String(link.status)) &&
+    link.subject === input.userId && typeof link.identityId === "string" &&
+    UUID_PATTERN.test(link.identityId) && typeof link.issuer === "string" && link.issuer
+    ? link
+    : null;
+}
+
 export function verifiedAuditIdentity(input: DbSessionInput): { auditIdentityId: string | null; auditIssuer: string | null } {
-  const link = input.relation as { identityId?: unknown; issuer?: unknown; subject?: unknown; status?: unknown } | undefined;
-  if (link && ["linked", "pending_confirmation"].includes(String(link.status)) &&
-      link.subject === input.userId && typeof link.identityId === "string" &&
-      UUID_PATTERN.test(link.identityId) && typeof link.issuer === "string" && link.issuer) {
-    return { auditIdentityId: link.identityId, auditIssuer: link.issuer };
+  const link = verifiedLink(input);
+  if (link) {
+    return { auditIdentityId: link.identityId as string, auditIssuer: link.issuer as string };
   }
   // A nested database session already carries the verified identity context.
   if (input.auditIdentityId) {
@@ -170,6 +335,104 @@ export function verifiedAuditIdentity(input: DbSessionInput): { auditIdentityId:
     return { auditIdentityId: input.auditIdentityId, auditIssuer: input.auditIssuer ?? null };
   }
   return { auditIdentityId: null, auditIssuer: null };
+}
+
+/**
+ * The verified application id, or null. A malformed value is a programming
+ * error here rather than a denial to be papered over: the only writer is the
+ * API-key resolver, which reads a uuid primary key, so anything else means
+ * some other path invented a principal.
+ */
+function normalizeAppPrincipalId(
+  principal: { integrationId: string } | null | undefined,
+): string | null {
+  if (!principal) return null;
+  assertUuid(principal.integrationId, "appPrincipal.integrationId");
+  return principal.integrationId;
+}
+
+/**
+ * The verified credential row id, or null. Same contract as the principal
+ * above and for the same reason: the only writer is the API-key resolver,
+ * which reads a uuid primary key. An application principal without one would
+ * be a session the record-action fence cannot check, so it is a programming
+ * error here rather than a silent denial later.
+ */
+function normalizeAppCredentialId(
+  principal: { credentialId: string } | null | undefined,
+): string | null {
+  if (!principal) return null;
+  assertUuid(principal.credentialId, "appPrincipal.credentialId");
+  return principal.credentialId;
+}
+
+/**
+ * Classify the session from server-sourced facts, most specific first.
+ *
+ * A resolved integration outranks the "service" kind its own token carries:
+ * an API-key session is both, and `application` is the narrower, useful
+ * answer. Beyond that, the only `person` is a STATED person — the bearer
+ * path's verdict about verified claims, or the class a trusted-context
+ * producer signed into its bundle. A carrier that states nothing is
+ * `unknown`, and nothing it carries lifts it out of that: see below for why
+ * the identity link in particular does not.
+ *
+ * ## Why the identity link classifies nobody
+ *
+ * The obvious fallback for a carrier that states no kind is its identity ↔
+ * Relation link, and it is a tempting one: {@link verifiedLink} establishes
+ * that this server read a row of `platform.identity_relations` naming this
+ * session's subject, under RLS, and nobody asserted it. It is still not
+ * evidence of a human, for three independent reasons:
+ *
+ *   - a link row is recorded for MACHINES too. `ensureServiceIdentityLink`
+ *     writes one for every API-key service account on its first session.
+ *   - the PARTY a link names is administrator input. `link_identity` may
+ *     point any identity at any Relation the tenant holds, so the party's own
+ *     `relation_type` is a fact about a row an administrator chose — a type
+ *     any tenant may author and any member with the admission role may name —
+ *     and not a fact about how the session authenticated. A machine identity
+ *     linked to a person Relation is an ordinary, permitted arrangement.
+ *   - a `pending_confirmation` link names a CANDIDATE the e-mail matched and
+ *     nobody has confirmed, so even reading the party as authoritative would
+ *     be reading an unverified one.
+ *
+ * The class answers "did a human authenticate", and a party type cannot
+ * answer it however it is read. So the link does not enter this derivation at
+ * all, and an unclassified carrier — the payload-v2 trusted-context bundle
+ * this deployment still accepts for ordinary work (packages/auth,
+ * `ACCEPTED_PAYLOAD_VERSIONS`) — is `unknown`.
+ *
+ * ## What `unknown` costs, and what it does not
+ *
+ * `unknown` holds no named record action and matches no `person` entry in an
+ * entity's `authorization.principalClasses`. So the surfaces that depend on
+ * the person class are reached by a v2 producer only once it is redeployed to
+ * sign v3; redeploying it is the fix, not widening this. Concretely:
+ *
+ *   - a named action's `users`, `roles` and `groups` subjects
+ *     (`app.record_action_subject_allows`, `entity/record-permissions.ts`) and
+ *     the Operations gated on them (`operations/runtime.ts`);
+ *   - an entity whose `principalClasses` omits `unknown`
+ *     (`entity/principal-classes.ts`). The compiler's own default includes
+ *     `unknown`, so every entity that authors no list keeps admitting these
+ *     sessions;
+ *   - `platform.principals.classOf` in a runtime module (`modules/principals.ts`),
+ *     which reports `unknown` rather than inventing a person.
+ *
+ * Nothing else moves. Roles, scope, the view/edit/delete permissions, tenant
+ * isolation, the acting Relation (`app.relation_id`) and the audit identity
+ * (`app.audit_identity_id`) are all unchanged, and the last two are still
+ * read off the very link this derivation ignores — which identity acted is a
+ * different question from whether it is a person. Key management was never
+ * reachable this way either: `auth/api-key/ceiling.ts` has always required
+ * the carrier's own signed `principalKind`.
+ */
+export function resolvePrincipalClass(input: DbSessionInput): DbPrincipalClass {
+  if (input.appPrincipal) return "application";
+  if (input.principalKind === "service") return "service";
+  if (input.principalKind === "person") return "person";
+  return "unknown";
 }
 
 export function createDbSessionContext(input: DbSessionInput): DbSessionContext {
@@ -183,16 +446,22 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
   assertUuid(input.tenantId, "tenantId");
   assertUuid(input.userId, "userId");
 
-  return {
+  return sealSession({
     tenantId: input.tenantId,
     userId: input.userId,
     ...verifiedAuditIdentity(input),
-    roles: input.roles ?? [],
-    groups: normalizeGroups(input.groups),
-    relationGroupIds: normalizeRelationGroupIds(input.relationGroupIds),
+    // Copied before they are frozen: the carrier's arrays belong to the caller,
+    // and freezing one would reach back out of this layer into code that is
+    // entitled to keep editing its own.
+    roles: [...(input.roles ?? [])],
+    groups: [...normalizeGroups(input.groups)],
+    relationGroupIds: [...normalizeRelationGroupIds(input.relationGroupIds)],
     relationId: actingRelationId(input),
+    appPrincipalId: normalizeAppPrincipalId(input.appPrincipal),
+    appCredentialId: normalizeAppCredentialId(input.appPrincipal),
+    principalClass: resolvePrincipalClass(input),
     scope: normalizeScope(input.scope),
-  };
+  });
 }
 
 export async function applyDbSession<TDatabase>(
@@ -229,6 +498,16 @@ export async function applyDbSession<TDatabase>(
     sql`set_config('app.scope', ${session.scope}, true)`,
     sql`set_config('app.relation_group_ids', ${session.relationGroupIds.join(",")}, true)`,
     sql`set_config('app.relation_id', ${session.relationId ?? ""}, true)`,
+    // Always written, empty included: a transaction-local setting that is only
+    // written when present would let one request's application principal be
+    // observed by the next session opened on the same transaction.
+    sql`set_config('app.app_principal_id', ${session.appPrincipalId ?? ""}, true)`,
+    // Written on the same unconditional terms, and for the stronger version
+    // of the same reason: a credential id left over from the previous session
+    // on this pooled connection would let a revoked key's fence answer with
+    // another key's row.
+    sql`set_config('app.app_credential_id', ${session.appCredentialId ?? ""}, true)`,
+    sql`set_config('app.principal_class', ${session.principalClass}, true)`,
     sql`set_config('app.user_groups', '', true)`,
     sql`set_config('app.user_groups_exact', '', true)`,
     sql`set_config('app.user_groups_ancestors', '', true)`,
@@ -288,16 +567,55 @@ export async function applyDbSession<TDatabase>(
   return audit;
 }
 
+/**
+ * The active session itself, when `input` IS it — otherwise undefined.
+ *
+ * It returns the session the active transaction on `db` was OPENED with rather
+ * than the object the caller passed. Here those are the same object, so the
+ * distinction looks idle and is not: it is what makes the answer independent
+ * of the caller entirely, so no field of the returned session can have come
+ * from anywhere but this module's own derivation.
+ *
+ * Identity is the capability, and it is one a caller cannot manufacture.
+ * {@link activeDbSessionContext} is the only way to obtain the object, the
+ * object is frozen ({@link sealSession}), and it is in
+ * {@link derivedSessions}, which only {@link createDbSessionContext} writes.
+ * A caller-shaped object, a spread, a prototype child and a context from a
+ * different database are none of those things: they fall through to
+ * {@link createDbSessionContext} and are then held to the nested fence below
+ * exactly as before. This establishes no session either; a rejoin requires an
+ * active one, by construction.
+ */
+function rejoinActiveSession<TDatabase>(
+  db: Kysely<TDatabase>,
+  input: DbSessionInput | DbSessionContext,
+): DbSessionContext | undefined {
+  const active = activeDbSession.getStore();
+  if (!active || active.db !== (db as unknown as Kysely<unknown>)) return undefined;
+  if ((input as unknown) !== active.session) return undefined;
+  return derivedSessions.has(active.session) ? active.session : undefined;
+}
+
 export async function withDbSession<TDatabase, TResult>(
   db: Kysely<TDatabase>,
-  input: DbSessionInput,
+  input: DbSessionInput | DbSessionContext,
   callback: (trx: Transaction<TDatabase>, session: DbSessionContext) => Promise<TResult>,
   options: { isolationLevel?: "repeatable read" | "serializable"; independent?: boolean } = {},
 ): Promise<TResult> {
-  const session = createDbSessionContext(input);
+  // A rejoin reuses the derived session; everything else derives one. Nothing
+  // is widened either way — the rejoined object is the one this function
+  // derived when it opened the transaction being rejoined, taken from the
+  // active store rather than from the caller.
+  const rejoined = rejoinActiveSession(db, input);
+  const session = rejoined ?? createDbSessionContext(input);
   const active = activeDbSession.getStore();
   if (active && active.db === db) {
-    const sameSession = active.session.tenantId === session.tenantId &&
+    // A rejoin IS the active session — one frozen object, so there is nothing
+    // to compare and no comparison that could be satisfied by editing it.
+    // Everything else was derived from a carrier's own facts and has to name
+    // the same principal, field for field.
+    const sameSession = session === active.session ||
+      (active.session.tenantId === session.tenantId &&
       active.session.userId === session.userId &&
       active.session.auditIdentityId === session.auditIdentityId &&
       active.session.auditIssuer === session.auditIssuer &&
@@ -310,7 +628,10 @@ export async function withDbSession<TDatabase, TResult>(
       active.session.relationGroupIds.every(
         (group, index) => group === session.relationGroupIds[index],
       ) &&
-      active.session.relationId === session.relationId;
+      active.session.relationId === session.relationId &&
+      active.session.appPrincipalId === session.appPrincipalId &&
+      active.session.appCredentialId === session.appCredentialId &&
+      active.session.principalClass === session.principalClass);
     if (!sameSession) {
       throw new Error("Nested database work cannot replace the active session.");
     }
@@ -439,9 +760,12 @@ export async function withCredentialResolutionSession<TDatabase, TResult>(
       );
     }
     await sql`select set_config('app.tenant_id', ${tenantId}, true)`.execute(trx);
-    // Deliberately no app.user_id, no app.roles, no app.scope: nothing this
-    // callback reads is user- or role-predicated, and setting a placeholder
-    // would make a later rowScope policy silently match the wrong rows.
+    // Deliberately no app.user_id, no app.roles, no app.scope, no
+    // app.principal_class and no
+    // app.app_principal_id: nothing this callback reads is user-, role- or
+    // application-predicated, and setting a placeholder would make a later
+    // rowScope or record-action policy silently match the wrong rows. The
+    // application principal is an OUTPUT of this resolution, not an input.
     return callback(trx);
   });
 }

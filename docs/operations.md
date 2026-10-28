@@ -185,6 +185,18 @@ What the compiler makes of it:
   use `auth.alsoRequire`: the caller holds one of `roles` (default: the update
   roles) **and** one of `alsoRequire`, lowered to the Operation's `roleGroups`
   (#944; `Deal.win` needs the deal write and the quote right).
+- A record-scoped Operation may require a NAMED record action with
+  `auth.recordAction`, declared by the entity under
+  `authorization.rowAccess.recordPermissions.actions`
+  ([authoring.md](authoring.md)). Unlike `recordPermission` it does not imply
+  the record's `view`, so a verified application may invoke it without the
+  record becoming readable; what the handler may then read is the action's
+  declared `reads` projection and nothing else. It is checked before a
+  challenge or lease is issued and again inside the Operation's transaction,
+  where it also takes the ACL-row lock that serializes it against a concurrent
+  policy change. Declaring it beside `recordPermission` requires both. The
+  compiler refuses an action the entity does not declare, one without a record
+  target, and one that restates view, edit or delete.
 - On an entity with `authorization.rowAccess.recordPermissions` every rule
   requires the record's `edit` permission — a transition is a write, so
   `auth.recordPermission` may only restate `edit` — checked before the offer

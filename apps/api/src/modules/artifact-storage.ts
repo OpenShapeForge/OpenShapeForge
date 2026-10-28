@@ -14,7 +14,7 @@ function descriptor(value: RuntimeArtifactDescriptor): RuntimeArtifactDescriptor
       typeof value.fileName !== "string" || !value.fileName || /[\r\n\0/\\]/.test(value.fileName) ||
       typeof value.mediaType !== "string" || !/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(value.mediaType) ||
       typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256) ||
-      !Number.isSafeInteger(value.byteSize) || value.byteSize < 0) {
+      !Number.isSafeInteger(value.byteSize) || value.byteSize < 0 || value.byteSize > 64 * 1024 * 1024) {
     throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "Stored file metadata could not be verified." });
   }
   return Object.freeze({ artifactId: value.artifactId, version: value.version, fileName: value.fileName,
@@ -91,14 +91,16 @@ export class ArtifactStorageRuntime<Session, Transaction> {
         if (result.artifactId !== input.artifactId) throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "The linked file identity does not match." });
         return result;
       },
-      read: async (session, input) => {
+      read: async (session, input, readOptions) => {
         const active = provider(session);
         const record = owner(input);
         // One transaction for the oracle and the provider: the record the
         // session was found to reach is the record the bytes are read against.
         return options.withTransaction(session, async () => {
           await options.records.assertAccess(session, { entityName: record.entity, id: record.id, intent: "get" });
-          const result = await active.read(context(session), input);
+          readOptions?.signal?.throwIfAborted();
+          const result = await active.read(context(session), input, readOptions);
+          readOptions?.signal?.throwIfAborted();
           const safe = descriptor(result.descriptor);
           if (safe.artifactId !== input.artifactId || !(result.bytes instanceof Uint8Array) || result.bytes.byteLength !== safe.byteSize) {
             throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "The returned file does not match its stored descriptor." });

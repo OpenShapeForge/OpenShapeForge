@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { readBoundedResponse } from "../modules/outbound-response.js";
 /**
  * OAuth token mechanics shared by every platform-owned token store.
  *
@@ -229,7 +230,7 @@ export async function refreshOAuthTokenSet(input: {
     expires_in?: unknown;
   };
   try {
-    payload = (await response.json()) as typeof payload;
+    payload = (JSON.parse(await readBoundedResponse(response, 1024 * 1024))) as typeof payload;
   } catch {
     throw new OAuthTokenLifecycleError(
       "OAUTH_FAILED",

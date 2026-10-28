@@ -46,7 +46,7 @@ fields:
       column: created_at
       storageClass: core
     render:
-      component: DateTimePicker
+      component: FieldDateAndTime
   - key: updatedAt
     osfType: datetime
     required: true
@@ -61,7 +61,7 @@ fields:
       column: updated_at
       storageClass: core
     render:
-      component: DateTimePicker
+      component: FieldDateAndTime
   - key: externalId
     osfType: string
     required: false
@@ -108,15 +108,29 @@ fields:
     osfType: string
     required: false
     label:
-      en: Source administration
-      nl: Bronadministratie
+      en: Source administration ID
+      nl: Bronadministratie-ID
     description:
-      en: Identifier or label of the administration or sub-ledger within the source organization.
-      nl: Identificatie of label van de administratie of subadministratie binnen de bronorganisatie.
+      en: Stable identifier of the administration within the source organization; records match on it.
+      nl: Stabiele identificatie van de administratie binnen de bronorganisatie; records koppelen hierop.
     validation:
       maxLength: 200
     persisted:
       column: source_administration
+      storageClass: core
+  - key: sourceAdministrationName
+    osfType: string
+    required: false
+    label:
+      en: Source administration name
+      nl: Naam bronadministratie
+    description:
+      en: Readable name of that administration; not used for matching.
+      nl: Leesbare naam van die administratie; niet gebruikt om te koppelen.
+    validation:
+      maxLength: 200
+    persisted:
+      column: source_administration_name
       storageClass: core
   - key: sourceVersion
     osfType: string

@@ -52,7 +52,7 @@ import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
 import { createControlRuntime } from "../control/runtime.js";
 import { CONTROL_PLUGIN } from "../control/operations.js";
 import { registerControlMcpServer } from "../mcp/control-mcp-server.js";
-import { registerArtifactRestRoutes } from "../artifacts/rest-routes.js";
+import { activeArtifactServices, registerArtifactRestRoutes } from "../artifacts/rest-routes.js";
 import {
   registerGeneratedMcpServer,
 } from "../mcp/generated-mcp-server.js";
@@ -76,6 +76,7 @@ import {
   type ModuleRegistry,
 } from "../modules/registry.js";
 import type { ModuleRuntimeContext } from "../modules/contract.js";
+import { missingEgressOwnerDiagnostic } from "../modules/egress.js";
 import type { InitializedMaintenanceOwner } from "../modules/maintenance.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
 import { generatedRuntimeFieldSchemas } from "../modules/field-schemas.js";
@@ -451,6 +452,8 @@ export function createApiApp(options: {
       });
     }
     const egressOwner = assertSingleModuleEgressOwner(initialised.loaded);
+    const egressDiagnostic = missingEgressOwnerDiagnostic(process.env.NODE_ENV, egressOwner);
+    if (egressDiagnostic) app.log.warn({ code: egressDiagnostic.code }, egressDiagnostic.message);
     if (modulePlatform) {
       modulePlatform.registerDeclarativeServiceExecutor(
         createRuntimeDeclarativeServiceExecutor({
@@ -632,17 +635,8 @@ export function createApiApp(options: {
     if (modulePlatform) {
       registerArtifactRestRoutes(routes, {
         ...dbOptions,
-        artifacts: {
-          stage: (session, input) => modulePlatform.withActiveOperationSession(
-            session, (activeSession) => modulePlatform.services.artifacts.stage(activeSession, input),
-          ),
-          bind: (session, input) => modulePlatform.withActiveOperationSession(
-            session, (activeSession) => modulePlatform.services.artifacts.bind(activeSession, input),
-          ),
-          read: (session, input) => modulePlatform.withActiveOperationSession(
-            session, (activeSession) => modulePlatform.services.artifacts.read(activeSession, input),
-          ),
-        },
+        artifacts: activeArtifactServices(modulePlatform.services.artifacts,
+          (session, work) => modulePlatform.withActiveOperationSession(session, work)),
       });
     }
     registerConnectorRestRoutes(routes, {

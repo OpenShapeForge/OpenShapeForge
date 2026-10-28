@@ -56,7 +56,10 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Generate artifacts
-        run: bun run generate
+        run: |
+          cp test/fixtures/authoring/test-composition.yaml authoring.config.local.yaml
+          bun run generate
+          bun scripts/check-test-fixture-composition.ts test
 
       - name: Start Keycloak with the generated tenant realm
         run: |

@@ -123,7 +123,7 @@ export async function resolveControlSession(
     try { options = { ...options, ...mcpResourceHeader(headers, "control") }; }
     catch (error) { if (error instanceof SessionAuthenticationUnavailableError) throw error; throw new ControlAuthorizationError("UNAUTHENTICATED", "Invalid control MCP App resource binding."); }
   }
-  if (usesHostOrganizationContext()) assertHostRealm(config);
+  const hostAuthority = usesHostOrganizationContext() ? assertHostRealm(config) : null;
   const claims = await verifyControlBearer(headers, config, options);
 
   const authorizedParty = stringClaim(claims, "azp") ?? "";
@@ -147,7 +147,7 @@ export async function resolveControlSession(
 
   // Host-organization mode maps Keycloak's built-in realm administrator onto
   // the same single control-plane role used in the dedicated control realm.
-  const roles = usesHostOrganizationContext()
+  const roles = hostAuthority === "tenant-realm-admin"
     ? hasKeycloakRealmAdmin(claims) ? [...CONTROL_REALM_ROLES] : []
     : realmRolesOf(claims);
   if (!roles.some((role) => CONTROL_REALM_ROLES.includes(role))) {

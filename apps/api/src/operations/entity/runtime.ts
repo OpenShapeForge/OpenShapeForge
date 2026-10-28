@@ -35,6 +35,7 @@ import {
 } from "./confirmation-challenges.js";
 import {
   createGeneratedEntity,
+  createGeneratedEntityAfterElicitation,
   deleteGeneratedEntity,
   updateGeneratedEntity,
 } from "./mutations.js";
@@ -52,8 +53,10 @@ import type {
   ListPageInput,
 } from "./types.js";
 import { fieldNameForColumn } from "./columns.js";
+import { entityAdmitsPrincipal } from "./principal-classes.js";
 import {
   assertRecordPermission,
+  recordActionsAllowRow,
   recordPermissionsAllowRow,
   type RecordPermissionAction,
 } from "./record-permissions.js";
@@ -103,6 +106,8 @@ const operationCatalog = rawOperationCatalog as unknown as {
           roleGroups?: string[][];
           scopes?: string[];
           recordPermission?: RecordPermissionAction;
+          /** A named record action, independent of the record's `view`. */
+          recordAction?: string;
         }
       | { mode: "custom" };
     concurrency?: OperationConcurrency;
@@ -515,6 +520,25 @@ export function entityOperationRef(
   return { id: operation.id, intent: operation.intent };
 }
 
+/**
+ * Does this entity Operation's entity admit this session's principal class?
+ *
+ * The listing's mirror of the gate in `requireEntityOperation`. An Operation
+ * whose table cannot be resolved is not available either, so a refusal here
+ * answers `false` rather than propagating: the caller is deciding what to
+ * OFFER.
+ */
+export function entityOperationAdmitsPrincipal(
+  operation: EntityOperationRef,
+  session: DbSessionInput,
+): boolean {
+  try {
+    return entityAdmitsPrincipal(tableForEntityOperation(operation), session);
+  } catch {
+    return false;
+  }
+}
+
 export function tableForEntityOperation(operation: EntityOperationRef): GeneratedCrudTable {
   const contract = entityOperationsById.get(operation.id);
   if (!contract) {
@@ -698,7 +722,10 @@ export async function acquireEditLeaseForEntityOperation(
  */
 export function getEntityOperationOffers(
   entityName: string,
-  session: Pick<DbSessionInput, "roles"> & { oauthScopes?: readonly string[]; credential?: string },
+  session: Pick<
+    DbSessionInput,
+    "roles" | "userId" | "relationGroupIds" | "appPrincipal" | "principalKind" | "relation"
+  > & { oauthScopes?: readonly string[]; credential?: string },
   intents: readonly GeneratedCrudExposureOperation[],
   unavailable: Readonly<Record<string, OperationError | undefined>> = {},
   target?: { id: string; version?: string; row?: Readonly<Record<string, unknown>> },
@@ -718,7 +745,18 @@ export function getEntityOperationOffers(
       target?.row &&
       recordPermissionsAllowRow(table, target.row, permissions, session),
     );
-  const generatedOffers = entityOperations
+  // The entity's principal-class policy governs the GENERATED operations and
+  // the search derived from them — not the authored plugin Operations below.
+  // That distinction is the whole point: an entity may exclude applications
+  // from its collection and its record read while still offering one an
+  // action-gated Operation on a record it was granted.
+  const admitsPrincipal = entityAdmitsPrincipal(
+    getGeneratedCrudTables().find((candidate) =>
+      candidate.source?.authoringEntityName === entityName) ??
+      ({ source: {} } as GeneratedCrudTable),
+    session,
+  );
+  const generatedOffers = (admitsPrincipal ? entityOperations : [])
     .filter(
       (operation) =>
         operation.entityName === entityName &&
@@ -749,7 +787,18 @@ export function getEntityOperationOffers(
       (!target ||
         operation.auth.mode !== "session" ||
         !operation.auth.recordPermission ||
-        hasRecordPermissions([operation.auth.recordPermission]))
+        hasRecordPermissions([operation.auth.recordPermission])) &&
+      // An action-gated Operation is offered only on a record that actually
+      // grants it. A holder that cannot see the record has no row here, so
+      // nothing is offered — correct, since offers are a convenience for a
+      // reader and the runtime check is the gate either way.
+      (!target ||
+        operation.auth.mode !== "session" ||
+        !operation.auth.recordAction ||
+        Boolean(
+          table && target.row &&
+          recordActionsAllowRow(table, target.row, [operation.auth.recordAction], session),
+        ))
     )
     .map((operation) => {
       const bindings = Object.entries(operation.target?.inputBindings ?? {});
@@ -891,10 +940,13 @@ function listPageInput(input: EntityOperationInput | undefined): ListPageInput {
 }
 
 /** Interface-neutral dispatcher used by REST, MCP and future transports. */
+type SecureCompletion = { into: string; value: unknown; existingId?: string };
+
 async function executeEntityOperationWithContext(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   request: EntityOperationRequest,
+  completion?: SecureCompletion,
 ): Promise<EntityOperationResult> {
   try {
     const table = tableForEntityOperation(request.operation);
@@ -1081,6 +1133,26 @@ async function executeEntityOperationWithContext(
         requireContractValues(operation, table, values, { partial: blueprintId !== undefined }, session);
         await requireOperationPrerequisites(db, session, operation);
         requireCreateOperationConfirmation(operation, request.input);
+        if (completion) {
+          const secure = operation.interaction.secureInput;
+          if (!secure || secure.into !== completion.into || blueprintId !== undefined || prepared.bindings) {
+            throw operationFailure({ code: "BAD_USER_INPUT", message: "Secure completion does not match this Operation." });
+          }
+          const data = await governed(async () => {
+            // The final effect repeats prerequisites inside the owning transaction.
+            await requireOperationPrerequisites(db, session, operation);
+            if (completion.existingId) {
+              throw operationFailure({ code: "FORBIDDEN", message: "An existing configuration requires a separately authorized update Operation." });
+            }
+            return createGeneratedEntityAfterElicitation(db, session, {
+              table: table.name, into: completion.into, values: { ...values, [completion.into]: completion.value },
+              ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
+            });
+          });
+          if (!data) throw operationFailure({ code: "NOT_FOUND", message: "The configured record is unavailable." });
+          return { intent: "create", data, operations: await currentRecordOffers(db, session, entityName, table,
+            offerTarget(data, table), projectedOfferIntents(request, RECORD_OFFER_INTENTS)) };
+        }
         const interactionError = secureInputInteractionError(operation);
         if (interactionError) return { intent: "create", error: interactionError };
         const data = await governed(() => blueprintId !== undefined
@@ -1250,7 +1322,16 @@ async function executeEntityOperationWithContext(
   }
 }
 
-export const executeEntityOperation: typeof executeEntityOperationWithContext = (db, session, request, ...rest) =>
+export const executeEntityOperation = (db: OpenShapeForgeDatabase, session: DbSessionInput, request: EntityOperationRequest): Promise<EntityOperationResult> =>
   withAuditContext(request.operation.id, (session as { credential?: import("../../auth/trusted-context.js").SessionCredential }).credential,
-    () => executeEntityOperationWithContext(db, session, request, ...rest),
+    () => executeEntityOperationWithContext(db, session, request),
     (session as { principalKind?: "person" | "service" }).principalKind);
+
+/** Server-only continuation: secret values are never accepted through public Operation input. */
+export function completeEntitySecureInput(db: OpenShapeForgeDatabase, session: DbSessionInput,
+  request: EntityOperationRequest, completion: SecureCompletion): Promise<EntityOperationResult> {
+  if (request.operation.intent !== "create") throw operationFailure({ code: "BAD_USER_INPUT", message: "Secure completion requires a create Operation." });
+  return withAuditContext(request.operation.id, (session as { credential?: import("../../auth/trusted-context.js").SessionCredential }).credential,
+    () => executeEntityOperationWithContext(db, session, request, completion),
+    (session as { principalKind?: "person" | "service" }).principalKind);
+}

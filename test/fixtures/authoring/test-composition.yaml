@@ -1,0 +1,4 @@
+# Optional local/CI additions. Copy to authoring.config.local.yaml before
+# generating test artifacts; never include this file in a production build.
+layers:
+  - test/fixtures/authoring/record-actions

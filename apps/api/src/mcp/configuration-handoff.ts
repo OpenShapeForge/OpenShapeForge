@@ -61,6 +61,8 @@ export type StoredFieldDefinition = {
 };
 
 export type PendingConfiguration = {
+  id?: string;
+  confirmed?: boolean;
   token: string;
   tenantId: string;
   userId: string;
@@ -121,12 +123,12 @@ export async function mintConfiguration(
       kind: "entity_configuration",
       tenantId: input.tenantId,
       userId: input.userId,
-      payload: { ...payload, expiresAtMs },
+      payload: { ...payload, id, expiresAtMs },
       expiresAtMs,
     });
   } else {
     token = base64url(randomBytes(24));
-    pendingByToken.set(token, { ...payload, token, expiresAtMs });
+    pendingByToken.set(token, { ...payload, id, token, expiresAtMs });
   }
   return { id, token, expiresInSeconds: TOKEN_TTL_MS / 1000 };
 }

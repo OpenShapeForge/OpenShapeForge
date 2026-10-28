@@ -225,6 +225,20 @@ describe("the full dispatch chain", () => {
     expect(auth).toBe(`Basic ${btoa("AKIA-DISPATCH:dispatch-secret-value")}`);
   });
 
+  test("a governor refusal happens before OAuth token lookup or refresh", async () => {
+    const refusal = new Error("governor refused this invocation");
+    const configured = contract();
+    const oauth = listConnectorContracts().find(candidate => candidate.auth)?.auth;
+    expect(oauth).toBeDefined();
+    const { calls } = await withUpstream(() => { throw Error("No provider request is permitted"); }, async () => {
+      await expect(invokeConnectorOperation({
+        ...invocationContext(TENANT, ["Connectors.ExampleObjectStore.Read"]),
+        governor: {run:async()=>{throw refusal;}} as unknown as ConnectorGovernor,
+      }, {...configured,auth:oauth!}, operation("listObjects"), {})).rejects.toBe(refusal);
+    });
+    expect(calls).toHaveLength(0);
+  });
+
   // The gate that could not be written before dispatch existed.
   test("an unauthorized session executes no package code", async () => {
     let reached = false;

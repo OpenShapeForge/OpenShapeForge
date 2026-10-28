@@ -41,7 +41,7 @@ export async function upsertIdentity(
     insert into platform.identities (issuer, subject, email, display_name)
     values (${claims.issuer}, ${claims.subject}, ${claims.email ?? null}, ${displayName})
     on conflict (issuer, subject) do update
-      set email = coalesce(excluded.email, platform.identities.email),
+      set email = excluded.email,
           display_name = coalesce(excluded.display_name, platform.identities.display_name),
           updated_at = case
             when excluded.email is distinct from platform.identities.email
@@ -135,12 +135,16 @@ export async function writeMembershipRoles(
  * pending row with a candidate (any more), and false for a pending row that
  * holds roles: confirming must never switch on grants nobody assigned to a
  * linked person, so such a row fails closed instead.
+ * Callers recheck the candidate before this update. Under READ COMMITTED a
+ * privileged concurrent contact edit can still land between that read and
+ * this update; the update pins the candidate but does not lock contact rows.
  */
 export async function confirmCandidateLink(
   trx: Transaction<DB>,
   identityId: string,
   tenantId: string,
   linkedBy: string,
+  expectedCandidate: string,
 ): Promise<boolean> {
   const result = await sql<{ identity_id: string }>`
     update platform.identity_relations
@@ -154,6 +158,7 @@ export async function confirmCandidateLink(
        and tenant_id = ${tenantId}
        and status = 'pending_confirmation'
        and candidate_relation_id is not null
+       and candidate_relation_id = ${expectedCandidate}::uuid
        and cardinality(roles) = 0
     returning identity_id
   `.execute(trx);

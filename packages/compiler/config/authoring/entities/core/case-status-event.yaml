@@ -227,11 +227,11 @@ interfaces:
             clearable: false
       enteredAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       exitedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       actorType:
         render:

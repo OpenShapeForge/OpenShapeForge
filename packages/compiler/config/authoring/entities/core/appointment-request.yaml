@@ -403,9 +403,9 @@ interfaces:
             clearable: false
       requestedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       respondedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}

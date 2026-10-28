@@ -101,6 +101,84 @@ export type RecordPermissionAction = "view" | "edit" | "delete";
  * that shape fixed lets the database policy and every Operation adapter use
  * one parser instead of letting each entity invent an authorization dialect.
  */
+/** Principal kinds a named record action may be granted to. */
+export type RecordActionPrincipal = "person" | "integration";
+
+/**
+ * One named action the record ACL may grant, declared by the entity.
+ *
+ * The axis is opt-in per entity and per action, which is what keeps it from
+ * regressing any existing policy: an entity that declares nothing can carry
+ * no action, and an action that does not admit `integration` can never be
+ * granted to an application. The name is the key under the stored ACL's
+ * `actions` member and the value an Operation's `auth.recordAction` names.
+ */
+export interface RowAccessRecordActionConfig {
+  /** lowerCamel identifier; never view, edit or delete. */
+  name: RecordActionName;
+  /**
+   * What a person reading a screen calls this action.
+   *
+   * The entity that declares an action is the only honest place to name it:
+   * core knows the axis, not a product's vocabulary. Optional, so an action
+   * authored before this existed keeps compiling — a reader of this field
+   * falls back to the action NAME, which is the one label that is always
+   * available and never invented.
+   */
+  labels?: LocalizedText;
+  /** Which principal kinds a grant of this action may name. */
+  principals: RecordActionPrincipal[];
+  /**
+   * The ONLY fields a holder of this action may read from the record, as
+   * authored field keys.
+   *
+   * Holding an action does not make the record readable — that is the point of
+   * the axis — but an action that cannot read anything cannot be carried out
+   * either. This list is the entity's explicit answer to "what does executing
+   * this need to see": core reads exactly these columns of exactly that row,
+   * through the same owner-scoped lookup that authorized the action, and
+   * returns nothing else. The ACL field, a classified field, a computed or
+   * localized field and anything unpersisted are refused at compile time, so
+   * the projection cannot become a way to reach a draft, a document body or
+   * another record.
+   *
+   * Omitted or empty means the action authorizes an effect and discloses
+   * nothing, which is the correct shape for an action whose input the caller
+   * already supplies.
+   */
+  reads?: string[];
+  /**
+   * How strongly the authorization check locks the record's ACL row.
+   *
+   * The check and the effect run in one transaction, and the check takes the
+   * lock first. That ordering is what fences a concurrent policy change — a
+   * revocation waits for an effect in flight, and a check that starts after a
+   * revocation waits and then reads it — and both modes below keep it.
+   *
+   * What differs is how two holders of the SAME action on the SAME record
+   * behave:
+   *
+   *   exclusive  (default) a self-exclusive lock. The second holder waits at
+   *              the check until the first commits. An effect that later takes
+   *              a row-exclusive lock on the same record is then safe, because
+   *              only one holder is ever positioned to upgrade.
+   *   shared     both holders pass the check together. Correct for an action
+   *              whose effect only reads — and a DEADLOCK if that effect then
+   *              locks the same record more strongly, since each holder waits
+   *              for a shared lock the other will not release until it has
+   *              upgraded. PostgreSQL detects it and aborts one transaction.
+   *
+   * So `shared` is a throughput choice for a provably read-only effect, and
+   * the compiler cannot verify that claim: an effect's SQL is not in scope
+   * here. The default is the mode that cannot deadlock.
+   */
+  lock?: RecordActionLock;
+}
+
+export type RecordActionLock = "exclusive" | "shared";
+
+export type RecordActionName = string;
+
 export interface RowAccessRecordPermissionsConfig {
   /** Authored field key for the persisted single jsonb object. */
   field: string;
@@ -108,6 +186,11 @@ export interface RowAccessRecordPermissionsConfig {
   empty: "public" | "restricted";
   /** Permissions the creator must hold in the submitted ACL. */
   createRequires: RecordPermissionAction[];
+  /**
+   * Named actions this record ACL may grant, independently of view/edit/delete.
+   * Absent on every entity that did not opt in.
+   */
+  actions?: RowAccessRecordActionConfig[];
 }
 
 export interface RowAccessConfig {
@@ -130,10 +213,36 @@ export interface OwnerAxisConfig {
   command?: { setting: string; values: string[] };
 }
 
+/**
+ * What the SERVER decided a session is. Not a role, not a scope, not anything
+ * a caller states: `person` is a verified human identity, `application` a
+ * resolved API-key integration, `service` a verified client-credentials
+ * principal with no integration behind it (configured organization automation
+ * included), and `unknown` a carrier the server could not classify.
+ */
+export type EntityPrincipalClass = "person" | "application" | "service" | "unknown";
+
 export interface AuthorizationConfig {
   roles: AuthorizationRoles;
   rowAccess?: RowAccessConfig;
   ownerAxis?: OwnerAxisConfig;
+  /**
+   * Which principal classes this entity's GENERATED CRUD and the search
+   * derived from it admit. A role list says what a session may do; this says
+   * what KIND of session may use the generic routes at all — which a role
+   * list cannot express, because a service account and the person beside it
+   * can hold the very same role.
+   *
+   * Omitted admits every class, which is what every entity did before this
+   * existed. The one exception is derived rather than authored: an entity that
+   * declares a named record action for `integration` principals excludes
+   * `application` unless it says otherwise. An application reaches such an
+   * entity through the grants on individual records, so admitting it to the
+   * collection as well would hand a key with a broad role every record of the
+   * entity and make the per-record grant decorative. Writing the list out
+   * re-admits it deliberately.
+   */
+  principalClasses?: EntityPrincipalClass[];
 }
 
 export interface FieldAuthorizationConfig {

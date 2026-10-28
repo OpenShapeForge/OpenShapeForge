@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { readBoundedResponse } from "../modules/outbound-response.js";
 /**
  * Schema discovery for provider rows — a compact, model-readable summary of
  * what a provider's declared API offers, so operations can be authored (by a
@@ -166,7 +167,7 @@ export async function discoverProviderSchema(
     fetchImpl,
     egressDispatch,
   );
-  const text = await response.text();
+  const text = await readBoundedResponse(response, 20 * 1024 * 1024);
   if (!response.ok) {
     throw new HttpError(
       502,

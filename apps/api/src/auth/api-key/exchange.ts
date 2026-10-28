@@ -20,6 +20,8 @@ import { REQUEST_TIMEOUT_MS } from "../../control/keycloak-service-account.js";
 export type ExchangeConfig = {
   /** Keycloak issuer, e.g. https://keycloak.example/realms/openshapeforge */
   issuer: string;
+  /** Optional internal token endpoint; the public issuer still verifies the returned token. */
+  tokenUrl?: string | undefined;
   keyring: SecretKeyring;
   /** Injectable for tests; defaults to global fetch. */
   fetch?: typeof fetch;
@@ -114,7 +116,7 @@ async function performExchange(
   });
 
   const doFetch = config.fetch ?? fetch;
-  const response = await doFetch(`${config.issuer}/protocol/openid-connect/token`, {
+  const response = await doFetch(config.tokenUrl ?? `${config.issuer}/protocol/openid-connect/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: body.toString(),

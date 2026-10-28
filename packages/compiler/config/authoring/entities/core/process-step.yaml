@@ -396,15 +396,15 @@ interfaces:
           component: JsonEditor
       startedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       dueAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       completedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       completionApprovalComment:
         render:

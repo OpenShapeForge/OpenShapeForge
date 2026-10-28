@@ -359,6 +359,8 @@ describe("canonical operation database sessions", () => {
           throw new Error("Expected a session-authenticated operation on every transport.");
         }
         const role = operation.auth.roles[0]!;
+        const pluginOperations = listOperationContracts()
+          .filter((entry) => entry.plugin === operation.plugin);
         const notebookId = randomUUID();
         const observations: Observation[] = [];
         let mcpAuthorization: unknown;
@@ -421,7 +423,20 @@ describe("canonical operation database sessions", () => {
         };
         const module: RuntimeModule = {
           name: operation.plugin,
-          operationHandlers: { [operation.handler]: handler },
+          operationHandlers: {
+            [operation.handler]: handler,
+            // The plugin owns more than the one Operation under test, and a
+            // module that supplies any handler must supply all of them. The
+            // siblings get a handler that fails if it is ever reached.
+            ...Object.fromEntries(
+              listOperationContracts()
+                .filter((entry) =>
+                  entry.plugin === operation.plugin && entry.handler !== operation.handler)
+                .map((entry) => [entry.handler, () => {
+                  throw new Error(`This test does not exercise ${entry.key}.`);
+                }]),
+            ),
+          },
         };
         const verifiedSession: TrustedSessionContext = {
           tenantId,
@@ -452,7 +467,11 @@ describe("canonical operation database sessions", () => {
             rest,
             [module],
             { db, platform: restPlatform.services },
-            [operation],
+            // The plugin's whole set, not just the Operation under test: the
+            // binder requires a handler for every Operation of a module that
+            // supplies any, and refuses a handler the given list does not
+            // declare. A narrowed list would hit one rule or the other.
+            pluginOperations,
           );
           try {
             const response = await rest.inject({

@@ -92,7 +92,8 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
       const platform = new ModulePlatformRuntime(runtime.db);
       platform.registerStaticOperations(runtimeStaticOperationRegistrations([], { db: runtime.db }, listOperationContracts().filter(operation => operation.plugin === "osf-audit")));
       const server = __buildGeneratedMcpServerForTests({ db: runtime.db, modulePlatform: platform, session: session(tenantId, held) as never,
-        modules: [accounts, documents as never, versioning as never, { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }) } }],
+        modules: [accounts, documents as never, versioning as never, { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }),
+          deliverToNotebook: () => { throw new Error("This test does not exercise Notebook.deliver."); } } }],
         operationToolProjection: { mode: "searchable", search: "osf_search_operations", execute: "osf_execute_operation" } });
       const client = new Client({ name: "audit-entity-proof", version: "1" }); const [ct, st] = InMemoryTransport.createLinkedPair();
       try { await server.connect(st); await client.connect(ct); await run(client); }

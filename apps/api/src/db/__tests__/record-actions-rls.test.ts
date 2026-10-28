@@ -511,10 +511,22 @@ describe("the definer role is bounded", () => {
     });
   }, TEST_TIMEOUT);
 
-  test("the shipped manifest declares no record-action entity yet, so the lookup denies everything", () => {
-    // Opt-in means opt-in: nothing in this repository's authoring carries the
-    // axis, so no production table is reachable through the function today.
-    expect(recordActionEntities()).toEqual([]);
+  test("the shipped manifest reaches exactly the entities that opted in", () => {
+    // Opt-in means opt-in. One entity in this repository's authoring carries
+    // the axis — `Notebook`, through the notebook example plugin — and the
+    // registry the migration compiles from names it and nothing else, with
+    // the physical table rather than the registry key.
+    expect(recordActionEntities()).toEqual([{
+      entity: "Notebook",
+      schema: "notebook",
+      table: "notebooks",
+      keyColumn: "id",
+      keyIsUuid: true,
+      aclColumn: "permissions",
+      actions: ["deliver"],
+      reads: { deliver: [{ field: "name", column: "name" }] },
+      locks: { deliver: "exclusive" },
+    }]);
   });
 });
 

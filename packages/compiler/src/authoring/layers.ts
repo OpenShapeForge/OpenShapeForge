@@ -976,20 +976,25 @@ function resolvedRowEmpty(rowAccess: JsonObject): "public" | "restricted" {
  * kind this axis exists to prevent, and the layer doing it cannot see the
  * grants the first author relies on.
  *
- * An absent list means every class, so a first layer that authored none
- * constrains nothing — a later layer is free to declare one.
+ * An absent list admits every class except when integration actions derive
+ * an application exclusion; a later layer may not reopen that derived boundary.
  */
 function assertPrincipalClassesOnlyNarrow(
   base: JsonObject,
   merged: JsonObject,
   origin: string,
 ): void {
-  assertOrListOnlyNarrows(
-    objectProperty(base, "authorization")?.principalClasses,
-    objectProperty(merged, "authorization")?.principalClasses,
-    "authorization.principalClasses",
-    origin,
-  );
+  const effective = (entity: JsonObject): JsonValue | undefined => {
+    const authorization = objectProperty(entity, "authorization");
+    if (authorization?.principalClasses !== undefined) return authorization.principalClasses;
+    const permissions = objectProperty(objectProperty(authorization, "rowAccess"), "recordPermissions");
+    const actions = Array.isArray(permissions?.actions) ? permissions.actions : [];
+    const excludesApplication = actions.some((action) =>
+      action && typeof action === "object" && Array.isArray((action as JsonObject).principals)
+        && ((action as JsonObject).principals as unknown[]).includes("integration"));
+    return excludesApplication ? ["person", "service", "unknown"] : undefined;
+  };
+  assertOrListOnlyNarrows(effective(base), effective(merged), "authorization.principalClasses", origin);
 }
 
 function assertRowAccessOnlyNarrows(base: JsonObject, merged: JsonObject, origin: string): void {
@@ -1163,7 +1168,7 @@ function assertRecordActionsOnlyNarrow(
       `${path}.principals`,
       origin,
     );
-    assertOrListOnlyNarrows(beforeAction.reads, afterAction.reads, `${path}.reads`, origin);
+    assertOrListOnlyNarrows(beforeAction.reads ?? [], afterAction.reads ?? [], `${path}.reads`, origin);
     // "exclusive" is the deadlock-safe mode and the default, so a later layer
     // moving an action to "shared" relaxes a concurrency guarantee the first
     // author relied on — on an effect whose SQL that author owns and this

@@ -291,6 +291,7 @@ export function buildAuthorization(
       }
       const actions = compileRecordActions(
         coreEntity, recordPermissions.actions, allAuthoringFields, recordPermissions.field,
+        new Set(profiles.flatMap((profile) => (profile.fields ?? []).map((field) => field.key))),
       );
       if (
         field.defaultValue !== undefined &&
@@ -456,6 +457,7 @@ function compileRecordActions(
   authored: import("../types/common.js").RowAccessRecordActionConfig[] | undefined,
   fields: ReadonlyArray<Record<string, unknown>>,
   aclField: string,
+  profileFields: ReadonlySet<string>,
 ): import("../types/common.js").RowAccessRecordActionConfig[] {
   if (!authored || authored.length === 0) return [];
   const seen = new Set<string>();
@@ -486,7 +488,7 @@ function compileRecordActions(
           `and an undeclared principal kind is refused at write time.`,
       );
     }
-    const reads = compileRecordActionReads(coreEntity, action, fields, aclField);
+    const reads = compileRecordActionReads(coreEntity, action, fields, aclField, profileFields);
     // The lock the check takes, always emitted. Leaving it implicit would put
     // the deadlock-safe default in three places (schema, compiler, migration)
     // and make a changed default silently rewrite deployed SQL; carrying it
@@ -555,6 +557,7 @@ function compileRecordActionReads(
   action: import("../types/common.js").RowAccessRecordActionConfig,
   fields: ReadonlyArray<Record<string, unknown>>,
   aclField: string,
+  profileFields: ReadonlySet<string>,
 ): string[] {
   const reads = [...new Set(action.reads ?? [])].sort();
   const refuse = (key: string, reason: string): never => {
@@ -566,6 +569,7 @@ function compileRecordActionReads(
   };
   for (const key of reads) {
     if (key === aclField) refuse(key, "it is the record ACL itself");
+    if (profileFields.has(key)) refuse(key, "it belongs to a profile with its own authorization");
     const field = fields.find((candidate) => candidate.key === key);
     if (!field) refuse(key, "it is not a field of this entity");
     if (!(field!.persisted as { column?: string } | undefined)?.column) {

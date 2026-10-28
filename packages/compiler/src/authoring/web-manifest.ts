@@ -1498,6 +1498,16 @@ function projectStandalone(
   // own. Both resolve across all catalogs, so both are settled here, before
   // the first one is projected.
   assertRelatedWebEntitiesResolve(catalogs.map((document) => ({ origin: document.plugin, document })));
+  // Validate extension links against their actual owner and destination using
+  // exactly the same route, binding, read and realm rules as authored links.
+  const extendedCatalogs = structuredClone(catalogs);
+  for (const catalog of extendedCatalogs) for (const [name, extension] of Object.entries(catalog.interfaces.web?.entityExtensions ?? {})) {
+    const owner = extendedCatalogs.find((candidate) => candidate.interfaces.web?.entities?.[name]);
+    const entity = owner?.interfaces.web?.entities?.[name];
+    if (!entity) throw new Error(`Operation-backed entity extension "${name}" from "${catalog.plugin}" has no target entity.`);
+    entity.related = [...(entity.related ?? []), ...extension.related];
+  }
+  assertRelatedWebEntitiesResolve(extendedCatalogs.map((document) => ({ origin: document.plugin, document })));
   // A reference picker may point at a core entity or at an operation-backed
   // web entity any catalog declares — the two are the same thing to the host,
   // and an operation-backed one is how a provider surface exposes its own

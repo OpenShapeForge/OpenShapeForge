@@ -255,6 +255,16 @@ describe("named record actions", () => {
     }
   });
 
+  test("record actions cannot disclose profile fields even when they are stored", () => {
+    const subject = withActions([{ name: "start", principals: ["integration"], reads: ["privateProfile"] }]);
+    const profile = { schemaVersion: 2, kind: "entityProfile", profile: "private", entity: "ProtectedRecord", extends: "ProtectedRecord", language: "en",
+      fields: [storedField("privateProfile")], authorization: { roles: { read: ["Private.Read"] } } } as never;
+    expect(() => buildAuthorization(subject, [profile], [])).toThrow(/profile with its own authorization/);
+    subject.fields.push(storedField("publicCore") as never);
+    subject.authorization!.rowAccess!.recordPermissions!.actions![0]!.reads = ["publicCore"];
+    expect(() => buildAuthorization(subject, [profile], [])).not.toThrow();
+  });
+
   test("refuses a seeded ACL that grants an undeclared action or principal kind", () => {
     const integration = "11111111-1111-4111-8111-111111111111";
     expect(() => buildAuthorization(withActions(

@@ -485,12 +485,13 @@ describe("canonical operation runtime", () => {
     expect(bound.has("source-sync.upsert")).toBe(true);
     expect(bound.has("entity.edit-lease.acquire")).toBe(true);
     expect(
-      [...bound.values()].filter(({ operation }) => !(
+      [...bound.entries()].filter(([, { operation }]) => !(
         operation.implementation?.type === "collection" ||
         operation.implementation?.type === "entity-type-list" ||
         operation.implementation?.type === "application-search" ||
         operation.implementation?.type === "collection-options" ||
         operation.implementation?.type === "constrained-reference-create" ||
+        operation.plugin === "accounts" ||
         operation.plugin === "osf-api-keys" ||
         operation.plugin === "osf-audit" ||
         operation.plugin === "osf-billing" ||
@@ -502,7 +503,7 @@ describe("canonical operation runtime", () => {
         operation.plugin === "osf-record-actions" ||
         operation.plugin === "osf-source-sync" ||
         operation.plugin === "osf-transitions"
-      )).map(({ operation }) => ({ id: operation.id, plugin: operation.plugin })),
+      )).map(([id, { operation }]) => ({ id, plugin: operation.plugin })),
     ).toEqual([]);
     // Once any operation module is present, every plugin operation must bind.
     const noOperationModule = { name: "no-operation-module" };

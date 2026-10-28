@@ -151,10 +151,46 @@ from the resolver, grants exactly the declared column `SELECT` and the ACL
 column `UPDATE`, then reads `pg_class.relacl` and `pg_attribute.attacl` back
 and fails if the result is not that exact set. `TRUNCATE` is why — it ignores
 row security completely, so no policy bounds it — and a grant made by a second
-grantor survives the owner's revoke. Each entity's grants and its four policies
-are applied in one transaction: the migration lock is a *session* advisory lock,
-so without that a concurrent session could observe the table between
-`DROP POLICY` and `CREATE POLICY`.
+grantor survives the owner's revoke. `revoke all` does reach column grants, so
+an entity that stops reading a field loses that column `SELECT` on the next
+migrate.
+
+`PUBLIC` is a grantee like any other, and the resolver holds everything
+`PUBLIC` holds — a `revoke` addressed to the resolver does not reach it. So the
+step reads `PUBLIC`'s privileges from the same two ACL columns, with
+`acldefault` standing in where the column is `NULL` (which means the built-in
+default, not "nothing"), and **refuses the table** before its first grant if
+`PUBLIC` holds anything on it. It does not revoke the grant: a `PUBLIC` grant
+belongs to every role in the cluster, so a migration silently revoking it would
+be taking a privilege away from whoever it was made for. The error names the
+`revoke … from public` an administrator runs if the grant was a mistake.
+Reaching the resolver's inherited `PUBLIC` privileges needs an explicit
+`PUBLIC` grant on an entity table *and* the ability to execute as the resolver,
+so this closes a gap between the claimed and the actual privilege set rather
+than an externally reachable hole.
+
+The per-entity loop only visits the entities the manifest declares today, which
+leaves nothing behind for an entity whose projection changed but does leave the
+grants and the four policies of an entity the new manifest **dropped** — or of
+one whose last action was dropped, which is the same thing one step earlier.
+The step therefore also takes back the resolver's grants on every table it
+still reaches that no declared entity names, and drops the record-action
+policies there by the name the catalog holds, so a renamed table is covered
+too. Only the resolver's own grants: another grantee's privileges on the same
+table, and `PUBLIC`'s, are left exactly as the deployment set them. Schema
+`USAGE` stays granted — it is not a table privilege and opens nothing on a
+table the resolver holds nothing on.
+
+The whole step is one transaction: the grants, the four policies per entity,
+that cleanup and both function bodies. The migration lock is a *session*
+advisory lock, so without it a concurrent session could observe the table
+between `DROP POLICY` and `CREATE POLICY`, or — across entities — the new
+grants under the *old* function bodies, whose branches read columns the new
+grant set no longer covers. The cost is that the `ACCESS EXCLUSIVE` locks
+`CREATE POLICY` takes are held until the step commits, so a long-running reader
+of one entity table delays the DDL on all of them and a session holding row
+locks across two can deadlock with the step. Either way the step rolls back and
+the deployment stays on the grants and policies it had.
 
 The role contract covers attributes and membership too. No declared role may be
 `SUPERUSER`, `BYPASSRLS`, `CREATEROLE`, `CREATEDB` or `REPLICATION`; a definer

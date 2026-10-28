@@ -31,14 +31,39 @@ export const TRUSTED_CONTEXT_MAX_AGE_MS = 5 * 60 * 1000;
 export const TRUSTED_CONTEXT_MAX_CLOCK_SKEW_MS = 30 * 1000;
 
 /**
- * Payload version. v3 includes the PRINCIPAL CLASS the signer verified, so a
- * consumer can require a human without taking a caller's word for it; v2
- * (groups, no principal class) and v1 (neither) are no longer accepted —
- * every producer in the workspace ships from the same package version, and a
- * tier that has not been redeployed reads as unauthenticated rather than as
- * an unclassified principal.
+ * The payload version this package SIGNS. v3 includes the PRINCIPAL CLASS the
+ * signer verified, so a consumer can require a human without taking a
+ * caller's word for it.
  */
 const PAYLOAD_VERSION = "v3";
+
+/**
+ * The payload versions a verifier still ACCEPTS, newest first.
+ *
+ * v2 is here because the tiers that produce bundles release separately from
+ * this package: a host's web tier, its MCP app and its operational scripts
+ * sign v2 until they are redeployed. Rejecting v2 outright does not fail
+ * those hops closed in some harmless way — it reads every one of them as
+ * UNAUTHENTICATED, so ordinary work stops across a deployment mid-upgrade.
+ *
+ * What v2 can never do is carry a principal class. The class is not in its
+ * signed payload, so a v2 bundle says who the identity is and NOTHING about
+ * how it was authenticated; {@link verifyBundle} therefore discards the
+ * principal-class header on a v2 match rather than reading it off the wire.
+ * Honouring that header under a v2 signature would be the whole control
+ * inverted: anyone able to replay a captured v2 bundle could append
+ * `x-user-principal-kind: person` to it and reach a surface reserved for a
+ * verified human. Absence is not a permissive reading anywhere — a consumer
+ * that needs a person (credential management, delegation) refuses an
+ * unclassified bundle — so a v2 hop keeps doing the ordinary work it always
+ * did and reaches none of those surfaces until its producer signs v3.
+ *
+ * v1 (no groups, no class) stays rejected: groups ARE authorization input,
+ * and a bundle that leaves them outside the signature can have them swapped.
+ */
+const ACCEPTED_PAYLOAD_VERSIONS = ["v3", "v2"] as const;
+
+type AcceptedPayloadVersion = (typeof ACCEPTED_PAYLOAD_VERSIONS)[number];
 
 /**
  * What the SIGNER established about the principal behind the bundle, not what
@@ -87,26 +112,38 @@ function joinDelimited(values: readonly string[] | null | undefined): string {
     .join(",");
 }
 
-function payloadString(input: {
+type PayloadFields = {
   timestamp: string;
   tenantId: string | null;
   userId: string | null;
   roles: string;
   groups: string;
   principalKind: TrustedPrincipalKind | undefined;
-}) {
-  // Field count is fixed and every field is separated by the same newline, so
-  // a value that itself contains one adds a segment and can never make two
-  // different header sets produce the same payload.
-  return [
-    PAYLOAD_VERSION,
+};
+
+/**
+ * The exact bytes a given version signs.
+ *
+ * Field count is fixed PER VERSION and the version is the first field, so a
+ * value that itself contains a newline adds a segment and can never make two
+ * different header sets — or two different versions — produce the same
+ * payload. That last part is what keeps accepting two versions safe: a v2
+ * payload is six fields beginning "v2" and a v3 payload is seven beginning
+ * "v3", so no v2 signature is ever also a valid v3 signature.
+ */
+function payloadString(version: AcceptedPayloadVersion, input: PayloadFields) {
+  const fields = [
+    version,
     input.timestamp,
     input.tenantId ?? "",
     input.userId ?? "",
     input.roles,
     input.groups,
-    input.principalKind ?? "",
-  ].join("\n");
+  ];
+  // v2 predates the principal class and does not sign one. See
+  // ACCEPTED_PAYLOAD_VERSIONS for why it is not appended as an empty field.
+  if (version === "v3") fields.push(input.principalKind ?? "");
+  return fields.join("\n");
 }
 
 function sign(secret: string, payload: string) {
@@ -175,46 +212,65 @@ export function applyTrustedContextHeaders(
   headers.set(TRUSTED_CONTEXT_HEADERS.timestamp, timestamp);
   headers.set(
     TRUSTED_CONTEXT_HEADERS.signature,
-    sign(secret, payloadString({ timestamp, tenantId, userId, roles, groups, principalKind })),
+    sign(secret, payloadString(PAYLOAD_VERSION, {
+      timestamp, tenantId, userId, roles, groups, principalKind,
+    })),
   );
 }
 
-function verifySignature(
+/** A bundle whose signature verified, and the version that verified it. */
+export type VerifiedTrustedContext = {
+  identity: IdentityInput;
+  version: AcceptedPayloadVersion;
+};
+
+/** The same identity with no principal class, for a version that signs none. */
+function unclassified(identity: IdentityInput): IdentityInput {
+  const { principalKind: _discarded, ...rest } = identity;
+  return rest;
+}
+
+function verifyBundle(
   headers: ReadonlyHeadersLike,
   identity: IdentityInput,
   options: ReadTrustedContextOptions,
-): boolean {
+): VerifiedTrustedContext | null {
   const secret = options.secret ?? null;
-  if (!secret) return false;
+  if (!secret) return null;
 
   const timestamp = headers.get(TRUSTED_CONTEXT_HEADERS.timestamp);
   const signature = headers.get(TRUSTED_CONTEXT_HEADERS.signature);
-  if (!timestamp || !signature) return false;
+  if (!timestamp || !signature) return null;
 
   const parsedTimestamp = Number.parseInt(timestamp, 10);
-  if (!Number.isFinite(parsedTimestamp)) return false;
+  if (!Number.isFinite(parsedTimestamp)) return null;
 
   const nowMs = options.nowMs ?? Date.now();
   const ageMs = nowMs - parsedTimestamp;
   // Reject stale bundles (older than the replay window) and meaningfully
   // future-dated bundles (beyond a small clock-skew allowance). The window is
   // deliberately asymmetric — see TRUSTED_CONTEXT_MAX_CLOCK_SKEW_MS.
-  if (ageMs > TRUSTED_CONTEXT_MAX_AGE_MS) return false;
-  if (ageMs < -TRUSTED_CONTEXT_MAX_CLOCK_SKEW_MS) return false;
+  if (ageMs > TRUSTED_CONTEXT_MAX_AGE_MS) return null;
+  if (ageMs < -TRUSTED_CONTEXT_MAX_CLOCK_SKEW_MS) return null;
 
-  const expected = sign(
-    secret,
-    payloadString({
-      timestamp,
-      tenantId: identity.tenantId,
-      userId: identity.userId,
-      roles: joinDelimited(identity.roles),
-      groups: joinDelimited(identity.groups),
-      principalKind: identity.principalKind,
-    }),
-  );
+  const fields: PayloadFields = {
+    timestamp,
+    tenantId: identity.tenantId,
+    userId: identity.userId,
+    roles: joinDelimited(identity.roles),
+    groups: joinDelimited(identity.groups),
+    principalKind: identity.principalKind,
+  };
 
-  return signaturesMatch(signature, expected);
+  for (const version of ACCEPTED_PAYLOAD_VERSIONS) {
+    if (!signaturesMatch(signature, sign(secret, payloadString(version, fields)))) continue;
+    // The class survives only on the version that signs it. Everywhere else
+    // it is dropped, not defaulted — see ACCEPTED_PAYLOAD_VERSIONS.
+    return version === "v3"
+      ? { identity, version }
+      : { identity: unclassified(identity), version };
+  }
+  return null;
 }
 
 function readIdentityHeaders(headers: ReadonlyHeadersLike): IdentityInput {
@@ -243,6 +299,11 @@ const EMPTY_IDENTITY: IdentityInput = {
  * signature. Returns an empty identity when verification fails — callers fail
  * closed by checking for null.
  *
+ * A bundle signed by a producer that predates the principal class (payload
+ * v2) verifies here and comes back UNCLASSIFIED — the identity it names,
+ * never a principal class, whatever the headers claim. See
+ * ACCEPTED_PAYLOAD_VERSIONS.
+ *
  * `allowUnsigned: true` returns the headers as-is, but ONLY when no secret is
  * configured. This is for unit-test fixtures and the local dev path where
  * OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET is intentionally unset. Everything
@@ -261,7 +322,21 @@ export function readTrustedContext(
     return identity;
   }
 
-  return verifySignature(headers, identity, options) ? identity : EMPTY_IDENTITY;
+  return verifyBundle(headers, identity, options)?.identity ?? EMPTY_IDENTITY;
+}
+
+/**
+ * The verified bundle and the payload version that verified it, or null.
+ *
+ * The version is reported because it is the difference between "this hop
+ * authenticated a person" and "this hop names an identity": a v2 producer can
+ * only ever be the second, however the bundle is signed.
+ */
+export function verifyTrustedContext(
+  headers: ReadonlyHeadersLike,
+  options: ReadTrustedContextOptions = {},
+): VerifiedTrustedContext | null {
+  return verifyBundle(headers, readIdentityHeaders(headers), options);
 }
 
 /** True iff the inbound headers carry a valid signature over the identity they claim. */
@@ -269,5 +344,5 @@ export function hasValidTrustedContextSignature(
   headers: ReadonlyHeadersLike,
   options: ReadTrustedContextOptions = {},
 ): boolean {
-  return verifySignature(headers, readIdentityHeaders(headers), options);
+  return verifyBundle(headers, readIdentityHeaders(headers), options) !== null;
 }

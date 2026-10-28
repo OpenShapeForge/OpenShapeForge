@@ -71,7 +71,11 @@ export type CeilingSession = {
  *
  * `trusted-context` is the deployment's OWN in-mesh hop: HMAC-signed with
  * `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` inside a ±5-minute window, and
- * since payload v3 the signer's verdict travels INSIDE that signature. It is
+ * since payload v3 the signer's verdict travels INSIDE that signature. A
+ * producer still signing the older payload v2 therefore reaches this surface
+ * NEVER: its bundle is accepted for ordinary work (packages/auth,
+ * ACCEPTED_PAYLOAD_VERSIONS) but carries no class, and absence is refused
+ * here. Redeploying that producer is what admits it, not relaxing this. It is
  * what apps/web sends when it holds no forwardable access token, and apps/web
  * signs "person" only for a session it established through an interactive
  * login (it holds that login's id token). Every other producer of a bundle —

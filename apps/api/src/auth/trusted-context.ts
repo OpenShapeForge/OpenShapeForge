@@ -158,7 +158,10 @@ export function readTrustedSessionContext(
   // The principal class comes from the SIGNED payload or not at all: it is
   // inside the HMAC (packages/auth, payload v3), so a caller cannot assert it
   // and a hop that authenticated nobody cannot borrow it. An unsigned or
-  // tampered bundle reads as the empty identity, which carries none either.
+  // tampered bundle reads as the empty identity, which carries none either,
+  // and a bundle from a producer that predates the class (payload v2, still
+  // accepted so a mid-upgrade deployment keeps working) reads as the identity
+  // it names with NO class — never as a person, whatever its headers claim.
   return {
     tenantId: base.tenantId,
     userId: base.userId,

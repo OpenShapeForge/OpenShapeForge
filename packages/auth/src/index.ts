@@ -35,6 +35,7 @@ export {
   applyTrustedContextHeaders,
   hasValidTrustedContextSignature,
   readTrustedContext,
+  verifyTrustedContext,
 } from "./trusted-context.js";
 
 export type {
@@ -42,6 +43,7 @@ export type {
   ReadTrustedContextOptions,
   TrustedContextIdentity,
   TrustedPrincipalKind,
+  VerifiedTrustedContext,
 } from "./trusted-context.js";
 
 export {

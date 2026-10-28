@@ -881,9 +881,9 @@ async function assertRowSecurityBounds(
  * ownership alike with `has_privs_of_role`, so a member of the resolver holds
  * the column grants this step is about to make AND owns the two SECURITY
  * DEFINER functions it is about to create: with `CREATE` on schema `app` it
- * can `create or replace app.record_action_allows` and decide every record
- * action itself. The fence bounds its writes to entity tables; it does not
- * bound that. So the contract is that the only roles that can act as the
+ * can alter or drop those functions. If it separately acquires CREATE on app,
+ * it can also replace their bodies. The fence bounds its writes to entity
+ * tables; it does not bound function ownership. So the contract is that the only roles that can act as the
  * resolver are the migrate identity itself and this database's owner, and the
  * only membership the migrate identity leans on is a direct grant carrying
  * INHERIT and SET. Both halves are reachability questions: a helper role
@@ -972,7 +972,7 @@ async function assertResolverMembers(db: OpenShapeForgeDatabase): Promise<void> 
         unintended.map((row) => `${explainDefinerMember(row, identity)}. `).join("") +
         "Such a role inherits the resolver's column grants, is matched by the policies " +
         "written TO it, and owns the two SECURITY DEFINER functions this step installs — " +
-        "so it can replace their bodies. " +
+        "so it can alter or drop them, and replace their bodies if separately granted schema CREATE. " +
         (revokes.length === 1
           ? "Run as an administrator: "
           : `Each statement below cuts one of the ${revokes.length} routes above; run ALL of ` +
@@ -1693,5 +1693,11 @@ ${renderRecordActionProjection(entities)}
   // CREATE is needed only for transferring ownership. Keeping it would let a
   // later resolver member replace its own security-definer functions.
   await sql`revoke create on schema app from ${sql.id(RESOLVER_ROLE)}`.execute(db);
+  const remainingCreate = await sql<{ permitted: boolean }>`
+    select has_schema_privilege(${RESOLVER_ROLE}, 'app', 'CREATE') as permitted
+  `.execute(db);
+  if (remainingCreate.rows[0]?.permitted !== false) {
+    throw new Error(`The record-action resolver ${RESOLVER_ROLE} still has CREATE on schema app. Revoke the remaining grant, including any grant to PUBLIC, before retrying.`);
+  }
   return [...entities];
 }

@@ -214,8 +214,8 @@ test("a superuser caller reports the same deviation rather than admitting every 
 /**
  * Why the refusal is not pedantic. With the membership in place the helper
  * holds the resolver's privileges, which includes ownership of the two
- * SECURITY DEFINER functions and `CREATE` on schema `app` — so it replaces
- * the authorization body with `select true` and every record action is
+ * SECURITY DEFINER functions. A separate erroneous schema CREATE grant
+ * lets it replace the authorization body with `select true` and every record action is
  * allowed. The gate above is what stands between a deployment and this.
  */
 test("a member of the resolver can replace the lookup it owns", async () => {
@@ -225,8 +225,9 @@ test("a member of the resolver can replace the lookup it owns", async () => {
         select pg_has_role(${helperRole}, ${RESOLVER_ROLE}, 'USAGE') as owns,
           has_schema_privilege(${helperRole}, 'app', 'CREATE') as creates
       `.execute(conn);
-      expect(reach.rows[0]).toEqual({ owns: true, creates: true });
-
+      expect(reach.rows[0]).toEqual({ owns: true, creates: false });
+      // Simulate a second bad operator grant, independently of membership.
+      await sql.raw(`grant create on schema app to ${helperRole}`).execute(conn);
       await sql.raw(`set role ${helperRole}`).execute(conn);
       const acting = await sql<{ user: string }>`select current_user as "user"`.execute(conn);
       expect(acting.rows[0]?.user).toBe(helperRole);
@@ -240,6 +241,7 @@ test("a member of the resolver can replace the lookup it owns", async () => {
       const asResolver = await sql<{ user: string }>`select current_user as "user"`.execute(conn);
       expect(asResolver.rows[0]?.user).toBe(RESOLVER_ROLE);
       await sql`reset role`.execute(conn);
+      await sql.raw(`revoke create on schema app from ${helperRole}`).execute(conn);
       const owner = await sql<{ owner: string; replaced: boolean }>`
         select r.rolname as owner, p.prosrc like '%select true%' as replaced
           from pg_proc p join pg_roles r on r.oid = p.proowner
@@ -403,6 +405,9 @@ test("a role that reaches the database owner replaces the lookup through it", as
       `.execute(conn));
     expect(direct.rows[0]?.present).toBe(false);
 
+    // A separate erroneous CREATE grant makes function replacement possible.
+    await migrateOnOwnedDatabase.db.connection().execute((conn) =>
+      sql.raw(`grant create on schema app to ${RESOLVER_ROLE}`).execute(conn));
     // The attack, on its own connection as the attacker.
     await indirectOnOwnedDatabase.db.connection().execute(async (conn) => {
       await sql.raw(`set role ${RESOLVER_ROLE}`).execute(conn);
@@ -443,6 +448,8 @@ test("a role that reaches the database owner replaces the lookup through it", as
       expect(failure?.message).toContain(`revoke ${ownerRole} from ${indirectRole};`);
     });
   } finally {
+    await migrateOnOwnedDatabase.db.connection().execute((conn) =>
+      sql.raw(`revoke create on schema app from ${RESOLVER_ROLE}`).execute(conn));
     await server.unsafe(`revoke ${ownerRole} from ${indirectRole}`);
     await server.unsafe(`revoke ${RESOLVER_ROLE} from ${ownerRole}`);
   }

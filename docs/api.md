@@ -697,6 +697,13 @@ and nothing else, so:
   is spelled in the headers. The reader builds the session from the bundle's
   tenant, user, roles and groups and nothing else.
 
+A runtime module reads the same classification through
+`platform.principals` ([plugins.md](plugins.md)): `classOf(session)` answers
+`person`, `application`, `service` or `unknown`, and `application(session)`
+answers the verified integration id or `undefined`. Both refuse any session
+object but the live one this invocation was handed, and neither authorizes
+anything — a module that needs a permission asks `platform.records`.
+
 **3. Trusted-context HMAC headers (v2)** — the internal service-to-service
 path (`packages/auth/src/trusted-context.ts`). Header names:
 

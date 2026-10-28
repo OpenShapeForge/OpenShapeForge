@@ -567,6 +567,22 @@ also catches the module that never imported at all. The contract, the
 composition rule, the `EXECUTION_NOT_PERMITTED` refusal and the limits are in
 [execution-policies.md](execution-policies.md).
 
+`platform.principals` is how a module learns **who** is calling it, as the
+host classified it: `classOf(session)` answers `person`, `application`,
+`service` or `unknown`, and `application(session)` answers
+`{ integrationId }` for a resolved API key and `undefined` for every other
+carrier ([api.md](api.md) lists which carriers produce which). A module acting
+for an external application needs that identity for three things authorization
+does not give it — the namespace its idempotency keys live in, the provenance
+it stores on the rows it writes, and the actor it appends an event for — and
+every one of those must survive a hostile caller, so **none of them may come
+from request input**: not a header, not a path parameter, not a key id a client
+happens to know. Two limits make the service safe to hand to plugin code. It
+answers for the live session this invocation was handed and refuses any other
+object, so a module cannot build a session naming an integration of its choice;
+and it authorizes nothing — the answer is an identity, never a permission. A
+module that needs to know whether it MAY act asks `platform.records`.
+
 `platform.webhookSecrets`, when the host provides it, is how a plugin accepts
 signed inbound webhooks without reading the signing secret: `seal` encrypts a
 credential's secret under the host keyring, and `verify` /

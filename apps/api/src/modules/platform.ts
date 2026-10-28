@@ -59,6 +59,7 @@ import { operationErrorOf } from "@openshapeforge/operations";
 import { ArtifactStorageRuntime } from "./artifact-storage.js";
 import { runtimeSettings } from "./settings.js";
 import { RecordAccessRuntime } from "./record-access.js";
+import { PrincipalRuntime } from "./principals.js";
 import { createWebhookSecretServices } from "./webhook-secrets.js";
 import { ReadProgressRuntime, type ReadProgressDefinition } from "./read-progress.js";
 import type { RuntimeReadProgress } from "@openshapeforge/plugin-runtime";
@@ -401,6 +402,9 @@ export class ModulePlatformRuntime {
     this.#readBarriers = sharedReadBarriers(db);
     documentPlatformRuntimes.set(db, this);
     this.#capabilityOperations = options.capabilityOperations;
+    const principals = new PrincipalRuntime({
+      acceptsSession: (session) => this.#acceptsScopedSession(session),
+    });
     const records = new RecordAccessRuntime({
       acceptsSession: (session) => this.#acceptsScopedSession(session),
       currentTransaction: (session) => this.#activeTransaction(session, "Record authorization transaction"),
@@ -445,6 +449,7 @@ export class ModulePlatformRuntime {
         },
       }),
       records: records.services,
+      principals: principals.services,
       settings: runtimeSettings,
       artifacts: this.#artifactStorage.services,
       durableOperations: {
@@ -707,6 +712,7 @@ export class ModulePlatformRuntime {
     Object.defineProperty(this.services, "artifacts", { writable: false, configurable: false });
     Object.defineProperty(this.services, "settings", { writable: false, configurable: false });
     Object.defineProperty(this.services, "records", { writable: false, configurable: false });
+    Object.defineProperty(this.services, "principals", { writable: false, configurable: false });
   }
 
   registerArtifactStorage(modules: readonly RuntimeModule[]): void {

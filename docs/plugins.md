@@ -633,6 +633,14 @@ verified identity — `revoke set on parameter` records nothing for a placeholde
 GUC, verified on PostgreSQL 17.11, which is also why
 `db/migrations/record-actions.ts` refuses to depend on `app.bypass_rls`.
 
+The credential fence ([authoring.md](authoring.md)) sits on the same side of
+that boundary: `platform.records` asks `app.record_action_principal_live()`
+before the lookup, so every route core offers a module is fenced, and raw SQL
+that calls `app.record_action_allows` itself is not. What a module reaches that
+way is bounded as below — another declared projection of the same shape — and
+widening it to another live credential of the same tenant, which is the most
+the placeholders admit, reaches no further.
+
 What the database enforces regardless, for core and module alike, is the
 resolver role's **column** grants: only the columns an action declared under
 `reads` are selectable at all, the ACL column and the tenant column are refused

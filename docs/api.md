@@ -684,6 +684,19 @@ and nothing else, so:
 
 - the grant follows the INTEGRATION, not the credential. Rotating or revoking
   one key does not move it; deleting the integration ends it.
+- which CREDENTIAL resolved the session is carried too, as
+  `session.appPrincipal.credentialId` (`platform.api_keys.id`, projected into
+  `app.app_credential_id`). It is not what a grant names — it is what the
+  action check re-reads. Because the grant survives rotation, the integration
+  id alone cannot tell a live key from one revoked a second ago, so every
+  record-action check verifies and locks that credential row and its
+  integration inside the action's own transaction: unrevoked, unexpired
+  against the wall clock, integration `active`, and the two naming each other.
+  A revoke or a disable therefore either waits for an effect already in flight
+  or is read by one that starts after it, and a credential withdrawn before
+  the action authorizes nothing. No other principal class is affected — none
+  of them carries an API-key credential to withdraw. The identity is the row's
+  primary key and never the secret, and only the resolver writes it.
 - a direct bearer token of the same integration's Keycloak service account is
   classified `service`, not `application`, and satisfies no record action.
   Mapping `azp` back to an integration row would mean trusting a claim-to-row

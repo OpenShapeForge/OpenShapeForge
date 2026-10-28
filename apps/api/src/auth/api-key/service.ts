@@ -331,7 +331,7 @@ export async function createIntegration(
     // return rather than throw. When called inside an Operation, the outer
     // transaction still holds this lock until the caller unwinds.
     if (!locked || locked.status !== "pending") {
-      return { fenced: locked?.status ?? "absent" } as const;
+      return { fenced: locked?.status ?? "absent", rowExists: Boolean(locked) } as const;
     }
 
     const updated = await sql<{
@@ -357,7 +357,7 @@ export async function createIntegration(
     // Unreachable while the lock above is held — nothing can change the status
     // between the two statements — but the fence is what decides, not the
     // lock, so its verdict is handled rather than assumed.
-    if (!row) return { fenced: "absent" } as const;
+    if (!row) return { fenced: "absent", rowExists: true } as const;
 
     await insertKeyRow(trx, {
       keyId,
@@ -380,11 +380,10 @@ export async function createIntegration(
     // that it must not, THEN try to delete it: the delete is best effort, and
     // what makes a failed one recoverable is that a row still names the
     // client. An already disabled row is itself that durable record.
-    // A disabled row is already durable and names the realm client. Rewriting
-    // it on an independent connection here would wait on our own outer
-    // Operation transaction's row lock, which cannot finish until we return.
-    // The reconciler already sweeps disabled rows with no client secret.
-    if (activated.fenced !== "disabled") {
+    // An existing row already names the client; rewriting it independently
+    // would wait on the outer Operation transaction's own row lock. The
+    // reconciler sweeps non-pending rows lacking a client secret.
+    if (!activated.rowExists) {
       await recordAbandonedAttempt(deps, session, {
         integrationId,
         keycloakClientId,

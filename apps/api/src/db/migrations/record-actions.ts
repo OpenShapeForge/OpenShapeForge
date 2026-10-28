@@ -169,6 +169,29 @@ import { WORKER_ROLE } from "./worker-role.js";
  * happened to visit. `revokeStaleRecordActionGrants` takes those grants back
  * and drops those policies, addressing the resolver and nothing else.
  *
+ * AND A POLICY IS NOT THE RESOLVER'S BECAUSE IT NAMES THE RESOLVER
+ * ----------------------------------------------------------------
+ * Both paths change policies by NAME — the per-entity loop drops and recreates
+ * the four, the cleanup drops them — and `pg_policy.polroles` is a list. Every
+ * policy this module creates is `to <resolver>` alone, but a deployment that
+ * conditionally added a second role to one of them (`alter policy ... to
+ * <resolver>, <other>`), or that created a policy of its own under one of
+ * these names, holds another role's row-level access in that object. A `drop
+ * policy` takes that access away; a `create policy` under the same name
+ * afterwards is worse still, because the replacement names only the resolver
+ * and the catalog goes on showing a policy by that name.
+ *
+ * So neither path trusts the name: a policy is this module's only if its `TO`
+ * list is the resolver and nothing else (`ownedByResolverAlone`), and anything
+ * else under one of these names fails the step with the `alter policy` an
+ * administrator runs to take the resolver out of the list. Fail closed, like
+ * the PUBLIC gate above and for the same reason: which roles still need the
+ * policy is a decision about the deployment's access, not a detail a migration
+ * may settle on its own. A policy that names no role at all is `{0}` in
+ * `polroles` and so applies to every role in the cluster, which is the same
+ * refusal. The resolver keeps a stale privilege until that is resolved, and
+ * the lookup still has no branch that can use it.
+ *
  * ONE TRANSACTION
  * ---------------
  * The whole step is one transaction: the grants, the four policies per entity,
@@ -248,10 +271,15 @@ const UUID_LITERAL =
  * collapsed into one would leave the table with whichever was created last.
  */
 const LONGEST_POLICY_SUFFIX = "_record_action_delete_fence";
+/** The four policy suffixes this module creates per entity table. */
+const POLICY_SUFFIXES = ["read", "lock", "fence", "delete_fence"] as const;
 /**
  * A policy name this module creates. The stale-grant cleanup drops policies by
  * the name the catalog holds rather than by one derived from the current table
  * name, so it needs to recognise its own.
+ *
+ * The NAME alone does not make a policy this module's to drop or replace: see
+ * {@link ownedByResolverAlone}.
  */
 const OWNED_POLICY = /_record_action_(read|lock|fence|delete_fence)$/;
 
@@ -793,42 +821,196 @@ async function assertResolverPrivileges(
 }
 
 /**
+ * What {@link POLICY_ROLE_NAMES} renders for `polroles` entry `0`. PostgreSQL
+ * has no `pg_roles` row for PUBLIC, so the OID is translated here rather than
+ * joined; it is never a role name a deployment can also have, because `public`
+ * is a reserved role name.
+ */
+const PUBLIC_GRANTEE = "PUBLIC";
+
+/**
+ * A policy as the catalog holds it: its name and every role its `TO` list
+ * names. A policy that names no role carries the single name `PUBLIC`, which
+ * is what `polroles = {0}` means — it applies to every role in the cluster.
+ */
+type CatalogPolicy = { name: string; roles: string[] };
+
+/**
+ * The role names of the policy aliased `p` in the surrounding query.
+ *
+ * `polroles` holds role OIDs, `0` standing for "no role named", which RLS
+ * reads as every role. A role referenced by a policy cannot be dropped, so the
+ * join finds a name for every other entry; the OID is rendered as a last
+ * resort rather than silently dropping a participant from the list.
+ */
+const POLICY_ROLE_NAMES = `
+  coalesce((select array_agg(named.name order by named.name)
+              from (select case when pr.oid = 0 then ${literal(PUBLIC_GRANTEE)}
+                                else coalesce(r.rolname::text, pr.oid::text) end as name
+                      from unnest(p.polroles) pr(oid)
+                      left join pg_roles r on r.oid = pr.oid) named), '{}'::text[])`;
+
+/**
+ * A policy this module may replace or drop: one whose `TO` list is the
+ * resolver and nothing else.
+ *
+ * Every policy this module creates is `to <resolver>` alone, so that is the
+ * only shape it can prove is its own. A policy that names a second role — or
+ * that names no role, and so applies to all of them — carries another role's
+ * row-level access, and `drop policy` would take that access away without the
+ * deployment ever asking for it. `create policy` under the same name afterwards
+ * would be worse: the replacement names only the resolver, so the other role
+ * silently loses the policy while the catalog still shows one by that name.
+ */
+function ownedByResolverAlone(policy: CatalogPolicy): boolean {
+  return policy.roles.length === 1 && policy.roles[0] === RESOLVER_ROLE;
+}
+
+/**
+ * Refuse a policy under one of this module's four names that is not the
+ * resolver's alone, naming the roles that hold it and the statements that
+ * resolve it.
+ *
+ * Fail closed rather than guess: whether the other role still needs the
+ * predicate, and whether the resolver should be in that list at all, is a
+ * decision about the deployment's access that a migration cannot make. The
+ * step is one transaction, so nothing it had already changed survives this.
+ */
+function refuseSharedPolicies(
+  shared: ReadonlyArray<{ schema: string; table: string; policy: CatalogPolicy }>,
+): never {
+  const described = shared.map(({ schema, table, policy }) => {
+    const to = policy.roles.length === 0
+      // RLS applies a policy with an empty TO list to no role at all, which
+      // the catalog does not produce; reported rather than assumed away.
+      ? "no role at all"
+      : policy.roles.includes(PUBLIC_GRANTEE)
+        ? "every role in the cluster, because it names none"
+        : policy.roles.join(", ");
+    return `${policy.name} on ${schema}.${table} applies to ${to}`;
+  });
+  const first = shared[0]!;
+  throw new Error(
+    `A policy under one of this migration's record-action names is not ${RESOLVER_ROLE}'s alone: ` +
+      `${described.join("; ")}. This migration creates each of its policies \`to ${RESOLVER_ROLE}\` ` +
+      "alone, so it will neither drop nor replace one that another role's row-level access depends " +
+      "on: dropping it would take that access away, and recreating it under the same name would " +
+      "narrow the policy to the resolver while the catalog still showed a policy by that name. " +
+      "Decide what each role still needs and run, as the table owner: " +
+      `alter policy ${first.policy.name} on ${first.schema}.${first.table} to <the roles that keep it>; ` +
+      `or drop policy ${first.policy.name} on ${first.schema}.${first.table};`,
+  );
+}
+
+/** Every policy on one table, whichever roles it names. */
+async function readTablePolicies(
+  db: OpenShapeForgeDatabase,
+  schema: string,
+  table: string,
+): Promise<CatalogPolicy[]> {
+  const qualified = literal(ident(schema, table));
+  const rows = await sql<{ name: string; roles: string[] }>`
+    select p.polname as name, ${sql.raw(POLICY_ROLE_NAMES)} as roles
+      from pg_policy p
+     where p.polrelid = ${sql.raw(qualified)}::regclass
+     order by p.polname
+  `.execute(db);
+  return rows.rows.map((row) => ({ name: row.name, roles: row.roles }));
+}
+
+/**
+ * One of the four policy names an entity table carries.
+ *
+ * `recordActionEntities` already refused a table name that leaves no room for
+ * the longest suffix; this repeats the bound at the point of interpolation,
+ * because truncation at 63 bytes would collapse the four names into one and
+ * leave the table with whichever policy was created last.
+ */
+function policyName(entity: RecordActionEntity, suffix: string): string {
+  const name = `${entity.table}_record_action_${suffix}`;
+  if (name.length > 63) unrenderable(name, "the policy name exceeds 63 bytes");
+  return name;
+}
+
+/**
+ * The four policies this entity is about to be given, checked BEFORE the first
+ * `drop policy` — because the replacement is a drop and a create, and a
+ * deployment that added a second role to one of them would otherwise lose that
+ * role's access to a migration that reported success.
+ */
+async function assertPoliciesReplaceable(
+  db: OpenShapeForgeDatabase,
+  entity: RecordActionEntity,
+): Promise<void> {
+  const names = new Set(POLICY_SUFFIXES.map((suffix) => policyName(entity, suffix)));
+  const existing = await readTablePolicies(db, entity.schema, entity.table);
+  const shared = existing
+    .filter((policy) => names.has(policy.name) && !ownedByResolverAlone(policy))
+    .map((policy) => ({ schema: entity.schema, table: entity.table, policy }));
+  if (shared.length > 0) refuseSharedPolicies(shared);
+}
+
+/**
  * The tables the resolver still reaches, as the catalog holds them — not as
  * the manifest describes them.
  *
  * A table is here if the resolver holds a table or column privilege on it, or
  * if a policy is scoped `to <resolver>`. `polroles` is `{0}` for a policy that
  * names no role, so the generated row-scope policy — which applies to the
- * resolver like every other role — does not match: only a policy created `to`
- * the resolver by name does.
+ * resolver like every other role — does not by itself bring a table into this
+ * set: only an explicit grant or a policy created `to` the resolver by name
+ * does.
+ *
+ * Once a table IS in the set, EVERY policy on it comes back, with its whole
+ * `TO` list — not only the ones that name the resolver. Two reasons, and both
+ * are about not deciding by name alone. The resolver's presence in a `TO` list
+ * does not make the policy the resolver's to drop. And a policy under one of
+ * this module's four names whose `TO` list does NOT contain the resolver —
+ * another role's, or `{0}` and therefore every role's — is not something to
+ * step over quietly either: filtering it out here would leave the cleanup
+ * reporting that it had taken this module's footprint back while a policy
+ * under its own name, with a role list it never wrote, stayed on the table.
+ * The caller refuses both.
  */
 async function readManagedTables(
   db: OpenShapeForgeDatabase,
-): Promise<Array<{ schema: string; table: string; policies: string[] }>> {
-  const rows = await sql<{ schema: string; table: string; policies: string[] }>`
-    with who as (select oid as grantee from pg_roles where rolname = ${RESOLVER_ROLE})
-    select n.nspname as schema, c.relname as table,
-           coalesce((select array_agg(p.polname order by p.polname)
-                       from pg_policy p, who
-                      where p.polrelid = c.oid and who.grantee = any(p.polroles)), '{}') as policies
-      from pg_class c
-      join pg_namespace n on n.oid = c.relnamespace
-     where c.relkind in ('r', 'p')
-       and (exists (select 1
-                      from aclexplode(coalesce(c.relacl, pg_catalog.acldefault('r', c.relowner))) acl,
-                           who
-                     where acl.grantee = who.grantee)
-         or exists (select 1 from pg_attribute att, aclexplode(att.attacl) acl, who
-                     where att.attrelid = c.oid and acl.grantee = who.grantee)
-         or exists (select 1 from pg_policy p, who
-                     where p.polrelid = c.oid and who.grantee = any(p.polroles)))
-     order by n.nspname, c.relname
+): Promise<Array<{ schema: string; table: string; policies: CatalogPolicy[] }>> {
+  const rows = await sql<{
+    schema: string;
+    table: string;
+    policy: string | null;
+    roles: string[];
+  }>`
+    with who as (select oid as grantee from pg_roles where rolname = ${RESOLVER_ROLE}),
+         managed as (
+           select c.oid as relid, n.nspname as nspname, c.relname as relname
+             from pg_class c
+             join pg_namespace n on n.oid = c.relnamespace
+            where c.relkind in ('r', 'p')
+              and (exists (select 1
+                             from aclexplode(coalesce(c.relacl, pg_catalog.acldefault('r', c.relowner))) acl,
+                                  who
+                            where acl.grantee = who.grantee)
+                or exists (select 1 from pg_attribute att, aclexplode(att.attacl) acl, who
+                            where att.attrelid = c.oid and acl.grantee = who.grantee)
+                or exists (select 1 from pg_policy p, who
+                            where p.polrelid = c.oid and who.grantee = any(p.polroles)))
+         )
+    select m.nspname as schema, m.relname as table, p.polname as policy,
+           ${sql.raw(POLICY_ROLE_NAMES)} as roles
+      from managed m
+      left join pg_policy p on p.polrelid = m.relid
+     order by m.nspname, m.relname, p.polname
   `.execute(db);
-  return rows.rows.map((row) => ({
-    schema: row.schema,
-    table: row.table,
-    policies: row.policies,
-  }));
+  const managed = new Map<string, { schema: string; table: string; policies: CatalogPolicy[] }>();
+  for (const row of rows.rows) {
+    const key = `${row.schema}.${row.table}`;
+    const entry = managed.get(key) ??
+      { schema: row.schema, table: row.table, policies: [] };
+    if (row.policy !== null) entry.policies.push({ name: row.policy, roles: row.roles });
+    managed.set(key, entry);
+  }
+  return [...managed.values()];
 }
 
 /**
@@ -852,6 +1034,16 @@ async function readManagedTables(
  * more are left exactly as the deployment set them. The result is read back,
  * because a revoke only reaches what this migrator granted.
  *
+ * And only policies the resolver holds ALONE. A policy under one of these four
+ * names whose `TO` list is anything else carries row-level access this module
+ * did not write — a second role's, or, for `polroles = {0}`, every role's — so
+ * the step refuses instead of dropping it. `refuseSharedPolicies` names the
+ * roles and the `alter policy` that resolves it. That check reads every policy
+ * on every stale table and runs before the first revoke, so the refusal does
+ * not depend on which table carries it, and a policy under one of these names
+ * that does not mention the resolver at all is refused rather than left behind
+ * while the step reports the footprint taken back.
+ *
  * Schema USAGE stays granted. It is not a table privilege, the resolver needs
  * it for the schemas it still reads, and a USAGE grant on a schema whose
  * tables it holds nothing on opens nothing.
@@ -861,10 +1053,17 @@ async function revokeStaleRecordActionGrants(
   entities: readonly RecordActionEntity[],
 ): Promise<string[]> {
   const current = new Set(entities.map((entity) => `${entity.schema}.${entity.table}`));
-  const managed = await readManagedTables(db);
+  const managed = (await readManagedTables(db))
+    .filter(({ schema, table }) => !current.has(`${schema}.${table}`));
+  // Before anything is revoked or dropped, and across every stale table at
+  // once, so an administrator sees the whole job rather than one table of it.
+  const shared = managed.flatMap(({ schema, table, policies }) =>
+    policies
+      .filter((policy) => OWNED_POLICY.test(policy.name) && !ownedByResolverAlone(policy))
+      .map((policy) => ({ schema, table, policy })));
+  if (shared.length > 0) refuseSharedPolicies(shared);
   const cleaned: string[] = [];
   for (const { schema, table, policies } of managed) {
-    if (current.has(`${schema}.${table}`)) continue;
     // These names come from the catalog, not from the manifest. A name this
     // module could not have rendered is a grant it cannot have made, so it is
     // reported rather than revoked on a guess.
@@ -878,10 +1077,15 @@ async function revokeStaleRecordActionGrants(
     const target = sql.id(schema, table);
     await sql`revoke all on ${target} from ${sql.id(RESOLVER_ROLE)}`.execute(db);
     // By actual name rather than by a name derived from the table's, so a
-    // renamed table loses its policies too.
-    for (const name of policies) {
-      if (!OWNED_POLICY.test(name)) continue;
-      await sql`drop policy if exists ${sql.id(name)} on ${target}`.execute(db);
+    // renamed table loses its policies too. Only the ones scoped to the
+    // resolver alone — the gate above already refused every other `TO` list
+    // under one of these names, so this filter is the same decision twice and
+    // never the only thing standing between a drop and another role's access.
+    // A policy under any OTHER name is not this module's and is left alone;
+    // the generated row-scope policy on a former entity table is exactly that.
+    for (const policy of policies) {
+      if (!OWNED_POLICY.test(policy.name) || !ownedByResolverAlone(policy)) continue;
+      await sql`drop policy if exists ${sql.id(policy.name)} on ${target}`.execute(db);
     }
     const left = await readTablePrivileges(db, schema, table);
     const own = [...new Set(left.filter((privilege) => !privilege.public).map(describePrivilege))].sort();
@@ -952,13 +1156,7 @@ async function applyRecordActions(
     const ownsTheTable =
       `coalesce((select pg_catalog.pg_has_role(current_user, c.relowner, 'USAGE')` +
       ` from pg_catalog.pg_class c where c.oid = ${literal(qualified)}::regclass), false)`;
-    const policy = (suffix: string) => {
-      const name = `${entity.table}_record_action_${suffix}`;
-      // Truncation at 63 bytes would collapse the four names into one and
-      // leave the table with whichever policy was created last.
-      if (name.length > 63) unrenderable(name, "the policy name exceeds 63 bytes");
-      return sql.id(name);
-    };
+    const policy = (suffix: string) => sql.id(policyName(entity, suffix));
     // Exactly the columns the two questions need: the key and tenant to find
     // the row, the ACL to decide, and the union of the declared read
     // projections to answer with. Anything else on the row stays "permission
@@ -983,6 +1181,10 @@ async function applyRecordActions(
     // before the first grant, so a table PUBLIC can already TRUNCATE is
     // refused rather than fenced.
     await assertNoPublicPrivileges(db, entity);
+    // And each of the four policies must be this module's to replace. The
+    // replacement is a `drop policy` and a `create policy` under the same
+    // name, which would take a second role named in the old one out of it.
+    await assertPoliciesReplaceable(db, entity);
     await sql`grant usage on schema ${sql.id(entity.schema)} to ${sql.id(RESOLVER_ROLE)}`.execute(db);
     // REPLACE rather than add: a table-wide grant reaches every column, a
     // TRUNCATE grant is outside row security altogether, and a column

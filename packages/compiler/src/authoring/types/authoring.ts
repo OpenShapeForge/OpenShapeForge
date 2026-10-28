@@ -532,10 +532,6 @@ export interface OperationCatalogWebInterface {
     };
     related?: Array<{ entity: string; label: LocalizedText; route: string }>;
   }>;
-  /** Add relationships to an Operation-backed entity owned by another catalog. */
-  entityExtensions?: Record<string, {
-    related: Array<{ entity: string; label: LocalizedText; route: string }>;
-  }>;
 }
 
 /** YAML-owned module/global Operations that have no honest entity target. */

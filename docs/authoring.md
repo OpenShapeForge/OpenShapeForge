@@ -175,32 +175,6 @@ for one tab and is normalized to the same record layout; do not combine it with
 `layout`. Named views are embedded read presentations, not additional routes or
 write Operations. The optional `title` defaults to the standard record title.
 
-### Extending an Operation-backed entity from another catalog
-
-A host or plugin can place its own Operation-backed child entity below an
-Operation-backed entity owned by another catalog. The child stays in the
-owning catalog; `entityExtensions` contributes only the related route to the
-parent after all catalogs have been composed:
-
-```yaml
-interfaces:
-  web:
-    entities:
-      TenantSeedInstallation:
-        # normal Operation-backed entity definition
-    entityExtensions:
-      PlatformTenant:
-        related:
-          - entity: TenantSeedInstallation
-            label: { en: Seed installations, nl: Seed-installaties }
-            route: /tenants/:slug/seeds
-```
-
-Both the parent and child must resolve to Operation-backed entities in the
-composed manifest. The compiler rejects an unknown parent, an unknown child,
-and duplicate child or route contributions. This composes navigation only;
-the child catalog still owns its Operations, authorization and input bindings.
-
 ### Action-specific record permissions
 
 An entity can let one persisted JSON field further narrow its ordinary tenant

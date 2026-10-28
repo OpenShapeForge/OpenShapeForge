@@ -131,10 +131,31 @@ import { WORKER_ROLE } from "./worker-role.js";
  * an action that no longer reads the field fails the migration instead of
  * resting on the fence.
  *
+ * AND PUBLIC IS A GRANTEE
+ * -----------------------
+ * The resolver's reach is the union of its own grants and PUBLIC's, and a
+ * `revoke` addressed to the resolver does not touch the second half. Verified
+ * on PostgreSQL 17.11: with `grant delete, truncate on <table> to public`, the
+ * revoke-and-regrant above leaves `has_table_privilege('<resolver>', ...,
+ * 'TRUNCATE')` TRUE, the whole migration still succeeds, and a session running
+ * AS the resolver truncates the table. That needs an explicit PUBLIC grant on
+ * an entity table AND the ability to execute as the resolver, so it is not an
+ * externally reachable exploit; it is a privilege the step claimed was exact
+ * and was not.
+ *
+ * So PUBLIC's privileges are read too — from the same two ACL columns, with
+ * `acldefault` standing in where the column is NULL, because NULL means the
+ * built-in default rather than "nothing" — and any of them fails the step
+ * BEFORE the first grant and before either function body exists. They are not
+ * revoked: `revoke ... from public` takes the privilege from every role in the
+ * cluster, so a migration doing that silently would be undoing a grant the
+ * deployment made for someone else. The error carries the statement an
+ * administrator runs if the grant was a mistake.
+ *
  * ONE TRANSACTION
  * ---------------
  * The whole step is one transaction: the grants, the four policies per entity,
- * and the two function bodies. The migration lock
+ * the stale-grant cleanup and the two function bodies. The migration lock
  * (bootstrap.ts) is a SESSION advisory lock, not a transaction, so without
  * this a concurrent session saw the window between `drop policy` and `create
  * policy`, the window between the column grants and the fence that bounds
@@ -607,8 +628,106 @@ async function assertResolverRole(db: OpenShapeForgeDatabase): Promise<void> {
 /** What the resolver may hold on an entity table, and nothing else. */
 type TablePrivilege = { kind: "table" | "column"; column: string | null; privilege: string };
 
+/** A privilege the catalog holds: granted to the resolver, or to PUBLIC. */
+type HeldPrivilege = TablePrivilege & { public: boolean };
+
 function privilegeKey(privilege: TablePrivilege): string {
   return `${privilege.kind}:${privilege.column ?? "-"}:${privilege.privilege}`;
+}
+
+function describePrivilege(privilege: HeldPrivilege): string {
+  return privilege.kind === "table"
+    ? privilege.privilege
+    : `${privilege.privilege}(${privilege.column})`;
+}
+
+/**
+ * Every privilege on one table that the resolver can USE: its own explicit
+ * grants, and PUBLIC's.
+ *
+ * PUBLIC is a grantee like any other in `relacl`, and every role holds what it
+ * holds — `pg_roles` has no row for it, `grant ... to <resolver>` is not how it
+ * got there, and `revoke ... from <resolver>` does not take it away. Verified
+ * on PostgreSQL 17.11: with `grant delete, truncate on <table> to public`,
+ * `has_table_privilege('<resolver>', '<table>', 'TRUNCATE')` is TRUE after the
+ * revoke-and-regrant below. So reading only the resolver's own grants would
+ * report an exact privilege set the resolver does not actually have.
+ *
+ * `relacl` and `attacl` are read rather than `information_schema`, because they
+ * show EVERY grantor's grant. A NULL ACL is not "no privileges": it means the
+ * built-in default still applies, so `acldefault` stands in for it — for a
+ * relation that is the owner and no one else, and for a column it is empty.
+ * A `default privileges` entry that caught this table is already materialised
+ * into these two columns by the time the table exists.
+ */
+async function readTablePrivileges(
+  db: OpenShapeForgeDatabase,
+  schema: string,
+  table: string,
+): Promise<HeldPrivilege[]> {
+  const qualified = literal(ident(schema, table));
+  const held = await sql<{
+    kind: string;
+    column: string | null;
+    privilege: string;
+    is_public: boolean;
+  }>`
+    with target as (select ${sql.raw(qualified)}::regclass as oid),
+         who as (select oid as grantee from pg_roles where rolname = ${RESOLVER_ROLE})
+    select 'table' as kind, null::name as column, acl.privilege_type as privilege,
+           acl.grantee = 0 as is_public
+      from target, pg_class c,
+           aclexplode(coalesce(c.relacl, pg_catalog.acldefault('r', c.relowner))) acl
+     where c.oid = target.oid
+       and (acl.grantee = 0 or acl.grantee in (select grantee from who))
+    union all
+    select 'column' as kind, att.attname as column, acl.privilege_type as privilege,
+           acl.grantee = 0 as is_public
+      from target, pg_attribute att, aclexplode(att.attacl) acl
+     where att.attrelid = target.oid
+       and (acl.grantee = 0 or acl.grantee in (select grantee from who))
+  `.execute(db);
+  return held.rows.map((row) => ({
+    kind: row.kind as TablePrivilege["kind"],
+    column: row.column,
+    privilege: row.privilege,
+    public: row.is_public,
+  }));
+}
+
+/**
+ * PUBLIC must hold nothing on an entity table, checked BEFORE anything is
+ * granted and before either function body exists.
+ *
+ * The resolver's reach is the union of its own grants and PUBLIC's, and the
+ * second half is outside everything this migration controls: PUBLIC DELETE is
+ * admitted by the delete fence's own USING for the session's tenant, and
+ * PUBLIC TRUNCATE ignores row security altogether. A PUBLIC SELECT or UPDATE
+ * is narrower but still wider than the column grants below declare.
+ *
+ * It is NOT revoked here. `revoke ... from public` takes the privilege from
+ * every role in the cluster, not from the resolver, so this migration would be
+ * silently undoing a grant the deployment made for someone else. The step
+ * fails instead, with the statement an administrator runs if the grant was a
+ * mistake.
+ */
+async function assertNoPublicPrivileges(
+  db: OpenShapeForgeDatabase,
+  entity: RecordActionEntity,
+): Promise<void> {
+  const held = await readTablePrivileges(db, entity.schema, entity.table);
+  const fromPublic = held.filter((privilege) => privilege.public);
+  if (fromPublic.length === 0) return;
+  const described = [...new Set(fromPublic.map(describePrivilege))].sort();
+  throw new Error(
+    `Record-action policy for ${entity.schema}.${entity.table} cannot be deployed: PUBLIC holds ` +
+      `${described.join(", ")} on it, and ${RESOLVER_ROLE} holds everything PUBLIC holds. ` +
+      "TRUNCATE ignores row security entirely and DELETE is admitted by the fence for the " +
+      "session's own tenant, so the resolver would reach past the column grants this manifest " +
+      "declares. This migration does not revoke it, because a PUBLIC grant belongs to every " +
+      "role in the cluster and revoking it here would take it from all of them. Run as the " +
+      `table owner, if the grant was not intended: revoke all on ${entity.schema}.${entity.table} from public;`,
+  );
 }
 
 /**
@@ -618,33 +737,23 @@ function privilegeKey(privilege: TablePrivilege): string {
  * A policy bounds SELECT, INSERT, UPDATE and DELETE. It does NOT bound
  * TRUNCATE, which ignores row security completely, and a table-wide UPDATE
  * grant would reach every column rather than the ACL. So the grants are not
- * trusted to be what the two statements above made them: they are read from
- * `pg_class.relacl` and `pg_attribute.attacl` — which, unlike
- * `information_schema`, show every grantor's grant — and anything beyond the
- * declared set fails the migration inside its transaction.
+ * trusted to be what the two statements above made them: they are read back
+ * out of the catalog and anything beyond the declared set fails the migration
+ * inside its transaction.
+ *
+ * PUBLIC's rows are skipped here: {@link assertNoPublicPrivileges} already
+ * refused the table before the grants were made, and they are not part of "the
+ * set this grant made".
  */
 async function assertResolverPrivileges(
   db: OpenShapeForgeDatabase,
   entity: RecordActionEntity,
   expected: readonly TablePrivilege[],
 ): Promise<void> {
-  const qualified = literal(ident(entity.schema, entity.table));
-  const held = await sql<{ kind: string; column: string | null; privilege: string }>`
-    with target as (select ${sql.raw(qualified)}::regclass as oid),
-         who as (select oid as grantee from pg_roles where rolname = ${RESOLVER_ROLE})
-    select 'table' as kind, null::name as column, acl.privilege_type as privilege
-      from target, who, pg_class c, aclexplode(c.relacl) acl
-     where c.oid = target.oid and acl.grantee = who.grantee
-    union all
-    select 'column' as kind, att.attname as column, acl.privilege_type as privilege
-      from target, who, pg_attribute att, aclexplode(att.attacl) acl
-     where att.attrelid = target.oid and acl.grantee = who.grantee
-  `.execute(db);
+  const held = await readTablePrivileges(db, entity.schema, entity.table);
   const wanted = new Set(expected.map(privilegeKey));
   const actual = new Set(
-    held.rows.map((row) =>
-      privilegeKey({ kind: row.kind as TablePrivilege["kind"], column: row.column, privilege: row.privilege }),
-    ),
+    held.filter((privilege) => !privilege.public).map(privilegeKey),
   );
   const extra = [...actual].filter((key) => !wanted.has(key)).sort();
   const missing = [...wanted].filter((key) => !actual.has(key)).sort();
@@ -741,6 +850,11 @@ async function applyRecordActions(
     // hands out a column grant that is a real read and a real write if the
     // assertion is false.
     await assertRowSecurityBounds(db, entity);
+    // And PUBLIC must hold nothing, because the resolver holds whatever PUBLIC
+    // holds and no revoke addressed to the resolver can take it back. Checked
+    // before the first grant, so a table PUBLIC can already TRUNCATE is
+    // refused rather than fenced.
+    await assertNoPublicPrivileges(db, entity);
     await sql`grant usage on schema ${sql.id(entity.schema)} to ${sql.id(RESOLVER_ROLE)}`.execute(db);
     // REPLACE rather than add: a table-wide grant reaches every column, a
     // TRUNCATE grant is outside row security altogether, and a column

@@ -38,7 +38,10 @@
  *     bun test apps/api/src/auth/api-key/__tests__/application-record-action.e2e.test.ts
  *
  * It SKIPS wholesale when either is absent, so it never fails for the wrong
- * reason.
+ * reason. On a machine loaded enough that ordinary statements approach the
+ * 15s default, add `DB_STATEMENT_TIMEOUT_MS=60000`: the default is left alone
+ * here on purpose, because the HTTP behaviour below is asserted under the
+ * limits a deployment actually runs with.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -98,10 +101,10 @@ const { createApiApp } = await import("../../../roles/api.js");
 const { __resetSessionResolverForTests } = await import("../../identity.js");
 const { __resetExchangeCacheForTests } = await import("../exchange.js");
 const { readApiKeyProvisioningConfig } = await import("../runtime-config.js");
-const { createIntegration } = await import("../service.js");
+const { createIntegration, issueKey, revokeKey } = await import("../service.js");
 const { REST_MOUNT_PATH } = await import("../../../rest/rest-paths.js");
 const { createDatabaseRuntime, readMigrateDatabaseUrl } = await import("../../../db/connection.js");
-const { SYSTEM_BYPASS_ROLE, withSystemSession } = await import("../../../db/session.js");
+const { SYSTEM_BYPASS_ROLE, withDbSession, withSystemSession } = await import("../../../db/session.js");
 const { sql } = await import("kysely");
 
 type App = Awaited<ReturnType<typeof createApiApp>>;
@@ -148,6 +151,16 @@ let app: App | undefined;
 let migrate: Migrate | undefined;
 let key = "";
 let integrationId = "";
+/** The `platform.api_keys` row behind `key`, as the service minted it. */
+let credentialId = "";
+/**
+ * A SECOND real credential of the same real realm client, for the revocation
+ * case. Revoking `key` would break every assertion above it.
+ */
+let rotatedKey = "";
+let rotatedCredentialId = "";
+/** The restricted runtime role, for the one question HTTP cannot ask. */
+let appDb: Migrate | undefined;
 /** Granted the action, and readable to nobody: `view` names one person. */
 let grantedNotebook = "";
 /** No action grant at all, and the same human ACL. */
@@ -237,7 +250,19 @@ beforeAll(async () => {
   );
   key = created.token;
   integrationId = created.integrationId;
+  credentialId = created.keyId;
   expect(key).toStartWith("osf_live_");
+
+  // Rotation, through the same service and against the same realm client:
+  // two credentials, one application, one grant.
+  const rotated = await issueKey(
+    { db: migrate.db, ...provisioning! },
+    { tenantId: TENANT_ID, userId: person, roles: [MANAGE_ROLE, READ_ROLE], credential: "bearer" },
+    { integrationId, displayName: "rotated" },
+  );
+  rotatedKey = rotated.token;
+  rotatedCredentialId = rotated.keyId;
+  appDb = createDatabaseRuntime({ databaseUrl: DATABASE_URL });
 
   grantedNotebook = randomUUID();
   ungrantedNotebook = randomUUID();
@@ -291,6 +316,7 @@ afterAll(async () => {
     }
   }
   await app?.close();
+  await appDb?.close();
   await migrate?.close();
 });
 
@@ -387,6 +413,66 @@ describe.skipIf(!ready)("a real API key against an entity that excludes applicat
     // entity policy and not an empty projection.
     const allowed = await mcpCall("osf_list", { entity: "DocumentTheme" }, asApplication());
     expect(allowed.text).not.toContain("is not one of the entities");
+  }, 120_000);
+
+  /**
+   * The credential fence, on a credential this realm actually issued.
+   *
+   * The in-flight interleaving is intra-transaction and is proven against a
+   * scratch database in
+   * `apps/api/src/db/__tests__/record-action-credential-fence-db.test.ts`.
+   * What only a real realm can show is the other half: that the session the
+   * full chain produces — admin-API client, client_credentials exchange, JWKS
+   * verification — carries the credential ROW the store resolved, that the
+   * fence accepts it, and that revoking it through the real service closes
+   * both the fence and the transport while the application's other credential
+   * and the record's grant are untouched.
+   */
+  test.skipIf(!credentialUsable)("a real credential is fenced on its own row", async () => {
+    const fence = (candidate: string) =>
+      withDbSession(appDb!.db, {
+        tenantId: TENANT_ID,
+        userId: randomUUID(),
+        roles: [],
+        groups: [],
+        relationGroupIds: [],
+        scope: "tenant",
+        principalKind: "service",
+        appPrincipal: { integrationId, credentialId: candidate },
+      }, async (trx) => (await sql<{ live: boolean }>`
+        select app.record_action_principal_live() as live
+      `.execute(trx)).rows[0]?.live === true);
+
+    // The rows the service wrote, not values this test chose.
+    const stored = (await sql<{ id: string; integration_id: string }>`
+      select id, integration_id from platform.api_keys
+       where id = any(${sql.raw(`'{${credentialId},${rotatedCredentialId}}'`)}::uuid[])
+       order by created_at
+    `.execute(migrate!.db)).rows;
+    expect(stored.map((row) => row.integration_id)).toEqual([integrationId, integrationId]);
+
+    // Both live credentials pass the fence, and both authenticate.
+    expect(await fence(credentialId)).toBe(true);
+    expect(await fence(rotatedCredentialId)).toBe(true);
+    expect(await rest(`${REST_MOUNT_PATH}/document-themes`,
+      { authorization: `Bearer ${rotatedKey}` })).toBe(200);
+
+    // A credential of this tenant that does not exist is not a live one.
+    expect(await fence(randomUUID())).toBe(false);
+
+    await revokeKey(
+      { db: migrate!.db, ...provisioning! },
+      { tenantId: TENANT_ID, userId: person, roles: [MANAGE_ROLE], credential: "bearer" },
+      rotatedCredentialId,
+    );
+
+    // The retired credential holds nothing and no longer authenticates; the
+    // other one is untouched, because the grant names the integration.
+    expect(await fence(rotatedCredentialId)).toBe(false);
+    expect(await rest(`${REST_MOUNT_PATH}/document-themes`,
+      { authorization: `Bearer ${rotatedKey}` })).toBe(401);
+    expect(await fence(credentialId)).toBe(true);
+    expect(await rest(`${REST_MOUNT_PATH}/document-themes`, asApplication())).toBe(200);
   }, 120_000);
 
   test("a person with the same role on the same tenant reaches all of it", async () => {

@@ -13,7 +13,7 @@ import { UUID_PATTERN } from "../db/session.js";
 import { withDbSession, registerDbSessionAfterCommit } from "../db/session.js";
 import { HttpError } from "../rest/http-error.js";
 import { actingPartyColumns, actingPartyTable } from "./identity-contract.js";
-import { confirmCandidateLink } from "./identity-link-store.js";
+import { confirmCandidateLink, relationsWithEmail } from "./identity-link-store.js";
 import {
   invalidateIdentityLink,
   readLinkRow,
@@ -33,7 +33,7 @@ import { protectDirectAdministrator } from './member-administrator.js';
  */
 export async function confirmPendingLink(
   db: OpenShapeForgeDatabase,
-  session: SessionInput & { relation?: IdentityLinkState | null | undefined },
+  session: SessionInput & { relation?: IdentityLinkState | null | undefined; verifiedEmail?: string | undefined },
 ): Promise<IdentityLinkState> {
   const current = session.relation;
   if (!current) {
@@ -53,8 +53,15 @@ export async function confirmPendingLink(
       "There is no candidate Relation to confirm; ask an organization administrator to link you.",
     );
   }
+  if (!session.verifiedEmail) {
+    throw new HttpError(409, "NO_CANDIDATE", "Confirming this link requires a verified email in the current bearer session.");
+  }
   const state = await withDbSession(db, session, async (trx) => {
-    if (!(await confirmCandidateLink(trx, current.identityId, session.tenantId, current.identityId))) {
+    const candidates = await relationsWithEmail(trx, session.tenantId, session.verifiedEmail!);
+    if (candidates.length !== 1 || candidates[0]?.id !== current.candidateRelationId) {
+      throw new HttpError(409, "NO_CANDIDATE", "The candidate no longer matches the verified email; ask an organization administrator to link you.");
+    }
+    if (!(await confirmCandidateLink(trx, current.identityId, session.tenantId, current.identityId, current.candidateRelationId))) {
       throw new HttpError(409, "NO_CANDIDATE", "There is no pending candidate to confirm any more.");
     }
     const updated = await readLinkRow(trx, current.identityId, session.tenantId);

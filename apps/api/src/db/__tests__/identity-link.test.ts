@@ -26,6 +26,7 @@ import {
   listPendingRoleAssignments,
   setMembershipRoles,
   resolveIdentityLink,
+  withSessionRelation,
   sessionRelation,
   type IdentityClaims,
   type IdentityLinkState,
@@ -120,6 +121,8 @@ function sessionFor(who: Person, tenantId: string, relation?: IdentityLinkState 
     oauthScopes: [],
     scope: "self",
     credential: "bearer",
+    principalKind: "person",
+    ...(who.claims.email ? { verifiedEmail: who.claims.email } : {}),
     relation: relation ?? null,
   };
   return session;
@@ -842,16 +845,31 @@ describe("identity ↔ Relation link", () => {
         //    the candidate. That link carries NO roles yet — nobody invited
         //    them as anything — so they run on the just-in-time minimum and
         //    show up for the administrator.
-        await existingRelation(adminDb, tenantA, "Jack Existing", "jack@example.com");
+        const jackRelation = await existingRelation(adminDb, tenantA, "Jack Existing", "jack@example.com");
         const jack = person("jack");
         const jackFirst = await signIn(appDb, jack, tenantA);
         expect(jackFirst.state!.status).toBe("pending_confirmation");
         expect(jackFirst.state!.needsRoleAssignment).toBe(false);
+        // A cached bearer candidate cannot confer mailbox proof to a later
+        // trusted-context or service credential without its own claims.
+        for (const credential of ["trusted-context", "api-key"] as const) {
+          const { verifiedEmail: _verifiedEmail, ...withoutProof } = jackFirst.session;
+          const carried = await withSessionRelation({ ...withoutProof, credential, issuer: ISSUER }, { db: appDb });
+          expect(carried.relation?.candidateRelationId).toBeNull();
+        }
+        const { email: _email, ...unverifiedClaims } = jack.claims;
+        await expect(resolveIdentityLink(appDb, jackFirst.session, unverifiedClaims)).rejects.toMatchObject({ code: "NOT_INVITED" });
+        expect((await sql<{ email: string | null }>`select email from platform.identities where id = ${jackFirst.state!.identityId}`.execute(adminDb)).rows[0]?.email).toBeNull();
+        await resolveIdentityLink(appDb, jackFirst.session, jack.claims);
         // Roles cannot be recorded on an unconfirmed link: nobody verified
         // that Relation is theirs yet.
         await expect(
           setMembershipRoles(appDb, adminInA.session, jackFirst.state!.identityId, ["org_admin"]),
         ).rejects.toMatchObject({ code: "IDENTITY_NOT_LINKED" });
+        await expect(confirmPendingLink(appDb, { ...jackFirst.session, verifiedEmail: undefined })).rejects.toMatchObject({ code: "NO_CANDIDATE" });
+        await sql`update erp.contact_details set value = 'changed@example.com' where tenant_id = ${tenantA} and relation_id = ${jackRelation}`.execute(adminDb);
+        await expect(confirmPendingLink(appDb, jackFirst.session)).rejects.toMatchObject({ code: "NO_CANDIDATE" });
+        await sql`update erp.contact_details set value = 'jack@example.com' where tenant_id = ${tenantA} and relation_id = ${jackRelation}`.execute(adminDb);
         const confirmed = await confirmPendingLink(appDb, jackFirst.session);
         expect(confirmed).toMatchObject({ status: "linked", roles: [], needsRoleAssignment: true });
 

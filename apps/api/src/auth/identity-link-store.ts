@@ -41,7 +41,7 @@ export async function upsertIdentity(
     insert into platform.identities (issuer, subject, email, display_name)
     values (${claims.issuer}, ${claims.subject}, ${claims.email ?? null}, ${displayName})
     on conflict (issuer, subject) do update
-      set email = coalesce(excluded.email, platform.identities.email),
+      set email = excluded.email,
           display_name = coalesce(excluded.display_name, platform.identities.display_name),
           updated_at = case
             when excluded.email is distinct from platform.identities.email
@@ -141,6 +141,7 @@ export async function confirmCandidateLink(
   identityId: string,
   tenantId: string,
   linkedBy: string,
+  expectedCandidate?: string,
 ): Promise<boolean> {
   const result = await sql<{ identity_id: string }>`
     update platform.identity_relations
@@ -154,6 +155,7 @@ export async function confirmCandidateLink(
        and tenant_id = ${tenantId}
        and status = 'pending_confirmation'
        and candidate_relation_id is not null
+       and (${expectedCandidate ?? null}::uuid is null or candidate_relation_id = ${expectedCandidate ?? null}::uuid)
        and cardinality(roles) = 0
     returning identity_id
   `.execute(trx);

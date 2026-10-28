@@ -135,6 +135,9 @@ export async function writeMembershipRoles(
  * pending row with a candidate (any more), and false for a pending row that
  * holds roles: confirming must never switch on grants nobody assigned to a
  * linked person, so such a row fails closed instead.
+ * Callers recheck the candidate before this update. Under READ COMMITTED a
+ * privileged concurrent contact edit can still land between that read and
+ * this update; the update pins the candidate but does not lock contact rows.
  */
 export async function confirmCandidateLink(
   trx: Transaction<DB>,

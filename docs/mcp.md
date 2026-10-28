@@ -638,7 +638,10 @@ to their own organization.
    candidate and a current human bearer with a verified email. No arguments; it
    links only if exactly one active Relation still matches that email. Pending
    identities, including candidates that can no longer be confirmed, remain
-   visible to administrators for explicit linking by identity ID.
+   visible to administrators for explicit linking by identity ID. Their
+   `candidateStatus` reports `none`, `review_required`, or
+   `awaiting_confirmation` based on the last recorded email; it does not
+   replace the current verified-email check at confirmation.
 3. **`link_identity`** — for organization administrators
    (`Organization.All.ReadWrite`): `identityEmail` (or `identityId`) +
    `relationId`. The identity must have signed in to this organization at

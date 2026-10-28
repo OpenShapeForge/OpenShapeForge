@@ -355,19 +355,22 @@ describe("actor: relation stamps under a trusted-context session", () => {
     expect(sessionRelation(await trustedSession(tenantId, userId))?.relationId).not.toBe(admitted!.relationId);
   }, 60_000);
 
-  test("list_pending_members shows an unlinked API-key identity by id and not a person with a candidate", async () => {
+  test("list_pending_members shows unlinked identities and marks a stale candidate for review", async () => {
     const tenantId = await tenant();
     const serviceAccount = randomUUID();
     await apiKeySession(tenantId, serviceAccount);
-    // A person with a candidate is theirs to confirm, not an administrator's to pick up.
+    // This candidate has no matching contact and must be explicitly reviewed.
     const person = randomUUID();
     const identity = randomUUID();
     await sql`insert into platform.identities (id, issuer, subject, email) values (${identity}::uuid, ${ISSUER}, ${person}, ${`${person}@example.test`})`.execute(privileged.db);
     await sql`insert into platform.identity_relations (identity_id, tenant_id, status, candidate_relation_id) values (${identity}::uuid, ${tenantId}::uuid, 'pending_confirmation', ${await relation(tenantId)}::uuid)`.execute(privileged.db);
     const admin = { tenantId, userId: randomUUID(), roles: [IDENTITY_LINK_ADMIN_ROLE], groups: [], scope: "tenant" as const };
     const unlinked = await listUnlinkedIdentities(restricted.db, admin);
-    expect(unlinked).toEqual([{ identityId: expect.any(String), displayName: "Billing robot", email: null }]);
-    expect(unlinked[0]!.identityId).not.toBe(identity);
+    expect(unlinked).toEqual(expect.arrayContaining([
+      { identityId: expect.any(String), displayName: "Billing robot", email: null, candidateStatus: "none" },
+      { identityId: identity, displayName: null, email: `${person}@example.test`, candidateStatus: "review_required" },
+    ]));
+    expect(unlinked).toHaveLength(2);
   }, 60_000);
 
   test("an invalidation during a read wins: the read's result is not stored over it", async () => {

@@ -30,8 +30,9 @@ export function assertHostRealm(config: ControlPlaneConfig): HostOperatorAuthori
   } catch {
     throw new ControlAuthorizationError("FORBIDDEN", "Host administration requires the host realm issuer.");
   }
-  if (base.search || base.hash || issuer.origin !== base.origin ||
-      issuer.search || issuer.hash) {
+  if (!["http:", "https:"].includes(base.protocol) || base.username || base.password ||
+      base.search || base.hash || issuer.origin !== base.origin ||
+      issuer.username || issuer.password || issuer.search || issuer.hash) {
     throw new ControlAuthorizationError("FORBIDDEN", "Host administration requires the host realm issuer.");
   }
 

@@ -33,7 +33,7 @@ import { DEFAULT_MCP_CLIENTS } from "./organization-scopes.js";
 
 /** Environment variables the control plane reads. */
 export type ControlPlaneEnv = {
-  /** Keycloak origin, e.g. `http://localhost:8181`. No trailing path. */
+  /** Keycloak base URL, e.g. `http://localhost:8181` or `https://id.example/auth`. */
   OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL?: string | undefined;
   /**
    * Optional TLS ingress used only for network routing. Requests retain the
@@ -215,7 +215,13 @@ export function readControlPlaneConfig(
   if (!operatorClientId) missing.push("OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID");
   if (!publicOrigin) missing.push("OPENSHAPEFORGE_PUBLIC_ORIGIN");
 
-  const normalizedBaseUrl = baseUrl ? asOrigin(baseUrl.replace(/\/+$/, "")) : null;
+  const normalizedBaseUrl = (() => {
+    if (!baseUrl) return null;
+    try {
+      const parsed = new URL(baseUrl);
+      return parsed.username || parsed.password || parsed.search || parsed.hash ? null : parsed.origin;
+    } catch { return null; }
+  })();
   const normalizedConnectUrl = connectUrl ? asOrigin(connectUrl.replace(/\/+$/, "")) : null;
   if (connectUrl && (!normalizedBaseUrl?.startsWith("https://") || !normalizedConnectUrl?.startsWith("https://"))) {
     missing.push(

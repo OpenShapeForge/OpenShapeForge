@@ -26,6 +26,7 @@ import { createModuleSessionCapability } from "../platform.js";
 const TENANT = "11111111-1111-4111-8111-111111111111";
 const ACTOR = "22222222-2222-4222-8222-222222222222";
 const INTEGRATION = "33333333-3333-4333-8333-333333333333";
+const CREDENTIAL = "44444444-4444-4444-8444-444444444444";
 const VICTIM_INTEGRATION = "44444444-4444-4444-8444-444444444444";
 const RELATION = "55555555-5555-4555-8555-555555555555";
 const IDENTITY = "66666666-6666-4666-8666-666666666666";
@@ -44,7 +45,7 @@ function apiKeySession(): TrustedSessionContext {
     scope: "self",
     credential: "api-key",
     principalKind: "service",
-    appPrincipal: { integrationId: INTEGRATION },
+    appPrincipal: { integrationId: INTEGRATION, credentialId: CREDENTIAL },
   };
 }
 
@@ -101,7 +102,9 @@ describe("the module session capability is a detached snapshot", () => {
     const before = structuredClone(verified.appPrincipal);
     const capability = createModuleSessionCapability(verified);
 
-    expect(capability.appPrincipal).toEqual({ integrationId: INTEGRATION });
+    expect(capability.appPrincipal).toEqual({
+      integrationId: INTEGRATION, credentialId: CREDENTIAL,
+    });
     expect(capability.appPrincipal).not.toBe(verified.appPrincipal);
     expect(Object.isFrozen(capability.appPrincipal)).toBe(true);
 

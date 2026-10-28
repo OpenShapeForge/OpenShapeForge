@@ -21,6 +21,8 @@ import { PrincipalRuntime } from "./principals.js";
 const tenantId = randomUUID();
 const userId = randomUUID();
 const integrationId = randomUUID();
+/** The credential row the resolver read; carried beside the integration. */
+const credentialId = randomUUID();
 const CONTEXT_SECRET = "principal-unit-test-context-secret";
 
 function base(overrides: Partial<TrustedSessionContext> = {}): TrustedSessionContext {
@@ -41,7 +43,7 @@ function apiKeySession(overrides: Partial<TrustedSessionContext> = {}): TrustedS
   return base({
     credential: "api-key",
     principalKind: "service",
-    appPrincipal: { integrationId },
+    appPrincipal: { integrationId, credentialId },
     roles: ["Relations.All.Read"],
     ...overrides,
   });
@@ -158,7 +160,7 @@ describe("the module-facing principal classification", () => {
     const { services } = harness(session);
     // Same fields, different object: this is what a module would build if it
     // wanted to name an integration of its choosing.
-    const forged = { ...session, appPrincipal: { integrationId: randomUUID() } };
+    const forged = { ...session, appPrincipal: { integrationId: randomUUID(), credentialId } };
     expect(failureCode(() => services.classOf(forged))).toBe("FORBIDDEN");
     expect(failureCode(() => services.application(forged))).toBe("FORBIDDEN");
   });
@@ -166,7 +168,7 @@ describe("the module-facing principal classification", () => {
   test("an application principal that is not an integration id is a refusal, not a namespace", () => {
     // Only the API-key resolver writes this field, and it writes a uuid
     // primary key. Anything else means another path invented a principal.
-    const session = apiKeySession({ appPrincipal: { integrationId: "integration-name" } });
+    const session = apiKeySession({ appPrincipal: { integrationId: "integration-name", credentialId } });
     const { services } = harness(session);
     expect(services.classOf(session)).toBe("application");
     expect(failureCode(() => services.application(session))).toBe("FORBIDDEN");

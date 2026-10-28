@@ -51,6 +51,14 @@ const otherPerson = randomUUID();
 const relationGroup = randomUUID();
 const integration = randomUUID();
 const otherIntegration = randomUUID();
+/**
+ * The credential row id a resolved session carries beside its integration.
+ * `app.record_action_allows` never reads it — the credential fence is its own
+ * function, proven against real key rows in
+ * `record-action-credential-fence-db.test.ts` — so a synthetic value is the
+ * honest fixture for the ACL questions this file asks.
+ */
+const credential = randomUUID();
 const SHARED_ROLE = "Runs.All.Operate";
 /**
  * A SECOND role that inherits the resolver — the shape the role contract gives
@@ -315,7 +323,8 @@ describe("record action lookup under the restricted app role", () => {
   test("answers for a verified application without making the record readable", async () => {
     const machine = session({
       userId: randomUUID(), principalKind: "service",
-      appPrincipal: { integrationId: integration }, roles: [SHARED_ROLE],
+      appPrincipal: { integrationId: integration, credentialId: credential },
+      roles: [SHARED_ROLE],
     });
     expect(await allows(app.db, machine, RUN, runRow, "start")).toBe(true);
     expect(await allows(app.db, machine, RUN, runRow, "follow")).toBe(true);
@@ -329,7 +338,7 @@ describe("record action lookup under the restricted app role", () => {
   test("denies across tenants, outside the registry and outside the declared actions", async () => {
     const machine = session({
       userId: randomUUID(), principalKind: "service",
-      appPrincipal: { integrationId: integration },
+      appPrincipal: { integrationId: integration, credentialId: credential },
     });
     // The row exists and names this integration — in the OTHER tenant.
     expect(await allows(app.db, machine, RUN, runRowTenantB, "start")).toBe(false);
@@ -357,7 +366,7 @@ describe("record action lookup under the restricted app role", () => {
   test("an application holds only the grants that name it", async () => {
     const machine = session({
       userId: randomUUID(), principalKind: "service",
-      appPrincipal: { integrationId: otherIntegration },
+      appPrincipal: { integrationId: otherIntegration, credentialId: credential },
     });
     // Named for publish on the doc, named nowhere on the run.
     expect(await allows(app.db, machine, DOC, docRow, "publish")).toBe(true);
@@ -379,7 +388,7 @@ describe("verified principal class decides which subjects apply", () => {
     });
     const asApplication = session({
       userId: randomUUID(), roles, principalKind: "service",
-      appPrincipal: { integrationId: integration },
+      appPrincipal: { integrationId: integration, credentialId: credential },
     });
     const unclassified = session({ userId: randomUUID(), roles });
 
@@ -466,16 +475,20 @@ describe("an API-key credential resolves to the integration it names", () => {
     });
   }
 
-  async function issueKey(integrationId: string): Promise<string> {
+  /** The credential, and the row id the resolved session must report. */
+  async function issueKey(
+    integrationId: string,
+  ): Promise<{ token: string; keyId: string }> {
     const minted = mintApiKey();
+    const keyId = randomUUID();
     await admin.db.connection().execute(async (conn) => {
       await sql`insert into platform.api_keys
           (id, tenant_id, integration_id, lookup_id, secret_hash, display_name, created_by)
-        values (${randomUUID()}::uuid, ${tenantA}::uuid, ${integrationId}::uuid,
+        values (${keyId}::uuid, ${tenantA}::uuid, ${integrationId}::uuid,
           ${minted.lookupId}, ${minted.secretHash}, 'key', ${randomUUID()}::uuid)
       `.execute(conn);
     });
-    return minted.token;
+    return { token: minted.token, keyId };
   }
 
   async function resolve(token: string) {
@@ -495,11 +508,16 @@ describe("an API-key credential resolves to the integration it names", () => {
 
   test("the session names the integration and the record action then applies", async () => {
     await provisionIntegration(integration);
-    const session = await resolve(await issueKey(integration));
+    const issued = await issueKey(integration);
+    const session = await resolve(issued.token);
     expect(session).toBeDefined();
     expect(session!.credential).toBe("api-key");
     expect(session!.principalKind).toBe("service");
-    expect(session!.appPrincipal).toEqual({ integrationId: integration });
+    // Both halves come out of the store: the integration a policy names, and
+    // the credential row the fence re-reads.
+    expect(session!.appPrincipal).toEqual({
+      integrationId: integration, credentialId: issued.keyId,
+    });
     // The grant in the fixture names this integration, and here it is being
     // matched against a value the store produced.
     expect(await allows(app.db, session as DbSessionInput, RUN, runRow, "start")).toBe(true);
@@ -510,16 +528,24 @@ describe("an API-key credential resolves to the integration it names", () => {
   }, TEST_TIMEOUT);
 
   test("a second credential of the same integration is the same principal", async () => {
-    const rotated = await resolve(await issueKey(integration));
-    expect(rotated!.appPrincipal).toEqual({ integrationId: integration });
+    const issued = await issueKey(integration);
+    const rotated = await resolve(issued.token);
+    // Same application, different credential: the principal a grant names is
+    // stable across rotation, the credential identity is not.
+    expect(rotated!.appPrincipal).toEqual({
+      integrationId: integration, credentialId: issued.keyId,
+    });
     expect(await allows(app.db, rotated as DbSessionInput, RUN, runRow, "start")).toBe(true);
   }, TEST_TIMEOUT);
 
   test("a different integration is a different principal and holds nothing", async () => {
     const stranger = randomUUID();
     await provisionIntegration(stranger);
-    const session = await resolve(await issueKey(stranger));
-    expect(session!.appPrincipal).toEqual({ integrationId: stranger });
+    const issued = await issueKey(stranger);
+    const session = await resolve(issued.token);
+    expect(session!.appPrincipal).toEqual({
+      integrationId: stranger, credentialId: issued.keyId,
+    });
     expect(await allows(app.db, session as DbSessionInput, RUN, runRow, "start")).toBe(false);
   }, TEST_TIMEOUT);
 
@@ -532,7 +558,7 @@ describe("an API-key credential resolves to the integration it names", () => {
 describe("the bounded execution capability", () => {
   const machine = (id = integration) => session({
     userId: randomUUID(), principalKind: "service",
-    appPrincipal: { integrationId: id },
+    appPrincipal: { integrationId: id, credentialId: credential },
   });
   async function read(
     input: DbSessionInput, entity: string, recordKey: string, action: string,
@@ -993,7 +1019,7 @@ describe("the definer role is bounded", () => {
 describe("the lock ordering serializes a policy change against a check", () => {
   const machine = () => session({
     userId: randomUUID(), principalKind: "service",
-    appPrincipal: { integrationId: integration },
+    appPrincipal: { integrationId: integration, credentialId: credential },
   });
   // The row names otherPerson for view and edit: the realistic holder of
   // editor authority, which is what assigning or revoking an action needs.
@@ -1166,7 +1192,7 @@ describe("the lock ordering serializes a policy change against a check", () => {
 describe("the declared lock decides what two parallel holders do", () => {
   const machine = () => session({
     userId: randomUUID(), principalKind: "service",
-    appPrincipal: { integrationId: integration },
+    appPrincipal: { integrationId: integration, credentialId: credential },
   });
 
   async function labelledJob<T>(
@@ -1340,7 +1366,7 @@ describe("existing human behaviour is unchanged", () => {
     // Holding an action never adds a row to either answer.
     const machine = session({
       userId: randomUUID(), principalKind: "service",
-      appPrincipal: { integrationId: integration },
+      appPrincipal: { integrationId: integration, credentialId: credential },
     });
     expect(await readable(machine, "action_runs")).toBe(0);
     expect(await readable(machine, "action_docs")).toBe(1);

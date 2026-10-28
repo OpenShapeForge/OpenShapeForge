@@ -210,6 +210,7 @@ describe("record permissions", () => {
 });
 
 const integrationId = "44444444-4444-4444-8444-444444444444";
+const credentialId = "55555555-5555-4555-8555-555555555555";
 
 /** The same entity, with a declared action axis. */
 const actionTable = {
@@ -267,7 +268,7 @@ describe("named record actions", () => {
   test("an action is independent of view, and empty never means public", () => {
     const application: DbSessionInput = {
       ...session, userId: "66666666-6666-4666-8666-666666666666",
-      principalKind: "service", appPrincipal: { integrationId },
+      principalKind: "service", appPrincipal: { integrationId, credentialId },
     };
     // Granted the action, granted no view.
     const document = grant({ integrations: [integrationId] });
@@ -294,7 +295,7 @@ describe("named record actions", () => {
       ["service bearer", { ...session, roles, principalKind: "service" }, false, false],
       [
         "api-key application",
-        { ...session, roles, principalKind: "service", appPrincipal: { integrationId } },
+        { ...session, roles, principalKind: "service", appPrincipal: { integrationId, credentialId } },
         false, true,
       ],
       ["unclassified", { ...session, roles }, false, false],
@@ -308,7 +309,7 @@ describe("named record actions", () => {
 
   test("row-local evaluation agrees, and refuses an entity without the policy", () => {
     const application: DbSessionInput = {
-      ...session, principalKind: "service", appPrincipal: { integrationId },
+      ...session, principalKind: "service", appPrincipal: { integrationId, credentialId },
     };
     const row = { authorization: grant({ integrations: [integrationId] }) };
     expect(recordActionsAllowRow(actionTable, row, ["start"], application)).toBe(true);

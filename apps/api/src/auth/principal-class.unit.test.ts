@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 
 const tenantId = randomUUID();
 const integrationId = randomUUID();
+const credentialId = randomUUID();
 const serviceAccountUserId = randomUUID();
 
 describe("no other carrier produces an application principal", () => {
@@ -50,7 +51,7 @@ describe("no other carrier produces an application principal", () => {
     // An application outranks the service kind its own token carries.
     expect(resolvePrincipalClass({
       tenantId, userId: serviceAccountUserId, principalKind: "service",
-      appPrincipal: { integrationId },
+      appPrincipal: { integrationId, credentialId },
     })).toBe("application");
     // A verified service account cannot be re-read as a person by attaching a
     // Relation to it; the stated kind wins over the link.

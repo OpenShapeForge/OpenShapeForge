@@ -1285,9 +1285,31 @@ type ProjectedStandalone = {
 type OperationEntityCollectionQuery = {
   input: WebCollectionQueryContract;
   nextCursorField: string;
-  totalCountField: string;
+  /**
+   * Absent when the Operation declares its total as UNKNOWN — see
+   * {@link operationEntityCollectionQuery}. A renderer with no field to read
+   * the total from derives progress from the cursor instead, which is the
+   * honest answer rather than a count it would have had to invent.
+   */
+  totalCountField?: string;
   defaultSort?: { key: string; direction: "asc" | "desc" };
 };
+
+/**
+ * Does this list Operation promise a total at all?
+ *
+ * A `totalCount` that admits `null` is the declaration that it does not. Some
+ * collections genuinely cannot state one: a listing bounded by the caller's
+ * own row authorization would have to read past that authorization to count
+ * what it is not allowed to see, and a count of only the visible rows is not a
+ * total. Those Operations declare `type: [integer, "null"]` and the projected
+ * contract then carries no `totalCountField`.
+ */
+function declaresKnownTotal(totalCount: Record<string, unknown>): boolean {
+  const type = totalCount.type;
+  if (Array.isArray(type)) return !type.includes("null");
+  return type !== "null";
+}
 
 function objectProperties(schema: unknown): Record<string, Record<string, unknown>> {
   if (!schema || typeof schema !== "object" || Array.isArray(schema)) return {};
@@ -1338,6 +1360,7 @@ function operationEntityCollectionQuery(
   if (!("nextCursor" in output) || !("totalCount" in output)) {
     throw new Error(`Operation-backed list "${operationId}" must return nextCursor and totalCount for collection pagination.`);
   }
+  const knownTotal = declaresKnownTotal(output.totalCount!);
   const defaultSortField = input.sortField!.default;
   const defaultSortDirection = input.sortDirection!.default;
   const defaultSort: OperationEntityCollectionQuery["defaultSort"] = typeof defaultSortField === "string" && sortFields.includes(defaultSortField)
@@ -1353,7 +1376,7 @@ function operationEntityCollectionQuery(
       pagination: { kind: "cursor", defaultLimit: Number(defaultLimit), maxLimit: Number(maxLimit) },
     },
     nextCursorField: "nextCursor",
-    totalCountField: "totalCount",
+    ...(knownTotal ? { totalCountField: "totalCount" } : {}),
     ...(defaultSort ? { defaultSort } : {}),
   };
 }
@@ -1363,6 +1386,87 @@ function operationEntityCollectionQuery(
  * authored id and routed at `/<id>` relative to the surface root; the host
  * mounts them beside the entity routes.
  */
+/**
+ * Every entity an authored input schema points a reference picker at must be
+ * one this deployment actually projects.
+ *
+ * `x-osf-reference` is how a declarative form says "pick a record of this
+ * entity": the host resolves the target's own collection and display name to
+ * render the picker. Nothing else checked the name, so a catalog could name an
+ * entity that no layer declares — or one an overlay supplies and the published
+ * base does not — and still compile, leaving a form whose only control cannot
+ * be populated. Checked here, where the projectable corpus is known, so the
+ * build fails on the authoring rather than the browser on the page.
+ *
+ * Every level of the schema, not only its root: a picker is as dead inside a
+ * nested object, a list item or a discriminated variant as it is beside them,
+ * and a host walks all of those to render its controls. The reported name is
+ * the path to the input, so a nested one says where it is.
+ */
+function assertReferenceTargetsExist(
+  origin: string,
+  schema: Readonly<Record<string, unknown>>,
+  known: ReadonlySet<string>,
+  path: readonly string[] = [],
+): void {
+  const reference = schema["x-osf-reference"];
+  if (reference && typeof reference === "object" && !Array.isArray(reference)) {
+    const entity = (reference as { entity?: unknown }).entity;
+    if (typeof entity === "string" && !known.has(entity)) {
+      throw new Error(
+        `${origin} input "${path.join("/")}" references unknown entity "${entity}"; ` +
+          "x-osf-reference must name a core entity or an operation-backed web " +
+          "entity this deployment's authoring layers declare.",
+      );
+    }
+  }
+  for (const [key, property] of Object.entries(objectProperties(schema))) {
+    assertReferenceTargetsExist(origin, property, known, [...path, key]);
+  }
+  const items = schema.items;
+  if (items && typeof items === "object" && !Array.isArray(items)) {
+    assertReferenceTargetsExist(origin, items as Record<string, unknown>, known, [...path, "*"]);
+  }
+  // A discriminated variant: each branch declares its own properties, and a
+  // picker in one of them is one a reader actually reaches.
+  for (const keyword of ["oneOf", "anyOf", "allOf"] as const) {
+    const branches = schema[keyword];
+    if (!Array.isArray(branches)) continue;
+    for (const branch of branches) {
+      if (!branch || typeof branch !== "object" || Array.isArray(branch)) continue;
+      assertReferenceTargetsExist(origin, branch as Record<string, unknown>, known, path);
+    }
+  }
+}
+
+/**
+ * A collection action, targeted at the collection it was placed on.
+ *
+ * A collection action of a PARAMETERIZED collection is invoked on the page the
+ * user is already on, so it inherits that page's own route bindings — the same
+ * map the list Operation uses, narrowed to the inputs this action actually
+ * declares. Nothing new is authored for it: an action that does not take the
+ * parameter simply gets no binding.
+ */
+function collectionActionTarget(
+  ref: WebStandaloneOperationRef,
+  entityName: string,
+  listBindings: Record<string, string> | undefined,
+): WebStandaloneOperationRef {
+  const inputs = objectProperties(ref.input.schema);
+  const routeBindings = Object.fromEntries(
+    Object.entries(listBindings ?? {}).filter(([inputKey]) => inputKey in inputs));
+  return {
+    ...ref,
+    target: {
+      entityId: entityName,
+      entityName,
+      scope: "collection" as const,
+      ...(Object.keys(routeBindings).length ? { routeBindings } : {}),
+    },
+  };
+}
+
 /** The core entity an operation schema property is typed as, when its `x-osf-type` names one. */
 function referenceTarget(
   schema: Record<string, unknown>,
@@ -1391,6 +1495,15 @@ function projectStandalone(
   // own. Both resolve across all catalogs, so both are settled here, before
   // the first one is projected.
   assertRelatedWebEntitiesResolve(catalogs.map((document) => ({ origin: document.plugin, document })));
+  // A reference picker may point at a core entity or at an operation-backed
+  // web entity any catalog declares — the two are the same thing to the host,
+  // and an operation-backed one is how a provider surface exposes its own
+  // records. Collected before the loop, so a catalog may reference an entity a
+  // later catalog declares.
+  const referenceable = new Set([
+    ...targets.keys(),
+    ...catalogs.flatMap((catalog) => Object.keys(catalog.interfaces.web?.entities ?? {})),
+  ]);
   for (const catalog of catalogs) {
     const web = catalog.interfaces.web!;
     const operationRef = (key: string): WebStandaloneOperationRef => {
@@ -1403,6 +1516,7 @@ function projectStandalone(
             "pass the catalog's lowered operations alongside the catalog.",
         );
       }
+      assertReferenceTargetsExist(`${catalog.plugin} Operation "${key}"`, compiled.inputSchema, referenceable);
       const placement = web.operations?.[key];
       return {
         id,
@@ -1587,10 +1701,8 @@ function projectStandalone(
             : { visibleWhen: action.visibleWhen }),
         };
       });
-      const collectionActions = (entity.operations.collectionActions ?? []).map((key) => ({
-        ...refs[key]!,
-        target: { entityId: entityName, entityName, scope: "collection" as const },
-      }));
+      const collectionActions = (entity.operations.collectionActions ?? []).map((key) =>
+        collectionActionTarget(refs[key]!, entityName, entity.operations.list.bindings));
       const recordRoute = entity.recordRoute ?? `${entity.route}/:${entity.idField}`;
       entities[entityName] = {
         entityId: entityName,
@@ -1608,7 +1720,10 @@ function projectStandalone(
             ...(listQuery ? { query: {
               input: listQuery.input,
               nextCursorField: listQuery.nextCursorField,
-              totalCountField: listQuery.totalCountField,
+              // Omitted, not null, when the Operation declares an unknown
+              // total: the field names where to READ a total, and there is no
+              // such place to name.
+              ...(listQuery.totalCountField ? { totalCountField: listQuery.totalCountField } : {}),
             } } : {}),
           },
           ...(entity.operations.get ? { record: {

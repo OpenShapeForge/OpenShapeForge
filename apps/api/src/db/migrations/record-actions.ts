@@ -192,6 +192,23 @@ import { WORKER_ROLE } from "./worker-role.js";
  * refusal. The resolver keeps a stale privilege until that is resolved, and
  * the lookup still has no branch that can use it.
  *
+ * AND EVERY ONE OF THESE BOUNDS IS PER DATABASE
+ * ---------------------------------------------
+ * The resolver is ONE cluster-wide role; `pg_class`, `pg_attribute` and
+ * `pg_policy` are per database. So "the resolver holds exactly what this
+ * manifest declares" is a statement about the database being migrated, and
+ * about no other: a grant it holds in a sibling database is neither visible
+ * here nor revocable from here, and the stale-grant cleanup below reaches only
+ * this database's tables.
+ *
+ * That is not a gap this step could close, and the role contract makes it one
+ * it does not have to: a cluster cannot hold two OpenShapeForge databases with
+ * distinct owners, because each one's migrate role is a member of the definer
+ * roles and the other database sees that membership as an undeclared member of
+ * its own. `verifyDatabaseRoles` refuses both, symmetrically — verified on
+ * PostgreSQL 17.11. See database-roles.ts and docs/migrations.md; nothing here
+ * claims a shared cluster with distinct owners works.
+ *
  * ONE TRANSACTION
  * ---------------
  * The whole step is one transaction: the grants, the four policies per entity,

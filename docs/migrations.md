@@ -202,6 +202,37 @@ the `revoke` that fixes it. Adding a role is a host provisioning step:
 `db:provision-roles` before the next `db:migrate`, or step 0 refuses the chain
 and names the statements.
 
+### One cluster holds one OpenShapeForge database per owner
+
+That membership rule is the point where a cluster-wide object meets a
+per-database check, and it bounds what a cluster may host. Roles and role
+memberships live in the cluster; `datdba` — the owner the rule compares a
+member against — belongs to one database. So **a cluster cannot host two
+OpenShapeForge databases with distinct owners.** Each database's migrate role
+must be a member of the definer roles, and from the other database that
+membership is a role which is neither its own migrate identity nor a holder of
+its owner's privileges. Step 0 refuses both databases, and the `revoke` each
+one names would break the other.
+
+Verified on PostgreSQL 17.11 with `verifyDatabaseRoles` itself: two databases
+owned by distinct non-superuser roles, both migrators provisioned, and each
+database reports the other's migrator as an undeclared member of all three
+definer roles. The refusal is symmetric, so there is no order of provisioning
+that satisfies both.
+
+Two databases that share one owner are fine — the same verification passes for
+both — and so is one cluster per deployment, which is what
+`db:provision-roles` ("once per cluster") assumes. For separate deployments on
+shared hardware, use separate clusters rather than a shared one; nothing here
+is a claim that a shared cluster works with distinct owners.
+
+The record-action step's privilege guarantees are per-database for the same
+reason. It reads `pg_class`, `pg_attribute` and `pg_policy`, all of which are
+per-database, so "the resolver holds exactly what this manifest declares" is a
+statement about the database being migrated. The resolver is one cluster-wide
+role, and its grants in a sibling database are neither visible to nor revocable
+from this one.
+
 ```sh
 OPENSHAPEFORGE_ADMIN_DATABASE_URL=postgres://admin:...@host/db \
 OPENSHAPEFORGE_MIGRATE_DATABASE_URL=postgres://migrator:...@host/db \

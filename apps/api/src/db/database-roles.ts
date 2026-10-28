@@ -11,6 +11,28 @@
  * whose objects it must hand over. Anything missing is reported with the
  * exact statements an administrator runs — the same statements
  * {@link provisionDatabaseRoles} executes when given the admin connection.
+ *
+ * ONE DATABASE PER OWNER, PER CLUSTER
+ * -----------------------------------
+ * {@link readRoleMembers} is where a cluster-wide object meets a per-database
+ * check, and the combination bounds what a cluster may host. Memberships are
+ * cluster-wide; `datdba`, the owner a member is compared against, belongs to
+ * one database. So a cluster cannot hold two OpenShapeForge databases with
+ * DISTINCT owners: each one's migrate role must be a member of the definer
+ * roles, and seen from the other database that membership is a role which is
+ * neither its own migrate identity nor a holder of its owner's privileges.
+ * Verified on PostgreSQL 17.11 — two databases owned by distinct
+ * non-superuser roles, both migrators provisioned, and `verifyDatabaseRoles`
+ * refuses in BOTH, each naming the other's migrator against all three definer
+ * roles. The refusal is symmetric, so no provisioning order satisfies both,
+ * and the `revoke` each error names would break the other database.
+ *
+ * Two databases sharing ONE owner pass (verified the same way), as does one
+ * cluster per deployment, which is what `db:provision-roles` assumes. This is
+ * a restriction and not a shortcoming of the check: the alternative is
+ * admitting a member on the strength of its being some database's owner, which
+ * would let the owner of any database in the cluster hold the definer roles'
+ * grants in this one. See docs/migrations.md.
  */
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "./connection.js";

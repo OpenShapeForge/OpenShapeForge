@@ -10,9 +10,9 @@
  * will not return, so the cost of the last page grows with the account and a
  * bounded offset makes the tail unreachable; a keyset names the last row and
  * asks the index for what comes after it, so every page costs the same and
- * there is no tail to be cut off. It is also stable under
- * concurrent writes: a row inserted before the cursor cannot shift a later
- * page, which an offset silently does (one row skipped, one row repeated).
+ * there is no tail to be cut off. It is also stable under concurrent writes: a
+ * row inserted before the cursor cannot shift a later page, which an offset
+ * silently does (one row skipped, one row repeated).
  *
  * Two properties make a keyset correct, and both are enforced here rather than
  * left to the caller:
@@ -53,8 +53,8 @@ export type SortDirection = "asc" | "desc";
  * It also keeps caller-supplied text out of a typed expression entirely: the
  * value half used to be cast to `timestamptz`, which is a 500 for every
  * spelling the validator and the input parser disagreed about. The only thing
- * a caller now supplies is the uuid, and {@link resumeAfter} reads the value
- * from the row itself.
+ * a caller now supplies is the uuid, and {@link anchorValueQuery} reads the
+ * value from the row itself.
  */
 export type PageAnchor = { id: string };
 

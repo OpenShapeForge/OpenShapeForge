@@ -108,11 +108,11 @@ fields:
     osfType: string
     required: false
     label:
-      en: Source administration
-      nl: Bronadministratie
+      en: Source administration ID
+      nl: Bronadministratie-ID
     description:
-      en: Identifier or label of the administration or sub-ledger within the source organization.
-      nl: Identificatie of label van de administratie of subadministratie binnen de bronorganisatie.
+      en: Stable identifier of the administration within the source organization; records match on it.
+      nl: Stabiele identificatie van de administratie binnen de bronorganisatie; records koppelen hierop.
     validation:
       maxLength: 200
     persisted:
@@ -125,8 +125,8 @@ fields:
       en: Source administration name
       nl: Naam bronadministratie
     description:
-      en: Readable name of the administration; sourceAdministration stays the identifier records match on.
-      nl: Leesbare naam van de administratie; sourceAdministration blijft de identificatie waarop records koppelen.
+      en: Readable name of that administration; not used for matching.
+      nl: Leesbare naam van die administratie; niet gebruikt om te koppelen.
     validation:
       maxLength: 200
     persisted:

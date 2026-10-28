@@ -10,7 +10,9 @@
 # The writing Operations also accept sourceAdministrationName, the readable
 # name of that administration, and write it to every record they touch. It is
 # a stored label, never part of the match: the two Operations that only read
-# or delete by identity do not take it.
+# or delete by identity do not take it. The call owns the field the way it owns
+# the authority and the administration, so a copy inside a record is stripped:
+# a call that does not name the administration leaves the stored name as it is.
 #
 # The session gate is deliberately open: what a caller may do is decided per
 # call by the TARGET entity's own create/update/delete/list roles, the same

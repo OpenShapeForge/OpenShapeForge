@@ -8,7 +8,8 @@
  * back from the data, and the target entity's own roles decide. The readable
  * sourceAdministrationName a call supplies is written to every record it
  * touches without becoming part of source identity: renaming an administration
- * matches the same records and resumes the same cursor.
+ * matches the same records and resumes the same cursor. A call that omits the
+ * name leaves the stored one alone, whatever its records carry.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -258,6 +259,35 @@ describe("source-sync Operations", () => {
     expect(await rows("ledger_accounts", tenantId)).toEqual([]);
     await run("upsertBySource", { entity: "LedgerAccount", ...SOURCE, records: [account("a1", "1000", 1)] }, session);
     expect((await rows("ledger_accounts", tenantId)).map((row) => row.source_administration_name)).toEqual([null]);
+  });
+
+  test("a call without the administration name leaves the stored name alone, whatever the records carry", async () => {
+    const tenantId = await tenant(), session = sessionFor(tenantId);
+    await run("upsertBySource", {
+      entity: "LedgerAccount", ...SOURCE, sourceAdministrationName: "Acme Holding BV",
+      records: [account("a1", "1000", 1), account("a2", "8000", 1)],
+    }, session);
+
+    // The field is the call's, not the record's: omitting it means "leave it
+    // alone", so neither a stale name nor an explicit null reaches the write.
+    const updated = await run("upsertBySource", {
+      entity: "LedgerAccount", ...SOURCE,
+      records: [
+        { ...account("a1", "1000", 2), sourceAdministrationName: "Beta Holding BV" },
+        { ...account("a2", "8000", 2), sourceAdministrationName: null },
+      ],
+    }, session);
+    expect(updated).toMatchObject({ created: 0, updated: 2, skipped: 0 });
+    expect((await rows("ledger_accounts", tenantId)).map((row) => [row.external_id, row.source_administration_name]))
+      .toEqual([["a1", "Acme Holding BV"], ["a2", "Acme Holding BV"]]);
+
+    // The same through an atomic page, which forwards only what the page named.
+    await run("applySourcePage", {
+      ...SOURCE,
+      batches: [{ entity: "LedgerAccount", action: "upsert", records: [{ ...account("a1", "1000", 3), sourceAdministrationName: null }] }],
+    }, session);
+    expect((await rows("ledger_accounts", tenantId)).map((row) => row.source_administration_name))
+      .toEqual(["Acme Holding BV", "Acme Holding BV"]);
   });
 
   test("an atomic page writes the administration name across its batches", async () => {

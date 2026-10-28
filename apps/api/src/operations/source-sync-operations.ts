@@ -15,7 +15,8 @@
  * it owns the authority and the administration. That name is stored, never
  * matched on: identity, deduplication and the watermark are keyed on the
  * administration identifier alone, so a renamed administration remains one
- * administration with one cursor.
+ * administration with one cursor. A call that does not name it leaves the
+ * stored name exactly as it was.
  */
 import { operationFailure } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
@@ -153,9 +154,13 @@ async function resolveReferences(
 }
 
 /**
- * A record's own source fields may repeat the call's, never contradict them.
- * The readable administration name is owned the same way when the call supplies
- * one; without it a record keeps whatever name it carries itself.
+ * The source fields belong to the call, not to the records in it. A record may
+ * repeat the call's values but never contradict them, and whatever it carries
+ * is replaced by the call's own. The readable administration name is owned the
+ * same way, with one difference: the call may leave it out, and then the field
+ * is simply dropped from the write, so a record carrying a stale name — or a
+ * null — cannot rename or clear the stored one. Omitting the name means
+ * "leave it alone", which is what the Operation's input schema promises.
  */
 function sourceValues(record: Rec, source: Source): Rec {
   const owned: Record<string, string> = {
@@ -169,7 +174,8 @@ function sourceValues(record: Rec, source: Source): Rec {
       throw badInput(`Record ${JSON.stringify(record.externalId)} has ${field} ${JSON.stringify(value)}, not ${JSON.stringify(expected)}.`);
     }
   }
-  return { ...record, ...owned };
+  const { sourceAdministrationName: _callerOwned, ...rest } = record;
+  return { ...rest, ...owned };
 }
 
 const upsertBySource: ModuleOperationHandler = async (input, context) => {

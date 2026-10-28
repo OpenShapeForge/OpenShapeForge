@@ -22,9 +22,11 @@ export type DocumentBlockRow = Readonly<Record<string, unknown>> & {
 export type TemplateVersionRow = Readonly<{ id: string; template_id: string; version_number: number; status: string; snapshot: PublishedSnapshot }>;
 export type DocumentCommand = "link" | "follow";
 
+/** Ownership and provenance, never block content: not copied down, not compared for divergence. */
 const RESERVED = new Set([
-  "id", "tenant_id", "created_at", "updated_at", "external_id", "source_authority", "source_organization", "source_administration",
-  "permissions", "variant_id", "variant_id_position", "document_variant_id", "document_variant_id_position", "origin", "template_block_id", "diverged",
+  "id", "tenant_id", "created_at", "updated_at", "external_id", "source_authority", "source_organization",
+  "source_administration", "source_administration_name", "permissions", "variant_id", "variant_id_position",
+  "document_variant_id", "document_variant_id_position", "origin", "template_block_id", "diverged",
 ]);
 const IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
 const CASTS: Readonly<Record<string, string>> = {

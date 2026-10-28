@@ -263,11 +263,25 @@ suite runs on in CI, and therefore the oldest server this contract supports.
 On an older server the check errors on the missing columns rather than passing;
 upgrade the cluster to 16 or later before `db:migrate`.
 
-Anything else is reported with the `grant` or `revoke` that fixes it — and only
-reported. The chain runs as the migrate role, which is deliberately not a role
-administrator, so it fails closed rather than revoking a membership an operator
-created. The record-action step repeats this check on the resolver before it
-grants anything, because a host can call that step directly.
+Anything else is reported with the `alter role`, `grant` or `revoke` that fixes
+it — and only reported. The chain runs as the migrate role, which is
+deliberately not a role administrator, so it fails closed rather than changing
+an attribute or revoking a membership an operator set. The record-action step
+repeats this check on the resolver before it grants anything, because a host
+can call that step directly.
+
+An attribute deviation is reported as **one `alter role` per role**, naming
+that role and only the attributes it must not keep —
+`alter role openshapeforge_record_action_resolver nosuperuser nocreatedb;` for
+a role that is a superuser and may create databases, and nothing for the
+attributes that are already right. No other role is named, and the statement is
+never run for you. `db:provision-roles` does not stand in for it: the script
+creates the roles that do not exist and grants the migrate identity its
+membership, and a role that already exists keeps the attribute that failed, so
+the next `db:migrate` refuses on it again until the printed `alter role` is run.
+Postgres reserves `SUPERUSER`, `REPLICATION` and `BYPASSRLS` to superusers, so
+the refusal says when a `CREATEROLE` administrator connection is not enough for
+the statement it just printed.
 
 Adding a role is a host provisioning step:
 `db:provision-roles` before the next `db:migrate`, or step 0 refuses the chain

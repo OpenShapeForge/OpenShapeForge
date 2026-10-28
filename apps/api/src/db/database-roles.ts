@@ -9,8 +9,11 @@
  * every role the generated schema depends on exists with the load-bearing
  * attributes, and that the migrate role is a member of the definer roles
  * whose objects it must hand over. Anything missing is reported with the
- * exact statements an administrator runs — the same statements
- * {@link provisionDatabaseRoles} executes when given the admin connection.
+ * exact statements an administrator runs. {@link provisionDatabaseRoles}
+ * executes the create-and-grant half of them when given the admin connection;
+ * the `alter role` that drops an unsafe attribute from a role that already
+ * exists, and the `revoke` that cuts an unintended membership, are printed for
+ * an operator and never run here — see {@link verifyDatabaseRoles}.
  *
  * TWO OPENSHAPEFORGE DATABASES IN ONE CLUSTER
  * -------------------------------------------
@@ -175,8 +178,23 @@ function identifier(name: string): string {
   return name;
 }
 
+/**
+ * The attributes whose removal needs a SUPERUSER connection. `ALTER ROLE` can
+ * drop CREATEROLE, CREATEDB, LOGIN and INHERIT with CREATEROLE alone; Postgres
+ * reserves SUPERUSER, REPLICATION and BYPASSRLS to superusers, so the refusal
+ * says which connection the printed statement needs rather than letting an
+ * administrator discover it from a permission error.
+ */
+const SUPERUSER_ONLY_ATTRIBUTES = new Set(["nosuperuser", "noreplication", "nobypassrls"]);
+
 /** The statements an administrator runs to satisfy the contract. Passwords are
- * never rendered; login roles get a placeholder the operator replaces. */
+ * never rendered; login roles get a placeholder the operator replaces.
+ *
+ * Only roles that do not exist yet are created: the `do $$ ... $$` guard is
+ * what makes the script safe to re-run, and it is also why the script does not
+ * repair an EXISTING role. An attribute a role already carries is reported by
+ * {@link verifyDatabaseRoles} as its own `alter role`, naming that one role and
+ * only the attributes it must not keep. */
 export function renderProvisioningSql(options: { migratorRole?: string } = {}): string {
   const lines: string[] = [];
   for (const role of DATABASE_ROLES) {
@@ -450,9 +468,13 @@ async function readRoleMemberships(db: OpenShapeForgeDatabase): Promise<Map<stri
  *     are outside row security and privilege checks regardless of any
  *     membership.
  *
- * Deviations are reported with the `revoke` that fixes them and never revoked
- * here: this runs as the migrate role, which is deliberately not a role
- * administrator, and a membership an operator created is theirs to remove.
+ * Deviations are reported with the `alter role` or `revoke` that fixes them and
+ * never applied here: this runs as the migrate role, which is deliberately not
+ * a role administrator, and an attribute or membership an operator set is
+ * theirs to change. The provisioning script does not stand in for those two
+ * either — it creates roles that are absent and grants the migrate identity's
+ * membership, so a role that already exists keeps the attribute that failed,
+ * and the next verify fails on it again until the printed `alter role` is run.
  */
 export async function verifyDatabaseRoles(db: OpenShapeForgeDatabase): Promise<void> {
   const rows = await readRoles(db);
@@ -460,25 +482,60 @@ export async function verifyDatabaseRoles(db: OpenShapeForgeDatabase): Promise<v
   const current = identity.user;
   const problems: string[] = [];
   const remedies: string[] = [];
+  let superuserRemedy = false;
   for (const role of DATABASE_ROLES) {
     const row = rows.get(role.name);
     if (!row) {
       problems.push(`role ${role.name} (${role.key}) does not exist`);
       continue;
     }
-    if (row.rolsuper) problems.push(`role ${role.name} must not be SUPERUSER`);
-    if (row.rolbypassrls) problems.push(`role ${role.name} must not have BYPASSRLS`);
-    if (row.rolcreaterole) problems.push(`role ${role.name} must not have CREATEROLE`);
-    if (row.rolcreatedb) problems.push(`role ${role.name} must not have CREATEDB`);
-    if (row.rolreplication) problems.push(`role ${role.name} must not have REPLICATION`);
+    // Every attribute deviation this role has, collected into the ONE `alter
+    // role` that fixes it. The statement names this role and nothing else, and
+    // lists only the attributes it must not keep — an administrator reading it
+    // can see it touches no other role and changes no attribute that is
+    // already right. A blanket `alter role <name> nosuperuser nobypassrls
+    // nocreaterole nocreatedb noreplication` would read the same way and be
+    // wrong: on a compliant role it is a no-op nobody needs to run, and it
+    // hides which attribute actually failed.
+    const attributes: string[] = [];
+    if (row.rolsuper) {
+      problems.push(`role ${role.name} must not be SUPERUSER`);
+      attributes.push("nosuperuser");
+    }
+    if (row.rolbypassrls) {
+      problems.push(`role ${role.name} must not have BYPASSRLS`);
+      attributes.push("nobypassrls");
+    }
+    if (row.rolcreaterole) {
+      problems.push(`role ${role.name} must not have CREATEROLE`);
+      attributes.push("nocreaterole");
+    }
+    if (row.rolcreatedb) {
+      problems.push(`role ${role.name} must not have CREATEDB`);
+      attributes.push("nocreatedb");
+    }
+    if (row.rolreplication) {
+      problems.push(`role ${role.name} must not have REPLICATION`);
+      attributes.push("noreplication");
+    }
     if (row.rolcanlogin !== role.login) {
       problems.push(`role ${role.name} must ${role.login ? "" : "not "}be able to log in`);
+      // `login` alone, never a password: a role that must be able to log in
+      // already has whatever secret the host gave it, and the remedy must not
+      // reset it or print one.
+      attributes.push(role.login ? "login" : "nologin");
     }
     // A definer role owns SECURITY DEFINER functions, so what it inherits is
     // what those bodies run with.
     if (!role.login && row.rolinherit) {
       problems.push(`definer role ${role.name} must be NOINHERIT`);
-      remedies.push(`alter role ${identifier(role.name)} noinherit;`);
+      attributes.push("noinherit");
+    }
+    if (attributes.length > 0) {
+      remedies.push(`alter role ${identifier(role.name)} ${attributes.join(" ")};`);
+      if (attributes.some((attribute) => SUPERUSER_ONLY_ATTRIBUTES.has(attribute))) {
+        superuserRemedy = true;
+      }
     }
     // A superuser hands the objects over without a grant. Otherwise the grant
     // must name the migrate identity itself AND carry INHERIT and SET on that
@@ -522,9 +579,16 @@ export async function verifyDatabaseRoles(db: OpenShapeForgeDatabase): Promise<v
     "Database role contract is not satisfied:\n" +
       problems.map((problem) => `  - ${problem}`).join("\n") +
       "\n\nRoles are cluster-wide and are provisioned by the host, not by this migration. " +
-      "Run apps/api/src/db/provision-roles.ts with OPENSHAPEFORGE_ADMIN_DATABASE_URL, " +
-      "or execute ALL of the following as an administrator — each revoke cuts one route " +
-      "into one definer role, and a role listed more than once reaches it more than once:" +
+      "apps/api/src/db/provision-roles.ts with OPENSHAPEFORGE_ADMIN_DATABASE_URL creates the " +
+      "roles that do not exist and grants the migrate identity its membership; it never " +
+      "alters an existing role and never revokes anything, so execute ALL of the following " +
+      "as an administrator — each alter role names one role and only the attributes it must " +
+      "not keep, each revoke cuts one route into one definer role, and a role listed more " +
+      "than once reaches it more than once:" +
+      (superuserRemedy
+        ? " changing SUPERUSER, REPLICATION or BYPASSRLS needs a SUPERUSER connection, which " +
+          "CREATEROLE alone is not."
+        : "") +
       "\n\n" +
       [provisioning, ...extra].join("\n"),
   );
@@ -545,6 +609,13 @@ export type ProvisionResult = { created: string[]; rotated: string[]; granted: s
  * Satisfy the contract as an ADMINISTRATOR connection (CREATEROLE). Idempotent:
  * existing roles are left untouched unless their password is explicitly
  * selected for rotation, and memberships are granted only when missing.
+ *
+ * "Left untouched" includes ATTRIBUTES. A role an operator created with an
+ * attribute the contract refuses is not repaired here, deliberately: the
+ * attributes a deployment's own role carries are not this script's to rewrite,
+ * and `nosuperuser`, `noreplication` and `nobypassrls` need a superuser this
+ * connection need not be. {@link verifyDatabaseRoles} prints the `alter role`
+ * for exactly the deviating attributes of exactly that role instead.
  */
 export async function provisionDatabaseRoles(
   admin: OpenShapeForgeDatabase,

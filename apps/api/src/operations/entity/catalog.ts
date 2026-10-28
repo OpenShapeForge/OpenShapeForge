@@ -128,6 +128,35 @@ export function requireEntityOperation(
 export const __requireEntityOperationForTests = requireEntityOperation;
 
 /**
+ * Register one manifest-shaped table, and its role sets, for the duration of a
+ * test; the returned function removes it again.
+ *
+ * Needed because both registries are derived from the compiled manifest at
+ * import and this repository's own authoring declares no entity with a record
+ * ACL — so a behavioural test of the paths that resolve a table BY NAME
+ * (record-action delegation, generated CRUD role gating) would otherwise have
+ * no entity to resolve. The fixture is a manifest entry, not a shortcut past
+ * one: every gate downstream reads it exactly as it reads a compiled table.
+ */
+export function __registerGeneratedCrudTableForTests(
+  table: GeneratedCrudTable,
+): () => void {
+  generatedCrudTables.set(table.name, table);
+  entityRoleSets.set(
+    table.name,
+    Object.fromEntries(
+      Object.entries(table.source?.authorization?.roles ?? {}).map(
+        ([operation, roles]) => [operation, new Set(roles)],
+      ),
+    ) as Partial<Record<GeneratedCrudOperation, ReadonlySet<string>>>,
+  );
+  return () => {
+    generatedCrudTables.delete(table.name);
+    entityRoleSets.delete(table.name);
+  };
+}
+
+/**
  * Entity name used in authorization errors — the authored name when the
  * manifest carries one, never the physical table. Matches the wording
  * requireEntityOperation already produces.

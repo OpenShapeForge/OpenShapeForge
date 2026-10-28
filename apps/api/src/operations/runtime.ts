@@ -92,6 +92,7 @@ import { evaluateOperationAvailability } from "./availability.js";
 import { assertOperationAdmitted } from "./execution-policy.js";
 import { nativeEntityTypeListHandler } from "./entity-type-list.js";
 import { API_KEYS_PLUGIN, apiKeyOperationHandler } from "./api-key-operations.js";
+import { RECORD_ACTIONS_PLUGIN, recordActionOperationHandler } from "./record-action-operations.js";
 import { GRANTS_PLUGIN, grantsOperationHandler } from "./grants-operations.js";
 import { SOURCE_SYNC_PLUGIN, sourceSyncOperationHandler } from "./source-sync-operations.js";
 import { EDIT_LEASES_PLUGIN, editLeaseOperationHandler } from "./edit-lease-operations.js";
@@ -671,6 +672,15 @@ export function bindOperationHandlers(
     if (operation.plugin === API_KEYS_PLUGIN) {
       if (modulesByName.has(API_KEYS_PLUGIN)) throw new Error("The core API key catalog runtime cannot be replaced by a plugin.");
       bound.set(operation.key, { operation, handler: apiKeyOperationHandler(operation) });
+      continue;
+    }
+    // The named record-action axis is core as well, and emphatically not
+    // replaceable: a plugin standing in for this handler would be a SECOND
+    // writer of the axis, which is the one thing the single-writer design
+    // exists to prevent (operations/record-action-operations.ts).
+    if (operation.plugin === RECORD_ACTIONS_PLUGIN) {
+      if (modulesByName.has(RECORD_ACTIONS_PLUGIN)) throw new Error("The core record action runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: recordActionOperationHandler(operation) });
       continue;
     }
     // Importing records from an external source system by their base source

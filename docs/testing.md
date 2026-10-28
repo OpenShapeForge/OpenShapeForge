@@ -131,7 +131,9 @@ Properties worth knowing:
   206 pass / 0 skip.
 - Keycloak knobs: `E2E_KEYCLOAK_CLIENT_ID` (default `openshapeforge-gateway`),
   `E2E_KEYCLOAK_CLIENT_SECRET` (`dev-secret`), `E2E_KEYCLOAK_USERNAME`
-  (`tenant-a-admin`), `E2E_KEYCLOAK_PASSWORD` (`test`).
+  (`tenant-a-admin`), `E2E_KEYCLOAK_PASSWORD` (`test`). Existing realms are not
+  updated by realm import: verify the four seeded test users in Keycloak or
+  re-import a disposable test realm to apply their explicit verified-email flags.
 - **The provisioning tests are opt-in the same way**, and for the same reason —
   they reach a real Keycloak through the identity-configuration SPI, so without
   one they would prove nothing. They skip unless the control plane is configured

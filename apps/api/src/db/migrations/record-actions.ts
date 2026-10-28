@@ -6,8 +6,6 @@ import { databaseRole } from "../database-roles.js";
 import { APP_ROLE } from "./app-role.js";
 import { WORKER_ROLE } from "./worker-role.js";
 
-const RESOLVER_ROLE = databaseRole("recordActionResolver").name;
-
 /**
  * The record-action point lookup: does this session hold ONE named action on
  * ONE record?
@@ -62,11 +60,17 @@ const RESOLVER_ROLE = databaseRole("recordActionResolver").name;
  * come from the compiled manifest and are baked into a fixed `case` over the
  * entities that opted in, so a caller can neither name a table the compiler
  * did not authorize, nor an action the entity did not declare, nor a column
- * the policy does not cover. Every identifier is validated against a strict
- * pattern below before it reaches SQL, so a malformed manifest fails the
- * migration instead of shaping a statement. The only answer the function can
- * give is one the caller is entitled to: whether its own session holds an
- * action it already names.
+ * the policy does not cover.
+ *
+ * Every string that reaches SQL is both REJECTED and QUOTED, at the point of
+ * interpolation rather than only in the registry builder — these renderers are
+ * exported and a plugin-contributed table never passed through the authoring
+ * loader. Schema, table and column names must match a plain lowercase
+ * identifier and are emitted double-quoted; the entity, action and read-field
+ * names must match their authored pattern and are emitted as literals with
+ * quotes doubled. A manifest that deviates fails the migration instead of
+ * shaping a statement. The only answer the function can give is one the caller
+ * is entitled to: whether its own session holds an action it already names.
  *
  * THE LOCK ORDERING
  * -----------------
@@ -87,9 +91,75 @@ const RESOLVER_ROLE = databaseRole("recordActionResolver").name;
 const IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
 const ENTITY_NAME = /^[A-Z][A-Za-z0-9]*$/;
 const ACTION_NAME = /^[a-z][A-Za-z0-9]*$/;
+/** The authoring field-key contract (authoring/loader.ts FIELD_KEY_PATTERN). */
+const FIELD_NAME = /^[a-z][A-Za-z0-9]*$/;
+const RECORD_PERMISSIONS = ["view", "edit", "delete"];
 /** The uuid shape a uuid-keyed branch refuses before casting. */
 const UUID_LITERAL =
   "'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'";
+/**
+ * The longest name this module derives from a table name. PostgreSQL
+ * truncates an identifier at 63 bytes, and three policies whose names
+ * collapsed into one would leave the table with whichever was created last.
+ */
+const LONGEST_POLICY_SUFFIX = "_record_action_fence";
+
+function unrenderable(value: string, reason: string): never {
+  throw new Error(
+    `Record-action DDL cannot be rendered: ${reason} (${JSON.stringify(value)}). ` +
+      "This is compiled manifest output, so fix the authoring or the compiler rather than this migration.",
+  );
+}
+
+/** A validated, double-quoted SQL identifier. Nothing reaches SQL bare. */
+function ident(...parts: string[]): string {
+  return parts
+    .map((part) => {
+      if (!IDENTIFIER.test(part)) unrenderable(part, "it is not a plain lowercase identifier");
+      return `"${part}"`;
+    })
+    .join(".");
+}
+
+/** A single-quoted SQL string literal, with embedded quotes doubled. */
+function literal(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function entityLiteral(name: string): string {
+  if (!ENTITY_NAME.test(name)) unrenderable(name, "it is not a PascalCase entity name");
+  return literal(name);
+}
+
+function actionLiteral(name: string): string {
+  if (!ACTION_NAME.test(name) || RECORD_PERMISSIONS.includes(name)) {
+    unrenderable(name, "it is not a lowerCamel action name outside view/edit/delete");
+  }
+  return literal(name);
+}
+
+function fieldLiteral(name: string): string {
+  if (!FIELD_NAME.test(name)) unrenderable(name, "it is not a lowerCamel field name");
+  return literal(name);
+}
+
+/**
+ * The `<Entity>:<action>` label the projection switches on. Both halves are
+ * validated, and neither pattern admits a colon, so the label of one pair can
+ * never be the label of another.
+ */
+function projectionLabel(entity: string, action: string): string {
+  entityLiteral(entity);
+  actionLiteral(action);
+  return literal(`${entity}:${action}`);
+}
+
+/** The definer role, validated once: it is interpolated into DDL and a policy. */
+const RESOLVER_ROLE = (() => {
+  const name = databaseRole("recordActionResolver").name;
+  if (!IDENTIFIER.test(name)) unrenderable(name, "the definer role is not a plain identifier");
+  return name;
+})();
 
 /**
  * The authored field name a column carries, the same derivation the entity
@@ -157,13 +227,24 @@ export function recordActionEntities(
     if (!IDENTIFIER.test(table.schema) || !IDENTIFIER.test(table.name)) {
       invalid(table, "its schema or table name is not a plain lowercase identifier");
     }
+    // The three policies are named after the table. PostgreSQL would truncate
+    // them at 63 bytes and collapse all three into one.
+    if (table.name.length + LONGEST_POLICY_SUFFIX.length > 63) {
+      invalid(table, `its name leaves no room for a "${LONGEST_POLICY_SUFFIX}" policy name within 63 bytes`);
+    }
     if (!IDENTIFIER.test(policy.column)) invalid(table, `ACL column "${policy.column}" is not a plain lowercase identifier`);
     // Tenant isolation is enforced INSIDE the function by comparing
     // app.current_tenant(); an entity with no tenant column has no boundary to
     // compare and must not carry an action.
     if (!table.tenantScoped) invalid(table, "a record action requires a tenant-scoped table");
-    const key = (table.columns ?? []).find((column) => column.primaryKey);
-    if (!key || !IDENTIFIER.test(key.name)) invalid(table, "it has no single plain-identifier primary key");
+    // ONE key column, because both the lookup and the projection address the
+    // record by it: one column of a compound key matches more than one row,
+    // and `select ... into` would then answer from an arbitrary one.
+    const keys = (table.columns ?? []).filter((column) => column.primaryKey);
+    const key = keys[0];
+    if (keys.length !== 1 || !key || !IDENTIFIER.test(key.name)) {
+      invalid(table, "it has no single plain-identifier primary key");
+    }
     if (!(table.columns ?? []).some((column) => column.name === policy.column)) {
       invalid(table, `ACL column "${policy.column}" is not a column of this table`);
     }
@@ -172,7 +253,7 @@ export function recordActionEntities(
     }
     const actions = [...new Set(policy.actions.map((action) => action.name))].sort();
     for (const action of actions) {
-      if (!ACTION_NAME.test(action) || ["view", "edit", "delete"].includes(action)) {
+      if (!ACTION_NAME.test(action) || RECORD_PERMISSIONS.includes(action)) {
         invalid(table, `declared action "${action}" is not a lowerCamel name outside view/edit/delete`);
       }
     }
@@ -180,6 +261,12 @@ export function recordActionEntities(
     for (const action of policy.actions) {
       const projection: Array<{ field: string; column: string }> = [];
       for (const field of [...new Set(action.reads ?? [])].sort()) {
+        // The field NAME is a key of the returned jsonb document, so it is
+        // interpolated as a literal. `sourceField` comes from the manifest and
+        // a plugin-contributed column never passed the authoring loader.
+        if (!FIELD_NAME.test(field)) {
+          invalid(table, `action "${action.name}" reads "${field}", which is not a lowerCamel field name`);
+        }
         const column = (table.columns ?? []).find(
           (candidate) => fieldNameForColumn(candidate) === field,
         );
@@ -196,6 +283,12 @@ export function recordActionEntities(
       }
       if (projection.length > 0) reads[action.name] = projection;
     }
+    // The entity name is the `case` label the caller selects a branch with.
+    // Two tables answering to one name would make the second branch dead and
+    // the first branch the wrong table.
+    if (entities.some((existing) => existing.entity === entity)) {
+      invalid(table, `entity name "${entity}" is already declared by another table`);
+    }
     entities.push({
       entity: entity!,
       schema: table.schema,
@@ -210,18 +303,29 @@ export function recordActionEntities(
   return entities.sort((left, right) => left.entity.localeCompare(right.entity));
 }
 
+/**
+ * The one row both bodies address: the record this key names, inside the
+ * session's tenant. The key column is the table's single primary key, so this
+ * matches at most one row — which is what lets `select ... into` answer
+ * without an ordering, and what makes the `FOR SHARE` of the lookup and of
+ * the projection the same lock.
+ */
+function recordPredicate(entity: RecordActionEntity): string {
+  const key = entity.keyIsUuid
+    ? `t.${ident(entity.keyColumn)} = record_key::uuid`
+    : `t.${ident(entity.keyColumn)}::text = record_key`;
+  return `${key} and t.${ident("tenant_id")} = app.current_tenant()`;
+}
+
 /** The fixed `case` body. Deterministic for a given manifest. */
 export function renderRecordActionLookup(entities: readonly RecordActionEntity[]): string {
   if (entities.length === 0) {
     return "      -- No entity declares a record action in this deployment.\n      return false;";
   }
   const branches = entities.map((entity) => {
-    const key = entity.keyIsUuid
-      ? `t.${entity.keyColumn} = record_key::uuid`
-      : `t.${entity.keyColumn}::text = record_key`;
-    const allowed = entity.actions.map((action) => `'${action}'`).join(", ");
+    const allowed = entity.actions.map(actionLiteral).join(", ");
     return [
-      `        when '${entity.entity}' then`,
+      `        when ${entityLiteral(entity.entity)} then`,
       // Both guards return rather than raise. An exception would abort the
       // caller's transaction, which a caller could catch and read as something
       // other than a denial; a key that is not a key, and an action this
@@ -230,9 +334,9 @@ export function renderRecordActionLookup(entities: readonly RecordActionEntity[]
       ...(entity.keyIsUuid
         ? [`          if record_key !~* ${UUID_LITERAL} then return false; end if;`]
         : []),
-      `          select t.${entity.aclColumn} into document`,
-      `            from ${entity.schema}.${entity.table} t`,
-      `           where ${key} and t.tenant_id = app.current_tenant()`,
+      `          select t.${ident(entity.aclColumn)} into document`,
+      `            from ${ident(entity.schema, entity.table)} t`,
+      `           where ${recordPredicate(entity)}`,
       `           for share;`,
     ].join("\n");
   });
@@ -252,23 +356,29 @@ export function renderRecordActionLookup(entities: readonly RecordActionEntity[]
  * resolved from the manifest and checked against the identifier pattern, and
  * the ACL and tenant columns are refused outright, so the projection cannot
  * name the row's own policy or widen past the record.
+ *
+ * It repeats the `FOR SHARE` of the lookup rather than inheriting it. The
+ * lookup already locked this row in this same transaction — `record_action_read`
+ * calls `record_action_allows` first and a SECURITY DEFINER call takes no
+ * subtransaction, so the lock is the caller's and is held to commit — and
+ * re-locking the row it already holds costs nothing. Stating it here is what
+ * makes the projection's guarantee local: whatever reorders the two bodies
+ * later, the ACL this payload was authorized against cannot change under it.
  */
 export function renderRecordActionProjection(
   entities: readonly RecordActionEntity[],
 ): string {
   const branches = entities.flatMap((entity) =>
     Object.entries(entity.reads).map(([action, projection]) => {
-      const key = entity.keyIsUuid
-        ? `t.${entity.keyColumn} = record_key::uuid`
-        : `t.${entity.keyColumn}::text = record_key`;
       const object = projection
-        .map((read) => `'${read.field}', t.${read.column}`)
+        .map((read) => `${fieldLiteral(read.field)}, t.${ident(read.column)}`)
         .join(", ");
       return [
-        `        when '${entity.entity}:${action}' then`,
+        `        when ${projectionLabel(entity.entity, action)} then`,
         `          select jsonb_build_object(${object}) into payload`,
-        `            from ${entity.schema}.${entity.table} t`,
-        `           where ${key} and t.tenant_id = app.current_tenant();`,
+        `            from ${ident(entity.schema, entity.table)} t`,
+        `           where ${recordPredicate(entity)}`,
+        `           for share;`,
       ].join("\n");
     }));
   if (branches.length === 0) {

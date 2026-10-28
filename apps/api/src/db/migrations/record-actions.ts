@@ -152,6 +152,23 @@ import { WORKER_ROLE } from "./worker-role.js";
  * deployment made for someone else. The error carries the statement an
  * administrator runs if the grant was a mistake.
  *
+ * WHAT A PREVIOUS MANIFEST LEFT
+ * -----------------------------
+ * The per-entity loop visits what the manifest declares TODAY. For an entity
+ * that is still declared and whose projection changed, that is enough: the
+ * `revoke all` reaches column grants as well (verified on PostgreSQL 17.11 —
+ * after `grant select (<old column>)` and then `revoke all on <table>`,
+ * `has_column_privilege` is false), so no extra work is needed there.
+ *
+ * What the loop cannot reach is a table the new manifest no longer mentions —
+ * a dropped entity, or an entity whose last action was dropped. Nothing
+ * iterates it, so its column SELECT, its ACL UPDATE and its four policies
+ * outlive the manifest that justified them. The new function bodies have no
+ * branch for it, so nothing reaches it through the lookup; but the exact
+ * privilege set this step promises is then only exact for the tables it
+ * happened to visit. `revokeStaleRecordActionGrants` takes those grants back
+ * and drops those policies, addressing the resolver and nothing else.
+ *
  * ONE TRANSACTION
  * ---------------
  * The whole step is one transaction: the grants, the four policies per entity,
@@ -231,6 +248,12 @@ const UUID_LITERAL =
  * collapsed into one would leave the table with whichever was created last.
  */
 const LONGEST_POLICY_SUFFIX = "_record_action_delete_fence";
+/**
+ * A policy name this module creates. The stale-grant cleanup drops policies by
+ * the name the catalog holds rather than by one derived from the current table
+ * name, so it needs to recognise its own.
+ */
+const OWNED_POLICY = /_record_action_(read|lock|fence|delete_fence)$/;
 
 function unrenderable(value: string, reason: string): never {
   throw new Error(
@@ -770,6 +793,111 @@ async function assertResolverPrivileges(
 }
 
 /**
+ * The tables the resolver still reaches, as the catalog holds them — not as
+ * the manifest describes them.
+ *
+ * A table is here if the resolver holds a table or column privilege on it, or
+ * if a policy is scoped `to <resolver>`. `polroles` is `{0}` for a policy that
+ * names no role, so the generated row-scope policy — which applies to the
+ * resolver like every other role — does not match: only a policy created `to`
+ * the resolver by name does.
+ */
+async function readManagedTables(
+  db: OpenShapeForgeDatabase,
+): Promise<Array<{ schema: string; table: string; policies: string[] }>> {
+  const rows = await sql<{ schema: string; table: string; policies: string[] }>`
+    with who as (select oid as grantee from pg_roles where rolname = ${RESOLVER_ROLE})
+    select n.nspname as schema, c.relname as table,
+           coalesce((select array_agg(p.polname order by p.polname)
+                       from pg_policy p, who
+                      where p.polrelid = c.oid and who.grantee = any(p.polroles)), '{}') as policies
+      from pg_class c
+      join pg_namespace n on n.oid = c.relnamespace
+     where c.relkind in ('r', 'p')
+       and (exists (select 1
+                      from aclexplode(coalesce(c.relacl, pg_catalog.acldefault('r', c.relowner))) acl,
+                           who
+                     where acl.grantee = who.grantee)
+         or exists (select 1 from pg_attribute att, aclexplode(att.attacl) acl, who
+                     where att.attrelid = c.oid and acl.grantee = who.grantee)
+         or exists (select 1 from pg_policy p, who
+                     where p.polrelid = c.oid and who.grantee = any(p.polroles)))
+     order by n.nspname, c.relname
+  `.execute(db);
+  return rows.rows.map((row) => ({
+    schema: row.schema,
+    table: row.table,
+    policies: row.policies,
+  }));
+}
+
+/**
+ * Take back what a PREVIOUS manifest granted.
+ *
+ * The loop above replaces the grants of every entity the manifest declares
+ * today, which covers an entity whose read projection or ACL column changed —
+ * `revoke all on <table>` reaches the column grants too (verified on
+ * PostgreSQL 17.11: a `select (<old column>)` grant is gone afterwards, and
+ * `has_column_privilege` is false). It does NOT cover an entity, or the last
+ * action of an entity, that the new manifest DROPPED: nothing iterates a table
+ * the manifest no longer mentions, so its column SELECT, its ACL UPDATE and
+ * its four policies survived every later migration. The new function bodies
+ * have no branch for it, so nothing could reach it through the lookup — but
+ * the resolver kept a privilege the deployment can no longer see a reason for,
+ * and the next role granted the resolver would inherit it.
+ *
+ * So the resolver's own grants are revoked and the four policies this module
+ * names are dropped. Only the resolver's: `revoke ... from <resolver>` touches
+ * no other grantee, and PUBLIC's privileges on a table nothing manages any
+ * more are left exactly as the deployment set them. The result is read back,
+ * because a revoke only reaches what this migrator granted.
+ *
+ * Schema USAGE stays granted. It is not a table privilege, the resolver needs
+ * it for the schemas it still reads, and a USAGE grant on a schema whose
+ * tables it holds nothing on opens nothing.
+ */
+async function revokeStaleRecordActionGrants(
+  db: OpenShapeForgeDatabase,
+  entities: readonly RecordActionEntity[],
+): Promise<string[]> {
+  const current = new Set(entities.map((entity) => `${entity.schema}.${entity.table}`));
+  const managed = await readManagedTables(db);
+  const cleaned: string[] = [];
+  for (const { schema, table, policies } of managed) {
+    if (current.has(`${schema}.${table}`)) continue;
+    // These names come from the catalog, not from the manifest. A name this
+    // module could not have rendered is a grant it cannot have made, so it is
+    // reported rather than revoked on a guess.
+    if (!IDENTIFIER.test(schema) || !IDENTIFIER.test(table)) {
+      throw new Error(
+        `${RESOLVER_ROLE} holds a privilege on ${JSON.stringify(`${schema}.${table}`)}, which this ` +
+          "migration cannot have granted: its name is not a plain lowercase identifier. The resolver " +
+          "must hold nothing outside the entities the manifest declares. Revoke it as an administrator.",
+      );
+    }
+    const target = sql.id(schema, table);
+    await sql`revoke all on ${target} from ${sql.id(RESOLVER_ROLE)}`.execute(db);
+    // By actual name rather than by a name derived from the table's, so a
+    // renamed table loses its policies too.
+    for (const name of policies) {
+      if (!OWNED_POLICY.test(name)) continue;
+      await sql`drop policy if exists ${sql.id(name)} on ${target}`.execute(db);
+    }
+    const left = await readTablePrivileges(db, schema, table);
+    const own = [...new Set(left.filter((privilege) => !privilege.public).map(describePrivilege))].sort();
+    if (own.length > 0) {
+      throw new Error(
+        `${RESOLVER_ROLE} still holds ${own.join(", ")} on ${schema}.${table}, which no entity in this ` +
+          "manifest declares. A revoke only reaches what this migrator granted, so a grant made by a " +
+          "second grantor survives it. Revoke it as that grantor, or as an administrator.",
+      );
+    }
+    cleaned.push(`${schema}.${table}`);
+  }
+  return cleaned;
+}
+
+/**
  * One transaction, or the caller's if it already opened one.
  *
  * The migration lock (bootstrap.ts) is a session advisory lock, so it does
@@ -907,6 +1035,12 @@ async function applyRecordActions(
       as restrictive for delete to ${sql.id(RESOLVER_ROLE)}
       using (${sql.raw(ownsTheTable)})`.execute(db);
   }
+
+  // What a PREVIOUS manifest granted and this one does not declare. The loop
+  // above only visits the entities that exist today, so a dropped entity — or
+  // an entity whose last action was dropped — keeps its grants for ever
+  // otherwise.
+  await revokeStaleRecordActionGrants(db, entities);
 
   // The two function bodies, their EXECUTE grants and the ownership transfer.
   // `create function` defaults to EXECUTE for PUBLIC, so a first install would

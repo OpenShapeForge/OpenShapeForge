@@ -83,6 +83,14 @@ export type RuntimeRecordAccessServices<Session> = Readonly<{
    * fields and nothing else — never the ACL, never the tenant column, never an
    * undeclared field, never a second record. An action that declares no
    * projection discloses nothing and refuses here.
+   *
+   * Bound to the ACTIVE Operation's target, unlike its two neighbours. They
+   * answer a question about the session's own grant; this one discloses record
+   * fields the session has no `view` on, so it serves the record and the action
+   * the host authorized THIS invocation on — `auth.recordAction` on the
+   * Operation's `target.inputField` — and refuses any other record the same
+   * grant reaches. A handler reached outside a record-action Operation holds no
+   * target and reads nothing; `holdsAction` is the call that still works there.
    */
   readForAction(
     session: Session,

@@ -74,6 +74,10 @@ import {
   assertRecordPermissionInTransaction,
   type RecordPermissionAction,
 } from "./entity/record-permissions.js";
+import {
+  withAdmittedRecordAction,
+  type AdmittedRecordAction,
+} from "./entity/record-action-admission.js";
 import { normalizeTimestampToken } from "../db/timestamps.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import { issueOperationPrerequisiteReceipt } from "./prerequisite-receipts.js";
@@ -978,7 +982,24 @@ async function invokeCustomOperationWithControls(
   return invokeGuardedCustomOperation(bound, input, context, invokeHandler);
 }
 
-async function invokeGuardedCustomOperation(
+/**
+ * Every custom Operation handler runs with ITS OWN record-action admission
+ * and never with an enclosing one (entity/record-action-admission.ts). A
+ * handler that dispatches a second Operation would otherwise lend its
+ * authorized target to that Operation's handler, and a second plugin could
+ * read a record it was never authorized on.
+ */
+function invokeGuardedCustomOperation(
+  bound: Bound,
+  input: Readonly<Record<string, unknown>>,
+  context: Parameters<ModuleOperationHandler>[1],
+  invokeHandler: (handlerInput: Record<string, unknown>) => Promise<ModuleOperationSuccessResult>,
+): Promise<ModuleOperationSuccessResult> {
+  return withAdmittedRecordAction(null, () =>
+    guardedCustomOperation(bound, input, context, invokeHandler));
+}
+
+async function guardedCustomOperation(
   bound: Bound,
   input: Readonly<Record<string, unknown>>,
   context: Parameters<ModuleOperationHandler>[1],
@@ -1133,6 +1154,24 @@ async function invokeGuardedCustomOperation(
     confirmationToken = requireStringControl(input, "confirmationToken");
     confirmationAnswer = requireStringControl(input, "confirmationAnswer");
   }
+  // The record and the actions this invocation was authorized on, for the
+  // handler's bounded read and for nothing else. Established only where it is
+  // established at all: below, inside the Operation's transaction, after the
+  // decisive `assertRecordActionInTransaction` has passed and under the
+  // ACL-row lock it took. An Operation that requires no action admits none,
+  // and `invokeGuardedCustomOperation` already cleared whatever an enclosing
+  // dispatch had admitted.
+  const admitted: AdmittedRecordAction | null =
+    recordActions.length > 0 && context.session && operation.target?.entityName
+      ? {
+        session: context.session,
+        entityName: operation.target.entityName,
+        id: targetValue,
+        actions: new Set(recordActions),
+      }
+      : null;
+  const runHandler = (handlerInput: Record<string, unknown>) =>
+    withAdmittedRecordAction(admitted, () => invokeHandler(handlerInput));
   return withModuleOperationTransaction(
     context.platform,
     context.session,
@@ -1174,7 +1213,7 @@ async function invokeGuardedCustomOperation(
         if (operation.implementation?.type === "collection") {
           return withConsumedCollectionLeaseInTransaction(trx, context.session!, {
             operation: protectedOperation, targetId: targetValue, expectedVersion, leaseToken,
-          }, () => invokeHandler(customHandlerInput(operation, input)));
+          }, () => runHandler(customHandlerInput(operation, input)));
         }
         await consumeEntityEditLeaseInTransaction(trx, context.session!, {
           operation: protectedOperation,
@@ -1192,7 +1231,7 @@ async function invokeGuardedCustomOperation(
           confirmationAnswer,
         });
       }
-      return invokeHandler(customHandlerInput(operation, input));
+      return runHandler(customHandlerInput(operation, input));
     },
   );
 }

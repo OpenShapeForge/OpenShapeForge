@@ -25,6 +25,7 @@ import {
   getEntityOperationContracts,
   tableForEntityOperation,
 } from "../operations/entity/runtime.js";
+import { admitsRecordAction } from "../operations/entity/record-action-admission.js";
 import type {
   EntityOperationContract,
   GeneratedCrudTable,
@@ -384,12 +385,57 @@ export class RecordAccessRuntime {
       // `async` like its two neighbours, so every refusal on this service is a
       // rejection. A call that sometimes throws before it returns a promise and
       // sometimes rejects is a trap for a module author writing one catch.
+      //
+      // Unlike them it is bound to the ACTIVE Operation's target. `assertAction`
+      // and `holdsAction` answer a question about the session's own grant, which
+      // is the predicate a plugin-owned table composes with; this one DISCLOSES
+      // record fields the session has no `view` on, so it serves the one record
+      // and the one action the dispatcher authorized this invocation on
+      // (operations/entity/record-action-admission.ts) and refuses any other
+      // record the same grant happens to reach.
+      //
+      // THE TRUST BOUNDARY. That binding is enforced in this process, not by
+      // the database, and it cannot be. Core and a runtime module share one
+      // PostgreSQL role, one connection and one transaction — `platform.db
+      // .withSession` hands the module the Operation's own transaction — so the
+      // database cannot tell the module's statements from core's, and no
+      // database-enforced constraint can bind the one without binding the
+      // other. Concretely, a module that writes its own SQL can call
+      // `app.record_action_read` directly (EXECUTE is granted to the app role),
+      // and the `app.*` session placeholders are settable by any role
+      // (`revoke set on parameter` records nothing for a placeholder; verified
+      // on PostgreSQL 17.11), so a module's raw SQL is bounded by neither this
+      // admission nor the verified principal core wrote.
+      //
+      // What the database DOES enforce, unconditionally and for core and module
+      // alike: the resolver role's column grants. Only the columns an action
+      // declared in `reads` are selectable at all, the ACL and tenant columns
+      // are refused outright, and nothing widens the app role's own view of the
+      // table (db/migrations/record-actions.ts). So the worst a hostile module
+      // reaches by going around this service is another declared projection of
+      // the same shape — never an undeclared column, never the ACL, never the
+      // record itself.
+      //
+      // Closing the rest needs a database role of its own for module SQL, on
+      // its own connection, without EXECUTE on `app.record_action_*`. That is a
+      // change to the module database boundary rather than another check here,
+      // and it is recorded in docs/plugins.md as the boundary this bound stands
+      // in for.
       readForAction: async (
         session: TrustedSessionContext,
         rawInput: RuntimeRecordActionRequest,
       ): Promise<Readonly<Record<string, unknown>>> => {
         if (!options.acceptsSession(session)) {
           refusal("Record actions require the live verified session.");
+        }
+        // Validated before the admission question, so the question is asked
+        // about a well-formed entity/record/action triple, and asked before any
+        // transaction is opened: a refusal costs nothing and reads no row.
+        const requested = actionRequest(rawInput);
+        if (!admitsRecordAction(session, requested)) {
+          refusal(
+            "The bounded record read serves the Operation target this action authorized.",
+          );
         }
         return await withActionTransaction(session, rawInput, options, (trx, table, input) =>
           readRecordForActionInTransaction(trx, session, table, input.id, input.action));

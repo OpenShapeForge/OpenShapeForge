@@ -74,6 +74,10 @@ const importNotebook: ModuleOperationHandler = async (input, { db, session }) =>
  *      so the row policy hides the notebook from this session's own SQL. The
  *      action declared `reads: [name]`, and `readForAction` returns that one
  *      field of that one row — not the body, not the ACL, not another record.
+ *      "That one row" is the Operation's own target: the read is bound to the
+ *      notebook `auth.recordAction` was checked against, so this handler
+ *      reads the notebook its caller named and not the rest of the
+ *      integration's grant, however many notebooks that grant reaches.
  *   3. **gate its OWN rows.** `notebook_deliveries` is plugin-owned: no
  *      entity, no ACL, no CRUD. Rather than copy the host's policy or read
  *      its ACL, the handler asks `holdsAction` the one question core can

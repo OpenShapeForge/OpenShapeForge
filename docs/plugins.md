@@ -606,6 +606,49 @@ policy still hides it from the module's own SQL, and `readForAction` is the
 whole execution capability. `examples/plugins/notebook` is the worked example
 — `Notebook.deliver` plus `notebook.notebook_deliveries`.
 
+`readForAction` is additionally **bound to the Operation's own target**. The
+other two answer a question about the session's grant; this one discloses
+record fields the session has no `view` on, so it serves the one record and the
+one action the host authorized this invocation on — `auth.recordAction` on
+`target.inputField` — and refuses every other record the same grant reaches. A
+session granted `deliver` on fifty records holds the action on all fifty; the
+handler reads the one its caller named. The target is stated by the dispatcher
+inside the Operation's transaction, after the decisive check and under the
+ACL-row lock it took, and a handler that dispatches a second Operation does not
+lend its target to that Operation's handler. Outside a record-action Operation
+there is no target and `readForAction` reads nothing; `holdsAction` is the call
+that still works there.
+
+#### The module database trust boundary
+
+That target binding, and the verified principal `platform.principals` reports,
+are enforced **in this process**. They are not database boundaries and cannot
+be made into ones as the module database surface stands: `platform.db
+.withSession` hands the module the Operation's own transaction on the app
+role's connection, so core's statements and the module's are the same database
+principal and PostgreSQL cannot tell them apart. A module that writes its own
+SQL can call `app.record_action_read` directly (EXECUTE is granted to the app
+role) and can overwrite the `app.*` session placeholders that carry the
+verified identity — `revoke set on parameter` records nothing for a placeholder
+GUC, verified on PostgreSQL 17.11, which is also why
+`db/migrations/record-actions.ts` refuses to depend on `app.bypass_rls`.
+
+What the database enforces regardless, for core and module alike, is the
+resolver role's **column** grants: only the columns an action declared under
+`reads` are selectable at all, the ACL column and the tenant column are refused
+outright, and the app role's own view of the table is never widened. So the
+most a hostile module reaches by going around the service is another declared
+projection of the same shape — never an undeclared column, never the ACL, never
+the record itself.
+
+Closing the rest needs a **database role of its own for module SQL**, on its
+own connection, without EXECUTE on `app.record_action_*` and with its own
+privilege and policy surface, so that core's guards run as a principal the
+module cannot impersonate. That is a change to the module database boundary
+rather than another check inside it, and it is the boundary the in-process bind
+stands in for until it lands. Reviewing a module's SQL remains part of
+admitting the module.
+
 `platform.webhookSecrets`, when the host provides it, is how a plugin accepts
 signed inbound webhooks without reading the signing secret: `seal` encrypts a
 credential's secret under the host keyring, and `verify` /

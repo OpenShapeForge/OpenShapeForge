@@ -181,7 +181,7 @@ describe("tenant member roles from the control plane", () => {
         try {
           expect(await getTenantMember(patDeps, "acme", pendingSubject)).toMatchObject({ linkStatus: "pending_confirmation", candidateRelationName: null });
           expect((await listTenantMembers(patDeps, "acme")).members.find(member => member.memberId === pendingSubject)?.candidateRelationName).toBeNull();
-          await expect(changeTenantMemberRoles(patDeps, "acme", pendingSubject, ["org_admin"], "assign")).rejects.toMatchObject({ status: 409, code: "MEMBER_NOT_LINKED", message: expect.stringContaining("link_identity") });
+          await expect(changeTenantMemberRoles(patDeps, "acme", pendingSubject, ["org_admin"], "assign")).rejects.toMatchObject({ status: 409, code: "MEMBER_LINK_PENDING", message: expect.stringMatching(/no longer uniquely matches.*link_identity/) });
           await expect(confirmTenantMemberLink(patDeps, "acme", pendingSubject)).rejects.toMatchObject({ status: 409, detail: "NO_PENDING_LINK" });
         } finally {
           await sql`delete from erp.contact_details where tenant_id = ${TENANT} and relation_id = ${duplicateId}`.execute(adminDb);

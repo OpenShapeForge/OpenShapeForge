@@ -686,12 +686,13 @@ test("a membership carrying only ADMIN OPTION is a path and is refused", async (
  * asserts in both directions. That is the policy rather than an oversight:
  * admitting any database owner would admit whoever a CREATEDB role made one.
  *
- * The sentence the refusal adds, and that this test pins, names the
- * arrangement that always satisfies the contract — one owner and one migrate
- * identity per cluster, or one cluster each — as operator advice. It is
- * stricter than the predicate the check applies: a member is admitted when it
- * is a superuser, IS this database's current_user or IS this database's
- * datdba, so distinct owners under ONE migrate identity also pass (see
+ * The sentence the refusal adds, and that this test pins, states the predicate
+ * the check applies: a member is admitted when it is a superuser, IS this
+ * database's current_user or IS this database's datdba. So it says why owning
+ * another database admits this member there and not here — and it does NOT
+ * say the cluster must share one owner and one migrate identity, which is an
+ * arrangement that satisfies the contract rather than the limit the check
+ * imposes: distinct owners under ONE migrate identity also pass (see
  * database-role-contract.test.ts). Differing owners alone are not what fails;
  * being a member of a definer role in a database that is neither yours to
  * migrate nor yours to own is.
@@ -708,11 +709,18 @@ test("a definer member owning another database is admitted there, refused here",
     expect(error?.message).toContain(
       `role ${ownerRole} is a member of definer role ${RESOLVER_ROLE}`,
     );
-    expect(error?.message).toContain(`${ownerRole} owns another database on this cluster`);
     expect(error?.message).toContain(
-      "every OpenShapeForge database sharing a cluster must share one owner and one migrate " +
-        "identity, or be given its own cluster",
+      `${ownerRole} owns another database on this cluster and is admitted there for that reason`,
     );
+    expect(error?.message).toContain(
+      "a member is admitted in a database only when it IS that database's migrate identity " +
+        "or owner, so owning another one admits it there and not here",
+    );
+    expect(error?.message).toContain("Revoke the grant, or give the two databases separate");
+    // The refusal must not state a limit the check does not apply: one owner
+    // and one migrate identity per cluster is sufficient, not necessary.
+    expect(error?.message).not.toContain("must share one owner");
+    expect(error?.message).not.toContain("one migrate identity");
     expect(error?.message).toContain(`revoke ${RESOLVER_ROLE} from ${ownerRole};`);
   } finally {
     await server.unsafe(`revoke ${RESOLVER_ROLE} from ${ownerRole}`);

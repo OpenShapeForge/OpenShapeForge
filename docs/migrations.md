@@ -404,11 +404,16 @@ current database" is not. A role that is a member of the definer roles and owns
 here, and that is the supported policy rather than an oversight: admitting any
 database owner would admit whoever a `CREATEDB` role made one. The refusal says
 so when the reported role owns another database, so it is not mistaken for a
-broken grant, and the sentence it adds names the arrangement that always
-satisfies the contract: one owner and one migrate identity per cluster, or a
-cluster each. That advice is deliberately stricter than the predicate the check
-applies — see the section above for the rule itself, under which a cluster
-whose databases differ in owner passes under one migrate identity.
+broken grant, and the sentence it adds states the predicate the check applies:
+a member is admitted in a database only when it **is** that database's migrate
+identity or owner, so owning another one admits it there and not here. The
+remedy is the `revoke` the refusal already carries, or separate clusters.
+
+That sentence does not ask for one owner and one migrate identity across the
+cluster. Such a cluster satisfies the contract, but it is not what the check
+requires — a cluster whose databases differ in owner passes under one migrate
+identity, as does one whose two migrate identities each own the other's
+database. See the section above for the rule itself.
 
 Differing owners alone do not cause a refusal: an owner is only measured
 against the predicate if it is a member of the definer roles, or reaches one
@@ -423,9 +428,12 @@ is neither the migrate identity nor this database's owner can reach a definer
 role — including through either of those two — and when the migrate identity's
 own grant is indirect or carries neither option. On a shared cluster that
 includes a sibling database's owner or migrate identity, when it is a definer
-member and is neither this database's `current_user` nor its owner. Each
-refusal names the exact `grant` or `revoke` — one per route, so run all of
-them; none of them is applied for you. Run
+member and is neither this database's `current_user` nor its owner. It also
+refuses when a declared role that already exists carries `SUPERUSER`,
+`BYPASSRLS`, `CREATEROLE`, `CREATEDB` or `REPLICATION`, or the wrong login
+flag, which `db:provision-roles` does not repair. Each refusal names the exact
+`alter role`, `grant` or `revoke` — one per deviating role and one per route,
+so run all of them; none of them is applied for you. Run
 `db:provision-roles -- --print` and the reported statements against the cluster
 before the upgrade window if any of those shapes may be present.
 

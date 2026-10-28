@@ -414,13 +414,18 @@ export async function readUnintendedDefinerMembers(
  * would admit whoever a `CREATEDB` role made one.
  *
  * The extra sentence is emitted for exactly that member, so the refusal is not
- * mistaken for a broken grant. It names the arrangement that always satisfies
- * the contract — one owner and one migrate identity per cluster, or a cluster
- * each — as operator advice; it is deliberately stricter than the predicate
- * this check applies, which admits each database's own `current_user` and
- * `datdba` and so also passes a shared cluster whose databases differ in owner
- * under one migrate identity. The precise rule is in the file header and in
- * docs/migrations.md.
+ * mistaken for a broken grant. It states the predicate this check applies — a
+ * member is admitted in a database when it IS that database's `current_user`
+ * or its `datdba`, or is a superuser — and so says why owning some OTHER
+ * database is not a ground for admission here.
+ *
+ * It does not ask for one owner and one migrate identity across the cluster.
+ * That arrangement satisfies the contract, but so does a cluster whose
+ * databases differ in owner under one migrate identity, and so does one whose
+ * two migrate identities each own the other's database; demanding the first
+ * states a limit this check does not apply. The remedy is the `revoke` the
+ * refusal already carries, or a cluster per database. The precise rule is in
+ * the file header and in docs/migrations.md.
  */
 export function explainDefinerMember(
   row: UnintendedDefinerMember,
@@ -432,9 +437,10 @@ export function explainDefinerMember(
       ? `role ${row.member} is a member of definer role ${row.role}`
       : `role ${row.member} can act as definer role ${row.role} through ${row.path}`;
   const cluster = row.ownsOtherDatabase
-    ? `. ${row.member} owns another database on this cluster: definer roles are cluster-wide, ` +
-      "so every OpenShapeForge database sharing a cluster must share one owner and one migrate " +
-      "identity, or be given its own cluster"
+    ? `. ${row.member} owns another database on this cluster and is admitted there for that ` +
+      "reason: definer roles are cluster-wide, but a member is admitted in a database only " +
+      "when it IS that database's migrate identity or owner, so owning another one admits it " +
+      "there and not here. Revoke the grant, or give the two databases separate clusters"
     : "";
   return (
     `${reach}, and is neither the migrate role ${identity.user} nor this database's owner ` +

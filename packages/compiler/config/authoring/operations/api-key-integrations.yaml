@@ -624,6 +624,18 @@ interfaces:
         title: { en: Credentials, nl: Credentials }
         route: /api-key-integrations/:integrationId/credentials
         recordRoute: /api-key-integrations/:integrationId/credentials/:id
+        recordLayout:
+          preset: main-context
+          tabs:
+            - id: overview
+              label: { en: Overview, nl: Overzicht }
+              groups:
+                - id: details
+                  title: { en: Credential, nl: Credential }
+                  fields: [displayName, status, integrationId]
+                - id: validity
+                  title: { en: Validity and use, nl: Geldigheid en gebruik }
+                  fields: [createdAt, expiresAt, lastUsedAt, revokedAt, roleSubset]
         idField: id
         displayField: displayName
         fields: [displayName, status, integrationId, createdAt, expiresAt, lastUsedAt, revokedAt, roleSubset, id]

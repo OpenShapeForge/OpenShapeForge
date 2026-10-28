@@ -1739,6 +1739,37 @@ function projectStandalone(
       const collectionActions = (entity.operations.collectionActions ?? []).map((key) =>
         collectionActionTarget(refs[key]!, entityName, entity.operations.list.bindings));
       const recordRoute = entity.recordRoute ?? `${entity.route}/:${entity.idField}`;
+      const authoredLayout = entity.recordLayout;
+      let recordPreset: "main-context" | "inbox-main-context" = "inbox-main-context";
+      let recordTabs: WebRecordTab[] = [{ id: "overview", label: localized(undefined, "Overview"), groups: [{ id: "overview", title: localized(undefined, "Overview"), fields: entity.fields }] }];
+      if (authoredLayout) {
+        const onlyKeys = (value: object, allowed: readonly string[], scope: string) => {
+          const unsupported = Object.keys(value).filter((key) => !allowed.includes(key));
+          if (unsupported.length) throw new Error(`${entityName} recordLayout ${scope} does not support: ${unsupported.join(", ")}.`);
+        };
+        onlyKeys(authoredLayout, ["preset", "tabs"], "layout");
+        if (!getRef) throw new Error(`${entityName} recordLayout requires a get Operation.`);
+        if (authoredLayout.preset === "main") throw new Error(`${entityName} recordLayout preset main hides record actions and is not supported.`);
+        recordPreset = authoredLayout.preset ?? "inbox-main-context";
+        if (authoredLayout.tabs.length !== 1) throw new Error(`${entityName} recordLayout requires exactly one content tab; related route tabs remain available.`);
+        const tab = authoredLayout.tabs[0]!;
+        onlyKeys(tab, ["id", "label", "title", "groups"], "tab");
+        if (!tab.id || !tab.groups?.length) throw new Error(`${entityName} recordLayout tab needs an id and field groups.`);
+        const used = new Set<string>();
+        const groups = tab.groups.map((group) => {
+          onlyKeys(group, ["id", "title", "label", "fields"], "group");
+          if (!group.id || !group.fields?.length) throw new Error(`${entityName} recordLayout group needs an id and fields.`);
+          const keys = group.fields.map((entry) => {
+            if (typeof entry !== "string" || !fields[entry]) throw new Error(`${entityName} recordLayout group ${group.id} references an unsupported or unknown field.`);
+            if (used.has(entry)) throw new Error(`${entityName} recordLayout field ${entry} appears more than once.`);
+            used.add(entry);
+            return entry;
+          });
+          return { id: group.id, title: localized(group.title ?? group.label, group.id), fields: keys };
+        });
+        if (new Set(groups.map((group) => group.id)).size !== groups.length) throw new Error(`${entityName} recordLayout group ids must be unique.`);
+        recordTabs = [{ id: tab.id, label: localized(tab.label ?? tab.title, tab.id), groups }];
+      }
       entities[entityName] = {
         entityId: entityName,
         entitySlug: entity.route.replace(/^\//, ""),
@@ -1781,11 +1812,11 @@ function projectStandalone(
             columns: entity.columns.map((key) => ({ fieldId: `${entityName}.${key}`, key, label: fields[key]!.label })),
           },
           ...(getRef ? { record: {
-            id: `${entityName}.record`, kind: "record", renderer: "operation.entity.record", preset: "inbox-main-context",
+            id: `${entityName}.record`, kind: "record", renderer: "operation.entity.record", preset: recordPreset,
             modes: ["read"], routes: { read: recordRoute },
             operations: { read: getRef, ...(recordActions.length ? { actions: recordActions } : {}) },
             titleTemplate: `{{${entity.displayField}}}`,
-            layout: { tabs: [{ id: "overview", label: localized(undefined, "Overview"), groups: [{ id: "overview", title: localized(undefined, "Overview"), fields: entity.fields }] }], context: { groups: [], relationships: [] } },
+            layout: { tabs: recordTabs, context: { groups: [], relationships: [] } },
             labels: {},
           } } : {}),
         },

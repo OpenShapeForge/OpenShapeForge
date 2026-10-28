@@ -1201,3 +1201,11 @@ still applies. Collection-valued references and routes needing multiple paramete
 are not supported by this projection.
 This metadata supplies an identifier, not an embedded target record or a grant
 to read it. List inputs bound from route context are not offered as user filters.
+
+Operation-backed web entities can optionally set `recordLayout` using the same
+record-layout vocabulary as entity views. This projection currently supports
+`main-context` and `inbox-main-context`, one content tab, and named groups of
+projected fields. Fields needed for identity and bindings can remain in `fields`
+without being placed in the visible groups. Other layout properties and multiple
+content tabs are rejected explicitly; related route tabs remain unchanged.
+Omitting `recordLayout` preserves the existing default.

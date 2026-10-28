@@ -295,7 +295,7 @@ async function ensureIdentityLink(
 
     const existing = await readLinkRow(trx, identityId, session.tenantId);
     if (existing) {
-      return { identityId, state: { ...toState(existing, claims), ...(existing.status === "pending_confirmation" && !candidates.some(candidate => candidate.id === existing.candidate_relation_id) ? { candidateRelationId: null } : {}) }, knownToTenant: candidates.length > 0 };
+      return { identityId, state: { ...toState(existing, claims), ...(existing.status === "pending_confirmation" && (candidates.length !== 1 || candidates[0]?.id !== existing.candidate_relation_id) ? { candidateRelationId: null, displayName: null, relationType: null } : {}) }, knownToTenant: candidates.length > 0 };
     }
 
     if (candidates.length > 0 || !claims.email) {

@@ -181,9 +181,10 @@ export async function withSessionRelation(
   const relation = session.credential === "api-key"
     ? await ensureServiceIdentityLink(options.db, link, identity, session.userDisplayName ?? session.userId)
     : await readSessionLink(options.db, link, identity);
+  const safeRelation = relation?.status === "pending_confirmation" ? { ...relation, candidateRelationId: null, displayName: null, relationType: null } : relation;
   return {
     ...session,
-    relation,
-    ...(relation?.displayName && !session.userDisplayName ? { userDisplayName: relation.displayName } : {}),
+    relation: safeRelation,
+    ...(safeRelation?.displayName && !session.userDisplayName ? { userDisplayName: safeRelation.displayName } : {}),
   };
 }

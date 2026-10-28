@@ -221,6 +221,7 @@ export async function callIdentityLinkTool(
     groups: session.groups,
     scope: session.scope,
     relation: session.relation,
+    ...(session.credential === "bearer" && session.principalKind === "person" && session.verifiedEmail ? { verifiedEmail: session.verifiedEmail } : {}),
   };
 
   if (name === LINK_IDENTITY_TOOL) {

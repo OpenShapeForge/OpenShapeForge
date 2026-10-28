@@ -19,7 +19,7 @@ import {
 } from "../auth/employee-invitations.js";
 import { actingPartyColumns, actingPartyTable } from "../auth/identity-contract.js";
 import { invalidateIdentityLink } from "../auth/identity-link.js";
-import { confirmCandidateLink, writeMembershipRoles } from "../auth/identity-link-store.js";
+import { confirmCandidateLink, relationsWithEmail, writeMembershipRoles } from "../auth/identity-link-store.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import { withSystemSession } from "../db/session.js";
@@ -69,7 +69,7 @@ async function withTenant<T>(deps: Dependencies, operation: string, slug: string
 
 type MembershipRow = {
   identity_id: string; issuer: string; subject: string; roles: string[] | null;
-  status: "linked" | "pending_confirmation"; relation_name: string | null; candidate_relation_name: string | null;
+  status: "linked" | "pending_confirmation"; relation_name: string | null; candidate_relation_name: string | null; candidate_relation_id: string | null;
 };
 
 /**
@@ -83,7 +83,7 @@ async function membershipsBySubject(trx: Transaction<DB>, tenantId: string, subj
   const party = actingPartyColumns();
   const relations = sql.table(actingPartyTable());
   const rows = await sql<MembershipRow>`
-    select ir.identity_id, i.issuer, i.subject, ir.roles, ir.status,
+    select ir.identity_id, i.issuer, i.subject, ir.roles, ir.status, ir.candidate_relation_id,
            r.${sql.id(party.name)} as relation_name, c.${sql.id(party.name)} as candidate_relation_name
       from platform.identity_relations ir
       join platform.identities i on i.id = ir.identity_id
@@ -265,15 +265,19 @@ export async function confirmTenantMemberLink(deps: Dependencies, slug: string, 
   providerId(memberId, "memberId");
   const operation = "control.confirm-tenant-member-link";
   return withTenant(deps, operation, slug, `member="${memberId}"`, "write", async (tenant, trx, afterCommit) => {
-    await memberWithSummary(deps, trx, tenant, memberId);
+    const member = await memberWithSummary(deps, trx, tenant, memberId);
     const membership = await membershipOf(trx, tenant.id, memberId);
-    if (!membership || membership.status !== "pending_confirmation" || !membership.candidate_relation_name) {
+    if (!membership || membership.status !== "pending_confirmation" || !membership.candidate_relation_name || !membership.candidate_relation_id) {
       throw new ControlOperationError(409, "CONFLICT", "NO_PENDING_LINK", membership?.status === "linked"
         ? "The member is already linked to a Relation in this tenant."
         : "The member has no pending link with a candidate Relation to confirm.");
     }
+    const candidates = member.emailVerified && member.email ? await relationsWithEmail(trx, tenant.id, member.email) : [];
+    if (candidates.length !== 1 || candidates[0]?.id !== membership.candidate_relation_id) {
+      throw new ControlOperationError(409, "CONFLICT", "NO_PENDING_LINK", "The candidate no longer matches the member's verified email; link the correct Relation explicitly.");
+    }
     const actor = systemSessionForAdministrator(deps.administrator, operation).actorSubject;
-    if (!(await confirmCandidateLink(trx, membership.identity_id, tenant.id, actor))) {
+    if (!(await confirmCandidateLink(trx, membership.identity_id, tenant.id, actor, membership.candidate_relation_id))) {
       throw new ControlOperationError(409, "CONFLICT", "NO_PENDING_LINK", "The pending link changed while confirming it; reload the member.");
     }
     afterCommit(() => invalidateIdentityLink(membership.issuer, membership.subject, tenant.id));

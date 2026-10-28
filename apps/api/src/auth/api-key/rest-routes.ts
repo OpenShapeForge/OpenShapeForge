@@ -102,7 +102,10 @@ export function registerApiKeyRestRoutes(
   if (!db || !config) {
     app.log.info(
       "API key provisioning is not configured; /api/api-keys is not served. " +
-        "Set OPENSHAPEFORGE_API_KEY_SECRET_KEYS and the Keycloak admin variables to enable it.",
+        "Set OPENSHAPEFORGE_API_KEY_SECRET_KEYS and the Keycloak admin variables to " +
+        "enable it. A declared OPENSHAPEFORGE_API_KEY_MAX_TTL_DAYS or " +
+        "OPENSHAPEFORGE_API_KEY_DEFAULT_TTL_DAYS this build will not interpret " +
+        "disables it too, deliberately: see auth/api-key/lifetime.ts.",
     );
     return;
   }

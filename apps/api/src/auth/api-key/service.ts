@@ -41,11 +41,11 @@ import {
 } from "./ceiling.js";
 import { invalidateIntegrationToken } from "./exchange.js";
 import { mintApiKey } from "./format.js";
+import { KeycloakAdmin } from "./keycloak-admin.js";
 import {
   resolveCredentialExpiry,
   type CredentialLifetimePolicy,
 } from "./lifetime.js";
-import { KeycloakAdmin } from "./keycloak-admin.js";
 import { parseRoleSubset } from "./store.js";
 
 export type ProvisioningSession = CeilingSession & {

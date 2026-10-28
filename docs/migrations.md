@@ -118,22 +118,53 @@ lock an ACL row to serialize a check against a concurrent policy change, and
 may never write one. Its two functions are not executable by the worker
 connection or by `PUBLIC`.
 
-Those grants are bounded by three policies per entity, and the load-bearing
-one is `AS RESTRICTIVE`. Permissive policies are combined with `OR`, and every
-tenant-scoped table already carries the generated row policy, which names no
-role and whose write check any row of the session's own tenant satisfies; a
+Those grants are bounded by four policies per entity, and the load-bearing
+ones are `AS RESTRICTIVE`. Permissive policies are combined with `OR`, and
+every tenant-scoped table already carries the generated row policy, which names
+no role and whose write check any row of the session's own tenant satisfies; a
 role-targeted `WITH CHECK (false)` is OR-ed with it and refuses nothing. So
 beside the two permissive policies that admit the resolver to its own tenant's
 rows for `SELECT` and for the lock, `<table>_record_action_fence` is a
-restrictive `FOR ALL` policy whose check is `current_user <> '<resolver>'`:
-AND-ed, and therefore not widenable by any policy added later. The
-`current_user` test rather than the policy's `TO` list is deliberate — RLS
-matches `TO` with `has_privs_of_role`, so a `TO <resolver>` policy also covers
-the migrate role, which the contract makes a member of every definer role. The
-migration refuses to grant anything on a table whose row security is not
-enabled *and* forced, because a policy bounds nothing there. Adding a role is a
-host provisioning step: `db:provision-roles` before the next `db:migrate`, or
-step 0 refuses the chain and names the statements.
+restrictive `FOR ALL` policy — AND-ed, and therefore not widenable by any
+policy added later — and `<table>_record_action_delete_fence` is a restrictive
+`FOR DELETE` policy, because a `FOR ALL` policy's `WITH CHECK` is applied to
+`INSERT` and `UPDATE` only while `DELETE` is bounded by `USING`, which the
+`FOR ALL` fence has to leave true for the tenant's own rows or `FOR SHARE`
+stops working.
+
+Both fences exempt one thing: a session holding the privileges of the table's
+own owner, read from `pg_class` at evaluation time. That is a privilege, not a
+role name, and the distinction matters. RLS matches `TO` with
+`has_privs_of_role`, so a `TO <resolver>` policy also covers every member of
+the resolver — the migrate role, which the contract makes a member of every
+definer role, and anything else a deployment grants it. An exemption written as
+`current_user <> '<resolver>'` covered all of them, and a second member then
+held `UPDATE (<acl column>)` with nothing refusing it. The owner's privileges
+exempt the migrate role that created the table (and any second migrator) while
+staying false for the resolver and for a member that owns nothing. The step
+refuses to grant anything on a table whose row security is not enabled *and*
+forced, or whose owner is a role the resolver holds the privileges of, because
+in either case the policies bound nothing.
+
+Privileges are replaced, not added to: the step revokes everything on the table
+from the resolver, grants exactly the declared column `SELECT` and the ACL
+column `UPDATE`, then reads `pg_class.relacl` and `pg_attribute.attacl` back
+and fails if the result is not that exact set. `TRUNCATE` is why — it ignores
+row security completely, so no policy bounds it — and a grant made by a second
+grantor survives the owner's revoke. Each entity's grants and its four policies
+are applied in one transaction: the migration lock is a *session* advisory lock,
+so without that a concurrent session could observe the table between
+`DROP POLICY` and `CREATE POLICY`.
+
+The role contract covers attributes and membership too. No declared role may be
+`SUPERUSER`, `BYPASSRLS`, `CREATEROLE`, `CREATEDB` or `REPLICATION`; a definer
+role must be `NOINHERIT` and a member of nothing, since its functions are
+`SECURITY DEFINER` and would otherwise run with whatever it inherits; and the
+only members *of* a definer role are the migrate identity and roles that
+already hold this database's owner privileges. Anything else is reported with
+the `revoke` that fixes it. Adding a role is a host provisioning step:
+`db:provision-roles` before the next `db:migrate`, or step 0 refuses the chain
+and names the statements.
 
 ```sh
 OPENSHAPEFORGE_ADMIN_DATABASE_URL=postgres://admin:...@host/db \

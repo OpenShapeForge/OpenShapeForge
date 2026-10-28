@@ -1767,7 +1767,7 @@ describe("standalone Operation pages", () => {
     expect(credential.fields.integrationId).toMatchObject({ osfType: "ApiKeyIntegration", relationship: { targetEntityId: "ApiKeyIntegration" } });
     expect(credential.relationships.integrationId).toMatchObject({ kind: "belongsTo", recordField: "integrationId", targetEntityId: "ApiKeyIntegration", operations: { get: integration.views.record!.operations.read } });
     expect(integration.operationSource!.record!.bindings).toEqual({ integrationId: "integrationId" });
-    expect(credential.relationships.integrationId!.operations.get).toEqual(integration.views.record!.operations.read);
+    expect(credential.relationships.integrationId!.source).toEqual({ kind: "provider", bindings: { integrationId: "integrationId" } });
   });
 
   test("supports another operation-backed reference and refuses composite target routes", () => {
@@ -1776,7 +1776,7 @@ describe("standalone Operation pages", () => {
       ...controlCatalog,
       operations: { ...controlCatalog.operations, listTenants: { ...list, output: { schema: { type: "object", properties: {
         tenants: { type: "array", items: { type: "object", properties: {
-          slug: { type: "string" }, parent: { type: "string", "x-osf-type": "Tenant" },
+          slug: { type: "string" }, parent: { type: "string", "x-osf-type": "Tenant", "x-osf-reference": { entity: "Tenant", valueField: "slug" } },
         } } },
       } } } } },
       interfaces: { ...controlCatalog.interfaces, web: { entities: {
@@ -1787,7 +1787,41 @@ describe("standalone Operation pages", () => {
       } } },
     };
     const manifest = buildWebManifest([], {}, standalone(catalog));
-    expect(manifest.entities.Tenant!.relationships.parent).toMatchObject({ targetEntityId: "Tenant", recordField: "parent", kind: "belongsTo" });
+    expect(manifest.entities.Tenant!.relationships.parent).toMatchObject({ targetEntityId: "Tenant", recordField: "parent", kind: "belongsTo", source: { kind: "provider", bindings: { slug: "parent" } } });
+    const owner = structuredClone(catalog);
+    const target = structuredClone(catalog);
+    target.plugin = "zz-target";
+    target.interfaces.mcp = { operations: {} };
+    for (const placement of Object.values(target.interfaces.rest!.operations!)) if (placement && placement.path) placement.path = placement.path.replace("/api/control/", "/api/zz-target/");
+    for (const [key, operation] of Object.entries(target.operations)) {
+      operation.id = `zz-target.${key}`;
+      operation.implementation = { type: "plugin", plugin: "zz-target", handler: key };
+    }
+    const targetEntity = target.interfaces.web!.entities!.Tenant!;
+    targetEntity.fields = ["slug"];
+    target.interfaces.web!.entities = { Provider: targetEntity };
+    const ownerList = owner.operations.listTenants!.output!.schema as any;
+    ownerList.properties.tenants.items.properties.parent = { type: ["string", "null"], "x-osf-type": "Provider", "x-osf-reference": { entity: "Provider", valueField: "slug" } };
+    ownerList.properties.tenants.items.properties.slug["x-osf-type"] = "Tenant";
+    ownerList.properties.tenants.items.properties.slug["x-osf-reference"] = { entity: "Tenant", valueField: "slug" };
+    const sources = [owner, target];
+    const project = () => buildWebManifest([], {}, { catalogs: sources, operations: collectAuthoredModulePluginOperations(sources, operationContext) });
+    const crossCatalog = project().entities.Tenant!;
+    expect(crossCatalog.relationships.parent).toMatchObject({ targetEntityId: "Provider", source: { bindings: { slug: "parent" } } });
+    expect(crossCatalog.relationships.slug).toBeUndefined();
+    target.operations.getTenant!.auth = { mode: "session", roles: ["member"] };
+    expect(project).toThrow(/cross authentication realms/);
+    target.operations.getTenant!.auth = { mode: "control", roles: ["platform-operator"] };
+    ownerList.properties.tenants.items.properties.parent["x-osf-reference"].valueField = "notId";
+    expect(project).toThrow(/must identify Provider by its idField/);
+    ownerList.properties.tenants.items.properties.parent["x-osf-reference"].valueField = "slug";
+    ownerList.properties.tenants.items.properties.parent.type = "array";
+    expect(project).toThrow(/collection references are not supported/);
+    delete ownerList.properties.tenants.items.properties.parent["x-osf-reference"];
+    expect(project().entities.Tenant!.relationships.parent).toBeUndefined();
+    ownerList.properties.tenants.items.properties.parent = { type: "string", "x-osf-type": "Provider", "x-osf-reference": { entity: "Provider", valueField: "slug" } };
+    delete target.interfaces.web!.entities!.Provider!.operations.get;
+    expect(project).toThrow(/needs a readable target/);
     catalog.interfaces.web!.entities!.Tenant!.recordRoute = "/tenants/:organization/:tenantKey";
     expect(() => buildWebManifest([], {}, standalone(catalog))).toThrow(/single record route parameter/);
     catalog.interfaces.web!.entities!.Tenant!.recordRoute = "/tenants/:tenantKey";

@@ -1332,6 +1332,7 @@ function operationEntityCollectionQuery(
   inputSchema: unknown,
   outputSchema: unknown,
   fields: readonly string[],
+  boundInputs: readonly string[] = [],
 ): OperationEntityCollectionQuery | undefined {
   const input = objectProperties(inputSchema);
   const reserved = ["first", "after", "sortField", "sortDirection"] as const;
@@ -1350,7 +1351,7 @@ function operationEntityCollectionQuery(
   const ref = input.filter?.$ref;
   const root = inputSchema as Record<string, any>;
   const structuredFields = objectProperties(typeof ref === "string" && ref.startsWith("#/$defs/") ? root.$defs?.[ref.slice(8)] : input.filter);
-  const filterFields = fields.filter((field) => field in input || field in structuredFields);
+  const filterFields = fields.filter((field) => !boundInputs.includes(field) && (field in input || field in structuredFields));
   const sortFields = Array.isArray(input.sortField!.enum)
     ? input.sortField!.enum.filter((field): field is string => typeof field === "string" && allowedFields.has(field))
     : [];
@@ -1487,7 +1488,7 @@ function projectStandalone(
   const metadata: ProjectedStandalone["metadata"] = [];
   const refsByPage = new Map<string, WebStandaloneOperationRef[]>();
   const pageOwner = new Map<string, string>();
-  const pendingReferences: Array<{ entityName: string; key: string; targetName: string }> = [];
+  const pendingReferences: Array<{ entityName: string; key: string; targetName: string; valueField: string }> = [];
   const compiledByKey = new Map(input.operations.map((operation) => [operation.key, operation]));
   const catalogs = [...input.catalogs]
     .filter((catalog) => catalog.interfaces.web)
@@ -1622,13 +1623,19 @@ function projectStandalone(
         } | undefined;
         const title = i18n?.title;
         const target = referenceTarget(schema, targets);
-        const targetName = schema["x-osf-type"];
-        if (!target && typeof targetName === "string" && catalogs.some((item) => item.interfaces.web?.entities?.[targetName])) {
+        const reference = schema["x-osf-reference"];
+        const explicitReference = reference && typeof reference === "object" && !Array.isArray(reference)
+          ? reference as { entity?: unknown; valueField?: unknown } : undefined;
+        const targetName = explicitReference?.entity;
+        if (!target && key !== entity.idField && typeof targetName === "string" && catalogs.some((item) => item.interfaces.web?.entities?.[targetName])) {
           const types = Array.isArray(schema.type) ? schema.type : [schema.type];
           if (!types.includes("string") || types.some((type) => type !== "string" && type !== "null")) {
-            throw new Error(`Operation-backed reference ${entityName}.${key} must be a single string identifier.`);
+            throw new Error(`Operation-backed reference ${entityName}.${key} must be a single string identifier; collection references are not supported.`);
           }
-          pendingReferences.push({ entityName, key, targetName });
+          if (typeof explicitReference?.valueField !== "string" || schema["x-osf-type"] !== targetName) {
+            throw new Error(`Operation-backed reference ${entityName}.${key} needs matching x-osf-type and x-osf-reference entity and an explicit valueField.`);
+          }
+          pendingReferences.push({ entityName, key, targetName, valueField: explicitReference.valueField });
         }
         const rawType = Array.isArray(schema.type) ? schema.type.find((value) => value !== "null") : schema.type;
         // Plain text arrays use the existing collection renderer. Structured,
@@ -1701,6 +1708,7 @@ function projectStandalone(
         listDefinition.input?.schema,
         listDefinition.output?.schema,
         entity.fields,
+        Object.keys(entity.operations.list.bindings ?? {}),
       );
       const getRef = entity.operations.get ? refs[entity.operations.get.operation]! : undefined;
       const createRef = entity.operations.create ? refs[entity.operations.create.operation]! : undefined;
@@ -1786,9 +1794,12 @@ function projectStandalone(
   // Resolve provider-backed reference targets after every catalog entity exists.
   // A single authored route parameter unambiguously identifies the destination;
   // composite routes need explicit bindings, rather than guessing from names.
-  for (const { entityName, key, targetName } of pendingReferences) {
+  for (const { entityName, key, targetName, valueField } of pendingReferences) {
     const owner = entities[entityName]!;
-    const target = entities[targetName]!;
+    const target = entities[targetName];
+    if (!target?.operationSource || !target.views.collection) throw new Error(`Operation-backed reference ${entityName}.${key} has no projected target ${targetName}.`);
+    if (valueField !== target.operationSource.idField) throw new Error(`Operation-backed reference ${entityName}.${key} must identify ${targetName} by its idField ${target.operationSource.idField}.`);
+    if (owner.relationships[key]) throw new Error(`Operation-backed reference ${entityName}.${key} conflicts with an existing relationship.`);
     const record = target.views.record;
     const route = record?.routes.read;
     const parameters = route?.match(/:([a-zA-Z][a-zA-Z0-9_]*)/g) ?? [];
@@ -1796,21 +1807,29 @@ function projectStandalone(
     if (!record?.operations.read || !route || parameters.length !== 1 || Object.values(bindings).some((value) => `:${value}` !== parameters[0])) {
       throw new Error(`Operation-backed reference ${entityName}.${key} needs a readable target with a single record route parameter and compatible get bindings.`);
     }
-    const input = operations[record.operations.read.id]?.input.schema;
-    const properties = input ? objectProperties(input) : {};
+    const readInput = operations[record.operations.read.id]?.input.schema;
+    const properties = readInput ? objectProperties(readInput) : {};
     const parameter = parameters[0]!.slice(1);
     const availableInputs = new Set([...Object.keys(bindings), ...(properties[parameter] ? [parameter] : [])]);
-    const requiredInputs = input && Array.isArray(input.required) ? input.required : [];
-    if (!input || Object.keys(bindings).some((key) => !properties[key]) || requiredInputs.some((key) => typeof key !== "string" || !availableInputs.has(key))) {
+    const requiredInputs = readInput && Array.isArray(readInput.required) ? readInput.required : [];
+    if (!readInput || !availableInputs.has(target.operationSource.idField) || Object.keys(bindings).some((inputKey) => !properties[inputKey]) || requiredInputs.some((inputKey) => typeof inputKey !== "string" || !availableInputs.has(inputKey))) {
       throw new Error(`Operation-backed reference ${entityName}.${key} cannot supply the target read Operation's required input from its record route.`);
     }
+    const sourceRead = owner.views.record?.operations.read;
+    const sourceAuth = sourceRead && operations[sourceRead.id]?.auth;
+    const targetAuth = operations[record.operations.read.id]?.auth;
+    if (!sourceAuth || !targetAuth || sourceAuth.mode !== targetAuth.mode) {
+      throw new Error(`Operation-backed reference ${entityName}.${key} cannot cross authentication realms.`);
+    }
+    const providerBindings = Object.fromEntries([...availableInputs].map((inputKey) => [inputKey, key]));
     const field = owner.fields[key]!;
     field.osfType = targetName;
     field.relationship = { targetEntityId: targetName };
     owner.relationships[key] = {
       id: `${entityName}.${key}`, key, label: field.label, kind: "belongsTo",
       targetEntityId: targetName, targetRoute: target.views.collection.route,
-      recordField: key, ownership: "reference", operations: { get: record.operations.read },
+      recordField: key, ownership: "reference", source: { kind: "provider", bindings: providerBindings },
+      operations: { get: record.operations.read },
     };
   }
   // A plugin may own a child resource while its parent Operation-backed entity

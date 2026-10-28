@@ -273,6 +273,7 @@ operations:
                   type: string
                   format: uuid
                   x-osf-type: ApiKeyIntegration
+                  x-osf-reference: { entity: ApiKeyIntegration, valueField: integrationId }
                   x-osf-i18n: { title: { en: Integration, nl: Integratie } }
                 integrationName:
                   type: string

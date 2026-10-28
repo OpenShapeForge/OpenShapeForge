@@ -1176,3 +1176,26 @@ A single `osfType: Document` reference can declare `document: { content: file, m
 Web reuses Document upload, storage and the variant block editor. Uploading creates an ordinary Document; saving the referring form assigns its identity. Cancelling the referring form leaves its previous reference intact; the newly uploaded Document remains in the document library. Blocks retain their own explicit save operations.
 
 A blueprint may include policy-bearing Document properties. Publication captures portable metadata, file bytes and local block content, excluding source identity and permissions. Copy/reset creates destination-tenant Documents and stages/binds new artifacts through canonical Operations in the destination transaction. The source tenant's Document/artifact identifiers are never assigned to a receiving tenant. Classification codes and block definitions must be available in the destination. Existing scalar-only blueprints are unchanged.
+
+## References between Operation-backed web entities
+
+An Operation catalog's result property can declare a single reference to another
+Operation-backed web entity using the existing `x-osf-type` and
+`x-osf-reference` annotations together. `valueField` must be the target's
+authored `idField`; this is the identifier carried in the source property.
+
+```yaml
+integrationId:
+  type: string
+  format: uuid
+  x-osf-type: ApiKeyIntegration
+  x-osf-reference: { entity: ApiKeyIntegration, valueField: integrationId }
+```
+
+The target must have a readable record route with one parameter, and its get
+Operation must accept the target identity through that route and its declared
+bindings. Source and target reads must use the same authentication realm; the
+target's own read authorization still applies. Collection-valued references
+and routes needing multiple parameters are not supported by this projection.
+This metadata supplies an identifier, not an embedded target record or a grant
+to read it.

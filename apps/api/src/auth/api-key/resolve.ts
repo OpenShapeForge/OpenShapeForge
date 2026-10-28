@@ -142,5 +142,22 @@ export async function resolveApiKeySession(
     relationGroupIds: [],
     scope: deps.resolveScope(roles, identity.groups),
     credential: "api-key",
+    // A resolved API key is an application, never a person: the token it
+    // exchanged for is a client-credentials token of the integration's own
+    // service account. Stating it keeps the audit actor "integration" even
+    // when this session is resolved inside another one's audit context, and
+    // it is what a record-action policy classifies on.
+    principalKind: "service",
+    // The integration AND the credential, both read from the rows the store
+    // resolved under tenant-fenced RLS — never from the request.
+    //
+    // `integration_id` is what a record-action policy names: it survives
+    // rotation and revocation of this particular credential, while
+    // `display_name` is a mutable label nothing may authorize on. `keyId` is
+    // the opposite property and is carried for the opposite reason — it is
+    // the one value that can still be checked for revocation and expiry while
+    // an Operation is in flight (db/migrations/record-actions.ts,
+    // `app.record_action_principal_live`). Neither is the secret.
+    appPrincipal: { integrationId: key.integrationId, credentialId: key.keyId },
   };
 }

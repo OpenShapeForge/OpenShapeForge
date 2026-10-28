@@ -53,8 +53,10 @@ import type {
   ListPageInput,
 } from "./types.js";
 import { fieldNameForColumn } from "./columns.js";
+import { entityAdmitsPrincipal } from "./principal-classes.js";
 import {
   assertRecordPermission,
+  recordActionsAllowRow,
   recordPermissionsAllowRow,
   type RecordPermissionAction,
 } from "./record-permissions.js";
@@ -104,6 +106,8 @@ const operationCatalog = rawOperationCatalog as unknown as {
           roleGroups?: string[][];
           scopes?: string[];
           recordPermission?: RecordPermissionAction;
+          /** A named record action, independent of the record's `view`. */
+          recordAction?: string;
         }
       | { mode: "custom" };
     concurrency?: OperationConcurrency;
@@ -516,6 +520,25 @@ export function entityOperationRef(
   return { id: operation.id, intent: operation.intent };
 }
 
+/**
+ * Does this entity Operation's entity admit this session's principal class?
+ *
+ * The listing's mirror of the gate in `requireEntityOperation`. An Operation
+ * whose table cannot be resolved is not available either, so a refusal here
+ * answers `false` rather than propagating: the caller is deciding what to
+ * OFFER.
+ */
+export function entityOperationAdmitsPrincipal(
+  operation: EntityOperationRef,
+  session: DbSessionInput,
+): boolean {
+  try {
+    return entityAdmitsPrincipal(tableForEntityOperation(operation), session);
+  } catch {
+    return false;
+  }
+}
+
 export function tableForEntityOperation(operation: EntityOperationRef): GeneratedCrudTable {
   const contract = entityOperationsById.get(operation.id);
   if (!contract) {
@@ -699,7 +722,10 @@ export async function acquireEditLeaseForEntityOperation(
  */
 export function getEntityOperationOffers(
   entityName: string,
-  session: Pick<DbSessionInput, "roles"> & { oauthScopes?: readonly string[]; credential?: string },
+  session: Pick<
+    DbSessionInput,
+    "roles" | "userId" | "relationGroupIds" | "appPrincipal" | "principalKind" | "relation"
+  > & { oauthScopes?: readonly string[]; credential?: string },
   intents: readonly GeneratedCrudExposureOperation[],
   unavailable: Readonly<Record<string, OperationError | undefined>> = {},
   target?: { id: string; version?: string; row?: Readonly<Record<string, unknown>> },
@@ -719,7 +745,18 @@ export function getEntityOperationOffers(
       target?.row &&
       recordPermissionsAllowRow(table, target.row, permissions, session),
     );
-  const generatedOffers = entityOperations
+  // The entity's principal-class policy governs the GENERATED operations and
+  // the search derived from them — not the authored plugin Operations below.
+  // That distinction is the whole point: an entity may exclude applications
+  // from its collection and its record read while still offering one an
+  // action-gated Operation on a record it was granted.
+  const admitsPrincipal = entityAdmitsPrincipal(
+    getGeneratedCrudTables().find((candidate) =>
+      candidate.source?.authoringEntityName === entityName) ??
+      ({ source: {} } as GeneratedCrudTable),
+    session,
+  );
+  const generatedOffers = (admitsPrincipal ? entityOperations : [])
     .filter(
       (operation) =>
         operation.entityName === entityName &&
@@ -750,7 +787,18 @@ export function getEntityOperationOffers(
       (!target ||
         operation.auth.mode !== "session" ||
         !operation.auth.recordPermission ||
-        hasRecordPermissions([operation.auth.recordPermission]))
+        hasRecordPermissions([operation.auth.recordPermission])) &&
+      // An action-gated Operation is offered only on a record that actually
+      // grants it. A holder that cannot see the record has no row here, so
+      // nothing is offered — correct, since offers are a convenience for a
+      // reader and the runtime check is the gate either way.
+      (!target ||
+        operation.auth.mode !== "session" ||
+        !operation.auth.recordAction ||
+        Boolean(
+          table && target.row &&
+          recordActionsAllowRow(table, target.row, [operation.auth.recordAction], session),
+        ))
     )
     .map((operation) => {
       const bindings = Object.entries(operation.target?.inputBindings ?? {});

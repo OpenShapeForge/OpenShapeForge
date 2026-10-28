@@ -261,6 +261,34 @@ describe("sameStatefulMcpAuthorization", () => {
     expect(Object.isFrozen(capability.roles)).toBe(true);
   });
 
+  it("detaches the long-lived session's nested authority from the capability", () => {
+    // A stateful transport pins its credential for the life of the session, so
+    // the application principal is one object that outlives every request on
+    // it. A capability sharing that object would let one request's plugin code
+    // rewrite the verified integration for the whole connection.
+    const established = authorization() as TrustedSessionContext;
+    established.credential = "api-key";
+    established.appPrincipal = {
+      integrationId: "44444444-4444-4444-8444-444444444444",
+      credentialId: "66666666-6666-4666-8666-666666666666",
+    };
+    const stateful = createStatefulMcpSessionContext(established);
+    const capability = createModuleSessionCapability(stateful);
+
+    expect(capability.appPrincipal).toEqual(established.appPrincipal);
+    expect(capability.appPrincipal).not.toBe(established.appPrincipal);
+    expect(capability.appPrincipal).not.toBe(stateful.appPrincipal);
+    expect(Object.isFrozen(capability.appPrincipal)).toBe(true);
+    expect(() => {
+      (capability.appPrincipal as { integrationId: string }).integrationId =
+        "55555555-5555-4555-8555-555555555555";
+    }).toThrow(TypeError);
+    expect(established.appPrincipal).toEqual({
+      integrationId: "44444444-4444-4444-8444-444444444444",
+      credentialId: "66666666-6666-4666-8666-666666666666",
+    });
+  });
+
   it("still refuses identity, claim, and credential changes", () => {
     const original = authorization();
     expect(

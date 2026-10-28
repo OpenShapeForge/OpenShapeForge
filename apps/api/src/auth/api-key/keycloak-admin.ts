@@ -75,6 +75,37 @@ export type ProvisionedClient = {
   serviceAccountUserId: string;
 };
 
+/**
+ * The longest client `name` the realm will store.
+ *
+ * Keycloak's `CLIENT.NAME` is 255 characters and a UTF-16 code unit is one
+ * character to it, so the limit is units and not code points. The catalog's
+ * contract permits a display name of 200 CODE POINTS, which is 400 units of
+ * emoji — and `POST /clients` then answers 500, which reaches the customer as
+ * a 502 and leaves a 'pending' row for the reconciler to sweep, for a name the
+ * contract told them they could use. Measured against Keycloak 26: 255 units
+ * are stored, 256 are refused.
+ *
+ * The realm's copy of the name is a LABEL. The authoritative name is
+ * `platform.api_key_integrations.display_name`, which every read reports and
+ * which is never derived from the realm, so shortening what the realm is told
+ * costs nothing a caller can observe — and it is the only option that does not
+ * either refuse a permitted name or fail provisioning halfway.
+ */
+const MAX_REALM_CLIENT_NAME_UNITS = 255;
+
+/**
+ * The display name as the realm may hold it: cut to the realm's limit without
+ * splitting a surrogate pair, because half of an astral character is not a
+ * character and the realm would store a replacement for it.
+ */
+export function realmClientName(displayName: string): string {
+  if (displayName.length <= MAX_REALM_CLIENT_NAME_UNITS) return displayName;
+  const cut = displayName.slice(0, MAX_REALM_CLIENT_NAME_UNITS);
+  const last = cut.charCodeAt(cut.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
+
 export class KeycloakAdmin {
   private token: { value: string; expiresAtMs: number } | undefined;
 
@@ -164,7 +195,7 @@ export class KeycloakAdmin {
   ): Promise<ProvisionedClient> {
     const response = await this.request("POST", "/clients", {
       clientId,
-      name: displayName,
+      name: realmClientName(displayName),
       protocol: "openid-connect",
       publicClient: false,
       bearerOnly: false,

@@ -441,6 +441,7 @@ describe("composed mutation Service on the native provider", () => {
         const notebookModule: RuntimeModule = {
           name: "notebook",
           operationHandlers: {
+            deliverToNotebook: () => { throw new Error("This test does not exercise Notebook.deliver."); },
             importNotebook: async () => ({ value: { status: "accepted" } }),
           },
         };

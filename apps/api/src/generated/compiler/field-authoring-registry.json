@@ -20091,6 +20091,134 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "ExternalProcessRun": {
+      "kind": "entity",
+      "entity": "ExternalProcessRun",
+      "entityIdentity": true,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "External process run",
+        "nl": "Externe procesuitvoering"
+      },
+      "pluralLabel": {
+        "en": "External process runs",
+        "nl": "Externe procesuitvoeringen"
+      },
+      "shape": [
+        {
+          "key": "name",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Name",
+            "nl": "Naam"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "persisted": {
+            "column": "name",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "definition",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Process definition",
+            "nl": "Procesdefinitie"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "persisted": {
+            "column": "definition",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "status",
+          "osfType": "string",
+          "required": true,
+          "defaultValue": "ready",
+          "label": {
+            "en": "Status",
+            "nl": "Status"
+          },
+          "validation": {
+            "maxLength": 50
+          },
+          "persisted": {
+            "column": "status",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "notes",
+          "osfType": "multilineText",
+          "required": false,
+          "label": {
+            "en": "Notes",
+            "nl": "Notities"
+          },
+          "validation": {
+            "maxLength": 4000
+          },
+          "persisted": {
+            "column": "notes",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "authorization",
+          "osfType": "object",
+          "required": true,
+          "defaultValue": {},
+          "label": {
+            "en": "Authorization",
+            "nl": "Autorisatie"
+          },
+          "persisted": {
+            "column": "authorization",
+            "storageClass": "core"
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "externalProcessRunId": {
+      "kind": "entityId",
+      "entity": "ExternalProcessRun",
+      "baseType": "string",
+      "label": {
+        "en": "External process run",
+        "nl": "Externe procesuitvoering"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "optionSource": {
+        "type": "entity",
+        "source": "ExternalProcessRun",
+        "valueField": "id"
+      },
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "FiscalPeriod": {
       "kind": "entity",
       "entity": "FiscalPeriod",
@@ -25252,6 +25380,117 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "MeterConnection": {
+      "kind": "entity",
+      "entity": "MeterConnection",
+      "entityIdentity": true,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Meter connection",
+        "nl": "Meteraansluiting"
+      },
+      "pluralLabel": {
+        "en": "Meter connections",
+        "nl": "Meteraansluitingen"
+      },
+      "shape": [
+        {
+          "key": "name",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Name",
+            "nl": "Naam"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "persisted": {
+            "column": "name",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "meterKey",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Meter key",
+            "nl": "Metersleutel"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "persisted": {
+            "column": "meter_key",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "location",
+          "osfType": "string",
+          "required": false,
+          "label": {
+            "en": "Location",
+            "nl": "Locatie"
+          },
+          "validation": {
+            "maxLength": 200
+          },
+          "persisted": {
+            "column": "location",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "authorization",
+          "osfType": "object",
+          "required": true,
+          "defaultValue": {},
+          "label": {
+            "en": "Authorization",
+            "nl": "Autorisatie"
+          },
+          "persisted": {
+            "column": "authorization",
+            "storageClass": "core"
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "meterConnectionId": {
+      "kind": "entityId",
+      "entity": "MeterConnection",
+      "baseType": "string",
+      "label": {
+        "en": "Meter connection",
+        "nl": "Meteraansluiting"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "optionSource": {
+        "type": "entity",
+        "source": "MeterConnection",
+        "valueField": "id"
+      },
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Milestone": {
       "kind": "entity",
       "entity": "Milestone",
@@ -26569,6 +26808,20 @@
           },
           "persisted": {
             "column": "body",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "permissions",
+          "osfType": "object",
+          "required": true,
+          "label": {
+            "en": "Permissions",
+            "nl": "Rechten"
+          },
+          "defaultValue": {},
+          "persisted": {
+            "column": "permissions",
             "storageClass": "core"
           }
         },
@@ -42427,6 +42680,24 @@
         "nl": "Rollen"
       }
     },
+    "ApiKeyIntegration": {
+      "kind": "provider",
+      "entity": "ApiKeyIntegration",
+      "baseType": "object",
+      "label": {
+        "en": "API integrations",
+        "nl": "API-integraties"
+      }
+    },
+    "ApiKeyCredential": {
+      "kind": "provider",
+      "entity": "ApiKeyCredential",
+      "baseType": "object",
+      "label": {
+        "en": "Credentials",
+        "nl": "Credentials"
+      }
+    },
     "PlatformTenant": {
       "kind": "provider",
       "entity": "PlatformTenant",
@@ -42470,6 +42741,15 @@
       "label": {
         "en": "Services",
         "nl": "Services"
+      }
+    },
+    "RecordActionAssignment": {
+      "kind": "provider",
+      "entity": "RecordActionAssignment",
+      "baseType": "object",
+      "label": {
+        "en": "Record actions",
+        "nl": "Recordacties"
       }
     }
   },

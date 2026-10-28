@@ -59,6 +59,7 @@ export type TrustedContextHeaderNames = {
   userId: string;
   roles: string;
   groups: string;
+  principalKind: string;
   timestamp: string;
   signature: string;
 };

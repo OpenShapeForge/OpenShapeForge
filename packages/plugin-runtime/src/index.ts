@@ -13,7 +13,10 @@ import type { RuntimeReadProgressServices } from "./read-progress.js";
 export type { RuntimeReadProgress, RuntimeReadProgressSnapshot, RuntimeReadProgressServices } from "./read-progress.js";
 export type { RuntimeWebhookSecretServices, RuntimeWebhookSignatureInput } from "./webhook-secrets.js";
 import type { RuntimeRecordAccessServices } from "./record-access.js";
-export type { RuntimeRecordAccessServices, RuntimeRecordAccessRequest, RuntimeRecordAccessBatchRequest, RuntimeRecordAccessIntent, RuntimeStoredFieldProjectionRequest } from "./record-access.js";
+export type { RuntimeRecordAccessServices, RuntimeRecordAccessRequest, RuntimeRecordAccessBatchRequest, RuntimeRecordAccessIntent, RuntimeStoredFieldProjectionRequest,
+  RuntimeRecordActionRequest } from "./record-access.js";
+import type { RuntimePrincipalServices } from "./principals.js";
+export type { RuntimePrincipalServices, RuntimePrincipalClass, RuntimeApplicationPrincipal } from "./principals.js";
 import type { RuntimeExecutionPolicy } from "./execution-policy.js";
 export type { RuntimeExecutionPolicy, RuntimeExecutionPolicyContract, RuntimeExecutionPolicyRequest,
   RuntimeExecutionOperation, RuntimeExecutionAdmission, RuntimeExecutionRefusal } from "./execution-policy.js";
@@ -459,6 +462,12 @@ export type PluginPlatformServices = {
   /** Host-owned signing secret sealing and raw-body verification; no plaintext read API. */
   readonly webhookSecrets?: RuntimeWebhookSecretServices<PluginSessionContext>;
   readonly records: RuntimeRecordAccessServices<PluginSessionContext>;
+  /**
+   * Who the host verified this session to be. A module acting for an
+   * application reads its integration identity here and nowhere else; the
+   * session object's own fields are host output, not a contract to parse.
+   */
+  readonly principals: RuntimePrincipalServices<PluginSessionContext>;
   readonly settings: RuntimeSettingsService;
   readonly artifacts: RuntimeArtifactServices<PluginSessionContext>;
   /** Server configuration, never a service identity selected in operation input. */

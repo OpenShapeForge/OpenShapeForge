@@ -12,6 +12,7 @@ import { sql, type Kysely } from "kysely";
 import type { DB } from "../../generated/db/types.js";
 import { API_KEY_MANAGE_ROLE } from "../../auth/api-key/ceiling.js";
 import { mintApiKey, parseApiKey } from "../../auth/api-key/format.js";
+import { UNDECLARED_CREDENTIAL_LIFETIME_POLICY } from "../../auth/api-key/lifetime.js";
 import { issueKey, type ApiKeyServiceDeps } from "../../auth/api-key/service.js";
 import { recordApiKeyUse, resolveApiKey } from "../../auth/api-key/store.js";
 import { createDatabaseRuntime } from "../connection.js";
@@ -96,8 +97,16 @@ async function integrationWithKey(adminDb: Kysely<DB>, tenantId: string, granted
   return { integrationId, keyId, token: minted.token, lookupId: minted.lookupId };
 }
 
+/**
+ * A verified human administrator. `principalKind` is what the ceiling's
+ * carrier rule reads (auth/api-key/ceiling.ts): a bearer session without it is
+ * an unknown principal and may not manage credentials at all.
+ */
 function session(tenantId: string, roles: string[]) {
-  return { tenantId, userId: USER, roles, groups: [], scope: "tenant" as const, credential: "bearer" as const };
+  return {
+    tenantId, userId: USER, roles, groups: [], scope: "tenant" as const,
+    credential: "bearer" as const, principalKind: "person" as const,
+  };
 }
 
 describe("platform.api_keys under the app role", () => {
@@ -169,12 +178,16 @@ describe("platform.api_keys under the app role", () => {
       await withScratchDb(async (appDb, adminDb) => {
         await seed(adminDb);
         const a = await integrationWithKey(adminDb, tenantA, ["Relations.All.ReadWrite", "Relations.All.Read"]);
-        const deps = {
+        // Only the keyring and the realm client are out of reach of the
+        // paths under test; everything else is the real thing, so the cast
+        // is narrowed to those two rather than applied to the whole object.
+        const deps: ApiKeyServiceDeps = {
           db: appDb,
-          keyring: undefined,
-          admin: undefined,
+          keyring: undefined as never,
+          admin: undefined as never,
           entityRoleClientId: "erp-provider",
-        } as unknown as ApiKeyServiceDeps;
+          lifetime: UNDECLARED_CREDENTIAL_LIFETIME_POLICY,
+        };
         // The caller holds LESS than the integration does. An unrestricted
         // key would carry Relations.All.ReadWrite, which the caller cannot
         // grant — so the ceiling refuses it, where before only the (absent)

@@ -672,8 +672,467 @@ Requires `OPENSHAPEFORGE_API_KEY_SECRET_KEYS` (its own keyring, deliberately
 not the connector one) and a complete bearer verifier; absent either, keys are
 rejected rather than half-honoured. Provisioning lives at `/api/api-keys` and
 on the GraphQL surface, gated by `Platform.ApiKeys.Manage` and by a privilege
-ceiling — a caller cannot grant roles it does not hold, and an api-key session
-may never manage keys at all.
+ceiling — a caller cannot grant roles it does not hold, and only a session this
+deployment can show to be a PERSON may manage keys at all. That carrier rule is
+decided before any role (`auth/api-key/ceiling.ts`) and it asks ONE question of
+the two admitted carriers: did this deployment classify the principal as a
+person? A bearer carries the bearer path's own `principalKind: "person"`
+verdict, which refuses a Keycloak service account holding
+`Platform.ApiKeys.Manage` and a verified token whose principal could not be
+named. The deployment's own HMAC-signed in-mesh bundle carries the class its
+SIGNER established, inside the signature: trusted-context payload v3 adds a
+`x-user-principal-kind` field to the signed bundle, so a caller cannot assert
+it and a producer that authenticated nobody cannot borrow one. apps/web signs
+`person` on one property it can check — the session holds the id token of an
+OIDC authorization-code login, which a client-credentials grant never mints;
+the health probe and every other internal producer sign no class and are
+refused here. Every other credential is refused outright.
+
+The verifier accepts **both v3 and v2** (`ACCEPTED_PAYLOAD_VERSIONS` in
+`packages/auth/src/trusted-context.ts`), because the tiers that produce bundles
+release separately from this package: a host's web tier, its MCP app and its
+operational scripts sign v2 until they are redeployed, and rejecting v2 does
+not fail those hops closed in some harmless way — it reads every one of them as
+unauthenticated, so ordinary work stops across a deployment mid-upgrade. What
+v2 can never do is carry a principal class. The class is not in its signed
+payload, so a v2 bundle names an identity and says NOTHING about how it was
+authenticated; the verifier therefore discards the `x-user-principal-kind`
+header on a v2 match rather than reading it off the wire. Honouring it would
+invert the whole control: anyone able to replay a captured v2 bundle could
+append `person` and reach this surface. A v2 hop keeps doing the ordinary work
+it always did and reaches credential management — or anything else reserved for
+a verified human — only once its producer signs v3. The two payloads cannot be
+confused (six fields beginning `v2` against seven beginning `v3`), and v1,
+whose groups sat outside the signature, stays refused.
+
+Nothing else may stand in for that class. In particular an identity link is
+not evidence of an interactive human login: a Relation can be linked by an
+administrator, can sit at `pending_confirmation`, and belongs to a service
+identity as readily as to a person. `ceiling.ts` asks for the signed class and
+for nothing else.
+
+Every response that carries a credential — the two `/api/api-keys` 201s, the
+canonical minting Operations and the two GraphQL mint mutations — is sent with
+`cache-control: private, no-store, max-age=0` and `pragma: no-cache`. The
+secret is returned once and is not retrievable afterwards, so a shared cache or
+a browser's back button holding the only copy is both a disclosure and the only
+place it still exists. Metadata reads on the same mounts are left cacheable.
+
+The same feature is also reachable as canonical Operations, authored in
+`packages/compiler/config/authoring/operations/api-key-integrations.yaml` under
+the core `osf-api-keys` plugin and bound by
+`apps/api/src/operations/api-key-operations.ts`:
+`api-keys.create-integration`, `api-keys.list-integrations`,
+`api-keys.get-integration`, `api-keys.list-credentials`,
+`api-keys.get-credential`, `api-keys.issue-credential`,
+`api-keys.revoke-credential` and `api-keys.disable-integration`, projected to
+REST under `/api/api-key-integrations/*`. They are a third projection of the
+same authority, not a second implementation: every handler calls
+`auth/api-key/service.ts` and therefore the one ceiling, and an integration is
+named by its stable `platform.api_key_integrations.id` — never by the derived
+Keycloak clientId, which the realm reconciler rebuilds under the same row.
+Reads select metadata only; a deployment without provisioning configuration
+answers every one of them with a declared `503 NOT_CONFIGURED` rather than
+half-managing its integrations.
+
+`create-integration` registers an external party and hands over its first
+credential. Its result keeps the two halves apart: `integration` is ordinary
+metadata and `credential` is the one-time secret. The metadata comes out of the
+SAME transaction that mints the key, from the activation statement's own
+`RETURNING`, and not from a read-back afterwards — the plaintext credential
+exists exactly once, in that answer, so any statement between minting it and
+returning it is a step whose failure loses the secret while the mint has
+committed, and whose retry provisions a second realm client and a second
+credential. It is the only Operation here that declares `external: write` and
+the only one that can report `502 PROVISIONING_FAILED`; a realm that refuses
+leaves the intent row at `pending`, which authenticates nothing and is what the
+reconciler sweeps.
+
+**A fenced activation compensates recoverably.** The intent row commits before
+the realm is touched, so the integration is visible and mutable while the
+external call is in flight: an administrator can disable it, and the activation
+is fenced on still finding its own `pending` attempt. When the fence refuses,
+the realm client created in that window has to go — and that delete is best
+effort, because the caller's answer is already decided and a realm that will
+not cooperate must not become a different, misleading failure. What makes a
+failed delete recoverable is that a row still carries the derived
+`keycloak_client_id`, so the activation now WRITES that record before it tries
+the delete, in its own transaction: `disabled`, with no client secret and no
+credential under it. For the ordinary verdict the disable already wrote it; for
+a row deleted out from under the attempt nothing named the client at all, and a
+refused delete orphaned a confidential client with roles granted past every
+later run. The record is a cleanup record, not a restored integration: it
+authenticates nothing, and the update is guarded on
+`client_secret_ciphertext is null`, so it can only ever move a row that was
+never live. The reconciler picks such rows up by that same missing secret
+rather than by a list of statuses, and for the same reason never rebuilds one —
+minting a realm client and a fresh secret for an integration nobody activated
+would be an enable nobody asked for.
+
+**One transaction per request.** A writing canonical Operation is dispatched
+inside the database session core opened for the session it verified — carrying
+the identity link, the audit identity and the resolved access scope — and the
+provisioning service JOINS that session rather than opening a second one next
+to it (`activeDbSessionContext` in `apps/api/src/db/session.ts`). It passes the
+active session back verbatim, after checking that its tenant and user are the
+ones the ceiling already decided on; the joined session is never an
+authorization source, and a mismatch fails loudly rather than running one
+principal's statements under another's. Rebuilding a session from what the
+service holds cannot work here: a rebuilt one has none of those three fields,
+and a trusted-context person resolves to scope `self` rather than `tenant`, so
+`withDbSession` refuses the substitution. Both api-key tables are fenced on the
+tenant alone, so joining a narrower scope changes no row the service may read.
+
+That session is handed out FROZEN, and a rejoin is recognised by its identity
+rather than by its contents. The object reaches code outside `db/session.ts`
+twice — as the second argument of every `withDbSession` callback and through
+`activeDbSessionContext` — and while it was mutable, a holder could write
+another tenant, a longer role set or a `person` class onto it and hand it back
+with `independent: true`: a second transaction then opened with the edited
+fields, and the nested fence, comparing the object against itself field by
+field, agreed every time. Frozen, that assignment throws; a caller's own object
+with the fields it wants is not the active session, so it is derived from the
+carrier's facts and held to the fence as before.
+
+The one exception is the intent row, which keeps its own transaction. It has to
+be durable BEFORE the realm is touched: nested, it would roll back together
+with the step that failed, leaving a realm client that no `pending` row names
+and that the reconciler could therefore neither finish nor sweep.
+
+**One page request is one statement, and so one snapshot.** The count, the
+anchor's digest check and the page's own select are a single statement with
+three CTEs, not three statements. Separately they took three snapshots of a
+READ COMMITTED transaction, and a commit landing between them was visible to
+the later ones and not the earlier: the digest matched, the page then resumed
+after the anchor's *new* value, and a rename that moved the anchor later in the
+order handed the caller back the very row the previous page had ended on — past
+the refusal written for that case. `totalCount` could likewise describe fewer
+rows than the page carried. One statement is what makes those three answers
+agree regardless of isolation level, which matters because inside a canonical
+Operation this listing joins the dispatcher's transaction and does not choose
+its isolation. Proven with a real second connection committing inside the
+request, at every statement boundary it has
+(`apps/api/src/operations/api-key-cursor-db.test.ts`, "one page request is one
+snapshot").
+
+**Cursors are opaque, bounded, and not trusted.** A keyset cursor names the
+previous page's last row by id and by a 16-character digest of that row's sort
+value, never by the value itself. That is what makes it a fixed size: a cursor
+that carried the value was as long as the value, and `display_name` is
+unbounded `text` which the older REST and GraphQL mints accept any length of —
+so every bound on such a cursor was also a bound on a name some row already
+holds, and a row past it was a page the listing emitted and would not take
+back. The value to resume after is read back out of the anchor row per request,
+under the same tenant and subject predicates the page itself carries, so an id
+outside that set resolves to no row and is refused rather than guessed at. The
+only caller-supplied text left is the uuid, checked against what the `uuid`
+type accepts before it is bound; the digest reaches no expression at all, being
+compared for equality against one the database computes from the same ordering
+expression. The query fingerprint does not cover any of this: it keeps a cursor
+from resuming the wrong SET and is deliberately not a security boundary, being
+derived from public inputs. A payload that will not parse, a sort or filter the
+cursor was not issued under and an anchor no row answers to are the same
+declared `400 VALIDATION` with the same message, so a cursor is not a probe for
+another tenant's ids.
+
+The digest is **required**, so a cursor issued before it existed — the
+four-field payload this listing used to emit — is refused with that same
+`400 VALIDATION`. A caller mid-walk across the deploy that added it reads the
+listing again from its first page. A cursor is a page token with the lifetime
+of one walk and nothing persists it, so there is nothing to migrate; accepting
+a digest-less cursor and skipping the anchor check for it would keep the
+silently-short page below reachable for as long as any client held one.
+
+**A listing is not stable across a mutation of the row a cursor anchors on, and
+says so.** Resolving the resume value from the anchor row per request means
+resolving its CURRENT value. Rename the row a page ended on to a name that
+sorts after everything left and the next page is empty: the listing would end
+there with every remaining row unread, and a caller could not tell. Rename it
+earlier and rows repeat. Carrying the value would fix it and is the option the
+unbounded `display_name` rules out, so the cursor carries the digest instead —
+enough to notice the move, not enough to undo it. Such a page is refused with
+its own `400 VALIDATION` ("after names a row whose sort value changed…") and
+the caller reads the listing from its first page again. What a keyset does give
+and an offset does not is that an insert or a removal before the cursor cannot
+shift a later page, which an offset answers with one row skipped and one
+repeated.
+
+That is a claim about inserts and removals, and not a snapshot of the catalog
+across page requests: a row whose own sort value changes between two requests
+moves in the order, and a walk may then reach it twice or not at all. That is
+ordinary keyset pagination rather than an anomaly this listing closes — only
+the anchor row's own movement is refused, because resuming from it is what
+would end a walk early with rows unread. This is the listing's one accepted
+anomaly in the sense that it is the one it refuses rather than absorbs, and it
+is a visible one — see
+`apps/api/src/operations/api-key-cursor-db.test.ts` ("a cursor whose anchor
+moved in the order"). Paging a catalog while it is being renamed may therefore
+need a retry from the first page; nothing silently answers short.
+
+**The catalog's input bounds are the Operations', not the service's.** Both
+minting Operations declare `displayName` as 1..200 characters and the
+dispatcher applies that before a handler runs. The service does not repeat it:
+`/api/api-keys` and the GraphQL mint mutations reach the same functions and have
+accepted a name of any length since before the Operations existed, and an empty
+credential name besides (the REST mount substitutes `rotated` only when the
+field is absent). Adding the Operations' bound to the service would narrow both
+published contracts without either of them changing. Nothing downstream needs
+it: the realm's copy of the name is cut to what `CLIENT.NAME` holds, and the
+cursor carries the row's id. An integration still needs a non-empty name, which
+those surfaces also required — it names the realm client.
+
+**Credential lifetime.** Three bounds, kept apart in
+`auth/api-key/lifetime.ts` because they answer different questions.
+
+*The contract's bound.* This is the canonical catalog's OWN policy and applies
+to nothing else. The older `/api/api-keys` REST mount and the GraphQL mint
+mutations keep no host maximum of their own and still accept any positive
+number of days and `null`; the catalog's 366 is not retroactively imposed on
+them, and adopting the catalog does not change what an existing client of those
+endpoints may ask for. Both minting Operations bound `expiresInDays` to
+1..366 and do not accept `null`. `null` reached the service as "never
+expires", which is not something a generic integration form may request on
+anyone's behalf; omitting the field takes the deployment default. The bound is
+stated in the authored input schema, so every transport is refused before the
+handler, and restated as `MAX_CREDENTIAL_TTL_DAYS` for a direct caller. It
+belongs to the contract: no deployment can raise it, and it is never imposed
+on the long-lived `/api/api-keys` and GraphQL mounts.
+
+*The deployment's bound.* A host that needs a tighter rule declares one in
+`OPENSHAPEFORGE_API_KEY_MAX_TTL_DAYS`, with an optional
+`OPENSHAPEFORGE_API_KEY_DEFAULT_TTL_DAYS` beside it. Both are read with the
+other provisioning variables (`runtime-config.ts`) and travel to the service
+through `ApiKeyProvisioningConfig`, so all three surfaces resolve one rule and
+a surface added later cannot mint outside it by forgetting to pass it. They may
+only NARROW: a maximum above 366, a value below one day, a non-integer, or a
+default outside the declared maximum is a configuration error that disables
+provisioning (`503 NOT_CONFIGURED`) rather than one that widens anything. When
+a maximum is declared, a refusal names the deployment's number rather than the
+product's, and `null` stops being offered on the mounts that had it — declaring
+a maximum lifetime says every credential expires.
+
+*Defaults, and what an existing deployment sees.* The shipped default is 365
+days, narrowed to the declared maximum when there is one. **Declaring nothing
+changes nothing**: with neither variable set the long-lived REST and GraphQL
+mounts keep accepting any positive number of days and `null`, exactly as
+before, so no existing consumer is silently moved onto the contract's 366. No
+migration is required to adopt this change; declaring a maximum is the
+migration, and it applies from that moment on. Nothing is retroactive and
+nothing is per-application: the policy is read at mint time and written into
+one `expires_at`, rows that already exist — including non-expiring ones — are
+never revisited, and authentication keeps reading the instant stored on the row
+(`auth/api-key/store.ts`). A workflow application registers as an ordinary
+integration and meets exactly these bounds; a host that needs a different rule
+from its neighbours is a different deployment, not an exception list.
+
+The reads also carry generic `interfaces.web.entities` declarations
+(`ApiKeyIntegration`, and `ApiKeyCredential` nested under it), with keyset
+cursor paging, sorting and name/status filters, plus the revoke and disable
+record actions.
+
+**What is proven, and what is not.** The suites below run against a real
+PostgreSQL and, where stated, a booted application; the realm half is a stub
+HTTP server speaking the slice of the Keycloak Admin API the provisioning path
+calls.
+
+Proven:
+
+- a v2 producer reproduced literally reaches the current verifier, verifies,
+  and arrives unclassified — including with `x-user-principal-kind` appended —
+  while forged, tampered, stale, unsigned and v1 bundles are refused
+  (`packages/auth/src/trusted-context-v2-compat.test.ts`);
+- the four writing Operations and the reads succeed over the booted HTTP
+  dispatcher for a signed v3 person whose login is linked to a Relation, with
+  the service's rows shown to belong to the dispatcher's transaction by
+  comparing each row's `xmin` against that transaction's `txid_current()`
+  (`apps/api/src/operations/api-key-dispatcher-db.test.ts`);
+- a failure after the handler discards the credential with the caller's
+  transaction while the `pending` intent row survives; a realm that refuses
+  leaves one `pending` row, no credential, one realm client and a declared
+  `502`;
+- both interleavings of create against a concurrent disable, with the realm
+  held open inside `POST /clients`; and, with the realm refusing every delete,
+  a never-activated `disabled` record left behind for a row that was disabled
+  AND for one deleted out from under the attempt, each then swept by a later
+  reconciler run against the same realm — swept and not rebuilt
+  (`apps/api/src/operations/api-key-catalog-db.test.ts`);
+- a malformed cursor anchor, and an anchor no row of the set answers to
+  (forged, another tenant's, or deleted mid-walk), are the declared `400`
+  before any cast; every cursor either listing issues walks to the end of every
+  sort in both directions, one row per page, under four `DateStyle`/`TimeZone`
+  pairs and over display names of 200, 1,000 and 20,000 code points — the last
+  two being what the older surfaces accept and no value-carrying cursor could
+  have taken back; and an anchor RENAMED mid-walk (forwards past the rest of
+  the listing, backwards behind rows already read) or moved out of its derived
+  status block is that same declared `400` rather than a silently short page,
+  while an insert before the cursor and a rename of a row already delivered
+  leave the walk reaching every row exactly once; and a cursor from before the
+  digest existed is that same declared `400`
+  (`apps/api/src/operations/api-key-cursor-db.test.ts`,
+  `apps/api/src/operations/api-key-cursor.test.ts`);
+- the page's three answers agree under a real second connection committing
+  INSIDE one request, at every statement boundary it has: a rename that moves
+  the anchor cannot hand the anchor row back, and `totalCount` cannot describe
+  fewer rows than the page carries
+  (`apps/api/src/operations/api-key-cursor-db.test.ts`);
+- a verified identity link whose party is not a person does not classify its
+  session as one, so a payload-v2 carrier with such a link holds no named
+  action's person subjects and no person-only generic route; the audit identity
+  it carries is unaffected
+  (`apps/api/src/auth/principal-class.unit.test.ts`,
+  `apps/api/src/db/__tests__/principal-class-session.test.ts`);
+- the session a rejoin is recognised by is frozen, so neither the callback's
+  argument nor `activeDbSessionContext` can be edited into another tenant,
+  role set, principal class or application principal and handed back — nested
+  or `independent`
+  (`apps/api/src/db/__tests__/principal-class-session.test.ts`);
+- `no-store` on both minting surfaces of a booted stack, and the carrier
+  refusal of an unclassified bundle on both
+  (`apps/api/src/auth/api-key/credential-no-store-db.test.ts`).
+
+Not proven here, and still open:
+
+- **No real interactive login is exercised.** Every suite signs its own
+  in-mesh bundle with the deployment secret. That the web tier signs `person`
+  for exactly an authorization-code session, and for nothing else, rests on
+  `apps/web/src/lib/server/principal-kind.ts` and its unit test, not on a
+  browser login against a real Keycloak. A host upgrade that reaches
+  credential management therefore needs its own end-to-end login evidence.
+- **No real Keycloak.** The realm is a stub, so realm-side behaviour under
+  partial failure, concurrency or a realm reset is not covered beyond what the
+  reconciler's own tests assert. The stub is what the interleavings need — a
+  real server cannot be paused inside `POST /clients`, nor made to answer every
+  read and refuse every delete — so the compensation and retry evidence above
+  is stub evidence. That the admin paths it speaks are the right ones, and that
+  a second delete of an already-deleted client is the no-op the compensation
+  relies on, is the e2e suite's job and is reported separately.
+- **A crash, as opposed to an error, is not simulated.** The `pending` row is
+  shown durable across a failed realm call and a rolled-back caller
+  transaction; a process killed mid-provisioning is reasoned about, not tested.
+- **The web projection of the two minting Operations is still absent** — see
+  below.
+
+**Neither minting Operation is projected to web.** The secret property of both
+carries the existing schema marker `x-osf-presentation: {component:
+FieldSecret}`, which the compiler carries through verbatim into the canonical
+contract and — as `packages/compiler/src/api-key-catalog.test.ts` shows by
+building the projection under test — would carry into the web manifest on that
+property and on no other. The marker is not yet enough on its own: the shared
+web implementation that honours it is still being built, and until it has been
+independently security-reviewed a generic entity form would render whatever its
+Operation returns. Enabling the two actions afterwards is exactly this diff in
+the catalog's `interfaces.web.entities.ApiKeyIntegration.operations`, and
+nothing else — no renderer, no second entity, no change to any Operation:
+
+```yaml
+          create: { operation: createIntegration }
+          recordActions: [disableIntegration, issueCredential]
+```
+
+Before that diff lands, the generic frontend must mask a `FieldSecret` result
+property, keep it out of history, telemetry and any client-side store, and the
+union and identity changes it depends on must pass.
+
+A resolved key is also the ONLY carrier that produces an *application
+principal*: the `integration_id` of the row the store resolved, carried as
+`session.appPrincipal` and projected into `app.app_principal_id`, with the
+session's class fixed at `application`. A named record action
+([authoring.md](authoring.md)) matches an `integrations` subject against that
+and nothing else, so:
+
+- the grant follows the INTEGRATION, not the credential. Rotating or revoking
+  one key does not move it; deleting the integration ends it.
+- which CREDENTIAL resolved the session is carried too, as
+  `session.appPrincipal.credentialId` (`platform.api_keys.id`, projected into
+  `app.app_credential_id`). It is not what a grant names — it is what the
+  action check re-reads. Because the grant survives rotation, the integration
+  id alone cannot tell a live key from one revoked a second ago, so every
+  record-action check verifies and locks that credential row and its
+  integration inside the action's own transaction: unrevoked, unexpired
+  against the wall clock, integration `active`, and the two naming each other.
+  A revoke or a disable therefore either waits for an effect already in flight
+  or is read by one that starts after it, and a credential withdrawn before
+  the action authorizes nothing. No other principal class is affected — none
+  of them carries an API-key credential to withdraw. The identity is the row's
+  primary key and never the secret, and only the resolver writes it.
+- that check is **point-in-time, at the gate**. Revocation and disabling
+  cannot interleave with an effect, because each is an update the gate's locks
+  serialize against. Expiry is the passage of time and no lock holds it back:
+  an invocation admitted while the credential was live commits even if the
+  credential expires while its effect runs, and every later check — including
+  the bounded read's own, inside that same transaction — refuses. A holder
+  may check again later in the transaction, but that establishes validity
+  only at the later check, not at commit. The platform does not promise
+  continuous validity for an admission it has already given.
+- a direct bearer token of the same integration's Keycloak service account is
+  classified `service`, not `application`, and satisfies no record action.
+  Mapping `azp` back to an integration row would mean trusting a claim-to-row
+  lookup that cannot distinguish a re-pointed or separately created realm
+  client, so it is deliberately not done. An application that needs a record
+  action presents its key.
+- organization automation and every other configured service account are
+  likewise `service`. Nothing about their existing access changes; they simply
+  hold no named action, which is the default for every principal.
+- a trusted-context bundle names no application principal at all, however it
+  is spelled in the headers. The reader builds the session from the bundle's
+  tenant, user, roles and groups and nothing else.
+
+An entity may also decide which classes reach its generated CRUD and derived
+search at all (`authorization.principalClasses`, [authoring.md](authoring.md)).
+That is the enforced answer to "do not grant a workflow role to an API key's
+service account": an entity that declares a record action for integrations
+excludes `application` from its generic routes by default, so a broad role on a
+key no longer reaches the collection behind the per-record grant.
+
+### What makes a session a `person`
+
+The `person` class is the server's own positive verdict that a HUMAN
+authenticated, and it has exactly two sources: the bearer path's reading of
+verified token claims (`auth/bearer-session.ts`), and the class a
+trusted-context producer signed inside its bundle's HMAC (payload v3, above).
+A carrier that states neither is `unknown`.
+
+Nothing a session merely *carries* reaches the class, and the identity ↔
+Relation link in particular does not — not even when the party it names is of
+the deployment's person type. The link is a row this server read under RLS
+rather than a claim, which is what makes it tempting, and it is still the
+wrong question:
+
+- a link row exists for MACHINES. `ensureServiceIdentityLink` records one for
+  every API-key service account on its first session.
+- the party a link names is administrator input. `link_identity` admits any
+  identity against any Relation the tenant holds, so a party's
+  `relation_type` is a fact about a row somebody chose — and a machine
+  identity linked to a person Relation is a permitted, ordinary arrangement.
+- a `pending_confirmation` link names a candidate an e-mail matched and
+  nobody has confirmed.
+
+So `resolvePrincipalClass` (`db/session.ts`) never consults it. Which identity
+acted (`app.audit_identity_id`) and which party it acts as
+(`app.relation_id`) are different questions and are still answered from that
+same link, for every carrier that has one.
+
+**What this costs a producer that still signs v2.** Its sessions are
+`unknown`, so they reach none of the surfaces that depend on the person class:
+a named record action's `users`, `roles` or `groups` subjects; an entity whose
+`principalClasses` omits `unknown`; and `platform.principals.classOf`, which
+answers `unknown` rather than inventing a person. Redeploying the producer so
+it signs v3 is what admits those surfaces — the same remedy as for credential
+management, and the same one in both directions.
+
+**What it does not cost.** Everything else behaves exactly as before: roles,
+scopes, the view/edit/delete axis of the record ACL, tenant isolation, the
+acting Relation and the audit identity. The compiler's derived
+`principalClasses` default always includes `unknown`, and an entity that
+declares no policy admits every class, so ordinary generated CRUD, generated
+search and the generic MCP tools are unaffected for these sessions.
+
+A runtime module reads the same classification through
+`platform.principals` ([plugins.md](plugins.md)): `classOf(session)` answers
+`person`, `application`, `service` or `unknown`, and `application(session)`
+answers the verified integration id or `undefined`. Both refuse any session
+object but the live one this invocation was handed, and neither authorizes
+anything — a module that needs a permission asks `platform.records`.
 
 **3. Trusted-context HMAC headers (v2)** — the internal service-to-service
 path (`packages/auth/src/trusted-context.ts`). Header names:

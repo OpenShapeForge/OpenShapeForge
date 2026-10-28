@@ -32,7 +32,10 @@ function fixture(name = "reports.summary") {
     decorateTool: tool => { if (tool.name === name) decorations++; return tool; },
   } };
   const modules = [accounts, documents as unknown as RuntimeModule, versioning as unknown as RuntimeModule,
-    { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }) } }, module];
+    { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }),
+      // The entity now carries a second canonical Operation; a module that
+      // supplies any handler must supply all of them.
+      deliverToNotebook: () => { throw new Error("This test does not exercise Notebook.deliver."); } } }, module];
   return { db, platform, session, modules, module, hide: () => { visible = false; },
     counts: () => ({ providerListings, calls, interceptions, decorations }) };
 }

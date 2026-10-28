@@ -668,7 +668,10 @@ describe("web manifest projection", () => {
   test("a system-written reference key from the corpus is never create-writable and its collection offers no create", () => {
     // Comment.authorId is authored readOnly (attribution, not an input); the
     // derived Relation.comments collection therefore cannot pre-fill it.
-    const entries = ["comment", "relation", "account"].map((slug) => ({
+    // The corpus has to carry every entity the real catalogs point a reference
+    // picker at (RelationGroup, from the accounts catalog): buildWebManifest
+    // refuses an x-osf-reference to an entity it was not given.
+    const entries = ["comment", "relation", "account", "relation-group"].map((slug) => ({
       slug, path: `entities/core/${slug}.yaml`, origin: "core" as const, contract: compile(loadEntity(authoringDir, slug)),
     }));
     const authorId = entries[0]!.contract.model.fields.find(({ key }) => key === "authorId")!;
@@ -1531,6 +1534,182 @@ describe("standalone Operation pages", () => {
     const composed = buildWebManifest([canonicalTenant], {}, standalone(operationEntities));
     expect(composed.entities.Tenant?.operationSource).toBeUndefined();
     expect(composed.entities.Tenant?.entityId).toBe("Tenant");
+  });
+
+  /** One operation-backed Tenant collection, with the parts a test varies. */
+  const tenantCollection = (options: {
+    totalCount: Record<string, unknown>;
+    listInput?: Record<string, unknown>;
+    listBindings?: Record<string, string>;
+    route?: string;
+    collectionActions?: string[];
+    actionInputs?: Record<string, Record<string, unknown>>;
+  }): OperationCatalogDefinition => {
+    const listTenants = controlCatalog.operations.listTenants!;
+    const operations: Record<string, typeof listTenants> = {
+      ...controlCatalog.operations,
+      listTenants: {
+        ...listTenants,
+        input: { schema: options.listInput ?? { type: "object", additionalProperties: false, properties: {
+          sortField: { type: "string", enum: ["slug"], default: "slug" },
+          sortDirection: { type: "string", enum: ["asc", "desc"], default: "asc" },
+          first: { type: "integer", minimum: 1, maximum: 100, default: 25 },
+          after: { type: "string" },
+        } } },
+        output: { schema: { type: "object", additionalProperties: false, properties: {
+          tenants: { type: "array", items: { type: "object", additionalProperties: false, properties: {
+            slug: { type: "string", "x-osf-i18n": { title: text("Slug") } },
+          }, required: ["slug"] } },
+          totalCount: options.totalCount,
+          nextCursor: { type: ["string", "null"] },
+        }, required: ["tenants", "totalCount", "nextCursor"] } },
+      },
+    };
+    for (const [key, schema] of Object.entries(options.actionInputs ?? {})) {
+      operations[key] = { ...controlCatalog.operations[key]!, input: { schema } };
+    }
+    const route = options.route ?? "/tenants";
+    return {
+      ...controlCatalog,
+      operations,
+      interfaces: { ...controlCatalog.interfaces, web: { pages: {}, operations: {}, entities: {
+        Tenant: {
+          title: text("Tenants"), route, recordRoute: `${route}/:slug`,
+          idField: "slug", displayField: "slug", fields: ["slug"], columns: ["slug"],
+          operations: {
+            list: { operation: "listTenants", resultField: "tenants",
+              ...(options.listBindings ? { bindings: options.listBindings } : {}) },
+            ...(options.collectionActions ? { collectionActions: options.collectionActions } : {}),
+          },
+        },
+      } } },
+    };
+  };
+
+  test("a nullable totalCount projects an UNKNOWN total rather than a field to read it from", () => {
+    // The honest shape for a listing bounded by the caller's own row
+    // authorization: it cannot state a total without reading past that
+    // authorization, and a count of only the visible rows is not a total. The
+    // contract then names no field, so a renderer derives progress from the
+    // cursor instead of substituting the rows it has loaded for a total.
+    const unknown = buildWebManifest([], {}, standalone(tenantCollection({
+      totalCount: { type: ["integer", "null"] },
+    }))).entities.Tenant?.operationSource?.collection.query;
+    expect(unknown?.nextCursorField).toBe("nextCursor");
+    expect(unknown).not.toHaveProperty("totalCountField");
+
+    // The ordinary case is untouched: a non-nullable totalCount still names
+    // the field, so this is an opt-in of the Operation's own schema and not a
+    // change of the default.
+    expect(buildWebManifest([], {}, standalone(tenantCollection({
+      totalCount: { type: "integer" },
+    }))).entities.Tenant?.operationSource?.collection.query?.totalCountField).toBe("totalCount");
+  });
+
+  test("a collection action inherits the parameterized collection's own route bindings", () => {
+    // The action is invoked on the page the user is already on, so the page's
+    // route parameter is context it should not have to be typed. Narrowed to
+    // the inputs the action declares: an action that does not take the
+    // parameter gets no binding, and nothing new is authored for either case.
+    const catalog = tenantCollection({
+      totalCount: { type: "integer" },
+      route: "/operators/:operatorId/tenants",
+      listBindings: { operatorId: "operatorId" },
+      listInput: { type: "object", additionalProperties: false, required: ["operatorId"], properties: {
+        operatorId: { type: "string", format: "uuid" },
+        sortField: { type: "string", enum: ["slug"], default: "slug" },
+        sortDirection: { type: "string", enum: ["asc", "desc"], default: "asc" },
+        first: { type: "integer", minimum: 1, maximum: 100, default: 25 },
+        after: { type: "string" },
+      } },
+      collectionActions: ["updateTenant", "getTenant"],
+      actionInputs: {
+        // Takes the parameter: bound.
+        updateTenant: { type: "object", additionalProperties: false, required: ["operatorId", "slug"], properties: {
+          operatorId: { type: "string", format: "uuid" },
+          slug: { type: "string" },
+        } },
+        // Does not take it: no binding, rather than one that names an input
+        // the Operation would reject.
+        getTenant: { type: "object", additionalProperties: false, required: ["slug"], properties: {
+          slug: { type: "string" },
+        } },
+      },
+    });
+    const actions = buildWebManifest([], {}, standalone(catalog))
+      .entities.Tenant?.views.collection.operations.actions ?? [];
+    expect(actions.map((action) => action.target)).toEqual([
+      { entityId: "Tenant", entityName: "Tenant", scope: "collection", routeBindings: { operatorId: "operatorId" } },
+      { entityId: "Tenant", entityName: "Tenant", scope: "collection" },
+    ]);
+  });
+
+  test("a reference picker must name an entity this deployment declares", () => {
+    // `x-osf-reference` is the whole control of a pick-a-record form: the host
+    // resolves the target's own collection to populate it. Nothing else
+    // checked the name, so a catalog could point at an entity no layer ships
+    // — or one only an overlay ships — and still compile.
+    const catalog = tenantCollection({
+      totalCount: { type: "integer" },
+      collectionActions: ["updateTenant"],
+      actionInputs: {
+        updateTenant: { type: "object", additionalProperties: false, required: ["slug"], properties: {
+          slug: { type: "string", "x-osf-reference": { entity: "NoSuchEntity", valueField: "id" } },
+        } },
+      },
+    });
+    expect(() => buildWebManifest([], {}, standalone(catalog)))
+      .toThrow(/references unknown entity "NoSuchEntity"/);
+    // An operation-backed web entity any catalog declares is a valid target,
+    // the same as a core one.
+    const toItsOwn = tenantCollection({
+      totalCount: { type: "integer" },
+      collectionActions: ["updateTenant"],
+      actionInputs: {
+        updateTenant: { type: "object", additionalProperties: false, required: ["slug"], properties: {
+          slug: { type: "string", "x-osf-reference": { entity: "Tenant", valueField: "slug" } },
+        } },
+      },
+    });
+    expect(() => buildWebManifest([], {}, standalone(toItsOwn))).not.toThrow();
+  });
+
+  test("a picker inside a nested object, a list or a variant is checked the same way", () => {
+    // A control is as dead one level down as it is at the root, and a host
+    // renders all of these — a discriminated variant among them, which is the
+    // shape a generated choice-of-record-type form takes.
+    const nested = (target: Record<string, unknown>) => tenantCollection({
+      totalCount: { type: "integer" },
+      collectionActions: ["updateTenant"],
+      actionInputs: {
+        updateTenant: { type: "object", additionalProperties: false, required: ["slug"], properties: {
+          slug: { type: "string" },
+          target,
+        } },
+      },
+    });
+    const picker = (entity: string) => ({ type: "string", "x-osf-reference": { entity, valueField: "id" } });
+    for (const target of [
+      { type: "object", properties: { recordId: picker("NoSuchEntity") } },
+      { type: "array", items: picker("NoSuchEntity") },
+      { type: "object", oneOf: [
+        { properties: { kind: { const: "known" }, knownId: picker("Tenant") } },
+        { properties: { kind: { const: "other" }, otherId: picker("NoSuchEntity") } },
+      ] },
+    ]) {
+      expect(() => buildWebManifest([], {}, standalone(nested(target))))
+        .toThrow(/references unknown entity "NoSuchEntity"/);
+    }
+    // The path says where it is, rather than naming the property a reader
+    // would have to go looking for.
+    expect(() => buildWebManifest([], {}, standalone(nested({
+      type: "object", properties: { recordId: picker("NoSuchEntity") },
+    })))).toThrow(/input "target\/recordId"/);
+    // And a variant whose every branch names a declared entity compiles.
+    expect(() => buildWebManifest([], {}, standalone(nested({ type: "object", oneOf: [
+      { properties: { kind: { const: "known" }, knownId: picker("Tenant") } },
+      { properties: { kind: { const: "other" }, otherId: picker("Tenant") } },
+    ] })))).not.toThrow();
   });
 
   test("a result property typed as an entity is that entity's belongsTo, like a core reference field", () => {

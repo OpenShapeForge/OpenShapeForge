@@ -16,6 +16,7 @@ const defaults = Object.fromEntries(DATABASE_ROLES.map(role => [role.key, role.n
 const secondary: DatabaseRoleNames = {
   app: "secondary_app", worker: "secondary_worker",
   blueprintReader: "secondary_blueprint_reader", identityResolver: "secondary_identity_resolver",
+  recordActionResolver: "secondary_record_action_resolver",
 };
 const manifest: PlatformSchemaManifest = {
   version: 1,
@@ -75,8 +76,14 @@ async function hostRoot() {
 
 describe("trusted database role names", () => {
   test("absent and explicit defaults retain all original artifact bytes and checksum", () => {
-    // Captured from the unmodified generator at main 5a47bd1d, before this option existed.
-    expect(digest(generate())).toBe("cf2bc3c34e8598746c943cd5d933bd9637259eeba5d29272a84167bff1f9db6b");
+    // Pinned so the role-names option can never change a byte on its own. The
+    // digest moves only when the declared role CONTRACT changes, which is a
+    // deliberate, host-visible provisioning change: the previous value
+    // cf2bc3c3… was the four-role contract, and this one is the same
+    // generator with openshapeforge_record_action_resolver declared.
+    expect(digest(generate())).toBe("3bfd48827cff9b339f46bd5effe7d5492dae83bf6ad7eb276713d0b05f368a2c");
+    expect(contract(generate()).databaseRoles.map((role: { key: string }) => role.key))
+      .toEqual(["app", "worker", "blueprintReader", "identityResolver", "recordActionResolver"]);
     expect(generate(defaults)).toEqual(generate());
   });
 

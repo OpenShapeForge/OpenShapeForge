@@ -360,9 +360,12 @@ an application principal the check verifies and locks the presented
 `active` — in that same transaction, integration row first. So revoking the key
 or disabling the integration either waits for an effect in flight or is read by
 one that starts after it, and a withdrawn credential authorizes nothing even
-while the record's grant is untouched. Nothing is authored for this: it applies
-wherever a named action does, and no other principal class carries a credential
-it could affect. See [api.md](api.md) for the carrier and
+while the record's grant is untouched. The reading is point-in-time: an
+invocation already admitted commits even if the credential EXPIRES while its
+effect runs, while every later check — the bounded read's included — refuses.
+Nothing is authored for this: it applies wherever a named action does, and no
+other principal class carries a credential it could affect. See
+[api.md](api.md) for the carrier and semantics and
 `db/migrations/record-actions.ts` for the lock order.
 
 Notes on what the compiler does with this:

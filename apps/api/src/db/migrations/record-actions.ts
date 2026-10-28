@@ -711,9 +711,29 @@ export function renderRecordActionProjection(
  *     placeholder would take — is refused rather than reconciled;
  *   - it is not revoked;
  *   - it has not expired, measured against `clock_timestamp()` rather than
- *     `now()`. `now()` is the transaction's start, so a key that expires
- *     while a long effect runs would still pass; the wall clock is the
- *     honest reading and the stricter one.
+ *     `now()`. `now()` is the transaction's start, so a transaction that
+ *     opened before an expiry would keep reading the credential as live for
+ *     as long as it ran; the wall clock is the honest reading and the
+ *     stricter one.
+ *
+ * WHEN EACH FACT IS READ, AND WHAT THAT DOES NOT PROMISE
+ * ------------------------------------------------------
+ * All four are read WHEN THIS FUNCTION IS ASKED, and every answer is a
+ * point-in-time one. It is asked at the transaction gate of a record action
+ * (operations/entity/record-permissions.ts, `assertActionPrincipalLive`) and
+ * again by the bounded read, so a long effect that re-reads is re-checked —
+ * and refused if the credential has since gone.
+ *
+ * It is NOT a claim about the moment of commit. An invocation admitted while
+ * the credential was live commits even if the credential EXPIRES while its
+ * effect runs: expiry is the passage of time, and no lock holds time back.
+ * Revocation and disabling are the cases that cannot interleave, because each
+ * is an UPDATE that the `for share` locks below serialize against — a revoke
+ * either waits for the effect in flight or is read by the effect that starts
+ * after it. So the semantics are: admitted at the gate, serialized against
+ * withdrawal, and never retroactively invalidated by the clock. A caller that
+ * needs a credential to be live at commit must re-ask inside its own
+ * transaction, which is exactly what the bounded read does.
  *
  * Every other principal class answers TRUE. A person, a direct bearer service
  * account, a capability grant and a control session carry no API-key

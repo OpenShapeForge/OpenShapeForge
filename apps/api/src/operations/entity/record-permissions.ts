@@ -515,6 +515,17 @@ export async function assertRecordActionInTransaction(
  * A session of any other principal class passes this unchanged: there is no
  * API-key credential to withdraw, so the function answers true without
  * reading a row or taking a lock.
+ *
+ * The answer is POINT-IN-TIME, at this statement. A revoke or a disable cannot
+ * interleave with the effect that follows — the fence's `for share` locks
+ * serialize against their UPDATE in both directions — but an EXPIRY that falls
+ * due while the effect runs does not retract an admission already given: the
+ * invocation commits, and every later check, including the bounded read's own
+ * call to this function inside the same transaction, refuses. See
+ * `app.record_action_principal_live` (db/migrations/record-actions.ts) for the
+ * full semantics and
+ * `auth/api-key/__tests__/record-action-credential-chain.e2e.test.ts` for the
+ * proof on a real credential.
  */
 async function assertActionPrincipalLive(
   trx: Transaction<DB>,

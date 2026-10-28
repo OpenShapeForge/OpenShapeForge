@@ -1480,3 +1480,15 @@ describe("identity providers — the documented examples in authorization.yaml",
     expect(workforce.config.useJwksUrl).toBe("true");
   });
 });
+
+
+test("realm users are verified only when explicitly authored", () => {
+  const config = devConfig();
+  config.users = [
+    { username: "verified", email: "verified@example.test", emailVerified: true, password: "test" },
+    { username: "unverified", email: "unverified@example.test", password: "test" },
+  ];
+  const realm = JSON.parse(generateKeycloakRealmArtifacts([], config)[0]!.contents);
+  expect(realm.users.find((user: {username:string}) => user.username === "verified").emailVerified).toBe(true);
+  expect(realm.users.find((user: {username:string}) => user.username === "unverified").emailVerified).toBeUndefined();
+});

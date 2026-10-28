@@ -970,6 +970,8 @@ export interface AuthorizationGroupNode {
 export interface AuthorizationUser {
   username: string;
   email?: string;
+  /** Explicitly pre-verified by the operator; never inferred from an address. */
+  emailVerified?: boolean;
   firstName?: string;
   lastName?: string;
   password: string;

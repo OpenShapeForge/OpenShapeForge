@@ -232,8 +232,13 @@ realm, and the organization admits them in one of two ways
 invited the token's e-mail address, or a Relation in the organization already
 carries that address; in the second case no invitation is needed, the
 identity is recorded as a pending candidate for that Relation, and the person
-links to it by confirming (`confirm_my_link`). The match uses the `email` claim
-as the token carries it. See [mcp.md](mcp.md#identities-and-relations) for the
+links to it by confirming (`confirm_my_link`). The match uses the `email` claim only when the verified identity token also
+asserts `email_verified: true`. Operators must verify existing human users in
+Keycloak (or configure verification at the identity provider) before relying on
+email-based invitations or candidate matching. An unverified address cannot
+claim an invitation or candidate. Seeded test users may explicitly declare
+`emailVerified: true` only when the operator has established that fact; an
+address alone never makes it verified. See [mcp.md](mcp.md#identities-and-relations) for the
 link states.
 
 ## How a human signs in: passkeys, and how a federated login fits

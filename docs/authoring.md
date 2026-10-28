@@ -509,7 +509,8 @@ context-full entity at load time. It contributes:
 | `externalId` | `external_id` | id of the record in a connected source system |
 | `sourceAuthority` | `source_authority` | responsible authority / data steward |
 | `sourceOrganization` | `source_organization` | owning external organization |
-| `sourceAdministration` | `source_administration` | sub-ledger within the source |
+| `sourceAdministration` | `source_administration` | sub-ledger within the source; the identifier source identity, deduplication and the watermark are keyed on |
+| `sourceAdministrationName` | `source_administration_name` | the readable name of that administration, for display beside the identifier; renaming it does not change source identity |
 | `sourceVersion` | `source_version` | the source's change marker, sortable as text; the highest per source and administration is the incremental-import watermark |
 
 Redeclaring one of these fields in an entity is a compile error

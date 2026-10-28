@@ -9,6 +9,13 @@
  * so its roles, validation, record permissions, events and deletion guards
  * all apply; the Operation itself only matches, resolves references and keeps
  * a page atomic. The watermark is read back from sourceVersion, never stored.
+ *
+ * A writing call may also name the administration's readable
+ * sourceAdministrationName, which it owns for every record it writes the way
+ * it owns the authority and the administration. That name is stored, never
+ * matched on: identity, deduplication and the watermark are keyed on the
+ * administration identifier alone, so a renamed administration remains one
+ * administration with one cursor.
  */
 import { operationFailure } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
@@ -27,7 +34,12 @@ export const SOURCE_SYNC_PLUGIN = "osf-source-sync";
 const MAX_RECORDS = 1000;
 const REFERENCE_SUFFIX = "ExternalId";
 type Rec = Record<string, unknown>;
-type Source = { table: GeneratedCrudTable; authority: string; administration: string };
+/**
+ * One source administration as a call names it. `administration` is the
+ * identifier everything is keyed on; `administrationName` is only the readable
+ * label written alongside it, absent when the caller did not supply one.
+ */
+type Source = { table: GeneratedCrudTable; authority: string; administration: string; administrationName?: string };
 type Stored = { id: string; external_id: string; source_version: string | null };
 
 function badInput(message: string): Error {
@@ -51,11 +63,16 @@ function entityTable(entity: string): GeneratedCrudTable {
 }
 
 function sourceOf(input: Rec): Source {
-  return {
+  const source: Source = {
     table: entityTable(text(input.entity, "entity")),
     authority: text(input.sourceAuthority, "sourceAuthority"),
     administration: text(input.sourceAdministration, "sourceAdministration"),
   };
+  const name = input.sourceAdministrationName;
+  if (name !== undefined && name !== null) {
+    source.administrationName = text(name, "sourceAdministrationName");
+  }
+  return source;
 }
 
 function requireSession(context: Parameters<ModuleOperationHandler>[1]): { db: OpenShapeForgeDatabase; session: DbSessionInput } {
@@ -135,15 +152,24 @@ async function resolveReferences(
   })));
 }
 
-/** A record's own source fields may repeat the call's, never contradict them. */
+/**
+ * A record's own source fields may repeat the call's, never contradict them.
+ * The readable administration name is owned the same way when the call supplies
+ * one; without it a record keeps whatever name it carries itself.
+ */
 function sourceValues(record: Rec, source: Source): Rec {
-  for (const [field, expected] of [["sourceAuthority", source.authority], ["sourceAdministration", source.administration]] as const) {
+  const owned: Record<string, string> = {
+    sourceAuthority: source.authority,
+    sourceAdministration: source.administration,
+  };
+  if (source.administrationName !== undefined) owned.sourceAdministrationName = source.administrationName;
+  for (const [field, expected] of Object.entries(owned)) {
     const value = record[field];
     if (value !== undefined && value !== null && String(value) !== expected) {
       throw badInput(`Record ${JSON.stringify(record.externalId)} has ${field} ${JSON.stringify(value)}, not ${JSON.stringify(expected)}.`);
     }
   }
-  return { ...record, sourceAuthority: source.authority, sourceAdministration: source.administration };
+  return { ...record, ...owned };
 }
 
 const upsertBySource: ModuleOperationHandler = async (input, context) => {
@@ -296,11 +322,16 @@ const applySourcePage: ModuleOperationHandler = async (input, context) => {
       const chunks: unknown[] = [];
       const handler = batch.action === "upsert" ? upsertBySource : removeBySource;
       for (let offset = 0; offset < batch.records.length; offset += MAX_RECORDS) {
-        const result = await handler({
+        const batchInput: Rec = {
           entity: batch.entity, sourceAuthority: batch.source.authority,
           sourceAdministration: batch.source.administration,
           records: batch.records.slice(offset, offset + MAX_RECORDS),
-        }, context);
+        };
+        // Only the upsert half writes values; removeBySource takes no name.
+        if (batch.action === "upsert" && batch.source.administrationName !== undefined) {
+          batchInput.sourceAdministrationName = batch.source.administrationName;
+        }
+        const result = await handler(batchInput, context);
         if (!("value" in result)) throw operationFailure({ code: result.code, message: "Source batch failed; the page was rolled back." });
         chunks.push(result.value);
       }

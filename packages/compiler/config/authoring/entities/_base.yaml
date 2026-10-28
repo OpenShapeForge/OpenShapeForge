@@ -118,6 +118,20 @@ fields:
     persisted:
       column: source_administration
       storageClass: core
+  - key: sourceAdministrationName
+    osfType: string
+    required: false
+    label:
+      en: Source administration name
+      nl: Naam bronadministratie
+    description:
+      en: Readable name of the administration; sourceAdministration stays the identifier records match on.
+      nl: Leesbare naam van de administratie; sourceAdministration blijft de identificatie waarop records koppelen.
+    validation:
+      maxLength: 200
+    persisted:
+      column: source_administration_name
+      storageClass: core
   - key: sourceVersion
     osfType: string
     required: false

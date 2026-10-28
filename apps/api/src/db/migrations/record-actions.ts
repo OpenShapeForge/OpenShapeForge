@@ -731,9 +731,8 @@ export function renderRecordActionProjection(
  * is an UPDATE that the `for share` locks below serialize against — a revoke
  * either waits for the effect in flight or is read by the effect that starts
  * after it. So the semantics are: admitted at the gate, serialized against
- * withdrawal, and never retroactively invalidated by the clock. A caller that
- * needs a credential to be live at commit must re-ask inside its own
- * transaction, which is exactly what the bounded read does.
+ * withdrawal, and never retroactively invalidated by the clock. A later
+ * check establishes validity at that check, not at the eventual commit.
  *
  * Every other principal class answers TRUE. A person, a direct bearer service
  * account, a capability grant and a control session carry no API-key

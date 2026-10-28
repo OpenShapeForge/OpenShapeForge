@@ -703,9 +703,9 @@ and nothing else, so:
   an invocation admitted while the credential was live commits even if the
   credential expires while its effect runs, and every later check — including
   the bounded read's own, inside that same transaction — refuses. A holder
-  that needs validity at commit re-asks inside its own transaction; the
-  platform does not promise continuous validity for an admission it has
-  already given.
+  may check again later in the transaction, but that establishes validity
+  only at the later check, not at commit. The platform does not promise
+  continuous validity for an admission it has already given.
 - a direct bearer token of the same integration's Keycloak service account is
   classified `service`, not `application`, and satisfies no record action.
   Mapping `azp` back to an integration row would mean trusting a claim-to-row

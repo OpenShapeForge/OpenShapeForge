@@ -136,16 +136,106 @@ import { WORKER_ROLE } from "./worker-role.js";
  * an action that no longer reads the field fails the migration instead of
  * resting on the fence.
  *
- * ONE TRANSACTION PER TABLE
- * -------------------------
- * The grants and the four policies are applied in a single transaction per
- * entity. The migration lock (bootstrap.ts) is a SESSION advisory lock, not a
- * transaction, so without this a concurrent session saw the window between
- * `drop policy` and `create policy` — and, on a first install, the window
- * between the column grants and the fence that bounds them. CREATE POLICY
- * takes ACCESS EXCLUSIVE on the table, so inside one transaction no other
- * session can observe the table between the two states: it waits for the
- * commit and then sees the replacement.
+ * AND PUBLIC IS A GRANTEE
+ * -----------------------
+ * The resolver's reach is the union of its own grants and PUBLIC's, and a
+ * `revoke` addressed to the resolver does not touch the second half. Verified
+ * on PostgreSQL 17.11: with `grant delete, truncate on <table> to public`, the
+ * revoke-and-regrant above leaves `has_table_privilege('<resolver>', ...,
+ * 'TRUNCATE')` TRUE, the whole migration still succeeds, and a session running
+ * AS the resolver truncates the table. That needs an explicit PUBLIC grant on
+ * an entity table AND the ability to execute as the resolver, so it is not an
+ * externally reachable exploit; it is a privilege the step claimed was exact
+ * and was not.
+ *
+ * So PUBLIC's privileges are read too — from the same two ACL columns, with
+ * `acldefault` standing in where the column is NULL, because NULL means the
+ * built-in default rather than "nothing" — and any of them fails the step
+ * BEFORE the first grant and before either function body exists. They are not
+ * revoked: `revoke ... from public` takes the privilege from every role in the
+ * cluster, so a migration doing that silently would be undoing a grant the
+ * deployment made for someone else. The error carries the statement an
+ * administrator runs if the grant was a mistake.
+ *
+ * WHAT A PREVIOUS MANIFEST LEFT
+ * -----------------------------
+ * The per-entity loop visits what the manifest declares TODAY. For an entity
+ * that is still declared and whose projection changed, that is enough: the
+ * `revoke all` reaches column grants as well (verified on PostgreSQL 17.11 —
+ * after `grant select (<old column>)` and then `revoke all on <table>`,
+ * `has_column_privilege` is false), so no extra work is needed there.
+ *
+ * What the loop cannot reach is a table the new manifest no longer mentions —
+ * a dropped entity, or an entity whose last action was dropped. Nothing
+ * iterates it, so its column SELECT, its ACL UPDATE and its four policies
+ * outlive the manifest that justified them. The new function bodies have no
+ * branch for it, so nothing reaches it through the lookup; but the exact
+ * privilege set this step promises is then only exact for the tables it
+ * happened to visit. `revokeStaleRecordActionGrants` takes those grants back
+ * and drops those policies, addressing the resolver and nothing else.
+ *
+ * AND A POLICY IS NOT THE RESOLVER'S BECAUSE IT NAMES THE RESOLVER
+ * ----------------------------------------------------------------
+ * Both paths change policies by NAME — the per-entity loop drops and recreates
+ * the four, the cleanup drops them — and `pg_policy.polroles` is a list. Every
+ * policy this module creates is `to <resolver>` alone, but a deployment that
+ * conditionally added a second role to one of them (`alter policy ... to
+ * <resolver>, <other>`), or that created a policy of its own under one of
+ * these names, holds another role's row-level access in that object. A `drop
+ * policy` takes that access away; a `create policy` under the same name
+ * afterwards is worse still, because the replacement names only the resolver
+ * and the catalog goes on showing a policy by that name.
+ *
+ * So neither path trusts the name: a policy is this module's only if its `TO`
+ * list is the resolver and nothing else (`ownedByResolverAlone`), and anything
+ * else under one of these names fails the step with the `alter policy` an
+ * administrator runs to take the resolver out of the list. Fail closed, like
+ * the PUBLIC gate above and for the same reason: which roles still need the
+ * policy is a decision about the deployment's access, not a detail a migration
+ * may settle on its own. A policy that names no role at all is `{0}` in
+ * `polroles` and so applies to every role in the cluster, which is the same
+ * refusal. The resolver keeps a stale privilege until that is resolved, and
+ * the lookup still has no branch that can use it.
+ *
+ * AND EVERY ONE OF THESE BOUNDS IS PER DATABASE
+ * ---------------------------------------------
+ * The resolver is ONE cluster-wide role; `pg_class`, `pg_attribute` and
+ * `pg_policy` are per database. So "the resolver holds exactly what this
+ * manifest declares" is a statement about the database being migrated, and
+ * about no other: a grant it holds in a sibling database is neither visible
+ * here nor revocable from here, and the stale-grant cleanup below reaches only
+ * this database's tables.
+ *
+ * That is not a gap this step could close, and the role contract does not close
+ * it either: two OpenShapeForge databases in one cluster are admitted whenever
+ * every member of the definer roles is accounted for in both, which one
+ * migrate identity migrating both satisfies however their owners differ. So a
+ * sibling database is a real possibility rather than an excluded one, and what
+ * bounds the resolver there is that the sibling's own migrate run makes this
+ * same exact-privilege statement about the sibling. In a database no
+ * OpenShapeForge migration manages, nothing here bounds the resolver at all.
+ * See database-roles.ts and docs/migrations.md for the membership condition;
+ * nothing here claims the resolver's privileges are bounded cluster-wide.
+ *
+ * ONE TRANSACTION
+ * ---------------
+ * The whole step is one transaction: the grants, the four policies per entity,
+ * the stale-grant cleanup and the two function bodies. The migration lock
+ * (bootstrap.ts) is a SESSION advisory lock, not a transaction, so without
+ * this a concurrent session saw the window between `drop policy` and `create
+ * policy`, the window between the column grants and the fence that bounds
+ * them, and — across entities — the window in which the OLD function bodies
+ * were still installed against the NEW grants, where a branch reads a column
+ * the new grant set no longer covers. CREATE POLICY takes ACCESS EXCLUSIVE on
+ * the table, so no other session can observe a participating table between the
+ * two states: it waits for the commit and then sees the replacement whole.
+ *
+ * The cost is that those ACCESS EXCLUSIVE locks are held until the step
+ * commits rather than per entity, so a long-running reader of one entity table
+ * delays the DDL on all of them, and a session holding row locks across two of
+ * them can deadlock with this step. Both outcomes are an error on one side and
+ * a rollback on this one, which leaves the deployment on the grants and
+ * policies it already had.
  *
  * EXECUTE is revoked from PUBLIC and from the worker role, and granted to the
  * app role alone: no worker-side action check is supported yet. That revoke is
@@ -206,6 +296,17 @@ const UUID_LITERAL =
  * collapsed into one would leave the table with whichever was created last.
  */
 const LONGEST_POLICY_SUFFIX = "_record_action_delete_fence";
+/** The four policy suffixes this module creates per entity table. */
+const POLICY_SUFFIXES = ["read", "lock", "fence", "delete_fence"] as const;
+/**
+ * A policy name this module creates. The stale-grant cleanup drops policies by
+ * the name the catalog holds rather than by one derived from the current table
+ * name, so it needs to recognise its own.
+ *
+ * The NAME alone does not make a policy this module's to drop or replace: see
+ * {@link ownedByResolverAlone}.
+ */
+const OWNED_POLICY = /_record_action_(read|lock|fence|delete_fence)$/;
 
 function unrenderable(value: string, reason: string): never {
   throw new Error(
@@ -696,8 +797,106 @@ async function assertResolverMembers(db: OpenShapeForgeDatabase): Promise<void> 
 /** What the resolver may hold on an entity table, and nothing else. */
 type TablePrivilege = { kind: "table" | "column"; column: string | null; privilege: string };
 
+/** A privilege the catalog holds: granted to the resolver, or to PUBLIC. */
+type HeldPrivilege = TablePrivilege & { public: boolean };
+
 function privilegeKey(privilege: TablePrivilege): string {
   return `${privilege.kind}:${privilege.column ?? "-"}:${privilege.privilege}`;
+}
+
+function describePrivilege(privilege: HeldPrivilege): string {
+  return privilege.kind === "table"
+    ? privilege.privilege
+    : `${privilege.privilege}(${privilege.column})`;
+}
+
+/**
+ * Every privilege on one table that the resolver can USE: its own explicit
+ * grants, and PUBLIC's.
+ *
+ * PUBLIC is a grantee like any other in `relacl`, and every role holds what it
+ * holds — `pg_roles` has no row for it, `grant ... to <resolver>` is not how it
+ * got there, and `revoke ... from <resolver>` does not take it away. Verified
+ * on PostgreSQL 17.11: with `grant delete, truncate on <table> to public`,
+ * `has_table_privilege('<resolver>', '<table>', 'TRUNCATE')` is TRUE after the
+ * revoke-and-regrant below. So reading only the resolver's own grants would
+ * report an exact privilege set the resolver does not actually have.
+ *
+ * `relacl` and `attacl` are read rather than `information_schema`, because they
+ * show EVERY grantor's grant. A NULL ACL is not "no privileges": it means the
+ * built-in default still applies, so `acldefault` stands in for it — for a
+ * relation that is the owner and no one else, and for a column it is empty.
+ * A `default privileges` entry that caught this table is already materialised
+ * into these two columns by the time the table exists.
+ */
+async function readTablePrivileges(
+  db: OpenShapeForgeDatabase,
+  schema: string,
+  table: string,
+): Promise<HeldPrivilege[]> {
+  const qualified = literal(ident(schema, table));
+  const held = await sql<{
+    kind: string;
+    column: string | null;
+    privilege: string;
+    is_public: boolean;
+  }>`
+    with target as (select ${sql.raw(qualified)}::regclass as oid),
+         who as (select oid as grantee from pg_roles where rolname = ${RESOLVER_ROLE})
+    select 'table' as kind, null::name as column, acl.privilege_type as privilege,
+           acl.grantee = 0 as is_public
+      from target, pg_class c,
+           aclexplode(coalesce(c.relacl, pg_catalog.acldefault('r', c.relowner))) acl
+     where c.oid = target.oid
+       and (acl.grantee = 0 or acl.grantee in (select grantee from who))
+    union all
+    select 'column' as kind, att.attname as column, acl.privilege_type as privilege,
+           acl.grantee = 0 as is_public
+      from target, pg_attribute att, aclexplode(att.attacl) acl
+     where att.attrelid = target.oid
+       and (acl.grantee = 0 or acl.grantee in (select grantee from who))
+  `.execute(db);
+  return held.rows.map((row) => ({
+    kind: row.kind as TablePrivilege["kind"],
+    column: row.column,
+    privilege: row.privilege,
+    public: row.is_public,
+  }));
+}
+
+/**
+ * PUBLIC must hold nothing on an entity table, checked BEFORE anything is
+ * granted and before either function body exists.
+ *
+ * The resolver's reach is the union of its own grants and PUBLIC's, and the
+ * second half is outside everything this migration controls: PUBLIC DELETE is
+ * admitted by the delete fence's own USING for the session's tenant, and
+ * PUBLIC TRUNCATE ignores row security altogether. A PUBLIC SELECT or UPDATE
+ * is narrower but still wider than the column grants below declare.
+ *
+ * It is NOT revoked here. `revoke ... from public` takes the privilege from
+ * every role in the cluster, not from the resolver, so this migration would be
+ * silently undoing a grant the deployment made for someone else. The step
+ * fails instead, with the statement an administrator runs if the grant was a
+ * mistake.
+ */
+async function assertNoPublicPrivileges(
+  db: OpenShapeForgeDatabase,
+  entity: RecordActionEntity,
+): Promise<void> {
+  const held = await readTablePrivileges(db, entity.schema, entity.table);
+  const fromPublic = held.filter((privilege) => privilege.public);
+  if (fromPublic.length === 0) return;
+  const described = [...new Set(fromPublic.map(describePrivilege))].sort();
+  throw new Error(
+    `Record-action policy for ${entity.schema}.${entity.table} cannot be deployed: PUBLIC holds ` +
+      `${described.join(", ")} on it, and ${RESOLVER_ROLE} holds everything PUBLIC holds. ` +
+      "TRUNCATE ignores row security entirely and DELETE is admitted by the fence for the " +
+      "session's own tenant, so the resolver would reach past the column grants this manifest " +
+      "declares. This migration does not revoke it, because a PUBLIC grant belongs to every " +
+      "role in the cluster and revoking it here would take it from all of them. Run as the " +
+      `table owner, if the grant was not intended: revoke all on ${entity.schema}.${entity.table} from public;`,
+  );
 }
 
 /**
@@ -707,33 +906,23 @@ function privilegeKey(privilege: TablePrivilege): string {
  * A policy bounds SELECT, INSERT, UPDATE and DELETE. It does NOT bound
  * TRUNCATE, which ignores row security completely, and a table-wide UPDATE
  * grant would reach every column rather than the ACL. So the grants are not
- * trusted to be what the two statements above made them: they are read from
- * `pg_class.relacl` and `pg_attribute.attacl` — which, unlike
- * `information_schema`, show every grantor's grant — and anything beyond the
- * declared set fails the migration inside its transaction.
+ * trusted to be what the two statements above made them: they are read back
+ * out of the catalog and anything beyond the declared set fails the migration
+ * inside its transaction.
+ *
+ * PUBLIC's rows are skipped here: {@link assertNoPublicPrivileges} already
+ * refused the table before the grants were made, and they are not part of "the
+ * set this grant made".
  */
 async function assertResolverPrivileges(
   db: OpenShapeForgeDatabase,
   entity: RecordActionEntity,
   expected: readonly TablePrivilege[],
 ): Promise<void> {
-  const qualified = literal(ident(entity.schema, entity.table));
-  const held = await sql<{ kind: string; column: string | null; privilege: string }>`
-    with target as (select ${sql.raw(qualified)}::regclass as oid),
-         who as (select oid as grantee from pg_roles where rolname = ${RESOLVER_ROLE})
-    select 'table' as kind, null::name as column, acl.privilege_type as privilege
-      from target, who, pg_class c, aclexplode(c.relacl) acl
-     where c.oid = target.oid and acl.grantee = who.grantee
-    union all
-    select 'column' as kind, att.attname as column, acl.privilege_type as privilege
-      from target, who, pg_attribute att, aclexplode(att.attacl) acl
-     where att.attrelid = target.oid and acl.grantee = who.grantee
-  `.execute(db);
+  const held = await readTablePrivileges(db, entity.schema, entity.table);
   const wanted = new Set(expected.map(privilegeKey));
   const actual = new Set(
-    held.rows.map((row) =>
-      privilegeKey({ kind: row.kind as TablePrivilege["kind"], column: row.column, privilege: row.privilege }),
-    ),
+    held.filter((privilege) => !privilege.public).map(privilegeKey),
   );
   const extra = [...actual].filter((key) => !wanted.has(key)).sort();
   const missing = [...wanted].filter((key) => !actual.has(key)).sort();
@@ -750,11 +939,293 @@ async function assertResolverPrivileges(
 }
 
 /**
+ * What {@link POLICY_ROLE_NAMES} renders for `polroles` entry `0`. PostgreSQL
+ * has no `pg_roles` row for PUBLIC, so the OID is translated here rather than
+ * joined; it is never a role name a deployment can also have, because `public`
+ * is a reserved role name.
+ */
+const PUBLIC_GRANTEE = "PUBLIC";
+
+/**
+ * A policy as the catalog holds it: its name and every role its `TO` list
+ * names. A policy that names no role carries the single name `PUBLIC`, which
+ * is what `polroles = {0}` means — it applies to every role in the cluster.
+ */
+type CatalogPolicy = { name: string; roles: string[] };
+
+/**
+ * The role names of the policy aliased `p` in the surrounding query.
+ *
+ * `polroles` holds role OIDs, `0` standing for "no role named", which RLS
+ * reads as every role. A role referenced by a policy cannot be dropped, so the
+ * join finds a name for every other entry; the OID is rendered as a last
+ * resort rather than silently dropping a participant from the list.
+ */
+const POLICY_ROLE_NAMES = `
+  coalesce((select array_agg(named.name order by named.name)
+              from (select case when pr.oid = 0 then ${literal(PUBLIC_GRANTEE)}
+                                else coalesce(r.rolname::text, pr.oid::text) end as name
+                      from unnest(p.polroles) pr(oid)
+                      left join pg_roles r on r.oid = pr.oid) named), '{}'::text[])`;
+
+/**
+ * A policy this module may replace or drop: one whose `TO` list is the
+ * resolver and nothing else.
+ *
+ * Every policy this module creates is `to <resolver>` alone, so that is the
+ * only shape it can prove is its own. A policy that names a second role — or
+ * that names no role, and so applies to all of them — carries another role's
+ * row-level access, and `drop policy` would take that access away without the
+ * deployment ever asking for it. `create policy` under the same name afterwards
+ * would be worse: the replacement names only the resolver, so the other role
+ * silently loses the policy while the catalog still shows one by that name.
+ */
+function ownedByResolverAlone(policy: CatalogPolicy): boolean {
+  return policy.roles.length === 1 && policy.roles[0] === RESOLVER_ROLE;
+}
+
+/**
+ * Refuse a policy under one of this module's four names that is not the
+ * resolver's alone, naming the roles that hold it and the statements that
+ * resolve it.
+ *
+ * Fail closed rather than guess: whether the other role still needs the
+ * predicate, and whether the resolver should be in that list at all, is a
+ * decision about the deployment's access that a migration cannot make. The
+ * step is one transaction, so nothing it had already changed survives this.
+ */
+function refuseSharedPolicies(
+  shared: ReadonlyArray<{ schema: string; table: string; policy: CatalogPolicy }>,
+): never {
+  const described = shared.map(({ schema, table, policy }) => {
+    const to = policy.roles.length === 0
+      // RLS applies a policy with an empty TO list to no role at all, which
+      // the catalog does not produce; reported rather than assumed away.
+      ? "no role at all"
+      : policy.roles.includes(PUBLIC_GRANTEE)
+        ? "every role in the cluster, because it names none"
+        : policy.roles.join(", ");
+    return `${policy.name} on ${schema}.${table} applies to ${to}`;
+  });
+  const first = shared[0]!;
+  throw new Error(
+    `A policy under one of this migration's record-action names is not ${RESOLVER_ROLE}'s alone: ` +
+      `${described.join("; ")}. This migration creates each of its policies \`to ${RESOLVER_ROLE}\` ` +
+      "alone, so it will neither drop nor replace one that another role's row-level access depends " +
+      "on: dropping it would take that access away, and recreating it under the same name would " +
+      "narrow the policy to the resolver while the catalog still showed a policy by that name. " +
+      "Decide what each role still needs and run, as the table owner: " +
+      `alter policy ${first.policy.name} on ${first.schema}.${first.table} to <the roles that keep it>; ` +
+      `or drop policy ${first.policy.name} on ${first.schema}.${first.table};`,
+  );
+}
+
+/** Every policy on one table, whichever roles it names. */
+async function readTablePolicies(
+  db: OpenShapeForgeDatabase,
+  schema: string,
+  table: string,
+): Promise<CatalogPolicy[]> {
+  const qualified = literal(ident(schema, table));
+  const rows = await sql<{ name: string; roles: string[] }>`
+    select p.polname as name, ${sql.raw(POLICY_ROLE_NAMES)} as roles
+      from pg_policy p
+     where p.polrelid = ${sql.raw(qualified)}::regclass
+     order by p.polname
+  `.execute(db);
+  return rows.rows.map((row) => ({ name: row.name, roles: row.roles }));
+}
+
+/**
+ * One of the four policy names an entity table carries.
+ *
+ * `recordActionEntities` already refused a table name that leaves no room for
+ * the longest suffix; this repeats the bound at the point of interpolation,
+ * because truncation at 63 bytes would collapse the four names into one and
+ * leave the table with whichever policy was created last.
+ */
+function policyName(entity: RecordActionEntity, suffix: string): string {
+  const name = `${entity.table}_record_action_${suffix}`;
+  if (name.length > 63) unrenderable(name, "the policy name exceeds 63 bytes");
+  return name;
+}
+
+/**
+ * The four policies this entity is about to be given, checked BEFORE the first
+ * `drop policy` — because the replacement is a drop and a create, and a
+ * deployment that added a second role to one of them would otherwise lose that
+ * role's access to a migration that reported success.
+ */
+async function assertPoliciesReplaceable(
+  db: OpenShapeForgeDatabase,
+  entity: RecordActionEntity,
+): Promise<void> {
+  const names = new Set(POLICY_SUFFIXES.map((suffix) => policyName(entity, suffix)));
+  const existing = await readTablePolicies(db, entity.schema, entity.table);
+  const shared = existing
+    .filter((policy) => names.has(policy.name) && !ownedByResolverAlone(policy))
+    .map((policy) => ({ schema: entity.schema, table: entity.table, policy }));
+  if (shared.length > 0) refuseSharedPolicies(shared);
+}
+
+/**
+ * The tables the resolver still reaches, as the catalog holds them — not as
+ * the manifest describes them.
+ *
+ * A table is here if the resolver holds a table or column privilege on it, or
+ * if a policy is scoped `to <resolver>`. `polroles` is `{0}` for a policy that
+ * names no role, so the generated row-scope policy — which applies to the
+ * resolver like every other role — does not by itself bring a table into this
+ * set: only an explicit grant or a policy created `to` the resolver by name
+ * does.
+ *
+ * Once a table IS in the set, EVERY policy on it comes back, with its whole
+ * `TO` list — not only the ones that name the resolver. Two reasons, and both
+ * are about not deciding by name alone. The resolver's presence in a `TO` list
+ * does not make the policy the resolver's to drop. And a policy under one of
+ * this module's four names whose `TO` list does NOT contain the resolver —
+ * another role's, or `{0}` and therefore every role's — is not something to
+ * step over quietly either: filtering it out here would leave the cleanup
+ * reporting that it had taken this module's footprint back while a policy
+ * under its own name, with a role list it never wrote, stayed on the table.
+ * The caller refuses both.
+ */
+async function readManagedTables(
+  db: OpenShapeForgeDatabase,
+): Promise<Array<{ schema: string; table: string; policies: CatalogPolicy[] }>> {
+  const rows = await sql<{
+    schema: string;
+    table: string;
+    policy: string | null;
+    roles: string[];
+  }>`
+    with who as (select oid as grantee from pg_roles where rolname = ${RESOLVER_ROLE}),
+         managed as (
+           select c.oid as relid, n.nspname as nspname, c.relname as relname
+             from pg_class c
+             join pg_namespace n on n.oid = c.relnamespace
+            where c.relkind in ('r', 'p')
+              and (exists (select 1
+                             from aclexplode(coalesce(c.relacl, pg_catalog.acldefault('r', c.relowner))) acl,
+                                  who
+                            where acl.grantee = who.grantee)
+                or exists (select 1 from pg_attribute att, aclexplode(att.attacl) acl, who
+                            where att.attrelid = c.oid and acl.grantee = who.grantee)
+                or exists (select 1 from pg_policy p, who
+                            where p.polrelid = c.oid and who.grantee = any(p.polroles)))
+         )
+    select m.nspname as schema, m.relname as table, p.polname as policy,
+           ${sql.raw(POLICY_ROLE_NAMES)} as roles
+      from managed m
+      left join pg_policy p on p.polrelid = m.relid
+     order by m.nspname, m.relname, p.polname
+  `.execute(db);
+  const managed = new Map<string, { schema: string; table: string; policies: CatalogPolicy[] }>();
+  for (const row of rows.rows) {
+    const key = `${row.schema}.${row.table}`;
+    const entry = managed.get(key) ??
+      { schema: row.schema, table: row.table, policies: [] };
+    if (row.policy !== null) entry.policies.push({ name: row.policy, roles: row.roles });
+    managed.set(key, entry);
+  }
+  return [...managed.values()];
+}
+
+/**
+ * Take back what a PREVIOUS manifest granted.
+ *
+ * The loop above replaces the grants of every entity the manifest declares
+ * today, which covers an entity whose read projection or ACL column changed —
+ * `revoke all on <table>` reaches the column grants too (verified on
+ * PostgreSQL 17.11: a `select (<old column>)` grant is gone afterwards, and
+ * `has_column_privilege` is false). It does NOT cover an entity, or the last
+ * action of an entity, that the new manifest DROPPED: nothing iterates a table
+ * the manifest no longer mentions, so its column SELECT, its ACL UPDATE and
+ * its four policies survived every later migration. The new function bodies
+ * have no branch for it, so nothing could reach it through the lookup — but
+ * the resolver kept a privilege the deployment can no longer see a reason for,
+ * and the next role granted the resolver would inherit it.
+ *
+ * So the resolver's own grants are revoked and the four policies this module
+ * names are dropped. Only the resolver's: `revoke ... from <resolver>` touches
+ * no other grantee, and PUBLIC's privileges on a table nothing manages any
+ * more are left exactly as the deployment set them. The result is read back,
+ * because a revoke only reaches what this migrator granted.
+ *
+ * And only policies the resolver holds ALONE. A policy under one of these four
+ * names whose `TO` list is anything else carries row-level access this module
+ * did not write — a second role's, or, for `polroles = {0}`, every role's — so
+ * the step refuses instead of dropping it. `refuseSharedPolicies` names the
+ * roles and the `alter policy` that resolves it. That check reads every policy
+ * on every stale table and runs before the first revoke, so the refusal does
+ * not depend on which table carries it, and a policy under one of these names
+ * that does not mention the resolver at all is refused rather than left behind
+ * while the step reports the footprint taken back.
+ *
+ * Schema USAGE stays granted. It is not a table privilege, the resolver needs
+ * it for the schemas it still reads, and a USAGE grant on a schema whose
+ * tables it holds nothing on opens nothing.
+ */
+async function revokeStaleRecordActionGrants(
+  db: OpenShapeForgeDatabase,
+  entities: readonly RecordActionEntity[],
+): Promise<string[]> {
+  const current = new Set(entities.map((entity) => `${entity.schema}.${entity.table}`));
+  const managed = (await readManagedTables(db))
+    .filter(({ schema, table }) => !current.has(`${schema}.${table}`));
+  // Before anything is revoked or dropped, and across every stale table at
+  // once, so an administrator sees the whole job rather than one table of it.
+  const shared = managed.flatMap(({ schema, table, policies }) =>
+    policies
+      .filter((policy) => OWNED_POLICY.test(policy.name) && !ownedByResolverAlone(policy))
+      .map((policy) => ({ schema, table, policy })));
+  if (shared.length > 0) refuseSharedPolicies(shared);
+  const cleaned: string[] = [];
+  for (const { schema, table, policies } of managed) {
+    // These names come from the catalog, not from the manifest. A name this
+    // module could not have rendered is a grant it cannot have made, so it is
+    // reported rather than revoked on a guess.
+    if (!IDENTIFIER.test(schema) || !IDENTIFIER.test(table)) {
+      throw new Error(
+        `${RESOLVER_ROLE} holds a privilege on ${JSON.stringify(`${schema}.${table}`)}, which this ` +
+          "migration cannot have granted: its name is not a plain lowercase identifier. The resolver " +
+          "must hold nothing outside the entities the manifest declares. Revoke it as an administrator.",
+      );
+    }
+    const target = sql.id(schema, table);
+    await sql`revoke all on ${target} from ${sql.id(RESOLVER_ROLE)}`.execute(db);
+    // By actual name rather than by a name derived from the table's, so a
+    // renamed table loses its policies too. Only the ones scoped to the
+    // resolver alone — the gate above already refused every other `TO` list
+    // under one of these names, so this filter is the same decision twice and
+    // never the only thing standing between a drop and another role's access.
+    // A policy under any OTHER name is not this module's and is left alone;
+    // the generated row-scope policy on a former entity table is exactly that.
+    for (const policy of policies) {
+      if (!OWNED_POLICY.test(policy.name) || !ownedByResolverAlone(policy)) continue;
+      await sql`drop policy if exists ${sql.id(policy.name)} on ${target}`.execute(db);
+    }
+    const left = await readTablePrivileges(db, schema, table);
+    const own = [...new Set(left.filter((privilege) => !privilege.public).map(describePrivilege))].sort();
+    if (own.length > 0) {
+      throw new Error(
+        `${RESOLVER_ROLE} still holds ${own.join(", ")} on ${schema}.${table}, which no entity in this ` +
+          "manifest declares. A revoke only reaches what this migrator granted, so a grant made by a " +
+          "second grantor survives it. Revoke it as that grantor, or as an administrator.",
+      );
+    }
+    cleaned.push(`${schema}.${table}`);
+  }
+  return cleaned;
+}
+
+/**
  * One transaction, or the caller's if it already opened one.
  *
  * The migration lock (bootstrap.ts) is a session advisory lock, so it does
- * not make a sequence of statements atomic to a concurrent reader. Every unit
- * below that must not be observed half-applied gets a real transaction.
+ * not make a sequence of statements atomic to a concurrent reader. The whole
+ * step runs inside this, so nothing it changes can be observed half-applied
+ * and a refusal part-way through leaves nothing behind.
  *
  * As in audit-history.ts, "already opened one" means a Kysely transaction. A
  * caller that issued a raw `begin` on the connection is not detectable here
@@ -772,6 +1243,13 @@ async function atomically<T>(
 export async function applyRecordActionsMigration(
   db: OpenShapeForgeDatabase,
   entities: readonly RecordActionEntity[] = recordActionEntities(),
+): Promise<RecordActionEntity[]> {
+  return atomically(db, (tx) => applyRecordActions(tx, entities));
+}
+
+async function applyRecordActions(
+  db: OpenShapeForgeDatabase,
+  entities: readonly RecordActionEntity[],
 ): Promise<RecordActionEntity[]> {
   // The definer role's own attributes, before it is handed a grant: its
   // privileges are bounded by policies, and BYPASSRLS or an inherited role
@@ -796,13 +1274,7 @@ export async function applyRecordActionsMigration(
     const ownsTheTable =
       `coalesce((select pg_catalog.pg_has_role(current_user, c.relowner, 'USAGE')` +
       ` from pg_catalog.pg_class c where c.oid = ${literal(qualified)}::regclass), false)`;
-    const policy = (suffix: string) => {
-      const name = `${entity.table}_record_action_${suffix}`;
-      // Truncation at 63 bytes would collapse the four names into one and
-      // leave the table with whichever policy was created last.
-      if (name.length > 63) unrenderable(name, "the policy name exceeds 63 bytes");
-      return sql.id(name);
-    };
+    const policy = (suffix: string) => sql.id(policyName(entity, suffix));
     // Exactly the columns the two questions need: the key and tenant to find
     // the row, the ACL to decide, and the union of the declared read
     // projections to answer with. Anything else on the row stays "permission
@@ -814,80 +1286,86 @@ export async function applyRecordActionsMigration(
       .filter((column, index, all) => all.indexOf(column) === index);
     const selectable = selectColumns.map((column) => ident(column)).join(", ");
 
-    // The grants and the four policies that bound them, atomically: a
-    // concurrent session must never see the column grants without the fence,
-    // nor the table between `drop policy` and `create policy`. CREATE POLICY
-    // takes ACCESS EXCLUSIVE, so a reader waits for the commit and then sees
-    // the replacement whole.
-    await atomically(db, async (tx) => {
-      // A policy only bounds a privilege while row security is ON and applies
-      // to the role reading. Both are true by construction — the generated
-      // schema emits ENABLE and FORCE ROW LEVEL SECURITY for every
-      // tenant-scoped table and the registry refuses a table that is not
-      // tenant-scoped — and this asserts it anyway, because the step after it
-      // hands out a column grant that is a real read and a real write if the
-      // assertion is false.
-      await assertRowSecurityBounds(tx, entity);
-      await sql`grant usage on schema ${sql.id(entity.schema)} to ${sql.id(RESOLVER_ROLE)}`.execute(tx);
-      // REPLACE rather than add: a table-wide grant reaches every column, a
-      // TRUNCATE grant is outside row security altogether, and a column
-      // SELECT left over from an action that no longer reads the field is a
-      // disclosure this manifest does not declare. Revoking first makes the
-      // grant set a function of the manifest alone.
-      await sql`revoke all on ${target} from ${sql.id(RESOLVER_ROLE)}`.execute(tx);
-      await sql.raw(
-        `grant select (${selectable}) on ${qualified} to ${ident(RESOLVER_ROLE)}`,
-      ).execute(tx);
-      // The lock privilege and nothing more: UPDATE is what PostgreSQL
-      // requires for FOR SHARE. The fence policy below is what makes the write
-      // impossible; the column grant alone would not.
-      await sql.raw(
-        `grant update (${ident(entity.aclColumn)}) on ${qualified} to ${ident(RESOLVER_ROLE)}`,
-      ).execute(tx);
-      await assertResolverPrivileges(tx, entity, [
-        ...selectColumns.map((column) => ({ kind: "column" as const, column, privilege: "SELECT" })),
-        { kind: "column", column: entity.aclColumn, privilege: "UPDATE" },
-      ]);
-      // Permissive: admits the resolver to the rows the view-gated row policy
-      // hides from the app role, within this session's tenant and no further.
-      await sql`drop policy if exists ${policy("read")} on ${target}`.execute(tx);
-      await sql`create policy ${policy("read")} on ${target}
-        for select to ${sql.id(RESOLVER_ROLE)} using (${sql.raw(tenantFence)})`.execute(tx);
-      await sql`drop policy if exists ${policy("lock")} on ${target}`.execute(tx);
-      await sql`create policy ${policy("lock")} on ${target}
-        for update to ${sql.id(RESOLVER_ROLE)}
-        using (${sql.raw(tenantFence)}) with check (false)`.execute(tx);
-      // RESTRICTIVE, and therefore the actual bound: permissive policies are
-      // OR-ed, so the generated row policy — which names no role and whose
-      // write check is satisfied by the resolver's own tenant — would
-      // otherwise hand back both the cross-tenant read and the ACL write the
-      // two policies above appear to refuse. The exemption is the table
-      // owner's privileges rather than a role name, so a second member of the
-      // resolver inherits the column grants and still cannot write.
-      await sql`drop policy if exists ${policy("fence")} on ${target}`.execute(tx);
-      await sql`create policy ${policy("fence")} on ${target}
-        as restrictive for all to ${sql.id(RESOLVER_ROLE)}
-        using (${sql.raw(ownsTheTable)} or ${sql.raw(tenantFence)})
-        with check (${sql.raw(ownsTheTable)})`.execute(tx);
-      // A `for all` policy's WITH CHECK is applied to INSERT and UPDATE only,
-      // so DELETE is bounded by the fence's USING — which has to stay true for
-      // the tenant's own rows, or FOR SHARE stops working. This is the one
-      // statement that needs its own restrictive USING. The resolver holds no
-      // DELETE privilege either, by the revoke above and by the privilege
-      // assertion; this is what holds if a later grant appears.
-      await sql`drop policy if exists ${policy("delete_fence")} on ${target}`.execute(tx);
-      await sql`create policy ${policy("delete_fence")} on ${target}
-        as restrictive for delete to ${sql.id(RESOLVER_ROLE)}
-        using (${sql.raw(ownsTheTable)})`.execute(tx);
-    });
+    // A policy only bounds a privilege while row security is ON and applies
+    // to the role reading. Both are true by construction — the generated
+    // schema emits ENABLE and FORCE ROW LEVEL SECURITY for every
+    // tenant-scoped table and the registry refuses a table that is not
+    // tenant-scoped — and this asserts it anyway, because the step after it
+    // hands out a column grant that is a real read and a real write if the
+    // assertion is false.
+    await assertRowSecurityBounds(db, entity);
+    // And PUBLIC must hold nothing, because the resolver holds whatever PUBLIC
+    // holds and no revoke addressed to the resolver can take it back. Checked
+    // before the first grant, so a table PUBLIC can already TRUNCATE is
+    // refused rather than fenced.
+    await assertNoPublicPrivileges(db, entity);
+    // And each of the four policies must be this module's to replace. The
+    // replacement is a `drop policy` and a `create policy` under the same
+    // name, which would take a second role named in the old one out of it.
+    await assertPoliciesReplaceable(db, entity);
+    await sql`grant usage on schema ${sql.id(entity.schema)} to ${sql.id(RESOLVER_ROLE)}`.execute(db);
+    // REPLACE rather than add: a table-wide grant reaches every column, a
+    // TRUNCATE grant is outside row security altogether, and a column
+    // SELECT left over from an action that no longer reads the field is a
+    // disclosure this manifest does not declare. Revoking first makes the
+    // grant set a function of the manifest alone.
+    await sql`revoke all on ${target} from ${sql.id(RESOLVER_ROLE)}`.execute(db);
+    await sql.raw(
+      `grant select (${selectable}) on ${qualified} to ${ident(RESOLVER_ROLE)}`,
+    ).execute(db);
+    // The lock privilege and nothing more: UPDATE is what PostgreSQL
+    // requires for FOR SHARE. The fence policy below is what makes the write
+    // impossible; the column grant alone would not.
+    await sql.raw(
+      `grant update (${ident(entity.aclColumn)}) on ${qualified} to ${ident(RESOLVER_ROLE)}`,
+    ).execute(db);
+    await assertResolverPrivileges(db, entity, [
+      ...selectColumns.map((column) => ({ kind: "column" as const, column, privilege: "SELECT" })),
+      { kind: "column", column: entity.aclColumn, privilege: "UPDATE" },
+    ]);
+    // Permissive: admits the resolver to the rows the view-gated row policy
+    // hides from the app role, within this session's tenant and no further.
+    await sql`drop policy if exists ${policy("read")} on ${target}`.execute(db);
+    await sql`create policy ${policy("read")} on ${target}
+      for select to ${sql.id(RESOLVER_ROLE)} using (${sql.raw(tenantFence)})`.execute(db);
+    await sql`drop policy if exists ${policy("lock")} on ${target}`.execute(db);
+    await sql`create policy ${policy("lock")} on ${target}
+      for update to ${sql.id(RESOLVER_ROLE)}
+      using (${sql.raw(tenantFence)}) with check (false)`.execute(db);
+    // RESTRICTIVE, and therefore the actual bound: permissive policies are
+    // OR-ed, so the generated row policy — which names no role and whose
+    // write check is satisfied by the resolver's own tenant — would
+    // otherwise hand back both the cross-tenant read and the ACL write the
+    // two policies above appear to refuse. The exemption is the table
+    // owner's privileges rather than a role name, so a second member of the
+    // resolver inherits the column grants and still cannot write.
+    await sql`drop policy if exists ${policy("fence")} on ${target}`.execute(db);
+    await sql`create policy ${policy("fence")} on ${target}
+      as restrictive for all to ${sql.id(RESOLVER_ROLE)}
+      using (${sql.raw(ownsTheTable)} or ${sql.raw(tenantFence)})
+      with check (${sql.raw(ownsTheTable)})`.execute(db);
+    // A `for all` policy's WITH CHECK is applied to INSERT and UPDATE only,
+    // so DELETE is bounded by the fence's USING — which has to stay true for
+    // the tenant's own rows, or FOR SHARE stops working. This is the one
+    // statement that needs its own restrictive USING. The resolver holds no
+    // DELETE privilege either, by the revoke above and by the privilege
+    // assertion; this is what holds if a later grant appears.
+    await sql`drop policy if exists ${policy("delete_fence")} on ${target}`.execute(db);
+    await sql`create policy ${policy("delete_fence")} on ${target}
+      as restrictive for delete to ${sql.id(RESOLVER_ROLE)}
+      using (${sql.raw(ownsTheTable)})`.execute(db);
   }
 
-  // The two function bodies, their EXECUTE grants and the ownership transfer
-  // as one unit: `create function` defaults to EXECUTE for PUBLIC, so a first
-  // install would otherwise expose the lookup to every role in the window
-  // before the revoke.
-  await atomically(db, async (tx) => {
-    await sql.raw(`
+  // What a PREVIOUS manifest granted and this one does not declare. The loop
+  // above only visits the entities that exist today, so a dropped entity — or
+  // an entity whose last action was dropped — keeps its grants for ever
+  // otherwise.
+  await revokeStaleRecordActionGrants(db, entities);
+
+  // The two function bodies, their EXECUTE grants and the ownership transfer.
+  // `create function` defaults to EXECUTE for PUBLIC, so a first install would
+  // otherwise expose the lookup to every role in the window before the revoke.
+  await sql.raw(`
     create or replace function app.record_action_allows(
       entity text,
       record_key text,
@@ -921,8 +1399,8 @@ ${renderRecordActionLookup(entities)}
       return app.record_action_subject_allows(document -> 'actions' -> action);
     end
     $record_action$;
-  `).execute(tx);
-    await sql.raw(`
+  `).execute(db);
+  await sql.raw(`
     create or replace function app.record_action_read(
       entity text,
       record_key text,
@@ -944,21 +1422,20 @@ ${renderRecordActionProjection(entities)}
       return payload;
     end
     $record_action_read$;
-  `).execute(tx);
-    await sql`revoke all on function app.record_action_read(text, text, text) from public`.execute(tx);
-    await sql`revoke all on function app.record_action_read(text, text, text)
-      from ${sql.id(WORKER_ROLE)}`.execute(tx);
-    await sql`grant execute on function app.record_action_read(text, text, text)
-      to ${sql.id(APP_ROLE)}`.execute(tx);
-    await sql`alter function app.record_action_read(text, text, text)
-      owner to ${sql.id(RESOLVER_ROLE)}`.execute(tx);
-    await sql`revoke all on function app.record_action_allows(text, text, text) from public`.execute(tx);
-    await sql`revoke all on function app.record_action_allows(text, text, text)
-      from ${sql.id(WORKER_ROLE)}`.execute(tx);
-    await sql`grant execute on function app.record_action_allows(text, text, text)
-      to ${sql.id(APP_ROLE)}`.execute(tx);
-    await sql`alter function app.record_action_allows(text, text, text)
-      owner to ${sql.id(RESOLVER_ROLE)}`.execute(tx);
-  });
+  `).execute(db);
+  await sql`revoke all on function app.record_action_read(text, text, text) from public`.execute(db);
+  await sql`revoke all on function app.record_action_read(text, text, text)
+    from ${sql.id(WORKER_ROLE)}`.execute(db);
+  await sql`grant execute on function app.record_action_read(text, text, text)
+    to ${sql.id(APP_ROLE)}`.execute(db);
+  await sql`alter function app.record_action_read(text, text, text)
+    owner to ${sql.id(RESOLVER_ROLE)}`.execute(db);
+  await sql`revoke all on function app.record_action_allows(text, text, text) from public`.execute(db);
+  await sql`revoke all on function app.record_action_allows(text, text, text)
+    from ${sql.id(WORKER_ROLE)}`.execute(db);
+  await sql`grant execute on function app.record_action_allows(text, text, text)
+    to ${sql.id(APP_ROLE)}`.execute(db);
+  await sql`alter function app.record_action_allows(text, text, text)
+    owner to ${sql.id(RESOLVER_ROLE)}`.execute(db);
   return [...entities];
 }

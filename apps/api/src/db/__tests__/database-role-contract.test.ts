@@ -33,11 +33,11 @@ let admin: SQL;
 let adminRuntime: DatabaseRuntime;
 let migrator: DatabaseRuntime;
 
-function url(user: string, password: string): string {
+function url(user: string, password: string, database = scratchDatabase): string {
   const next = new URL(ADMIN_URL);
   next.username = user;
   next.password = password;
-  next.pathname = `/${scratchDatabase}`;
+  next.pathname = `/${database}`;
   return next.toString();
 }
 
@@ -163,6 +163,126 @@ describe("database role contract", () => {
     }
     // Revoked, the contract holds again.
     await migrator.db.connection().execute((db) => verifyDatabaseRoles(db));
+  }, TEST_TIMEOUT);
+
+  /**
+   * TWO OpenShapeForge DATABASES IN ONE CLUSTER
+   *
+   * The definer roles' member list is cluster-wide, but both things a member
+   * is measured against are per database: the migrate identity the check runs
+   * as, and `datdba`. So what decides whether step 0 passes in BOTH databases
+   * is each definer member's standing in each of them — superuser, a role the
+   * connected migrate identity inherits, or a holder of that database's owner
+   * privileges — and not the owners being distinct. The three configurations
+   * below are the ones the comment in database-roles.ts and the section in
+   * docs/migrations.md claim: distinct owners with distinct migrate identities
+   * refuse symmetrically, distinct owners under one migrate identity pass, and
+   * a second migrate identity is accepted by the database whose owner
+   * privileges it holds while the other still refuses it.
+   */
+  test("a second migrate identity is refused in both databases; a second owner is not", async () => {
+    const secondDatabase = `role_contract_second_${suffix}`;
+    const secondMigrator = `osf_contract_migrator2_${suffix}`;
+    const secondOwner = `osf_contract_owner2_${suffix}`;
+    const secondPassword = `second-${suffix}`;
+    const definers = DATABASE_ROLES.filter((role) => !role.login).map((role) => role.name);
+    let second: DatabaseRuntime | undefined;
+    try {
+      await admin.unsafe(`
+        create role ${secondMigrator} login password '${secondPassword}'
+          nosuperuser nocreaterole nocreatedb nobypassrls;
+        create role ${secondOwner} nologin nosuperuser nocreaterole nocreatedb nobypassrls;
+        grant ${secondOwner} to ${migratorRole};
+      `);
+      await admin.unsafe(`create database ${secondDatabase} owner ${secondMigrator}`);
+      // Each database owned by, and migrated as, its own non-superuser role.
+      // Both migrators must be members of the definer roles, so each database
+      // sees the other's migrator as a member it can account for neither as
+      // its own migrate identity nor as a holder of its owner's privileges.
+      const provisioned = await adminRuntime.db.connection().execute((db) =>
+        provisionDatabaseRoles(db, { passwords: {}, migratorRole: secondMigrator }),
+      );
+      expect(provisioned.granted.sort()).toEqual(
+        definers.map((definer) => `${definer} -> ${secondMigrator}`).sort(),
+      );
+      second = createDatabaseRuntime({
+        databaseUrl: url(secondMigrator, secondPassword, secondDatabase),
+        maxConnections: 1,
+      });
+      const refuse = (runtime: DatabaseRuntime): Promise<Error | undefined> =>
+        runtime.db.connection().execute((db) => verifyDatabaseRoles(db)).then(
+          () => undefined,
+          (caught: unknown) => caught as Error,
+        );
+      const [here, there] = [await refuse(migrator), await refuse(second)];
+      for (const definer of definers) {
+        expect(here?.message).toContain(
+          `role ${secondMigrator} is a member of definer role ${definer}`,
+        );
+        expect(here?.message).toContain(`revoke ${definer} from ${secondMigrator};`);
+        expect(there?.message).toContain(
+          `role ${migratorRole} is a member of definer role ${definer}`,
+        );
+        // Symmetric, so the remedy either error names breaks the other database.
+        expect(there?.message).toContain(`revoke ${definer} from ${migratorRole};`);
+      }
+
+      // Hand the second database to a distinct OWNER and migrate it as the
+      // first database's identity: the member list is back to one role, and
+      // both databases satisfy the contract with owners that differ.
+      await second.close();
+      second = undefined;
+      for (const definer of definers) {
+        await admin.unsafe(`revoke ${definer} from ${secondMigrator}`);
+      }
+      await admin.unsafe(`alter database ${secondDatabase} owner to ${secondOwner}`);
+      const shared = createDatabaseRuntime({
+        databaseUrl: url(migratorRole, migratorPassword, secondDatabase),
+        maxConnections: 1,
+      });
+      try {
+        await shared.db.connection().execute((db) => verifyDatabaseRoles(db));
+        const owners = await shared.db.connection().execute((db) =>
+          sql<{ second: string; first: string }>`
+            select (select datdba::regrole::text from pg_database
+                      where datname = current_database()) as second,
+              (select datdba::regrole::text from pg_database
+                 where datname = ${scratchDatabase}) as first
+          `.execute(db),
+        );
+        expect(owners.rows[0]).toEqual({ second: secondOwner, first: migratorRole });
+      } finally {
+        await shared.close();
+      }
+      await migrator.db.connection().execute((db) => verifyDatabaseRoles(db));
+
+      // Two migrate identities do coexist where each holds the owner
+      // privileges of every database involved: granted the second database's
+      // owner, the second migrator is accounted for there — while the FIRST
+      // database still refuses it, because it holds none of ITS owner's
+      // privileges. Owner privileges per database, not one owner for all.
+      await admin.unsafe(`grant ${secondOwner} to ${secondMigrator}`);
+      for (const definer of definers) {
+        await admin.unsafe(`grant ${definer} to ${secondMigrator} with inherit true, set true`);
+      }
+      second = createDatabaseRuntime({
+        databaseUrl: url(secondMigrator, secondPassword, secondDatabase),
+        maxConnections: 1,
+      });
+      await second.db.connection().execute((db) => verifyDatabaseRoles(db));
+      expect((await refuse(migrator))?.message).toContain(
+        `role ${secondMigrator} is a member of definer role ${definers[0]}`,
+      );
+    } finally {
+      await second?.close();
+      for (const definer of definers) {
+        await admin.unsafe(`revoke ${definer} from ${secondMigrator}`).catch(() => undefined);
+      }
+      await admin.unsafe(`drop database if exists ${secondDatabase} with (force)`);
+      await admin.unsafe(`revoke ${secondOwner} from ${migratorRole}`).catch(() => undefined);
+      await admin.unsafe(`drop role if exists ${secondMigrator}`);
+      await admin.unsafe(`drop role if exists ${secondOwner}`);
+    }
   }, TEST_TIMEOUT);
 
   /**

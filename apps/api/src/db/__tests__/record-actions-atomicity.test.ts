@@ -173,6 +173,54 @@ describe("the record-action step replaces its grants and policies atomically", (
   }, TEST_TIMEOUT);
 
   /**
+   * The table grants and the two function bodies are ONE unit.
+   *
+   * They used to be a transaction each, in that order, so a refusal while
+   * rewriting the functions committed the new grants under the OLD bodies —
+   * which read columns the new grant set no longer covers, turning every
+   * concurrent lookup into "permission denied for column" until someone
+   * noticed. The failure injected here is a lookup whose signature matches and
+   * whose return type does not, so `create or replace` refuses AFTER the table
+   * phase has already narrowed the grants.
+   */
+  test("a failure rewriting the functions rolls the table grants back", async () => {
+    expect(await declaredPrivileges()).toEqual(FULL_GRANTS);
+    await admin.db.connection().execute(async (conn) => {
+      await sql`drop function app.record_action_allows(text, text, text)`.execute(conn);
+      await sql`create function app.record_action_allows(text, text, text)
+        returns text language sql as $stub$ select null::text $stub$`.execute(conn);
+      try {
+        await expect(applyRecordActionsMigration(conn, [entity({})]))
+          .rejects.toThrow(/cannot change return type/);
+      } finally {
+        await sql`drop function app.record_action_allows(text, text, text)`.execute(conn);
+      }
+    });
+    // Not the narrowed set the refused pass asked for: the grants rolled back
+    // with the function it could not write.
+    expect(await declaredPrivileges()).not.toEqual(NARROWED_GRANTS);
+    expect(await declaredPrivileges()).toEqual(FULL_GRANTS);
+    // And the step installs both halves again from there.
+    await admin.db.connection().execute((conn) =>
+      applyRecordActionsMigration(conn, [entity()]));
+    expect(await declaredPrivileges()).toEqual(FULL_GRANTS);
+    const restored = await admin.db.connection().execute((conn) =>
+      sql<{ name: string; owner: string }>`
+        select p.proname as name, r.rolname as owner
+          from pg_proc p
+          join pg_roles r on r.oid = p.proowner
+          join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'app'
+           and p.proname in ('record_action_allows', 'record_action_read')
+         order by p.proname
+      `.execute(conn));
+    expect(restored.rows).toEqual([
+      { name: "record_action_allows", owner: RESOLVER_ROLE },
+      { name: "record_action_read", owner: RESOLVER_ROLE },
+    ]);
+  }, TEST_TIMEOUT);
+
+  /**
    * The re-run, stopped in the middle of its own swap and inspected from
    * another session.
    *

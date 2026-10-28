@@ -11,6 +11,50 @@
  * whose objects it must hand over. Anything missing is reported with the
  * exact statements an administrator runs — the same statements
  * {@link provisionDatabaseRoles} executes when given the admin connection.
+ *
+ * TWO OPENSHAPEFORGE DATABASES IN ONE CLUSTER
+ * -------------------------------------------
+ * {@link readRoleMembers} is where a cluster-wide object meets a per-database
+ * check. The member list is cluster-wide; both yardsticks a member is held
+ * against are per database — the migrate identity the check is connected as,
+ * and `datdba`. The same member list must therefore be accounted for in BOTH
+ * databases, which is a condition on the MIGRATE IDENTITIES and the
+ * memberships they hold, and not on the owners being equal or distinct:
+ *
+ *   - ONE migrate identity for both databases satisfies the contract however
+ *     their owners differ. It is the only member, and each database
+ *     recognises it as the identity it is connected as;
+ *   - TWO migrate identities satisfy it only where each database can account
+ *     for the other's on one of the three grounds this check accepts: the
+ *     member is SUPERUSER, a role the connected migrate identity itself
+ *     inherits, or a holder of that database's owner privileges. Where each
+ *     database is owned by the role that migrates it, none of the three covers
+ *     the other's migrator, so both refuse, each naming it against all three
+ *     definer roles. That refusal is symmetric: no provisioning order
+ *     satisfies both, the `revoke` each error names would break the other
+ *     database, and two roles cannot be members of each other.
+ *
+ * Two databases sharing one owner therefore pass where each is migrated as an
+ * identity holding that owner's privileges — the usual deployment shape, where
+ * the migrate role owns the database it migrates — and are refused where
+ * neither identity is covered on any of those grounds, exactly as two distinct
+ * owners are. Sharing an owner is not sufficient on its own and distinct
+ * owners are not what fails: what counts is what each member of the definer
+ * roles is in the database doing the checking.
+ *
+ * Verified in __tests__/database-role-contract.test.ts, on PostgreSQL 17.11
+ * and 16.15: it provisions a second database in the test cluster and runs
+ * {@link verifyDatabaseRoles} in both databases. Two databases each owned by
+ * the distinct non-superuser role that migrates it refuse symmetrically; the
+ * same two databases with distinct owners under ONE migrate identity pass in
+ * both; and a second migrate identity granted the second database's owner is
+ * accepted there while the first database, whose owner privileges it does not
+ * hold, still refuses it.
+ *
+ * The check cannot admit a member on the strength of its being SOME database's
+ * owner: that would let the owner of any database in the cluster hold the
+ * definer roles' grants in this one. One cluster per deployment, which is what
+ * `db:provision-roles` assumes, needs none of this. See docs/migrations.md.
  */
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "./connection.js";

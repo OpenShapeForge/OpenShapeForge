@@ -151,10 +151,46 @@ from the resolver, grants exactly the declared column `SELECT` and the ACL
 column `UPDATE`, then reads `pg_class.relacl` and `pg_attribute.attacl` back
 and fails if the result is not that exact set. `TRUNCATE` is why — it ignores
 row security completely, so no policy bounds it — and a grant made by a second
-grantor survives the owner's revoke. Each entity's grants and its four policies
-are applied in one transaction: the migration lock is a *session* advisory lock,
-so without that a concurrent session could observe the table between
-`DROP POLICY` and `CREATE POLICY`.
+grantor survives the owner's revoke. `revoke all` does reach column grants, so
+an entity that stops reading a field loses that column `SELECT` on the next
+migrate.
+
+`PUBLIC` is a grantee like any other, and the resolver holds everything
+`PUBLIC` holds — a `revoke` addressed to the resolver does not reach it. So the
+step reads `PUBLIC`'s privileges from the same two ACL columns, with
+`acldefault` standing in where the column is `NULL` (which means the built-in
+default, not "nothing"), and **refuses the table** before its first grant if
+`PUBLIC` holds anything on it. It does not revoke the grant: a `PUBLIC` grant
+belongs to every role in the cluster, so a migration silently revoking it would
+be taking a privilege away from whoever it was made for. The error names the
+`revoke … from public` an administrator runs if the grant was a mistake.
+Reaching the resolver's inherited `PUBLIC` privileges needs an explicit
+`PUBLIC` grant on an entity table *and* the ability to execute as the resolver,
+so this closes a gap between the claimed and the actual privilege set rather
+than an externally reachable hole.
+
+The per-entity loop only visits the entities the manifest declares today, which
+leaves nothing behind for an entity whose projection changed but does leave the
+grants and the four policies of an entity the new manifest **dropped** — or of
+one whose last action was dropped, which is the same thing one step earlier.
+The step therefore also takes back the resolver's grants on every table it
+still reaches that no declared entity names, and drops the record-action
+policies there by the name the catalog holds, so a renamed table is covered
+too. Only the resolver's own grants: another grantee's privileges on the same
+table, and `PUBLIC`'s, are left exactly as the deployment set them. Schema
+`USAGE` stays granted — it is not a table privilege and opens nothing on a
+table the resolver holds nothing on.
+
+The whole step is one transaction: the grants, the four policies per entity,
+that cleanup and both function bodies. The migration lock is a *session*
+advisory lock, so without it a concurrent session could observe the table
+between `DROP POLICY` and `CREATE POLICY`, or — across entities — the new
+grants under the *old* function bodies, whose branches read columns the new
+grant set no longer covers. The cost is that the `ACCESS EXCLUSIVE` locks
+`CREATE POLICY` takes are held until the step commits, so a long-running reader
+of one entity table delays the DDL on all of them and a session holding row
+locks across two can deadlock with the step. Either way the step rolls back and
+the deployment stays on the grants and policies it had.
 
 The role contract covers attributes and membership too. No declared role may be
 `SUPERUSER`, `BYPASSRLS`, `CREATEROLE`, `CREATEDB` or `REPLICATION`; a definer
@@ -235,6 +271,62 @@ grants anything, because a host can call that step directly.
 Adding a role is a host provisioning step:
 `db:provision-roles` before the next `db:migrate`, or step 0 refuses the chain
 and names the statements.
+
+### Two OpenShapeForge databases in one cluster
+
+That membership rule is the point where a cluster-wide object meets a
+per-database check. Roles and role memberships live in the cluster, but both
+things the rule holds a member against are per database: the migrate identity
+step 0 is connected as, and `datdba`. The same member list must therefore be
+accounted for in **both** databases, which makes a shared cluster a condition
+on the **migrate identities** and the memberships they hold — not on the owners
+being equal or distinct.
+
+- **One migrate identity for both databases** satisfies the contract however
+  their owners differ. It is the only member of the definer roles, and each
+  database recognises it as the identity it is connected as.
+- **Two migrate identities** satisfy it only where each database can account
+  for the other's. A member passes on one of three grounds: it is a superuser
+  (outside row security and privilege checks regardless of membership), it is a
+  role the connected migrate identity itself inherits, or it holds that
+  database's owner privileges. Where each database is owned by the role that
+  migrates it, none of the three covers the other's migrator, so step 0 refuses
+  in both, each naming the other's migrator against all three definer roles.
+  That refusal is symmetric — no provisioning order satisfies both, the
+  `revoke` each error names would break the other database, and two roles
+  cannot be members of each other, so no repair keeps both.
+
+Two databases that share one owner pass where each is migrated as an identity
+holding that owner's privileges — the usual deployment shape, in which the
+migrate role owns the database it migrates — and are refused where neither
+identity is covered on any of those grounds, exactly as two distinct owners
+are. Sharing an owner is not sufficient on its own, and distinct owners are not
+what fails: what counts is what each member of the definer roles is in the
+database doing the checking.
+
+Verified by `database-role-contract.test.ts` on PostgreSQL 17.11 and 16.15: it
+provisions a second database in the test cluster and runs `verifyDatabaseRoles`
+in both databases. Two databases each owned by the distinct non-superuser role
+that migrates it refuse symmetrically; the same two databases with distinct
+owners under one migrate identity pass in both; and a second migrate identity
+granted the second database's owner is accepted there while the first database,
+whose owner privileges it does not hold, still refuses it. The check cannot
+admit a member for being *some* database's owner: that would let the owner of
+any database in the cluster hold the definer roles' grants in this one.
+
+One cluster per deployment, which is what `db:provision-roles` ("once per
+cluster") assumes, needs none of this. For two deployments on shared hardware,
+separate clusters are the arrangement to reach for first; a shared cluster
+works only under the condition above, and the migrate identities — not the
+database owners alone — are what to check before relying on it.
+
+The record-action step's privilege guarantees are per-database for the same
+reason. It reads `pg_class`, `pg_attribute` and `pg_policy`, all of which are
+per-database, so "the resolver holds exactly what this manifest declares" is a
+statement about the database being migrated. The resolver is one cluster-wide
+role, and its grants in a sibling database are neither visible to nor revocable
+from this one; what bounds them there is that database's own migrate run. In a
+database no OpenShapeForge migration manages, nothing here bounds them at all.
 
 ```sh
 OPENSHAPEFORGE_ADMIN_DATABASE_URL=postgres://admin:...@host/db \

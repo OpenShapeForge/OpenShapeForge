@@ -13,10 +13,17 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql } from "kysely";
-import { createDatabaseRuntime, type DatabaseRuntime } from "../connection.js";
+import {
+  createDatabaseRuntime,
+  type DatabaseRuntime,
+  type OpenShapeForgeDatabase,
+} from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { DATABASE_ROLES, databaseRole } from "../database-roles.js";
-import { applyRecordActionsMigration } from "../migrations/record-actions.js";
+import {
+  applyRecordActionsMigration,
+  type RecordActionEntity,
+} from "../migrations/record-actions.js";
 import { APP_ROLE } from "../migrations/app-role.js";
 
 const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -224,6 +231,85 @@ test("the restricted migrate role installs the lookup, its grants and its polici
       actions: ["start"],
       reads: { start: [{ field: "definition", column: "definition" }] },
     }]);
+  });
+}, TEST_TIMEOUT);
+
+/** The grants the shipped `RestrictedRun` declaration asks for. */
+const RESTRICTED_RUN: RecordActionEntity = {
+  entity: "RestrictedRun", schema: "erp", table: "restricted_runs",
+  keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
+  actions: ["start"],
+  reads: { start: [{ field: "definition", column: "definition" }] },
+};
+const DECLARED_GRANTS = [
+  "SELECT acl", "SELECT definition", "SELECT id", "SELECT tenant_id", "UPDATE acl",
+];
+
+const resolverGrants = (conn: OpenShapeForgeDatabase) =>
+  sql<{ column_name: string; privilege_type: string }>`
+    select column_name, privilege_type from information_schema.column_privileges
+     where grantee = ${RESOLVER_ROLE} and table_name = 'restricted_runs'
+     order by privilege_type, column_name
+  `.execute(conn).then((result) =>
+    result.rows.map((row) => `${row.privilege_type} ${row.column_name}`));
+
+/**
+ * PUBLIC is a grantee like any other, and the resolver holds everything PUBLIC
+ * holds.
+ *
+ * Nothing in the step grants to PUBLIC and `revoke all ... from <resolver>`
+ * does not reach a PUBLIC grant, so reading only the resolver's own ACL
+ * entries reports an exact privilege set the resolver does not have: with
+ * `grant delete, truncate to public` the step used to succeed while the
+ * resolver could TRUNCATE the table, which is outside row security entirely.
+ *
+ * The PUBLIC grant is NOT revoked by the migration — it belongs to every role
+ * in the cluster — so the step refuses the table and names the remedy.
+ */
+test("it refuses an entity table PUBLIC holds a privilege on", async () => {
+  await migrate.db.connection().execute(async (conn) => {
+    expect(await resolverGrants(conn)).toEqual(DECLARED_GRANTS);
+
+    // The two privileges no policy can bound: TRUNCATE ignores row security,
+    // and DELETE is admitted by the delete fence for the session's own tenant.
+    await sql`grant delete, truncate on erp.restricted_runs to public`.execute(conn);
+    try {
+      const effective = await sql<{ truncate: boolean; remove: boolean; granted: number }>`
+        select has_table_privilege(${RESOLVER_ROLE}, 'erp.restricted_runs', 'TRUNCATE') as truncate,
+               has_table_privilege(${RESOLVER_ROLE}, 'erp.restricted_runs', 'DELETE') as remove,
+               (select count(*)::int from information_schema.table_privileges
+                 where grantee = ${RESOLVER_ROLE} and table_name = 'restricted_runs') as granted
+      `.execute(conn);
+      // Nothing is granted TO the resolver, and it holds both regardless.
+      expect(effective.rows[0]).toEqual({ truncate: true, remove: true, granted: 0 });
+      await expect(applyRecordActionsMigration(conn, [RESTRICTED_RUN]))
+        .rejects.toThrow(/PUBLIC holds DELETE, TRUNCATE/);
+      // The refusal is before the first grant and inside the transaction, so
+      // the deployment keeps the grants it had.
+      expect(await resolverGrants(conn)).toEqual(DECLARED_GRANTS);
+    } finally {
+      await sql`revoke delete, truncate on erp.restricted_runs from public`.execute(conn);
+    }
+
+    // A PUBLIC COLUMN grant: narrower, outside the declared projection, and
+    // just as invisible to a read of the resolver's own grants.
+    await sql`grant select (secret) on erp.restricted_runs to public`.execute(conn);
+    try {
+      const leaked = await sql<{ secret: boolean }>`
+        select has_column_privilege(${RESOLVER_ROLE}, 'erp.restricted_runs', 'secret', 'SELECT')
+          as secret
+      `.execute(conn);
+      expect(leaked.rows[0]).toEqual({ secret: true });
+      await expect(applyRecordActionsMigration(conn, [RESTRICTED_RUN]))
+        .rejects.toThrow(/PUBLIC holds SELECT\(secret\)/);
+    } finally {
+      await sql`revoke select (secret) on erp.restricted_runs from public`.execute(conn);
+    }
+
+    // PUBLIC holding nothing is the ordinary case: the default ACL of a table
+    // grants it nothing, and the step installs as before.
+    await applyRecordActionsMigration(conn, [RESTRICTED_RUN]);
+    expect(await resolverGrants(conn)).toEqual(DECLARED_GRANTS);
   });
 }, TEST_TIMEOUT);
 

@@ -184,6 +184,9 @@ export async function resolveCredentialSession(
           db: options.db,
           keyring,
           issuer,
+          ...(process.env.OPENSHAPEFORGE_API_KEY_TOKEN_URL?.trim()
+            ? { tokenUrl: process.env.OPENSHAPEFORGE_API_KEY_TOKEN_URL.trim() }
+            : {}),
           verifyToken: (token, credential) => verifyBearerIdentity(token, credential, options.db!),
           resolveScope,
         },

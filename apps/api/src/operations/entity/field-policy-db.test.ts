@@ -348,7 +348,7 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
     expect(JSON.stringify(merged)).not.toContain("ciphertext");
   });
 
-  test("actual secure form POST preserves omitted encrypted siblings and denies cross-tenant access", async () => {
+  test("secure form POST cannot update existing records and creates only once within its tenant", async () => {
     const { registerConfigurationHandoffRoutes } = await import("../../mcp/configuration-handoff-routes.js");
     const { mintConfiguration } = await import("../../mcp/configuration-handoff.js");
     const keyringText = `handoff:${Buffer.alloc(32, 11).toString("base64")}`;
@@ -377,8 +377,10 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       const mint = async (tenantId: string, overrides: Record<string, unknown> = {}) => {
         const pending = await mintConfiguration({ db: runtime.db, tenantId, userId: writer.userId, table: table.name,
           elicit: { sourceField: "definitionId", sourceEntity: "Fixture", sourceTable: table.name, definitionsField: "definitions", into: "data" },
-          modelValues: { key, definitionId, acceptanceId, ...overrides }, displayName: "Fixture", definitions: [
+          modelValues: { key, definitionId, acceptanceId, label: "Secure rotation", explicitSecret: "top secret", ...overrides }, displayName: "Fixture", definitions: [
             { key: "visible", osfType: "string", required: true, label: { en: "Public value" } },
+            { key: "restricted", osfType: "string", required: true },
+            { key: "fixed", osfType: "string", required: true },
             { key: "token", osfType: "string", label: { en: "Secret value" }, classification: { sensitivity: "confidential" } },
           ],
         });
@@ -395,10 +397,11 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       };
       const submit = async (tenantId: string, body: string, overrides: Record<string, unknown> = {}) => submitPending(await mint(tenantId, overrides), body);
       const before = (await stored(String(created.id))).data as Record<string, unknown>;
-      expect((await submit(writer.tenantId, "visible=changed")).status).toBe(200);
+      const firstSubmission = await submit(writer.tenantId, "visible=changed&restricted=private&fixed=initial");
+      expect(firstSubmission.status).toBe(400);
       const saved = (await stored(String(created.id))).data as Record<string, unknown>;
-      expect(saved.token).toEqual(before.token);
-      expect(saved.visible).toBe("changed");
+      expect(saved).toEqual(before);
+      expect(saved.visible).toBe("old");
       expect(decryptSecret(keyring, table.name, "token", saved.token as import("../../connectors/secrets.js").StoredSecret)).toBe(secret);
       const read = await getGeneratedEntity(runtime.db, writer, { table: table.name, id: String(created.id) });
       expect(JSON.stringify(read)).not.toContain(secret);
@@ -430,35 +433,40 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       await expect(getPending({ query: { formId: [older.id] } })).rejects.toMatchObject({ status: 404 });
       expect(await latestConfigurationForSession({ ...writer, userId: randomUUID() }, runtime.db, older.id)).toBeNull();
       expect(await latestConfigurationForSession({ ...writer, tenantId: randomUUID() }, runtime.db, older.id)).toBeNull();
-      const parallelPending = await mint(writer.tenantId);
+      const parallelKey = `parallel-${randomUUID()}`;
+      const parallelPending = await mint(writer.tenantId, { key: parallelKey });
       const parallelId = (await latestConfigurationForSession(writer, runtime.db))!.id;
       const beforeParallelEvents = await events(String(created.id));
       const parallel = await Promise.all([
-        submitPending(parallelPending, "visible=first", parallelId),
-        submitPending(parallelPending, "visible=second", parallelId),
+        submitPending(parallelPending, "visible=first&restricted=private&fixed=initial", parallelId),
+        submitPending(parallelPending, "visible=second&restricted=private&fixed=initial", parallelId),
       ]);
       expect(parallel.map(response => response.status).sort()).toEqual([200, 409]);
-      expect(parallel.find(response => response.status === 200)!.output).toEqual({ saved: true, id: String(created.id) });
-      expect((await events(String(created.id))).length).toBe(beforeParallelEvents.length + 1);
-      const tokenPending = await mint(writer.tenantId);
+      const parallelRows = await listGeneratedEntities(runtime.db, writer, { table: table.name, filter: { key: parallelKey } });
+      expect(parallelRows.rows).toHaveLength(1);
+      expect(parallel.find(response => response.status === 200)!.output).toEqual({ saved: true, id: String(parallelRows.rows[0]!.id) });
+      expect(await events(String(created.id))).toEqual(beforeParallelEvents);
+      const tokenKey = `token-${randomUUID()}`;
+      const tokenPending = await mint(writer.tenantId, { key: tokenKey });
       const beforeTokenEvents = await events(String(created.id));
       const tokenParallel = await Promise.all([
-        submitPending(tokenPending, "visible=token-first"), submitPending(tokenPending, "visible=token-second"),
+        submitPending(tokenPending, "visible=token-first&restricted=private&fixed=initial"), submitPending(tokenPending, "visible=token-second&restricted=private&fixed=initial"),
       ]);
       expect(tokenParallel.map(response => response.status).sort()).toEqual([200, 400]);
-      expect((await events(String(created.id))).length).toBe(beforeTokenEvents.length + 1);
+      expect(await events(String(created.id))).toEqual(beforeTokenEvents);
+      expect((await listGeneratedEntities(runtime.db, writer, { table: table.name, filter: { key: tokenKey } })).rows).toHaveLength(1);
       // A failed write rolls back consumption, leaving the same form retryable.
       const retryPending = await mint(writer.tenantId, { label: "Different identity" });
       expect((await submitPending(retryPending, "visible=must-not-save")).status).toBe(400);
       const { peekConfiguration } = await import("../../mcp/configuration-handoff.js");
       expect(await peekConfiguration(retryPending.token, runtime.db)).not.toBeNull();
-      const validationPending = await mint(writer.tenantId);
+      const validationPending = await mint(writer.tenantId, { key: `validation-${randomUUID()}` });
       const validationId = (await latestConfigurationForSession(writer, runtime.db))!.id;
       const beforeValidation = await stored(String(created.id));
       expect((await submitPending(validationPending, "visible=", validationId)).status).not.toBe(200);
       expect(await stored(String(created.id))).toEqual(beforeValidation);
       expect(await peekConfiguration(validationPending.token, runtime.db)).not.toBeNull();
-      expect((await submitPending(validationPending, "visible=retry", validationId)).status).toBe(200);
+      expect((await submitPending(validationPending, "visible=retry&restricted=private&fixed=initial", validationId)).status).toBe(200);
       // The same single-use rule protects a brand-new row even when its table
       // does not have a key uniqueness constraint to mask duplicate creates.
       const createKey = `create-${randomUUID()}`;

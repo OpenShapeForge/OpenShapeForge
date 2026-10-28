@@ -42,10 +42,12 @@ type RoleRow = {
   rolcreatedb: boolean;
   rolreplication: boolean;
   rolinherit: boolean;
-  /** The migrate identity holds this role's privileges and can SET ROLE to it. */
+  /** The migrate identity holds this role's privileges and can SET ROLE to it, by ANY path. */
   member: boolean;
   /** `grant <role> to <migrate identity>` exists — not a path through a third role. */
   direct: boolean;
+  /** That direct grant carries INHERIT and SET, so it alone is what the identity holds. */
+  directGrant: boolean;
 };
 
 /**
@@ -81,8 +83,24 @@ export type MigrateIdentity = {
   databaseOwner: string | null;
 };
 
-/** A member of a definer role that the contract does not admit. */
-export type UnintendedDefinerMember = { role: string; member: string };
+/**
+ * A role that can act as a definer role and that the contract does not admit.
+ *
+ * "Can act as" is reachability in the membership graph, not a direct grant:
+ * see {@link readUnintendedDefinerMembers}.
+ */
+export type UnintendedDefinerMember = {
+  /** The definer role that is reached. */
+  role: string;
+  /** The role that reaches it. */
+  member: string;
+  /** The role `member` holds DIRECTLY on that path — `role` itself at depth 1. */
+  via: string;
+  /** The whole chain, from the unintended member to the definer role. */
+  path: string;
+  /** `member` owns a database on this cluster other than the current one. */
+  ownsOtherDatabase: boolean;
+};
 
 const IDENTIFIER = /^[a-z_][a-z0-9_]{0,62}$/;
 
@@ -125,23 +143,53 @@ export async function readMigrateIdentity(db: OpenShapeForgeDatabase): Promise<M
   return result.rows[0]!;
 }
 
+/** How deep the membership graph is walked. Postgres forbids cycles; this is a belt. */
+const MEMBERSHIP_DEPTH = 16;
+
 /**
- * The members of the given roles that the contract does not admit, by NAME.
+ * Every role that can ACT AS one of the given definer roles and that the
+ * contract does not admit, by NAME.
  *
- * Admitted, and nothing else:
+ * REACHABILITY, NOT A DIRECT GRANT
+ * --------------------------------
+ * A direct scan of `pg_auth_members` answers the wrong question. The two
+ * admitted members are themselves ordinary roles, and a role granted one of
+ * THEM reaches the definer role through it: with `grant <definer> to <owner>`
+ * and `grant <owner> to <third>`, that third role runs `set role <owner>;
+ * set role <definer>; create or replace app.record_action_allows(...)` and
+ * decides every record action — without ever appearing as a member of the
+ * definer role (verified on PostgreSQL 17.11 and 16.15). So the walk starts
+ * at each definer role and follows `pg_auth_members` outwards transitively,
+ * through the admitted roles as well.
  *
+ * EVERY EDGE COUNTS
+ * -----------------
+ * A membership can carry INHERIT, SET and ADMIN independently, and none of
+ * the three is safe here: INHERIT hands over the definer role's privileges
+ * and, because ownership is resolved with `has_privs_of_role`, the ownership
+ * of its SECURITY DEFINER functions; SET lets the member become it; and ADMIN
+ * alone is enough, because the member may `grant <role> to <itself> with
+ * inherit true, set true` (verified on PostgreSQL 17.11). An edge with all
+ * three false confers nothing today, but it has no purpose on the path to a
+ * definer role either, so the walk does not carve it out: it is reported with
+ * the same `revoke` rather than classified as harmless.
+ *
+ * ADMITTED, AND NOTHING ELSE
+ * --------------------------
  *   - `current_user`, the migrate identity that must hand the objects over.
  *     The grant has to be to that identity itself: a role granted TO it is a
- *     different principal, reachable by anything that can reach the helper,
- *     and inherits the definer role's grants and the ownership of its
- *     SECURITY DEFINER functions;
+ *     different principal that reaches everything the migrate identity does;
  *   - the owner of the current database, which already owns the schema those
  *     objects live in. By name again — a role that merely holds the owner's
  *     privileges would, as a definer member, gain function ownership the
  *     owner's privileges alone do not confer;
- *   - a SUPERUSER member, because it is outside row security and every
- *     privilege check with or without the membership, so revoking it would
- *     change nothing.
+ *   - a SUPERUSER, because it is outside row security and every privilege
+ *     check with or without the membership, so revoking it would change
+ *     nothing. The walk still passes THROUGH a superuser: a role that can
+ *     become one reaches the definer role, and holds far more besides.
+ *
+ * Admitted roles are not reported; everything else on a path is, with the
+ * chain it travels and the single `revoke` closest to it that cuts the path.
  *
  * Nothing here depends on what the CALLER holds, so a superuser running the
  * check sees the same deviations a restricted migrate role does.
@@ -153,18 +201,65 @@ export async function readUnintendedDefinerMembers(
   const names = roles.map((role) => sql.lit(identifier(role)));
   if (names.length === 0) return [];
   const result = await sql<UnintendedDefinerMember>`
-    select role.rolname as role, member.rolname as member
-    from pg_auth_members am
-    join pg_roles role on role.oid = am.roleid
-    join pg_roles member on member.oid = am.member
-    where role.rolname in (${sql.join(names)})
-      and not member.rolsuper
+    with recursive reachable as (
+      select definer.rolname as role, am.member as member_oid,
+        definer.rolname as via, definer.rolname || ' <- ' || member.rolname as path, 1 as depth
+      from pg_auth_members am
+      join pg_roles definer on definer.oid = am.roleid
+      join pg_roles member on member.oid = am.member
+      where definer.rolname in (${sql.join(names)})
+      union all
+      select r.role, am.member, holder.rolname, r.path || ' <- ' || member.rolname, r.depth + 1
+      from reachable r
+      join pg_roles holder on holder.oid = r.member_oid
+      join pg_auth_members am on am.roleid = r.member_oid
+      join pg_roles member on member.oid = am.member
+      where r.depth < ${MEMBERSHIP_DEPTH}
+    )
+    select distinct on (r.role, member.rolname)
+      r.role, member.rolname as member, r.via, r.path,
+      exists (select 1 from pg_database d
+        where d.datdba = member.oid and d.datname <> current_database()) as "ownsOtherDatabase"
+    from reachable r
+    join pg_roles member on member.oid = r.member_oid
+    where not member.rolsuper
       and member.rolname <> current_user
       and member.oid <> coalesce(
         (select datdba from pg_database where datname = current_database()), 0)
-    order by role.rolname, member.rolname
+    order by r.role, member.rolname, r.depth
   `.execute(db);
   return result.rows;
+}
+
+/**
+ * Why a reachable role was refused, in one sentence an operator can act on.
+ *
+ * Roles are cluster-wide; the definer roles are named once in the manifest and
+ * shared by every OpenShapeForge database on the cluster, while "this
+ * database's owner" is per database. So a second OpenShapeForge database with
+ * a DIFFERENT owner makes each database refuse the other's owner, and that is
+ * the supported policy rather than an oversight: admitting any database owner
+ * would admit whoever a `CREATEDB` role made one. The sentence says so when it
+ * applies, so the refusal is not mistaken for a broken grant.
+ */
+export function explainDefinerMember(
+  row: UnintendedDefinerMember,
+  identity: MigrateIdentity,
+): string {
+  const owner = identity.databaseOwner ?? "(unknown)";
+  const reach =
+    row.via === row.role
+      ? `role ${row.member} is a member of definer role ${row.role}`
+      : `role ${row.member} can act as definer role ${row.role} through ${row.path}`;
+  const cluster = row.ownsOtherDatabase
+    ? `. ${row.member} owns another database on this cluster: definer roles are cluster-wide, ` +
+      "so every OpenShapeForge database sharing a cluster must share one owner and one migrate " +
+      "identity, or be given its own cluster"
+    : "";
+  return (
+    `${reach}, and is neither the migrate role ${identity.user} nor this database's owner ` +
+    `${owner}${cluster}`
+  );
 }
 
 async function readRoles(db: OpenShapeForgeDatabase): Promise<Map<string, RoleRow>> {
@@ -177,7 +272,18 @@ async function readRoles(db: OpenShapeForgeDatabase): Promise<Map<string, RoleRo
         and pg_has_role(current_user, r.rolname, 'SET')) as member,
       exists (select 1 from pg_auth_members am
         where am.roleid = r.oid
-          and am.member = (select cu.oid from pg_roles cu where cu.rolname = current_user)) as direct
+          and am.member = (select cu.oid from pg_roles cu where cu.rolname = current_user)) as direct,
+      -- The options ON A DIRECT EDGE. pg_has_role answers for the whole
+      -- graph, so an optionless direct grant passes it whenever a third role
+      -- supplies the privilege — exactly the shape the member scan is meant
+      -- to surface (verified on PostgreSQL 17.11 and 16.15). One (role,
+      -- member) pair can have SEVERAL grants from different grantors, as a
+      -- createrole_self_grant edge beside the host's grant does, and holding
+      -- one that carries both options is what the contract asks for.
+      exists (select 1 from pg_auth_members am
+        where am.roleid = r.oid
+          and am.member = (select cu.oid from pg_roles cu where cu.rolname = current_user)
+          and am.inherit_option and am.set_option) as "directGrant"
     from pg_roles r
     where r.rolname in (${sql.join(names)})
   `.execute(db);
@@ -219,15 +325,17 @@ async function readRoleMemberships(db: OpenShapeForgeDatabase): Promise<Map<stri
  *     are SECURITY DEFINER, so `grant <anything> to <definer>` would widen
  *     every one of those bodies at once;
  *   - the migrate identity holds every role it must hand objects over to by a
- *     DIRECT grant, or is a superuser and needs none. A membership that only
- *     exists through a third role means that role is a member too, and the
- *     rule below is what refuses it;
- *   - the only members OF a definer role are the migrate identity itself and
- *     the owner of this database, by {@link readUnintendedDefinerMembers}.
- *     Every other member inherits the definer role's narrow grants, OWNS its
+ *     DIRECT grant carrying INHERIT and SET, or is a superuser and needs none.
+ *     A membership that only exists through a third role means that role can
+ *     act as the definer role too, and the rule below is what refuses it;
+ *   - the only roles that can ACT AS a definer role are the migrate identity
+ *     itself and the owner of this database, by
+ *     {@link readUnintendedDefinerMembers} — which walks the membership graph
+ *     transitively, so a role granted one of those two is refused as well.
+ *     Every other holder inherits the definer role's narrow grants, OWNS its
  *     SECURITY DEFINER functions (ownership is resolved with
  *     `has_privs_of_role`) AND is matched by the policies written `TO` it. A
- *     second member is a second holder of those grants; the record-action
+ *     second holder is a second holder of those grants; the record-action
  *     fence bounds its writes (its exemption is the table owner's privileges,
  *     not a role name) but nothing stops it replacing a function body, so the
  *     contract is that it does not exist. Superusers are accepted because they
@@ -265,24 +373,22 @@ export async function verifyDatabaseRoles(db: OpenShapeForgeDatabase): Promise<v
       remedies.push(`alter role ${identifier(role.name)} noinherit;`);
     }
     // A superuser hands the objects over without a grant. Otherwise the grant
-    // must name the migrate identity itself: holding the role through a third
-    // role makes that role a member, which the member scan below refuses.
-    if (role.migratorMember && !identity.superuser) {
-      const grant = `grant ${identifier(role.name)} to ${identifier(current)} with inherit true, set true;`;
-      if (!row.direct && !row.member) {
-        problems.push(`migrate role ${current} is not a member of ${role.name}`);
-      } else if (!row.direct) {
-        problems.push(
-          `migrate role ${current} holds ${role.name} only through another role, ` +
-            `not as a direct member`,
-        );
-        remedies.push(grant);
-      } else if (!row.member) {
-        problems.push(
-          `migrate role ${current} is a member of ${role.name} without INHERIT and SET`,
-        );
-        remedies.push(grant);
-      }
+    // must name the migrate identity itself AND carry INHERIT and SET on that
+    // edge: holding the role through a third role makes that role a member,
+    // which the member scan below refuses, and `pg_has_role` cannot tell the
+    // two apart because it answers for the whole graph.
+    if (role.migratorMember && !identity.superuser && !row.directGrant) {
+      problems.push(
+        !row.direct && !row.member
+          ? `migrate role ${current} is not a member of ${role.name}`
+          : !row.direct
+            ? `migrate role ${current} holds ${role.name} only through another role, ` +
+              `not as a direct member`
+            : `migrate role ${current} is a member of ${role.name} without INHERIT and SET`,
+      );
+      remedies.push(
+        `grant ${identifier(role.name)} to ${identifier(current)} with inherit true, set true;`,
+      );
     }
   }
   const definers = new Set(DATABASE_ROLES.filter((role) => !role.login).map((role) => role.name));
@@ -294,20 +400,23 @@ export async function verifyDatabaseRoles(db: OpenShapeForgeDatabase): Promise<v
     }
   }
   for (const row of await readUnintendedDefinerMembers(db, [...definers])) {
-    problems.push(
-      `role ${row.member} is a member of definer role ${row.role} and is neither the ` +
-        `migrate role ${current} nor this database's owner ${identity.databaseOwner ?? "(unknown)"}`,
-    );
-    remedies.push(`revoke ${identifier(row.role)} from ${identifier(row.member)};`);
+    problems.push(explainDefinerMember(row, identity));
+    remedies.push(`revoke ${identifier(row.via)} from ${identifier(row.member)};`);
   }
   if (problems.length === 0) return;
+  // The provisioning script already carries the grant for every role the
+  // migrate identity must hold, so a missing or optionless grant is not
+  // repeated after it, and two roles missing the same revoke say it once.
+  const provisioning = renderProvisioningSql({ migratorRole: current });
+  const already = new Set(provisioning.split("\n"));
+  const extra = [...new Set(remedies)].filter((statement) => !already.has(statement));
   throw new Error(
     "Database role contract is not satisfied:\n" +
       problems.map((problem) => `  - ${problem}`).join("\n") +
       "\n\nRoles are cluster-wide and are provisioned by the host, not by this migration. " +
       "Run apps/api/src/db/provision-roles.ts with OPENSHAPEFORGE_ADMIN_DATABASE_URL, " +
       "or execute as an administrator:\n\n" +
-      [renderProvisioningSql({ migratorRole: current }), ...remedies].join("\n"),
+      [provisioning, ...extra].join("\n"),
   );
 }
 
@@ -364,20 +473,21 @@ export async function provisionDatabaseRoles(
     }
     if (role.migratorMember && options.migratorRole) {
       const migrator = identifier(options.migratorRole);
-      // `member` is the capability and `direct` is the grant the contract
-      // requires: an indirect membership satisfies pg_has_role and would leave
-      // provisioning idempotent against a contract verifyDatabaseRoles refuses.
-      const membership = await sql<{ member: boolean; direct: boolean; superuser: boolean }>`
-        select (pg_has_role(${migrator}, ${name}, 'USAGE')
-          and pg_has_role(${migrator}, ${name}, 'SET')) as member,
-          exists (select 1 from pg_auth_members am
+      // The DIRECT edge with INHERIT and SET is the grant the contract
+      // requires. pg_has_role answers for the whole graph, so an indirect
+      // membership — or a direct one carrying neither option while a third
+      // role supplies the privilege — would leave provisioning idempotent
+      // against a contract verifyDatabaseRoles refuses.
+      const membership = await sql<{ granted: boolean; superuser: boolean }>`
+        select exists (select 1 from pg_auth_members am
             join pg_roles role on role.oid = am.roleid
             join pg_roles member on member.oid = am.member
-            where role.rolname = ${name} and member.rolname = ${migrator}) as direct,
+            where role.rolname = ${name} and member.rolname = ${migrator}
+              and am.inherit_option and am.set_option) as granted,
           (select rolsuper from pg_roles where rolname = ${migrator}) as superuser
       `.execute(admin);
       const row = membership.rows[0];
-      if (row && !(row.member && row.direct) && !row.superuser) {
+      if (row && !row.granted && !row.superuser) {
         await sql`
           grant ${sql.ref(name)} to ${sql.ref(migrator)}
           with inherit true, set true

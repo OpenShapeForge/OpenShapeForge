@@ -4,6 +4,7 @@ import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { OpenShapeForgeDatabase } from "../connection.js";
 import {
   databaseRole,
+  explainDefinerMember,
   readMigrateIdentity,
   readUnintendedDefinerMembers,
 } from "../database-roles.js";
@@ -561,11 +562,14 @@ async function assertRowSecurityBounds(
  * DEFINER functions it is about to create: with `CREATE` on schema `app` it
  * can `create or replace app.record_action_allows` and decide every record
  * action itself. The fence bounds its writes to entity tables; it does not
- * bound that. So the contract is that the only members are the migrate
- * identity itself and this database's owner, and the only membership the
- * migrate identity leans on is a direct grant — a helper role granted to
- * migrate and also granted the resolver is a separate principal with all of
- * the above (verified on PostgreSQL 17.11).
+ * bound that. So the contract is that the only roles that can act as the
+ * resolver are the migrate identity itself and this database's owner, and the
+ * only membership the migrate identity leans on is a direct grant carrying
+ * INHERIT and SET. Both halves are reachability questions: a helper role
+ * granted to migrate and also granted the resolver is a separate principal
+ * with all of the above, and so is a role granted the DATABASE OWNER, which
+ * reaches the resolver through it without ever being its member (both
+ * verified on PostgreSQL 17.11 and 16.15).
  *
  * database-roles.ts verifies the same contract for every declared role at the
  * head of the chain. This repeats the resolver's own part of it here, because
@@ -616,11 +620,18 @@ async function assertResolverRole(db: OpenShapeForgeDatabase): Promise<void> {
 }
 
 /**
- * Who may be a member OF the resolver, and how the migrate identity may hold
- * it. Both are compared by role NAME against `current_user` and the current
- * database's owner: `pg_has_role(current_user, <member>, 'USAGE')` is not an
- * identity test — it is true for every role granted TO the migrate role, and
- * true for every member of every role when the caller is a superuser.
+ * Who may ACT AS the resolver, and how the migrate identity may hold it. Both
+ * are compared by role NAME against `current_user` and the current database's
+ * owner: `pg_has_role(current_user, <member>, 'USAGE')` is not an identity
+ * test — it is true for every role granted TO the migrate role, and true for
+ * every member of every role when the caller is a superuser.
+ *
+ * Neither question stops at a direct grant. The two admitted roles are
+ * ordinary roles, so a third role granted one of THEM becomes the resolver
+ * through it, and a direct grant carrying neither INHERIT nor SET is not the
+ * membership this step needs even while `pg_has_role` is satisfied by that
+ * same third path. {@link readUnintendedDefinerMembers} walks the graph; the
+ * grant below is read off the edge itself.
  */
 async function assertResolverMembers(db: OpenShapeForgeDatabase): Promise<void> {
   const identity = await readMigrateIdentity(db);
@@ -631,31 +642,39 @@ async function assertResolverMembers(db: OpenShapeForgeDatabase): Promise<void> 
       `The record-action resolver role ${RESOLVER_ROLE} cannot be used: ` +
         `${members.join(", ")} ${members.length === 1 ? "is a member" : "are members"} of it, ` +
         `and neither the migrate identity ${identity.user} nor this database's owner ` +
-        `${identity.databaseOwner ?? "(unknown)"}. A member inherits the resolver's column ` +
-        "grants, is matched by the policies written TO it, and owns the two SECURITY DEFINER " +
-        "functions this step installs — so it can replace their bodies. Run as an " +
-        "administrator: " +
-        members.map((member) => `revoke ${RESOLVER_ROLE} from ${member};`).join(" "),
+        `${identity.databaseOwner ?? "(unknown)"}. ` +
+        unintended.map((row) => `${explainDefinerMember(row, identity)}. `).join("") +
+        "Such a role inherits the resolver's column grants, is matched by the policies " +
+        "written TO it, and owns the two SECURITY DEFINER functions this step installs — " +
+        "so it can replace their bodies. Run as an administrator: " +
+        unintended.map((row) => `revoke ${row.via} from ${row.member};`).join(" "),
     );
   }
-  // The migrate identity's own membership: a direct grant, or SUPERUSER, which
-  // needs none. Held through a third role, that role is a member as well — and
-  // the scan above has already refused it, so this only reports the case where
-  // the privilege arrives from a role the scan admits.
+  // The migrate identity's own membership: a direct grant with INHERIT and
+  // SET, or SUPERUSER, which needs none. Held through a third role, that role
+  // can act as the resolver as well — and the walk above has already refused
+  // it, so this only reports what arrives from a role the walk admits.
   if (identity.superuser) return;
-  const held = await sql<{ member: boolean; direct: boolean }>`
+  const held = await sql<{ member: boolean; direct: boolean; granted: boolean }>`
     select (pg_has_role(current_user, ${RESOLVER_ROLE}, 'USAGE')
       and pg_has_role(current_user, ${RESOLVER_ROLE}, 'SET')) as member,
       exists (select 1 from pg_auth_members am
         join pg_roles role on role.oid = am.roleid
         join pg_roles member on member.oid = am.member
-        where role.rolname = ${RESOLVER_ROLE} and member.rolname = current_user) as direct
+        where role.rolname = ${RESOLVER_ROLE} and member.rolname = current_user) as direct,
+      exists (select 1 from pg_auth_members am
+        join pg_roles role on role.oid = am.roleid
+        join pg_roles member on member.oid = am.member
+        where role.rolname = ${RESOLVER_ROLE} and member.rolname = current_user
+          and am.inherit_option and am.set_option) as granted
   `.execute(db);
   const row = held.rows[0];
-  if (row?.member && row.direct) return;
-  const how = row?.member
-    ? `holds ${RESOLVER_ROLE} only through another role`
-    : `is not a member of ${RESOLVER_ROLE}`;
+  if (row?.granted) return;
+  const how = row?.direct
+    ? `is a member of ${RESOLVER_ROLE} without INHERIT and SET`
+    : row?.member
+      ? `holds ${RESOLVER_ROLE} only through another role`
+      : `is not a member of ${RESOLVER_ROLE}`;
   throw new Error(
     `The migrate identity ${identity.user} cannot install the record-action lookup: it ${how}` +
       ". The step transfers the two SECURITY DEFINER functions to that role, which needs " +

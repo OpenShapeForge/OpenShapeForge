@@ -410,6 +410,15 @@ describe("resolveAuthoringLayers", () => {
     const narrowed = YAML.parse(readFileSync(join(result, "entities/core/widget.yaml"), "utf8"));
     expect(narrowed.authorization.principalClasses).toEqual(["person", "service", "unknown"]);
     expect(narrowed.authorization.rowAccess.recordPermissions.actions[0].principals).toEqual(["person"]);
+    const disabled = makeRepo();
+    writeYaml(disabled, "base/entities/core/widget.yaml", { ...actionEntity, authorization: {
+      ...actionEntity.authorization, rowAccess: { ...actionEntity.authorization.rowAccess, enabled: false },
+    } });
+    writeYaml(disabled, "overlay/entities/core/widget.yaml", { kind: "entityPatch", authorization: {
+      principalClasses: ["person", "service", "unknown", "application"],
+    } });
+    configureLayers(disabled, ["base", "overlay"]);
+    expect(() => resolveAuthoringLayers(disabled)).not.toThrow();
   });
 
   test("an entity patch may tighten a declared record action", () => {

@@ -38,7 +38,7 @@ const EXPECTED_NO_STORE = { "cache-control": "private, no-store, max-age=0", pra
  * The hop apps/web signs for a logged-in administrator: the identity, and the
  * principal class the web tier established from that person's own login. The
  * class is inside the HMAC, so these headers are the only way this suite can
- * reach a minting path at all — see `forged-principal.test.ts` for what a
+ * reach a minting path at all — see `carrier-admission.test.ts` for what a
  * caller gets by writing the same header itself.
  */
 function managerHeaders(): Record<string, string> {

@@ -363,7 +363,8 @@ operations:
             minimum: 1
             maximum: 366
             description: 'Omit for this deployment''s default lifetime. The ceiling is 366 days: a credential that
-              never expires, or one that outlives a yearly review, is not something this contract can ask for.'
+              never expires, or one that outlives a yearly review, is not something this contract can ask for. A
+              deployment may declare a tighter maximum than 366; a request past it is refused and names that number.'
             x-osf-i18n: { title: { en: Lifetime in days, nl: Looptijd in dagen } }
           roleSubset:
             type: array

@@ -674,14 +674,22 @@ rejected rather than half-honoured. Provisioning lives at `/api/api-keys` and
 on the GraphQL surface, gated by `Platform.ApiKeys.Manage` and by a privilege
 ceiling — a caller cannot grant roles it does not hold, and only a session this
 deployment can show to be a PERSON may manage keys at all. That carrier rule is
-decided before any role (`auth/api-key/ceiling.ts`): a bearer is admitted only
-on the bearer path's own `principalKind: "person"` verdict, which also refuses
-a Keycloak service account holding `Platform.ApiKeys.Manage` and a verified
-token whose principal could not be named; the deployment's own HMAC-signed
-in-mesh bundle stays admitted because apps/web uses it when it holds no
-forwardable access token, and every other credential is refused outright. The
-bundle carries no principal kind, so narrowing THAT case needs the carrier to
-propagate the verdict — a limit recorded in `ceiling.ts`, not closed by it.
+decided before any role (`auth/api-key/ceiling.ts`) and it asks ONE question of
+the two admitted carriers: did this deployment classify the principal as a
+person? A bearer carries the bearer path's own `principalKind: "person"`
+verdict, which refuses a Keycloak service account holding
+`Platform.ApiKeys.Manage` and a verified token whose principal could not be
+named. The deployment's own HMAC-signed in-mesh bundle carries the class its
+SIGNER established, inside the signature: trusted-context payload v3 adds a
+`x-user-principal-kind` field to the signed bundle, so a caller cannot assert
+it and a producer that authenticated nobody cannot borrow one. apps/web signs
+`person` on one property it can check — the session holds the id token of an
+OIDC authorization-code login, which a client-credentials grant never mints;
+the health probe and every other internal producer sign no class and are
+refused here. Every other credential is refused outright. v3 is not
+backward-compatible by design: a tier still signing v2 reads as unauthenticated
+rather than as an unclassified principal, so both tiers are redeployed
+together.
 
 Every response that carries a credential — the two `/api/api-keys` 201s, the
 canonical minting Operations and the two GraphQL mint mutations — is sent with
@@ -715,17 +723,44 @@ only one that can report `502 PROVISIONING_FAILED`; a realm that refuses leaves
 the intent row at `pending`, which authenticates nothing and is what the
 reconciler sweeps.
 
-**Credential lifetime.** Both minting contracts bound `expiresInDays` to
-1..366 and no longer accept `null`. `null` reached the service as "never
+**Credential lifetime.** Three bounds, kept apart in
+`auth/api-key/lifetime.ts` because they answer different questions.
+
+*The contract's bound.* Both minting Operations bound `expiresInDays` to
+1..366 and do not accept `null`. `null` reached the service as "never
 expires", which is not something a generic integration form may request on
-anyone's behalf; omitting the field takes the deployment default of 365 days.
-The bound is stated in the authored input schema, so every transport is refused
-before the handler, and restated as `MAX_CREDENTIAL_TTL_DAYS` for a direct
-caller. Deployments that genuinely need a longer-lived integration credential
-should get a deployment-level maximum (an `OPENSHAPEFORGE_API_KEY_MAX_TTL_DAYS`
-read beside the other provisioning variables in `runtime-config.ts`, bounded by
-a compiled-in hard ceiling and reported in the Operation's schema), not a
-per-application exception list and not a second authorization path.
+anyone's behalf; omitting the field takes the deployment default. The bound is
+stated in the authored input schema, so every transport is refused before the
+handler, and restated as `MAX_CREDENTIAL_TTL_DAYS` for a direct caller. It
+belongs to the contract: no deployment can raise it, and it is never imposed
+on the long-lived `/api/api-keys` and GraphQL mounts.
+
+*The deployment's bound.* A host that needs a tighter rule declares one in
+`OPENSHAPEFORGE_API_KEY_MAX_TTL_DAYS`, with an optional
+`OPENSHAPEFORGE_API_KEY_DEFAULT_TTL_DAYS` beside it. Both are read with the
+other provisioning variables (`runtime-config.ts`) and travel to the service
+through `ApiKeyProvisioningConfig`, so all three surfaces resolve one rule and
+a surface added later cannot mint outside it by forgetting to pass it. They may
+only NARROW: a maximum above 366, a value below one day, a non-integer, or a
+default outside the declared maximum is a configuration error that disables
+provisioning (`503 NOT_CONFIGURED`) rather than one that widens anything. When
+a maximum is declared, a refusal names the deployment's number rather than the
+product's, and `null` stops being offered on the mounts that had it — declaring
+a maximum lifetime says every credential expires.
+
+*Defaults, and what an existing deployment sees.* The shipped default is 365
+days, narrowed to the declared maximum when there is one. **Declaring nothing
+changes nothing**: with neither variable set the long-lived REST and GraphQL
+mounts keep accepting any positive number of days and `null`, exactly as
+before, so no existing consumer is silently moved onto the contract's 366. No
+migration is required to adopt this change; declaring a maximum is the
+migration, and it applies from that moment on. Nothing is retroactive and
+nothing is per-application: the policy is read at mint time and written into
+one `expires_at`, rows that already exist — including non-expiring ones — are
+never revisited, and authentication keeps reading the instant stored on the row
+(`auth/api-key/store.ts`). A workflow application registers as an ordinary
+integration and meets exactly these bounds; a host that needs a different rule
+from its neighbours is a different deployment, not an exception list.
 
 The reads also carry generic `interfaces.web.entities` declarations
 (`ApiKeyIntegration`, and `ApiKeyCredential` nested under it), with keyset

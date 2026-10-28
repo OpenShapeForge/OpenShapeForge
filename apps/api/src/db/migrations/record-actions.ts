@@ -880,10 +880,9 @@ async function assertRowSecurityBounds(
  * the last line of defence for. RLS matches a policy's `TO` list and object
  * ownership alike with `has_privs_of_role`, so a member of the resolver holds
  * the column grants this step is about to make AND owns the two SECURITY
- * DEFINER functions it is about to create: with `CREATE` on schema `app` it
- * can alter or drop those functions. If it separately acquires CREATE on app,
- * it can also replace their bodies. The fence bounds its writes to entity
- * tables; it does not bound function ownership. So the contract is that the only roles that can act as the
+ * DEFINER functions it is about to create. Ownership alone permits ALTER or
+ * DROP, and a separate CREATE grant on schema app permits body replacement.
+ * The fence bounds writes to entity tables, not function ownership. So the contract is that the only roles that can act as the
  * resolver are the migrate identity itself and this database's owner, and the
  * only membership the migrate identity leans on is a direct grant carrying
  * INHERIT and SET. Both halves are reachability questions: a helper role
@@ -1697,7 +1696,14 @@ ${renderRecordActionProjection(entities)}
     select has_schema_privilege(${RESOLVER_ROLE}, 'app', 'CREATE') as permitted
   `.execute(db);
   if (remainingCreate.rows[0]?.permitted !== false) {
-    throw new Error(`The record-action resolver ${RESOLVER_ROLE} still has CREATE on schema app. Revoke the remaining grant, including any grant to PUBLIC, before retrying.`);
+    throw new Error(
+      `The record-action resolver ${RESOLVER_ROLE} still has CREATE on schema app. ` +
+      `An administrator must identify the surviving grantor and revoke it: ` +
+      `REVOKE CREATE ON SCHEMA app FROM ${RESOLVER_ROLE}; ` +
+      `If PUBLIC holds CREATE, explicitly review and run ` +
+      `REVOKE CREATE ON SCHEMA app FROM PUBLIC; before retrying. ` +
+      `PUBLIC grants affect every role, so this migration does not revoke them automatically.`,
+    );
   }
   return [...entities];
 }

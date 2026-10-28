@@ -112,6 +112,7 @@ export function registerApiKeyRestRoutes(
     keyring: config.keyring,
     admin: config.admin,
     entityRoleClientId: config.entityRoleClientId,
+    lifetime: config.lifetime,
   };
 
   /**

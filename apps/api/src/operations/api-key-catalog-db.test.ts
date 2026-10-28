@@ -40,6 +40,7 @@ import {
   type IntegrationSortField,
   type ProvisioningSession,
 } from "../auth/api-key/service.js";
+import { UNDECLARED_CREDENTIAL_LIFETIME_POLICY } from "../auth/api-key/lifetime.js";
 import { createDatabaseRuntime } from "../db/connection.js";
 import { runMigrationChain } from "../db/migration-chain.js";
 import { APP_ROLE } from "../db/migrations/app-role.js";
@@ -174,6 +175,7 @@ function serviceDeps(appDb: Kysely<DB>): ApiKeyServiceDeps {
     keyring: undefined as never,
     admin: undefined as never,
     entityRoleClientId: "erp-provider",
+    lifetime: UNDECLARED_CREDENTIAL_LIFETIME_POLICY,
   };
 }
 

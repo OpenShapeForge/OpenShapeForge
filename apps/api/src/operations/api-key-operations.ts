@@ -32,6 +32,7 @@ import {
   type ApiKeyProvisioningConfig,
 } from "../auth/api-key/runtime-config.js";
 import type { KeysetCursor } from "../auth/api-key/catalog-page.js";
+import { PRODUCT_MAX_CREDENTIAL_TTL_DAYS } from "../auth/api-key/lifetime.js";
 import {
   ApiKeyNotFoundError,
   ApiKeyProvisioningError,
@@ -105,6 +106,7 @@ function resolve(context: ModuleOperationContext): Resolved | ModuleOperationErr
       keyring: config.keyring,
       admin: config.admin,
       entityRoleClientId: config.entityRoleClientId,
+      lifetime: config.lifetime,
     },
     // `credential` and `principalKind` are carried through untouched: together
     // they are the ceiling's carrier rule, so flattening either here would
@@ -162,14 +164,17 @@ function iso(value: Date | null): string | null {
  * integration form may request on anyone's behalf. The authored input schema
  * states the same bound, so every transport is refused before the handler;
  * this restates it for a direct caller and is what a drift test pins against
- * the schema. The service's own default (365 days) sits inside it.
+ * the schema.
  *
- * Making this a deployment setting rather than a constant is a real need for
- * some integrations and deliberately NOT done here: see the task report for
- * the generic configuration boundary proposed instead of a per-application
- * exception list.
+ * It is the CONTRACT's bound and nothing else. A deployment that needs a
+ * tighter rule declares one (`auth/api-key/lifetime.ts`), and the service
+ * applies it to every minting surface — so the number a caller is actually
+ * held to may be lower than this, and the refusal then names that number
+ * rather than this one. No deployment can raise it, and a deployment that
+ * declares nothing leaves the long-lived REST and GraphQL mounts exactly as
+ * they were: this bound is not retroactively imposed on them.
  */
-export const MAX_CREDENTIAL_TTL_DAYS = 366;
+export const MAX_CREDENTIAL_TTL_DAYS = PRODUCT_MAX_CREDENTIAL_TTL_DAYS;
 
 /**
  * Normalise the requested lifetime, or refuse it.

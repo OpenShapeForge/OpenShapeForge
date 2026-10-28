@@ -202,6 +202,7 @@ export function createApiKeyResolvers(options: ApiKeyGraphqlOptions = {}) {
       keyring: options.config.keyring,
       admin: options.config.admin,
       entityRoleClientId: options.config.entityRoleClientId,
+      lifetime: options.config.lifetime,
     };
   }
 

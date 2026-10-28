@@ -41,6 +41,10 @@ import {
 } from "./ceiling.js";
 import { invalidateIntegrationToken } from "./exchange.js";
 import { mintApiKey } from "./format.js";
+import {
+  resolveCredentialExpiry,
+  type CredentialLifetimePolicy,
+} from "./lifetime.js";
 import { KeycloakAdmin } from "./keycloak-admin.js";
 import { parseRoleSubset } from "./store.js";
 
@@ -58,6 +62,13 @@ export type ApiKeyServiceDeps = {
   admin: KeycloakAdmin;
   /** The Keycloak client entity roles live on (`erp-provider` in the shipped realm). */
   entityRoleClientId: string;
+  /**
+   * The deployment's credential lifetime rule (lifetime.ts). Required, not
+   * optional with a permissive fallback: every minting surface resolves it
+   * from the one provisioning configuration, so a surface added later cannot
+   * mint outside the host's rule by forgetting to pass it.
+   */
+  lifetime: CredentialLifetimePolicy;
 };
 
 export class ApiKeyProvisioningError extends Error {
@@ -104,19 +115,31 @@ function roleSubsetOrThrow(subset: string[] | null | undefined): string[] | null
   return roles;
 }
 
-/** Default key lifetime. A non-expiring key must be asked for explicitly. */
-const DEFAULT_KEY_TTL_DAYS = 365;
-
-function expiryFrom(days: number | null, now: Date): Date | null {
-  if (days === null) return null;
-  return new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+/**
+ * The one place a minted credential's expiry is decided, for every surface.
+ *
+ * The rule itself lives in lifetime.ts; this turns its refusal into the
+ * validation error the three transports already map to 400.
+ */
+function expiryFrom(
+  requested: number | null | undefined,
+  policy: CredentialLifetimePolicy,
+  now: Date,
+): Date | null {
+  const verdict = resolveCredentialExpiry(requested, policy, now);
+  if ("refused" in verdict) throw new ApiKeyValidationError(verdict.refused);
+  return verdict.expiresAt;
 }
 
 export type CreateIntegrationInput = {
   displayName: string;
   /** Roles to grant the integration's service account. Bounded by the ceiling. */
   roles: string[];
-  /** null → never expires. Omitted → DEFAULT_KEY_TTL_DAYS. */
+  /**
+   * null → never expires; omitted → the deployment's default. Both are
+   * answered by the deployment's lifetime policy, which may refuse the first
+   * outright (lifetime.ts).
+   */
   expiresInDays?: number | null;
   /** Optional narrowing for the first key. null → the integration's full role set. */
   roleSubset?: string[] | null;
@@ -151,6 +174,10 @@ export async function createIntegration(
   if (displayName === "") {
     throw new ApiKeyNotFoundError("An integration needs a display name.");
   }
+  // Resolved here rather than beside the mint below: a lifetime the
+  // deployment's policy refuses must leave neither an intent row nor a realm
+  // client behind, and everything from the insert onwards is external.
+  const expiresAt = expiryFrom(input.expiresInDays, deps.lifetime, now);
 
   const integrationId = randomUUID();
   const keycloakClientId = `osf-int-${integrationId}`;
@@ -192,10 +219,6 @@ export async function createIntegration(
   //    while nothing had been handed to anyone.
   const minted = mintApiKey();
   const keyId = randomUUID();
-  const expiresAt = expiryFrom(
-    input.expiresInDays === undefined ? DEFAULT_KEY_TTL_DAYS : input.expiresInDays,
-    now,
-  );
   const encrypted = encryptSecret(
     deps.keyring,
     integrationId,
@@ -298,10 +321,7 @@ export async function issueKey(
 
   const minted = mintApiKey();
   const keyId = randomUUID();
-  const expiresAt = expiryFrom(
-    input.expiresInDays === undefined ? DEFAULT_KEY_TTL_DAYS : input.expiresInDays,
-    now,
-  );
+  const expiresAt = expiryFrom(input.expiresInDays, deps.lifetime, now);
 
   await withSession(deps, session, async (trx) => {
     const parent = await lockIntegration(trx, session.tenantId, input.integrationId);

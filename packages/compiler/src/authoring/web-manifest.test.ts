@@ -1495,6 +1495,11 @@ describe("standalone Operation pages", () => {
             },
           },
         },
+        entityExtensions: {
+          Tenant: {
+            related: [{ entity: "Tenant", label: text("Related tenants", "Gerelateerde tenants"), route: "/tenants/:slug/related" }],
+          },
+        },
       } },
     };
     const manifest = buildWebManifest([], {}, standalone(operationEntities));
@@ -1526,6 +1531,11 @@ describe("standalone Operation pages", () => {
       { value: "EXPIRED", label: text("Expired", "Verlopen") },
     ]);
     expect(manifest.entities.Tenant?.fields.sentAt?.baseType).toBe("datetime");
+    expect(manifest.entities.Tenant?.operationSource?.related).toEqual([{
+      entityId: "Tenant",
+      label: text("Related tenants", "Gerelateerde tenants"),
+      route: "/tenants/:slug/related",
+    }]);
 
     const canonicalTenant = entity("Tenant", "tenant", [field("name")], coreView());
     const composed = buildWebManifest([canonicalTenant], {}, standalone(operationEntities));

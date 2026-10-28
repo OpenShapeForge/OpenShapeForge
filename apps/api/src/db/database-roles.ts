@@ -229,8 +229,11 @@ export async function readMigrateIdentity(db: OpenShapeForgeDatabase): Promise<M
 
 /**
  * How deep the membership graph is walked. Postgres forbids cycles, so the walk
- * terminates on its own; this bounds the work it may do on a dense grant
- * lattice an administrator built.
+ * terminates on its own; this bounds how far from a definer role it looks.
+ *
+ * It is not what keeps the walk cheap on a dense grant lattice — the node-wise
+ * traversal in {@link readUnintendedDefinerMembers} is, and that one is bounded
+ * by the SIZE of the graph rather than by the number of paths through it.
  *
  * A chain longer than this is not a way past the contract. Every role on it at
  * depth 1..16 is reported unless it is admitted, and the nearest reported role
@@ -301,6 +304,39 @@ const MEMBERSHIP_DEPTH = 16;
  * That also bounds the result: at most one row per definer role per
  * `pg_auth_members` edge, however many distinct paths run through it.
  *
+ * AND BOUNDS THE WORK, NOT JUST THE RESULT
+ * ----------------------------------------
+ * Enumerating those paths to report one row per edge is what a `union all`
+ * walk does, and the cost is the number of PATHS — which on a dense lattice an
+ * administrator built is exponential in its depth. Eight layers of six roles,
+ * every role granted to every role in the next, is 258 edges and 2,015,538
+ * paths: the walk took 20s to return 258 rows (measured on PostgreSQL 17.11).
+ * Three more layers is unresponsive, so a deployment could be refused a
+ * migration by a grant graph rather than by a verdict on it.
+ *
+ * So the walk is over NODES and the paths are reconstructed afterwards:
+ *
+ *   - `reach` is a `union` — not `union all` — over `(definer, role, depth)`,
+ *     so a role several grants lead to is visited once per level instead of
+ *     once per path. Its rows are bounded by definer roles × roles × depth and
+ *     its edge scans by definer roles × `pg_auth_members` × depth, whatever
+ *     the path count;
+ *   - `hop` keeps each role's SHORTEST distance from each definer role, and
+ *     `nearest` picks one predecessor at that distance — so the shortest-path
+ *     tree has exactly one parent per node;
+ *   - `chain` walks that tree to build one chain string per reached role;
+ *   - the final select joins each reached role's outgoing edges, which is
+ *     where the one row per `(definer, member, first hop)` comes from: `via`
+ *     is the reached role, `member` the role granted it, and the chain shown
+ *     is the shortest one to `via` plus `member`.
+ *
+ * The rows and the chains are the same the path enumeration produced — same
+ * `(role, member, via)` triples, same chain length per row (verified against
+ * the `union all` walk on the lattice above, on PostgreSQL 17.11 and 16.15).
+ * Nothing is capped and no route is dropped: a member reachable by ten routes
+ * still gets ten rows and ten revokes. {@link MEMBERSHIP_DEPTH} is the only
+ * limit, unchanged in meaning.
+ *
  * Admitted roles are not reported; everything else on a path is, with a chain
  * it travels and the `revoke` that cuts that route.
  *
@@ -314,32 +350,55 @@ export async function readUnintendedDefinerMembers(
   const names = roles.map((role) => sql.lit(identifier(role)));
   if (names.length === 0) return [];
   const result = await sql<UnintendedDefinerMember>`
-    with recursive reachable as (
-      select definer.rolname as role, am.member as member_oid,
-        definer.rolname as via, definer.rolname || ' <- ' || member.rolname as path, 1 as depth
-      from pg_auth_members am
-      join pg_roles definer on definer.oid = am.roleid
-      join pg_roles member on member.oid = am.member
+    with recursive reach as (
+      select definer.rolname as role, definer.oid as node, 0 as depth
+      from pg_roles definer
       where definer.rolname in (${sql.join(names)})
-      union all
-      select r.role, am.member, holder.rolname, r.path || ' <- ' || member.rolname, r.depth + 1
-      from reachable r
-      join pg_roles holder on holder.oid = r.member_oid
-      join pg_auth_members am on am.roleid = r.member_oid
-      join pg_roles member on member.oid = am.member
+      union
+      select r.role, am.member, r.depth + 1
+      from reach r
+      join pg_auth_members am on am.roleid = r.node
       where r.depth < ${MEMBERSHIP_DEPTH}
+    ),
+    hop as (
+      select role, node, min(depth) as depth from reach group by role, node
+    ),
+    nearest as (
+      select distinct on (child.role, child.node)
+        child.role, child.node, child.depth, up.node as parent
+      from hop child
+      join pg_auth_members am on am.member = child.node
+      join hop up on up.role = child.role and up.node = am.roleid
+        and up.depth = child.depth - 1
+      where child.depth > 0
+      order by child.role, child.node, child.depth, up.node
+    ),
+    chain as (
+      select h.role, h.node, h.depth, root.rolname::text as path
+      from hop h
+      join pg_roles root on root.oid = h.node
+      where h.depth = 0
+      union all
+      select n.role, n.node, n.depth, c.path || ' <- ' || reached.rolname
+      from chain c
+      join nearest n on n.role = c.role and n.parent = c.node and n.depth = c.depth + 1
+      join pg_roles reached on reached.oid = n.node
     )
-    select distinct on (r.role, member.rolname, r.via)
-      r.role, member.rolname as member, r.via, r.path,
+    select distinct on (c.role, member.rolname, via.rolname)
+      c.role as role, member.rolname as member, via.rolname as via,
+      c.path || ' <- ' || member.rolname as path,
       exists (select 1 from pg_database d
         where d.datdba = member.oid and d.datname <> current_database()) as "ownsOtherDatabase"
-    from reachable r
-    join pg_roles member on member.oid = r.member_oid
-    where not member.rolsuper
+    from chain c
+    join pg_roles via on via.oid = c.node
+    join pg_auth_members am on am.roleid = c.node
+    join pg_roles member on member.oid = am.member
+    where c.depth < ${MEMBERSHIP_DEPTH}
+      and not member.rolsuper
       and member.rolname <> current_user
       and member.oid <> coalesce(
         (select datdba from pg_database where datname = current_database()), 0)
-    order by r.role, member.rolname, r.via, r.depth
+    order by c.role, member.rolname, via.rolname
   `.execute(db);
   return result.rows;
 }

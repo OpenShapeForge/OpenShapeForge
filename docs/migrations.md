@@ -234,11 +234,28 @@ leave the other route live. So the refusal names one route per distinct first
 hop out of the reported role, each with its own `revoke`, and says that every
 statement has to be run. Running all of them removes every edge by which a
 reported role reaches a definer role; it is not an iterative hunt. The walk
-stops at 16 hops, which bounds its work on a grant lattice an administrator
-built and is not a way past the check: the nearest reported role on a longer
-chain fails it and carries the `revoke` that cuts the chain, so hiding behind
-the bound means 16 *admitted* hops — 16 superusers, since the migrate identity
-and the database owner are one role each.
+stops at 16 hops, and that is not a way past the check: the nearest reported
+role on a longer chain fails it and carries the `revoke` that cuts the chain,
+so hiding behind the bound means 16 *admitted* hops — 16 superusers, since the
+migrate identity and the database owner are one role each.
+
+What the 16 hops do **not** do is bound the walk's cost. Reading one row per
+route off an enumeration of paths costs the number of paths, and on a dense
+acyclic lattice that is exponential in its depth: eight layers of six roles,
+every role granted to every role in the next, is 264 edges and 2,015,544
+paths, and the enumeration spent 20s producing the 264 rows. A few more layers
+is unresponsive — a grant graph large enough would refuse a deployment its
+migration rather than report a verdict on it. So the walk is over **roles**:
+`UNION` rather than `UNION ALL`, keyed on `(definer role, role, depth)`, so a
+role that several grants lead to is visited once per level instead of once per
+path. Its shortest-distance tree is reconstructed after it and the routes are
+read off each reached role's outgoing edges, which is where the one row per
+first hop comes from. The rows are the ones the enumeration produced — same
+triples, same shortest chain length each — and nothing is capped: a role
+reachable by ten routes still gets ten rows and ten `revoke`s. The cost is now
+bounded by the size of the grant graph, as
+`apps/api/src/db/__tests__/definer-role-reachability.test.ts` measures on that
+same lattice.
 
 No membership option makes an edge safe, so the walk does not look at them.
 `INHERIT` hands over the definer role's privileges and the ownership of its

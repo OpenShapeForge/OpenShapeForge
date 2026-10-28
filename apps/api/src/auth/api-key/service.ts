@@ -21,7 +21,11 @@ import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
-import { withDbSession } from "../../db/session.js";
+import {
+  activeDbSessionContext,
+  withDbSession,
+  type DbSessionInput,
+} from "../../db/session.js";
 import { encryptSecret, type SecretKeyring } from "../../platform/secrets.js";
 import {
   containsFilter,
@@ -182,7 +186,13 @@ export async function createIntegration(
   const integrationId = randomUUID();
   const keycloakClientId = `osf-int-${integrationId}`;
 
-  // 1. Intent, recorded before anything external happens.
+  // 1. Intent, recorded before anything external happens — and COMMITTED
+  //    before it, which is what `independent` buys. Nested inside a canonical
+  //    Operation this row would otherwise be rolled back together with the
+  //    step that failed, leaving the realm client step 2 may have created with
+  //    nothing on record: no `keycloak_client_id` anywhere, so reconcile.ts
+  //    could neither finish nor sweep it. Its own transaction keeps the
+  //    'pending' row the stalled-attempt sweep is built on.
   await withSession(deps, session, async (trx) => {
     await sql`
       insert into platform.api_key_integrations
@@ -192,7 +202,7 @@ export async function createIntegration(
         (${integrationId}, ${session.tenantId}, ${displayName}, ${keycloakClientId},
          'pending', ${jsonbLiteral(input.roles)}, ${session.userId}, ${now}, ${now})
     `.execute(trx);
-  });
+  }, { independent: true });
 
   // 2. The realm. Anything that throws here leaves a 'pending' row behind, which
   //    is the intended failure mode rather than an accident.
@@ -824,21 +834,54 @@ async function insertKeyRow(trx: unknown, args: InsertKeyArgs): Promise<void> {
  * Every management statement runs inside the caller's own tenant session, so
  * the RLS policy on `api_key_integrations` is doing real work rather than being
  * bypassed by a service-level connection.
+ *
+ * Which session that is depends on who called. On the REST and GraphQL mounts
+ * this service IS the request, so it opens the caller's tenant session itself.
+ * Inside a canonical Operation the dispatcher has ALREADY opened one — for
+ * the person core verified, carrying the identity link, the audit identity and
+ * the RelationGroup memberships the resolver resolved — and the right thing to
+ * do is JOIN it, not open a second one beside it.
+ *
+ * Rebuilding a session from `ProvisioningSession` is what this used to do, and
+ * it could not work nested: a rebuilt session has none of those three fields,
+ * and `withDbSession` (correctly) refuses to let nested work replace the
+ * active session with a different one. The effect was that a verified person
+ * who actually HAS a Relation — the ordinary case for anyone who can manage
+ * credentials — could not reach any writing Operation in this catalog at all.
+ * So the active session is passed back verbatim; nothing about it is rebuilt,
+ * widened or re-derived.
+ *
+ * Authorization does not come from the joined session. The ceiling has already
+ * decided on `session`, the one core verified and handed the handler, and the
+ * tenant and user of the active session are checked against it here — so
+ * joining can only ever continue the same principal's transaction, and a
+ * mismatch is this service's bug rather than something to accommodate.
+ *
+ * `independent` opens a separate transaction even when nested, for the one
+ * write that must be durable BEFORE an external system is touched. It still
+ * runs under the same joined session.
  */
 function withSession<T>(
   deps: ApiKeyServiceDeps,
   session: ProvisioningSession,
   callback: (trx: never) => Promise<T>,
+  options: { independent?: boolean } = {},
 ): Promise<T> {
-  return withDbSession(
-    deps.db,
-    {
-      tenantId: session.tenantId,
-      userId: session.userId,
-      roles: [...session.roles],
-      groups: session.groups ? [...session.groups] : [],
-      scope: "tenant",
-    },
-    (trx) => callback(trx as never),
-  );
+  const active = activeDbSessionContext(deps.db);
+  if (active && (active.tenantId !== session.tenantId || active.userId !== session.userId)) {
+    throw new Error(
+      "API key management cannot run inside another principal's database session.",
+    );
+  }
+  // Both api-key tables are fenced on the tenant alone (db/migrations/api-keys.ts
+  // and the generated {table}_tenant_isolation), so joining a session whose
+  // scope is narrower than "tenant" changes no row this service may read.
+  const input: DbSessionInput = active ?? {
+    tenantId: session.tenantId,
+    userId: session.userId,
+    roles: [...session.roles],
+    groups: session.groups ? [...session.groups] : [],
+    scope: "tenant",
+  };
+  return withDbSession(deps.db, input, (trx) => callback(trx as never), options);
 }

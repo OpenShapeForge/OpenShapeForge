@@ -102,6 +102,30 @@ export function currentDbSessionDatabase(): Kysely<unknown> | undefined {
   return activeDbSession.getStore()?.db;
 }
 
+/**
+ * The session the active transaction on `db` was opened with, if any.
+ *
+ * For the one case {@link withDbSession} cannot serve: work that must run in
+ * the caller's transaction but does not itself hold the context that
+ * transaction was established from. Such a caller would have to REBUILD a
+ * session from what it does hold — and a rebuilt session drops the identity
+ * link, the audit identity and the RelationGroup memberships the resolver
+ * put there, which is exactly the substitution the nested-session fence
+ * below refuses. Asking for the active session instead and passing it back
+ * verbatim joins the transaction without replacing anything in it.
+ *
+ * This is NOT an authorization source. It reports what the active database
+ * session already is; a caller still decides on the session core verified
+ * and handed it, and must satisfy itself that the two name the same
+ * principal before joining (api-key/service.ts does both).
+ */
+export function activeDbSessionContext<TDatabase>(
+  db: Kysely<TDatabase>,
+): DbSessionContext | undefined {
+  const active = activeDbSession.getStore();
+  return active && active.db === (db as unknown as Kysely<unknown>) ? active.session : undefined;
+}
+
 /** RFC 4122 shape, the one every id this layer accepts must have. */
 export const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

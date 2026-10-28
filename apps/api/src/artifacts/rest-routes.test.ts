@@ -141,6 +141,25 @@ describe("artifact REST adapter", () => {
       expect(() => assertUploadFileName(name)).toThrow("The file name is invalid.");
     }
   });
+test("a response closed before authentication consumes no provider slot", async () => {
+  const app = Fastify(); let first = true, reads = 0;
+  app.addHook("onRequest", async (_request, reply) => { if (first) { first = false; reply.raw.destroy(); } });
+  registerArtifactRestRoutes(app, { artifacts: {
+    stage: async () => { throw Error("unused"); }, bind: async () => { throw Error("unused"); },
+    read: async (_session, input) => {
+      reads++;
+      return { descriptor: { artifactId: ARTIFACT_ID, version: 1, fileName: "a.bin", mediaType: "application/octet-stream", sha256: "a".repeat(64), byteSize: 1 }, bytes: Uint8Array.of(1), owner: input.owner };
+    },
+  } });
+  const path = `/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`;
+  try {
+    await app.inject({ method: "GET", url: path, headers: authorizationHeaders() }).catch(() => {});
+    expect(reads).toBe(0);
+    expect((await app.inject({ method: "GET", url: path, headers: authorizationHeaders() })).statusCode).toBe(200);
+    expect(reads).toBe(1);
+  } finally { await app.close(); }
+});
+
 test("a stalled tenant cannot occupy every download slot", async () => {
   const app = Fastify();
   let finish!: () => void, started!: () => void;
@@ -172,7 +191,7 @@ test("a cooperative provider stops on deadline before its slot is released", asy
     read: async (_session, input, options) => {
       started++;
       if (started > 1) return { descriptor: { artifactId: ARTIFACT_ID, version: 1, fileName: "a.bin", mediaType: "application/octet-stream", sha256: "a".repeat(64), byteSize: 1 }, bytes: Uint8Array.of(1), owner: input.owner };
-      try { await new Promise<void>((_resolve, reject) => options!.signal!.addEventListener("abort", () => reject(new Error("cancelled")), { once: true })); }
+      try { await new Promise<void>((_resolve, reject) => options!.signal!.addEventListener("abort", () => reject(options!.signal!.reason), { once: true })); }
       finally { cleaned++; }
       throw Error("unreachable");
     },
@@ -185,6 +204,19 @@ test("a cooperative provider stops on deadline before its slot is released", asy
     expect(started).toBe(1);
     expect(cleaned).toBe(1);
     expect((await app.inject({ method: "GET", url: path, headers: authorizationHeaders() })).statusCode).toBe(200);
+  } finally { await app.close(); }
+});
+
+test("a provider failure is not rewritten as a timeout merely because the signal fired", async () => {
+  const app = Fastify();
+  registerArtifactRestRoutes(app, { downloadTimeoutMs: 5, artifacts: {
+    stage: async () => { throw Error("unused"); }, bind: async () => { throw Error("unused"); },
+    read: async () => { await new Promise((resolve) => setTimeout(resolve, 15)); throw new Error("provider failed"); },
+  } });
+  try {
+    const response = await app.inject({ method: "GET", url: `/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`, headers: authorizationHeaders() });
+    expect(response.statusCode).toBe(500);
+    expect(response.json().error.code).not.toBe("ARTIFACT_DOWNLOAD_TIMEOUT");
   } finally { await app.close(); }
 });
 
@@ -202,7 +234,7 @@ test("deadline abort flows through storage runtime and finishes transaction clea
   runtime.configure([{ name: "test-storage", artifactStorage: {
     providerId: "test", stage: async () => { throw Error("unused"); }, bind: async () => { throw Error("unused"); },
     read: async (_context, _input, options) => {
-      try { await new Promise<void>((_resolve, reject) => options!.signal!.addEventListener("abort", () => reject(new Error("cancelled")), { once: true })); }
+      try { await new Promise<void>((_resolve, reject) => options!.signal!.addEventListener("abort", () => reject(options!.signal!.reason), { once: true })); }
       finally { providerStopped = true; }
       throw Error("unreachable");
     },

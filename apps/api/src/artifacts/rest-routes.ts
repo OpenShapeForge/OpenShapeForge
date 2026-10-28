@@ -162,7 +162,8 @@ export function registerArtifactRestRoutes(
         .send(Buffer.from(result.bytes.buffer, result.bytes.byteOffset, result.bytes.byteLength));
       } catch (error) {
         readSettled = true;
-        const timedOut = abort.signal.aborted && !responseSettled;
+        const cancellation = error === abort.signal.reason || (error instanceof Error && error.name === "AbortError");
+        const timedOut = abort.signal.aborted && !responseSettled && cancellation;
         responseDone();
         if (timedOut) throw new HttpError(504, "ARTIFACT_DOWNLOAD_TIMEOUT", "File download timed out.");
         throw error;

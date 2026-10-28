@@ -179,8 +179,12 @@ export type GeneratedCrudTable = {
       }>;
     }>;
     authoringEntityName?: string;
+    /** The entity's authored slug; the key its web page configs are seeded under. */
+    authoringEntitySlug?: string;
     /** The entity's authored name in both languages, for what a person reads. */
     labels?: { en?: string; nl?: string };
+    /** The authored record title, e.g. `{{displayName}}`; names fields, not columns. */
+    displayTemplate?: string;
     versioning?: {
       strategy: "publishedSnapshot";
       versionEntity: string;

@@ -337,6 +337,42 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
       end
     $$;
 
+    -- The INVERSE of app.record_action_subject_allows, for the one question a
+    -- management surface asks: of the actions this entity DECLARED, which does
+    -- one named integration hold on this document?
+    --
+    -- It is a pure function of its arguments. It reads no table, takes no
+    -- session setting and is owned by nobody in particular, so it grants
+    -- nothing: the caller must already hold the document, which it can only
+    -- have obtained by reading a row its own row-scope policy let it see.
+    -- That is what keeps the assignment read model inside ordinary record
+    -- authorization instead of beside it.
+    --
+    -- The declared argument is the entity's compiled action list. An entry
+    -- naming an action the entity no longer declares is ignored rather than
+    -- reported, so a stale grant cannot appear as a manageable one. A
+    -- malformed document yields nothing, exactly as every other reader treats
+    -- it.
+    create or replace function app.record_action_integration_actions(
+      document jsonb,
+      integration text,
+      declared text[]
+    ) returns text[]
+    language sql immutable parallel safe
+    as $$
+      select coalesce(array_agg(entry.key order by entry.key), array[]::text[])
+      from jsonb_each(
+        case
+          when integration is null or integration = '' then '{}'::jsonb
+          when not app.record_permissions_valid(document) then '{}'::jsonb
+          when jsonb_typeof(document -> 'actions') <> 'object' then '{}'::jsonb
+          else document -> 'actions'
+        end
+      ) as entry
+      where entry.key = any(coalesce(declared, array[]::text[]))
+        and coalesce((entry.value -> 'integrations') ? integration, false)
+    $$;
+
     -- The body is replaced, privilege-scoped and transferred to the dedicated
     -- identity-resolver role by identity-link.ts after the generated registry
     -- tables exist. Keeping this early placeholder preserves migration order:

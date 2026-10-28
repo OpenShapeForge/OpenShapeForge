@@ -1,0 +1,563 @@
+# The manager's side of the named record-action axis (docs/authoring.md).
+#
+# An entity declares the actions its records may grant and the principal kinds
+# each admits; a record grants one by naming a subject under its ACL's own
+# `actions` member. That is where the right lives, and nothing here moves it:
+# these three Operations LIST what one integration has been given, READ one of
+# those rows, and SET exactly one (record, action, integration) hold.
+#
+# SET writes nothing itself. It resolves the locator and then applies the one
+# canonical delta every change to the axis goes through
+# (record-actions.yaml, `entity.record-action.delegate`), so there is a single
+# writer, a single set of authority checks and a single lock ordering. The
+# ordinary write guard refuses the axis to every entity update, this surface
+# included.
+#
+# Generic, by construction. The entities, actions and record names come from
+# the compiled manifest and the rows come from records the session may already
+# read. There is no second permission store, no per-entity handler and no
+# renderer of its own — the surface below is the standard operation-backed
+# entity view every provider-backed catalog uses.
+schemaVersion: 1
+kind: operationCatalog
+plugin: osf-record-actions
+operations:
+  listAssignments:
+    id: record-actions.list-assignments
+    name:
+      en: List record action assignments
+      nl: Recordacties van een integratie tonen
+    description:
+      en: 'Lists the records one API-key integration has been given a declared action on: the record''s name,
+        the action, and whether this session may change it. Limited to records this session may read, and it
+        reports what it left out. Never returns the record''s authorization document or another subject.'
+      nl: 'Toont de records waarop één API-sleutelintegratie een gedeclareerde actie heeft gekregen: de naam
+        van het record, de actie, en of deze sessie die mag wijzigen. Beperkt tot records die deze sessie mag
+        lezen, en meldt wat is weggelaten. Geeft nooit het autorisatiedocument of een andere houder terug.'
+    implementation:
+      type: plugin
+      plugin: osf-record-actions
+      handler: listAssignments
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integrationId]
+        properties:
+          integrationId:
+            type: string
+            format: uuid
+            x-osf-i18n:
+              title: { en: Integration, nl: Integratie }
+          entity:
+            type: string
+            maxLength: 200
+            x-osf-i18n:
+              title: { en: Record type, nl: Recordtype }
+          action:
+            type: string
+            maxLength: 200
+            x-osf-i18n:
+              title: { en: Action, nl: Actie }
+          first:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+            x-osf-i18n:
+              title: { en: Page size, nl: Paginagrootte }
+          after:
+            type: string
+            maxLength: 4096
+            x-osf-i18n:
+              title: { en: Page cursor, nl: Paginacursor }
+          # The keyset is (entity, record key, action) and that is the only
+          # order that pages stably across several entities' tables, so the
+          # field is fixed and only its direction is a choice. Ordering by name
+          # is deliberately absent: a name may be withheld from this session by
+          # the entity's field policy, and an order over values it may not read
+          # would disclose them.
+          sortField:
+            type: string
+            enum: [recordId]
+            default: recordId
+            x-osf-i18n:
+              title: { en: Sort by, nl: Sorteren op }
+              enum:
+                recordId: { en: Record key, nl: Recordsleutel }
+          sortDirection:
+            type: string
+            enum: [asc, desc]
+            default: asc
+            x-osf-i18n:
+              title: { en: Sort direction, nl: Sorteerrichting }
+              enum:
+                asc: { en: Ascending, nl: Oplopend }
+                desc: { en: Descending, nl: Aflopend }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [assignments, nextCursor, totalCount, visibility]
+        properties:
+          assignments:
+            type: array
+            x-osf-i18n:
+              title: { en: Assignments, nl: Toekenningen }
+            items: &assignment
+              type: object
+              additionalProperties: false
+              required: [id, entity, entityLabel, recordId, recordName, nameWithheld, action, integrationId, manageable, version]
+              properties:
+                id:
+                  type: string
+                  x-osf-i18n:
+                    title: { en: Assignment, nl: Toekenning }
+                entity:
+                  type: string
+                  x-osf-i18n:
+                    title: { en: Record type, nl: Recordtype }
+                entityLabel:
+                  type: string
+                  x-osf-i18n:
+                    title: { en: Record type, nl: Recordtype }
+                recordId:
+                  type: string
+                  x-osf-i18n:
+                    title: { en: Record key, nl: Recordsleutel }
+                recordName:
+                  type: string
+                  x-osf-i18n:
+                    title: { en: Record, nl: Record }
+                nameWithheld:
+                  type: boolean
+                  x-osf-i18n:
+                    title: { en: Name withheld, nl: Naam afgeschermd }
+                action:
+                  type: string
+                  x-osf-i18n:
+                    title: { en: Action, nl: Actie }
+                integrationId:
+                  type: string
+                  format: uuid
+                  x-osf-i18n:
+                    title: { en: Integration, nl: Integratie }
+                manageable:
+                  type: boolean
+                  x-osf-i18n:
+                    title: { en: Manageable, nl: Beheerbaar }
+                version:
+                  type: [string, "null"]
+                  format: date-time
+                  x-osf-i18n:
+                    title: { en: Record version, nl: Recordversie }
+          nextCursor:
+            type: [string, "null"]
+            x-osf-i18n:
+              title: { en: Next page, nl: Volgende pagina }
+          # Always null: counting the assignments a session cannot see would
+          # mean reading past its own record authorization, and counting only
+          # the ones it can see would report a total that is not one. A
+          # nullable totalCount is the compiled signal for an unknown total —
+          # the collection contract then carries no totalCountField and a
+          # generic renderer derives progress from nextCursor instead
+          # (packages/compiler/src/authoring/web-manifest.ts).
+          totalCount:
+            type: [integer, "null"]
+            x-osf-i18n:
+              title: { en: Total, nl: Totaal }
+          visibility:
+            type: object
+            additionalProperties: false
+            required: [scope, omittedEntities, namesWithheld]
+            x-osf-i18n:
+              title: { en: Visibility, nl: Zichtbaarheid }
+            properties:
+              # There is deliberately no "complete" flag. A record the
+              # row-scope policy hides is not a row in this transaction at
+              # all, so totality is not something this surface is in a
+              # position to claim. The scope below is the claim it can make.
+              scope:
+                type: string
+                enum: [readable-records]
+                x-osf-i18n:
+                  title: { en: Scope, nl: Bereik }
+                  enum:
+                    readable-records: { en: Records you may read, nl: Records die u mag lezen }
+              omittedEntities:
+                type: array
+                x-osf-i18n:
+                  title: { en: Omitted record types, nl: Overgeslagen recordtypen }
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [entity, reason]
+                  properties:
+                    entity:
+                      type: string
+                      x-osf-i18n:
+                        title: { en: Record type, nl: Recordtype }
+                    reason:
+                      type: string
+                      enum: [no-read-authority]
+                      x-osf-i18n:
+                        title: { en: Reason, nl: Reden }
+                        enum:
+                          no-read-authority: { en: You may not read this record type, nl: U mag dit recordtype niet lezen }
+              namesWithheld:
+                type: boolean
+                x-osf-i18n:
+                  title: { en: Names withheld, nl: Namen afgeschermd }
+    auth:
+      mode: session
+      # Which records an integration may act on is integration-management
+      # information, so the authority is the one that provisions integrations
+      # — not an entity's read or edit permission and not the organization's
+      # general access-administration role. The handler asks for it again
+      # through the existing privilege ceiling (auth/api-key/ceiling.ts), so a
+      # direct in-process call is gated by the same rule as a routed one.
+      roles: [Platform.ApiKeys.Manage]
+    tenancy:
+      mode: required
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: &assignmentErrors
+      - status: 400
+        code: BAD_USER_INPUT
+        description: The query parameters do not match the Operation's input schema.
+      - status: 401
+        code: UNAUTHENTICATED
+        description: An authenticated tenant session is required.
+      - status: 403
+        code: FORBIDDEN
+        description: The session lacks the API key management role, the entity's write roles, or is a machine carrier.
+      - status: 404
+        code: NOT_FOUND
+        description: The integration, the record or the declared action does not exist in this organization.
+      - status: 409
+        code: CONFLICT
+        description: The record's stored authorization is not a valid document.
+      - status: 409
+        code: VERSION_CONFLICT
+        description: expectedVersion does not match the current record version.
+      - status: 422
+        code: VALIDATION
+        description: The input does not describe a valid request.
+  getAssignment:
+    id: record-actions.get-assignment
+    name:
+      en: View record action assignment
+      nl: Recordactie bekijken
+    description:
+      en: Reads one record action assignment, within the same record authorization the listing applies.
+      nl: Leest één recordactie-toekenning, binnen dezelfde recordautorisatie als de lijst.
+    implementation:
+      type: plugin
+      plugin: osf-record-actions
+      handler: getAssignment
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integrationId, id]
+        properties:
+          # The integration the route is scoped to. Bound from the path, and
+          # checked against the one the assignment identifier names: the path
+          # is untrusted input, so it authorizes nothing, but the two must
+          # agree or they are not one request.
+          integrationId:
+            type: string
+            format: uuid
+            x-osf-i18n:
+              title: { en: Integration, nl: Integratie }
+          id:
+            type: string
+            maxLength: 1024
+            x-osf-i18n:
+              title: { en: Assignment, nl: Toekenning }
+    output:
+      schema: *assignment
+    auth:
+      mode: session
+      # Which records an integration may act on is integration-management
+      # information, so the authority is the one that provisions integrations
+      # — not an entity's read or edit permission and not the organization's
+      # general access-administration role. The handler asks for it again
+      # through the existing privilege ceiling (auth/api-key/ceiling.ts), so a
+      # direct in-process call is gated by the same rule as a routed one.
+      roles: [Platform.ApiKeys.Manage]
+    tenancy:
+      mode: required
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *assignmentErrors
+  setAssignment:
+    id: record-actions.set-assignment
+    name:
+      en: Change record action assignment
+      nl: Recordactie wijzigen
+    description:
+      en: 'Gives or takes away exactly one integration''s hold on exactly one declared action of one record.
+        Needs the API key management role, the entity''s write roles and the record''s own edit permission,
+        and is refused for any machine session. Applied as a delta under the record''s authorization-row
+        lock by the one Operation that may change this axis, so everything else in the record''s
+        authorization — the people who may see and change it, its other actions and other integrations —
+        is left exactly as it was, and two administrators cannot overwrite each other.'
+      nl: 'Geeft of neemt precies één integratie het recht op precies één gedeclareerde actie van één record.
+        Vereist de beheerrol voor API-sleutels, de schrijfrollen van de entiteit en het edit-recht op het
+        record zelf, en wordt geweigerd voor elke machinesessie. Toegepast als delta onder de
+        rijvergrendeling van de autorisatie door de enige Operation die deze as mag wijzigen, dus al het
+        andere blijft ongewijzigd.'
+    implementation:
+      type: plugin
+      plugin: osf-record-actions
+      handler: setAssignment
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integrationId, id, assigned]
+        properties:
+          # Bound from the route and checked against the assignment
+          # identifier, exactly as the single read binds it.
+          integrationId:
+            type: string
+            format: uuid
+            x-osf-i18n:
+              title: { en: Integration, nl: Integratie }
+          id:
+            type: string
+            maxLength: 1024
+            x-osf-i18n:
+              title: { en: Assignment, nl: Toekenning }
+          assigned:
+            type: boolean
+            x-osf-i18n:
+              title: { en: Granted, nl: Toegekend }
+          # Optional, and honoured when given. The change is atomic without it:
+          # the record's ACL row is locked before its document is read and the
+          # write happens under that lock, so a concurrent change to another
+          # action or subject cannot be overwritten. What this adds is the
+          # refusal of a change made against a record that has moved since the
+          # caller looked at it.
+          expectedVersion:
+            type: string
+            format: date-time
+            x-osf-i18n:
+              title: { en: Expected version, nl: Verwachte versie }
+    output:
+      schema: &assignmentChange
+        type: object
+        additionalProperties: false
+        required: [id, entity, recordId, action, integrationId, assigned, changed, version]
+        properties:
+          id:
+            type: string
+            x-osf-i18n:
+              title: { en: Assignment, nl: Toekenning }
+          entity:
+            type: string
+            x-osf-i18n:
+              title: { en: Record type, nl: Recordtype }
+          recordId:
+            type: string
+            x-osf-i18n:
+              title: { en: Record key, nl: Recordsleutel }
+          action:
+            type: string
+            x-osf-i18n:
+              title: { en: Action, nl: Actie }
+          integrationId:
+            type: string
+            format: uuid
+            x-osf-i18n:
+              title: { en: Integration, nl: Integratie }
+          assigned:
+            type: boolean
+            x-osf-i18n:
+              title: { en: Granted, nl: Toegekend }
+          changed:
+            type: boolean
+            x-osf-i18n:
+              title: { en: Changed, nl: Gewijzigd }
+          version:
+            type: [string, "null"]
+            format: date-time
+            x-osf-i18n:
+              title: { en: Record version, nl: Recordversie }
+    auth:
+      mode: session
+      # Which records an integration may act on is integration-management
+      # information, so the authority is the one that provisions integrations
+      # — not an entity's read or edit permission and not the organization's
+      # general access-administration role. The handler asks for it again
+      # through the existing privilege ceiling (auth/api-key/ceiling.ts), so a
+      # direct in-process call is gated by the same rule as a routed one.
+      roles: [Platform.ApiKeys.Manage]
+    tenancy:
+      mode: required
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+    errors: *assignmentErrors
+  # The FIRST grant on a record, from a collection that has no such row yet.
+  #
+  # One Operation, one handler, one set of authority checks — and an input the
+  # compiler expands into one variant per entity that declares an action for an
+  # application principal (packages/compiler/src/record-action-grants.ts). That
+  # is the one part of this form that cannot be written out here: an
+  # `x-osf-reference` has a single target entity, so "pick a record of whichever
+  # action-capable entity" is not something an authored schema can say, while a
+  # generated one says it from the deployment's own manifest. The variants live
+  # under one object-typed input, which is where a generic operation form
+  # resolves a discriminated choice.
+  #
+  # So nothing below names an entity, an action or a product: declaring the axis
+  # on an entity is what makes its variant appear, and a deployment that
+  # declares none — the published base among them — gets no form at all rather
+  # than a select with nothing in it.
+  grantAssignment:
+    id: record-actions.grant-assignment
+    name:
+      en: Give an integration an action on a record
+      nl: Een integratie een actie op een record geven
+    description:
+      en: 'Gives one API-key integration one declared action on one record it does not otherwise hold.
+        Takes the same authority as every other change to this axis: the API key management role, the
+        entity''s write roles and the record''s own edit permission. The record type, the record and the
+        action come from the entities this organization declares the axis on.'
+      nl: 'Geeft één API-sleutelintegratie één gedeclareerde actie op één record. Vereist dezelfde
+        bevoegdheid als elke andere wijziging: de beheerrol voor API-sleutels, de schrijfrollen van de
+        entiteit en het edit-recht op het record zelf. Het recordtype, het record en de actie komen uit
+        de entiteiten die deze organisatie de as op declareert.'
+    implementation:
+      type: plugin
+      plugin: osf-record-actions
+      handler: grantAssignment
+    input:
+      schema:
+        # The compiler owns one input, `target`: the chosen record type with
+        # that type's own reference picker and action list, as one
+        # discriminated object. What is authored here is what every variant
+        # shares, and `integrationId` stays at the root because that is the
+        # input the collection's route binding fills.
+        x-osf-record-action-grant: true
+        type: object
+        additionalProperties: false
+        required: [integrationId]
+        properties:
+          # Bound from the collection's own route and re-resolved on the
+          # server; the route is context, never authority.
+          integrationId:
+            type: string
+            format: uuid
+            x-osf-i18n:
+              title: { en: Integration, nl: Integratie }
+    output:
+      schema: *assignmentChange
+    auth:
+      mode: session
+      # The same authority as the rest of the surface: which records an
+      # integration may act on is integration-management information. The
+      # handler asks for it again through the existing privilege ceiling, so a
+      # direct in-process call is gated by the same rule as a routed one.
+      roles: [Platform.ApiKeys.Manage]
+    tenancy:
+      mode: required
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+    errors: *assignmentErrors
+interfaces:
+  rest:
+    operations:
+      listAssignments:
+        method: GET
+        path: /api/record-actions/integrations/:integrationId/assignments
+        response:
+          status: 200
+          kind: json
+      getAssignment:
+        method: GET
+        path: /api/record-actions/integrations/:integrationId/assignments/:id
+        response:
+          status: 200
+          kind: json
+      setAssignment:
+        method: POST
+        path: /api/record-actions/integrations/:integrationId/assignments/:id
+        response:
+          status: 200
+          kind: json
+      # The collection address: a grant that has no row yet is a POST to the
+      # collection, not to a row that does not exist.
+      grantAssignment:
+        method: POST
+        path: /api/record-actions/integrations/:integrationId/assignments
+        response:
+          status: 200
+          kind: json
+  mcp:
+    operations:
+      listAssignments:
+        name: record_action_assignments_list
+      getAssignment:
+        name: record_action_assignment_get
+      setAssignment:
+        name: record_action_assignment_set
+      grantAssignment:
+        name: record_action_assignment_grant
+  web:
+    entities:
+      RecordActionAssignment:
+        title:
+          en: Record actions
+          nl: Recordacties
+        route: /integrations/:integrationId/record-actions
+        recordRoute: /integrations/:integrationId/record-actions/:id
+        idField: id
+        displayField: recordName
+        fields: [id, entity, entityLabel, recordId, recordName, nameWithheld, action, integrationId, manageable, version]
+        # nameWithheld is a column rather than a footnote: when the entity's
+        # field policy keeps a record's name from this session the table says
+        # so on the row it affects, which is the one place a reader is looking.
+        columns: [recordName, nameWithheld, entityLabel, action, manageable]
+        operations:
+          list:
+            operation: listAssignments
+            resultField: assignments
+            bindings:
+              integrationId: integrationId
+          # The way forward from an EMPTY list. A collection action of a
+          # parameterized collection inherits that collection's own route
+          # bindings, so the integration comes from the page the manager is on
+          # rather than from a field to type.
+          collectionActions: [grantAssignment]
+          get:
+            operation: getAssignment
+            bindings:
+              integrationId: integrationId
+              id: id
+          recordActions: [setAssignment]

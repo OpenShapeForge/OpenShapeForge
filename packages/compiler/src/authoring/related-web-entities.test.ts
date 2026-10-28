@@ -640,6 +640,7 @@ describe("shipped same-catalog related links", () => {
     expect(authored).toEqual([
       "accounts:AccessMember->AccessMemberAudit",
       "osf-api-keys:ApiKeyIntegration->ApiKeyCredential",
+      "osf-api-keys:ApiKeyIntegration->RecordActionAssignment",
       "osf-control:PlatformTenant->TenantMember",
       "osf-control:PlatformTenant->TenantInvitation",
       "osf-control:TenantMember->TenantCredential",

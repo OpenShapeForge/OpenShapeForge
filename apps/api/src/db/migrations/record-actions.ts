@@ -1574,6 +1574,26 @@ async function applyRecordActions(
     await sql`create policy ${policy("delete_fence")} on ${target}
       as restrictive for delete to ${sql.id(RESOLVER_ROLE)}
       using (${sql.raw(ownsTheTable)})`.execute(db);
+    // The INVERSE question's index: "which records has this subject been
+    // given an action on". The point lookup is keyed and needs nothing, but
+    // the management listing
+    // (operations/record-action-assignments/read-model.ts) asks the opposite
+    // way round, and grants are sparse — a tenant with a hundred thousand
+    // records and ten grants would otherwise read the hundred thousand to
+    // find the ten, per page. `jsonb_path_ops` because the listing's only
+    // index-eligible predicate is containment of one
+    // `{actions:{<action>:{integrations:[<id>]}}}` path, which is exactly what
+    // that operator class stores and the smallest index that answers it.
+    //
+    // It is a pre-filter, never the authority: the authoritative membership
+    // test stays `app.record_action_integration_actions`, which also rejects a
+    // malformed document that containment alone would match. Additive, under a
+    // name derived from the table like every other object here, so
+    // `db:migrate` rolls it forward.
+    await sql.raw(
+      `create index if not exists ${ident(`${entity.table}_record_action_subjects`)} ` +
+        `on ${qualified} using gin (${ident(entity.aclColumn)} jsonb_path_ops)`,
+    ).execute(db);
   }
 
   // What a PREVIOUS manifest granted and this one does not declare. The loop

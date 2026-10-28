@@ -54,6 +54,7 @@ import { buildModuleRegistry, MODULE_REGISTRY_PATH, renderModuleRegistry } from 
 import { MAX_DEDICATED_TOOLS, renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
 import { loadAuthoringConfig } from "./authoring/layers.js";
 import { loadOperationCatalogs } from "./authoring/operation-catalog.js";
+import { recordActionGrantVariants, withRecordActionGrants } from "./record-action-grants.js";
 import { assertTransitionAgreements, assertTransitionReferencedPreconditions } from "./authoring/compiler/transitions-corpus.js";
 import { withOwnedChildErrors } from "./authoring/compiler/entity-operation-errors.js";
 import {
@@ -401,8 +402,15 @@ export async function collectAllArtifacts(
     authoringDir,
     webPresent,
   };
-  const moduleOperationCatalogs = loadOperationCatalogs(authoringDir)
-    .map(({ document }) => document);
+  // The first-grant form is generated from the entities that declare the
+  // named-action axis for an application (record-action-grants.ts), so the
+  // catalogs are transformed before anything lowers or projects them: the
+  // compiled contract, the REST and MCP addresses and the web manifest all
+  // read one catalog.
+  const moduleOperationCatalogs = withRecordActionGrants(
+    loadOperationCatalogs(authoringDir).map(({ document }) => document),
+    recordActionGrantVariants(entities, manifest.tables),
+  );
   const operations = [
     ...collectBlueprintOperations(entities),
     ...collectJobOperations(),

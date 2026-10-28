@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { loadOperationCatalogs } from "./authoring/operation-catalog.js";
 import { buildWebManifest } from "./authoring/web-manifest.js";
 import { collectAuthoredModulePluginOperations } from "./generate-operations.js";
+import { withRecordActionGrants } from "./record-action-grants.js";
 import type { OperationCatalogDefinition } from "./authoring/types.js";
 
 const authoringDir = join(import.meta.dir, "../config/authoring");
@@ -31,8 +32,12 @@ const apiKeyCatalog = (): OperationCatalogDefinition =>
 const compiled = (catalog: OperationCatalogDefinition) =>
   collectAuthoredModulePluginOperations([catalog], context);
 
-const manifest = (catalog: OperationCatalogDefinition) =>
-  buildWebManifest([], {}, { catalogs: [catalog], operations: compiled(catalog) });
+const manifest = (catalog: OperationCatalogDefinition) => {
+  const assignments = loadOperationCatalogs(authoringDir)
+    .find(({ document }) => document.plugin === "osf-record-actions")!.document;
+  const catalogs = withRecordActionGrants([catalog, assignments], []);
+  return buildWebManifest([], {}, { catalogs, operations: collectAuthoredModulePluginOperations(catalogs, context) });
+};
 
 /** Every property name anywhere in a JSON schema, `$defs` and items included. */
 function propertyNames(schema: unknown, found: Set<string> = new Set()): Set<string> {
@@ -208,7 +213,10 @@ describe("shipped integration and API-key catalog", () => {
         },
       },
       record: { bindings: { integrationId: "integrationId" } },
-      related: [{ entityId: "ApiKeyCredential", route: "/api-key-integrations/:integrationId/credentials" }],
+      related: [
+        { entityId: "ApiKeyCredential", route: "/api-key-integrations/:integrationId/credentials" },
+        { entityId: "RecordActionAssignment", route: "/integrations/:integrationId/record-actions" },
+      ],
     });
     // The nested collection is bound to its integration, and that binding is
     // NOT offered as a filter: it is the subject of the view, not a control.

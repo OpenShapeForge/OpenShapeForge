@@ -92,7 +92,10 @@ import { evaluateOperationAvailability } from "./availability.js";
 import { assertOperationAdmitted } from "./execution-policy.js";
 import { nativeEntityTypeListHandler } from "./entity-type-list.js";
 import { API_KEYS_PLUGIN, apiKeyOperationHandler } from "./api-key-operations.js";
-import { RECORD_ACTIONS_PLUGIN, recordActionOperationHandler } from "./record-action-operations.js";
+import {
+  RECORD_ACTIONS_PLUGIN,
+  recordActionsOperationHandler,
+} from "./record-action-assignments/operations.js";
 import { GRANTS_PLUGIN, grantsOperationHandler } from "./grants-operations.js";
 import { SOURCE_SYNC_PLUGIN, sourceSyncOperationHandler } from "./source-sync-operations.js";
 import { EDIT_LEASES_PLUGIN, editLeaseOperationHandler } from "./edit-lease-operations.js";
@@ -674,13 +677,17 @@ export function bindOperationHandlers(
       bound.set(operation.key, { operation, handler: apiKeyOperationHandler(operation) });
       continue;
     }
-    // The named record-action axis is core as well, and emphatically not
-    // replaceable: a plugin standing in for this handler would be a SECOND
+    // The named record-action axis is core as well, BOTH halves of it: the
+    // one Operation that may write the axis
+    // (operations/record-action-operations.ts) and the manager's view of what
+    // it wrote (operations/record-action-assignments). Emphatically not
+    // replaceable — a plugin standing in for the writer would be a second
     // writer of the axis, which is the one thing the single-writer design
-    // exists to prevent (operations/record-action-operations.ts).
+    // exists to prevent — and bound once, so one plugin name cannot acquire
+    // two differently-guarded bindings.
     if (operation.plugin === RECORD_ACTIONS_PLUGIN) {
       if (modulesByName.has(RECORD_ACTIONS_PLUGIN)) throw new Error("The core record action runtime cannot be replaced by a plugin.");
-      bound.set(operation.key, { operation, handler: recordActionOperationHandler(operation) });
+      bound.set(operation.key, { operation, handler: recordActionsOperationHandler(operation) });
       continue;
     }
     // Importing records from an external source system by their base source

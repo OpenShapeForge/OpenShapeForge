@@ -2,6 +2,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
+import { operationErrorOf } from "@openshapeforge/operations";
 import { sql } from "kysely";
 import {
   createDatabaseRuntime,
@@ -10,6 +11,8 @@ import {
 import { runMigrationChain } from "../../db/migration-chain.js";
 import { APP_ROLE } from "../../db/migrations/app-role.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
+import { assertRecordPermissionsManyInTransaction } from "./record-permissions.js";
+import type { GeneratedCrudTable } from "./types.js";
 
 const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL ??
   "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
@@ -124,6 +127,29 @@ async function visibleMarkers(input: DbSessionInput): Promise<string[]> {
 }
 
 describe("record-permission RLS", () => {
+  test("batched checks refuse hidden, missing and cross-tenant records", async () => {
+    const rows = (await sql<{ id: string; marker: string }>`select id, marker from erp.record_permission_fixture`.execute(privileged.db)).rows;
+    const id = (marker: string) => rows.find(row => row.marker === marker)!.id;
+    const otherTenant = randomUUID(), foreignId = randomUUID();
+    await sql`insert into erp.record_permission_fixture (id,tenant_id,marker,"authorization") values (${foreignId}::uuid,${otherTenant}::uuid,'foreign',${{ view: { users: [userA] } }}::jsonb)`.execute(privileged.db);
+    const table = { schema: "erp", table: "record_permission_fixture", tenantScoped: true, primaryKey: "id",
+      columns: [{ name: "id", type: "uuid" }], source: { authorization: { recordPermissions: { field: "authorization", column: "authorization", empty: "public" } } } } as unknown as GeneratedCrudTable;
+    await withDbSession(restricted.db, session(userA), async trx => {
+      await assertRecordPermissionsManyInTransaction(trx, session(userA), table, [id("public-empty"), id("user-a")], ["view"]);
+      const refused = async (ids: string[], permissions: Array<"view" | "edit">) => {
+        let failure: unknown;
+        try { await assertRecordPermissionsManyInTransaction(trx, session(userA), table, ids, permissions); } catch (error) { failure = error; }
+        expect(operationErrorOf(failure)?.code).toBe("FORBIDDEN");
+      };
+      for (const denied of [id("role-a"), foreignId, randomUUID(), "not-a-uuid"]) {
+        await refused([id("user-a"), denied], ["view"]);
+      }
+      const restrictedTable = { ...table, source: { authorization: { recordPermissions: { field: "authorization", column: "authorization", empty: "restricted" } } } } as unknown as GeneratedCrudTable;
+      let editFailure: unknown;
+      try { await assertRecordPermissionsManyInTransaction(trx, session(userA), restrictedTable, [id("user-a")], ["view", "edit"]); } catch (error) { editFailure = error; }
+      expect(operationErrorOf(editFailure)?.code).toBe("FORBIDDEN");
+    });
+  }, TEST_TIMEOUT);
   test("valid empty is public while malformed ACL rows fail closed", async () => {
     expect(await visibleMarkers(session(userB))).toEqual(["public-empty"]);
   }, TEST_TIMEOUT);

@@ -635,6 +635,30 @@ export async function assertRecordPermissionInTransaction(
   }
 }
 
+/** Check all identities in bounded statements using the same row policy and RLS session. */
+export async function assertRecordPermissionsManyInTransaction(
+  trx: Transaction<DB>, session: DbSessionInput, table: GeneratedCrudTable,
+  ids: readonly string[], permissions: readonly RecordPermissionAction[],
+): Promise<void> {
+  const config = policy(table);
+  if (!config || !table.primaryKey) {
+    throw generatedCrudError("The record authorization contract is incomplete.", "INTERNAL_SERVER_ERROR");
+  }
+  for (let offset = 0; offset < ids.length; offset += 500) {
+    const chunk = ids.slice(offset, offset + 500);
+    const tenantWhere = table.tenantScoped ? sql`and ${sql.id("row_source", "tenant_id")} = ${session.tenantId}` : sql``;
+    const allowed = permissions.map(permission => sql`app.record_permission_allows(${sql.id("row_source", config.column)}, ${permission}, ${config.empty === "public"})`);
+    const result = await sql<{ count: string }>`select count(*)::text as count
+      from ${sql.id(table.schema, table.table)} as row_source
+      where (${sql.join(chunk.map(id => primaryKeyEquals(table, id, "row_source")), sql` or `)})
+      ${tenantWhere} ${subtypeScopeWhere(table, "row_source")}
+      and (${sql.join(allowed, sql` and `)})`.execute(trx);
+    if (Number(result.rows[0]?.count) !== chunk.length) {
+      throw operationFailure(notAuthorizedRefusal(table, permissions[0]!));
+    }
+  }
+}
+
 export function assertRecordPermission(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,

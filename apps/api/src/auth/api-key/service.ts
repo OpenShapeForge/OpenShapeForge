@@ -41,7 +41,9 @@ import {
   exactFilter,
   keysetPredicate,
   limitWithProbe,
+  MOVED_ANCHOR,
   orderBy,
+  sortValueDigest,
   takePage,
   UNUSABLE_CURSOR,
   type KeysetCursor,
@@ -736,6 +738,15 @@ function boundedFirst(first: number): number {
  * forged id, another tenant's id and a row removed out from under the caller
  * all look like. Refused as a client error rather than resumed from a guess,
  * which would skip or repeat a page's worth of rows.
+ *
+ * A row whose sort value no longer digests to what the cursor carries is the
+ * other refusal: the anchor is still a row of this set, but it has MOVED in
+ * the order, so resuming after its current value would end the walk early or
+ * repeat rows the caller already has (`catalog-page.ts`, `sortValueDigest`).
+ * Refused for the same reason and reported as {@link MOVED_ANCHOR}, which is
+ * distinguishable because it only ever concerns a row this caller just read.
+ * Both digests come out of the same SQL expression, so there is no second
+ * implementation of it to drift.
  */
 async function resumeAfter(
   trx: unknown,
@@ -745,11 +756,12 @@ async function resumeAfter(
   fence: (anchor: string) => RawBuilder<unknown>,
 ): Promise<KeysetCursor | undefined> {
   if (!anchor) return undefined;
-  const found = await sql<{ sort_value: string | null }>`
+  const found = await sql<{ sort_value: string | null; sort_digest: string }>`
     ${anchorValueQuery(column, from, fence(anchor.id))}
   `.execute(trx as never);
   const row = found.rows[0];
   if (!row) throw new ApiKeyValidationError(UNUSABLE_CURSOR);
+  if (row.sort_digest !== anchor.value) throw new ApiKeyValidationError(MOVED_ANCHOR);
   return { value: row.sort_value, id: anchor.id };
 }
 
@@ -807,8 +819,11 @@ export async function pageKeys(
         and k.integration_id = ${scope.integrationId}
         and k.id = ${anchor}`);
 
-    const result = await sql<KeyRow>`
-      select ${KEY_METADATA_COLUMNS}
+    // `sort_digest` is the ordering expression's own digest, carried out of
+    // the page so the next cursor can name the row it anchors on by value as
+    // well as by id — 16 characters a row, whatever that value is.
+    const result = await sql<KeyRow & { sort_digest: string }>`
+      select ${KEY_METADATA_COLUMNS}, ${sortValueDigest(column)} as sort_digest
         from platform.api_keys k
         join platform.api_key_integrations i on i.id = k.integration_id
        where ${fence}
@@ -983,8 +998,10 @@ export async function pageIntegrations(
       platform.api_key_integrations i`, (anchor) => sql`
       i.tenant_id = ${session.tenantId} and i.id = ${anchor}`);
 
-    const result = await sql<IntegrationRow>`
-      select ${integrationMetadataColumns(now)}
+    // See pageKeys for `sort_digest`. Functionally dependent on the grouping
+    // key (`i.id` is the primary key), so it needs no place in `group by`.
+    const result = await sql<IntegrationRow & { sort_digest: string }>`
+      select ${integrationMetadataColumns(now)}, ${sortValueDigest(column)} as sort_digest
         from platform.api_key_integrations i
         left join platform.api_keys k
           on k.integration_id = i.id and k.tenant_id = i.tenant_id

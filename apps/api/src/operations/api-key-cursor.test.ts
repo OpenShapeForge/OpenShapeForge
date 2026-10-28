@@ -3,16 +3,20 @@
  * The cursor contract on its own: what `decodeCursor` lets through, and what
  * it refuses as a client error.
  *
- * What it lets through is one uuid. A cursor names the previous page's last row
- * by id and carries no sort value (`api-key-cursor.ts`), which is what makes
- * every cursor one length and what takes caller-supplied text out of the typed
- * expressions the page builds. The tests below are the two halves of that:
+ * What it lets through is one uuid and one 16-character digest. A cursor names
+ * the previous page's last row by id and by a digest of that row's sort value,
+ * never by the value (`api-key-cursor.ts`), which is what makes every cursor
+ * one length and what takes caller-supplied text out of the typed expressions
+ * the page builds. The tests below are the two halves of that:
  *
  *   - the anchor really is checked against something the `uuid` type accepts,
  *     because it is the one caller-supplied value that still reaches a cast;
  *   - a cursor carrying anything ELSE — a `v` of the kind this listing used to
- *     emit, an injected statement, a megabyte — cannot move the resume point,
- *     because nothing but the anchor is read out of it.
+ *     emit, an injected statement, a megabyte — cannot move the resume point.
+ *     The digest is compared for EQUALITY against one the page computes from
+ *     the row it read (`auth/api-key/catalog-page.ts`, `anchorDigest`), so an
+ *     admissible-looking digest that was never issued refuses the page rather
+ *     than resuming it somewhere; an inadmissible one does not get that far.
  *
  * The second one is the regression that matters. A value-carrying cursor was
  * cast to `timestamptz`, so every spelling the validator and PostgreSQL's
@@ -47,6 +51,12 @@ const SORTS = ["displayName", "status", "createdAt", "updatedAt", "expiresAt", "
 const DIRECTIONS = ["asc", "desc"] as const;
 
 const QUERY = fingerprint(["integrations", undefined, undefined]);
+/**
+ * A digest of the shape the listing issues. Its VALUE is the database's
+ * business (`auth/api-key/catalog-page.ts`, `sortValueDigest`); what this file
+ * decides is which shapes the decoder lets reach the page at all.
+ */
+const DIGEST = "bD0Or6VNxYTDUslg";
 
 function forge(payload: Record<string, unknown>): string {
   return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
@@ -55,24 +65,27 @@ function forge(payload: Record<string, unknown>): string {
 describe("decodeCursor across both listings and both directions", () => {
   for (const field of SORTS) {
     for (const direction of DIRECTIONS) {
-      test(`${field} ${direction}: reads the anchor and nothing else`, () => {
+      test(`${field} ${direction}: reads the anchor and the digest, nothing else`, () => {
         const id = randomUUID();
-        expect(decodeCursor(forge({ f: field, d: direction, q: QUERY, i: id }), {
+        expect(decodeCursor(forge({ f: field, d: direction, q: QUERY, i: id, v: DIGEST }), {
           f: field,
           d: direction,
-        }, QUERY)).toEqual({ id });
+        }, QUERY)).toEqual({ id, value: DIGEST });
 
         // Values of the kind that used to reach a `timestamptz` cast, carried
-        // on a cursor that is otherwise well formed. Short ones, because the
-        // payload's own width is now tight enough that a longer forgery does
-        // not even get parsed — which the length test below states. The anchor
-        // is all that comes back from any of them, so none is bound to
-        // anything and none can be an error from the database.
-        for (const value of ["now()", "infinity", "yesterday", "'); select 1 --", null, 42]) {
-          expect(decodeCursor(forge({ f: field, d: direction, q: QUERY, v: value, i: id }), {
-            f: field,
-            d: direction,
-          }, QUERY)).toEqual({ id });
+        // in `v` on a cursor that is otherwise well formed. None of them is a
+        // digest, so none of them gets past the decoder at all — and a digest
+        // never reaches a cast in the first place: the page compares it for
+        // equality against one it computed from the row it read.
+        for (const value of [
+          "now()", "infinity", "yesterday", "'); select 1 --", null, 42,
+          "2026-02-29 00:00:00.000000+00", DIGEST.slice(0, 15), `${DIGEST}A`, `${DIGEST.slice(0, 15)}+`,
+        ]) {
+          expect(() => decodeCursor(
+            forge({ f: field, d: direction, q: QUERY, v: value, i: id }),
+            { f: field, d: direction },
+            QUERY,
+          )).toThrow(ApiKeyValidationError);
         }
       });
     }
@@ -90,7 +103,7 @@ describe("decodeCursor across both listings and both directions", () => {
       null,
     ]) {
       expect(() => decodeCursor(
-        forge({ f: "createdAt", d: "asc", q: QUERY, i: id }),
+        forge({ f: "createdAt", d: "asc", q: QUERY, i: id, v: DIGEST }),
         { f: "createdAt", d: "asc" },
         QUERY,
       )).toThrow(ApiKeyValidationError);
@@ -120,9 +133,10 @@ describe("decodeCursor across both listings and both directions", () => {
         .toThrow(ApiKeyValidationError);
     }
     // And the widest cursor this listing can issue fits under it, with the
-    // longest sort field, the longest direction, a full fingerprint and a uuid.
+    // longest sort field, the longest direction, a full fingerprint, a uuid
+    // and a digest — which is the same 16 characters for a name of 20,000.
     const widest = encodeCursor(
-      { id: randomUUID() },
+      { id: randomUUID(), value: DIGEST },
       { f: "displayName", d: "desc" },
       fingerprint(["credentials", randomUUID(), "x", "active"]),
     )!;
@@ -140,7 +154,9 @@ describe("decodeCursor across both listings and both directions", () => {
   });
 
   test("still refuses a cursor from another sort, direction or filter", () => {
-    const cursor = encodeCursor({ id: randomUUID() }, { f: "createdAt", d: "asc" }, QUERY)!;
+    const cursor = encodeCursor(
+      { id: randomUUID(), value: DIGEST }, { f: "createdAt", d: "asc" }, QUERY,
+    )!;
     expect(() => decodeCursor(cursor, { f: "updatedAt", d: "asc" }, QUERY))
       .toThrow(ApiKeyValidationError);
     expect(() => decodeCursor(cursor, { f: "createdAt", d: "desc" }, QUERY))
@@ -152,9 +168,11 @@ describe("decodeCursor across both listings and both directions", () => {
   test("names only that the cursor was rejected, never which half gave it away", () => {
     const messages = new Set<string>();
     for (const payload of [
-      { f: "createdAt", d: "asc", q: QUERY, i: "not-a-uuid" },
-      { f: "createdAt", d: "desc", q: QUERY, i: randomUUID() },
-      { f: "createdAt", d: "asc", q: fingerprint(["other"]), i: randomUUID() },
+      { f: "createdAt", d: "asc", q: QUERY, i: "not-a-uuid", v: DIGEST },
+      { f: "createdAt", d: "desc", q: QUERY, i: randomUUID(), v: DIGEST },
+      { f: "createdAt", d: "asc", q: fingerprint(["other"]), i: randomUUID(), v: DIGEST },
+      { f: "createdAt", d: "asc", q: QUERY, i: randomUUID(), v: "not-a-digest" },
+      { f: "createdAt", d: "asc", q: QUERY, i: randomUUID() },
       {},
     ]) {
       try {
@@ -169,11 +187,12 @@ describe("decodeCursor across both listings and both directions", () => {
   test("what encodeCursor produces is what decodeCursor accepts", () => {
     for (const field of SORTS) {
       for (const direction of DIRECTIONS) {
-        const anchor = { id: randomUUID() };
+        const anchor = { id: randomUUID(), value: DIGEST };
         const encoded = encodeCursor(anchor, { f: field, d: direction }, QUERY)!;
         expect(decodeCursor(encoded, { f: field, d: direction }, QUERY)).toEqual(anchor);
-        // One length, whatever the sort and whatever the row: that is the
-        // property an id-anchored cursor buys over a value-carrying one.
+        // One length, whatever the sort and whatever the row — the digest is
+        // 16 characters for a name of any size: that is the property an
+        // id-and-digest cursor buys over a value-carrying one.
         expect(encoded.length).toBeLessThanOrEqual(MAX_CURSOR_LENGTH);
       }
     }

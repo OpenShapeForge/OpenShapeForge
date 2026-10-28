@@ -51,6 +51,7 @@ import {
   ApiKeyValidationError,
   pageIntegrations,
   pageKeys,
+  revokeKey,
   MAX_DISPLAY_NAME_LENGTH,
   type ApiKeyServiceDeps,
   type CredentialSortField,
@@ -478,7 +479,9 @@ describe("an anchor is resolved against a row of this very set", () => {
         [keyIds[0]!, "a credential's id, on the integration listing"],
       ];
       for (const [id, why] of cases) {
-        const cursor = encodeCursor({ id }, identity, query)!;
+        // A digest of the right SHAPE that no row of this set answers to: the
+        // anchor lookup finds nothing, so the digest is never even compared.
+        const cursor = encodeCursor({ id, value: "AAAAAAAAAAAAAAAA" }, identity, query)!;
         let refused: unknown;
         try {
           await pageIntegrations(serviceDeps(appDb), manager(), {
@@ -548,8 +551,24 @@ describe("an anchor is resolved against a row of this very set", () => {
       const row = longest.rows[0]!;
       expect([...row.sort_value].length).toBeGreaterThan(MAX_DISPLAY_NAME_LENGTH * 50);
 
-      const issued = encodeCursor({ id: row.id }, identity, query)!;
-      expect(issued.length).toBeLessThanOrEqual(MAX_CURSOR_LENGTH);
+      // The cursor this listing really issues for that row: walked to the page
+      // that ends on it, so the digest is the database's own and not one this
+      // test computed. The longest name is not the first in any order, so the
+      // walk is how it is reached.
+      let issued: string | undefined;
+      let at: string | undefined;
+      for (let page = 0; page < 400 && issued === undefined; page += 1) {
+        const result = await pageIntegrations(serviceDeps(appDb), manager(), {
+          sortField: identity.f, sortDirection: identity.d, first: 1,
+          ...cursorSpread(decodeCursor(at, identity, query)),
+        });
+        const next = encodeCursor(result.nextCursor, identity, query);
+        if (result.rows[0]?.id === row.id) issued = next ?? undefined;
+        if (!next) break;
+        at = next;
+      }
+      expect(issued).toBeTypeOf("string");
+      expect(issued!.length).toBeLessThanOrEqual(MAX_CURSOR_LENGTH);
       // Decoded by exactly the handler's decoder, and the page it resumes is
       // answered rather than refused.
       const resumed = await pageIntegrations(serviceDeps(appDb), manager(), {
@@ -568,6 +587,171 @@ describe("an anchor is resolved against a row of this very set", () => {
         "utf8",
       ).toString("base64url");
       expect(carried.length).toBeGreaterThan(MAX_CURSOR_LENGTH * 100);
+    });
+  }, TEST_TIMEOUT);
+});
+
+/**
+ * What happens when the row a cursor anchors on MOVES in the order.
+ *
+ * This is the one thing an id-only anchor cannot get right, and it is not a
+ * rare shape: the resume value is read from the anchor row at resume time, so
+ * renaming the row the previous page ended on moves the resume point with it.
+ * Renaming it to a name that sorts after everything left makes the next page
+ * EMPTY and the walk end there — a caller reading a catalog of five while
+ * somebody renames one integration receives one row, no error, and no way to
+ * tell. Renaming it earlier repeats rows instead.
+ *
+ * Carrying the value would have fixed it and cannot be done here:
+ * `display_name` is unbounded `text` and the two older surfaces have been
+ * storing names of any length, so a value-carrying cursor is as long as the
+ * longest name a row holds and bounding it would bound those two published
+ * contracts (`catalog-page.ts`, `anchorDigest`). So the cursor carries a
+ * DIGEST of the value instead: fixed width for a name of any length, enough to
+ * notice the move, not enough to undo it. The page is refused as a declared
+ * client error and the caller reads the listing again.
+ *
+ * These tests state both halves: the move is refused rather than answered, and
+ * a mutation that does NOT move the anchor still pages exactly once per row.
+ */
+describe("a cursor whose anchor moved in the order", () => {
+  /** Five integrations named a..e, created in that order. */
+  async function seedLetters(adminDb: Kysely<DB>): Promise<Record<string, string>> {
+    await seedTenant(adminDb);
+    const ids: Record<string, string> = {};
+    for (const [index, letter] of ["a", "b", "c", "d", "e"].entries()) {
+      ids[letter] = await seedIntegration(adminDb, {
+        displayName: letter, createdAt: new Date(Date.UTC(2026, 0, 1 + index)),
+      });
+    }
+    return ids;
+  }
+
+  async function rename(adminDb: Kysely<DB>, id: string, displayName: string): Promise<void> {
+    await sql`
+      update platform.api_key_integrations set display_name = ${displayName}
+       where id = ${id}::uuid
+    `.execute(adminDb);
+  }
+
+  /**
+   * Walk a listing one row per page THROUGH the encoder and decoder, running
+   * `between` after each page. Returns the rows seen and the refusal, if any —
+   * never swallowing it, which is the whole point.
+   */
+  async function walkWith(
+    appDb: Kysely<DB>,
+    sortField: IntegrationSortField,
+    between: (page: number, lastId: string | undefined) => Promise<void>,
+  ): Promise<{ ids: string[]; refusal: Error | undefined }> {
+    const identity = { f: sortField, d: "asc" as const };
+    const query = fingerprint(["integrations", undefined, undefined]);
+    const ids: string[] = [];
+    let after: string | undefined;
+    for (let page = 0; page < 400; page += 1) {
+      let result;
+      try {
+        result = await pageIntegrations(serviceDeps(appDb), manager(), {
+          sortField, sortDirection: "asc", first: 1,
+          ...cursorSpread(decodeCursor(after, identity, query)),
+        });
+      } catch (error) {
+        return { ids, refusal: error as Error };
+      }
+      for (const row of result.rows) ids.push(row.id);
+      await between(page, ids.at(-1));
+      const next = encodeCursor(result.nextCursor, identity, query);
+      if (!next) return { ids, refusal: undefined };
+      after = next;
+    }
+    throw new Error("The integration walk did not terminate.");
+  }
+
+  test("renaming it past the rest of the listing is refused, not answered short", async () => {
+    if (!(await serverReachable())) return;
+    await withScratchDb(SESSIONS[0], async ({ appDb, adminDb }) => {
+      const ids = await seedLetters(adminDb);
+      // The walk reads "a", then "a" is renamed to sort last. Its resume value
+      // is now past b..e, so resuming after it returns nothing at all.
+      const walk = await walkWith(appDb, "displayName", async (page, lastId) => {
+        if (page === 0 && lastId) await rename(adminDb, lastId, "zzz");
+      });
+      // Refused — and the four rows are NOT reported as the end of the list.
+      expect(walk.ids).toEqual([ids.a!]);
+      expect(walk.refusal).toBeInstanceOf(ApiKeyValidationError);
+      expect(walk.refusal?.message).toMatch(/sort value changed/);
+    });
+  }, TEST_TIMEOUT);
+
+  test("renaming it back before rows already read is refused too", async () => {
+    if (!(await serverReachable())) return;
+    await withScratchDb(SESSIONS[0], async ({ appDb, adminDb }) => {
+      const ids = await seedLetters(adminDb);
+      // Three rows read, then "c" is renamed to sort before "b" — which would
+      // resume the walk inside the part already delivered and hand "b" back.
+      const walk = await walkWith(appDb, "displayName", async (page, lastId) => {
+        if (page === 2 && lastId) await rename(adminDb, lastId, "a0");
+      });
+      expect(walk.ids).toEqual([ids.a!, ids.b!, ids.c!]);
+      expect(walk.refusal).toBeInstanceOf(ApiKeyValidationError);
+      expect(walk.refusal?.message).toMatch(/sort value changed/);
+    });
+  }, TEST_TIMEOUT);
+
+  test("a derived status that moves under the anchor is refused as well", async () => {
+    if (!(await serverReachable())) return;
+    await withScratchDb(SESSIONS[0], async ({ appDb, adminDb }) => {
+      const { parent, keyIds } = await seedCatalog(adminDb);
+      // Sorting on the DERIVED status: revoking the credential the page ended
+      // on moves it out of the 'active' block, so the block the resume
+      // predicate lands in is not the one the cursor was issued from.
+      const identity = { f: "status" as const, d: "asc" as const };
+      const query = fingerprint(["credentials", parent, undefined, undefined]);
+      const first = await pageKeys(serviceDeps(appDb), manager(), { integrationId: parent }, {
+        sortField: identity.f, sortDirection: identity.d, first: 1,
+      });
+      const anchor = first.nextCursor!;
+      expect(keyIds).toContain(anchor.id);
+      await revokeKey(serviceDeps(appDb), manager(), anchor.id);
+
+      const cursor = encodeCursor(anchor, identity, query)!;
+      await expect(pageKeys(serviceDeps(appDb), manager(), { integrationId: parent }, {
+        sortField: identity.f, sortDirection: identity.d, first: 1,
+        ...cursorSpread(decodeCursor(cursor, identity, query)),
+      })).rejects.toThrow(/sort value changed/);
+    });
+  }, TEST_TIMEOUT);
+
+  test("a mutation that leaves the anchor where it is pages every row once", async () => {
+    if (!(await serverReachable())) return;
+    await withScratchDb(SESSIONS[0], async ({ appDb, adminDb }) => {
+      const ids = await seedLetters(adminDb);
+      const all = Object.values(ids);
+
+      // Renaming a row ALREADY delivered, which is not the anchor: the anchor
+      // still renders what its digest was taken from, so the walk continues.
+      const renamedBehind = await walkWith(appDb, "displayName", async (page) => {
+        if (page === 2) await rename(adminDb, ids.a!, "a-renamed-behind");
+      });
+      expect(renamedBehind.refusal).toBeUndefined();
+      expect([...renamedBehind.ids].sort()).toEqual([...all].sort());
+
+      // And an INSERT before the cursor, which an offset page would answer
+      // with one row skipped and one repeated.
+      await rename(adminDb, ids.a!, "a");
+      const inserted = await walkWith(appDb, "displayName", async (page) => {
+        if (page === 2) {
+          await seedIntegration(adminDb, {
+            displayName: "a-inserted-before-the-cursor",
+            createdAt: new Date(Date.UTC(2026, 5, 1)),
+          });
+        }
+      });
+      expect(inserted.refusal).toBeUndefined();
+      // The five originals, each exactly once. The inserted row sorts before
+      // the cursor, so this walk does not reach it — and no row is repeated.
+      expect(inserted.ids.length).toBe(new Set(inserted.ids).size);
+      expect(inserted.ids).toEqual(all);
     });
   }, TEST_TIMEOUT);
 });

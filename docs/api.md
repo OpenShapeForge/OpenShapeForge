@@ -789,22 +789,42 @@ with the step that failed, leaving a realm client that no `pending` row names
 and that the reconciler could therefore neither finish nor sweep.
 
 **Cursors are opaque, bounded, and not trusted.** A keyset cursor names the
-previous page's last row by id and carries no sort value. That is what makes it
-a fixed size: a cursor that carried the value was as long as the value, and
-`display_name` is unbounded `text` which the older REST and GraphQL mints
-accept any length of — so every bound on such a cursor was also a bound on a
-name some row already holds, and a row past it was a page the listing emitted
-and would not take back. The value to resume after is read back out of the
-anchor row per request, under the same tenant and subject predicates the page
-itself carries, so an id outside that set resolves to no row and is refused
-rather than guessed at. The only caller-supplied text left is the uuid, checked
-against what the `uuid` type accepts before it is bound. The query fingerprint
-does not cover any of this: it keeps a cursor from resuming the wrong SET and is
-deliberately not a security boundary, being derived from public inputs. Every
-refusal — a payload that will not parse, a sort or filter the cursor was not
-issued under, an anchor no row answers to — is the same declared
-`400 VALIDATION` with the same message, so a cursor is not a probe for another
-tenant's ids.
+previous page's last row by id and by a 16-character digest of that row's sort
+value, never by the value itself. That is what makes it a fixed size: a cursor
+that carried the value was as long as the value, and `display_name` is
+unbounded `text` which the older REST and GraphQL mints accept any length of —
+so every bound on such a cursor was also a bound on a name some row already
+holds, and a row past it was a page the listing emitted and would not take
+back. The value to resume after is read back out of the anchor row per request,
+under the same tenant and subject predicates the page itself carries, so an id
+outside that set resolves to no row and is refused rather than guessed at. The
+only caller-supplied text left is the uuid, checked against what the `uuid`
+type accepts before it is bound; the digest reaches no expression at all, being
+compared for equality against one the database computes from the same ordering
+expression. The query fingerprint does not cover any of this: it keeps a cursor
+from resuming the wrong SET and is deliberately not a security boundary, being
+derived from public inputs. A payload that will not parse, a sort or filter the
+cursor was not issued under and an anchor no row answers to are the same
+declared `400 VALIDATION` with the same message, so a cursor is not a probe for
+another tenant's ids.
+
+**A listing is not stable across a mutation of the row a cursor anchors on, and
+says so.** Resolving the resume value from the anchor row per request means
+resolving its CURRENT value. Rename the row a page ended on to a name that
+sorts after everything left and the next page is empty: the listing would end
+there with every remaining row unread, and a caller could not tell. Rename it
+earlier and rows repeat. Carrying the value would fix it and is the option the
+unbounded `display_name` rules out, so the cursor carries the digest instead —
+enough to notice the move, not enough to undo it. Such a page is refused with
+its own `400 VALIDATION` ("after names a row whose sort value changed…") and
+the caller reads the listing from its first page again. Everything else is
+stable in the way a keyset is and an offset is not: an insert or a removal
+before the cursor cannot shift a later page, and a mutation of any row other
+than the anchor leaves the walk reaching every row exactly once. This is the
+listing's one accepted anomaly and it is a visible one — see
+`apps/api/src/operations/api-key-cursor-db.test.ts` ("a cursor whose anchor
+moved in the order"). Paging a catalog while it is being renamed may therefore
+need a retry from the first page; nothing silently answers short.
 
 **The catalog's input bounds are the Operations', not the service's.** Both
 minting Operations declare `displayName` as 1..200 characters and the
@@ -899,7 +919,12 @@ Proven:
   sort in both directions, one row per page, under four `DateStyle`/`TimeZone`
   pairs and over display names of 200, 1,000 and 20,000 code points — the last
   two being what the older surfaces accept and no value-carrying cursor could
-  have taken back (`apps/api/src/operations/api-key-cursor-db.test.ts`);
+  have taken back; and an anchor RENAMED mid-walk (forwards past the rest of
+  the listing, backwards behind rows already read) or moved out of its derived
+  status block is that same declared `400` rather than a silently short page,
+  while a mutation of a non-anchor row and an insert before the cursor leave
+  the walk reaching every row exactly once
+  (`apps/api/src/operations/api-key-cursor-db.test.ts`);
 - `no-store` on both minting surfaces of a booted stack, and the carrier
   refusal of an unclassified bundle on both
   (`apps/api/src/auth/api-key/credential-no-store-db.test.ts`).

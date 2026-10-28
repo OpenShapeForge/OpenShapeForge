@@ -48,6 +48,7 @@ import {
 } from "../auth/api-key/reconcile.js";
 import { readApiKeyProvisioningConfig } from "../auth/api-key/runtime-config.js";
 import { stubRealm, type StubRealm } from "../auth/api-key/__tests__/fixtures.js";
+import type { PageAnchor } from "../auth/api-key/catalog-page.js";
 import { createDatabaseRuntime } from "../db/connection.js";
 import { runMigrationChain } from "../db/migration-chain.js";
 import { APP_ROLE } from "../db/migrations/app-role.js";
@@ -201,7 +202,7 @@ async function walkIntegrations(
 ): Promise<{ ids: string[]; pages: number; totals: number[] }> {
   const ids: string[] = [];
   const totals: number[] = [];
-  let after: { id: string } | undefined;
+  let after: PageAnchor | undefined;
   let pages = 0;
   for (;;) {
     const page = await pageIntegrations(serviceDeps(appDb), session, {
@@ -225,7 +226,7 @@ async function walkCredentials(
   query: { sortField: CredentialSortField; sortDirection: "asc" | "desc"; first?: number },
 ): Promise<string[]> {
   const ids: string[] = [];
-  let after: { id: string } | undefined;
+  let after: PageAnchor | undefined;
   for (;;) {
     const page = await pageKeys(serviceDeps(appDb), session, { integrationId }, {
       ...query, first: query.first ?? 1, ...(after ? { after } : {}),
@@ -422,7 +423,7 @@ describe("integration catalog paging against PostgreSQL", () => {
       }
       const session = manager(TENANT_A);
       const seen: string[] = [];
-      let after: { id: string } | undefined;
+      let after: PageAnchor | undefined;
       for (;;) {
         const page = await pageIntegrations(serviceDeps(appDb), session, {
           sortField: "createdAt", sortDirection: "asc", first: 1, ...(after ? { after } : {}),

@@ -3,9 +3,10 @@
  * The opaque `after` cursor of the integration catalog: what it carries, and
  * what has to be true of it before any of it reaches a typed expression.
  *
- * It carries the previous page's last row by ID and not by value. That is the
- * decision this module turns on, so it is worth stating why, because the
- * alternative was tried here and did not hold:
+ * It carries the previous page's last row by ID and by a DIGEST of its sort
+ * value, never by the value itself. That is the decision this module turns on,
+ * so it is worth stating why, because the alternative was tried here and did
+ * not hold:
  *
  *   - `display_name` is `text`. Nothing in the schema bounds it, and the two
  *     surfaces that have been storing it since before this listing existed
@@ -19,9 +20,20 @@
  *     will not take back: the page is reachable and the page after it is not.
  *     Tightening the name instead would have been this listing silently
  *     narrowing two published contracts to suit its own paging.
- *   - An id is a uuid whatever the row says. One cursor is one length, the
- *     bound below is a bound on MALFORMED input and nothing else, and no
- *     stored value and no accepted input can push a page out of reach.
+ *   - An id is a uuid whatever the row says, and a digest of the value is 16
+ *     characters whatever the value. One cursor is one length, the bound below
+ *     is a bound on MALFORMED input and nothing else, and no stored value and
+ *     no accepted input can push a page out of reach.
+ *
+ * The digest is what keeps the id-only anchor honest. Resolving the resume
+ * value from the anchor row means resolving the row's CURRENT value, so a row
+ * renamed between two pages moves the resume point with it — forwards, which
+ * ends the listing early with rows unread, or backwards, which repeats them.
+ * The digest cannot restore the old point, but it makes the move visible, and
+ * `auth/api-key/catalog-page.ts` (`MOVED_ANCHOR`) refuses the page instead of
+ * answering it short. See {@link anchorDigest} for why that trade, and not a
+ * value-carrying cursor, is the one available here: `anchorDigest` in that
+ * same module states it in full.
  *
  * It also takes caller-supplied text out of the typed expressions entirely.
  * The value half used to be cast to `timestamptz`
@@ -64,6 +76,8 @@ type CursorPayload = {
   q: string;
   /** The last row's id — the anchor the resume point is read from. */
   i: string;
+  /** Digest of that row's sort value when the cursor was issued. */
+  v: string;
 };
 
 /**
@@ -78,12 +92,21 @@ type CursorPayload = {
 const CURSOR_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * The JSON frame plus the longest `f`, `d`, `q` and `i` it can hold: 34
- * characters of punctuation, an 11-character sort field, a 4-character
- * direction, a 16-character fingerprint and a 36-character uuid. Rounded up to
- * a round number, with room for a field this payload may grow later.
+ * The digest's own shape: 16 base64url characters, as `anchorDigest`
+ * (`auth/api-key/catalog-page.ts`) produces. Checked for shape only — it is then compared for equality against
+ * a digest this process computes from the row, so an admissible value that was
+ * never issued simply does not match.
  */
-const CURSOR_ENVELOPE_BYTES = 128;
+const CURSOR_DIGEST = /^[A-Za-z0-9_-]{16}$/;
+
+/**
+ * The JSON frame plus the longest `f`, `d`, `q`, `i` and `v` it can hold: 42
+ * characters of punctuation, an 11-character sort field, a 4-character
+ * direction, a 16-character query fingerprint, a 36-character uuid and a
+ * 16-character value digest — 125. Rounded up to a round number, with room for
+ * a field this payload may grow later.
+ */
+const CURSOR_ENVELOPE_BYTES = 160;
 
 /**
  * The longest `after` string this listing can have produced, as base64 of the
@@ -124,10 +147,11 @@ export function decodeCursor(
   }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) invalidCursor();
   if (typeof payload.i !== "string" || !CURSOR_ID.test(payload.i)) invalidCursor();
+  if (typeof payload.v !== "string" || !CURSOR_DIGEST.test(payload.v)) invalidCursor();
   // Sort or filter tampering: the keyset is only meaningful under the order
   // and the set it was produced in.
   if (payload.f !== sort.f || payload.d !== sort.d || payload.q !== query) invalidCursor();
-  return { id: payload.i };
+  return { id: payload.i, value: payload.v };
 }
 
 export function encodeCursor(
@@ -136,7 +160,9 @@ export function encodeCursor(
   query: string,
 ): string | null {
   if (!cursor) return null;
-  const payload: CursorPayload = { f: sort.f, d: sort.d, q: query, i: cursor.id };
+  const payload: CursorPayload = {
+    f: sort.f, d: sort.d, q: query, i: cursor.id, v: cursor.value,
+  };
   return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
 }
 

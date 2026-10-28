@@ -11,8 +11,10 @@
  * bounded offset makes the tail unreachable; a keyset names the last row and
  * asks the index for what comes after it, so every page costs the same and
  * there is no tail to be cut off. It is also stable under concurrent writes: a
- * row inserted before the cursor cannot shift a later page, which an offset
- * silently does (one row skipped, one row repeated).
+ * row inserted or removed before the cursor cannot shift a later page, which
+ * an offset silently does (one row skipped, one row repeated). That stability
+ * is about OTHER rows; a mutation of the anchor row's own sort value is a
+ * separate matter, and {@link sortValueDigest} says what happens to it.
  *
  * Two properties make a keyset correct, and both are enforced here rather than
  * left to the caller:
@@ -26,11 +28,14 @@
  *      directions and the resume predicate knows which block it is in.
  *
  * What the cursor CARRIES is a third property, and it is why there are two
- * cursor types below. A cursor names the previous page's last row by id
- * ({@link PageAnchor}); the value to resume after is read back out of that row
+ * cursor types below. A cursor names the previous page's last row by id and by
+ * a fixed-width DIGEST of that row's sort value ({@link PageAnchor}); the
+ * value to resume after is read back out of the row itself
  * ({@link anchorValueQuery}) and only then reaches the predicate
  * ({@link KeysetCursor}). So a cursor is a fixed size whatever a row holds,
- * and the only caller-supplied part of it is a uuid.
+ * the only caller-supplied part of it is a uuid and a digest, and a row that
+ * MOVED in the order since the cursor was issued is detected rather than
+ * resumed from (see {@link sortValueDigest}).
  */
 import { sql, type RawBuilder } from "kysely";
 
@@ -56,15 +61,72 @@ export type SortDirection = "asc" | "desc";
  * a caller now supplies is the uuid, and {@link anchorValueQuery} reads the
  * value from the row itself.
  */
-export type PageAnchor = { id: string };
+export type PageAnchor = { id: string; value: string };
+
+/**
+ * The anchor's sort value as a fixed-width digest — the half of the cursor
+ * that makes a MOVED row visible.
+ *
+ * The id alone is not enough, and that is a correctness matter rather than a
+ * refinement. The resume value is read from the anchor row at resume time, so
+ * if that row's own sort value changed between two pages the resume point
+ * moves with it: renaming the row the previous page ended on to a name that
+ * sorts after everything left makes the next page empty and the listing end
+ * there, silently, with every remaining row unread. Renaming it backwards
+ * repeats rows instead. Neither is something a caller can see.
+ *
+ * Carrying the VALUE would fix it and cannot be done: `display_name` is
+ * unbounded `text` and the two surfaces that have been storing it since before
+ * this listing existed bound it nowhere, so a cursor carrying it is as long as
+ * the longest name any row holds — and bounding the cursor would then be
+ * bounding those two published contracts. A digest is 16 characters for a name
+ * of any length, so the cursor stays one size and no stored name and no
+ * accepted input can put a page out of reach.
+ *
+ * What the digest buys is detection, not repair: the resume point cannot be
+ * recovered from it, so a cursor whose anchor moved is refused as a client
+ * error ({@link MOVED_ANCHOR}) and the caller reads the listing again. That is
+ * the trade this listing makes — an explicit 400 on the rare page that follows
+ * a mutation of the row it anchored on, instead of a silently short answer.
+ *
+ * Computed in SQL, in both places that need it ({@link anchorValueQuery} and
+ * the page's own projection), for two reasons. It is the ONE expression, so a
+ * page's digest and the resume check's digest cannot drift the way a
+ * JavaScript hash of a separately rendered value could. And a page carries 16
+ * characters per row out of the database instead of the sort value itself —
+ * which for the names this catalog really holds is tens of kilobytes a row,
+ * for a value no caller is shown.
+ *
+ * `null` — "no expiry", "never used" — digests the marker `n` rather than any
+ * rendered value, so the absent-value block is its own anchor and cannot
+ * collide with a row whose name happens to render the same way. The result is
+ * compared for EQUALITY against the cursor's copy, so, like the sort/filter
+ * fingerprint, none of it reaches a typed expression.
+ */
+export function sortValueDigest(column: SortColumn): RawBuilder<unknown> {
+  const rendered = renderSortValue(column);
+  return sql`left(translate(encode(sha256(convert_to(
+    case when (${rendered}) is null then 'n' else 'v' || (${rendered}) end, 'UTF8')),
+    'base64'), '+/', '-_'), ${sql.lit(DIGEST_LENGTH)})`;
+}
+
+/** Characters of base64url the digest keeps: enough to make a collision idle. */
+export const DIGEST_LENGTH = 16;
 
 /**
  * An anchor RESOLVED against the row it names: the value to resume after, as
  * the database rendered it, and the id to break ties on.
  *
  * Resolved per request rather than carried, so the value and the ORDER are
- * read under the same expression and the same `now` — which is what keeps a
- * row whose status has since changed from being skipped or repeated.
+ * read under the same expression and the same `now`: the resume point is a
+ * real point in the order the page is about to produce, rather than a frozen
+ * rendering of an expression (a derived status, an expiry against `now`) whose
+ * meaning has moved on.
+ *
+ * It does NOT make the walk stable under a mutation of the anchor row itself —
+ * nothing resolved per request can, because the resolved value is the row's
+ * NEW one. {@link sortValueDigest} is what notices that, and {@link MOVED_ANCHOR}
+ * is what the caller is told.
  */
 export type KeysetCursor = { value: string | null; id: string };
 
@@ -79,6 +141,19 @@ export type KeysetCursor = { value: string | null; id: string };
  */
 export const UNUSABLE_CURSOR =
   "after must be a cursor this listing returned for this same query.";
+
+/**
+ * The other refusal: the anchor row IS a row of this set, and it has moved.
+ *
+ * Distinguished from {@link UNUSABLE_CURSOR} on purpose, and safely. It is
+ * only ever reached after the anchor resolved to a row inside the caller's
+ * own fenced set — the row the previous page handed them — so it discloses
+ * nothing a caller did not already read, while telling them the one thing they
+ * can act on: this walk cannot be continued, start it again.
+ */
+export const MOVED_ANCHOR =
+  "after names a row whose sort value changed after the page that issued it; " +
+  "read this listing again from its first page.";
 
 export type PageQuery<TSort extends string> = {
   sortField: TSort;
@@ -176,6 +251,10 @@ export function orderBy(
  * does, so an anchor is never resolved against a row outside the set the
  * caller may read.
  *
+ * `sort_digest` comes back beside it, from {@link sortValueDigest} over that
+ * same expression, so the caller can tell a row that is still where the cursor
+ * left it from one that has MOVED ({@link sortValueDigest}'s problem).
+ *
  * Absent means the cursor is unusable: an id this set has no row for, which is
  * what a forged, a stale or another tenant's anchor all look like from here.
  * The caller reports {@link UNUSABLE_CURSOR} and does not guess a resume point.
@@ -190,7 +269,8 @@ export function anchorValueQuery(
   fence: RawBuilder<unknown>,
 ): RawBuilder<unknown> {
   return sql`
-    select ${renderSortValue(column)} as sort_value
+    select ${renderSortValue(column)} as sort_value,
+           ${sortValueDigest(column)} as sort_digest
       from ${from}
      where ${fence}
      limit 1
@@ -267,12 +347,14 @@ export function limitWithProbe(first: number): RawBuilder<unknown> {
 /**
  * Trim the probe row and anchor the next cursor on the last row KEPT.
  *
- * The anchor is the row's id, so there is nothing here to re-derive in
- * JavaScript and nothing to get wrong: the value the next page resumes after
- * is read from this row by {@link anchorValueQuery}, under the same projection
- * that ordered it.
+ * The anchor is the row's id plus its `sort_digest` — the projection
+ * {@link sortValueDigest} put on the page query, so it is the database's own
+ * digest of the very expression that ordered the row, not something re-derived
+ * in JavaScript. The value the next page resumes after is read from this row
+ * again by {@link anchorValueQuery}, under that same expression, and the
+ * digest is what says whether it is still the same value.
  */
-export function takePage<T extends { id: string }>(
+export function takePage<T extends { id: string; sort_digest: string }>(
   rows: readonly T[],
   first: number,
   totalCount: number,
@@ -282,6 +364,8 @@ export function takePage<T extends { id: string }>(
   return {
     rows: [...page],
     totalCount,
-    nextCursor: rows.length > page.length && last ? { id: last.id } : null,
+    nextCursor: rows.length > page.length && last
+      ? { id: last.id, value: last.sort_digest }
+      : null,
   };
 }

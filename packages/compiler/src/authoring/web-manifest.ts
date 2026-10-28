@@ -1622,11 +1622,19 @@ function projectStandalone(
         const title = i18n?.title;
         const target = referenceTarget(schema, targets);
         const rawType = Array.isArray(schema.type) ? schema.type.find((value) => value !== "null") : schema.type;
-        const baseType = schema.format === "date-time"
+        // An operation's array is a collection of its item type, just like an
+        // entity field with cardinality many. Preserve open arrays as before:
+        // without an item schema there is no item type to project.
+        const itemSchema = rawType === "array" && schema.items && typeof schema.items === "object" && !Array.isArray(schema.items)
+          ? schema.items as typeof schema : undefined;
+        const itemType = itemSchema && (Array.isArray(itemSchema.type) ? itemSchema.type.find((value) => value !== "null") : itemSchema.type);
+        const fieldSchema = itemSchema ?? schema;
+        const fieldType = itemSchema ? itemType : rawType;
+        const baseType = fieldSchema.format === "date-time"
           ? "datetime"
-          : schema.format === "date"
+          : fieldSchema.format === "date"
             ? "date"
-            : typeof rawType === "string" ? rawType : "string";
+            : typeof fieldType === "string" ? fieldType : "string";
         const enumValues = Array.isArray(schema.enum)
           ? schema.enum.filter((value): value is string => typeof value === "string")
           : Object.keys(i18n?.enum ?? {});
@@ -1644,7 +1652,7 @@ function projectStandalone(
             })),
           } : {}),
           ...(target ? { relationship: { targetEntityId: target.contract.entity.name } } : {}),
-          cardinality: "one" as const,
+          cardinality: itemSchema ? "many" as const : "one" as const,
           required: false,
           supports: { read: true, create: false, update: false },
         }];

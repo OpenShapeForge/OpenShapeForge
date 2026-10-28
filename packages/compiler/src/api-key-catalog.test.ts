@@ -92,6 +92,15 @@ function presentationComponents(value: unknown): string[] {
 const MINTING = ["api-keys.create-integration", "api-keys.issue-credential"];
 
 describe("shipped integration and API-key catalog", () => {
+  test("projects role lists as collections of text, including nullable credential subsets", () => {
+    const entities = manifest(apiKeyCatalog()).entities;
+    expect(entities.ApiKeyIntegration!.fields.grantedRoles).toMatchObject({
+      osfType: "string", baseType: "string", cardinality: "many",
+    });
+    expect(entities.ApiKeyCredential!.fields.roleSubset).toMatchObject({
+      osfType: "string", baseType: "string", cardinality: "many",
+    });
+  });
   test("binds every Operation to the one provisioning service under the management role", () => {
     const operations = compiled(apiKeyCatalog());
     expect(operations.map(({ key }) => key).sort()).toEqual([

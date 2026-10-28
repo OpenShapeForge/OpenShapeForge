@@ -31,6 +31,14 @@ export type GeneratedCrudAuthorization = {
       principals: Array<"person" | "integration">;
       /** Fields a holder of this action may read; absent discloses nothing. */
       reads?: string[];
+      /**
+       * The ACL row lock the authorization check takes. `exclusive` (the
+       * compiled default) serializes two holders of the same action on the
+       * same record, so an effect that later locks that record more strongly
+       * cannot deadlock on the upgrade; `shared` lets them pass together and
+       * is only safe for an effect that never upgrades.
+       */
+      lock?: "exclusive" | "shared";
     }>;
   };
 };

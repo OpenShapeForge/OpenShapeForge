@@ -428,10 +428,23 @@ function compileRecordActions(
       );
     }
     const reads = compileRecordActionReads(coreEntity, action, fields, aclField);
+    // The lock the check takes, always emitted. Leaving it implicit would put
+    // the deadlock-safe default in three places (schema, compiler, migration)
+    // and make a changed default silently rewrite deployed SQL; carrying it
+    // means the manifest states which mode each action was compiled with.
+    if (action.lock !== undefined && action.lock !== "exclusive" && action.lock !== "shared") {
+      throw new AuthorizationCompileError(
+        coreEntity.entity,
+        `authorization.rowAccess.recordPermissions.actions "${action.name}" declares lock ` +
+          `${JSON.stringify(action.lock)}; it must be "exclusive" (the default, which cannot deadlock) ` +
+          `or "shared" (only for an effect that provably never locks the record more strongly).`,
+      );
+    }
     return {
       name: action.name,
       principals: principals.sort(),
       ...(reads.length > 0 ? { reads } : {}),
+      lock: action.lock ?? "exclusive",
     };
   }).sort((left, right) => left.name.localeCompare(right.name));
 }

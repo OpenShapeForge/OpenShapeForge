@@ -234,6 +234,7 @@ action:
           reads: [definition, status]
         - name: follow
           principals: [integration, person]
+          lock: shared
 ```
 
 and granted per record, under the ACL's own `actions` member:
@@ -281,12 +282,25 @@ What is true of this axis, and is the reason it is separate:
   compile time. An action with no `reads` authorizes an effect and discloses
   nothing.
 
+- **`lock` is the concurrency contract.** The check locks the record's ACL row
+  and holds it for the rest of the transaction, and the effect then runs under
+  that lock. `exclusive`, the default, takes a self-exclusive row lock: two
+  holders of the same action on the same record serialize at the check, so an
+  effect that goes on to lock that record more strongly — an ordinary
+  `select … for update` on it, or an entity update of it — cannot deadlock on
+  the upgrade. `shared` lets concurrent holders through together, which is the
+  right trade for an action whose effect only reads: `follow` above polls a
+  status and never writes the definition. Choosing `shared` for an effect that
+  *does* upgrade is a deadlock under parallel calls, and the compiler cannot
+  see an effect's SQL to warn you — which is why the default is the safe mode
+  and a later authoring layer may tighten `lock` but never weaken it. Both
+  modes fence a concurrent ACL change identically.
+
 A record-scoped plugin Operation requires one with
 `auth.recordAction: <name>`; the entity must declare it, and the check is a
-live read inside the Operation's transaction (docs/operations.md). The lookup
-locks the record's ACL row for the rest of that transaction, which is the
-single ordering a concurrent policy change also follows, so a grant and its
-removal cannot interleave with the effect in either direction.
+live read inside the Operation's transaction (docs/operations.md). The lock
+above is the single ordering a concurrent policy change also follows, so a
+grant and its removal cannot interleave with the effect in either direction.
 
 Notes on what the compiler does with this:
 

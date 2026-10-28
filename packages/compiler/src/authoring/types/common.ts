@@ -137,7 +137,35 @@ export interface RowAccessRecordActionConfig {
    * already supplies.
    */
   reads?: string[];
+  /**
+   * How strongly the authorization check locks the record's ACL row.
+   *
+   * The check and the effect run in one transaction, and the check takes the
+   * lock first. That ordering is what fences a concurrent policy change — a
+   * revocation waits for an effect in flight, and a check that starts after a
+   * revocation waits and then reads it — and both modes below keep it.
+   *
+   * What differs is how two holders of the SAME action on the SAME record
+   * behave:
+   *
+   *   exclusive  (default) a self-exclusive lock. The second holder waits at
+   *              the check until the first commits. An effect that later takes
+   *              a row-exclusive lock on the same record is then safe, because
+   *              only one holder is ever positioned to upgrade.
+   *   shared     both holders pass the check together. Correct for an action
+   *              whose effect only reads — and a DEADLOCK if that effect then
+   *              locks the same record more strongly, since each holder waits
+   *              for a shared lock the other will not release until it has
+   *              upgraded. PostgreSQL detects it and aborts one transaction.
+   *
+   * So `shared` is a throughput choice for a provably read-only effect, and
+   * the compiler cannot verify that claim: an effect's SQL is not in scope
+   * here. The default is the mode that cannot deadlock.
+   */
+  lock?: RecordActionLock;
 }
+
+export type RecordActionLock = "exclusive" | "shared";
 
 export type RecordActionName = string;
 

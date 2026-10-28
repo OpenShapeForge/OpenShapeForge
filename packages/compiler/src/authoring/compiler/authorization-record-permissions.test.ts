@@ -110,21 +110,30 @@ describe("named record actions", () => {
     persisted: { column: key, storageClass: "core" }, ...overrides,
   });
 
-  test("compiles declared actions, sorted, with their principals and reads", () => {
+  test("compiles declared actions, sorted, with their principals, reads and lock", () => {
     const compiled = buildAuthorization(
       withActions(
         [
           { name: "start", principals: ["integration"], reads: ["status", "definition"] },
-          { name: "follow", principals: ["integration", "person"] },
+          { name: "follow", principals: ["integration", "person"], lock: "shared" },
         ],
         [storedField("definition"), storedField("status")],
       ),
       [], [],
     );
+    // `lock` is always emitted, so the manifest states the mode each action
+    // was compiled with rather than leaving the migration to re-apply a
+    // default a later release might change.
     expect(compiled.rowAccess!.recordPermissions!.actions).toEqual([
-      { name: "follow", principals: ["integration", "person"] },
-      { name: "start", principals: ["integration"], reads: ["definition", "status"] },
+      { name: "follow", principals: ["integration", "person"], lock: "shared" },
+      { name: "start", principals: ["integration"], reads: ["definition", "status"], lock: "exclusive" },
     ]);
+  });
+
+  test("refuses a lock mode that is neither exclusive nor shared", () => {
+    expect(() => buildAuthorization(
+      withActions([{ name: "start", principals: ["integration"], lock: "none" }]), [], [],
+    )).toThrow(/must be "exclusive"/);
   });
 
   test("an entity that declares nothing carries no action axis at all", () => {

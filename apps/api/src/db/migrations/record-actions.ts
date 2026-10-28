@@ -75,7 +75,7 @@ const RESOLVER_ROLE = databaseRole("recordActionResolver").name;
  *
  *   policy change   the ordinary entity UPDATE of the ACL field takes the row
  *                   lock PostgreSQL gives every UPDATE;
- *   runtime check   `for share` inside this function, in the CALLER's
+ *   runtime check   a row lock inside this function, in the CALLER's
  *                   transaction, so it is held for the whole Operation;
  *   effect          runs after the check in that same transaction, under that
  *                   same lock.
@@ -83,6 +83,11 @@ const RESOLVER_ROLE = databaseRole("recordActionResolver").name;
  * So a revocation that starts after a check waits for the effect to commit,
  * and a check that starts after a revocation waits for it and then reads the
  * revoked ACL. Neither ordering can interleave a grant with its own removal.
+ *
+ * The STRENGTH of that lock is the action's own declaration, because only the
+ * action's author knows whether its effect writes the record: see
+ * RECORD_ACTION_LOCKS below. The default is the mode under which two parallel
+ * holders cannot deadlock.
  */
 const IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
 const ENTITY_NAME = /^[A-Z][A-Za-z0-9]*$/;
@@ -111,7 +116,12 @@ export type ManifestRecordActionTable = {
     authorization?: {
       recordPermissions?: {
         column: string;
-        actions?: Array<{ name: string; principals: string[]; reads?: string[] }>;
+        actions?: Array<{
+          name: string;
+          principals: string[];
+          reads?: string[];
+          lock?: string;
+        }>;
       };
     };
   };
@@ -131,7 +141,42 @@ export type RecordActionEntity = {
    * discloses nothing.
    */
   reads: Record<string, Array<{ field: string; column: string }>>;
+  /**
+   * Per action, the ACL row lock its check takes. `exclusive` renders `for no
+   * key update`, `shared` renders `for share`; see RECORD_ACTION_LOCKS below
+   * for why that choice belongs to the action rather than to this migration.
+   */
+  locks: Record<string, RecordActionLock>;
 };
+
+export type RecordActionLock = "exclusive" | "shared";
+
+/**
+ * The two lock modes, and what each one does to a concurrent pair.
+ *
+ * `for share` is self-COMPATIBLE: two holders of the same action on the same
+ * record both pass the check, both hold a shared lock on the ACL row, and if
+ * the effect then locks that row more strongly each waits for a lock the
+ * other will not release until it has upgraded. That is a deadlock, and
+ * PostgreSQL resolves it by aborting one transaction. It is not a security
+ * failure, but it is a liveness one, and it appears only under parallel load.
+ *
+ * `for no key update` is self-EXCLUSIVE: the second holder waits at the check
+ * until the first commits, so only one is ever positioned to upgrade and the
+ * deadlock cannot form. It costs serialization of concurrent holders of the
+ * same action on the same record, which is why it is a declared choice: an
+ * action whose effect only reads can afford `shared` and say so.
+ *
+ * Both modes conflict with the ordinary UPDATE of the ACL column (which takes
+ * `for no key update` itself), so the revocation fence is identical under
+ * either: a revocation that starts after a check waits for the effect to
+ * commit, and a check that starts after a revocation waits and then reads the
+ * revoked ACL.
+ */
+export const RECORD_ACTION_LOCKS: Readonly<Record<RecordActionLock, string>> = Object.freeze({
+  exclusive: "for no key update",
+  shared: "for share",
+});
 
 function invalid(table: ManifestRecordActionTable, reason: string): never {
   throw new Error(
@@ -177,7 +222,16 @@ export function recordActionEntities(
       }
     }
     const reads: RecordActionEntity["reads"] = {};
+    const locks: RecordActionEntity["locks"] = {};
     for (const action of policy.actions) {
+      // The compiler emits the mode on every action, so an absent one means
+      // the manifest predates the field rather than that the author chose.
+      // Take the safe mode either way; never guess "shared".
+      const lock = action.lock ?? "exclusive";
+      if (lock !== "exclusive" && lock !== "shared") {
+        invalid(table, `action "${action.name}" declares lock "${lock}", which is neither exclusive nor shared`);
+      }
+      locks[action.name] = lock;
       const projection: Array<{ field: string; column: string }> = [];
       for (const field of [...new Set(action.reads ?? [])].sort()) {
         const column = (table.columns ?? []).find(
@@ -205,39 +259,44 @@ export function recordActionEntities(
       aclColumn: policy.column,
       actions,
       reads,
+      locks,
     });
   }
   return entities.sort((left, right) => left.entity.localeCompare(right.entity));
 }
 
-/** The fixed `case` body. Deterministic for a given manifest. */
+/**
+ * The fixed `case` body. Deterministic for a given manifest.
+ *
+ * One branch per (entity, action), not per entity, because the lock mode is a
+ * property of the ACTION: a definition's read-only `follow` and its
+ * record-writing `start` live on the same row and must not be forced to share
+ * a lock strength. An entity or action the compiler did not authorize reaches
+ * the `else` and is a plain refusal — no raise, because an exception would
+ * abort the caller's transaction and a caller could read that as something
+ * other than a denial.
+ */
 export function renderRecordActionLookup(entities: readonly RecordActionEntity[]): string {
-  if (entities.length === 0) {
-    return "      -- No entity declares a record action in this deployment.\n      return false;";
-  }
-  const branches = entities.map((entity) => {
+  const branches = entities.flatMap((entity) => {
     const key = entity.keyIsUuid
       ? `t.${entity.keyColumn} = record_key::uuid`
       : `t.${entity.keyColumn}::text = record_key`;
-    const allowed = entity.actions.map((action) => `'${action}'`).join(", ");
-    return [
-      `        when '${entity.entity}' then`,
-      // Both guards return rather than raise. An exception would abort the
-      // caller's transaction, which a caller could catch and read as something
-      // other than a denial; a key that is not a key, and an action this
-      // entity does not declare, are plain refusals.
-      `          if action not in (${allowed}) then return false; end if;`,
+    return entity.actions.map((action) => [
+      `        when '${entity.entity}:${action}' then`,
       ...(entity.keyIsUuid
         ? [`          if record_key !~* ${UUID_LITERAL} then return false; end if;`]
         : []),
       `          select t.${entity.aclColumn} into document`,
       `            from ${entity.schema}.${entity.table} t`,
       `           where ${key} and t.tenant_id = app.current_tenant()`,
-      `           for share;`,
-    ].join("\n");
+      `           ${RECORD_ACTION_LOCKS[entity.locks[action] ?? "exclusive"]};`,
+    ].join("\n"));
   });
+  if (branches.length === 0) {
+    return "      -- No entity declares a record action in this deployment.\n      return false;";
+  }
   return [
-    "      case entity",
+    "      case entity || ':' || action",
     ...branches,
     "        else return false;",
     "      end case;",

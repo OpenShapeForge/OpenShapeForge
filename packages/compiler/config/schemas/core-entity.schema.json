@@ -351,6 +351,11 @@
                         "uniqueItems": true,
                         "items": { "enum": ["person", "integration"] },
                         "description": "Which principal kinds a grant of this action may name. person admits the ACL's users/groups/roles subjects; integration admits integrations, the verified tenant-bound API-key integration ids the server resolves from the presented credential. An integration may never be named for view, edit or delete."
+                      },
+                      "lock": {
+                        "enum": ["exclusive", "shared"],
+                        "default": "exclusive",
+                        "description": "How strongly the authorization check locks the record's ACL row, and therefore how two concurrent holders of this action behave. exclusive (the default) takes a self-exclusive row lock, so two holders serialize at the check and an effect that later locks the same record more strongly cannot deadlock on the upgrade. shared lets concurrent holders pass the check together, which is right for an action whose effect only reads - but an effect that then takes a row-exclusive lock on the SAME record deadlocks under parallel calls, because both holders must release a shared lock neither will. Both modes fence a concurrent ACL change: a revocation waits for a check in flight, and a check that starts after one waits and then reads the revocation. Choose shared only for an action whose effect provably never upgrades the lock."
                       }
                     }
                   }

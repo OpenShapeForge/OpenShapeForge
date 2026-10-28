@@ -109,6 +109,7 @@ test("the restricted migrate role installs the lookup, its grants and its polici
       keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
       actions: ["start"],
       reads: { start: [{ field: "definition", column: "definition" }] },
+      locks: { start: "exclusive" },
     }]);
     expect(installed.map((entity) => entity.entity)).toEqual(["RestrictedRun"]);
 
@@ -175,6 +176,7 @@ test("the restricted migrate role installs the lookup, its grants and its polici
       keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
       actions: ["start"],
       reads: { start: [{ field: "definition", column: "definition" }] },
+      locks: { start: "exclusive" },
     }]);
   });
 }, TEST_TIMEOUT);

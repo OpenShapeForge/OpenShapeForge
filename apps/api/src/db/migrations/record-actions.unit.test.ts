@@ -65,6 +65,7 @@ describe("the record-action registry", () => {
       keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
       actions: ["start"],
       reads: { start: [{ field: "definition", column: "definition" }] },
+      locks: { start: "exclusive" },
     }]);
   });
 
@@ -176,19 +177,50 @@ describe("the record-action registry", () => {
 describe("the rendered lookup", () => {
   const entities = recordActionEntities([table()]);
 
-  test("is a fixed case over the declared entities and their declared actions", () => {
+  test("is a fixed case over each declared entity and action pair", () => {
     const body = renderRecordActionLookup(entities);
-    expect(body).toContain("case entity");
-    expect(body).toContain("when 'Run' then");
-    expect(body).toContain("if action not in ('start') then return false; end if;");
+    expect(body).toContain("case entity || ':' || action");
+    expect(body).toContain("when 'Run:start' then");
     expect(body).toContain("from erp.runs t");
     expect(body).toContain("t.tenant_id = app.current_tenant()");
-    expect(body).toContain("for share");
     expect(body).toContain("else return false;");
     // No parameterized identifier: a caller cannot name a table or a column.
     expect(body).not.toContain("format(");
     expect(body).not.toContain("execute ");
     expect(body).not.toContain("bypass_rls");
+  });
+
+  test("takes the action's declared lock, defaulting to the one that cannot deadlock", () => {
+    // The default: a holder whose effect writes the record is the common case
+    // and `for share` would let two of them deadlock on the upgrade.
+    expect(renderRecordActionLookup(entities)).toContain("for no key update;");
+    expect(renderRecordActionLookup(entities)).not.toContain("for share");
+    const [declared] = recordActionEntities([
+      withPolicy({
+        column: "acl",
+        actions: [
+          { name: "follow", principals: ["integration"], lock: "shared" },
+          { name: "start", principals: ["integration"], lock: "exclusive" },
+        ],
+      }),
+    ]);
+    expect(declared!.locks).toEqual({ follow: "shared", start: "exclusive" });
+    const body = renderRecordActionLookup([declared!]);
+    // Per action, not per entity: both live on the same row and the read-only
+    // one must not be forced to serialize with the writing one.
+    expect(body).toContain("when 'Run:follow' then");
+    expect(body.split("when 'Run:follow' then")[1]!.split("when 'Run:start' then")[0])
+      .toContain("for share;");
+    expect(body.split("when 'Run:start' then")[1]).toContain("for no key update;");
+  });
+
+  test("refuses a lock mode that is neither", () => {
+    expect(() => recordActionEntities([
+      withPolicy({
+        column: "acl",
+        actions: [{ name: "start", principals: ["integration"], lock: "none" }],
+      }),
+    ])).toThrow(/declares lock "none"/);
   });
 
   test("guards a uuid key before casting, so a malformed key denies", () => {

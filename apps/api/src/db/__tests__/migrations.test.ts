@@ -400,6 +400,28 @@ describe("generated schema migration", () => {
   );
 
   test(
+    "foreign tables block a checksum roll-forward without changing data or ledger",
+    async () => {
+      await withScratchDb(async (url) => {
+        await runChain(url);
+        await withDb(url, async (db) => {
+          await sql`create table erp.preexisting_operator_data (id text primary key)`.execute(db);
+          await sql`insert into erp.preexisting_operator_data values ('preserve-me')`.execute(db);
+          await staleChecksum(db);
+        });
+        const message = await expectRejects(runChain(url));
+        expect(message).toContain("erp.preexisting_operator_data");
+        await withDb(url, async (db) => {
+          expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe("simulated-old");
+          const rows = await sql<{ id: string }>`select id from erp.preexisting_operator_data`.execute(db);
+          expect(rows.rows).toEqual([{ id: "preserve-me" }]);
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
     "a column the manifest does not declare blocks the roll-forward and records nothing",
     async () => {
       await withScratchDb(async (url) => {

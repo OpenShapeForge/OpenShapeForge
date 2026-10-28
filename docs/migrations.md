@@ -677,3 +677,25 @@ additive roll-forward and its refusals, versioned migrations and their
 baseline, constraint reconciliation, the one-source-of-truth invariant, the
 hand-written `CHECK` replacement, `db:reset` and the bootstrap — against
 throwaway scratch databases ([testing.md](testing.md#migration-tests)).
+
+### Removing the record-action test fixture composition
+
+Production no longer includes the `ExternalProcessRun` and `MeterConnection`
+fixture entities. Before upgrading a database previously used with a build that
+included this test composition, inspect it with the database owner:
+
+```sql
+select to_regclass('erp.external_process_runs'),
+       to_regclass('erp.meter_connections');
+```
+
+Verify the actual schema and table names against that build's database manifest;
+these examples alone do not establish absence in other schemas. If fixture
+objects exist in a manifest-covered schema, the migration refuses to advance the
+generated-schema checksum and retains the objects and their data. Keep the
+previous deployment available, take a verified backup, and have the owner assess
+records, foreign keys and consumers. A reviewed versioned migration and an
+explicit data disposition are required before retrying; do not reset or drop
+objects as an automatic upgrade step. This is an operator intervention, not an
+automated carry-forward. Databases without these objects can use the normal
+additive migration path.

@@ -68,6 +68,8 @@ jobs:
         run: |
           bun run generate
           bun scripts/check-test-fixture-composition.ts production
+          bun run check:generated
+          git diff --exit-code -- apps/api/src/generated/compiler/field-authoring-registry.json
           cp test/fixtures/authoring/test-composition.yaml authoring.config.local.yaml
           bun run generate
           bun scripts/check-test-fixture-composition.ts test

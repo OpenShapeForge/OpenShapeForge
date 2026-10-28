@@ -783,10 +783,37 @@ and a trusted-context person resolves to scope `self` rather than `tenant`, so
 `withDbSession` refuses the substitution. Both api-key tables are fenced on the
 tenant alone, so joining a narrower scope changes no row the service may read.
 
+That session is handed out FROZEN, and a rejoin is recognised by its identity
+rather than by its contents. The object reaches code outside `db/session.ts`
+twice — as the second argument of every `withDbSession` callback and through
+`activeDbSessionContext` — and while it was mutable, a holder could write
+another tenant, a longer role set or a `person` class onto it and hand it back
+with `independent: true`: a second transaction then opened with the edited
+fields, and the nested fence, comparing the object against itself field by
+field, agreed every time. Frozen, that assignment throws; a caller's own object
+with the fields it wants is not the active session, so it is derived from the
+carrier's facts and held to the fence as before.
+
 The one exception is the intent row, which keeps its own transaction. It has to
 be durable BEFORE the realm is touched: nested, it would roll back together
 with the step that failed, leaving a realm client that no `pending` row names
 and that the reconciler could therefore neither finish nor sweep.
+
+**One page request is one statement, and so one snapshot.** The count, the
+anchor's digest check and the page's own select are a single statement with
+three CTEs, not three statements. Separately they took three snapshots of a
+READ COMMITTED transaction, and a commit landing between them was visible to
+the later ones and not the earlier: the digest matched, the page then resumed
+after the anchor's *new* value, and a rename that moved the anchor later in the
+order handed the caller back the very row the previous page had ended on — past
+the refusal written for that case. `totalCount` could likewise describe fewer
+rows than the page carried. One statement is what makes those three answers
+agree regardless of isolation level, which matters because inside a canonical
+Operation this listing joins the dispatcher's transaction and does not choose
+its isolation. Proven with a real second connection committing inside the
+request, at every statement boundary it has
+(`apps/api/src/operations/api-key-cursor-db.test.ts`, "one page request is one
+snapshot").
 
 **Cursors are opaque, bounded, and not trusted.** A keyset cursor names the
 previous page's last row by id and by a 16-character digest of that row's sort
@@ -808,6 +835,14 @@ cursor was not issued under and an anchor no row answers to are the same
 declared `400 VALIDATION` with the same message, so a cursor is not a probe for
 another tenant's ids.
 
+The digest is **required**, so a cursor issued before it existed — the
+four-field payload this listing used to emit — is refused with that same
+`400 VALIDATION`. A caller mid-walk across the deploy that added it reads the
+listing again from its first page. A cursor is a page token with the lifetime
+of one walk and nothing persists it, so there is nothing to migrate; accepting
+a digest-less cursor and skipping the anchor check for it would keep the
+silently-short page below reachable for as long as any client held one.
+
 **A listing is not stable across a mutation of the row a cursor anchors on, and
 says so.** Resolving the resume value from the anchor row per request means
 resolving its CURRENT value. Rename the row a page ended on to a name that
@@ -817,11 +852,19 @@ earlier and rows repeat. Carrying the value would fix it and is the option the
 unbounded `display_name` rules out, so the cursor carries the digest instead —
 enough to notice the move, not enough to undo it. Such a page is refused with
 its own `400 VALIDATION` ("after names a row whose sort value changed…") and
-the caller reads the listing from its first page again. Everything else is
-stable in the way a keyset is and an offset is not: an insert or a removal
-before the cursor cannot shift a later page, and a mutation of any row other
-than the anchor leaves the walk reaching every row exactly once. This is the
-listing's one accepted anomaly and it is a visible one — see
+the caller reads the listing from its first page again. What a keyset does give
+and an offset does not is that an insert or a removal before the cursor cannot
+shift a later page, which an offset answers with one row skipped and one
+repeated.
+
+That is a claim about inserts and removals, and not a snapshot of the catalog
+across page requests: a row whose own sort value changes between two requests
+moves in the order, and a walk may then reach it twice or not at all. That is
+ordinary keyset pagination rather than an anomaly this listing closes — only
+the anchor row's own movement is refused, because resuming from it is what
+would end a walk early with rows unread. This is the listing's one accepted
+anomaly in the sense that it is the one it refuses rather than absorbs, and it
+is a visible one — see
 `apps/api/src/operations/api-key-cursor-db.test.ts` ("a cursor whose anchor
 moved in the order"). Paging a catalog while it is being renamed may therefore
 need a retry from the first page; nothing silently answers short.
@@ -922,9 +965,27 @@ Proven:
   have taken back; and an anchor RENAMED mid-walk (forwards past the rest of
   the listing, backwards behind rows already read) or moved out of its derived
   status block is that same declared `400` rather than a silently short page,
-  while a mutation of a non-anchor row and an insert before the cursor leave
-  the walk reaching every row exactly once
+  while an insert before the cursor and a rename of a row already delivered
+  leave the walk reaching every row exactly once; and a cursor from before the
+  digest existed is that same declared `400`
+  (`apps/api/src/operations/api-key-cursor-db.test.ts`,
+  `apps/api/src/operations/api-key-cursor.test.ts`);
+- the page's three answers agree under a real second connection committing
+  INSIDE one request, at every statement boundary it has: a rename that moves
+  the anchor cannot hand the anchor row back, and `totalCount` cannot describe
+  fewer rows than the page carries
   (`apps/api/src/operations/api-key-cursor-db.test.ts`);
+- a verified identity link whose party is not a person does not classify its
+  session as one, so a payload-v2 carrier with such a link holds no named
+  action's person subjects and no person-only generic route; the audit identity
+  it carries is unaffected
+  (`apps/api/src/auth/principal-class.unit.test.ts`,
+  `apps/api/src/db/__tests__/principal-class-session.test.ts`);
+- the session a rejoin is recognised by is frozen, so neither the callback's
+  argument nor `activeDbSessionContext` can be edited into another tenant,
+  role set, principal class or application principal and handed back — nested
+  or `independent`
+  (`apps/api/src/db/__tests__/principal-class-session.test.ts`);
 - `no-store` on both minting surfaces of a booted stack, and the carrier
   refusal of an unclassified bundle on both
   (`apps/api/src/auth/api-key/credential-no-store-db.test.ts`).

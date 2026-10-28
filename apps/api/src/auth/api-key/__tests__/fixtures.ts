@@ -21,7 +21,7 @@
  * assert the statements that were SENT (fence, parameters, bounds) and the
  * projection of the rows that came back.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   Kysely,
   PostgresAdapter,
@@ -31,6 +31,7 @@ import {
   type DatabaseConnection,
   type QueryResult,
 } from "kysely";
+import { DIGEST_LENGTH } from "../catalog-page.js";
 import type { DB } from "../../../generated/db/types.js";
 
 export type FixtureIntegration = {
@@ -74,6 +75,23 @@ function isLive(key: FixtureKey, now: Date): boolean {
     (key.expiresAt === null || key.expiresAt.getTime() > now.getTime());
 }
 
+/**
+ * The page's `sort_digest`, by the same rule the SQL uses: sha256 of the
+ * rendered value behind a `v`, or of `n` for an absent one, as the first
+ * {@link DIGEST_LENGTH} characters of base64url (`catalog-page.ts`,
+ * `sortValueDigest`). So a cursor this fixture issues is one it takes back.
+ *
+ * Which VALUE a row sorts by is not modelled: this fixture answers with every
+ * matching row and leaves ordering and paging to the database tests, so the
+ * digest only has to be stable per row.
+ */
+function sortDigest(value: string | null): string {
+  return createHash("sha256")
+    .update(value === null ? "n" : `v${value}`, "utf8")
+    .digest("base64url")
+    .slice(0, DIGEST_LENGTH);
+}
+
 function credentialStatusOf(key: FixtureKey, now: Date): string {
   if (key.revokedAt !== null) return "revoked";
   if (key.expiresAt !== null && key.expiresAt.getTime() <= now.getTime()) return "expired";
@@ -92,7 +110,7 @@ function answer(store: FixtureStore, text: string, params: readonly unknown[], n
   const integrationOf = () =>
     store.integrations.find((row) => named(row.id) && named(row.tenantId));
 
-  const integrationMetadata = (row: FixtureIntegration, sortValue?: string | null) => ({
+  const integrationMetadata = (row: FixtureIntegration) => ({
     id: row.id,
     display_name: row.displayName,
     status: row.status,
@@ -103,10 +121,9 @@ function answer(store: FixtureStore, text: string, params: readonly unknown[], n
     active_key_count: String(
       store.keys.filter((key) => key.integrationId === row.id && isLive(key, now)).length,
     ),
-    ...(sortValue === undefined ? {} : { sort_value: sortValue }),
   });
 
-  const keyMetadata = (row: FixtureKey, sortValue?: string | null) => ({
+  const keyMetadata = (row: FixtureKey) => ({
     id: row.id,
     integration_id: row.integrationId,
     integration_name:
@@ -117,7 +134,6 @@ function answer(store: FixtureStore, text: string, params: readonly unknown[], n
     expires_at: row.expiresAt,
     revoked_at: row.revokedAt,
     last_used_at: row.lastUsedAt,
-    ...(sortValue === undefined ? {} : { sort_value: sortValue }),
   });
 
   if (text.includes("set_config(")) return [];
@@ -195,11 +211,40 @@ function answer(store: FixtureStore, text: string, params: readonly unknown[], n
   // `api_key_integrations` anywhere would answer it with integration rows.
   const from = (table: string) => text.includes(`from platform.${table}`);
 
-  if (text.includes("count(*) as total")) {
-    const rows = from("api_key_integrations i")
-      ? store.integrations.filter((row) => named(row.tenantId))
-      : store.keys.filter((row) => named(row.tenantId) && named(row.integrationId));
-    return [{ total: String(rows.length) }];
+  // ONE page statement: the count, the anchor's verdict and the rows arrive
+  // together (`catalog-page.ts`, `pageStatement`), so this answers all three
+  // at once and is matched on a CTE the statement declares rather than on a
+  // fragment one of its parts shares with an ordinary read.
+  if (text.includes("page_total as (")) {
+    const credentials = from("api_keys k");
+    const rows: readonly { id: string; sort: string | null }[] = credentials
+      ? store.keys
+        .filter((row) => named(row.tenantId) && named(row.integrationId))
+        .map((row) => ({ id: row.id, sort: credentialStatusOf(row, now) }))
+      : store.integrations
+        .filter((row) => named(row.tenantId))
+        .map((row) => ({ id: row.id, sort: row.displayName.toLowerCase() }));
+    // The anchor CTE exists only for a request that carried a cursor, and its
+    // verdict rides on every row of the answer exactly as the real
+    // projection's does.
+    const anchored = text.includes("page_anchor as (");
+    const anchor = anchored ? rows.find((row) => named(row.id)) : undefined;
+    const verdict = {
+      total: String(rows.length),
+      anchor_found: anchored ? anchor !== undefined : false,
+      anchor_digest: anchor ? sortDigest(anchor.sort) : null,
+    };
+    // An empty page is the left join's unmatched row: the count and the
+    // verdict with no `page_ord`.
+    if (rows.length === 0) return [{ ...verdict, page_ord: null }];
+    return rows.map((row, index) => ({
+      ...verdict,
+      page_ord: String(index + 1),
+      sort_digest: sortDigest(row.sort),
+      ...(credentials
+        ? keyMetadata(store.keys.find((key) => key.id === row.id)!)
+        : integrationMetadata(store.integrations.find((item) => item.id === row.id)!)),
+    }));
   }
 
   if (from("api_keys k")) {
@@ -208,21 +253,13 @@ function answer(store: FixtureStore, text: string, params: readonly unknown[], n
       ? rows.filter((row) => named(row.integrationId))
       : rows;
     const scoped = text.includes("k.id =") ? byParent.filter((row) => named(row.id)) : byParent;
-    return scoped.map((row) =>
-      text.includes("sort_value")
-        ? keyMetadata(row, credentialStatusOf(row, now))
-        : keyMetadata(row)
-    );
+    return scoped.map((row) => keyMetadata(row));
   }
 
   if (from("api_key_integrations i")) {
     const rows = store.integrations.filter((row) => named(row.tenantId));
     const scoped = text.includes("and i.id =") ? rows.filter((row) => named(row.id)) : rows;
-    return scoped.map((row) =>
-      text.includes("sort_value")
-        ? integrationMetadata(row, row.displayName.toLowerCase())
-        : integrationMetadata(row)
-    );
+    return scoped.map((row) => integrationMetadata(row));
   }
 
   return [];

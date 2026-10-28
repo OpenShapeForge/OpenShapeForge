@@ -606,7 +606,7 @@ describe("an anchor is resolved against a row of this very set", () => {
  * `display_name` is unbounded `text` and the two older surfaces have been
  * storing names of any length, so a value-carrying cursor is as long as the
  * longest name a row holds and bounding it would bound those two published
- * contracts (`catalog-page.ts`, `anchorDigest`). So the cursor carries a
+ * contracts (`catalog-page.ts`, `sortValueDigest`). So the cursor carries a
  * DIGEST of the value instead: fixed width for a name of any length, enough to
  * notice the move, not enough to undo it. The page is refused as a declared
  * client error and the caller reads the listing again.
@@ -614,26 +614,28 @@ describe("an anchor is resolved against a row of this very set", () => {
  * These tests state both halves: the move is refused rather than answered, and
  * a mutation that does NOT move the anchor still pages exactly once per row.
  */
+const LETTERS = ["a", "b", "c", "d", "e"] as const;
+
+/** Five integrations named a..e, created in that order. */
+async function seedLetters(adminDb: Kysely<DB>): Promise<Record<string, string>> {
+  await seedTenant(adminDb);
+  const ids: Record<string, string> = {};
+  for (const [index, letter] of LETTERS.entries()) {
+    ids[letter] = await seedIntegration(adminDb, {
+      displayName: letter, createdAt: new Date(Date.UTC(2026, 0, 1 + index)),
+    });
+  }
+  return ids;
+}
+
+async function rename(adminDb: Kysely<DB>, id: string, displayName: string): Promise<void> {
+  await sql`
+    update platform.api_key_integrations set display_name = ${displayName}
+     where id = ${id}::uuid
+  `.execute(adminDb);
+}
+
 describe("a cursor whose anchor moved in the order", () => {
-  /** Five integrations named a..e, created in that order. */
-  async function seedLetters(adminDb: Kysely<DB>): Promise<Record<string, string>> {
-    await seedTenant(adminDb);
-    const ids: Record<string, string> = {};
-    for (const [index, letter] of ["a", "b", "c", "d", "e"].entries()) {
-      ids[letter] = await seedIntegration(adminDb, {
-        displayName: letter, createdAt: new Date(Date.UTC(2026, 0, 1 + index)),
-      });
-    }
-    return ids;
-  }
-
-  async function rename(adminDb: Kysely<DB>, id: string, displayName: string): Promise<void> {
-    await sql`
-      update platform.api_key_integrations set display_name = ${displayName}
-       where id = ${id}::uuid
-    `.execute(adminDb);
-  }
-
   /**
    * Walk a listing one row per page THROUGH the encoder and decoder, running
    * `between` after each page. Returns the rows seen and the refusal, if any —
@@ -752,6 +754,172 @@ describe("a cursor whose anchor moved in the order", () => {
       // the cursor, so this walk does not reach it — and no row is repeated.
       expect(inserted.ids.length).toBe(new Set(inserted.ids).size);
       expect(inserted.ids).toEqual(all);
+    });
+  }, TEST_TIMEOUT);
+});
+
+/**
+ * One page request is ONE snapshot, proven with a second connection committing
+ * inside it.
+ *
+ * The count, the anchor's digest check and the page's own select used to be
+ * three statements in a READ COMMITTED transaction, so each took its own
+ * snapshot and a commit landing between them was visible to the later ones and
+ * not the earlier. Two things followed, and both are failures the caller
+ * cannot see:
+ *
+ *   - the digest matched under the second statement's snapshot and the page
+ *     resumed after the anchor's value under the third's. A rename that moved
+ *     the anchor LATER in the order in that window made the anchor row itself
+ *     satisfy "after its old value", so the row the caller had just been
+ *     handed as the end of the previous page came back again — and the refusal
+ *     written for precisely this case (`MOVED_ANCHOR`) had already passed.
+ *   - `totalCount` was counted under the first snapshot and the rows selected
+ *     under the third, so a page could report a smaller total than the number
+ *     of rows it carried.
+ *
+ * The page is one statement now, so there is no window: the digest the caller
+ * compares, the value the keyset resumes after and the count are read under
+ * the snapshot the page is cut from.
+ *
+ * The overlap here is real rather than simulated. The writer is the admin
+ * connection, committing while the app connection's read transaction is open,
+ * and a Kysely plugin holds the request at a statement boundary until that
+ * commit has landed. Every boundary in turn is covered, so this test needs no
+ * assumption about which statement the window used to sit behind — and it
+ * asserts that the boundary it names was really reached, so a point that does
+ * not exist cannot pass vacuously.
+ *
+ * What is NOT claimed: a snapshot across page REQUESTS. Rows other than the
+ * anchor may change between two requests and a walk then reaches them twice or
+ * not at all; that is keyset pagination, and the suite above states which part
+ * of it this listing refuses.
+ */
+describe("one page request is one snapshot", () => {
+  /**
+   * Run `appDb`'s next request with `commit` landing once, after its `nth`
+   * statement. `reached` says whether that boundary existed.
+   */
+  function interleaved(appDb: Kysely<DB>, nth: number, commit: () => Promise<void>) {
+    let seen = 0;
+    const state = { reached: false };
+    const db = appDb.withPlugin({
+      transformQuery: (args) => args.node,
+      async transformResult(args) {
+        seen += 1;
+        if (!state.reached && seen === nth) {
+          state.reached = true;
+          await commit();
+        }
+        return args.result;
+      },
+    });
+    return { db, state };
+  }
+
+  /** Every statement boundary one page request has, and then some. */
+  const BOUNDARIES = [1, 2, 3, 4, 5, 6];
+
+  async function resetLetters(adminDb: Kysely<DB>, ids: Record<string, string>): Promise<void> {
+    for (const letter of LETTERS) await rename(adminDb, ids[letter]!, letter);
+    await sql`
+      delete from platform.api_key_integrations
+       where tenant_id = ${TENANT} and id <> all(${`{${Object.values(ids).join(",")}}`}::uuid[])
+    `.execute(adminDb);
+  }
+
+  test("a commit that moves the anchor cannot hand the anchor row back", async () => {
+    if (!(await serverReachable())) return;
+    await withScratchDb(SESSIONS[0], async ({ appDb, adminDb }) => {
+      const ids = await seedLetters(adminDb);
+      const identity = { f: "displayName" as const, d: "asc" as const };
+      const query = fingerprint(["integrations", undefined, undefined]);
+      let reachedAny = false;
+
+      for (const boundary of BOUNDARIES) {
+        await resetLetters(adminDb, ids);
+        // The cursor a caller really holds: the page that ended on "a".
+        const first = await pageIntegrations(serviceDeps(appDb), manager(), {
+          sortField: identity.f, sortDirection: identity.d, first: 1,
+        });
+        const anchor = first.nextCursor!;
+        expect({ boundary, anchor: anchor.id }).toEqual({ boundary, anchor: ids.a! });
+        const cursor = encodeCursor(anchor, identity, query)!;
+
+        // "a" becomes "zzz" — past b..e — on the other connection, committed
+        // while this request's transaction is open.
+        const { db, state } = interleaved(appDb, boundary, () =>
+          rename(adminDb, ids.a!, "zzz"));
+
+        let refusal: unknown;
+        let rows: string[] = [];
+        let total = 0;
+        try {
+          const page = await pageIntegrations(serviceDeps(db), manager(), {
+            sortField: identity.f, sortDirection: identity.d, first: 100,
+            ...cursorSpread(decodeCursor(cursor, identity, query)),
+          });
+          rows = page.rows.map((listed) => listed.id);
+          total = page.totalCount;
+        } catch (error) {
+          refusal = error;
+        }
+        reachedAny = reachedAny || state.reached;
+
+        if (refusal !== undefined) {
+          // The declared client error, never a 500: the anchor moved and the
+          // page says so.
+          expect({ boundary, declined: refusal instanceof ApiKeyValidationError })
+            .toEqual({ boundary, declined: true });
+          continue;
+        }
+        // Answered instead — which is correct only if the page was cut from a
+        // snapshot the digest still matched in. Either way the row the caller
+        // already has must NOT be in it, and the count must describe the rows.
+        expect({ boundary, repeated: rows.includes(ids.a!) })
+          .toEqual({ boundary, repeated: false });
+        expect({ boundary, unique: rows.length === new Set(rows).size })
+          .toEqual({ boundary, unique: true });
+        expect({ boundary, within: rows.length <= total })
+          .toEqual({ boundary, within: true });
+      }
+
+      // The interleaving happened: without this the loop above could pass by
+      // never reaching the boundary it names.
+      expect(reachedAny).toBe(true);
+    });
+  }, TEST_TIMEOUT);
+
+  test("the count cannot disagree with the rows it describes", async () => {
+    if (!(await serverReachable())) return;
+    await withScratchDb(SESSIONS[0], async ({ appDb, adminDb }) => {
+      const ids = await seedLetters(adminDb);
+      let reachedAny = false;
+
+      for (const boundary of BOUNDARIES) {
+        await resetLetters(adminDb, ids);
+        // A row inserted on the other connection, committed inside the
+        // request. The whole set fits in one page, so the count and the rows
+        // are describing exactly the same thing and have to agree.
+        const { db, state } = interleaved(appDb, boundary, async () => {
+          await seedIntegration(adminDb, {
+            displayName: "bb", createdAt: new Date(Date.UTC(2026, 5, 1)),
+          });
+        });
+        const page = await pageIntegrations(serviceDeps(db), manager(), {
+          sortField: "displayName", sortDirection: "asc", first: 100,
+        });
+        reachedAny = reachedAny || state.reached;
+        expect({ boundary, total: page.totalCount, rows: page.rows.length })
+          .toEqual({ boundary, total: page.rows.length, rows: page.rows.length });
+        // And the page is either the five it started with or the six it ended
+        // with — never a mixture of the two.
+        expect({ boundary, size: page.rows.length }).toEqual(
+          { boundary, size: page.rows.length === 6 ? 6 : 5 },
+        );
+      }
+
+      expect(reachedAny).toBe(true);
     });
   }, TEST_TIMEOUT);
 });

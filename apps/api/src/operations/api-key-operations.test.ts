@@ -528,13 +528,20 @@ describe("integration catalog Operations", () => {
           "lastUsedAt", "revokedAt", "roleSubset", "status",
         ]);
       }
-      // The parent is a predicate on the page AND on its count.
+      // The parent is a predicate on the page AND on its count — which are one
+      // statement now, so it has to appear in both of its CTEs rather than in
+      // two statements (`catalog-page.ts`, `pageStatement`).
       const fenced = statements.filter((query) => query.sql.includes("k.integration_id ="));
       expect(fenced.length).toBeGreaterThanOrEqual(2);
       for (const query of fenced) {
         expect(query.parameters).toContain(INTEGRATION_A);
         expect(query.parameters).toContain(TENANT_A);
       }
+      const pageStatement = statements.find((query) => query.sql.includes("page_total as ("));
+      expect(pageStatement).toBeTruthy();
+      // Once inside `page_total`, once inside `page_rows`.
+      expect(pageStatement!.sql.split("k.integration_id =").length - 1)
+        .toBeGreaterThanOrEqual(2);
 
       // A foreign parent is absent rather than an empty page.
       expect(failure((await run("listCredentials", { integrationId: INTEGRATION_B })).result))

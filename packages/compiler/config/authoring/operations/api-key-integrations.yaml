@@ -97,7 +97,10 @@ operations:
             # would have been right either, because the two older surfaces
             # accept a name of any length. The digest is what makes an anchor
             # that MOVED in the order a declared refusal rather than a silently
-            # short page; see docs/api.md. The decoder's own ceiling is derived
+            # short page, and it is REQUIRED: a cursor this listing issued
+            # before the digest existed is refused like a tampered one, so a
+            # caller mid-walk across that deploy reads the listing again from
+            # its first page. See docs/api.md. The decoder's own ceiling is derived
             # from the payload in apps/api/src/operations/api-key-cursor.ts
             # (MAX_CURSOR_LENGTH); this is the outer bound that stays above it,
             # pinned by a test in

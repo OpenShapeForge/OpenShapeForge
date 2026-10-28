@@ -31,8 +31,8 @@
  * ends the listing early with rows unread, or backwards, which repeats them.
  * The digest cannot restore the old point, but it makes the move visible, and
  * `auth/api-key/catalog-page.ts` (`MOVED_ANCHOR`) refuses the page instead of
- * answering it short. See {@link anchorDigest} for why that trade, and not a
- * value-carrying cursor, is the one available here: `anchorDigest` in that
+ * answering it short. See {@link sortValueDigest} for why that trade, and not a
+ * value-carrying cursor, is the one available here: `sortValueDigest` in that
  * same module states it in full.
  *
  * It also takes caller-supplied text out of the typed expressions entirely.
@@ -44,6 +44,18 @@
  * caller supplies is the uuid checked below, and the value reaching the cast
  * came out of the row a statement earlier (`catalog-page.ts`,
  * `anchorValueQuery`).
+ *
+ * COMPATIBILITY, STATED: `v` is REQUIRED, so a cursor issued before the digest
+ * existed — a payload with `f`, `d`, `q` and `i` and no `v` — is refused as
+ * {@link UNUSABLE_CURSOR}, exactly like a tampered one. That is deliberate and
+ * it is not free: a caller mid-walk across the deploy that adds this reads the
+ * listing again from its first page. A cursor is a page token with a lifetime
+ * of one walk rather than a stored identifier, so there is nothing persisted
+ * to migrate; and the alternative — accepting a v-less cursor and skipping the
+ * check for it — would keep the silently-short page this digest exists to stop
+ * reachable for as long as any client held one. Refusing is the smaller cost
+ * and the visible one. Nothing else about such a cursor changes: `i` is still
+ * an anchor of the caller's own set, so the refusal discloses nothing.
  *
  * The keyset alone would be resumable under a DIFFERENT sort or filter, where
  * "everything after this row" means something else entirely and silently skips
@@ -92,7 +104,7 @@ type CursorPayload = {
 const CURSOR_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * The digest's own shape: 16 base64url characters, as `anchorDigest`
+ * The digest's own shape: 16 base64url characters, as `sortValueDigest`
  * (`auth/api-key/catalog-page.ts`) produces. Checked for shape only — it is then compared for equality against
  * a digest this process computes from the row, so an admissible value that was
  * never issued simply does not match.

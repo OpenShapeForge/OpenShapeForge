@@ -14,7 +14,7 @@
  *   - a cursor carrying anything ELSE — a `v` of the kind this listing used to
  *     emit, an injected statement, a megabyte — cannot move the resume point.
  *     The digest is compared for EQUALITY against one the page computes from
- *     the row it read (`auth/api-key/catalog-page.ts`, `anchorDigest`), so an
+ *     the row it read (`auth/api-key/catalog-page.ts`, `sortValueDigest`), so an
  *     admissible-looking digest that was never issued refuses the page rather
  *     than resuming it somewhere; an inadmissible one does not get that far.
  *
@@ -39,6 +39,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { UNUSABLE_CURSOR } from "../auth/api-key/catalog-page.js";
 import { ApiKeyValidationError } from "../auth/api-key/service.js";
 import {
   decodeCursor,
@@ -201,5 +202,48 @@ describe("decodeCursor across both listings and both directions", () => {
 
   test("an absent cursor is the first page, not a refusal", () => {
     expect(decodeCursor(undefined, { f: "createdAt", d: "asc" }, QUERY)).toBeUndefined();
+  });
+});
+
+/**
+ * The cursor shape this listing issued BEFORE it carried a digest.
+ *
+ * `v` is required, so such a cursor is refused under the one message every
+ * unusable cursor gets. That is a compatibility statement rather than an
+ * oversight: a caller walking a listing across the deploy that added the
+ * digest reads it again from its first page. A cursor is a page token with the
+ * lifetime of one walk and nothing persists it, so there is nothing to
+ * migrate; accepting a v-less one and skipping the anchor check for it would
+ * keep the silently-short page the digest exists to refuse reachable for as
+ * long as any client held one.
+ */
+describe("a cursor from before the digest is refused, and that is the contract", () => {
+  const sort = { f: "displayName", d: "asc" as const };
+  const query = fingerprint(["integrations", undefined, undefined]);
+  const anchorId = "11111111-2222-4333-8444-555555555555";
+
+  const encoded = (payload: Record<string, unknown>) =>
+    Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+
+  test("the old four-field payload decodes to nothing", () => {
+    // Byte for byte what the listing used to emit once the value half was
+    // dropped and before the digest replaced it.
+    const old = encoded({ f: sort.f, d: sort.d, q: query, i: anchorId });
+    expect(() => decodeCursor(old, sort, query)).toThrow(UNUSABLE_CURSOR);
+  });
+
+  test("so does a payload whose v is absent, empty, null or the wrong width", () => {
+    for (const v of [undefined, "", null, 0, "AAAAAAAAAAAAAAA", "AAAAAAAAAAAAAAAAA", "AAAA/AAAAAAAAAAA"]) {
+      const cursor = encoded({ f: sort.f, d: sort.d, q: query, i: anchorId, ...(v === undefined ? {} : { v }) });
+      expect({ v, refused: (() => {
+        try { decodeCursor(cursor, sort, query); return false; } catch { return true; }
+      })() }).toEqual({ v, refused: true });
+    }
+  });
+
+  test("the current payload is the one that decodes", () => {
+    const current = encodeCursor({ id: anchorId, value: "AAAAAAAAAAAAAAAA" }, sort, query)!;
+    expect(decodeCursor(current, sort, query))
+      .toEqual({ id: anchorId, value: "AAAAAAAAAAAAAAAA" });
   });
 });

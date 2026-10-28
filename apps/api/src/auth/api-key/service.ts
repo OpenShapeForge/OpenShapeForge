@@ -36,20 +36,16 @@ import {
 } from "../../db/session.js";
 import { encryptSecret, type SecretKeyring } from "../../platform/secrets.js";
 import {
-  anchorValueQuery,
   containsFilter,
   exactFilter,
-  keysetPredicate,
-  limitWithProbe,
   MOVED_ANCHOR,
-  orderBy,
-  sortValueDigest,
+  pageStatement,
   takePage,
   UNUSABLE_CURSOR,
-  type KeysetCursor,
   type Page,
   type PageAnchor,
   type PageQuery,
+  type PageStatementRow,
   type SortColumn,
 } from "./catalog-page.js";
 import {
@@ -725,44 +721,36 @@ function boundedFirst(first: number): number {
 }
 
 /**
- * Resolve a cursor's anchor into the value the page resumes after, or refuse
- * the cursor.
+ * Refuse the cursor, or let the page it was read with stand.
  *
- * One statement, inside the page's own transaction and session, so the value
- * it reads is the one the page about to be ordered will compare against. The
- * `fence` is the caller's, built around the anchor id it is given — the tenant
- * and the subject binding are the caller's to supply and are never assumed
- * here.
+ * The anchor's verdict comes out of the page's OWN statement
+ * (`catalog-page.ts`, `pageStatement`), so it is read under the snapshot the
+ * page was cut from rather than one statement earlier. That is what makes the
+ * two refusals below mean anything: checked separately, the anchor could move
+ * after its digest matched and before the page was selected, and the page
+ * would then resume after the row's new value — handing back the row the
+ * caller was just given as the end of the previous page, or skipping rows.
  *
- * No row means the cursor is unusable: an anchor outside this set, which a
- * forged id, another tenant's id and a row removed out from under the caller
- * all look like. Refused as a client error rather than resumed from a guess,
- * which would skip or repeat a page's worth of rows.
+ * No row of this set answering to the anchor means the cursor is unusable: an
+ * anchor outside this set, which a forged id, another tenant's id and a row
+ * removed out from under the caller all look like. Refused as a client error
+ * rather than resumed from a guess.
  *
  * A row whose sort value no longer digests to what the cursor carries is the
  * other refusal: the anchor is still a row of this set, but it has MOVED in
  * the order, so resuming after its current value would end the walk early or
  * repeat rows the caller already has (`catalog-page.ts`, `sortValueDigest`).
- * Refused for the same reason and reported as {@link MOVED_ANCHOR}, which is
- * distinguishable because it only ever concerns a row this caller just read.
- * Both digests come out of the same SQL expression, so there is no second
- * implementation of it to drift.
+ * Reported as {@link MOVED_ANCHOR}, which is distinguishable because it only
+ * ever concerns a row this caller just read. Both digests come out of the same
+ * SQL expression, so there is no second implementation of it to drift.
  */
-async function resumeAfter(
-  trx: unknown,
-  column: SortColumn,
+function assertAnchorStood(
+  row: PageStatementRow | undefined,
   anchor: PageAnchor | undefined,
-  from: RawBuilder<unknown>,
-  fence: (anchor: string) => RawBuilder<unknown>,
-): Promise<KeysetCursor | undefined> {
-  if (!anchor) return undefined;
-  const found = await sql<{ sort_value: string | null; sort_digest: string }>`
-    ${anchorValueQuery(column, from, fence(anchor.id))}
-  `.execute(trx as never);
-  const row = found.rows[0];
-  if (!row) throw new ApiKeyValidationError(UNUSABLE_CURSOR);
-  if (row.sort_digest !== anchor.value) throw new ApiKeyValidationError(MOVED_ANCHOR);
-  return { value: row.sort_value, id: anchor.id };
+): void {
+  if (!anchor) return;
+  if (!row?.anchor_found) throw new ApiKeyValidationError(UNUSABLE_CURSOR);
+  if (row.anchor_digest !== anchor.value) throw new ApiKeyValidationError(MOVED_ANCHOR);
 }
 
 export type ListedKeyPage = Page<ListedKey>;
@@ -792,8 +780,8 @@ export async function pageKeys(
   const status = credentialStatusExpr(now);
 
   return withSession(deps, session, async (trx) => {
-    // The fence, repeated verbatim in both statements below. Written once as a
-    // fragment so the count can never drift from the page it describes.
+    // The fence, written once as a fragment so the count can never drift from
+    // the page it describes.
     const fence = sql`
       k.tenant_id = ${session.tenantId}
         and k.integration_id = ${scope.integrationId}
@@ -801,38 +789,39 @@ export async function pageKeys(
         ${exactFilter(status, query.status)}
     `;
 
-    const counted = await sql<{ total: string | number }>`
-      select count(*) as total
-        from platform.api_keys k
-       where ${fence}
+    // One statement: the count, the anchor's verdict and the rows, under one
+    // snapshot (`catalog-page.ts`, `pageStatement`). The anchor's fence leaves
+    // the FILTERS out on purpose — the anchor only has to be a row of this
+    // subject, and a name edited out of the filter since the cursor was issued
+    // is still a definite point in the order.
+    const result = await sql<KeyRow & { sort_digest: string } & PageStatementRow>`
+      ${pageStatement({
+        column,
+        id: sql`k.id`,
+        direction: query.sortDirection,
+        first,
+        from: sql`platform.api_keys k`,
+        pageFrom: sql`
+          platform.api_keys k
+          join platform.api_key_integrations i on i.id = k.integration_id`,
+        fence,
+        columns: KEY_METADATA_COLUMNS,
+        ...(query.after
+          ? {
+            anchor: {
+              cursor: query.after,
+              fence: sql`
+                k.tenant_id = ${session.tenantId}
+                  and k.integration_id = ${scope.integrationId}
+                  and k.id = ${query.after.id}`,
+            },
+          }
+          : {}),
+      })}
     `.execute(trx);
 
-    // The cursor names the row the previous page ended on; what to resume
-    // AFTER is read back out of that row here, under the tenant and the same
-    // integration binding the page itself is fenced on. The filters are left
-    // out on purpose: the anchor only has to be a row of this subject, and a
-    // name edited out of the filter since the cursor was issued is still a
-    // definite point in the order.
-    const after = await resumeAfter(trx, column, query.after, sql`
-      platform.api_keys k`, (anchor) => sql`
-      k.tenant_id = ${session.tenantId}
-        and k.integration_id = ${scope.integrationId}
-        and k.id = ${anchor}`);
-
-    // `sort_digest` is the ordering expression's own digest, carried out of
-    // the page so the next cursor can name the row it anchors on by value as
-    // well as by id — 16 characters a row, whatever that value is.
-    const result = await sql<KeyRow & { sort_digest: string }>`
-      select ${KEY_METADATA_COLUMNS}, ${sortValueDigest(column)} as sort_digest
-        from platform.api_keys k
-        join platform.api_key_integrations i on i.id = k.integration_id
-       where ${fence}
-         ${keysetPredicate(column, sql`k.id`, query.sortDirection, after)}
-       ${orderBy(column, sql`k.id`, query.sortDirection)}
-       ${limitWithProbe(first)}
-    `.execute(trx);
-
-    const page = takePage(result.rows, first, Number(counted.rows[0]?.total ?? 0));
+    assertAnchorStood(result.rows[0], query.after);
+    const page = takePage(result.rows, first);
     return { ...page, rows: page.rows.map(listedKey) };
   });
 }
@@ -985,34 +974,38 @@ export async function pageIntegrations(
         ${exactFilter(sql`i.status`, query.status)}
     `;
 
-    const counted = await sql<{ total: string | number }>`
-      select count(*) as total
-        from platform.api_key_integrations i
-       where ${fence}
+    // See pageKeys: one statement, one snapshot, and the anchor resolved under
+    // the tenant predicate alone — the filters are not part of what makes an
+    // anchor a row of this tenant's catalog. The digest is functionally
+    // dependent on the grouping key (`i.id` is the primary key), so it needs
+    // no place in `group by`.
+    const result = await sql<IntegrationRow & { sort_digest: string } & PageStatementRow>`
+      ${pageStatement({
+        column,
+        id: sql`i.id`,
+        direction: query.sortDirection,
+        first,
+        from: sql`platform.api_key_integrations i`,
+        pageFrom: sql`
+          platform.api_key_integrations i
+          left join platform.api_keys k
+            on k.integration_id = i.id and k.tenant_id = i.tenant_id`,
+        fence,
+        columns: integrationMetadataColumns(now),
+        groupBy: sql`group by i.id`,
+        ...(query.after
+          ? {
+            anchor: {
+              cursor: query.after,
+              fence: sql`i.tenant_id = ${session.tenantId} and i.id = ${query.after.id}`,
+            },
+          }
+          : {}),
+      })}
     `.execute(trx);
 
-    // See pageKeys: the resume value comes from the anchor row rather than
-    // from the cursor, under the tenant predicate alone — the filters are not
-    // part of what makes an anchor a row of this tenant's catalog.
-    const after = await resumeAfter(trx, column, query.after, sql`
-      platform.api_key_integrations i`, (anchor) => sql`
-      i.tenant_id = ${session.tenantId} and i.id = ${anchor}`);
-
-    // See pageKeys for `sort_digest`. Functionally dependent on the grouping
-    // key (`i.id` is the primary key), so it needs no place in `group by`.
-    const result = await sql<IntegrationRow & { sort_digest: string }>`
-      select ${integrationMetadataColumns(now)}, ${sortValueDigest(column)} as sort_digest
-        from platform.api_key_integrations i
-        left join platform.api_keys k
-          on k.integration_id = i.id and k.tenant_id = i.tenant_id
-       where ${fence}
-         ${keysetPredicate(column, sql`i.id`, query.sortDirection, after)}
-       group by i.id
-       ${orderBy(column, sql`i.id`, query.sortDirection)}
-       ${limitWithProbe(first)}
-    `.execute(trx);
-
-    const page = takePage(result.rows, first, Number(counted.rows[0]?.total ?? 0));
+    assertAnchorStood(result.rows[0], query.after);
+    const page = takePage(result.rows, first);
     return { ...page, rows: page.rows.map(listedIntegration) };
   });
 }

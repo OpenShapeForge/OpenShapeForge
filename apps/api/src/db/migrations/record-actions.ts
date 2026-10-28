@@ -632,22 +632,31 @@ async function assertResolverRole(db: OpenShapeForgeDatabase): Promise<void> {
  * membership this step needs even while `pg_has_role` is satisfied by that
  * same third path. {@link readUnintendedDefinerMembers} walks the graph; the
  * grant below is read off the edge itself.
+ *
+ * The walk returns one row per ROUTE, not per role, so a role that reaches the
+ * resolver twice over is named twice with a different `revoke` each time. The
+ * message says which role can act as the resolver, why each route is refused
+ * once per route, and that every statement has to be run — following one of
+ * them leaves the other route live.
  */
 async function assertResolverMembers(db: OpenShapeForgeDatabase): Promise<void> {
   const identity = await readMigrateIdentity(db);
   const unintended = await readUnintendedDefinerMembers(db, [RESOLVER_ROLE]);
   if (unintended.length > 0) {
-    const members = unintended.map((row) => row.member);
+    const reaching = [...new Set(unintended.map((row) => row.member))];
+    const revokes = [...new Set(unintended.map((row) => `revoke ${row.via} from ${row.member};`))];
     throw new Error(
       `The record-action resolver role ${RESOLVER_ROLE} cannot be used: ` +
-        `${members.join(", ")} ${members.length === 1 ? "is a member" : "are members"} of it, ` +
-        `and neither the migrate identity ${identity.user} nor this database's owner ` +
-        `${identity.databaseOwner ?? "(unknown)"}. ` +
+        `${reaching.join(", ")} can act as it. ` +
         unintended.map((row) => `${explainDefinerMember(row, identity)}. `).join("") +
         "Such a role inherits the resolver's column grants, is matched by the policies " +
         "written TO it, and owns the two SECURITY DEFINER functions this step installs — " +
-        "so it can replace their bodies. Run as an administrator: " +
-        unintended.map((row) => `revoke ${row.via} from ${row.member};`).join(" "),
+        "so it can replace their bodies. " +
+        (revokes.length === 1
+          ? "Run as an administrator: "
+          : `Each statement below cuts one of the ${revokes.length} routes above; run ALL of ` +
+            "them as an administrator: ") +
+        revokes.join(" "),
     );
   }
   // The migrate identity's own membership: a direct grant with INHERIT and

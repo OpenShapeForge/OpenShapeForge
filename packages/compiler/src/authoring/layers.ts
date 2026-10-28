@@ -1025,6 +1025,7 @@ function assertRowAccessOnlyNarrows(base: JsonObject, merged: JsonObject, origin
     "authorization.rowAccess.recordPermissions.createRequires",
     origin,
   );
+  assertRecordActionsOnlyNarrow(beforeAcl.actions, afterAcl.actions, origin);
 
   const beforeField = keyedObjects(base.fields).get(String(beforeAcl.field));
   const afterField = keyedObjects(merged.fields).get(String(afterAcl.field));
@@ -1084,6 +1085,56 @@ function assertSessionAuthOnlyNarrows(
     `${path}.recordPermission`,
     origin,
   );
+  // Which named action an Operation requires is its contract, not a knob: a
+  // later layer that renamed it would silently point the check at an action
+  // nobody has been granted, or at one everybody has.
+  assertExactWhenPresent(
+    before.recordAction,
+    after.recordAction,
+    `${path}.recordAction`,
+    origin,
+  );
+}
+
+/**
+ * A later layer may DECLARE a new record action — that grants nothing on its
+ * own, since a record must still name a subject and an Operation must still
+ * require it — but it may not loosen one an earlier layer declared.
+ *
+ * Removing an action would strand every grant already stored under its name
+ * and every Operation requiring it. Widening `principals` would let a kind of
+ * principal the first author excluded be named, which is exactly the
+ * person-versus-application boundary the axis exists to hold. Widening `reads`
+ * would disclose a field the first author did not put in the projection.
+ */
+function assertRecordActionsOnlyNarrow(
+  before: unknown,
+  after: unknown,
+  origin: string,
+): void {
+  const declared = (value: unknown): Map<string, JsonObject> => {
+    const entries = Array.isArray(value) ? value : [];
+    return new Map(
+      entries
+        .filter((entry): entry is JsonObject => Boolean(entry) && typeof entry === "object")
+        .map((entry) => [String((entry as JsonObject).name), entry as JsonObject]),
+    );
+  };
+  const beforeActions = declared(before);
+  if (beforeActions.size === 0) return;
+  const afterActions = declared(after);
+  for (const [name, beforeAction] of beforeActions) {
+    const path = `authorization.rowAccess.recordPermissions.actions.${name}`;
+    const afterAction = afterActions.get(name);
+    if (!afterAction) throw new Error(`${origin} removes ${path}.`);
+    assertAndListOnlyNarrows(
+      beforeAction.principals,
+      afterAction.principals,
+      `${path}.principals`,
+      origin,
+    );
+    assertAndListOnlyNarrows(beforeAction.reads, afterAction.reads, `${path}.reads`, origin);
+  }
 }
 
 function assertOperationOnlyNarrows(

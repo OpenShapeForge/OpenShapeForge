@@ -289,11 +289,26 @@ export function buildAuthorization(
             `Use an object with optional view/edit/delete members whose users/groups/roles values are arrays of non-empty strings.`,
         );
       }
+      const actions = compileRecordActions(
+        coreEntity, recordPermissions.actions, allAuthoringFields, recordPermissions.field,
+      );
+      if (
+        field.defaultValue !== undefined &&
+        !defaultRecordActionsAreDeclared(field.defaultValue, actions)
+      ) {
+        throw new AuthorizationCompileError(
+          coreEntity.entity,
+          `authorization.rowAccess.recordPermissions field "${recordPermissions.field}" has a defaultValue ` +
+            `granting an action this entity does not declare, or naming a principal kind that action does not admit. ` +
+            `Declare the action under authorization.rowAccess.recordPermissions.actions first.`,
+        );
+      }
       compiledRecordPermissions = {
         field: recordPermissions.field,
         column: field.persisted.column,
         empty: recordPermissions.empty,
         createRequires: [...recordPermissions.createRequires],
+        ...(actions.length > 0 ? { actions } : {}),
         ...(field.defaultValue !== undefined
           ? { defaultValue: structuredClone(field.defaultValue) as Record<string, unknown> }
           : {}),
@@ -365,22 +380,165 @@ export function buildAuthorization(
   };
 }
 
+const RECORD_ACTION_NAME = /^[a-z][A-Za-z0-9]*$/;
+const RECORD_PERMISSIONS = ["view", "edit", "delete"];
+
+/**
+ * Validate and normalize the entity's declared record actions.
+ *
+ * Must agree with the authoring schema, `app.record_permissions_valid` and
+ * the API's parser: a name is a lowerCamel identifier that never restates a
+ * record permission, and an action admits at least one principal kind. The
+ * compiler is where a typo becomes a build failure rather than a grant
+ * nothing ever honours.
+ */
+function compileRecordActions(
+  coreEntity: CoreEntity,
+  authored: import("../types/common.js").RowAccessRecordActionConfig[] | undefined,
+  fields: ReadonlyArray<Record<string, unknown>>,
+  aclField: string,
+): import("../types/common.js").RowAccessRecordActionConfig[] {
+  if (!authored || authored.length === 0) return [];
+  const seen = new Set<string>();
+  return authored.map((action) => {
+    if (typeof action?.name !== "string" || !RECORD_ACTION_NAME.test(action.name) ||
+      RECORD_PERMISSIONS.includes(action.name)) {
+      throw new AuthorizationCompileError(
+        coreEntity.entity,
+        `authorization.rowAccess.recordPermissions.actions name ${JSON.stringify(action?.name)} must be a ` +
+          `lowerCamel identifier matching /^[a-z][A-Za-z0-9]*$/ and must not be view, edit or delete — ` +
+          `the named-action axis is independent of the record permissions and may not shadow one.`,
+      );
+    }
+    if (seen.has(action.name)) {
+      throw new AuthorizationCompileError(
+        coreEntity.entity,
+        `authorization.rowAccess.recordPermissions.actions declares "${action.name}" twice.`,
+      );
+    }
+    seen.add(action.name);
+    const principals = [...new Set(action.principals ?? [])];
+    if (principals.length === 0 ||
+      principals.some((principal) => principal !== "person" && principal !== "integration")) {
+      throw new AuthorizationCompileError(
+        coreEntity.entity,
+        `authorization.rowAccess.recordPermissions.actions "${action.name}" must declare at least one of ` +
+          `"person" or "integration" in principals. An action nobody may be granted is a dead policy, ` +
+          `and an undeclared principal kind is refused at write time.`,
+      );
+    }
+    const reads = compileRecordActionReads(coreEntity, action, fields, aclField);
+    return {
+      name: action.name,
+      principals: principals.sort(),
+      ...(reads.length > 0 ? { reads } : {}),
+    };
+  }).sort((left, right) => left.name.localeCompare(right.name));
+}
+
+/**
+ * The fields a holder of this action may read, validated against what the
+ * projection can safely carry.
+ *
+ * Each refusal below is a way the projection could otherwise become a read of
+ * something the action never authorized: the ACL itself (who else holds what),
+ * a classified field (PII, a BSN, a confidential value), a computed or
+ * localized field (resolved elsewhere, so the stored column is not the value),
+ * a relationship (another record), and anything unpersisted (no column to
+ * read). A field that survives all of them is one plain stored column of the
+ * one row the action names.
+ */
+function compileRecordActionReads(
+  coreEntity: CoreEntity,
+  action: import("../types/common.js").RowAccessRecordActionConfig,
+  fields: ReadonlyArray<Record<string, unknown>>,
+  aclField: string,
+): string[] {
+  const reads = [...new Set(action.reads ?? [])].sort();
+  const refuse = (key: string, reason: string): never => {
+    throw new AuthorizationCompileError(
+      coreEntity.entity,
+      `authorization.rowAccess.recordPermissions.actions "${action.name}" cannot read "${key}": ${reason}. ` +
+        `A record action's read projection carries plain stored columns of the record it names and nothing else.`,
+    );
+  };
+  for (const key of reads) {
+    if (key === aclField) refuse(key, "it is the record ACL itself");
+    const field = fields.find((candidate) => candidate.key === key);
+    if (!field) refuse(key, "it is not a field of this entity");
+    if (!(field!.persisted as { column?: string } | undefined)?.column) {
+      refuse(key, "it is not persisted, so there is no column to read");
+    }
+    if (field!.relationship) refuse(key, "it is a relationship, which would reach another record");
+    if (field!.computed) refuse(key, "it is computed rather than stored");
+    if (field!.localized) refuse(key, "it is localized, so the stored column is not the value");
+    if (field!.classification) {
+      refuse(key, `it is classified ${JSON.stringify(field!.classification)}`);
+    }
+    if (field!.authorization || field!.permissions) {
+      refuse(key, "it carries its own field authorization, which this projection cannot apply");
+    }
+  }
+  return reads;
+}
+
+function isValidSubjectSets(value: unknown, allowIntegrations: boolean): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  const allowed = allowIntegrations
+    ? ["users", "groups", "roles", "integrations"]
+    : ["users", "groups", "roles"];
+  if (Object.keys(record).some((key) => !allowed.includes(key))) return false;
+  return Object.values(record).every((entries) =>
+    Array.isArray(entries) &&
+    entries.every((entry) => typeof entry === "string" && entry.length > 0)
+  );
+}
+
 function isValidRecordPermissionsDocument(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const document = value as Record<string, unknown>;
-  if (Object.keys(document).some((key) => !["view", "edit", "delete"].includes(key))) {
+  if (Object.keys(document).some((key) =>
+    key !== "actions" && !RECORD_PERMISSIONS.includes(key))) {
     return false;
   }
-  return Object.values(document).every((subjects) => {
-    if (!subjects || typeof subjects !== "object" || Array.isArray(subjects)) return false;
-    const record = subjects as Record<string, unknown>;
-    if (Object.keys(record).some((key) => !["users", "groups", "roles"].includes(key))) {
-      return false;
+  for (const [key, member] of Object.entries(document)) {
+    if (key === "actions") {
+      if (!member || typeof member !== "object" || Array.isArray(member)) return false;
+      for (const [name, subjects] of Object.entries(member as Record<string, unknown>)) {
+        if (!RECORD_ACTION_NAME.test(name) || RECORD_PERMISSIONS.includes(name)) return false;
+        if (!isValidSubjectSets(subjects, true)) return false;
+      }
+      continue;
     }
-    return Object.values(record).every((entries) =>
-      Array.isArray(entries) &&
-      entries.every((entry) => typeof entry === "string" && entry.length > 0)
-    );
+    if (!isValidSubjectSets(member, false)) return false;
+  }
+  return true;
+}
+
+/**
+ * A seeded ACL may only grant actions the entity declares, to principal kinds
+ * that action admits — the same rule the runtime enforces on every write. A
+ * default that violates it would seed a grant no write could ever restore.
+ */
+function defaultRecordActionsAreDeclared(
+  value: unknown,
+  actions: import("../types/common.js").RowAccessRecordActionConfig[],
+): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return true;
+  const granted = (value as Record<string, unknown>).actions;
+  if (!granted || typeof granted !== "object" || Array.isArray(granted)) return true;
+  return Object.entries(granted as Record<string, unknown>).every(([name, subjects]) => {
+    const declaration = actions.find((action) => action.name === name);
+    if (!declaration) return false;
+    const sets = (subjects ?? {}) as Record<string, unknown[]>;
+    const names = (kind: "person" | "integration") =>
+      kind === "integration"
+        ? [sets.integrations]
+        : [sets.users, sets.groups, sets.roles];
+    return (["person", "integration"] as const).every((kind) =>
+      declaration.principals.includes(kind) ||
+      names(kind).every((entries) => !Array.isArray(entries) || entries.length === 0));
   });
 }
 

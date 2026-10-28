@@ -55,6 +55,7 @@ import type {
 import { fieldNameForColumn } from "./columns.js";
 import {
   assertRecordPermission,
+  recordActionsAllowRow,
   recordPermissionsAllowRow,
   type RecordPermissionAction,
 } from "./record-permissions.js";
@@ -104,6 +105,8 @@ const operationCatalog = rawOperationCatalog as unknown as {
           roleGroups?: string[][];
           scopes?: string[];
           recordPermission?: RecordPermissionAction;
+          /** A named record action, independent of the record's `view`. */
+          recordAction?: string;
         }
       | { mode: "custom" };
     concurrency?: OperationConcurrency;
@@ -699,7 +702,10 @@ export async function acquireEditLeaseForEntityOperation(
  */
 export function getEntityOperationOffers(
   entityName: string,
-  session: Pick<DbSessionInput, "roles"> & { oauthScopes?: readonly string[]; credential?: string },
+  session: Pick<
+    DbSessionInput,
+    "roles" | "userId" | "relationGroupIds" | "appPrincipal" | "principalKind" | "relation"
+  > & { oauthScopes?: readonly string[]; credential?: string },
   intents: readonly GeneratedCrudExposureOperation[],
   unavailable: Readonly<Record<string, OperationError | undefined>> = {},
   target?: { id: string; version?: string; row?: Readonly<Record<string, unknown>> },
@@ -750,7 +756,18 @@ export function getEntityOperationOffers(
       (!target ||
         operation.auth.mode !== "session" ||
         !operation.auth.recordPermission ||
-        hasRecordPermissions([operation.auth.recordPermission]))
+        hasRecordPermissions([operation.auth.recordPermission])) &&
+      // An action-gated Operation is offered only on a record that actually
+      // grants it. A holder that cannot see the record has no row here, so
+      // nothing is offered — correct, since offers are a convenience for a
+      // reader and the runtime check is the gate either way.
+      (!target ||
+        operation.auth.mode !== "session" ||
+        !operation.auth.recordAction ||
+        Boolean(
+          table && target.row &&
+          recordActionsAllowRow(table, target.row, [operation.auth.recordAction], session),
+        ))
     )
     .map((operation) => {
       const bindings = Object.entries(operation.target?.inputBindings ?? {});

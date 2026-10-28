@@ -21,6 +21,17 @@ export type GeneratedCrudAuthorization = {
     empty: "public" | "restricted";
     createRequires: Array<"view" | "edit" | "delete">;
     defaultValue?: Record<string, unknown>;
+    /**
+     * The named actions this entity's ACL may grant, and which principal
+     * kinds each admits. Absent on every entity that did not opt in, which is
+     * what makes the axis unable to regress an existing policy.
+     */
+    actions?: Array<{
+      name: string;
+      principals: Array<"person" | "integration">;
+      /** Fields a holder of this action may read; absent discloses nothing. */
+      reads?: string[];
+    }>;
   };
 };
 

@@ -101,6 +101,46 @@ export type RecordPermissionAction = "view" | "edit" | "delete";
  * that shape fixed lets the database policy and every Operation adapter use
  * one parser instead of letting each entity invent an authorization dialect.
  */
+/** Principal kinds a named record action may be granted to. */
+export type RecordActionPrincipal = "person" | "integration";
+
+/**
+ * One named action the record ACL may grant, declared by the entity.
+ *
+ * The axis is opt-in per entity and per action, which is what keeps it from
+ * regressing any existing policy: an entity that declares nothing can carry
+ * no action, and an action that does not admit `integration` can never be
+ * granted to an application. The name is the key under the stored ACL's
+ * `actions` member and the value an Operation's `auth.recordAction` names.
+ */
+export interface RowAccessRecordActionConfig {
+  /** lowerCamel identifier; never view, edit or delete. */
+  name: RecordActionName;
+  /** Which principal kinds a grant of this action may name. */
+  principals: RecordActionPrincipal[];
+  /**
+   * The ONLY fields a holder of this action may read from the record, as
+   * authored field keys.
+   *
+   * Holding an action does not make the record readable — that is the point of
+   * the axis — but an action that cannot read anything cannot be carried out
+   * either. This list is the entity's explicit answer to "what does executing
+   * this need to see": core reads exactly these columns of exactly that row,
+   * through the same owner-scoped lookup that authorized the action, and
+   * returns nothing else. The ACL field, a classified field, a computed or
+   * localized field and anything unpersisted are refused at compile time, so
+   * the projection cannot become a way to reach a draft, a document body or
+   * another record.
+   *
+   * Omitted or empty means the action authorizes an effect and discloses
+   * nothing, which is the correct shape for an action whose input the caller
+   * already supplies.
+   */
+  reads?: string[];
+}
+
+export type RecordActionName = string;
+
 export interface RowAccessRecordPermissionsConfig {
   /** Authored field key for the persisted single jsonb object. */
   field: string;
@@ -108,6 +148,11 @@ export interface RowAccessRecordPermissionsConfig {
   empty: "public" | "restricted";
   /** Permissions the creator must hold in the submitted ACL. */
   createRequires: RecordPermissionAction[];
+  /**
+   * Named actions this record ACL may grant, independently of view/edit/delete.
+   * Absent on every entity that did not opt in.
+   */
+  actions?: RowAccessRecordActionConfig[];
 }
 
 export interface RowAccessConfig {

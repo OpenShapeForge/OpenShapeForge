@@ -55,6 +55,31 @@ export type CapabilityGrantSession = {
   maxUses: number | null;
 };
 
+/**
+ * The application a request acts as, as the SERVER verified it.
+ *
+ * Set on exactly one path: an API-key session, from the integration row the
+ * presented credential resolved to (auth/api-key/resolve.ts). `integrationId`
+ * is `platform.api_key_integrations.id` — a tenant-bound surrogate key that
+ * outlives key rotation and is independent of the integration's mutable
+ * display name, so a policy naming it keeps its meaning when the credential
+ * is replaced and stops meaning anything once the integration is gone.
+ *
+ * Absent everywhere else, and that absence is load-bearing. A bearer token of
+ * the same integration's Keycloak service account, a trusted-context bundle,
+ * a capability grant and a control session all produce NO app principal and
+ * therefore satisfy no record action: an action grant is reachable only
+ * through the credential whose resolution named the integration. Nothing here
+ * is ever read from request input — not a header, not a claim, not a body.
+ *
+ * See docs/authoring.md ("record actions") for the policy this identifies in,
+ * and for the direct-bearer path this deliberately does not classify.
+ */
+export type VerifiedAppPrincipal = {
+  /** `platform.api_key_integrations.id`; tenant-bound and stable across keys. */
+  integrationId: string;
+};
+
 export type TrustedSessionContext = {
   tenantId: string | null;
   userId: string | null;
@@ -78,6 +103,11 @@ export type TrustedSessionContext = {
   issuerRoles?: readonly string[];
   /** Explicit bearer principal kind; absence never proves a service account. */
   principalKind?: "person" | "service";
+  /**
+   * The verified application behind a machine session. Only the API-key
+   * carrier sets it; see {@link VerifiedAppPrincipal}.
+   */
+  appPrincipal?: VerifiedAppPrincipal;
   /** OAuth scopes from a verified bearer token; empty on non-bearer carriers. */
   oauthScopes?: string[];
   /**
@@ -158,6 +188,9 @@ export function readTrustedSessionContext(
     relationGroupIds: [],
     scope: "self",
     credential: "trusted-context",
+    // Deliberately no `appPrincipal`: a trusted-context bundle carries tenant,
+    // user, roles and groups, and no amount of signed header content may name
+    // an application principal. Record actions are an API-key-only capability.
   };
 }
 

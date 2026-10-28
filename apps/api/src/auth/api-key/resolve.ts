@@ -142,5 +142,16 @@ export async function resolveApiKeySession(
     relationGroupIds: [],
     scope: deps.resolveScope(roles, identity.groups),
     credential: "api-key",
+    // A resolved API key is an application, never a person: the token it
+    // exchanged for is a client-credentials token of the integration's own
+    // service account. Stating it keeps the audit actor "integration" even
+    // when this session is resolved inside another one's audit context, and
+    // it is what a record-action policy classifies on.
+    principalKind: "service",
+    // The integration, not the key: `integration_id` survives rotation and
+    // revocation of this particular credential, while `display_name` is a
+    // mutable label nothing may authorize on. Read from the row the store
+    // resolved under tenant-fenced RLS — never from the request.
+    appPrincipal: { integrationId: key.integrationId },
   };
 }

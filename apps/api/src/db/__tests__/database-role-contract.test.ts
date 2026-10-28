@@ -67,10 +67,12 @@ describe("database role contract", () => {
       "app",
       "blueprintReader",
       "identityResolver",
+      "recordActionResolver",
       "worker",
     ]);
     expect(databaseRole("blueprintReader")).toMatchObject({ login: false, migratorMember: true });
     expect(databaseRole("identityResolver")).toMatchObject({ login: false, migratorMember: true });
+    expect(databaseRole("recordActionResolver")).toMatchObject({ login: false, migratorMember: true });
     const rendered = renderProvisioningSql({ migratorRole: "some_migrator" });
     expect(rendered).toContain("create role openshapeforge_blueprint_reader nologin");
     expect(rendered).toContain(
@@ -121,6 +123,84 @@ describe("database role contract", () => {
     expect(again.created).toEqual([]);
     expect(again.rotated).toEqual([]);
     expect(again.granted).toEqual([]);
+  }, TEST_TIMEOUT);
+
+  /**
+   * The definer roles own SECURITY DEFINER functions and hold the narrow
+   * grants those functions need, and RLS resolves a policy's `TO` list with
+   * has_privs_of_role — so every member of a definer role inherits both. A
+   * second member is therefore a second holder of the record-action resolver's
+   * `update (<acl column>)`: before the fence's exemption became the table
+   * owner's privileges, that member could rewrite its own tenant's ACL
+   * document (verified on PostgreSQL 17.11). The contract is that it does not
+   * exist, and the chain refuses with the revoke that fixes it.
+   */
+  test("an extra member of a definer role fails the contract with the revoke that fixes it", async () => {
+    const intruder = `osf_contract_intruder_${suffix}`;
+    const definer = databaseRole("recordActionResolver").name;
+    await admin.unsafe(`create role ${intruder} nologin nosuperuser nobypassrls`);
+    try {
+      await admin.unsafe(`grant ${definer} to ${intruder}`);
+      const error = await migrator.db.connection().execute((db) => verifyDatabaseRoles(db)).then(
+        () => undefined,
+        (caught: unknown) => caught as Error,
+      );
+      expect(error?.message).toContain("Database role contract is not satisfied");
+      expect(error?.message).toContain(
+        `role ${intruder} is a member of definer role ${definer}`,
+      );
+      expect(error?.message).toContain(`revoke ${definer} from ${intruder};`);
+      // The migrate role itself is a member and must NOT be reported: it is
+      // the identity that hands the objects over.
+      expect(error?.message).not.toContain(`revoke ${definer} from ${migratorRole};`);
+      // And the whole chain refuses rather than running on past it.
+      await expect(
+        migrator.db.connection().execute((db) => runMigrationChain(db)),
+      ).rejects.toThrow(`role ${intruder} is a member of definer role ${definer}`);
+    } finally {
+      await admin.unsafe(`revoke ${definer} from ${intruder}`).catch(() => undefined);
+      await admin.unsafe(`drop role if exists ${intruder}`);
+    }
+    // Revoked, the contract holds again.
+    await migrator.db.connection().execute((db) => verifyDatabaseRoles(db));
+  }, TEST_TIMEOUT);
+
+  /**
+   * Attributes no policy can compensate for. BYPASSRLS and SUPERUSER are
+   * outside row security; CREATEROLE, CREATEDB and REPLICATION let a role
+   * widen its own reach without an administrator; and a definer role that
+   * INHERITS another role runs its SECURITY DEFINER bodies with whatever that
+   * role holds.
+   */
+  test("an unsafe attribute or an inherited role fails the contract", async () => {
+    const definer = databaseRole("recordActionResolver").name;
+    const parent = `osf_contract_parent_${suffix}`;
+    const cases: Array<{ apply: string; undo: string; expected: string }> = [
+      { apply: `alter role ${definer} createrole`, undo: `alter role ${definer} nocreaterole`,
+        expected: `role ${definer} must not have CREATEROLE` },
+      { apply: `alter role ${definer} createdb`, undo: `alter role ${definer} nocreatedb`,
+        expected: `role ${definer} must not have CREATEDB` },
+      { apply: `alter role ${definer} replication`, undo: `alter role ${definer} noreplication`,
+        expected: `role ${definer} must not have REPLICATION` },
+      { apply: `alter role ${definer} inherit`, undo: `alter role ${definer} noinherit`,
+        expected: `definer role ${definer} must be NOINHERIT` },
+      { apply: `create role ${parent} nologin; grant ${parent} to ${definer}`,
+        undo: `revoke ${parent} from ${definer}; drop role ${parent}`,
+        expected: `definer role ${definer} must not be a member of ${parent}` },
+    ];
+    for (const scenario of cases) {
+      await admin.unsafe(scenario.apply);
+      try {
+        const error = await migrator.db.connection().execute((db) => verifyDatabaseRoles(db)).then(
+          () => undefined,
+          (caught: unknown) => caught as Error,
+        );
+        expect(error?.message).toContain(scenario.expected);
+      } finally {
+        await admin.unsafe(scenario.undo);
+      }
+    }
+    await migrator.db.connection().execute((db) => verifyDatabaseRoles(db));
   }, TEST_TIMEOUT);
 
   test("explicit password rotation uses the administrator connection", async () => {

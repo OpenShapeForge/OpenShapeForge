@@ -666,6 +666,8 @@ export interface CompiledAuthorization {
       empty: "public" | "restricted";
       createRequires: import("./common.js").RecordPermissionAction[];
       defaultValue?: Record<string, unknown>;
+      /** Named actions the ACL may grant; absent unless the entity opted in. */
+      actions?: import("./common.js").RowAccessRecordActionConfig[];
     };
   };
 }

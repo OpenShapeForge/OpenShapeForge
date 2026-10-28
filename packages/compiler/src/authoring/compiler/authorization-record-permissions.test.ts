@@ -93,3 +93,114 @@ describe("authorization record permissions", () => {
     );
   });
 });
+
+describe("named record actions", () => {
+  function withActions(
+    actions: unknown,
+    extraFields: unknown[] = [],
+    defaultValue: unknown = {},
+  ): CoreEntity {
+    const base = entity(defaultValue);
+    base.fields = [...base.fields, ...(extraFields as typeof base.fields)];
+    base.authorization!.rowAccess!.recordPermissions!.actions = actions as never;
+    return base;
+  }
+  const storedField = (key: string, overrides: Record<string, unknown> = {}) => ({
+    key, osfType: "string", baseType: "string", required: false,
+    persisted: { column: key, storageClass: "core" }, ...overrides,
+  });
+
+  test("compiles declared actions, sorted, with their principals and reads", () => {
+    const compiled = buildAuthorization(
+      withActions(
+        [
+          { name: "start", principals: ["integration"], reads: ["status", "definition"] },
+          { name: "follow", principals: ["integration", "person"] },
+        ],
+        [storedField("definition"), storedField("status")],
+      ),
+      [], [],
+    );
+    expect(compiled.rowAccess!.recordPermissions!.actions).toEqual([
+      { name: "follow", principals: ["integration", "person"] },
+      { name: "start", principals: ["integration"], reads: ["definition", "status"] },
+    ]);
+  });
+
+  test("an entity that declares nothing carries no action axis at all", () => {
+    expect(buildAuthorization(entity(), [], []).rowAccess!.recordPermissions)
+      .not.toHaveProperty("actions");
+  });
+
+  test("refuses a name that is not a lowerCamel identifier outside the permissions", () => {
+    for (const name of ["view", "edit", "delete", "Start", "start-run", "", "1start", "start run"]) {
+      expect(() => buildAuthorization(
+        withActions([{ name, principals: ["integration"] }]), [], [],
+      )).toThrow(/lowerCamel identifier/);
+    }
+  });
+
+  test("refuses a duplicate action and an action nobody may hold", () => {
+    expect(() => buildAuthorization(withActions([
+      { name: "start", principals: ["integration"] },
+      { name: "start", principals: ["person"] },
+    ]), [], [])).toThrow(/declares "start" twice/);
+    for (const principals of [[], undefined, ["robot"], ["person", "robot"]]) {
+      expect(() => buildAuthorization(
+        withActions([{ name: "start", principals }]), [], [],
+      )).toThrow(/must declare at least one of/);
+    }
+  });
+
+  test("refuses a read projection that would reach past one plain stored column", () => {
+    // An unknown field, whatever else is declared.
+    expect(() => buildAuthorization(
+      withActions([{ name: "start", principals: ["integration"], reads: ["missing"] }]), [], [],
+    )).toThrow(/is not a field of this entity/);
+    // The ACL itself.
+    expect(() => buildAuthorization(
+      withActions([{ name: "start", principals: ["integration"], reads: ["authorization"] }]), [], [],
+    )).toThrow(/it is the record ACL itself/);
+    const refusals: Array<[Record<string, unknown>, RegExp]> = [
+      [{ persisted: undefined }, /not persisted/],
+      [{ relationship: { kind: "belongsTo", target: "Other" } }, /reach another record/],
+      [{ computed: { resolver: "labelRules" } }, /computed rather than stored/],
+      [{ localized: true }, /localized/],
+      [{ classification: { sensitivity: "pii" } }, /classified/],
+      [{ authorization: { roles: { read: ["Some.Role"] } } }, /own field authorization/],
+    ];
+    for (const [overrides, pattern] of refusals) {
+      expect(() => buildAuthorization(
+        withActions(
+          [{ name: "start", principals: ["integration"], reads: ["definition"] }],
+          [storedField("definition", overrides)],
+        ), [], [],
+      )).toThrow(pattern);
+    }
+  });
+
+  test("refuses a seeded ACL that grants an undeclared action or principal kind", () => {
+    const integration = "11111111-1111-4111-8111-111111111111";
+    expect(() => buildAuthorization(withActions(
+      [{ name: "start", principals: ["integration"] }], [],
+      { actions: { publish: { integrations: [integration] } } },
+    ), [], [])).toThrow(/does not declare/);
+    expect(() => buildAuthorization(withActions(
+      [{ name: "start", principals: ["integration"] }], [],
+      { actions: { start: { roles: ["Some.Role"] } } },
+    ), [], [])).toThrow(/does not declare/);
+    // The matching declaration is accepted.
+    expect(() => buildAuthorization(withActions(
+      [{ name: "start", principals: ["integration"] }], [],
+      { actions: { start: { integrations: [integration] } } },
+    ), [], [])).not.toThrow();
+  });
+
+  test("an integration may never be named for a record permission", () => {
+    const integration = "11111111-1111-4111-8111-111111111111";
+    expect(() => buildAuthorization(withActions(
+      [{ name: "start", principals: ["integration"] }], [],
+      { view: { integrations: [integration] } },
+    ), [], [])).toThrow(/malformed defaultValue/);
+  });
+});

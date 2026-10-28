@@ -33,6 +33,7 @@ export const WORKER_DATABASE_ROLE = "openshapeforge_worker";
 export const APP_DATABASE_ROLE = "openshapeforge_app";
 export const BLUEPRINT_READER_DATABASE_ROLE = "openshapeforge_blueprint_reader";
 export const IDENTITY_RESOLVER_DATABASE_ROLE = "openshapeforge_identity_resolver";
+export const RECORD_ACTION_RESOLVER_DATABASE_ROLE = "openshapeforge_record_action_resolver";
 
 /**
  * One declared database role. Roles are cluster-wide objects, so the
@@ -42,7 +43,7 @@ export const IDENTITY_RESOLVER_DATABASE_ROLE = "openshapeforge_identity_resolver
  */
 export type DatabaseRoleContract = {
   /** Stable key hosts and the runtime address the role by. */
-  key: "app" | "worker" | "blueprintReader" | "identityResolver";
+  key: "app" | "worker" | "blueprintReader" | "identityResolver" | "recordActionResolver";
   name: string;
   /** Whether the role authenticates; the definer roles never do. */
   login: boolean;
@@ -61,6 +62,8 @@ export const DATABASE_ROLES: readonly DatabaseRoleContract[] = [
     purpose: "Definer of the cross-tenant blueprint read function; owns nothing else." },
   { key: "identityResolver", name: IDENTITY_RESOLVER_DATABASE_ROLE, login: false, migratorMember: true,
     purpose: "Definer of the two identity-registry point lookups; owns nothing else." },
+  { key: "recordActionResolver", name: RECORD_ACTION_RESOLVER_DATABASE_ROLE, login: false, migratorMember: true,
+    purpose: "Definer of the record-action point lookup. Reads the key, tenant and ACL column of the entities that declare a record action and nothing else; may lock an ACL row and may never write one." },
 ];
 
 export type DatabaseRoleNames = Readonly<Record<DatabaseRoleContract["key"], string>>;
@@ -75,14 +78,18 @@ export function resolveDatabaseRoleNames(input?: DatabaseRoleNames): DatabaseRol
       Reflect.ownKeys(candidate).length !== keys.length ||
       Reflect.ownKeys(candidate).some((key) =>
         typeof key !== "string" || !keys.includes(key as DatabaseRoleContract["key"]))) {
-    throw new Error("databaseRoleNames requires exactly app, worker, blueprintReader and identityResolver.");
+    throw new Error(
+      "databaseRoleNames requires exactly app, worker, blueprintReader, identityResolver and recordActionResolver.",
+    );
   }
   const values = keys.map((key) => [key, candidate[key]] as const);
   if (values.some(([, value]) => typeof value !== "string" ||
       !/^[a-z_][a-z0-9_]{0,62}$/.test(value) || value === "postgres" ||
       value === "public" || value.startsWith("pg_")) ||
       new Set(values.map(([, value]) => value)).size !== keys.length) {
-    throw new Error("databaseRoleNames requires four distinct non-reserved SQL identifiers.");
+    throw new Error(
+      `databaseRoleNames requires ${keys.length} distinct non-reserved SQL identifiers.`,
+    );
   }
   return Object.freeze(Object.fromEntries(values)) as DatabaseRoleNames;
 }

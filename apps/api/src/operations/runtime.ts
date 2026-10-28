@@ -68,6 +68,8 @@ import { getEntityOperationOffers } from "./entity/runtime.js";
 import { entityBusinessUnavailability } from "./entity/availability.js";
 import type { EntityOperationContract, GeneratedCrudTable } from "./entity/types.js";
 import {
+  assertRecordAction,
+  assertRecordActionInTransaction,
   assertRecordPermission,
   assertRecordPermissionInTransaction,
   type RecordPermissionAction,
@@ -139,6 +141,12 @@ export type OperationContract = {
         scopes?: string[];
         recordPermission?: RecordPermissionAction;
         recordPermissions?: readonly RecordPermissionAction[];
+        /**
+         * A named action on the target record, independent of its `view`:
+         * see docs/operations.md. Checked beside any recordPermissions, never
+         * instead of them.
+         */
+        recordAction?: string;
       }
     | { mode: "capability" }
     | { mode: "custom"; scheme: string; description: string; securityScheme: Record<string, unknown> };
@@ -841,7 +849,8 @@ async function assertCurrentRecordPermission(
   trx: Transaction<DB>,
 ): Promise<void> {
   const recordPermissions = operationRecordPermissions(operation);
-  if (recordPermissions.length === 0) return;
+  const recordActions = operationRecordActions(operation);
+  if (recordPermissions.length === 0 && recordActions.length === 0) return;
   if (!operation.target || operation.target.scope !== "record" ||
     !operation.target.inputField || !context.session || !context.db) {
     throw operationFailure({
@@ -870,6 +879,15 @@ async function assertCurrentRecordPermission(
       permission,
     );
   }
+  for (const action of recordActions) {
+    await assertRecordActionInTransaction(
+      trx,
+      context.session,
+      targetTable(operation),
+      targetValue,
+      action,
+    );
+  }
 }
 
 function operationRecordPermissions(
@@ -878,6 +896,16 @@ function operationRecordPermissions(
   if (operation.auth.mode !== "session") return [];
   return operation.auth.recordPermissions ??
     (operation.auth.recordPermission ? [operation.auth.recordPermission] : []);
+}
+
+/**
+ * The named record actions this Operation requires. A separate list from the
+ * record PERMISSIONS above because the two are checked independently: an
+ * action never implies `view`, so satisfying one says nothing about the other.
+ */
+function operationRecordActions(operation: OperationContract): readonly string[] {
+  if (operation.auth.mode !== "session") return [];
+  return operation.auth.recordAction ? [operation.auth.recordAction] : [];
 }
 
 function protectedCustomOperation(
@@ -968,12 +996,14 @@ async function invokeGuardedCustomOperation(
     });
   }
   const recordPermissions = operationRecordPermissions(operation);
+  const recordActions = operationRecordActions(operation);
   const forcesTransaction = operationIntent(operation) !== "invoke";
   const hasGuard = Boolean(
     bound.availability ||
     operation.concurrency ||
     confirmation.mode === "challenge" ||
     recordPermissions.length > 0 ||
+    recordActions.length > 0 ||
     forcesTransaction,
   );
   if (!hasGuard) return invokeHandler(customHandlerInput(operation, input));
@@ -982,7 +1012,8 @@ async function invokeGuardedCustomOperation(
     operation.target?.scope === "collection" &&
     !operation.concurrency &&
     confirmation.mode !== "challenge" &&
-    recordPermissions.length === 0
+    recordPermissions.length === 0 &&
+    recordActions.length === 0
   ) {
     if (!context.session || !context.db || !context.platform) {
       throw operationFailure({
@@ -1041,7 +1072,8 @@ async function invokeGuardedCustomOperation(
     : undefined;
   // Source-backed record Operations can have business availability without a
   // generated CRUD table. Only platform-owned record guards require one.
-  const table = recordPermissions.length > 0 || expectedVersion || confirmation.mode === "challenge"
+  const table = recordPermissions.length > 0 || recordActions.length > 0 ||
+    expectedVersion || confirmation.mode === "challenge"
     ? targetTable(operation)
     : undefined;
   // A subtype target's leases and challenges are the base record's
@@ -1057,6 +1089,13 @@ async function invokeGuardedCustomOperation(
       targetValue,
       permission,
     );
+  }
+  // Refuse before a challenge or a lease is issued. This read is in its own
+  // transaction, so it is an early answer and never the authoritative one —
+  // the check inside the Operation's transaction below is, and it is the one
+  // holding the lock when the effect runs.
+  for (const action of recordActions) {
+    await assertRecordAction(context.db, context.session, table!, targetValue, action);
   }
   let confirmationToken: string | undefined;
   let confirmationAnswer: string | undefined;
@@ -1105,6 +1144,15 @@ async function invokeGuardedCustomOperation(
           table!,
           targetValue,
           permission,
+        );
+      }
+      for (const action of recordActions) {
+        await assertRecordActionInTransaction(
+          trx,
+          context.session!,
+          table!,
+          targetValue,
+          action,
         );
       }
       if (expectedVersion) {

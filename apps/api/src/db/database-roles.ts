@@ -24,35 +24,35 @@
  *   - ONE migrate identity for both databases satisfies the contract however
  *     their owners differ. It is the only member, and each database
  *     recognises it as the identity it is connected as;
- *   - TWO migrate identities satisfy it only where each database can account
- *     for the other's on one of the three grounds this check accepts: the
- *     member is SUPERUSER, a role the connected migrate identity itself
- *     inherits, or a holder of that database's owner privileges. Where each
- *     database is owned by the role that migrates it, none of the three covers
- *     the other's migrator, so both refuse, each naming it against all three
- *     definer roles. That refusal is symmetric: no provisioning order
- *     satisfies both, the `revoke` each error names would break the other
- *     database, and two roles cannot be members of each other.
+ *   - TWO migrate identities, both members and neither a SUPERUSER, never
+ *     satisfy it. The three grounds this check accepts are: the member is
+ *     SUPERUSER, it IS the migrate identity the check is connected as, or it
+ *     IS the owner of the current database — the last two by NAME. A role that
+ *     merely HOLDS an owner's privileges is not admitted: as a definer member
+ *     it would gain ownership of that role's SECURITY DEFINER functions, which
+ *     the privileges alone do not confer. So in each database the other's
+ *     migrator is none of the three, and both refuse, each naming it against
+ *     all three definer roles. That refusal is symmetric: no provisioning
+ *     order satisfies both, the `revoke` each error names would break the
+ *     other database, and two roles cannot be members of each other.
  *
- * Two databases sharing one owner therefore pass where each is migrated as an
- * identity holding that owner's privileges — the usual deployment shape, where
- * the migrate role owns the database it migrates — and are refused where
- * neither identity is covered on any of those grounds, exactly as two distinct
- * owners are. Sharing an owner is not sufficient on its own and distinct
- * owners are not what fails: what counts is what each member of the definer
- * roles is in the database doing the checking.
+ * Sharing an owner does not change that, and distinct owners are not what
+ * fails: what counts is what each member of the definer roles IS in the
+ * database doing the checking. Granting one migrator the other database's
+ * owner does not help either — privileges are not identity.
  *
- * Verified in __tests__/database-role-contract.test.ts, on PostgreSQL 17.11
- * and 16.15: it provisions a second database in the test cluster and runs
+ * Verified in __tests__/database-role-contract.test.ts on PostgreSQL 17.11: it
+ * provisions a second database in the test cluster and runs
  * {@link verifyDatabaseRoles} in both databases. Two databases each owned by
  * the distinct non-superuser role that migrates it refuse symmetrically; the
  * same two databases with distinct owners under ONE migrate identity pass in
- * both; and a second migrate identity granted the second database's owner is
- * accepted there while the first database, whose owner privileges it does not
- * hold, still refuses it.
+ * both; and a second migrate identity is still refused in the database whose
+ * owner's privileges it has been granted, as is the first database's migrator
+ * there.
  *
  * The check cannot admit a member on the strength of its being SOME database's
- * owner: that would let the owner of any database in the cluster hold the
+ * owner, nor for holding an owner's privileges: either would let the owner of
+ * any database in the cluster — or anyone granted that owner — hold the
  * definer roles' grants in this one. One cluster per deployment, which is what
  * `db:provision-roles` assumes, needs none of this. See docs/migrations.md.
  */

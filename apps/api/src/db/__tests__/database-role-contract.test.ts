@@ -175,14 +175,15 @@ describe("database role contract", () => {
    * The definer roles' member list is cluster-wide, but both things a member
    * is measured against are per database: the migrate identity the check runs
    * as, and `datdba`. So what decides whether step 0 passes in BOTH databases
-   * is each definer member's standing in each of them — superuser, a role the
-   * connected migrate identity inherits, or a holder of that database's owner
-   * privileges — and not the owners being distinct. The three configurations
-   * below are the ones the comment in database-roles.ts and the section in
+   * is each definer member's standing in each of them — a superuser, or the
+   * role that IS that database's migrate identity or owner, both by name —
+   * and not the owners being distinct. The three configurations below are the
+   * ones the comment in database-roles.ts and the section in
    * docs/migrations.md claim: distinct owners with distinct migrate identities
-   * refuse symmetrically, distinct owners under one migrate identity pass, and
-   * a second migrate identity is accepted by the database whose owner
-   * privileges it holds while the other still refuses it.
+   * refuse symmetrically, distinct owners under ONE migrate identity pass, and
+   * a second migrate identity is refused even in the database whose owner's
+   * privileges it has been granted — because holding an owner's privileges is
+   * not being that owner.
    */
   test("a second migrate identity is refused in both databases; a second owner is not", async () => {
     const secondDatabase = `role_contract_second_${suffix}`;
@@ -260,11 +261,13 @@ describe("database role contract", () => {
       }
       await migrator.db.connection().execute((db) => verifyDatabaseRoles(db));
 
-      // Two migrate identities do coexist where each holds the owner
-      // privileges of every database involved: granted the second database's
-      // owner, the second migrator is accounted for there — while the FIRST
-      // database still refuses it, because it holds none of ITS owner's
-      // privileges. Owner privileges per database, not one owner for all.
+      // Two migrate identities do NOT coexist by each holding the owner
+      // privileges of its own database. Admittance is the owner's IDENTITY,
+      // not its privileges: a role that merely holds them would, as a definer
+      // member, gain ownership of the SECURITY DEFINER functions those
+      // privileges alone do not confer. So granting the second database's
+      // owner to the second migrator accounts for neither migrator in the
+      // other's database, and both refuse — symmetrically, as above.
       await admin.unsafe(`grant ${secondOwner} to ${secondMigrator}`);
       for (const definer of definers) {
         await admin.unsafe(`grant ${definer} to ${secondMigrator} with inherit true, set true`);
@@ -273,7 +276,12 @@ describe("database role contract", () => {
         databaseUrl: url(secondMigrator, secondPassword, secondDatabase),
         maxConnections: 1,
       });
-      await second.db.connection().execute((db) => verifyDatabaseRoles(db));
+      // `migratorRole` holds secondOwner's privileges too, by the grant in
+      // this test's setup, and is still refused in the database secondOwner
+      // owns. Holding them is not being it.
+      expect((await refuse(second))?.message).toContain(
+        `role ${migratorRole} is a member of definer role ${definers[0]}`,
+      );
       expect((await refuse(migrator))?.message).toContain(
         `role ${secondMigrator} is a member of definer role ${definers[0]}`,
       );

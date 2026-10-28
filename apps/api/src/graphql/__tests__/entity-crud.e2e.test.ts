@@ -219,7 +219,12 @@ for (const table of tables) {
           deleteDoc(table),
           deleteVariables(table, randomUUID(), placeholderControls(table, "delete")),
         );
-        expect(deletedOf(table, result)).toBe(false);
+        if (table.source?.authorization?.recordPermissions) {
+          // Record permission checks intentionally conceal whether the row exists.
+          expectOperationError(table, result, graphql.deleteMutationName, "FORBIDDEN");
+        } else {
+          expect(deletedOf(table, result)).toBe(false);
+        }
       });
     }
 

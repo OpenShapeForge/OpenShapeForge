@@ -320,8 +320,10 @@ for (const table of restTables) {
               ? { expectedVersion: "2026-01-01T00:00:00.000Z" }
               : {}),
           });
-      expect(response.status).toBe(404);
-      expect(response.body.error.code).toBe("NOT_FOUND");
+      // A missing ACL-protected row is indistinguishable from a forbidden row.
+      const aclRefusal = Boolean(table.source?.authorization?.recordPermissions) && !leaseRequired(table, "update");
+      expect(response.status).toBe(aclRefusal ? 403 : 404);
+      expect(response.body.error.code).toBe(aclRefusal ? "FORBIDDEN" : "NOT_FOUND");
     });
 
     // What DELETE must do depends on what the create actually left behind,
@@ -360,7 +362,8 @@ for (const table of restTables) {
                 ? { expectedVersion: "2026-01-01T00:00:00.000Z" }
                 : {}),
             });
-        expect(again.status).toBe(404);
+        expect(again.status).toBe(table.source?.authorization?.recordPermissions && !leaseRequired(table, "delete") ? 403 : 404);
+        expect(again.body.error.code).toBe(table.source?.authorization?.recordPermissions && !leaseRequired(table, "delete") ? "FORBIDDEN" : "NOT_FOUND");
       }
     });
 
@@ -436,10 +439,13 @@ for (const table of restTables) {
 
     if (versionRequired(table, "update")) {
       test("invalid expectedVersion is a field validation error, not a server error", async () => {
+        // Exercise validation on a real, authorized record: ACL checks precede
+        // version validation and intentionally conceal missing records.
+        const id = table.source?.authorization?.recordPermissions ? await createRestRow(table, tenantA) : randomUUID();
         const refused = await rest(
           tenantA,
           "PATCH",
-          `${base}/${randomUUID()}`,
+          `${base}/${id}`,
           {
             expectedVersion: "2026-02-30T12:00:00.000Z",
             leaseToken: "not-used-because-version-validation-runs-first",

@@ -435,6 +435,22 @@ export async function createRow(
  * another — the parents of a row need roles the row's own create role need
  * not carry.
  */
+/** Give restricted fixture records the declared CRUD roles, without changing the
+ * seeded named-action axis or granting any role outside this entity's contract. */
+export function sampleRecordPermissions(table: GeneratedTable): Record<string, unknown> | undefined {
+  const authorization = table.source?.authorization;
+  const config = authorization?.recordPermissions;
+  if (!config || config.empty !== "restricted") return undefined;
+  const roles = authorization.roles;
+  const create = roles?.create ?? [];
+  return {
+    ...config.defaultValue,
+    view: { roles: [...new Set([...(roles?.read ?? []), ...create])] },
+    edit: { roles: [...new Set([...(roles?.update ?? []), ...create])] },
+    delete: { roles: [...new Set([...(roles?.delete ?? []), ...create])] },
+  };
+}
+
 export function createInput(
   table: GeneratedTable,
   identity: Identity,
@@ -466,6 +482,12 @@ export async function columnInput(
     const field = fieldName(column);
     if (field in overrides) {
       input[field] = overrides[field];
+      continue;
+    }
+    const permissions = table.source?.authorization?.recordPermissions;
+    const samplePermissions = permissions?.field === field ? sampleRecordPermissions(table) : undefined;
+    if (samplePermissions) {
+      input[field] = samplePermissions;
       continue;
     }
     const fkTarget = fkTargets.get(column.name);

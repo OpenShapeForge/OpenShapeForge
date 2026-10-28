@@ -245,7 +245,10 @@ const EMPTY_IDENTITY: IdentityInput = {
  *
  * `allowUnsigned: true` returns the headers as-is, but ONLY when no secret is
  * configured. This is for unit-test fixtures and the local dev path where
- * OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET is intentionally unset.
+ * OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET is intentionally unset. Everything
+ * in the bundle is then caller input, the principal class included, so no
+ * caller in this workspace passes it — a control that refuses a non-person
+ * would be refusing on a claim rather than on a verdict.
  */
 export function readTrustedContext(
   headers: ReadonlyHeadersLike,

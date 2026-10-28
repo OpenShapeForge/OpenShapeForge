@@ -987,14 +987,27 @@ function assertPrincipalClassesOnlyNarrow(
   const effective = (entity: JsonObject): JsonValue | undefined => {
     const authorization = objectProperty(entity, "authorization");
     if (authorization?.principalClasses !== undefined) return authorization.principalClasses;
-    const permissions = objectProperty(objectProperty(authorization, "rowAccess"), "recordPermissions");
+    const rowAccess = objectProperty(authorization, "rowAccess");
+    if (rowAccess?.enabled !== true) return undefined;
+    const permissions = objectProperty(rowAccess, "recordPermissions");
     const actions = Array.isArray(permissions?.actions) ? permissions.actions : [];
     const excludesApplication = actions.some((action) =>
       action && typeof action === "object" && Array.isArray((action as JsonObject).principals)
         && ((action as JsonObject).principals as unknown[]).includes("integration"));
     return excludesApplication ? ["person", "service", "unknown"] : undefined;
   };
-  assertOrListOnlyNarrows(effective(base), effective(merged), "authorization.principalClasses", origin);
+  const prior = effective(base);
+  const next = effective(merged);
+  // Removing the last integration action must not reopen generic CRUD to
+  // applications. Materialize the former derived restriction before compiling.
+  if (prior !== undefined && next === undefined &&
+      objectProperty(base, "authorization")?.principalClasses === undefined) {
+    const authorization = objectProperty(merged, "authorization");
+    if (authorization && authorization.principalClasses === undefined) {
+      authorization.principalClasses = structuredClone(prior);
+    }
+  }
+  assertOrListOnlyNarrows(prior, effective(merged), "authorization.principalClasses", origin);
 }
 
 function assertRowAccessOnlyNarrows(base: JsonObject, merged: JsonObject, origin: string): void {

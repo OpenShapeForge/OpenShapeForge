@@ -395,6 +395,21 @@ describe("resolveAuthoringLayers", () => {
     expect(check({ principalClasses: ["person", "service", "unknown", "application"] })).toThrow(/principalClasses/);
     expect(check({ principalClasses: ["person"] })).not.toThrow();
     expect(check({ rowAccess: { recordPermissions: { actions: [{ name: "start", principals: ["integration"] }] } } })).not.toThrow();
+    const root = makeRepo();
+    writeYaml(root, "base/entities/core/widget.yaml", {
+      ...actionEntity,
+      authorization: { ...actionEntity.authorization, rowAccess: { ...actionEntity.authorization.rowAccess,
+        recordPermissions: { ...actionEntity.authorization.rowAccess.recordPermissions,
+          actions: [{ name: "start", principals: ["integration", "person"] }] } } },
+    });
+    writeYaml(root, "overlay/entities/core/widget.yaml", { kind: "entityPatch", authorization: {
+      rowAccess: { recordPermissions: { actions: [{ name: "start", principals: ["person"] }] } },
+    } });
+    configureLayers(root, ["base", "overlay"]);
+    const result = resolveAuthoringLayers(root);
+    const narrowed = YAML.parse(readFileSync(join(result, "entities/core/widget.yaml"), "utf8"));
+    expect(narrowed.authorization.principalClasses).toEqual(["person", "service", "unknown"]);
+    expect(narrowed.authorization.rowAccess.recordPermissions.actions[0].principals).toEqual(["person"]);
   });
 
   test("an entity patch may tighten a declared record action", () => {

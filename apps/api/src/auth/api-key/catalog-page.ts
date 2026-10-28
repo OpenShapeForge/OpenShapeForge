@@ -137,6 +137,28 @@ export const DIGEST_LENGTH = 16;
 const ANCHOR = sql.raw("page_anchor");
 
 /**
+ * The page's ORDERING KEY, as the limited subquery projects it: the sort
+ * expression's own value and the id tie-break, under names the window that
+ * numbers the rows can order by.
+ *
+ * They exist because a window has to order by a column of its input, and the
+ * sort expression is written against the page's `from` — `lower(i.display_name)`,
+ * a `case` over `revoked_at` and `now` — which is out of scope one level up.
+ * Projecting it is how the window gets the SAME order the limit was taken in
+ * rather than an order of the plan's choosing ({@link pageStatement}).
+ *
+ * `page_sort_value` for a name sort is the lowercased copy of a name the page
+ * already carries, so this is not the sort value the cursor refuses to ship
+ * ({@link sortValueDigest}) — that is per-CURSOR and unbounded in both
+ * directions; this is one more column on a row whose own name is already on
+ * it. Both ride out on `page_rows.*`, and both are ignored: a caller reads the
+ * page's own projection, and {@link takePage} reads `page_ord` and
+ * `sort_digest`.
+ */
+const PAGE_SORT_VALUE = sql.raw("page_sort_value");
+const PAGE_SORT_ID = sql.raw("page_sort_id");
+
+/**
  * The anchor's resolved sort value, as a subquery over {@link ANCHOR}.
  *
  * Resolved inside the statement rather than carried, so the value and the
@@ -251,20 +273,38 @@ export function renderSortValue(column: SortColumn): RawBuilder<unknown> {
 }
 
 /**
- * `<expr> <direction> nulls last, <id> asc`.
+ * `<value> <direction> nulls last, <id> asc` — the ORDER this listing means,
+ * as a fragment, without the `order by` that introduces it.
+ *
+ * Written once because two clauses of the page statement have to mean exactly
+ * the same order: the subquery's `order by`, which decides WHICH rows the
+ * limit keeps, and the window that numbers them ({@link pageStatement}). The
+ * two read different expressions for the same value — the sort expression over
+ * the page's own `from`, and the column the subquery projects it as — so the
+ * value and the id are parameters here rather than a fixed pair.
  *
  * The id tie-break does NOT flip with the direction: it only has to be
  * definite, and keeping it ascending keeps one resume predicate correct for
- * both directions.
+ * both directions. `nulls last` likewise holds in both, which is the second
+ * keyset property (see the module header).
  */
+function orderSpec(
+  value: RawBuilder<unknown>,
+  id: RawBuilder<unknown>,
+  direction: SortDirection,
+): RawBuilder<unknown> {
+  return direction === "desc"
+    ? sql`${value} desc nulls last, ${id} asc`
+    : sql`${value} asc nulls last, ${id} asc`;
+}
+
+/** `order by <expr> <direction> nulls last, <id> asc` ({@link orderSpec}). */
 export function orderBy(
   column: SortColumn,
   id: RawBuilder<unknown>,
   direction: SortDirection,
 ): RawBuilder<unknown> {
-  return direction === "desc"
-    ? sql`order by ${column.expr} desc nulls last, ${id} asc`
-    : sql`order by ${column.expr} asc nulls last, ${id} asc`;
+  return sql`order by ${orderSpec(column.expr, id, direction)}`;
 }
 
 /**
@@ -376,11 +416,23 @@ export function limitWithProbe(first: number): RawBuilder<unknown> {
  * refused rather than absorbed, and the digest is now compared against the
  * same snapshot the page was cut from.
  *
- * The page's rows carry `page_ord`, a `row_number()` over the limited
- * subquery, because the outer select joins the count onto them and a join
- * guarantees no order. Numbering the rows is how the order survives it without
- * the sort VALUE having to be projected out of the database — which is the
- * thing {@link sortValueDigest} exists to avoid shipping.
+ * The page's rows carry `page_ord`, a `row_number()`, because the outer select
+ * joins the count onto them and a join guarantees no order: numbering the rows
+ * is how the order survives it.
+ *
+ * That number has to be ordered EXPLICITLY, and by the page's own sort. A
+ * `row_number() over ()` reads as "in the order the rows arrive", and SQL
+ * promises no such thing: the window has no `order by`, so the numbering
+ * follows whatever order the subquery's rows happen to reach it in, and an
+ * outer `order by page_ord` then sorts numbers that are arbitrary — a plan
+ * change (a different scan, a parallel append, a `group by` that hashes
+ * instead of sorts) is free to renumber the page and the rows come back
+ * shuffled, having been selected correctly. So the window orders by the
+ * limited subquery's projected ordering key ({@link PAGE_SORT_VALUE}) under
+ * the same {@link orderSpec} — same direction, same `nulls last`, same id
+ * tie-break — as the `order by` that decided which rows the limit kept. The
+ * numbering is then a reading of that order rather than a guess at it, and
+ * `page_ord` 1..n is the page in its sort order for every plan.
  */
 export function pageStatement(parts: {
   column: SortColumn;
@@ -420,9 +472,14 @@ export function pageStatement(parts: {
       select count(*) as total from ${parts.from} where ${parts.fence}
     ),
     page_rows as (
-      select limited.*, row_number() over () as page_ord
+      select limited.*,
+             row_number() over (
+               order by ${orderSpec(PAGE_SORT_VALUE, PAGE_SORT_ID, parts.direction)}
+             ) as page_ord
         from (
-          select ${parts.columns}, ${sortValueDigest(parts.column)} as sort_digest
+          select ${parts.columns}, ${sortValueDigest(parts.column)} as sort_digest,
+                 ${parts.column.expr} as ${PAGE_SORT_VALUE},
+                 ${parts.id} as ${PAGE_SORT_ID}
             from ${parts.pageFrom}
            where ${parts.fence}
              ${keysetPredicate(parts.column, parts.id, parts.direction, parts.anchor?.cursor)}

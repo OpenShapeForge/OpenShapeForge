@@ -11,6 +11,9 @@
  *   - rows that tie on the sort field still page in one definite order,
  *     because the order ends in the row id;
  *   - NULLs ("no expiry", "never used") sort last in both directions;
+ *   - a page comes back in its own order whatever PLAN produced it: every sort
+ *     field of both listings, in both directions, read again under sequential,
+ *     bitmap and index scans, a hashed grouping and a parallel plan;
  *   - rows inserted or disabled DURING the walk cannot shift the pages
  *     already handed out, which is what an offset silently does;
  *   - the tenant fence is the policy, not the predicate: another tenant's
@@ -26,7 +29,14 @@
 import { describe, expect, test } from "bun:test";
 import { randomBytes, randomUUID } from "node:crypto";
 import { SQL } from "bun";
-import { sql, type Kysely } from "kysely";
+import {
+  DummyDriver,
+  Kysely,
+  PostgresAdapter,
+  PostgresIntrospector,
+  PostgresQueryCompiler,
+  sql,
+} from "kysely";
 import { API_KEY_MANAGE_ROLE } from "../auth/api-key/ceiling.js";
 import { mintApiKey } from "../auth/api-key/format.js";
 import {
@@ -48,7 +58,7 @@ import {
 } from "../auth/api-key/reconcile.js";
 import { readApiKeyProvisioningConfig } from "../auth/api-key/runtime-config.js";
 import { stubRealm, type StubRealm } from "../auth/api-key/__tests__/fixtures.js";
-import type { PageAnchor } from "../auth/api-key/catalog-page.js";
+import { pageStatement, type PageAnchor } from "../auth/api-key/catalog-page.js";
 import { createDatabaseRuntime } from "../db/connection.js";
 import { runMigrationChain } from "../db/migration-chain.js";
 import { APP_ROLE } from "../db/migrations/app-role.js";
@@ -122,6 +132,8 @@ async function seedIntegration(adminDb: Kysely<DB>, input: {
   displayName: string;
   status?: string;
   createdAt?: Date;
+  /** Defaults to `createdAt`; given separately where the two must differ. */
+  updatedAt?: Date;
   grantedRoles?: string[];
 }): Promise<string> {
   const id = randomUUID();
@@ -134,7 +146,8 @@ async function seedIntegration(adminDb: Kysely<DB>, input: {
       (${id}, ${input.tenantId}, ${input.displayName}, ${`osf-int-${id}`},
        ${input.status ?? "active"}, cast(${input.grantedRoles ?? [READ_ROLE]} as jsonb),
        'ciphertext', 'k1', 'aes-256-gcm', ${USER},
-       ${input.createdAt ?? new Date()}, ${input.createdAt ?? new Date()})
+       ${input.createdAt ?? new Date()},
+       ${input.updatedAt ?? input.createdAt ?? new Date()})
   `.execute(adminDb);
   return id;
 }
@@ -199,6 +212,7 @@ async function walkIntegrations(
   session: ProvisioningSession,
   query: { sortField: IntegrationSortField; sortDirection: "asc" | "desc"; first?: number },
   mutate?: (page: number) => Promise<void>,
+  now?: Date,
 ): Promise<{ ids: string[]; pages: number; totals: number[] }> {
   const ids: string[] = [];
   const totals: number[] = [];
@@ -207,7 +221,7 @@ async function walkIntegrations(
   for (;;) {
     const page = await pageIntegrations(serviceDeps(appDb), session, {
       ...query, first: query.first ?? 1, ...(after ? { after } : {}),
-    });
+    }, now ?? new Date());
     pages += 1;
     totals.push(page.totalCount);
     for (const row of page.rows) ids.push(row.id);
@@ -224,13 +238,14 @@ async function walkCredentials(
   session: ProvisioningSession,
   integrationId: string,
   query: { sortField: CredentialSortField; sortDirection: "asc" | "desc"; first?: number },
+  now?: Date,
 ): Promise<string[]> {
   const ids: string[] = [];
   let after: PageAnchor | undefined;
   for (;;) {
     const page = await pageKeys(serviceDeps(appDb), session, { integrationId }, {
       ...query, first: query.first ?? 1, ...(after ? { after } : {}),
-    });
+    }, now ?? new Date());
     for (const row of page.rows) ids.push(row.id);
     if (!page.nextCursor) break;
     after = page.nextCursor;
@@ -461,6 +476,352 @@ describe("integration catalog paging against PostgreSQL", () => {
         { integrationId: theirs }, { sortField: "createdAt", sortDirection: "asc", first: 10 });
       expect(credentials.rows).toEqual([]);
       expect(credentials.totalCount).toBe(0);
+    });
+  }, TEST_TIMEOUT);
+});
+
+/**
+ * The order this listing declares, as a comparator over the seeded rows: the
+ * sort value in the asked direction, an ABSENT value last in both directions,
+ * then the row id ascending.
+ *
+ * Derived from the contract rather than from a page, so it is an oracle and
+ * not a restatement: a page that agrees with this agrees with what
+ * `catalog-page.ts` promises, instead of merely agreeing with itself.
+ */
+function expectedOrder<T extends { id: string }>(
+  rows: readonly T[],
+  value: (row: T) => string | number | null,
+  direction: "asc" | "desc",
+): string[] {
+  const sorted = [...rows].sort((left, right) => {
+    const first = value(left);
+    const second = value(right);
+    if (first === null || second === null) {
+      if (first !== second) return first === null ? 1 : -1;
+    } else if (first !== second) {
+      return (first < second ? -1 : 1) * (direction === "desc" ? -1 : 1);
+    }
+    return left.id < right.id ? -1 : 1;
+  });
+  return sorted.map((row) => row.id);
+}
+
+/**
+ * The plans a page is read under.
+ *
+ * The point of the matrix is that none of these may change the ANSWER. The
+ * page numbers its rows with a window function, and a window without its own
+ * `order by` numbers them in whatever order the plan hands them over — so an
+ * order that holds only under the plan this data happens to produce is not the
+ * order the listing promises. These force sequential, bitmap and index scans,
+ * a hashed rather than a sorted grouping, and a parallel plan — each named
+ * with a node its plan must contain, so the matrix cannot quietly become five
+ * runs of one plan.
+ *
+ * Set on the DATABASE because the page runs in a session this suite does not
+ * own: it opens its own transaction inside the service, so there is no
+ * `set local` to put them in.
+ */
+const PLANS: ReadonlyArray<{
+  name: string;
+  settings: readonly string[];
+  /** A node the forced plan must contain, so "every plan" is checkable. */
+  node: string;
+}> = [
+  { name: "the planner's own choice", settings: [], node: "Index Scan" },
+  {
+    name: "sequential scans only",
+    settings: ["enable_indexscan = off", "enable_bitmapscan = off", "enable_indexonlyscan = off"],
+    node: "Seq Scan",
+  },
+  {
+    name: "bitmap scans",
+    settings: ["enable_indexscan = off", "enable_seqscan = off"],
+    node: "Bitmap Heap Scan",
+  },
+  {
+    // `enable_sort = off` is a cost penalty rather than a prohibition, and the
+    // inflated cost it leaves on the plan is over `jit_above_cost`: without
+    // `jit = off` the time this page takes is LLVM compiling it, not the
+    // database answering it, and the statement timeout fires. JIT is code
+    // generation and not plan shape, so turning it off changes nothing this
+    // matrix is about.
+    name: "hashed grouping",
+    settings: ["enable_sort = off", "enable_indexscan = off", "jit = off"],
+    node: "HashAggregate",
+  },
+  {
+    name: "forced parallel query",
+    settings: [
+      "debug_parallel_query = on",
+      "max_parallel_workers_per_gather = 4",
+      "parallel_setup_cost = 0",
+      "parallel_tuple_cost = 0",
+      "min_parallel_table_scan_size = 0",
+    ],
+    node: "Gather",
+  },
+];
+
+/**
+ * Read pages under one set of planner settings.
+ *
+ * A database-level setting is read when a connection is ESTABLISHED, so the
+ * work gets a pool opened after the settings were written rather than the
+ * suite's own. The settings are reset afterwards, so one plan cannot leak into
+ * the next.
+ */
+async function withPlan<T>(
+  scratch: Scratch,
+  settings: readonly string[],
+  work: (appDb: Kysely<DB>) => Promise<T>,
+): Promise<T> {
+  const alter = (clause: string) =>
+    sql.raw(`alter database "${scratch.databaseName}" ${clause}`).execute(scratch.adminDb);
+  for (const setting of settings) await alter(`set ${setting}`);
+  const runtime = createDatabaseRuntime({
+    databaseUrl: databaseUrl(scratch.databaseName, true),
+    maxConnections: 4,
+  });
+  try {
+    return await work(runtime.db);
+  } finally {
+    await runtime.close();
+    for (const setting of settings) await alter(`reset ${setting.split(" ")[0]!}`);
+  }
+}
+
+/**
+ * The plan one statement is read under, as the planner describes it.
+ *
+ * `explain` names its one column `QUERY PLAN`, space and all, so the lines are
+ * read positionally rather than by a name this has to spell.
+ */
+async function planOf(appDb: Kysely<DB>, statement: string): Promise<string> {
+  const explained = await sql<Record<string, string>>`
+    ${sql.raw(`explain ${statement}`)}
+  `.execute(appDb);
+  return explained.rows.map((row) => Object.values(row)[0] ?? "").join("\n");
+}
+
+/**
+ * The page statement's own SQL, compiled against no database and with its
+ * whitespace collapsed.
+ *
+ * The statement is the only place the window's order can be read: a plan this
+ * suite can force decides which rows reach the window, and every plan here
+ * hands a sorted, limited subquery over in that order — so an UNORDERED window
+ * is a page that happens to be right rather than one that must be, and no
+ * answer distinguishes the two. What the statement says is the difference.
+ */
+function pageStatementText(direction: "asc" | "desc"): string {
+  const compiled = pageStatement({
+    column: { expr: sql`lower(i.display_name)` },
+    id: sql`i.id`,
+    direction,
+    first: 10,
+    from: sql`platform.api_key_integrations i`,
+    pageFrom: sql`platform.api_key_integrations i`,
+    fence: sql`i.tenant_id = ${TENANT_A}`,
+    columns: sql`i.id`,
+  }).compile(new Kysely<DB>({
+    dialect: {
+      createAdapter: () => new PostgresAdapter(),
+      createDriver: () => new DummyDriver(),
+      createIntrospector: (db) => new PostgresIntrospector(db),
+      createQueryCompiler: () => new PostgresQueryCompiler(),
+    },
+  }));
+  return compiled.sql.replaceAll(/\s+/g, " ");
+}
+
+describe("a page is numbered by its own order, not by the plan's", () => {
+  const NOW = new Date("2026-06-15T12:00:00.000Z");
+
+  test("the window that numbers a page carries the page's own order", () => {
+    for (const direction of ["asc", "desc"] as const) {
+      const text = pageStatementText(direction);
+      // `row_number() over ()` numbers rows in the order they arrive, which is
+      // the plan's business and not the page's: the outer `order by page_ord`
+      // then sorts numbers that mean nothing in particular.
+      expect(text).not.toContain("row_number() over ()");
+      // The window reads the limited subquery's own ordering key, under the
+      // same direction, the same NULL placement and the same id tie-break as
+      // the `order by` that decided which rows the limit kept.
+      expect(text).toContain(
+        `row_number() over ( order by page_sort_value ${direction} nulls last, page_sort_id asc )`,
+      );
+      expect(text).toContain(
+        `order by lower(i.display_name) ${direction} nulls last, i.id asc`,
+      );
+    }
+  });
+
+  /**
+   * Credentials covering every dimension of the order at once: two rows tied
+   * on the lowercased name, three tied on `created_at` to the microsecond,
+   * five tied on the derived status, and absent expiries and last uses — the
+   * NULL block, which sorts last in both directions.
+   */
+  type CredentialSeed = {
+    displayName: string;
+    createdAt: Date;
+    expiresAt?: Date;
+    lastUsedAt?: Date;
+    revokedAt?: Date;
+  };
+  const CREDENTIALS: readonly CredentialSeed[] = [
+    { displayName: "Alpha", createdAt: NOW, expiresAt: new Date("2030-01-01T00:00:00.000Z") },
+    { displayName: "alpha", createdAt: NOW, lastUsedAt: new Date("2026-01-01T00:00:00.000Z") },
+    { displayName: "beta", createdAt: new Date("2026-02-02T00:00:00.000Z"), expiresAt: new Date("2020-01-01T00:00:00.000Z") },
+    { displayName: "gamma", createdAt: new Date("2026-03-03T00:00:00.000Z"), revokedAt: new Date("2026-04-04T00:00:00.000Z") },
+    { displayName: "delta", createdAt: NOW },
+    { displayName: "epsilon", createdAt: new Date("2026-05-05T00:00:00.000Z"), expiresAt: new Date("2031-01-01T00:00:00.000Z"), lastUsedAt: new Date("2026-05-06T00:00:00.000Z") },
+    { displayName: "zeta", createdAt: new Date("2026-01-01T00:00:00.000Z"), expiresAt: new Date("2029-01-01T00:00:00.000Z"), lastUsedAt: new Date("2026-01-02T00:00:00.000Z") },
+  ];
+
+  /** The same expression `service.ts` derives a credential's status with. */
+  function statusOf(row: CredentialSeed): string {
+    if (row.revokedAt) return "revoked";
+    if (row.expiresAt && row.expiresAt <= NOW) return "expired";
+    return "active";
+  }
+
+  test("every credential sort field, in both directions, under every plan", async () => {
+    await withScratchDb(async (scratch) => {
+      await seedTenants(scratch.adminDb);
+      const integrationId = await seedIntegration(scratch.adminDb, {
+        tenantId: TENANT_A, displayName: "parent",
+      });
+      const seeded: Array<CredentialSeed & { id: string }> = [];
+      for (const input of CREDENTIALS) {
+        seeded.push({
+          ...input,
+          id: await seedKey(scratch.adminDb, { tenantId: TENANT_A, integrationId, ...input }),
+        });
+      }
+      const session = manager(TENANT_A);
+      // Absent values, per field, so the NULL block is really in the data.
+      expect(seeded.filter((row) => !row.expiresAt)).not.toHaveLength(0);
+      expect(seeded.filter((row) => !row.lastUsedAt)).not.toHaveLength(0);
+
+      const keys: Array<[CredentialSortField, (row: CredentialSeed) => string | number | null]> = [
+        ["displayName", (row) => row.displayName.toLowerCase()],
+        ["status", (row) => statusOf(row)],
+        ["createdAt", (row) => row.createdAt.getTime()],
+        ["expiresAt", (row) => row.expiresAt?.getTime() ?? null],
+        ["lastUsedAt", (row) => row.lastUsedAt?.getTime() ?? null],
+      ];
+
+      for (const plan of PLANS) {
+        await withPlan(scratch, plan.settings, async (appDb) => {
+          for (const [sortField, value] of keys) {
+            for (const sortDirection of ["asc", "desc"] as const) {
+              const expected = expectedOrder(seeded, value, sortDirection);
+              const page = await pageKeys(serviceDeps(appDb), session, { integrationId },
+                { sortField, sortDirection, first: 100 }, NOW);
+              // One wide page: the rows arrive in the order, and `page_ord`
+              // carried it through the join the count rides in on.
+              expect(page.rows.map((row) => row.id)).toEqual(expected);
+              expect(page.totalCount).toBe(seeded.length);
+              expect(page.nextCursor).toBeNull();
+              // And the keyset walks that same order one row at a time, so
+              // the page's numbering and the resume predicate agree.
+              const walked = await walkCredentials(appDb, session, integrationId,
+                { sortField, sortDirection }, NOW);
+              expect(walked).toEqual(expected);
+            }
+          }
+        });
+      }
+    });
+  }, TEST_TIMEOUT);
+
+  test("every integration sort field, in both directions, under every plan", async () => {
+    await withScratchDb(async (scratch) => {
+      await seedTenants(scratch.adminDb);
+      // Ties on the lowercased name, on `created_at` and on `updated_at`, and
+      // all three statuses. None of the four integration sort columns is
+      // nullable, so the NULL block is the credential page's to prove.
+      type IntegrationSeed = {
+        displayName: string;
+        status: string;
+        createdAt: Date;
+        updatedAt: Date;
+      };
+      const inputs: readonly IntegrationSeed[] = [
+        { displayName: "Alpha Integration", status: "active", createdAt: NOW, updatedAt: new Date("2026-06-20T00:00:00.000Z") },
+        { displayName: "alpha integration", status: "disabled", createdAt: NOW, updatedAt: new Date("2026-06-21T00:00:00.000Z") },
+        { displayName: "Beta", status: "pending", createdAt: new Date("2026-02-02T00:00:00.000Z"), updatedAt: NOW },
+        { displayName: "gamma", status: "active", createdAt: new Date("2026-03-03T00:00:00.000Z"), updatedAt: NOW },
+        { displayName: "delta", status: "active", createdAt: new Date("2026-04-04T00:00:00.000Z"), updatedAt: new Date("2026-06-22T00:00:00.000Z") },
+      ];
+      const seeded: Array<IntegrationSeed & { id: string }> = [];
+      for (const input of inputs) {
+        seeded.push({
+          ...input,
+          id: await seedIntegration(scratch.adminDb, { tenantId: TENANT_A, ...input }),
+        });
+      }
+      // Another tenant's rows are in the same tables and in none of the orders.
+      await seedIntegration(scratch.adminDb, { tenantId: TENANT_B, displayName: "aaa theirs" });
+      const session = manager(TENANT_A);
+
+      const keys: Array<[IntegrationSortField, (row: IntegrationSeed) => string | number]> = [
+        ["displayName", (row) => row.displayName.toLowerCase()],
+        ["status", (row) => row.status],
+        ["createdAt", (row) => row.createdAt.getTime()],
+        ["updatedAt", (row) => row.updatedAt.getTime()],
+      ];
+
+      for (const plan of PLANS) {
+        await withPlan(scratch, plan.settings, async (appDb) => {
+          for (const [sortField, value] of keys) {
+            for (const sortDirection of ["asc", "desc"] as const) {
+              const expected = expectedOrder(seeded, value, sortDirection);
+              const page = await pageIntegrations(serviceDeps(appDb), session,
+                { sortField, sortDirection, first: 100 }, NOW);
+              expect(page.rows.map((row) => row.id)).toEqual(expected);
+              expect(page.totalCount).toBe(seeded.length);
+              const walked = await walkIntegrations(appDb, session,
+                { sortField, sortDirection }, undefined, NOW);
+              expect(walked.ids).toEqual(expected);
+            }
+          }
+        });
+      }
+    });
+  }, TEST_TIMEOUT);
+
+  test("the plans the matrix forces really are different plans", async () => {
+    await withScratchDb(async (scratch) => {
+      await seedTenants(scratch.adminDb);
+      for (let index = 0; index < 40; index += 1) {
+        await seedIntegration(scratch.adminDb, {
+          tenantId: TENANT_A, displayName: `row ${index}`,
+        });
+      }
+      // Without this the matrix above could be five runs of one plan, and
+      // "under every plan" would prove nothing. The integration page's own
+      // shape is the statement to read it from: it joins, groups and sorts.
+      const statement = `
+        select i.id, count(k.id) as keys
+          from platform.api_key_integrations i
+          left join platform.api_keys k on k.integration_id = i.id
+         where i.tenant_id = '${TENANT_A}'
+         group by i.id
+         order by lower(i.display_name) asc nulls last, i.id asc
+         limit 11`;
+      const plans = new Set<string>();
+      for (const plan of PLANS) {
+        const explained = await withPlan(scratch, plan.settings,
+          (appDb) => planOf(appDb, statement));
+        // The settings really took: the node each one forces is in the plan.
+        expect(explained).toContain(plan.node);
+        plans.add(explained);
+      }
+      expect(plans.size).toBe(PLANS.length);
     });
   }, TEST_TIMEOUT);
 });

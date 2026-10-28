@@ -86,7 +86,18 @@ operations:
             x-osf-i18n: { title: { en: Page size, nl: Paginagrootte } }
           after: &after
             type: string
-            maxLength: 200
+            # The opaque keyset cursor this listing issued, which carries the
+            # last row's SORT VALUE. A display name at this contract's own
+            # maxLength therefore makes a cursor of roughly a kilobyte of
+            # base64url, so a 200-character bound refused the listing's own
+            # `nextCursor` at the transport for any name past a short one — the
+            # page was reachable and the page after it was not. The exact
+            # ceiling is derived from the display-name bound in
+            # apps/api/src/operations/api-key-cursor.ts (MAX_CURSOR_LENGTH);
+            # this is the outer bound that stays above it, pinned by a test in
+            # apps/api/src/operations/api-key-operations.test.ts so the two
+            # cannot cross.
+            maxLength: 4096
             x-osf-i18n: { title: { en: Cursor, nl: Cursor } }
     output:
       schema:

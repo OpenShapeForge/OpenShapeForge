@@ -41,6 +41,8 @@ import {
   MAX_CREDENTIAL_TTL_DAYS,
   ONE_TIME_CREDENTIAL_HEADERS,
 } from "./api-key-operations.js";
+import { MAX_DISPLAY_NAME_LENGTH } from "../auth/api-key/service.js";
+import { MAX_CURSOR_LENGTH } from "./api-key-cursor.js";
 import { createOperationAjv } from "./operation-ajv.js";
 import { listOperationContracts } from "./runtime.js";
 
@@ -602,6 +604,35 @@ describe("integration catalog Operations", () => {
           expect(failure((await run(handler, { ...input, first },
             { invalidInput: true })).result)).toMatchObject({ status: 400, code: "VALIDATION" });
         }
+      }
+    });
+
+    test("declares an `after` bound no cursor it issues can exceed", () => {
+      // The cursor carries the last row's SORT VALUE, so its length follows
+      // the display name's: at the authored maximum it is roughly a kilobyte
+      // of base64url. The transport bound was 200 characters, which refused
+      // the listing's own `nextCursor` for any name past a short one — the
+      // first page worked and there was no second. The decoder's ceiling is
+      // derived from the same display-name bound; this is what keeps the
+      // declared bound above it, on both listings, rather than leaving two
+      // numbers to drift.
+      for (const handler of ["listIntegrations", "listCredentials"]) {
+        const schema = contracts.get(handler)!.inputSchema as {
+          properties: { after: { maxLength: number }; displayName: { maxLength: number } };
+        };
+        expect({ handler, fits: schema.properties.after.maxLength >= MAX_CURSOR_LENGTH })
+          .toEqual({ handler, fits: true });
+        // And the name bound the service enforces is the one the contract
+        // declares, so a name one surface stores is a name the other accepts.
+        expect({ handler, declared: schema.properties.displayName.maxLength })
+          .toEqual({ handler, declared: MAX_DISPLAY_NAME_LENGTH });
+      }
+      for (const handler of ["createIntegration", "issueCredential"]) {
+        const schema = contracts.get(handler)!.inputSchema as {
+          properties: { displayName: { maxLength: number } };
+        };
+        expect({ handler, declared: schema.properties.displayName.maxLength })
+          .toEqual({ handler, declared: MAX_DISPLAY_NAME_LENGTH });
       }
     });
 

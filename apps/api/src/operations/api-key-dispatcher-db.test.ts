@@ -49,6 +49,7 @@ import {
   issueKey,
   pageIntegrations,
   revokeKey,
+  MAX_DISPLAY_NAME_LENGTH,
   type ApiKeyServiceDeps,
   type ProvisioningSession,
 } from "../auth/api-key/service.js";
@@ -495,6 +496,115 @@ describe("the catalog over the real dispatcher, as a person with a Relation", ()
       expect(ascending).toContain("Rotation");
       expect(ascending).toContain("Second rotation");
     }
+  }, TEST_TIMEOUT);
+
+  test("pages a name at the contract's limit, in code points rather than units", async () => {
+    if (!booted) return;
+    // 200 emoji: 200 characters to the input schema that accepts them, 400
+    // UTF-16 units to JavaScript, 800 bytes to UTF-8 — and a cursor of some
+    // 1.1 kB, which a fixed 512-character ceiling refused before parsing. The
+    // administrator could create the integration and then could not page past
+    // it. Driven here over the real dispatcher, so the schema's own
+    // `maxLength` is what admits the name.
+    const names = [
+      "\u{1f389}".repeat(MAX_DISPLAY_NAME_LENGTH),
+      "\u56de".repeat(MAX_DISPLAY_NAME_LENGTH),
+      `\u0130stanbul ${"\u015e".repeat(MAX_DISPLAY_NAME_LENGTH - 9)}`,
+    ];
+    const created: string[] = [];
+    for (const displayName of names) {
+      const response = await operation("create", {
+        displayName, roles: [READ_ROLE], expiresInDays: 30,
+      });
+      expect({ name: displayName.slice(0, 8), status: response.status })
+        .toEqual({ name: displayName.slice(0, 8), status: 200 });
+      created.push(response.body.integration.integrationId as string);
+      // A credential under the first of them, named the same way, so the
+      // credential listing's name sort carries the same value.
+      expect((await operation("issue-credential", {
+        integrationId: created[0], displayName, expiresInDays: 30,
+      })).status).toBe(200);
+    }
+
+    /** Walk one listing to its end over HTTP, one row per page. */
+    const walk = async (
+      path: string,
+      input: Record<string, unknown>,
+      collection: string,
+      sortField: string,
+      sortDirection: "asc" | "desc",
+    ): Promise<string[]> => {
+      const seen: string[] = [];
+      let after: string | undefined;
+      for (let page = 0; page < 200; page += 1) {
+        const response = await operation(path, {
+          ...input, sortField, sortDirection, first: 1,
+          ...(after === undefined ? {} : { after }),
+        });
+        expect({ page, sortField, sortDirection, status: response.status })
+          .toEqual({ page, sortField, sortDirection, status: 200 });
+        for (const row of response.body[collection] as { id?: string; integrationId?: string }[]) {
+          seen.push((row.id ?? row.integrationId)!);
+        }
+        after = response.body.nextCursor ?? undefined;
+        if (!after) break;
+      }
+      expect(after).toBeUndefined();
+      return seen;
+    };
+
+    for (const sortField of ["displayName", "createdAt"]) {
+      for (const direction of ["asc", "desc"] as const) {
+        const seen = await walk("list", {}, "integrations", sortField, direction);
+        // Every long-named integration is reached, each exactly once: the walk
+        // went past them rather than stopping at the first cursor.
+        expect(seen.length).toBe(new Set(seen).size);
+        for (const id of created) {
+          expect({ sortField, direction, reached: seen.includes(id) })
+            .toEqual({ sortField, direction, reached: true });
+        }
+        const credentials = await walk(
+          "list-credentials", { integrationId: created[0] }, "credentials", sortField, direction,
+        );
+        expect(credentials.length).toBe(new Set(credentials).size);
+        expect(credentials.length).toBeGreaterThanOrEqual(names.length);
+      }
+    }
+  }, TEST_TIMEOUT);
+
+  test("refuses a name past the limit as a declared 400, on both minting paths", async () => {
+    if (!booted) return;
+    // The bound is the service's, not the schema's alone: the older REST and
+    // GraphQL mounts call the same functions, so a name no listing could page
+    // past is refused wherever it is sent.
+    const parent = await operation("create", {
+      displayName: "Length subject", roles: [READ_ROLE], expiresInDays: 30,
+    });
+    expect(parent.status).toBe(200);
+    const tooLong = "\u{1f389}".repeat(MAX_DISPLAY_NAME_LENGTH + 1);
+    for (const [path, input] of [
+      ["create", { displayName: tooLong, roles: [READ_ROLE], expiresInDays: 30 }],
+      ["issue-credential", {
+        integrationId: parent.body.integration.integrationId, displayName: tooLong,
+        expiresInDays: 30,
+      }],
+    ] as const) {
+      const response = await operation(path, input);
+      // The declared input schema catches it at the transport, as the
+      // dispatcher's own input violation; what matters here is that it is a
+      // declared client error and not a 500 or a stored row.
+      expect({ path, status: response.status, code: response.body.error?.code })
+        .toEqual({ path, status: 400, code: "BAD_USER_INPUT" });
+    }
+    // And the service refuses it directly too, which is what the other two
+    // surfaces reach.
+    await expect(createIntegration(booted.deps, provisioningSession(), {
+      displayName: tooLong, roles: [READ_ROLE], expiresInDays: 30,
+    })).rejects.toThrow(/at most 200 characters/);
+    await expect(issueKey(booted.deps, provisioningSession(), {
+      integrationId: parent.body.integration.integrationId as string,
+      displayName: tooLong, expiresInDays: 30,
+    })).rejects.toThrow(/at most 200 characters/);
   }, TEST_TIMEOUT);
 });
 

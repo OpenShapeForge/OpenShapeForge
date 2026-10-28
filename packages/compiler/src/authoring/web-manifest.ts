@@ -1759,6 +1759,38 @@ function projectStandalone(
       } as unknown as WebEntityInterface;
     }
   }
+  // A plugin may own a child resource while its parent Operation-backed entity
+  // belongs to another catalog (for example a host capability below a core
+  // platform tenant). Resolve those additions only after every catalog entity
+  // exists, so catalogs remain independently owned and the relationship stays
+  // declarative.
+  for (const catalog of catalogs) {
+    for (const [targetName, extension] of Object.entries(catalog.interfaces.web?.entityExtensions ?? {})
+      .sort(([left], [right]) => left.localeCompare(right))) {
+      const target = entities[targetName];
+      if (!target?.operationSource) {
+        throw new Error(`Operation-backed entity extension "${targetName}" from "${catalog.plugin}" has no target entity.`);
+      }
+      for (const related of extension.related) {
+        if (!entities[related.entity]) {
+          throw new Error(
+            `Operation-backed entity extension "${targetName}" from "${catalog.plugin}" relates to unknown entity "${related.entity}".`,
+          );
+        }
+        const current = target.operationSource.related ?? [];
+        if (current.some((item) => item.entityId === related.entity || item.route === related.route)) {
+          throw new Error(
+            `Operation-backed entity extension "${targetName}" from "${catalog.plugin}" duplicates related entity "${related.entity}" or route "${related.route}".`,
+          );
+        }
+        target.operationSource.related = [...current, {
+          entityId: related.entity,
+          label: localized(related.label, related.entity),
+          route: related.route,
+        }];
+      }
+    }
+  }
   if (catalogs.length === 0) return undefined;
   for (const [pageId, refs] of refsByPage) pages[pageId]!.operations = pageOperationOrder(refs);
   return {

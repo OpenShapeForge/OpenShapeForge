@@ -487,14 +487,14 @@ describe("an API-key credential resolves to the integration it names", () => {
   };
   const serviceAccountUserId = randomUUID();
 
-  async function provisionIntegration(integrationId: string): Promise<void> {
+  async function provisionIntegration(integrationId: string, grantedRoles: string[] = [SHARED_ROLE]): Promise<void> {
     const secret = encryptSecret(keyring, integrationId, "clientSecret", "client-secret");
     await admin.db.connection().execute(async (conn) => {
       await sql`insert into platform.api_key_integrations
           (id, tenant_id, display_name, keycloak_client_id, status, granted_roles,
            client_secret_ciphertext, client_secret_key_id, client_secret_algorithm, created_by)
         values (${integrationId}::uuid, ${tenantA}::uuid, 'Partner robot',
-          ${`osf-int-${integrationId}`}, 'active', cast('[]' as jsonb),
+          ${`osf-int-${integrationId}`}, 'active', ${JSON.stringify(grantedRoles)}::text::jsonb,
           ${secret.ciphertext}, ${secret.keyId}, ${secret.algorithm}, ${randomUUID()}::uuid)
       `.execute(conn);
     });
@@ -550,6 +550,15 @@ describe("an API-key credential resolves to the integration it names", () => {
     // `publish` entry names. An application still gets nothing from it.
     expect(session!.roles).toContain(SHARED_ROLE);
     expect(await allows(app.db, session as DbSessionInput, DOC, docRow, "publish")).toBe(false);
+  }, TEST_TIMEOUT);
+
+  test("a role-free integration does not inherit the service token role", async () => {
+    const roleFree = randomUUID();
+    await provisionIntegration(roleFree, []);
+    const issued = await issueKey(roleFree);
+    const resolved = await resolve(issued.token);
+    expect(resolved!.roles).toEqual([]);
+    expect(await allows(app.db, resolved as DbSessionInput, DOC, docRow, "publish")).toBe(false);
   }, TEST_TIMEOUT);
 
   test("a second credential of the same integration is the same principal", async () => {
@@ -1002,25 +1011,19 @@ describe("the definer role is bounded", () => {
     });
   });
 
-  test("the shipped manifest declares exactly one record-action entity", () => {
-    // Opt-in means opt-in. `Notebook`, through the notebook example plugin,
-    // is the only authoring in this repository that carries the axis, with
-    // one action, one declared read field and the safe lock mode, so no
-    // other production table is reachable through the function. Pinned in
-    // full rather than counted: a widened projection, a second action, a
-    // weakened lock, or the registry key leaking in where the physical
-    // table belongs all show up here.
-    expect(recordActionEntities()).toEqual([{
-      entity: "Notebook",
-      schema: "notebook",
-      table: "notebooks",
-      keyColumn: "id",
-      keyIsUuid: true,
-      aclColumn: "permissions",
-      actions: ["deliver"],
-      reads: { deliver: [{ field: "name", column: "name" }] },
-      locks: { deliver: "exclusive" },
-    }]);
+  test("the composed test manifest declares exactly its record-action entities", () => {
+    // The opt-in test layer adds two unrelated examples to the notebook
+    // plugin. Pin all actions, readable fields and locks so the resolver's
+    // reachable surface cannot widen silently.
+    expect(recordActionEntities()).toEqual([
+      { entity: "ExternalProcessRun", schema: "erp", table: "external_process_runs", keyColumn: "id", keyIsUuid: true, aclColumn: "authorization",
+        actions: ["follow", "start"], reads: { start: [{ field: "definition", column: "definition" }, { field: "status", column: "status" }] },
+        locks: { follow: "exclusive", start: "exclusive" } },
+      { entity: "MeterConnection", schema: "erp", table: "meter_connections", keyColumn: "id", keyIsUuid: true, aclColumn: "authorization",
+        actions: ["submitReading"], reads: { submitReading: [{ field: "meterKey", column: "meter_key" }] }, locks: { submitReading: "exclusive" } },
+      { entity: "Notebook", schema: "notebook", table: "notebooks", keyColumn: "id", keyIsUuid: true, aclColumn: "permissions",
+        actions: ["deliver"], reads: { deliver: [{ field: "name", column: "name" }] }, locks: { deliver: "exclusive" } },
+    ]);
   });
 });
 

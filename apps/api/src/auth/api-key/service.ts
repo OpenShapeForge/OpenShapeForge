@@ -16,6 +16,14 @@
  * A row stuck at 'pending' authenticates nothing (the store refuses any status
  * but 'active') and is exactly the record the reconciler needs to finish or
  * sweep the attempt. The reverse order would produce the dangerous state.
+ *
+ * The cost of committing the intent first is that the row is VISIBLE while the
+ * realm is being mutated, so the lifecycle can move underneath the attempt: an
+ * administrator may disable it before it is ever live. The last step is
+ * therefore fenced on the attempt it is finishing — the shared integration
+ * lock, then `status = 'pending'` — so a disable that lands first stands, and
+ * the realm client created in between is discarded instead of being handed a
+ * credential.
  */
 import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
@@ -264,7 +272,24 @@ export async function createIntegration(
   //    The activation RETURNS the row, so the metadata a caller reports comes
   //    out of this transaction with the credential rather than from a second
   //    read after it — see CreatedApiKey.integration.
+  //
+  //    It is also FENCED on the attempt it is finishing. Between step 1 and
+  //    here the row is visible and committed, so an administrator can disable
+  //    it mid-flight — and an unconditional `set status = 'active'` would
+  //    quietly undo that disable and then mint a credential under it. So this
+  //    takes the integration lock `issueKey` and `disableIntegration` share,
+  //    requires the row to still be the 'pending' attempt this call recorded,
+  //    and repeats that requirement in the UPDATE itself.
   const activated = await withSession(deps, session, async (trx) => {
+    const locked = await lockIntegration(trx, session.tenantId, integrationId);
+    // Either the row was removed, or a disable (or anything else) has moved it
+    // out of 'pending'. Both mean this attempt no longer owns the integration:
+    // return rather than throw, so the lock is released before the realm
+    // client created in step 2 is discarded outside this transaction.
+    if (!locked || locked.status !== "pending") {
+      return { fenced: locked?.status ?? "absent" } as const;
+    }
+
     const updated = await sql<{
       display_name: string;
       status: string;
@@ -280,14 +305,15 @@ export async function createIntegration(
              updated_at = ${now}
        where id = ${integrationId}
          and tenant_id = ${session.tenantId}
+         and status = 'pending'
       returning display_name, status, granted_roles, created_at, updated_at
     `.execute(trx);
 
     const row = updated.rows[0];
-    // The row was inserted in step 1 under this same tenant. Its absence here
-    // means something removed or re-fenced it mid-flight; refuse rather than
-    // insert a key under an integration this transaction cannot see.
-    if (!row) throw new ApiKeyNotFoundError("No such integration.");
+    // Unreachable while the lock above is held — nothing can change the status
+    // between the two statements — but the fence is what decides, not the
+    // lock, so its verdict is handled rather than assumed.
+    if (!row) return { fenced: "absent" } as const;
 
     await insertKeyRow(trx, {
       keyId,
@@ -301,8 +327,22 @@ export async function createIntegration(
       createdBy: session.userId,
       now,
     });
-    return row;
+    return { row };
   });
+
+  if ("fenced" in activated) {
+    // Nothing was activated and nothing was minted, so the credential above
+    // was never handed out — but the realm client of step 2 exists and the
+    // row that names it is no longer one the reconciler visits (it sweeps
+    // 'pending' and repairs 'active'). Delete it here, and leave the sweep as
+    // the backstop for a realm that cannot be reached right now.
+    await discardRealmClient(deps, keycloakClientId);
+    throw new ApiKeyNotFoundError(
+      `The integration "${displayName}" was ${
+        activated.fenced === "absent" ? "removed" : activated.fenced
+      } while it was being provisioned, so nothing was activated and no credential was issued.`,
+    );
+  }
 
   return {
     integrationId,
@@ -310,22 +350,45 @@ export async function createIntegration(
     token: minted.token,
     expiresAt,
     integration: {
-      displayName: activated.display_name,
-      status: integrationStatus(activated.status),
-      grantedRoles: grantedRolesOf(activated.granted_roles),
-      createdAt: activated.created_at,
-      updatedAt: activated.updated_at,
+      displayName: activated.row.display_name,
+      status: integrationStatus(activated.row.status),
+      grantedRoles: grantedRolesOf(activated.row.granted_roles),
+      createdAt: activated.row.created_at,
+      updatedAt: activated.row.updated_at,
     },
   };
+}
+
+/**
+ * Undo step 2 after the activation refused to finish the attempt.
+ *
+ * Best effort on purpose. The caller's answer is already decided — the
+ * integration they asked for is not theirs to activate — and a realm that
+ * cannot be reached must not turn that into a different, misleading failure.
+ * What is NOT best effort is that the orphan stays findable: the row keeps the
+ * derived `keycloak_client_id`, and `reconcile.ts` sweeps a never-activated
+ * integration whose realm client still exists, so a delete that fails here is
+ * retried there rather than forgotten.
+ */
+async function discardRealmClient(
+  deps: ApiKeyServiceDeps,
+  keycloakClientId: string,
+): Promise<void> {
+  try {
+    await deps.admin.deleteClient(keycloakClientId);
+  } catch {
+    // Left to the reconciler, as described above.
+  }
 }
 
 /**
  * Take the integration's row lock, tenant-fenced, before deciding anything
  * about the keys under it.
  *
- * This is the serialization point `issueKey` and `disableIntegration` SHARE,
- * and sharing it is the whole point. Without it the two interleave into a
- * credential nobody asked for: disable reads the integration, revokes the keys
+ * This is the serialization point `createIntegration`'s activation, `issueKey`
+ * and `disableIntegration` SHARE, and sharing it is the whole point. Without it
+ * two of them interleave into a credential nobody asked for: disable reads the
+ * integration, revokes the keys
  * it can see and commits, while a concurrent issue — which read the same
  * integration as 'active' before that commit — inserts a key afterwards. The
  * result is a live credential under a disabled parent, which the exchange path

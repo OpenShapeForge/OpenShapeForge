@@ -21,6 +21,7 @@
  * assert the statements that were SENT (fence, parameters, bounds) and the
  * projection of the rows that came back.
  */
+import { randomUUID } from "node:crypto";
 import {
   Kysely,
   PostgresAdapter,
@@ -270,6 +271,8 @@ export type StubRealm = {
   requests: string[];
   clientSecret: string;
   serviceAccountUserId: string;
+  /** Integration clients this realm currently holds, as `clientId`s. */
+  clients(): string[];
   stop(): Promise<void>;
 };
 
@@ -280,19 +283,46 @@ export type StubRealm = {
  * makes `grantClientRoles` fail exactly as it would against a real realm,
  * which is how the "nothing usable was handed out" path gets exercised without
  * a Keycloak container.
+ *
+ * Integration clients are KEPT, not merely acknowledged: a created one is
+ * findable, a deleted one is not, and an unknown one was never there. That is
+ * what makes `clientExists` and `deleteClient` — the reconciler's probe and
+ * the activation's compensation — mean anything here.
+ *
+ * This is a stub, not Keycloak. It speaks the admin paths `keycloak-admin.ts`
+ * calls over real HTTP, and nothing else: no token validation, no realm
+ * import, no persistence. A test that needs the real server is the e2e suite
+ * in this directory, which runs only against a reachable Keycloak.
  */
 export function stubRealm(options: {
   realm?: string;
   roles?: readonly string[];
   failClientCreation?: boolean;
+  /**
+   * Awaited before each admin request is answered, with the method and path.
+   *
+   * The seam a concurrency test holds provisioning open on: a caller can block
+   * the attempt INSIDE the realm — after the 'pending' row is committed and
+   * before the activation — and let something else commit meanwhile. The
+   * default awaits nothing, so every other suite is unaffected.
+   */
+  onAdminRequest?: (method: string, path: string) => Promise<void>;
 } = {}): StubRealm {
   const realm = options.realm ?? "openshapeforge";
   const roles = options.roles ?? [];
   const requests: string[] = [];
   const clientSecret = "stub-realm-client-secret";
   const serviceAccountUserId = "9f1d6b8c-7a2e-4c1b-9f4a-2d3c5e6f7a8b";
-  const internalId = "11ca2f30-5b6c-4d7e-8f90-1a2b3c4d5e6f";
   const roleClientInternalId = "22ca2f30-5b6c-4d7e-8f90-1a2b3c4d5e6f";
+  /** clientId → the realm's own internal id, for the clients that exist. */
+  const clients = new Map<string, string>();
+  const internalIdOf = (clientId: string) => {
+    const existing = clients.get(clientId);
+    if (existing) return existing;
+    const minted = randomUUID();
+    clients.set(clientId, minted);
+    return minted;
+  };
 
   const server = Bun.serve({
     port: 0,
@@ -306,20 +336,40 @@ export function stubRealm(options: {
       if (path === `/realms/${realm}/protocol/openid-connect/token`) {
         return json({ access_token: "stub-admin-token", expires_in: 300 });
       }
+      if (options.onAdminRequest) await options.onAdminRequest(request.method, path);
       const admin = `/admin/realms/${realm}`;
       if (request.method === "POST" && url.pathname === `${admin}/clients`) {
-        return options.failClientCreation ? new Response(null, { status: 500 }) : new Response(null, { status: 201 });
+        if (options.failClientCreation) return new Response(null, { status: 500 });
+        const body = await request.json() as { clientId?: string };
+        if (typeof body.clientId === "string") {
+          if (clients.has(body.clientId)) return new Response(null, { status: 409 });
+          internalIdOf(body.clientId);
+        }
+        return new Response(null, { status: 201 });
       }
       if (request.method === "GET" && url.pathname === `${admin}/clients`) {
         const clientId = url.searchParams.get("clientId") ?? "";
-        // The role client and the new integration client are distinct objects.
-        return json([{ id: clientId.startsWith("osf-int-") ? internalId : roleClientInternalId }]);
+        // The role client is this realm's own fixture and always there; an
+        // integration client is there only while it has been created and not
+        // deleted, which is what the reconciler's probe asks about.
+        if (!clientId.startsWith("osf-int-")) return json([{ id: roleClientInternalId }]);
+        const existing = clients.get(clientId);
+        return json(existing ? [{ id: existing }] : []);
       }
-      if (url.pathname === `${admin}/clients/${internalId}/client-secret`) {
-        return json({ value: clientSecret });
-      }
-      if (url.pathname === `${admin}/clients/${internalId}/service-account-user`) {
-        return json({ id: serviceAccountUserId });
+      const integration = [...clients].find(([, id]) =>
+        url.pathname.startsWith(`${admin}/clients/${id}`));
+      if (integration) {
+        const [clientId, id] = integration;
+        if (request.method === "DELETE" && url.pathname === `${admin}/clients/${id}`) {
+          clients.delete(clientId);
+          return new Response(null, { status: 204 });
+        }
+        if (url.pathname === `${admin}/clients/${id}/client-secret`) {
+          return json({ value: clientSecret });
+        }
+        if (url.pathname === `${admin}/clients/${id}/service-account-user`) {
+          return json({ id: serviceAccountUserId });
+        }
       }
       if (url.pathname === `${admin}/clients/${roleClientInternalId}/roles`) {
         return json(roles.map((name, index) => ({ id: `role-${index}`, name })));
@@ -343,6 +393,7 @@ export function stubRealm(options: {
     requests,
     clientSecret,
     serviceAccountUserId,
+    clients: () => [...clients.keys()],
     async stop() { await server.stop(true); },
   };
 }

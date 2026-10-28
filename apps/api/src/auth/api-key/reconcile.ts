@@ -9,6 +9,12 @@
  *     between the insert and the realm mutation, or because the realm mutation
  *     failed. The row authenticates nothing, but it holds the derived
  *     clientId, so it can leave an orphaned client behind in Keycloak.
+ *   - an ABANDONED attempt: a row disabled before it was ever activated,
+ *     because an administrator disabled the integration while provisioning was
+ *     still inside the realm (service.ts, step 3's fence). The activation then
+ *     deletes the client it created, so there is usually nothing left here —
+ *     but that delete is best effort, and this status is otherwise visited by
+ *     neither branch above, so the orphan would survive every later run.
  *   - a RESET realm: `--import-realm` is a no-op against an existing realm, so
  *     runtime-created clients survive restarts — but a deliberate realm reset
  *     erases every one of them while the database still lists the integrations
@@ -42,6 +48,12 @@ export type ReconcileDeps = {
 export type ReconcileReport = {
   /** 'pending' rows older than the grace window, and what happened to them. */
   sweptPending: string[];
+  /**
+   * Never-activated 'disabled' rows whose realm client still existed and has
+   * now been deleted. Normally empty: the activation's own compensation does
+   * this, and this is only what that could not reach.
+   */
+  sweptAbandoned: string[];
   /** Active integrations whose realm client was missing and has been rebuilt. */
   rebuilt: string[];
   /** Integrations that could not be repaired; each needs a human. */
@@ -64,6 +76,8 @@ type IntegrationRow = {
   status: string;
   granted_roles: unknown;
   created_at: Date;
+  /** Null while an attempt has never been activated. See the abandoned branch. */
+  client_secret_ciphertext: string | null;
 };
 
 function rolesOf(value: unknown): string[] {
@@ -91,7 +105,9 @@ export async function reconcileApiKeyIntegrations(
   deps: ReconcileDeps,
   now: Date = new Date(),
 ): Promise<ReconcileReport> {
-  const report: ReconcileReport = { sweptPending: [], rebuilt: [], failed: [] };
+  const report: ReconcileReport = {
+    sweptPending: [], sweptAbandoned: [], rebuilt: [], failed: [],
+  };
 
   const rows = await withSystemSession(
     deps.db,
@@ -103,9 +119,10 @@ export async function reconcileApiKeyIntegrations(
     async (trx) => {
       const result = await sql<IntegrationRow>`
         select id, tenant_id, display_name, keycloak_client_id, status,
-               granted_roles, created_at
+               granted_roles, created_at, client_secret_ciphertext
           from platform.api_key_integrations
          where status in ('pending', 'active')
+            or (status = 'disabled' and client_secret_ciphertext is null)
          order by created_at asc
       `.execute(trx);
       return result.rows;
@@ -119,6 +136,18 @@ export async function reconcileApiKeyIntegrations(
         if (age < PENDING_GRACE_MS) continue;
         await sweepStalled(deps, row);
         report.sweptPending.push(row.id);
+        continue;
+      }
+
+      if (row.status === "disabled") {
+        // Disabled before it was ever activated: there is no credential to
+        // keep working and nothing to rebuild, only a client that may still be
+        // there. The row is already in its final state, so only the realm is
+        // touched — and `deleteClient` is a no-op when the client is gone,
+        // which is the ordinary case.
+        if (!await deps.admin.clientExists(row.keycloak_client_id)) continue;
+        await deps.admin.deleteClient(row.keycloak_client_id);
+        report.sweptAbandoned.push(row.id);
         continue;
       }
 

@@ -24,13 +24,14 @@
  * on timing.
  */
 import { describe, expect, test } from "bun:test";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql, type Kysely } from "kysely";
 import { API_KEY_MANAGE_ROLE } from "../auth/api-key/ceiling.js";
 import { mintApiKey } from "../auth/api-key/format.js";
 import {
   ApiKeyNotFoundError,
+  createIntegration,
   disableIntegration,
   issueKey,
   pageIntegrations,
@@ -41,6 +42,8 @@ import {
   type ProvisioningSession,
 } from "../auth/api-key/service.js";
 import { UNDECLARED_CREDENTIAL_LIFETIME_POLICY } from "../auth/api-key/lifetime.js";
+import { readApiKeyProvisioningConfig } from "../auth/api-key/runtime-config.js";
+import { stubRealm, type StubRealm } from "../auth/api-key/__tests__/fixtures.js";
 import { createDatabaseRuntime } from "../db/connection.js";
 import { runMigrationChain } from "../db/migration-chain.js";
 import { APP_ROLE } from "../db/migrations/app-role.js";
@@ -457,28 +460,28 @@ describe("integration catalog paging against PostgreSQL", () => {
   }, TEST_TIMEOUT);
 });
 
-describe("issue and disable under the shared integration lock", () => {
-  /**
-   * Observe a statement of this database WAITING on a lock.
-   *
-   * This is the barrier the concurrency test turns on: it polls a real
-   * condition — a backend in this database blocked on a lock — rather than
-   * waiting a guessed interval, so the test neither races nor sleeps.
-   */
-  async function waitForBlockedBackend(rival: SQL, databaseName: string): Promise<void> {
-    const deadline = Date.now() + 15_000;
-    for (;;) {
-      const rows = await rival.unsafe(
-        `select count(*)::int as waiting
-           from pg_stat_activity
-          where datname = $1 and wait_event_type = 'Lock' and state = 'active'`,
-        [databaseName],
-      ) as Array<{ waiting: number }>;
-      if ((rows[0]?.waiting ?? 0) > 0) return;
-      if (Date.now() > deadline) throw new Error("No backend ever blocked on the integration lock.");
-    }
+/**
+ * Observe a statement of this database WAITING on a lock.
+ *
+ * This is the barrier the concurrency tests turn on: it polls a real
+ * condition — a backend in this database blocked on a lock — rather than
+ * waiting a guessed interval, so they neither race nor sleep.
+ */
+async function waitForBlockedBackend(rival: SQL, databaseName: string): Promise<void> {
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const rows = await rival.unsafe(
+      `select count(*)::int as waiting
+         from pg_stat_activity
+        where datname = $1 and wait_event_type = 'Lock' and state = 'active'`,
+      [databaseName],
+    ) as Array<{ waiting: number }>;
+    if ((rows[0]?.waiting ?? 0) > 0) return;
+    if (Date.now() > deadline) throw new Error("No backend ever blocked on the integration lock.");
   }
+}
 
+describe("issue and disable under the shared integration lock", () => {
   test("a disable holding the lock makes a concurrent issue refuse", async () => {
     await withScratchDb(async ({ appDb, adminDb, rival, databaseName }) => {
       await seedTenants(adminDb);
@@ -566,6 +569,282 @@ describe("issue and disable under the shared integration lock", () => {
       await expect(issueKey(serviceDeps(appDb), session, {
         integrationId, displayName: "after", expiresInDays: 30,
       })).rejects.toThrow(ApiKeyNotFoundError);
+    });
+  }, TEST_TIMEOUT);
+});
+
+/**
+ * Provisioning wired exactly as a deployment wires it, against a stub realm.
+ *
+ * The configuration comes from `readApiKeyProvisioningConfig` rather than a
+ * hand-built object, so the keyring, the admin client and the lifetime policy
+ * under test are the ones a host resolves — the realm's base URL is the only
+ * thing that differs from production.
+ */
+function provisioningDeps(appDb: Kysely<DB>, realm: StubRealm): ApiKeyServiceDeps {
+  const config = readApiKeyProvisioningConfig({
+    OPENSHAPEFORGE_API_KEY_SECRET_KEYS: `test:${randomBytes(32).toString("base64")}`,
+    OPENSHAPEFORGE_API_KEY_MAX_TTL_DAYS: "366",
+    OPENSHAPEFORGE_API_KEY_DEFAULT_TTL_DAYS: "365",
+    OPENSHAPEFORGE_KEYCLOAK_BASE_URL: realm.baseUrl,
+    OPENSHAPEFORGE_KEYCLOAK_REALM: realm.realm,
+    OPENSHAPEFORGE_KEYCLOAK_ADMIN_CLIENT_ID: "provisioner",
+    OPENSHAPEFORGE_KEYCLOAK_ADMIN_CLIENT_SECRET: "provisioner-secret",
+  });
+  if (!config) throw new Error("The provisioning configuration under test is incomplete.");
+  return {
+    db: appDb as never,
+    keyring: config.keyring,
+    admin: config.admin,
+    entityRoleClientId: config.entityRoleClientId,
+    lifetime: config.lifetime,
+  };
+}
+
+/**
+ * A realm that can be HELD inside the one request provisioning makes first.
+ *
+ * `entered` resolves when the create reaches `POST /clients`, which is after
+ * the 'pending' intent row is committed and before the activation — the whole
+ * window in which the integration is visible but not live. `release` lets it
+ * continue. Neither is a sleep: the test waits on the realm having been
+ * reached, and the realm waits on the test having finished with it.
+ *
+ * Nothing about this is Keycloak. It is the stub HTTP server from
+ * `__tests__/fixtures.ts` speaking the admin paths `keycloak-admin.ts` calls;
+ * a real server cannot be paused mid-provisioning, which is exactly why the
+ * interleavings below need it. What a real Keycloak proves instead — that
+ * those paths are the right ones — is the e2e suite's job.
+ */
+function pausedRealm(): StubRealm & { entered: Promise<void>; release: () => void } {
+  let entered!: () => void;
+  let released!: () => void;
+  const enteredPromise = new Promise<void>((resolve) => { entered = resolve; });
+  const releasedPromise = new Promise<void>((resolve) => { released = resolve; });
+  let held = false;
+  const realm = stubRealm({
+    roles: [READ_ROLE],
+    onAdminRequest: async (method, path) => {
+      if (held || method !== "POST" || !path.endsWith("/clients")) return;
+      held = true;
+      entered();
+      await releasedPromise;
+    },
+  });
+  return { ...realm, entered: enteredPromise, release: released };
+}
+
+/** The one integration this tenant has, as the database holds it. */
+async function soleIntegration(adminDb: Kysely<DB>): Promise<{
+  id: string;
+  status: string;
+  client_secret_ciphertext: string | null;
+}> {
+  const rows = await sql<{ id: string; status: string; client_secret_ciphertext: string | null }>`
+    select id, status, client_secret_ciphertext
+      from platform.api_key_integrations
+     where tenant_id = ${TENANT_A}
+  `.execute(adminDb);
+  expect(rows.rows).toHaveLength(1);
+  return rows.rows[0]!;
+}
+
+describe("create against a concurrent disable", () => {
+  /**
+   * The window this whole describe is about.
+   *
+   * Provisioning commits its 'pending' intent BEFORE it touches the realm, on
+   * purpose: a crash in between must leave a record that names the realm
+   * client so the reconciler can finish or sweep it. The cost is that the row
+   * is visible and mutable while the external call is in flight, so an
+   * administrator can disable the integration before it was ever live — and
+   * the activation that follows used to `set status = 'active'` with no
+   * condition but the id and the tenant, undoing that disable and then
+   * minting a credential under it.
+   *
+   * Both orders are driven here against a real PostgreSQL, with the realm held
+   * open so the interleaving is real rather than simulated.
+   */
+  test("a disable that lands during the realm call stands, and nothing is minted", async () => {
+    await withScratchDb(async ({ appDb, adminDb }) => {
+      await seedTenants(adminDb);
+      const realm = pausedRealm();
+      try {
+        const deps = provisioningDeps(appDb, realm);
+        const session = manager(TENANT_A);
+        const creating = createIntegration(deps, session, {
+          displayName: "disabled mid-flight", roles: [READ_ROLE], expiresInDays: 30,
+        });
+        let settled = false;
+        void creating.then(() => { settled = true; }, () => { settled = true; });
+
+        // Provisioning is now inside the realm, so the intent row is committed
+        // — which is what makes the disable below possible at all.
+        await realm.entered;
+        expect(settled).toBe(false);
+        const pending = await soleIntegration(adminDb);
+        expect(pending.status).toBe("pending");
+        expect(realm.clients()).toEqual([]);
+
+        // The administrator disables it, to completion, while the create waits.
+        const disabled = await disableIntegration(deps, session, pending.id);
+        expect(disabled).toEqual({ id: pending.id, revokedKeys: 0 });
+
+        realm.release();
+        // The activation finds the attempt is no longer its own and refuses.
+        await expect(creating).rejects.toThrow(ApiKeyNotFoundError);
+
+        // The disable stands: still disabled, still never activated.
+        const after = await soleIntegration(adminDb);
+        expect(after).toMatchObject({
+          id: pending.id, status: "disabled", client_secret_ciphertext: null,
+        });
+        // And nothing was minted under it — not a revoked key, no key at all.
+        const keys = await sql<{ n: string }>`
+          select count(*)::text as n from platform.api_keys
+           where integration_id = ${pending.id}
+        `.execute(adminDb);
+        expect(keys.rows[0]!.n).toBe("0");
+        // The realm client created in the window is gone again: the activation
+        // compensated for what it could not finish.
+        expect(realm.clients()).toEqual([]);
+        expect(realm.requests.some((request) => request.startsWith("DELETE /admin/realms/")))
+          .toBe(true);
+      } finally {
+        realm.release();
+        await realm.stop();
+      }
+    });
+  }, TEST_TIMEOUT);
+
+  test("a disable that takes the lock while the activation waits on it still stands", async () => {
+    await withScratchDb(async ({ appDb, adminDb, rival, databaseName }) => {
+      await seedTenants(adminDb);
+      const realm = pausedRealm();
+      const holder = await rival.reserve();
+      try {
+        const deps = provisioningDeps(appDb, realm);
+        const session = manager(TENANT_A);
+        const creating = createIntegration(deps, session, {
+          displayName: "disabled at the lock", roles: [READ_ROLE], expiresInDays: 30,
+        });
+        let settled = false;
+        void creating.then(() => { settled = true; }, () => { settled = true; });
+        await realm.entered;
+        const pending = await soleIntegration(adminDb);
+        expect(pending.status).toBe("pending");
+
+        // Stand in for the disable's transaction: take the SAME row lock it
+        // takes, tenant-fenced, and hold it while the activation arrives. The
+        // row is still 'pending' at this point, so the activation cannot have
+        // read its verdict before the status changes.
+        await holder.unsafe("begin");
+        await holder.unsafe("select set_config('app.tenant_id', $1, true)", [TENANT_A]);
+        await holder.unsafe("select set_config('app.user_id', $1, true)", [USER]);
+        await holder.unsafe("select set_config('app.scope', 'tenant', true)");
+        expect(await holder.unsafe(
+          `select id from platform.api_key_integrations
+            where id = $1 and tenant_id = $2 for update`,
+          [pending.id, TENANT_A],
+        )).toHaveLength(1);
+
+        // Let the realm answer. The activation now reaches the same lock and
+        // waits there, observed waiting rather than assumed to be.
+        realm.release();
+        await waitForBlockedBackend(rival, databaseName);
+        expect(settled).toBe(false);
+
+        // Disable wins the race and commits.
+        await holder.unsafe(
+          `update platform.api_key_integrations set status = 'disabled', updated_at = now()
+            where id = $1 and tenant_id = $2`,
+          [pending.id, TENANT_A],
+        );
+        await holder.unsafe("commit");
+
+        // The activation re-reads the status it was waiting for and refuses.
+        await expect(creating).rejects.toThrow(ApiKeyNotFoundError);
+        const after = await soleIntegration(adminDb);
+        expect(after).toMatchObject({ status: "disabled", client_secret_ciphertext: null });
+        const keys = await sql<{ n: string }>`
+          select count(*)::text as n from platform.api_keys
+           where integration_id = ${pending.id}
+        `.execute(adminDb);
+        expect(keys.rows[0]!.n).toBe("0");
+        expect(realm.clients()).toEqual([]);
+      } finally {
+        await holder.unsafe("rollback").catch(() => undefined);
+        holder.release();
+        realm.release();
+        await realm.stop();
+      }
+    });
+  }, TEST_TIMEOUT);
+
+  test("a create that commits first keeps its credential, which the disable then revokes", async () => {
+    await withScratchDb(async ({ appDb, adminDb }) => {
+      await seedTenants(adminDb);
+      const realm = stubRealm({ roles: [READ_ROLE] });
+      try {
+        const deps = provisioningDeps(appDb, realm);
+        const session = manager(TENANT_A);
+        // The other order, with nothing held: provisioning finishes, so the
+        // credential is handed over exactly once and must not be lost.
+        const created = await createIntegration(deps, session, {
+          displayName: "live then disabled", roles: [READ_ROLE], expiresInDays: 30,
+        });
+        expect(created.token).toBeTypeOf("string");
+        expect(created.integration).toMatchObject({
+          displayName: "live then disabled", status: "active", grantedRoles: [READ_ROLE],
+        });
+        expect(realm.clients()).toEqual([`osf-int-${created.integrationId}`]);
+
+        const disabled = await disableIntegration(deps, session, created.integrationId);
+        expect(disabled).toEqual({ id: created.integrationId, revokedKeys: 1 });
+
+        const rows = await sql<{ id: string; revoked_at: Date | null }>`
+          select id, revoked_at from platform.api_keys
+           where integration_id = ${created.integrationId}
+        `.execute(adminDb);
+        expect(rows.rows).toHaveLength(1);
+        expect(rows.rows[0]!.id).toBe(created.keyId);
+        expect(rows.rows[0]!.revoked_at).not.toBeNull();
+        // The disable revokes; it does not delete the realm client, because
+        // this integration really was provisioned.
+        expect(realm.clients()).toEqual([`osf-int-${created.integrationId}`]);
+      } finally {
+        await realm.stop();
+      }
+    });
+  }, TEST_TIMEOUT);
+
+  test("a second create cannot resurrect a disabled attempt", async () => {
+    await withScratchDb(async ({ appDb, adminDb }) => {
+      await seedTenants(adminDb);
+      const realm = stubRealm({ roles: [READ_ROLE] });
+      try {
+        const deps = provisioningDeps(appDb, realm);
+        const session = manager(TENANT_A);
+        // A retry after the refusal above is an ordinary new attempt: its own
+        // id, its own realm client, and the disabled row left as it stands.
+        const disabledId = await seedIntegration(adminDb, {
+          tenantId: TENANT_A, displayName: "abandoned", status: "disabled",
+        });
+        const created = await createIntegration(deps, session, {
+          displayName: "the retry", roles: [READ_ROLE], expiresInDays: 30,
+        });
+        expect(created.integrationId).not.toBe(disabledId);
+        const rows = await sql<{ id: string; status: string }>`
+          select id, status from platform.api_key_integrations
+           where tenant_id = ${TENANT_A} order by status
+        `.execute(adminDb);
+        expect(rows.rows).toEqual([
+          { id: created.integrationId, status: "active" },
+          { id: disabledId, status: "disabled" },
+        ]);
+      } finally {
+        await realm.stop();
+      }
     });
   }, TEST_TIMEOUT);
 });

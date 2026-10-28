@@ -802,6 +802,37 @@ describe("the service's writes belong to the dispatcher's transaction", () => {
     expect(observed.visibleElsewhere).toBe("pending");
   }, TEST_TIMEOUT);
 
+  test("disabled provisioning in an outer Operation leaves a recoverable intent without self-locking", async () => {
+    if (!booted) throw new Error("An isolated PostgreSQL is required");
+    const admin = Object.create(booted.deps.admin) as typeof booted.deps.admin;
+    const grant = booted.deps.admin.grantClientRoles.bind(booted.deps.admin);
+    let integrationId = "";
+    admin.grantClientRoles = async (...args) => {
+      await grant(...args);
+      const row = await sql<{id:string}>`update platform.api_key_integrations set status='disabled'
+        where tenant_id=${TENANT}::uuid and display_name='Fenced nested attempt' and status='pending'
+        returning id`.execute(booted!.adminDb);
+      integrationId = row.rows[0]!.id;
+    };
+    let deleteAttempted = false;
+    admin.deleteClient = async () => { deleteAttempted = true; throw new Error("realm unavailable"); };
+    const started = Date.now();
+    await expect(withDbSession(booted.appDb, verifiedPersonSession(), () =>
+      createIntegration({...booted!.deps, admin}, provisioningSession(), {
+        displayName:"Fenced nested attempt", roles:[READ_ROLE], expiresInDays:30,
+      }))).rejects.toMatchObject({code:"NOT_FOUND"});
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(deleteAttempted).toBe(true);
+    const rows = await sql<{status:string; client_secret_ciphertext:unknown; keycloak_client_id:string}>`
+      select status,client_secret_ciphertext,keycloak_client_id from platform.api_key_integrations
+       where id=${integrationId}::uuid and tenant_id=${TENANT}::uuid`.execute(booted.adminDb);
+    expect(rows.rows).toEqual([{status:"disabled", client_secret_ciphertext:null,
+      keycloak_client_id:`osf-int-${integrationId}`}]);
+    const keys = await sql<{n:number}>`select count(*)::int as n from platform.api_keys
+      where integration_id=${integrationId}::uuid`.execute(booted.adminDb);
+    expect(keys.rows[0]!.n).toBe(0);
+  }, TEST_TIMEOUT);
+
   test("a failure after the handler discards the credential but keeps the intent", async () => {
     if (!booted) return;
     let created: { integrationId: string; keyId: string } | undefined;

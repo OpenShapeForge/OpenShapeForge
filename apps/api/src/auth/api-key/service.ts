@@ -328,8 +328,8 @@ export async function createIntegration(
     const locked = await lockIntegration(trx, session.tenantId, integrationId);
     // Either the row was removed, or a disable (or anything else) has moved it
     // out of 'pending'. Both mean this attempt no longer owns the integration:
-    // return rather than throw, so the lock is released before the realm
-    // client created in step 2 is discarded outside this transaction.
+    // return rather than throw. When called inside an Operation, the outer
+    // transaction still holds this lock until the caller unwinds.
     if (!locked || locked.status !== "pending") {
       return { fenced: locked?.status ?? "absent" } as const;
     }
@@ -379,15 +379,20 @@ export async function createIntegration(
     // was never handed out — but the realm client of step 2 exists. Record
     // that it must not, THEN try to delete it: the delete is best effort, and
     // what makes a failed one recoverable is that a row still names the
-    // client. Order matters, and so does doing this for every verdict rather
-    // than only the expected one.
-    await recordAbandonedAttempt(deps, session, {
-      integrationId,
-      keycloakClientId,
-      displayName,
-      roles: input.roles,
-      now,
-    });
+    // client. An already disabled row is itself that durable record.
+    // A disabled row is already durable and names the realm client. Rewriting
+    // it on an independent connection here would wait on our own outer
+    // Operation transaction's row lock, which cannot finish until we return.
+    // The reconciler already sweeps disabled rows with no client secret.
+    if (activated.fenced !== "disabled") {
+      await recordAbandonedAttempt(deps, session, {
+        integrationId,
+        keycloakClientId,
+        displayName,
+        roles: input.roles,
+        now,
+      });
+    }
     await discardRealmClient(deps, keycloakClientId);
     throw new ApiKeyNotFoundError(
       `The integration "${displayName}" was ${

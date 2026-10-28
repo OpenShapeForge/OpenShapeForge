@@ -156,8 +156,17 @@ public final class LocalAccountAuthenticator implements Authenticator, Authentic
 
     static UserSessionModel browserSessionToReplace(AuthenticationFlowContext context, UserModel selected) {
         if (selected == null || !eligible(selected.isEnabled(), selected.getServiceAccountClientLink(), selected.getUsername())) return null;
-        var auth = context.getAuthenticationSession();
-        var old = context.getSession().sessions().getUserSession(context.getRealm(), auth.getParentSession().getId());
+        // The root authentication-session id is not the browser SSO-session id.
+        // Resolve the signed identity cookie through Keycloak's own verifier so
+        // account replacement targets exactly this browser and cannot guess or
+        // enumerate another user session.
+        var authenticated = AuthenticationManager.authenticateIdentityCookie(context.getSession(), context.getRealm(), false);
+        var old = authenticated == null ? null : authenticated.session();
+        return differentUserSession(old, selected);
+    }
+
+    static UserSessionModel differentUserSession(UserSessionModel old, UserModel selected) {
+        if (selected == null || !eligible(selected.isEnabled(), selected.getServiceAccountClientLink(), selected.getUsername())) return null;
         return old != null && old.getUser() != null && !old.getUser().getId().equals(selected.getId()) ? old : null;
     }
 

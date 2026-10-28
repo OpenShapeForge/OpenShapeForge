@@ -208,11 +208,9 @@ export type PendingRoleAssignment = {
 };
 
 /**
- * An identity this organization has recorded but not linked and not waiting
- * on anyone's confirmation: an integration's service account (no e-mail at
- * all), or a token without one. Named by its identity id, which is what
- * `link_identity` takes for it. A pending row with a candidate is the
- * person's own to confirm (`confirm_my_link`) and is not listed here.
+ * An identity this organization has recorded but not linked, including one
+ * whose pending candidate is no longer confirmable. The identity id is the
+ * stable handle for `link_identity`, even when no verified email is available.
  */
 export type UnlinkedIdentity = {
   identityId: string;
@@ -239,7 +237,6 @@ export async function listUnlinkedIdentities(
        where ir.tenant_id = ${session.tenantId}
          and ir.status = 'pending_confirmation'
          and ir.relation_id is null
-         and ir.candidate_relation_id is null
        order by i.created_at asc
     `.execute(trx);
     return result.rows.map((row) => ({

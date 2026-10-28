@@ -18,7 +18,7 @@ const expected = {
     entity: "Quote",
     fields: [
       "id", "createdAt", "updatedAt", "externalId", "sourceAuthority",
-      "sourceOrganization", "sourceAdministration", "sourceVersion", "quoteStatus", "quoteNumber",
+      "sourceOrganization", "sourceAdministration", "sourceAdministrationName", "sourceVersion", "quoteStatus", "quoteNumber",
       "issueDate", "expiresAt", "currencyCode", "amountBase", "amountVat",
       "amountTotal", "description", "externalCode",
     ],
@@ -29,7 +29,7 @@ const expected = {
     entity: "QuoteLine",
     fields: [
       "id", "createdAt", "updatedAt", "externalId", "sourceAuthority",
-      "sourceOrganization", "sourceAdministration", "sourceVersion", "lineNumber", "description",
+      "sourceOrganization", "sourceAdministration", "sourceAdministrationName", "sourceVersion", "lineNumber", "description",
       "quantity", "unitId", "unitPrice", "amountBase", "amountVat", "amountTotal",
     ],
     relationships: [
@@ -42,7 +42,7 @@ const expected = {
     entity: "Agreement",
     fields: [
       "id", "createdAt", "updatedAt", "externalId", "sourceAuthority",
-      "sourceOrganization", "sourceAdministration", "sourceVersion", "code", "role", "agreementType",
+      "sourceOrganization", "sourceAdministration", "sourceAdministrationName", "sourceVersion", "code", "role", "agreementType",
       "agreementSubType", "status", "startDate", "endDate", "billingStartDate",
       "billingEndDate", "conceptSentAt", "sentAt", "dispatchStatus", "noticeDate",
       "noticeTerm", "terminationReason", "terminationReasonDetail", "sequenceNumber",
@@ -61,7 +61,7 @@ const expected = {
     entity: "AgreementMilestone",
     fields: [
       "id", "createdAt", "updatedAt", "externalId", "sourceAuthority",
-      "sourceOrganization", "sourceAdministration", "sourceVersion", "description", "basisAmount",
+      "sourceOrganization", "sourceAdministration", "sourceAdministrationName", "sourceVersion", "description", "basisAmount",
       "percentOfBasis", "amount", "status", "expectedAt", "triggeredAt", "triggeredBy",
     ],
     relationships: ["agreementId", "producedInvoiceId", "billingRunItems"],

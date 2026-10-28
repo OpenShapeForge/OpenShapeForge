@@ -77,6 +77,7 @@ const technicalFields = new Set([
   "sourceAuthority",
   "sourceOrganization",
   "sourceAdministration",
+  "sourceAdministrationName",
 ]);
 
 function localized(

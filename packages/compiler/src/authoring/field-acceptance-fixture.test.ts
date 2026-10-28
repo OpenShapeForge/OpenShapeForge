@@ -79,7 +79,7 @@ const CATALOGUE: Readonly<Record<number, string>> = Object.freeze({
  */
 const BASE_FIELDS = Object.freeze([
   "id", "createdAt", "updatedAt", "externalId", "sourceAuthority",
-  "sourceOrganization", "sourceAdministration", "sourceVersion",
+  "sourceOrganization", "sourceAdministration", "sourceAdministrationName", "sourceVersion",
 ]);
 const DERIVED_FIELDS = Object.freeze(["children"]);
 

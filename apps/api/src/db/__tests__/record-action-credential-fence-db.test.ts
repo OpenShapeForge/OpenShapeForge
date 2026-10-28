@@ -472,12 +472,16 @@ beforeAll(async () => {
   expect(role).toEqual({ superuser: false, bypass: false });
 }, TEST_TIMEOUT);
 
+// Bounded explicitly: dropping this file's scratch database closes the
+// connections of every holder it opened, and on a loaded cluster that takes
+// longer than the runner's default hook budget of five seconds — which would
+// report a suite whose every assertion passed as a failure.
 afterAll(async () => {
   await app?.close();
   await admin?.close();
   await server?.unsafe(`drop database if exists "${scratch}" with (force)`);
   await server?.close();
-});
+}, TEST_TIMEOUT);
 
 describe("the fence function's own privileges", () => {
   test("it is an invoker function the app role alone may execute", async () => {

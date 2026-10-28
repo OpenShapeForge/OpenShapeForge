@@ -60,6 +60,7 @@ import {
 } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import YAML from "yaml";
+import { RECORD_ACTION_DEFAULT_PRINCIPAL_CLASSES } from "./principal-classes.js";
 import { packagedConfigFallback } from "../packaged-config.js";
 import {
   AUTHORIZATION_PATCH_KIND,
@@ -978,8 +979,10 @@ function resolvedRowEmpty(rowAccess: JsonObject): "public" | "restricted" {
  *
  * An absent list admits every class except when integration actions derive
  * an application exclusion; a later layer may not reopen that derived boundary.
+ * If a patch removes the actions that derived it, write the inherited exclusion
+ * into the merged document so compilation preserves the same restriction.
  */
-function assertPrincipalClassesOnlyNarrow(
+function materializeAndAssertPrincipalClasses(
   base: JsonObject,
   merged: JsonObject,
   origin: string,
@@ -994,7 +997,7 @@ function assertPrincipalClassesOnlyNarrow(
     const excludesApplication = actions.some((action) =>
       action && typeof action === "object" && Array.isArray((action as JsonObject).principals)
         && ((action as JsonObject).principals as unknown[]).includes("integration"));
-    return excludesApplication ? ["person", "service", "unknown"] : undefined;
+    return excludesApplication ? [...RECORD_ACTION_DEFAULT_PRINCIPAL_CLASSES] : undefined;
   };
   const prior = effective(base);
   const next = effective(merged);
@@ -1011,7 +1014,7 @@ function assertPrincipalClassesOnlyNarrow(
 }
 
 function assertRowAccessOnlyNarrows(base: JsonObject, merged: JsonObject, origin: string): void {
-  assertPrincipalClassesOnlyNarrow(base, merged, origin);
+  materializeAndAssertPrincipalClasses(base, merged, origin);
   const before = objectProperty(objectProperty(base, "authorization"), "rowAccess");
   if (!before || before.enabled !== true) return;
   const after = objectProperty(objectProperty(merged, "authorization"), "rowAccess");

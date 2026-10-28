@@ -36,6 +36,7 @@ import type {
   CompiledAuthorizationRole,
   CompiledFieldAuthorization,
 } from "../types/compiled.js";
+import { PRINCIPAL_CLASSES, RECORD_ACTION_DEFAULT_PRINCIPAL_CLASSES } from "../principal-classes.js";
 import { fieldSqlType, isCollectionField } from "./helpers.js";
 import { buildCrud } from "./crud.js";
 
@@ -388,7 +389,7 @@ export function buildAuthorization(
   };
 }
 
-const PRINCIPAL_CLASSES = ["application", "person", "service", "unknown"] as const;
+
 
 function compiledRecordActionsFor(
   rowAccess: CompiledAuthorization["rowAccess"],
@@ -437,7 +438,7 @@ function compilePrincipalClasses(
   }
   const admitsApplications = actions.some((action) => action.principals.includes("integration"));
   if (!admitsApplications) return undefined;
-  return PRINCIPAL_CLASSES.filter((candidate) => candidate !== "application");
+  return [...RECORD_ACTION_DEFAULT_PRINCIPAL_CLASSES];
 }
 
 const RECORD_ACTION_NAME = /^[a-z][A-Za-z0-9]*$/;

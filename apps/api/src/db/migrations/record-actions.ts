@@ -2,7 +2,11 @@
 import { sql } from "kysely";
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { OpenShapeForgeDatabase } from "../connection.js";
-import { databaseRole } from "../database-roles.js";
+import {
+  databaseRole,
+  readMigrateIdentity,
+  readUnintendedDefinerMembers,
+} from "../database-roles.js";
 import { APP_ROLE } from "./app-role.js";
 import { WORKER_ROLE } from "./worker-role.js";
 
@@ -550,10 +554,24 @@ async function assertRowSecurityBounds(
  * <resolver>` widens both function bodies silently, and without it the role is
  * still one `set role` away from them.
  *
+ * The MEMBERS of the resolver are the other half, and the half this step is
+ * the last line of defence for. RLS matches a policy's `TO` list and object
+ * ownership alike with `has_privs_of_role`, so a member of the resolver holds
+ * the column grants this step is about to make AND owns the two SECURITY
+ * DEFINER functions it is about to create: with `CREATE` on schema `app` it
+ * can `create or replace app.record_action_allows` and decide every record
+ * action itself. The fence bounds its writes to entity tables; it does not
+ * bound that. So the contract is that the only members are the migrate
+ * identity itself and this database's owner, and the only membership the
+ * migrate identity leans on is a direct grant — a helper role granted to
+ * migrate and also granted the resolver is a separate principal with all of
+ * the above (verified on PostgreSQL 17.11).
+ *
  * database-roles.ts verifies the same contract for every declared role at the
  * head of the chain. This repeats the resolver's own part of it here, because
  * this step hands out a real read and a real write and is also called directly
- * by tests and by a host that assembles its own chain.
+ * by tests and by a host that assembles its own chain. Deviations fail the
+ * step with the administrator's `revoke`; nothing is revoked here.
  */
 async function assertResolverRole(db: OpenShapeForgeDatabase): Promise<void> {
   const state = await sql<{
@@ -586,12 +604,64 @@ async function assertResolverRole(db: OpenShapeForgeDatabase): Promise<void> {
             ? `it is a member of ${row.memberships.join(", ")}` +
               (row.inherits ? ", whose privileges it INHERITS" : "")
             : undefined;
-  if (reason === undefined) return;
+  if (reason !== undefined) {
+    throw new Error(
+      `The record-action resolver role ${RESOLVER_ROLE} cannot be used: ${reason}. ` +
+        "Its privileges are bounded by row-level policies and by nothing else, so it must be " +
+        `NOLOGIN NOSUPERUSER NOBYPASSRLS and a member of no role. Run as an administrator: ` +
+        `alter role ${RESOLVER_ROLE} nologin nosuperuser nobypassrls noinherit;`,
+    );
+  }
+  await assertResolverMembers(db);
+}
+
+/**
+ * Who may be a member OF the resolver, and how the migrate identity may hold
+ * it. Both are compared by role NAME against `current_user` and the current
+ * database's owner: `pg_has_role(current_user, <member>, 'USAGE')` is not an
+ * identity test — it is true for every role granted TO the migrate role, and
+ * true for every member of every role when the caller is a superuser.
+ */
+async function assertResolverMembers(db: OpenShapeForgeDatabase): Promise<void> {
+  const identity = await readMigrateIdentity(db);
+  const unintended = await readUnintendedDefinerMembers(db, [RESOLVER_ROLE]);
+  if (unintended.length > 0) {
+    const members = unintended.map((row) => row.member);
+    throw new Error(
+      `The record-action resolver role ${RESOLVER_ROLE} cannot be used: ` +
+        `${members.join(", ")} ${members.length === 1 ? "is a member" : "are members"} of it, ` +
+        `and neither the migrate identity ${identity.user} nor this database's owner ` +
+        `${identity.databaseOwner ?? "(unknown)"}. A member inherits the resolver's column ` +
+        "grants, is matched by the policies written TO it, and owns the two SECURITY DEFINER " +
+        "functions this step installs — so it can replace their bodies. Run as an " +
+        "administrator: " +
+        members.map((member) => `revoke ${RESOLVER_ROLE} from ${member};`).join(" "),
+    );
+  }
+  // The migrate identity's own membership: a direct grant, or SUPERUSER, which
+  // needs none. Held through a third role, that role is a member as well — and
+  // the scan above has already refused it, so this only reports the case where
+  // the privilege arrives from a role the scan admits.
+  if (identity.superuser) return;
+  const held = await sql<{ member: boolean; direct: boolean }>`
+    select (pg_has_role(current_user, ${RESOLVER_ROLE}, 'USAGE')
+      and pg_has_role(current_user, ${RESOLVER_ROLE}, 'SET')) as member,
+      exists (select 1 from pg_auth_members am
+        join pg_roles role on role.oid = am.roleid
+        join pg_roles member on member.oid = am.member
+        where role.rolname = ${RESOLVER_ROLE} and member.rolname = current_user) as direct
+  `.execute(db);
+  const row = held.rows[0];
+  if (row?.member && row.direct) return;
+  const how = row?.member
+    ? `holds ${RESOLVER_ROLE} only through another role`
+    : `is not a member of ${RESOLVER_ROLE}`;
   throw new Error(
-    `The record-action resolver role ${RESOLVER_ROLE} cannot be used: ${reason}. ` +
-      "Its privileges are bounded by row-level policies and by nothing else, so it must be " +
-      `NOLOGIN NOSUPERUSER NOBYPASSRLS and a member of no role. Run as an administrator: ` +
-      `alter role ${RESOLVER_ROLE} nologin nosuperuser nobypassrls noinherit;`,
+    `The migrate identity ${identity.user} cannot install the record-action lookup: it ${how}` +
+      ". The step transfers the two SECURITY DEFINER functions to that role, which needs " +
+      "membership in it, and the contract is that the grant names the migrate identity " +
+      `itself. Run as an administrator: grant ${RESOLVER_ROLE} to ${identity.user} ` +
+      "with inherit true, set true;",
   );
 }
 

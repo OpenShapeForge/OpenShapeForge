@@ -118,6 +118,15 @@ lock an ACL row to serialize a check against a concurrent policy change, and
 may never write one. Its two functions are not executable by the worker
 connection or by `PUBLIC`.
 
+The same step installs one function that is deliberately NOT a definer and not
+the resolver's: `app.record_action_principal_live()`, the credential fence a
+record action asks before the lookup ([authoring.md](authoring.md)). It reads
+and locks `platform.api_key_integrations` and `platform.api_keys` as its
+CALLER, which is the restricted runtime role under the ordinary tenant
+policies on both tables, so it needs no privilege of its own and widens no
+definer's reach. It is not executable by the worker connection or by `PUBLIC`
+either.
+
 Those grants are bounded by four policies per entity, and the load-bearing
 ones are `AS RESTRICTIVE`. Permissive policies are combined with `OR`, and
 every tenant-scoped table already carries the generated row policy, which names

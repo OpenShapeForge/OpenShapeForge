@@ -64,6 +64,18 @@ const tenantA = randomUUID();
 const tenantB = randomUUID();
 const integration = randomUUID();
 const otherIntegration = randomUUID();
+/**
+ * The credential rows behind those two applications.
+ *
+ * Real `platform.api_keys` rows, because the dispatcher's action check now
+ * also re-reads the credential that produced the session
+ * (`app.record_action_principal_live`). A session naming a key that does not
+ * exist holds nothing, which is the point of the fence — so a test that wants
+ * to exercise the GRANT has to carry a live credential like the real resolver
+ * does.
+ */
+const credential = randomUUID();
+const otherCredential = randomUUID();
 const person = randomUUID();
 
 /** Notebooks: granted, ungranted, another integration's, and another tenant's. */
@@ -120,7 +132,7 @@ function application(
     scope: "self",
     credential: "api-key",
     principalKind: "service",
-    appPrincipal: { integrationId: integration },
+    appPrincipal: { integrationId: integration, credentialId: credential },
     ...overrides,
   };
 }
@@ -270,6 +282,28 @@ beforeAll(async () => {
       insert into platform.tenants (id, slug, name, status) values
         (${tenantA}::uuid, ${`record-action-a-${tenantA.slice(0, 8)}`}, 'Record action tenant A', 'active'),
         (${tenantB}::uuid, ${`record-action-b-${tenantB.slice(0, 8)}`}, 'Record action tenant B', 'active')
+    `.execute(conn);
+    // The two applications, as the provisioning service would have left them:
+    // an active integration apiece and one live, unexpiring credential each.
+    // The action check re-reads these rows, so a fixture without them would
+    // prove the fence rather than the grant.
+    await sql`
+      insert into platform.api_key_integrations
+        (id, tenant_id, display_name, keycloak_client_id, status, granted_roles, created_by)
+      values
+        (${integration}::uuid, ${tenantA}::uuid, 'Partner robot',
+          ${`osf-int-${integration}`}, 'active', cast('[]' as jsonb), ${person}::uuid),
+        (${otherIntegration}::uuid, ${tenantA}::uuid, 'Other robot',
+          ${`osf-int-${otherIntegration}`}, 'active', cast('[]' as jsonb), ${person}::uuid)
+    `.execute(conn);
+    await sql`
+      insert into platform.api_keys
+        (id, tenant_id, integration_id, lookup_id, secret_hash, display_name, created_by)
+      values
+        (${credential}::uuid, ${tenantA}::uuid, ${integration}::uuid,
+          ${`lookup-${credential}`}, ${"0".repeat(64)}, 'key', ${person}::uuid),
+        (${otherCredential}::uuid, ${tenantA}::uuid, ${otherIntegration}::uuid,
+          ${`lookup-${otherCredential}`}, ${"0".repeat(64)}, 'other key', ${person}::uuid)
     `.execute(conn);
     await sql`
       insert into notebook.notebooks (id, tenant_id, name, body, permissions) values
@@ -427,7 +461,9 @@ describe("the module-facing record action", () => {
       ["trusted-context bundle", withoutApplication(application({
         credential: "trusted-context", roles: NOTEBOOK_ROLES,
       }))],
-      ["another integration", application({ appPrincipal: { integrationId: otherIntegration } })],
+      ["another integration", application({
+        appPrincipal: { integrationId: otherIntegration, credentialId: otherCredential },
+      })],
     ];
     for (const [label, session] of classes) {
       await asModule(session, async (platform, live) => {
@@ -439,7 +475,10 @@ describe("the module-facing record action", () => {
 
   test("a module cannot ask on a session core did not hand it", async () => {
     await asModule(application(), async (platform, live) => {
-      const forged = { ...live, appPrincipal: { integrationId: integration } };
+      const forged = {
+        ...live,
+        appPrincipal: { integrationId: integration, credentialId: credential },
+      };
       expect(await refusal(platform.records.holdsAction(forged, record(granted)))).toBe("FORBIDDEN");
       expect(await refusal(platform.records.readForAction(forged, record(granted)))).toBe("FORBIDDEN");
       expect(() => platform.principals.application(forged)).toThrow();
@@ -484,7 +523,9 @@ describe("the module's own rows compose with the axis", () => {
     // different application is a different delivery and never a replay of
     // this one. That application is granted on `otherApp`.
     const other = await dispatch(
-      application({ appPrincipal: { integrationId: otherIntegration } }),
+      application({
+        appPrincipal: { integrationId: otherIntegration, credentialId: otherCredential },
+      }),
       { notebookId: otherApp, reference },
     ) as { value: { status: string; deliveryId: string } };
     expect(other.value.status).toBe("accepted");
@@ -605,11 +646,13 @@ describe("a hostile module cannot widen the capability core handed it", () => {
         (live.appPrincipal as { integrationId: string }).integrationId = otherIntegration;
       });
       attempt("appPrincipal", () => {
-        mutable.appPrincipal = { integrationId: otherIntegration };
+        mutable.appPrincipal = {
+          integrationId: otherIntegration, credentialId: otherCredential,
+        };
       });
       attempt("defineProperty(appPrincipal)", () => {
         Object.defineProperty(live, "appPrincipal", {
-          value: { integrationId: otherIntegration },
+          value: { integrationId: otherIntegration, credentialId: otherCredential },
         });
       });
       attempt("delete appPrincipal", () => { delete mutable.appPrincipal; });
@@ -625,7 +668,11 @@ describe("a hostile module cannot widen the capability core handed it", () => {
       attempt("relationGroupIds.push", () =>
         (live.relationGroupIds as string[]).push(randomUUID()));
       attempt("setPrototypeOf", () =>
-        Object.setPrototypeOf(live, { appPrincipal: { integrationId: otherIntegration } }));
+        Object.setPrototypeOf(live, {
+          appPrincipal: {
+            integrationId: otherIntegration, credentialId: otherCredential,
+          },
+        }));
 
       // What the host says this session is, after all of that.
       const principal = platform.principals.application(live);

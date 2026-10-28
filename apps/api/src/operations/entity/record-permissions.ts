@@ -485,10 +485,57 @@ export async function assertRecordActionInTransaction(
       "INTERNAL_SERVER_ERROR",
     );
   }
+  await assertActionPrincipalLive(trx, table, action);
   const result = await sql<{ allowed: boolean }>`
     select app.record_action_allows(${entity}, ${id}, ${action}) as allowed
   `.execute(trx);
   if (result.rows[0]?.allowed !== true) {
+    throw operationFailure(notAuthorizedRefusal(table, action));
+  }
+}
+
+/**
+ * Is the credential behind this session still live? Asked FIRST, in the
+ * action's own transaction, and refused with the same message as a missing
+ * grant.
+ *
+ * Why it is a statement of its own rather than a conjunct of the lookup: the
+ * two take locks, and the ordering is part of the contract. The fence locks
+ * the integration row and then the credential row; the lookup locks the ACL
+ * row. Folding them into one expression would leave the order to the planner,
+ * and a reader could no longer tell which lock a waiting transaction is on.
+ * See `app.record_action_principal_live` (db/migrations/record-actions.ts)
+ * for the order itself and for why it is the one a disable writes in.
+ *
+ * Why the refusal is indistinguishable from "no grant": a holder learns that
+ * it may not act, and not whether the reason was the record's policy or its
+ * own credential. The management surface — which is authenticated as a human
+ * (auth/api-key/ceiling.ts) — is where the state of a key is legible.
+ *
+ * A session of any other principal class passes this unchanged: there is no
+ * API-key credential to withdraw, so the function answers true without
+ * reading a row or taking a lock.
+ *
+ * The answer is POINT-IN-TIME, at this statement. A revoke or a disable cannot
+ * interleave with the effect that follows — the fence's `for share` locks
+ * serialize against their UPDATE in both directions — but an EXPIRY that falls
+ * due while the effect runs does not retract an admission already given: the
+ * invocation commits, and every later check, including the bounded read's own
+ * call to this function inside the same transaction, refuses. See
+ * `app.record_action_principal_live` (db/migrations/record-actions.ts) for the
+ * full semantics and
+ * `auth/api-key/__tests__/record-action-credential-chain.e2e.test.ts` for the
+ * proof on a real credential.
+ */
+async function assertActionPrincipalLive(
+  trx: Transaction<DB>,
+  table: GeneratedCrudTable,
+  action: string,
+): Promise<void> {
+  const live = await sql<{ live: boolean }>`
+    select app.record_action_principal_live() as live
+  `.execute(trx);
+  if (live.rows[0]?.live !== true) {
     throw operationFailure(notAuthorizedRefusal(table, action));
   }
 }
@@ -537,6 +584,12 @@ export async function readRecordForActionInTransaction(
       "INTERNAL_SERVER_ERROR",
     );
   }
+  // The projection re-authorizes through the same lookup, so it needs the
+  // same credential fence: a withdrawn key must not keep disclosing the
+  // fields its action declared, even though the grant on the record is
+  // untouched. Asked here rather than only in the assert above, because
+  // `platform.records.readForAction` reaches this body directly.
+  await assertActionPrincipalLive(trx, table, action);
   const result = await sql<{ payload: Record<string, unknown> | null }>`
     select app.record_action_read(${entity}, ${id}, ${action}) as payload
   `.execute(trx);

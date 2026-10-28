@@ -108,6 +108,23 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
       select nullif(current_setting('app.app_principal_id', true), '')::uuid
     $$;
 
+    -- WHICH CREDENTIAL of that application authenticated this request:
+    -- platform.api_keys.id, written by applyDbSession from the row the store
+    -- resolved under tenant-fenced RLS (auth/api-key/store.ts) and from
+    -- nowhere else. The integration above outlives rotation and revocation on
+    -- purpose, so it cannot answer "is the credential in my hand still
+    -- valid"; this can, and app.record_action_principal_live()
+    -- (db/migrations/record-actions.ts) is the one caller that asks.
+    --
+    -- It is an identity, never a secret: the row's primary key, not the
+    -- presented token, not its lookup id and not its hash. Empty for every
+    -- carrier that is not a resolved API key, which is what makes the fence
+    -- a no-op for every existing human and bearer session.
+    create or replace function app.current_app_credential() returns uuid
+    language sql stable parallel safe as $$
+      select nullif(current_setting('app.app_credential_id', true), '')::uuid
+    $$;
+
     -- WHAT KIND of principal the server verified this session to be, written
     -- by applyDbSession from server-sourced facts only (db/session.ts):
     --   person      a verified human - bearer claims that are not a service

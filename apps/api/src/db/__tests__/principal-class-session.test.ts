@@ -19,18 +19,21 @@
  * application would be stripped to none. `withDbSession` therefore recognises
  * the active session BY IDENTITY and reuses it. What is proven:
  *
- *   - each carrier shape reaches `app.current_principal_class()` and
- *     `app.current_app_principal()` as the server classified it — including
- *     the v2 bundles whose verified link names a person party, confirmed and
- *     pending, which are `unknown` and not a person's class, while the audit
- *     identity and the acting Relation that link carries still arrive;
+ *   - each carrier shape reaches `app.current_principal_class()`,
+ *     `app.current_app_principal()` and `app.current_app_credential()` as the
+ *     server classified it — including the v2 bundles whose verified link names
+ *     a person party, confirmed and pending, which are `unknown` and not a
+ *     person's class, while the audit identity and the acting Relation that
+ *     link carries still arrive;
  *   - handing the active session back verbatim joins the SAME transaction
  *     (compared on `txid_current()`) with both values intact, for every shape
  *     — including the three the derivation cannot reproduce;
  *   - `independent: true` opens a second transaction and still carries them;
  *   - a COPY of that context is not the active session, so it is derived and
  *     then refused by the nested fence. The fence is not loosened: a session
- *     that really is different is still refused, in both directions.
+ *     that really is different is still refused, in both directions — the
+ *     same application on a DIFFERENT credential among them, which is the one
+ *     substitution an integration id cannot distinguish.
  *   - the session itself is frozen, so neither the callback's argument nor the
  *     accessor's answer can be edited into a different principal and handed
  *     back — the last describe block states that on its own.
@@ -61,6 +64,7 @@ const userId = randomUUID();
 const relationId = randomUUID();
 const identityId = randomUUID();
 const integrationId = randomUUID();
+const credentialId = randomUUID();
 
 /**
  * The carriers this layer classifies, as a resolver hands them over.
@@ -114,7 +118,10 @@ const carriers = {
     },
   },
   personWithoutRelation: { tenantId, userId, principalKind: "person" },
-  application: { tenantId, userId, principalKind: "service", appPrincipal: { integrationId } },
+  application: {
+    tenantId, userId, principalKind: "service",
+    appPrincipal: { integrationId, credentialId },
+  },
   service: { tenantId, userId, principalKind: "service" },
   unclassified: { tenantId, userId },
 } satisfies Record<string, DbSessionInput>;
@@ -122,19 +129,24 @@ const carriers = {
 type Carrier = keyof typeof carriers;
 
 /** What the server decided, as the database reads it back. */
-const expected: Record<Carrier, { principalClass: string; appPrincipal: string | null }> = {
-  personWithRelation: { principalClass: "person", appPrincipal: null },
+const expected: Record<
+  Carrier,
+  { principalClass: string; appPrincipal: string | null; appCredential: string | null }
+> = {
+  personWithRelation: { principalClass: "person", appPrincipal: null, appCredential: null },
   // A verified link is not a person, confirmed or pending. The audit identity
   // and the acting Relation it carries are still this session's own
   // (`app.audit_identity_id`, `app.relation_id`, asserted below); the CLASS is
   // not a person's, so the named-action axis holds nothing for it.
-  linkedPerson: { principalClass: "unknown", appPrincipal: null },
-  pendingPerson: { principalClass: "unknown", appPrincipal: null },
-  linkedService: { principalClass: "service", appPrincipal: null },
-  personWithoutRelation: { principalClass: "person", appPrincipal: null },
-  application: { principalClass: "application", appPrincipal: integrationId },
-  service: { principalClass: "service", appPrincipal: null },
-  unclassified: { principalClass: "unknown", appPrincipal: null },
+  linkedPerson: { principalClass: "unknown", appPrincipal: null, appCredential: null },
+  pendingPerson: { principalClass: "unknown", appPrincipal: null, appCredential: null },
+  linkedService: { principalClass: "service", appPrincipal: null, appCredential: null },
+  personWithoutRelation: { principalClass: "person", appPrincipal: null, appCredential: null },
+  application: {
+    principalClass: "application", appPrincipal: integrationId, appCredential: credentialId,
+  },
+  service: { principalClass: "service", appPrincipal: null, appCredential: null },
+  unclassified: { principalClass: "unknown", appPrincipal: null, appCredential: null },
 };
 
 /**
@@ -172,18 +184,28 @@ async function serverReachable(): Promise<boolean> {
   }
 }
 
-type Observed = { principalClass: string; appPrincipal: string | null; txid: string };
+type Observed = {
+  principalClass: string;
+  appPrincipal: string | null;
+  appCredential: string | null;
+  txid: string;
+};
 
 async function observe(trx: unknown): Promise<Observed> {
-  const row = await sql<{ principal_class: string; app_principal: string | null; txid: string }>`
+  const row = await sql<{
+    principal_class: string; app_principal: string | null;
+    app_credential: string | null; txid: string;
+  }>`
     select app.current_principal_class() as principal_class,
            app.current_app_principal()::text as app_principal,
+           app.current_app_credential()::text as app_credential,
            txid_current()::text as txid
   `.execute(trx as never);
   const first = row.rows[0]!;
   return {
     principalClass: first.principal_class,
     appPrincipal: first.app_principal,
+    appCredential: first.app_credential,
     txid: first.txid,
   };
 }
@@ -332,7 +354,25 @@ describe("the principal class in the database session", () => {
       withDbSession(runtime.db, carriers.application, () =>
         withDbSession(
           runtime!.db,
-          { tenantId, userId, principalKind: "service", appPrincipal: { integrationId: randomUUID() } },
+          {
+            tenantId, userId, principalKind: "service",
+            appPrincipal: { integrationId: randomUUID(), credentialId: randomUUID() },
+          },
+          (trx) => observe(trx),
+        )),
+    ).rejects.toThrow("Nested database work cannot replace the active session.");
+    // Nor for the SAME application on another key. The integration id is
+    // chosen to survive rotation, so it is the credential that says which row
+    // the record-action fence re-reads for revocation and expiry — swapping it
+    // mid-transaction would let a withdrawn key finish another key's work.
+    await expect(
+      withDbSession(runtime.db, carriers.application, () =>
+        withDbSession(
+          runtime!.db,
+          {
+            tenantId, userId, principalKind: "service",
+            appPrincipal: { integrationId, credentialId: randomUUID() },
+          },
           (trx) => observe(trx),
         )),
     ).rejects.toThrow("Nested database work cannot replace the active session.");
@@ -383,20 +423,22 @@ describe("the active session is immutable, and a rejoin cannot be redirected", (
   ];
 
   /**
-   * The two fields a context carries and no carrier input produces, so the
+   * The fields a context carries and no carrier input produces, so the
    * derivation cannot read them back at all. Writing one onto a copy is not
    * refused — it is IGNORED, which is the other half of the same answer.
    */
   const ignored: readonly [string, unknown][] = [
     ["principalClass", "person"],
     ["appPrincipalId", randomUUID()],
+    ["appCredentialId", randomUUID()],
   ];
 
   /** What the database says about the session a transaction really runs under. */
   async function settings(trx: unknown) {
     const row = await sql<{
       tenant: string; user_id: string; roles: string; scope: string;
-      principal_class: string; app_principal: string | null; relation: string | null;
+      principal_class: string; app_principal: string | null;
+      app_credential: string | null; relation: string | null;
     }>`
       select current_setting('app.tenant_id', true) as tenant,
              current_setting('app.user_id', true) as user_id,
@@ -404,6 +446,7 @@ describe("the active session is immutable, and a rejoin cannot be redirected", (
              current_setting('app.scope', true) as scope,
              app.current_principal_class() as principal_class,
              app.current_app_principal()::text as app_principal,
+             app.current_app_credential()::text as app_credential,
              nullif(current_setting('app.relation_id', true), '') as relation
     `.execute(trx as never);
     return row.rows[0]!;
@@ -527,6 +570,7 @@ describe("the active session is immutable, and a rejoin cannot be redirected", (
           ));
         expect({ field, independent, ...observed }).toMatchObject({
           field, independent, principal_class: "unknown", app_principal: null,
+          app_credential: null,
         });
       }
     }
@@ -561,6 +605,7 @@ describe("the active session is immutable, and a rejoin cannot be redirected", (
       scope: "self",
       principal_class: "service",
       app_principal: null,
+      app_credential: null,
       relation: null,
     });
   });

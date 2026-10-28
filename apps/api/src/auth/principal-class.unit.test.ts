@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 
 const tenantId = randomUUID();
 const integrationId = randomUUID();
+const credentialId = randomUUID();
 const serviceAccountUserId = randomUUID();
 
 describe("no other carrier produces an application principal", () => {
@@ -28,6 +29,8 @@ describe("no other carrier produces an application principal", () => {
       "x-osf-app-principal": integrationId,
       "x-osf-app-principal-id": integrationId,
       "x-osf-integration-id": integrationId,
+      "x-osf-app-credential": credentialId,
+      "x-osf-app-credential-id": credentialId,
       "x-osf-principal-class": "application",
       "x-osf-principal-kind": "service",
     });
@@ -36,6 +39,10 @@ describe("no other carrier produces an application principal", () => {
     expect(session.appPrincipal).toBeUndefined();
     expect(session.principalKind).toBeUndefined();
     expect(JSON.stringify(session)).not.toContain(integrationId);
+    // The credential the record-action fence re-reads is no more reachable
+    // from request input than the integration is: it comes off the store's
+    // own row (auth/api-key/store.ts) or the session has none.
+    expect(JSON.stringify(session)).not.toContain(credentialId);
   });
 
   test("the database session derives the class from the server's own decision", async () => {
@@ -50,7 +57,7 @@ describe("no other carrier produces an application principal", () => {
     // An application outranks the service kind its own token carries.
     expect(resolvePrincipalClass({
       tenantId, userId: serviceAccountUserId, principalKind: "service",
-      appPrincipal: { integrationId },
+      appPrincipal: { integrationId, credentialId },
     })).toBe("application");
   });
 });
@@ -149,7 +156,8 @@ describe("a link is not evidence of a person, however its party reads", () => {
       { ...carrier(PERSON_PARTY), principalKind: "service" } as never)).toBe("service");
     // Nor is it undone by a resolved integration, which only narrows it.
     expect(resolvePrincipalClass({
-      ...carrier(PERSON_PARTY), principalKind: "service", appPrincipal: { integrationId },
+      ...carrier(PERSON_PARTY), principalKind: "service",
+      appPrincipal: { integrationId, credentialId },
     } as never)).toBe("application");
   });
 

@@ -1042,6 +1042,28 @@ and nothing else, so:
 
 - the grant follows the INTEGRATION, not the credential. Rotating or revoking
   one key does not move it; deleting the integration ends it.
+- which CREDENTIAL resolved the session is carried too, as
+  `session.appPrincipal.credentialId` (`platform.api_keys.id`, projected into
+  `app.app_credential_id`). It is not what a grant names — it is what the
+  action check re-reads. Because the grant survives rotation, the integration
+  id alone cannot tell a live key from one revoked a second ago, so every
+  record-action check verifies and locks that credential row and its
+  integration inside the action's own transaction: unrevoked, unexpired
+  against the wall clock, integration `active`, and the two naming each other.
+  A revoke or a disable therefore either waits for an effect already in flight
+  or is read by one that starts after it, and a credential withdrawn before
+  the action authorizes nothing. No other principal class is affected — none
+  of them carries an API-key credential to withdraw. The identity is the row's
+  primary key and never the secret, and only the resolver writes it.
+- that check is **point-in-time, at the gate**. Revocation and disabling
+  cannot interleave with an effect, because each is an update the gate's locks
+  serialize against. Expiry is the passage of time and no lock holds it back:
+  an invocation admitted while the credential was live commits even if the
+  credential expires while its effect runs, and every later check — including
+  the bounded read's own, inside that same transaction — refuses. A holder
+  may check again later in the transaction, but that establishes validity
+  only at the later check, not at commit. The platform does not promise
+  continuous validity for an admission it has already given.
 - a direct bearer token of the same integration's Keycloak service account is
   classified `service`, not `application`, and satisfies no record action.
   Mapping `azp` back to an integration row would mean trusting a claim-to-row

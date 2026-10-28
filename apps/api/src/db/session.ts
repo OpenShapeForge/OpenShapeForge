@@ -78,8 +78,14 @@ export type DbSessionInput = {
    * `app.app_principal_id` GUC empty, so a record-action policy matches
    * nobody. Declared structurally so the database layer keeps no dependency
    * on the auth layer.
+   *
+   * `credentialId` is the `platform.api_keys` row the carrier presented. It
+   * reaches `app.app_credential_id`, which the record-action fence re-reads
+   * for revocation and expiry inside the action's own transaction; the
+   * integration id alone cannot answer that, because it is chosen to survive
+   * rotation.
    */
-  appPrincipal?: { integrationId: string } | null;
+  appPrincipal?: { integrationId: string; credentialId: string } | null;
   /**
    * What the bearer verifier made of the token's claims, or what a
    * trusted-context producer signed into its bundle, when the carrier states
@@ -103,6 +109,8 @@ export type DbSessionContext = {
   relationId: string | null;
   /** The verified application id; `app.current_app_principal()`. */
   appPrincipalId: string | null;
+  /** The verified credential row id; `app.current_app_credential()`. */
+  appCredentialId: string | null;
   /** The verified principal class; `app.current_principal_class()`. */
   principalClass: DbPrincipalClass;
   scope: DbSessionScope;
@@ -344,6 +352,21 @@ function normalizeAppPrincipalId(
 }
 
 /**
+ * The verified credential row id, or null. Same contract as the principal
+ * above and for the same reason: the only writer is the API-key resolver,
+ * which reads a uuid primary key. An application principal without one would
+ * be a session the record-action fence cannot check, so it is a programming
+ * error here rather than a silent denial later.
+ */
+function normalizeAppCredentialId(
+  principal: { credentialId: string } | null | undefined,
+): string | null {
+  if (!principal) return null;
+  assertUuid(principal.credentialId, "appPrincipal.credentialId");
+  return principal.credentialId;
+}
+
+/**
  * Classify the session from server-sourced facts, most specific first.
  *
  * A resolved integration outranks the "service" kind its own token carries:
@@ -435,6 +458,7 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
     relationGroupIds: [...normalizeRelationGroupIds(input.relationGroupIds)],
     relationId: actingRelationId(input),
     appPrincipalId: normalizeAppPrincipalId(input.appPrincipal),
+    appCredentialId: normalizeAppCredentialId(input.appPrincipal),
     principalClass: resolvePrincipalClass(input),
     scope: normalizeScope(input.scope),
   });
@@ -478,6 +502,11 @@ export async function applyDbSession<TDatabase>(
     // written when present would let one request's application principal be
     // observed by the next session opened on the same transaction.
     sql`set_config('app.app_principal_id', ${session.appPrincipalId ?? ""}, true)`,
+    // Written on the same unconditional terms, and for the stronger version
+    // of the same reason: a credential id left over from the previous session
+    // on this pooled connection would let a revoked key's fence answer with
+    // another key's row.
+    sql`set_config('app.app_credential_id', ${session.appCredentialId ?? ""}, true)`,
     sql`set_config('app.principal_class', ${session.principalClass}, true)`,
     sql`set_config('app.user_groups', '', true)`,
     sql`set_config('app.user_groups_exact', '', true)`,
@@ -601,6 +630,7 @@ export async function withDbSession<TDatabase, TResult>(
       ) &&
       active.session.relationId === session.relationId &&
       active.session.appPrincipalId === session.appPrincipalId &&
+      active.session.appCredentialId === session.appCredentialId &&
       active.session.principalClass === session.principalClass);
     if (!sameSession) {
       throw new Error("Nested database work cannot replace the active session.");

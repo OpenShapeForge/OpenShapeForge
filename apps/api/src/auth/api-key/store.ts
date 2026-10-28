@@ -188,6 +188,16 @@ export async function resolveApiKey(
  *
  * Deliberately fire-and-forget at the call site: a telemetry write must never
  * fail an authenticated request, and the row is not read on the hot path.
+ *
+ * `skip locked` is what keeps that promise now that a record action holds a
+ * SHARE lock on this row for as long as its effect runs
+ * (db/migrations/record-actions.ts). Without it, every request presenting a
+ * key whose own long-running Operation is still in flight would park this
+ * statement on that lock until the statement timeout, holding a pool
+ * connection for a write nothing reads synchronously. Skipping loses one
+ * `last_used_at` tick — and, on a key's very first use inside such a window,
+ * defers `first_used_at` to its next use. Both are acceptable for a
+ * retirement signal; blocking authentication behind telemetry is not.
  */
 export async function recordApiKeyUse(
   db: OpenShapeForgeDatabase,
@@ -199,7 +209,11 @@ export async function recordApiKeyUse(
       update platform.api_keys
          set first_used_at = coalesce(first_used_at, ${now}),
              last_used_at = ${now}
-       where id = ${key.keyId}
+       where id = (
+         select k.id from platform.api_keys k
+          where k.id = ${key.keyId}
+          for no key update skip locked
+       )
     `.execute(trx);
   });
 }

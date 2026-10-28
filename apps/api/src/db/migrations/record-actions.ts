@@ -679,6 +679,144 @@ export function renderRecordActionProjection(
 }
 
 /**
+ * Is the principal behind a record action still a live one?
+ *
+ * WHAT THE ACL LOCK DOES NOT COVER
+ * --------------------------------
+ * The lookup above fences the GRANT: the ACL row is locked, so a revocation
+ * of the action cannot interleave with the effect. It says nothing about the
+ * CREDENTIAL that produced the session. An application principal is
+ * `platform.api_key_integrations.id`, chosen because it survives rotation
+ * (auth/trusted-context.ts) — which is exactly why it cannot answer whether
+ * the key in the caller's hand is still valid. A long-running Operation that
+ * authenticated with a key, had that key revoked a second later and then
+ * authorized its effect against an unchanged ACL would act on a withdrawn
+ * credential, and the ACL lock would hold throughout.
+ *
+ * So the session also carries WHICH credential resolved it — the
+ * `platform.api_keys` row the store read under tenant-fenced RLS,
+ * `app.current_app_credential()` — and this is the predicate that re-reads it
+ * inside the action's own transaction.
+ *
+ * WHAT IT VERIFIES
+ * ----------------
+ * Four facts, all from rows and none from input:
+ *
+ *   - the integration named by the session's verified principal is `active`
+ *     in this tenant. 'pending' never finished provisioning and 'disabled'
+ *     is the customer having switched the whole integration off; both are a
+ *     denial, so a disabled integration cannot authorize;
+ *   - the credential row exists in this tenant and belongs to THAT
+ *     integration. A session whose two values disagree — the shape a forged
+ *     placeholder would take — is refused rather than reconciled;
+ *   - it is not revoked;
+ *   - it has not expired, measured against `clock_timestamp()` rather than
+ *     `now()`. `now()` is the transaction's start, so a transaction that
+ *     opened before an expiry would keep reading the credential as live for
+ *     as long as it ran; the wall clock is the honest reading and the
+ *     stricter one.
+ *
+ * WHEN EACH FACT IS READ, AND WHAT THAT DOES NOT PROMISE
+ * ------------------------------------------------------
+ * All four are read WHEN THIS FUNCTION IS ASKED, and every answer is a
+ * point-in-time one. It is asked at the transaction gate of a record action
+ * (operations/entity/record-permissions.ts, `assertActionPrincipalLive`) and
+ * again by the bounded read, so a long effect that re-reads is re-checked —
+ * and refused if the credential has since gone.
+ *
+ * It is NOT a claim about the moment of commit. An invocation admitted while
+ * the credential was live commits even if the credential EXPIRES while its
+ * effect runs: expiry is the passage of time, and no lock holds time back.
+ * Revocation and disabling are the cases that cannot interleave, because each
+ * is an UPDATE that the `for share` locks below serialize against — a revoke
+ * either waits for the effect in flight or is read by the effect that starts
+ * after it. So the semantics are: admitted at the gate, serialized against
+ * withdrawal, and never retroactively invalidated by the clock. A later
+ * check establishes validity at that check, not at the eventual commit.
+ *
+ * Every other principal class answers TRUE. A person, a direct bearer service
+ * account, a capability grant and a control session carry no API-key
+ * credential to withdraw, and their carriers' own lifetimes are unchanged by
+ * this: nothing here alters an existing human or key API beyond the named
+ * record-action gate that calls it.
+ *
+ * THE LOCK ORDER, AND WHY IT IS THIS ONE
+ * --------------------------------------
+ * Both rows are taken `for share`, integration FIRST and credential SECOND.
+ *
+ * That is the order `disableIntegration` writes them in
+ * (auth/api-key/service.ts): it updates the integration row, then every key
+ * row under it, in one transaction. A fence that locked the key first would
+ * hold what the disable needs second while waiting for what the disable
+ * already holds — a deadlock, and one that only appears under load.
+ * `revokeKey` takes the key row alone, so it joins this order without
+ * extending it. Nothing in the revocation path touches an entity ACL row, so
+ * adding the credential rows ahead of the ACL lock introduces no cycle with
+ * the single ACL ordering the lookup already keeps.
+ *
+ * `for share` is the mode because it is self-COMPATIBLE and still conflicts
+ * with the `for no key update` an ordinary UPDATE takes. Two concurrent
+ * holders of two different keys — or of the same one — do not serialize
+ * against each other, while a revoke or a disable that starts after a fence
+ * waits for that transaction to commit, and one that starts before it makes
+ * the fence wait and then read the withdrawn row. Neither side ever upgrades
+ * these locks, so the self-compatible mode cannot produce the upgrade
+ * deadlock `shared` admits on an ACL row.
+ *
+ * WHAT IT IS NOT
+ * --------------
+ * Not a second rights store, and not a capability: it answers "is this
+ * credential still live", never "may it do this". The grant stays in the
+ * record ACL and is still decided by `app.record_action_allows`. A caller
+ * must pass both.
+ */
+const RECORD_ACTION_PRINCIPAL_LIVE = `
+    create or replace function app.record_action_principal_live() returns boolean
+    language plpgsql volatile parallel unsafe
+    set search_path = pg_catalog, pg_temp
+    as $record_action_live$
+    declare
+      principal uuid := app.current_app_principal();
+      credential uuid := app.current_app_credential();
+      tenant uuid := app.current_tenant();
+      integration uuid;
+    begin
+      -- Only an application acts on a credential a customer can withdraw
+      -- mid-flight. Every other class is unchanged, deliberately.
+      if app.current_principal_class() <> 'application' then
+        return true;
+      end if;
+      -- An application with no credential, or outside a tenant, is a
+      -- half-written session: deny rather than guess which half is true.
+      if principal is null or credential is null or tenant is null then
+        return false;
+      end if;
+      -- FIRST the integration, because that is the order a disable writes.
+      select i.id into integration
+        from platform.api_key_integrations i
+       where i.id = principal
+         and i.tenant_id = tenant
+         and i.status = 'active'
+         for share;
+      if integration is null then
+        return false;
+      end if;
+      -- THEN the credential, bound to that same integration: a session whose
+      -- principal and credential name different rows holds nothing.
+      perform 1
+        from platform.api_keys k
+       where k.id = credential
+         and k.tenant_id = tenant
+         and k.integration_id = integration
+         and k.revoked_at is null
+         and (k.expires_at is null or k.expires_at > clock_timestamp())
+         for share;
+      return found;
+    end
+    $record_action_live$;
+  `;
+
+/**
  * Row security must be ENABLED and FORCED on the entity table, and the
  * resolver must not hold the owner's privileges on it.
  *
@@ -1443,6 +1581,19 @@ async function applyRecordActions(
   // an entity whose last action was dropped — keeps its grants for ever
   // otherwise.
   await revokeStaleRecordActionGrants(db, entities);
+
+  // The credential fence. Deliberately NOT security definer and therefore
+  // not owned by the resolver: it reads and locks two platform tables the
+  // restricted app role already holds tenant-fenced DML on, so it needs no
+  // privilege of its own and adds no definer reach. `search_path` is pinned
+  // and every name is qualified all the same, because an invoker function
+  // inherits whatever path the session set.
+  await sql.raw(RECORD_ACTION_PRINCIPAL_LIVE).execute(db);
+  await sql`revoke all on function app.record_action_principal_live() from public`.execute(db);
+  await sql`revoke all on function app.record_action_principal_live()
+    from ${sql.id(WORKER_ROLE)}`.execute(db);
+  await sql`grant execute on function app.record_action_principal_live()
+    to ${sql.id(APP_ROLE)}`.execute(db);
 
   // The two function bodies, their EXECUTE grants and the ownership transfer.
   // `create function` defaults to EXECUTE for PUBLIC, so a first install would

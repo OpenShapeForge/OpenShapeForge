@@ -148,10 +148,16 @@ export async function resolveApiKeySession(
     // when this session is resolved inside another one's audit context, and
     // it is what a record-action policy classifies on.
     principalKind: "service",
-    // The integration, not the key: `integration_id` survives rotation and
-    // revocation of this particular credential, while `display_name` is a
-    // mutable label nothing may authorize on. Read from the row the store
+    // The integration AND the credential, both read from the rows the store
     // resolved under tenant-fenced RLS — never from the request.
-    appPrincipal: { integrationId: key.integrationId },
+    //
+    // `integration_id` is what a record-action policy names: it survives
+    // rotation and revocation of this particular credential, while
+    // `display_name` is a mutable label nothing may authorize on. `keyId` is
+    // the opposite property and is carried for the opposite reason — it is
+    // the one value that can still be checked for revocation and expiry while
+    // an Operation is in flight (db/migrations/record-actions.ts,
+    // `app.record_action_principal_live`). Neither is the secret.
+    appPrincipal: { integrationId: key.integrationId, credentialId: key.keyId },
   };
 }

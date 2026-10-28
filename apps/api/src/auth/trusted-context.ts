@@ -78,6 +78,23 @@ export type CapabilityGrantSession = {
 export type VerifiedAppPrincipal = {
   /** `platform.api_key_integrations.id`; tenant-bound and stable across keys. */
   integrationId: string;
+  /**
+   * `platform.api_keys.id` of the credential that resolved THIS session.
+   *
+   * The integration above is stable across rotation on purpose, so it cannot
+   * answer whether the key in the caller's hand is still valid. This can: it
+   * is the row the store compared the presented secret against
+   * (auth/api-key/store.ts), carried so a record action can re-read that row
+   * — still unrevoked, still unexpired, its integration still active — inside
+   * its own transaction (db/migrations/record-actions.ts,
+   * `app.record_action_principal_live`).
+   *
+   * An identity, never a secret: the row's primary key, not the token, not
+   * its lookup id and not its hash. Required rather than optional so a
+   * carrier that produces an application principal cannot produce one the
+   * fence has to guess about, and it is never read from request input.
+   */
+  credentialId: string;
 };
 
 export type TrustedSessionContext = {

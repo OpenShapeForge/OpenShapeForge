@@ -41,6 +41,7 @@ import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 
 const tenantId = randomUUID();
 const integrationId = randomUUID();
+const credentialId = randomUUID();
 
 const NOTEBOOK_TABLE = "notebook.notebooks";
 const NOTEBOOK_ROLES = [
@@ -67,7 +68,7 @@ function session(overrides: Partial<DbSessionInput> = {}): DbSessionInput {
   };
 }
 
-const application = () => session({ principalKind: "service", appPrincipal: { integrationId } });
+const application = () => session({ principalKind: "service", appPrincipal: { integrationId, credentialId } });
 const serviceAccount = () => session({ principalKind: "service" });
 const person = () => session({ principalKind: "person" });
 const unclassified = () => session();

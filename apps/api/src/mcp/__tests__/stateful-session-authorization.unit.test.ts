@@ -268,7 +268,10 @@ describe("sameStatefulMcpAuthorization", () => {
     // rewrite the verified integration for the whole connection.
     const established = authorization() as TrustedSessionContext;
     established.credential = "api-key";
-    established.appPrincipal = { integrationId: "44444444-4444-4444-8444-444444444444" };
+    established.appPrincipal = {
+      integrationId: "44444444-4444-4444-8444-444444444444",
+      credentialId: "66666666-6666-4666-8666-666666666666",
+    };
     const stateful = createStatefulMcpSessionContext(established);
     const capability = createModuleSessionCapability(stateful);
 
@@ -280,8 +283,10 @@ describe("sameStatefulMcpAuthorization", () => {
       (capability.appPrincipal as { integrationId: string }).integrationId =
         "55555555-5555-4555-8555-555555555555";
     }).toThrow(TypeError);
-    expect(established.appPrincipal)
-      .toEqual({ integrationId: "44444444-4444-4444-8444-444444444444" });
+    expect(established.appPrincipal).toEqual({
+      integrationId: "44444444-4444-4444-8444-444444444444",
+      credentialId: "66666666-6666-4666-8666-666666666666",
+    });
   });
 
   it("still refuses identity, claim, and credential changes", () => {

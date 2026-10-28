@@ -385,9 +385,20 @@ describe("readForAction is bound to the admitted Operation target", () => {
   }
 
   test("serves the admitted record and refuses every other record, action and session", async () => {
-    const state = harness(() => [{ payload: { name: "Granted notes" } }]);
+    // Two stubbed answers, because the bounded read asks two questions: is the
+    // credential behind this session still live, and then what does the action
+    // disclose. Only the second is what this group is about, so the fence is
+    // answered true here and proven against real key rows in
+    // db/__tests__/record-action-credential-fence-db.test.ts.
+    const state = harness((query) =>
+      query.sql.includes("record_action_principal_live")
+        ? [{ live: true }]
+        : [{ payload: { name: "Granted notes" } }]);
     const live = { ...session, credential: "api-key" as const, principalKind: "service" as const,
-      appPrincipal: { integrationId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" } };
+      appPrincipal: {
+        integrationId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        credentialId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      } };
     state.live.add(live);
     try {
       await withAdmittedRecordAction(admitted(live, notebook, ["deliver"]), async () => {

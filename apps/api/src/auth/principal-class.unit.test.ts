@@ -52,45 +52,46 @@ describe("no other carrier produces an application principal", () => {
       tenantId, userId: serviceAccountUserId, principalKind: "service",
       appPrincipal: { integrationId },
     })).toBe("application");
-    // A verified service account cannot be re-read as a person by attaching a
-    // Relation to it; the stated kind wins over the link.
-    expect(resolvePrincipalClass({
-      tenantId, userId: serviceAccountUserId, principalKind: "service",
-      relation: {
-        identityId: randomUUID(), issuer: "https://identity.example/realms/test",
-        subject: serviceAccountUserId, status: "linked",
-      },
-    } as never)).toBe("service");
-    // A link belonging to someone else classifies nobody.
-    expect(resolvePrincipalClass({
-      tenantId, userId: serviceAccountUserId,
-      relation: {
-        identityId: randomUUID(), issuer: "https://identity.example/realms/test",
-        subject: randomUUID(), status: "linked",
-      },
-    } as never)).toBe("unknown");
   });
 });
 
 /**
- * The link classifies a PERSON, and only a person.
+ * The `person` class rests on a VERIFIED human login, and on nothing else.
  *
- * The fallback exists for the one carrier that states no kind: a
- * trusted-context bundle still signing payload v2, which this deployment
- * accepts for ordinary work. Everything about such a session's class comes
- * from the link, and a link is not evidence of a person — every API-key
- * service account records one on its first session
- * (`ensureServiceIdentityLink`), and `link_identity` may point any identity at
- * any Relation the tenant holds. So the party's own kind is required, and
- * `relationIsPerson` is where `toState` put the deployment's answer to it.
+ * One carrier states no kind: a trusted-context bundle still signing payload
+ * v2, which this deployment accepts for ordinary work. The tempting fallback
+ * for it is the identity ↔ Relation link, because that link is a row this
+ * server read under RLS rather than a claim. It is still not evidence of a
+ * human, and this file is the statement of that:
+ *
+ *   - `ensureServiceIdentityLink` records a link row for every API-key
+ *     service account on its first session, so a link exists for machines;
+ *   - `link_identity` lets an administrator point any identity at any
+ *     Relation the tenant holds, so the party's own `relation_type` is a fact
+ *     about a row somebody chose — a machine identity linked to a person
+ *     Relation is permitted and ordinary — and not a fact about how this
+ *     session authenticated;
+ *   - a `pending_confirmation` link names a candidate an e-mail matched and
+ *     nobody confirmed, so even reading the party as authoritative would be
+ *     reading an unverified one.
  *
  * `person` is the one class that holds a named action's user, role and group
  * subjects and the class a generic route's `principalClasses` is matched
- * against, so this is what a legacy linked service carrier would have been
- * handed.
+ * against, so each of those shapes would have been handed a person's record
+ * actions. That those two surfaces now hold nothing for them is proven where
+ * the surfaces live, against the compiled entities and a real database:
+ * `operations/entity/record-permissions.test.ts`,
+ * `operations/entity/principal-classes.test.ts` and
+ * `operations/api-key-dispatcher-db.test.ts`.
  */
-describe("a verified link is a person's or it is nobody's", () => {
-  const link = (extra: Record<string, unknown>) => ({
+describe("a link is not evidence of a person, however its party reads", () => {
+  const PERSON_PARTY = {
+    status: "linked",
+    relationId: randomUUID(),
+    relationType: "person",
+  };
+
+  const carrier = (extra: Record<string, unknown>) => ({
     tenantId,
     userId: serviceAccountUserId,
     relation: {
@@ -101,58 +102,69 @@ describe("a verified link is a person's or it is nobody's", () => {
     },
   });
 
-  test("a v2 carrier with a person party is a person — linked or pending", async () => {
+  test("an unclassified carrier linked to a person party is unknown", async () => {
     const { resolvePrincipalClass } = await import("../db/session.js");
-    // Ordinary v2 compatibility: this is how a real person with no signed
-    // class has always reached the person class, and still does.
+    // The shape the review names: a service account an administrator linked
+    // to a person Relation, reaching this code under a v2 bundle. Verified
+    // link, person party, no signed class — and no person.
+    expect(resolvePrincipalClass(carrier(PERSON_PARTY) as never)).toBe("unknown");
+    // And a candidate nobody confirmed is no better, whatever its party.
     expect(resolvePrincipalClass(
-      link({ status: "linked", relationIsPerson: true }) as never)).toBe("person");
-    // A candidate the e-mail matched is a person party too, so a person
-    // waiting to confirm keeps the class they have today.
-    expect(resolvePrincipalClass(
-      link({ status: "pending_confirmation", relationIsPerson: true }) as never)).toBe("person");
+      carrier({ ...PERSON_PARTY, status: "pending_confirmation" }) as never)).toBe("unknown");
   });
 
-  test("a v2 carrier whose party is not a person holds nothing", async () => {
+  test("no other party, status or shape of link reaches the class either", async () => {
     const { resolvePrincipalClass } = await import("../db/session.js");
+    const parties: readonly [string, Record<string, unknown>][] = [
+      ["a person party", { relationType: "person", relationId: randomUUID() }],
+      ["an organization party", { relationType: "organization", relationId: randomUUID() }],
+      ["no party at all", { relationType: null, relationId: null }],
+    ];
     for (const status of ["linked", "pending_confirmation"]) {
-      // A service account an administrator linked to a supplier organization.
-      expect({ status, got: resolvePrincipalClass(
-        link({ status, relationIsPerson: false }) as never) })
-        .toEqual({ status, got: "unknown" });
-      // The empty pending row an API-key service account records for itself:
-      // a verified link with no party at all.
-      expect({ status, got: resolvePrincipalClass(
-        link({ status, relationType: null, relationIsPerson: false }) as never) })
-        .toEqual({ status, got: "unknown" });
-      // And a link that says nothing about its party — a producer that omits
-      // the field proves no person, so absence is not a permissive value.
-      expect({ status, got: resolvePrincipalClass(link({ status }) as never) })
-        .toEqual({ status, got: "unknown" });
+      for (const [label, party] of parties) {
+        expect({ status, label, got: resolvePrincipalClass(
+          carrier({ status, ...party }) as never) })
+          .toEqual({ status, label, got: "unknown" });
+      }
     }
+    // A link belonging to someone else, and no link at all, are the same
+    // answer — there was never a route to the class here to close.
+    expect(resolvePrincipalClass(
+      carrier({ ...PERSON_PARTY, subject: randomUUID() }) as never)).toBe("unknown");
+    expect(resolvePrincipalClass({ tenantId, userId: serviceAccountUserId })).toBe("unknown");
   });
 
-  test("the audit identity is unaffected: a linked service is still audited", async () => {
+  test("a signed class decides, in both directions, link or no link", async () => {
+    const { resolvePrincipalClass } = await import("../db/session.js");
+    // A verified person needs no link at all: the class comes from the bearer
+    // path's verdict or from inside a v3 bundle's HMAC.
+    expect(resolvePrincipalClass({
+      tenantId, userId: serviceAccountUserId, principalKind: "person",
+    })).toBe("person");
+    expect(resolvePrincipalClass(
+      { ...carrier({ relationType: null, status: "linked" }), principalKind: "person" } as never),
+    ).toBe("person");
+    // And a signed service verdict is not undone by a person party.
+    expect(resolvePrincipalClass(
+      { ...carrier(PERSON_PARTY), principalKind: "service" } as never)).toBe("service");
+    // Nor is it undone by a resolved integration, which only narrows it.
+    expect(resolvePrincipalClass({
+      ...carrier(PERSON_PARTY), principalKind: "service", appPrincipal: { integrationId },
+    } as never)).toBe("application");
+  });
+
+  test("the audit identity and the acting Relation are unaffected", async () => {
     const { verifiedAuditIdentity } = await import("../db/session.js");
-    // The class is about personhood; the audit identity is about which
-    // identity row acted. A linked service account has one, and it still
-    // reaches `app.audit_identity_id`.
-    const input = link({ status: "linked", relationIsPerson: false });
+    const { actingRelationId } = await import("../db/acting-relation.js");
+    // Which identity acted, and which party it acts as, are different
+    // questions from whether it is a person — and both still come off the
+    // link this classification ignores. Narrowing the class must not quietly
+    // drop a session's audit trail or its row scope.
+    const input = carrier(PERSON_PARTY);
     expect(verifiedAuditIdentity(input as never)).toEqual({
       auditIdentityId: input.relation.identityId,
       auditIssuer: input.relation.issuer,
     });
-  });
-
-  test("a stated kind still outranks the link, in both directions", async () => {
-    const { resolvePrincipalClass } = await import("../db/session.js");
-    // A signed person verdict does not need a link at all, and a signed
-    // service verdict is not undone by a person party.
-    expect(resolvePrincipalClass(
-      { ...link({ status: "linked", relationIsPerson: false }), principalKind: "person" } as never),
-    ).toBe("person");
-    expect(resolvePrincipalClass(
-      { ...link({ status: "linked", relationIsPerson: true }), principalKind: "service" } as never),
-    ).toBe("service");
+    expect(actingRelationId(input as never)).toBe(PERSON_PARTY.relationId);
   });
 });

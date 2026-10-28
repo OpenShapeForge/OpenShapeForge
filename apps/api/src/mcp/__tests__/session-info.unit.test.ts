@@ -73,7 +73,6 @@ const linked: IdentityLinkState = {
   relationId: RELATION_ID,
   displayName: "Acme Admin",
   relationType: "person",
-  relationIsPerson: true,
   candidateRelationId: null,
   linkedBy: "jit",
   needsRoleAssignment: false,

@@ -38,7 +38,6 @@ const linked = {
   status: "linked" as const,
   relationId: RELATION_ID,
   relationType: "person" as const,
-  relationIsPerson: true,
   displayName: "Hans Dev",
   candidateRelationId: null,
   linkedBy: "jit",

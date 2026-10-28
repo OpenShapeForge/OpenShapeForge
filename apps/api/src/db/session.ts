@@ -15,17 +15,21 @@ export type DbSessionScope = "tenant" | "group" | "self";
  * What kind of principal the SERVER decided this session is.
  *
  * The named-action axis of the record ACL matches a subject kind against this
- * and nothing else, so it has to be derived from facts the server read, never
- * from anything a caller can assert:
+ * and nothing else, so every class has to rest on something the server
+ * established about HOW the principal authenticated — never on anything a
+ * caller can assert, and never on a fact about some other row:
  *
- *   person       verified bearer claims that are not a service account, or any
- *                carrier whose identity-Relation link was read back from
- *                `platform.identity_relations` AND names a person party
- *                (`linkedPersonParty`)
+ *   person       the server's own positive verdict that a human authenticated:
+ *                the bearer path's reading of verified token claims
+ *                (`auth/bearer-session.ts`), or the class a trusted-context
+ *                producer signed INSIDE its bundle's HMAC (packages/auth,
+ *                payload v3). There is no third way to reach it.
  *   application  a resolved API-key integration, and only that
  *   service      a verified client-credentials principal with no integration
  *                behind it — organization automation included
- *   unknown      a carrier that states nothing and has no link to read
+ *   unknown      a carrier whose principal this deployment did not classify —
+ *                a trusted-context bundle still signing payload v2 among them,
+ *                whatever Relation its subject happens to be linked to
  *
  * `unknown` is spelled out rather than left empty so no consumer can read a
  * missing value as a permissive one. It holds no named action; neither does
@@ -77,9 +81,11 @@ export type DbSessionInput = {
    */
   appPrincipal?: { integrationId: string } | null;
   /**
-   * What the bearer verifier made of the token's claims, when the carrier
-   * states it. Server-derived; a carrier that asserts nothing leaves it
-   * undefined and is classified from the identity link instead, or not at all.
+   * What the bearer verifier made of the token's claims, or what a
+   * trusted-context producer signed into its bundle, when the carrier states
+   * it at all. Server-derived, and the ONLY route to the `person` class
+   * ({@link resolvePrincipalClass}); a carrier that states nothing is
+   * `unknown`, whatever else it holds.
    */
   principalKind?: "person" | "service";
   scope?: DbSessionScope | null;
@@ -198,9 +204,10 @@ function sealSession(session: DbSessionContext): DbSessionContext {
  * application principal and the principal class. Both are DERIVED here from
  * what the carrier supplied ({@link resolvePrincipalClass}), and neither is a
  * field of this type, so re-deriving a session from a context would classify
- * a verified person with no Relation as `unknown` and strip an application
- * principal to null. {@link withDbSession} therefore recognises this exact
- * object and reuses it rather than deriving anything from it.
+ * every verified person as `unknown` — a context carries no `principalKind`,
+ * and no other fact reaches that class — and strip an application principal
+ * to null. {@link withDbSession} therefore recognises this exact object and
+ * reuses it rather than deriving anything from it.
  *
  * What comes back is the FROZEN session ({@link sealSession}), so a caller
  * reads it and cannot edit it: an assignment to a field of it throws, and the
@@ -279,32 +286,25 @@ function normalizeScope(scope: DbSessionScope | null | undefined): DbSessionScop
 
 /**
  * The identity ↔ Relation link a carrier supplied, narrowed to what this
- * layer reads off it. A plugin sees `relation` as `unknown`; the auth layer
- * builds it in one place (`auth/identity-link-store.ts`, `toState`).
+ * layer reads off it — the identity, its issuer and whose link it is, and
+ * nothing about the party. A plugin sees `relation` as `unknown`; the auth
+ * layer builds it in one place (`auth/identity-link-store.ts`, `toState`).
  */
 type SessionIdentityLink = {
   identityId?: unknown;
   issuer?: unknown;
   subject?: unknown;
   status?: unknown;
-  /**
-   * Whether the party the link names is a PERSON, as the deployment's identity
-   * contract spells "person". Derived where the Relation row is read, so it is
-   * a fact this server established; absent for every carrier that supplies no
-   * link, and false for a link with no party or a party of another type.
-   */
-  relationIsPerson?: unknown;
 };
 
 /**
  * The link, when it is THIS session's own and this server read it back.
  *
- * One predicate for both things derived from a link — the audit identity and
- * the person class — so the two cannot come to disagree about which links
- * count. It establishes the identity half only: that a row of
+ * It establishes the identity half and only that: a row of
  * `platform.identity_relations` naming this session's subject was read under
- * RLS. What that row's party IS is a separate question
- * ({@link linkedPersonParty}).
+ * RLS, so there is an identity row to audit and a party to act as. It
+ * establishes nothing about the KIND of principal behind that identity, which
+ * is why {@link resolvePrincipalClass} does not consult it.
  */
 function verifiedLink(input: DbSessionInput): SessionIdentityLink | null {
   const link = input.relation as SessionIdentityLink | null | undefined;
@@ -348,51 +348,68 @@ function normalizeAppPrincipalId(
  *
  * A resolved integration outranks the "service" kind its own token carries:
  * an API-key session is both, and `application` is the narrower, useful
- * answer. A stated kind outranks the identity link, so a verified service
- * account can never be re-read as a person by attaching a Relation to it.
- * The link is the fallback for carriers that state nothing — the web tier's
- * trusted-context bundle, which is how real people reach this code — and it
- * is itself a row this server read under RLS, not a claim.
+ * answer. Beyond that, the only `person` is a STATED person — the bearer
+ * path's verdict about verified claims, or the class a trusted-context
+ * producer signed into its bundle. A carrier that states nothing is
+ * `unknown`, and nothing it carries lifts it out of that: see below for why
+ * the identity link in particular does not.
+ *
+ * ## Why the identity link classifies nobody
+ *
+ * The obvious fallback for a carrier that states no kind is its identity ↔
+ * Relation link, and it is a tempting one: {@link verifiedLink} establishes
+ * that this server read a row of `platform.identity_relations` naming this
+ * session's subject, under RLS, and nobody asserted it. It is still not
+ * evidence of a human, for three independent reasons:
+ *
+ *   - a link row is recorded for MACHINES too. `ensureServiceIdentityLink`
+ *     writes one for every API-key service account on its first session.
+ *   - the PARTY a link names is administrator input. `link_identity` may
+ *     point any identity at any Relation the tenant holds, so the party's own
+ *     `relation_type` is a fact about a row an administrator chose — a type
+ *     any tenant may author and any member with the admission role may name —
+ *     and not a fact about how the session authenticated. A machine identity
+ *     linked to a person Relation is an ordinary, permitted arrangement.
+ *   - a `pending_confirmation` link names a CANDIDATE the e-mail matched and
+ *     nobody has confirmed, so even reading the party as authoritative would
+ *     be reading an unverified one.
+ *
+ * The class answers "did a human authenticate", and a party type cannot
+ * answer it however it is read. So the link does not enter this derivation at
+ * all, and an unclassified carrier — the payload-v2 trusted-context bundle
+ * this deployment still accepts for ordinary work (packages/auth,
+ * `ACCEPTED_PAYLOAD_VERSIONS`) — is `unknown`.
+ *
+ * ## What `unknown` costs, and what it does not
+ *
+ * `unknown` holds no named record action and matches no `person` entry in an
+ * entity's `authorization.principalClasses`. So the surfaces that depend on
+ * the person class are reached by a v2 producer only once it is redeployed to
+ * sign v3; redeploying it is the fix, not widening this. Concretely:
+ *
+ *   - a named action's `users`, `roles` and `groups` subjects
+ *     (`app.record_action_subject_allows`, `entity/record-permissions.ts`) and
+ *     the Operations gated on them (`operations/runtime.ts`);
+ *   - an entity whose `principalClasses` omits `unknown`
+ *     (`entity/principal-classes.ts`). The compiler's own default includes
+ *     `unknown`, so every entity that authors no list keeps admitting these
+ *     sessions;
+ *   - `platform.principals.classOf` in a runtime module (`modules/principals.ts`),
+ *     which reports `unknown` rather than inventing a person.
+ *
+ * Nothing else moves. Roles, scope, the view/edit/delete permissions, tenant
+ * isolation, the acting Relation (`app.relation_id`) and the audit identity
+ * (`app.audit_identity_id`) are all unchanged, and the last two are still
+ * read off the very link this derivation ignores — which identity acted is a
+ * different question from whether it is a person. Key management was never
+ * reachable this way either: `auth/api-key/ceiling.ts` has always required
+ * the carrier's own signed `principalKind`.
  */
 export function resolvePrincipalClass(input: DbSessionInput): DbPrincipalClass {
   if (input.appPrincipal) return "application";
   if (input.principalKind === "service") return "service";
   if (input.principalKind === "person") return "person";
-  return linkedPersonParty(input) ? "person" : "unknown";
-}
-
-/**
- * Does the carrier's link name a PERSON — positively?
- *
- * The identity half is not the question. {@link verifiedLink} establishes that
- * this server read a link row naming this session's subject, and that is as
- * true of a service account's link as of a person's:
- * `ensureServiceIdentityLink` records one for every API-key service account on
- * its first session, and an administrator's `link_identity` may point any
- * identity at any Relation the tenant holds — a supplier organization
- * included. So "a link exists" classified a machine principal as a person
- * whenever its carrier stated no kind, which is exactly the payload-v2
- * trusted-context bundle this deployment still accepts for ordinary work.
- *
- * That reading was not idle. `person` is the one class that holds a named
- * action's user, role and group subjects (`app.record_action_subject_allows`)
- * and the class a generic route's `authorization.principalClasses` is matched
- * against (`operations/entity/principal-classes.ts`), so a legacy linked
- * service carrier was handed a person's record actions. The privilege check
- * that admits key management reads the carrier's SIGNED `principalKind`
- * (`auth/api-key/ceiling.ts`) and so was never reachable this way; the ones
- * above were.
- *
- * The party's own kind is therefore required, positively. Anything else is
- * `unknown`, which holds nothing: a link with no party, a party of another
- * type, a carrier with no link at all, and a context rebuilt or copied from a
- * session rather than handed back as itself. A person whose link is still
- * `pending_confirmation` keeps the class it has today — the Relation the
- * e-mail matched is a person party, and narrowing that would change what an
- * ordinary v2 session may read, which is not what this closes.
- */
-function linkedPersonParty(input: DbSessionInput): boolean {
-  return verifiedLink(input)?.relationIsPerson === true;
+  return "unknown";
 }
 
 export function createDbSessionContext(input: DbSessionInput): DbSessionContext {

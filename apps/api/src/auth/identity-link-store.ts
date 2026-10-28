@@ -260,11 +260,6 @@ export function toState(row: LinkRow, identity: { issuer: string; subject: strin
     relationId: row.relation_id,
     displayName: row.display_name,
     relationType: row.relation_type,
-    // Compared against the contract's own `personType`, exactly as the
-    // just-in-time path WRITES it (./identity-link-admission.ts) and as
-    // ../accounts/invitation-relations.ts queries it, so the three agree on
-    // one spelling. A row with no party reads false rather than absent.
-    relationIsPerson: row.relation_type === IDENTITY_CONTRACT.actingParty.personType,
     candidateRelationId: row.candidate_relation_id,
     linkedBy: row.linked_by,
     // A linked member with no roles here — confirmed a candidate, or linked

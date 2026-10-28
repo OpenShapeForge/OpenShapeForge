@@ -11,7 +11,6 @@ export function stubLinkedMembershipForTests(roles: readonly string[] = []): voi
     relationId: "00000000-0000-4000-8000-000000000002",
     displayName: claims.name ?? claims.subject,
     relationType: "person",
-    relationIsPerson: true,
     candidateRelationId: null,
     linkedBy: "test",
     needsRoleAssignment: roles.length === 0,

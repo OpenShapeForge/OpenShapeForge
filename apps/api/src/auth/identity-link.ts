@@ -148,19 +148,6 @@ export type IdentityLinkState = {
    * linked otherwise. Null when neither exists.
    */
   relationType: string | null;
-  /**
-   * Whether {@link relationType} is the party type this deployment's identity
-   * contract calls a person (`identity.actingParty.personType`). Derived here
-   * rather than compared by its consumers, because the vocabulary is the
-   * deployment's: the database session layer classifies a carrier that states
-   * no principal kind from this field (`db/session.ts`,
-   * `resolvePrincipalClass`) and must not spell a relation type by hand.
-   *
-   * False, never absent, for a link with no party at all — the empty pending
-   * row every API-key service account records on its first session — and for
-   * a party of any other type, so a linked service account is not a person.
-   */
-  relationIsPerson: boolean;
   /** Set while pending, when the e-mail matched exactly one Relation. */
   candidateRelationId: string | null;
   linkedBy: string | null;

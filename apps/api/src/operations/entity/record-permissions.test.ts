@@ -230,13 +230,26 @@ const actionTable = {
   },
 } as unknown as GeneratedCrudTable;
 
+/**
+ * A verified identity ↔ Relation link naming a PERSON party, on a carrier
+ * that states no principal kind — the payload-v2 trusted-context bundle this
+ * deployment still accepts. The most person-like session the server can hold
+ * without having classified one, and so the shape the matrix below is about.
+ */
 const linked = {
   relation: {
     identityId: "55555555-5555-4555-8555-555555555555",
     issuer: "https://identity.example/realms/test",
     subject: userId,
     status: "linked",
+    relationId: "77777777-7777-4777-8777-777777777777",
+    relationType: "person",
   },
+} as Partial<DbSessionInput>;
+
+/** The same link, still a candidate nobody has confirmed. */
+const pending = {
+  relation: { ...(linked.relation as Record<string, unknown>), status: "pending_confirmation" },
 } as Partial<DbSessionInput>;
 
 describe("named record actions", () => {
@@ -283,6 +296,19 @@ describe("named record actions", () => {
     expect(recordActionAllows(document, "view", application)).toBe(false);
   });
 
+  /**
+   * The `person` subjects are satisfied by a session the server CLASSIFIED as
+   * a person, and by nothing that merely resembles one.
+   *
+   * An identity link is the near miss, and it is not evidence of a human: a
+   * link row is recorded for every API-key service account on its first
+   * session, and `link_identity` lets an administrator point any identity at
+   * any Relation the tenant holds — so the party's own `relation_type` is a
+   * fact about a row somebody chose, not about how this session
+   * authenticated. A `pending_confirmation` link is an unconfirmed candidate
+   * on top of that. All three linked shapes below hold the grant that names
+   * this very user and this very role, and none of them holds the action.
+   */
   test("a subject kind is matched against the verified principal class", () => {
     const roles = ["Records.All.Manage"];
     const personGrant = { actions: { start: { roles, users: [userId] } } };
@@ -290,7 +316,15 @@ describe("named record actions", () => {
     const carriers: Array<[string, DbSessionInput, boolean, boolean]> = [
       // label, session, may use a person subject, may use an integration one
       ["stated person", { ...session, roles, principalKind: "person" }, true, false],
-      ["linked person", { ...session, roles, ...linked }, true, false],
+      // A signed class decides; the link neither grants nor withdraws one.
+      ["stated person, linked", { ...session, roles, ...linked, principalKind: "person" }, true, false],
+      ["linked to a person party", { ...session, roles, ...linked }, false, false],
+      ["pending against a person party", { ...session, roles, ...pending }, false, false],
+      [
+        "service linked to a person party",
+        { ...session, roles, ...linked, principalKind: "service" },
+        false, false,
+      ],
       ["service bearer", { ...session, roles, principalKind: "service" }, false, false],
       [
         "api-key application",
@@ -303,6 +337,33 @@ describe("named record actions", () => {
       expect([label, recordActionAllows(personGrant, "start", carrier)]).toEqual([label, person]);
       expect([label, recordActionAllows(applicationGrant, "start", carrier)])
         .toEqual([label, application]);
+    }
+  });
+
+  /**
+   * And the ordinary permissions are untouched by that narrowing.
+   *
+   * `view`/`edit`/`delete` never looked at the principal class — they match a
+   * user, a role or a RelationGroup — so a linked v2 session reads and writes
+   * exactly what it read and wrote before. Stating it here is what keeps a
+   * later tightening of the class from being mistaken for a tightening of
+   * these.
+   */
+  test("the view/edit/delete axis is not narrowed with it", () => {
+    const linkedSession: DbSessionInput = { ...session, ...linked };
+    // Each subject kind the axis matches, named on `view` (which edit and
+    // delete both require) and on the permission under test.
+    for (const named of [
+      ["user", subjects({ users: [userId] })],
+      ["role", subjects({ roles: ["Records.All.Manage"] })],
+      ["group", subjects({ groups: [groupId] })],
+    ] as const) {
+      const [subject, allowed] = named;
+      for (const permission of ["view", "edit", "delete"] as const) {
+        expect([subject, permission, recordPermissionAllows(
+          { view: allowed, [permission]: allowed }, permission, linkedSession, "restricted",
+        )]).toEqual([subject, permission, true]);
+      }
     }
   });
 

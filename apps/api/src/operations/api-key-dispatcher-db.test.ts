@@ -83,6 +83,22 @@ const MANAGER = randomUUID();
 const UNLINKED_MANAGER = randomUUID();
 const IDENTITY = randomUUID();
 const RELATION = randomUUID();
+/**
+ * A machine login an administrator linked to a PERSON Relation.
+ *
+ * `link_identity` admits any identity against any Relation the tenant holds,
+ * so this is a permitted arrangement rather than a corrupted row — and under
+ * a carrier that states no kind it is the shape the principal class must not
+ * read as a human. Its own party is the supplier organization below for the
+ * second half of the same point: neither party type decides the class.
+ */
+const SERVICE_LOGIN = randomUUID();
+const SERVICE_IDENTITY = randomUUID();
+/** A person whose link is still a candidate nobody confirmed. */
+const PENDING_LOGIN = randomUUID();
+const PENDING_IDENTITY = randomUUID();
+const CANDIDATE_RELATION = randomUUID();
+const SUPPLIER_RELATION = randomUUID();
 const READ_ROLE = "Relations.All.Read";
 const ISSUER = "https://identity.test/realms/openshapeforge";
 
@@ -137,7 +153,6 @@ function verifiedPersonSession(): TrustedSessionContext {
       relationId: RELATION,
       displayName: "Alex Manager",
       relationType: "person",
-      relationIsPerson: true,
       candidateRelationId: null,
       linkedBy: "test",
       needsRoleAssignment: false,
@@ -282,6 +297,31 @@ beforeAll(async () => {
       insert into platform.identity_relations
         (identity_id, tenant_id, relation_id, status, linked_at, linked_by)
       values (${IDENTITY}, ${TENANT}, ${RELATION}, 'linked', now(), 'test')
+    `.execute(trx);
+
+    // Two more logins for the principal-class suite: a machine login an
+    // administrator pointed at the SAME person Relation shape, and a person
+    // whose link is still an unconfirmed candidate. Both are ordinary,
+    // permitted rows; neither is a verified human login.
+    await sql`
+      insert into erp.relations (id, tenant_id, display_name, relation_type, status)
+      values (${SUPPLIER_RELATION}, ${TENANT}, 'Northwind Supplies', 'organization', 'active'),
+             (${CANDIDATE_RELATION}, ${TENANT}, 'Robin Candidate', 'person', 'active')
+    `.execute(trx);
+    await sql`
+      insert into platform.identities (id, issuer, subject, display_name)
+      values (${SERVICE_IDENTITY}, ${ISSUER}, ${SERVICE_LOGIN}, 'Northwind integration'),
+             (${PENDING_IDENTITY}, ${ISSUER}, ${PENDING_LOGIN}, 'Robin Candidate')
+    `.execute(trx);
+    await sql`
+      insert into platform.identity_relations
+        (identity_id, tenant_id, relation_id, status, linked_at, linked_by)
+      values (${SERVICE_IDENTITY}, ${TENANT}, ${RELATION}, 'linked', now(), 'admin')
+    `.execute(trx);
+    await sql`
+      insert into platform.identity_relations
+        (identity_id, tenant_id, candidate_relation_id, status)
+      values (${PENDING_IDENTITY}, ${TENANT}, ${CANDIDATE_RELATION}, 'pending_confirmation')
     `.execute(trx);
   });
 
@@ -884,6 +924,135 @@ describe("a realm that refuses", () => {
     // caller's back, so nothing is provisioned twice.
     const after = realm.requests.filter((entry) => entry === "POST /admin/realms/openshapeforge/clients").length;
     expect(after - before).toBe(1);
+  }, TEST_TIMEOUT);
+});
+
+/**
+ * What principal class each carrier reaches the DATABASE with, through the
+ * real resolver and a real identity link.
+ *
+ * `app.current_principal_class()` is what the record ACL's named-action axis
+ * and an entity's `principalClasses` policy are matched against, so the class
+ * a carrier arrives with is the whole boundary. Nothing here is a fixture
+ * standing in for the resolver: the headers are signed as a producer signs
+ * them, `resolveSessionContext` reads the identity ↔ Relation link out of the
+ * seeded database under the session's own policies, and `withDbSession` then
+ * writes the GUCs this reads back.
+ *
+ * The claim is that the LINK makes no difference to the class, and that the
+ * signed kind makes all of it:
+ *
+ *   - a v2 bundle for a login linked to a person Relation is `unknown`. A
+ *     party type is administrator input — `link_identity` admits any identity
+ *     against any Relation — and cannot answer "did a human authenticate";
+ *   - so is a v2 bundle for a machine login linked to that same Relation, and
+ *     one for a person whose link is an unconfirmed candidate;
+ *   - a v3 bundle signing `person` is `person`, with or without a link, and
+ *     one signing `service` stays `service` even linked to a person party;
+ *   - and the link still does its own job throughout: the audit identity and
+ *     the acting Relation arrive for every linked carrier, because which
+ *     identity acted is a different question from whether it is a person.
+ */
+describe("the principal class a carrier reaches the database with", () => {
+  type Observed = {
+    principal_class: string;
+    audit: string | null;
+    relation: string | null;
+    user_id: string;
+  };
+
+  /** Resolve the session these headers prove, then read what the GUCs say. */
+  async function classOf(headers: Record<string, string>): Promise<Observed> {
+    const { resolveSessionContext } = await import("../auth/identity.js");
+    const session = await resolveSessionContext(new Headers(headers), { db: booted!.appDb });
+    return withDbSession(booted!.appDb, session, async (trx) => {
+      const row = await sql<Observed>`
+        select app.current_principal_class() as principal_class,
+               nullif(current_setting('app.audit_identity_id', true), '') as audit,
+               nullif(current_setting('app.relation_id', true), '') as relation,
+               current_setting('app.user_id', true) as user_id
+      `.execute(trx);
+      return row.rows[0]!;
+    });
+  }
+
+  test("a v2 bundle is unknown whatever party its link names", async () => {
+    if (!booted) return;
+    // MANAGER is linked to a person Relation, which is exactly the shape the
+    // class must not read as a human when nothing signed one.
+    expect(await classOf(unclassifiedV2Hop())).toEqual({
+      principal_class: "unknown",
+      // The link still carries both of its own answers.
+      audit: IDENTITY,
+      relation: RELATION,
+      user_id: MANAGER,
+    });
+
+    // A machine login an administrator linked to that same person Relation.
+    expect(await classOf(unclassifiedV2Hop(SERVICE_LOGIN))).toEqual({
+      principal_class: "unknown",
+      audit: SERVICE_IDENTITY,
+      relation: RELATION,
+      user_id: SERVICE_LOGIN,
+    });
+
+    // And an unconfirmed candidate, whose party is a person too. No acting
+    // Relation, because that rule has always required a confirmed link.
+    expect(await classOf(unclassifiedV2Hop(PENDING_LOGIN))).toEqual({
+      principal_class: "unknown",
+      audit: PENDING_IDENTITY,
+      relation: null,
+      user_id: PENDING_LOGIN,
+    });
+
+    // A login with no link at all is the same answer, so the link was never
+    // the thing being read.
+    expect(await classOf(unclassifiedV2Hop(UNLINKED_MANAGER))).toMatchObject({
+      principal_class: "unknown",
+      audit: null,
+      relation: null,
+    });
+  }, TEST_TIMEOUT);
+
+  test("a v3 bundle arrives as the class its signer put inside the HMAC", async () => {
+    if (!booted) return;
+    // The same linked person as the first case above, now with a signed
+    // verdict: this is the only difference, and it is the whole difference.
+    expect(await classOf(signedHop({ userId: MANAGER, principalKind: "person" }))).toEqual({
+      principal_class: "person",
+      audit: IDENTITY,
+      relation: RELATION,
+      user_id: MANAGER,
+    });
+    // A verified person needs no link to be one.
+    expect(await classOf(signedHop({ userId: UNLINKED_MANAGER, principalKind: "person" })))
+      .toMatchObject({ principal_class: "person", audit: null, relation: null });
+    // And a signed service verdict is not lifted by a person party.
+    expect(await classOf(signedHop({ userId: MANAGER, principalKind: "service" }))).toEqual({
+      principal_class: "service",
+      audit: IDENTITY,
+      relation: RELATION,
+      user_id: MANAGER,
+    });
+    expect(await classOf(signedHop({ userId: SERVICE_LOGIN, principalKind: "service" })))
+      .toMatchObject({ principal_class: "service", audit: SERVICE_IDENTITY });
+  }, TEST_TIMEOUT);
+
+  test("ordinary v2 work is untouched by the class it does not have", async () => {
+    if (!booted) return;
+    // The compatibility half, over the real HTTP dispatcher: the generic
+    // entity read every existing caller uses still answers for each of these
+    // bundles. Their roles, their tenant and their rows are unchanged; what
+    // they do not have is a class, and the compiler's derived
+    // `principalClasses` default admits `unknown`.
+    for (const login of [MANAGER, SERVICE_LOGIN, PENDING_LOGIN]) {
+      const response = await booted.app.inject({
+        method: "GET",
+        url: "/api/rest/v1/relations",
+        headers: unclassifiedV2Hop(login),
+      });
+      expect([login, response.statusCode]).toEqual([login, 200]);
+    }
   }, TEST_TIMEOUT);
 });
 

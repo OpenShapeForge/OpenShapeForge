@@ -571,7 +571,11 @@ composition rule, the `EXECUTION_NOT_PERMITTED` refusal and the limits are in
 host classified it: `classOf(session)` answers `person`, `application`,
 `service` or `unknown`, and `application(session)` answers
 `{ integrationId }` for a resolved API key and `undefined` for every other
-carrier ([api.md](api.md) lists which carriers produce which). A module acting
+carrier ([api.md](api.md) lists which carriers produce which). `person` means
+the host positively verified a human login, so a module that branches on it
+must treat `unknown` as "not shown to be a person" rather than as a default —
+a linked Relation is not a classification, and a trusted-context producer that
+has not been redeployed to sign the class answers `unknown`. A module acting
 for an external application needs that identity for three things authorization
 does not give it — the namespace its idempotency keys live in, the provenance
 it stores on the rows it writes, and the actor it appends an event for — and

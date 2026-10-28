@@ -5,22 +5,25 @@
  *
  * Two independently developed rules meet here. `createDbSessionContext`
  * DERIVES `principalClass` and `appPrincipalId` from what the carrier supplied
- * — a resolved integration, the bearer verifier's verdict, or the identity
- * link read back from `platform.identity_relations` — and never from a field a
- * caller can set. `activeDbSessionContext` hands the ALREADY DERIVED session
+ * — a resolved integration, or the class the server itself established about
+ * the login (the bearer verifier's verdict, or the one a trusted-context
+ * producer signed into its bundle) — and never from a field a caller can set,
+ * and never from the identity link, which names a party rather than a kind of
+ * principal. `activeDbSessionContext` hands the ALREADY DERIVED session
  * back to work that must join the caller's transaction without holding the
  * context that transaction was opened from (auth/api-key/service.ts).
  *
  * Deriving a session from such a context is lossy in exactly the direction
  * that matters: a context carries no `appPrincipal` and no `principalKind`, so
- * a verified person who has no Relation would be re-read as `unknown` and a
- * resolved application would be stripped to none. `withDbSession` therefore
- * recognises the active session BY IDENTITY and reuses it. What is proven:
+ * every verified person would be re-read as `unknown` and a resolved
+ * application would be stripped to none. `withDbSession` therefore recognises
+ * the active session BY IDENTITY and reuses it. What is proven:
  *
  *   - each carrier shape reaches `app.current_principal_class()` and
- *     `app.current_app_principal()` as the server classified it — including a
- *     v2 bundle whose verified link names a party that is NOT a person, which
- *     is `unknown` and not a person's class;
+ *     `app.current_app_principal()` as the server classified it — including
+ *     the v2 bundles whose verified link names a person party, confirmed and
+ *     pending, which are `unknown` and not a person's class, while the audit
+ *     identity and the acting Relation that link carries still arrive;
  *   - handing the active session back verbatim joins the SAME transaction
  *     (compared on `txid_current()`) with both values intact, for every shape
  *     — including the three the derivation cannot reproduce;
@@ -43,6 +46,7 @@ import { createDatabaseRuntime, type DatabaseRuntime } from "../connection.js";
 import { applyAppHelpersMigration } from "../migrations/app-helpers.js";
 import {
   activeDbSessionContext,
+  createDbSessionContext,
   withDbSession,
   type DbSessionContext,
   type DbSessionInput,
@@ -59,33 +63,54 @@ const identityId = randomUUID();
 const integrationId = randomUUID();
 
 /**
- * The six carriers this layer classifies, as a resolver hands them over.
+ * The carriers this layer classifies, as a resolver hands them over.
  *
- * `personWithRelation`, `linkedServiceParty` and `unclassified` are all the
- * same v2 trusted-context bundle — the producer that predates the signed class
- * names its user and carries no verdict, so it is classified from the link or
- * not at all. What separates them is the link: a person party, a party that is
- * not a person, and no link at all.
+ * `linkedPerson`, `pendingPerson`, `linkedService` and `unclassified` are all
+ * the same payload-v2 trusted-context bundle: the producer that predates the
+ * signed class names its user and carries no verdict. What separates them is
+ * the identity link the resolver attached — a confirmed person party, an
+ * unconfirmed candidate, a person party under a signed service verdict, and
+ * no link at all — and the point of having all four is that the link makes NO
+ * difference to the class. `personWithRelation` is the same link under a
+ * signed `person`, which is the only thing that does.
  */
 const carriers = {
+  /** A signed person who is also linked: the ordinary logged-in employee. */
   personWithRelation: {
-    tenantId, userId,
+    tenantId, userId, principalKind: "person",
     relation: {
       status: "linked", relationId, identityId, issuer: "https://identity.test",
-      subject: userId, relationIsPerson: true,
+      subject: userId,
     },
   },
   /**
-   * A link an administrator pointed at a party that is NOT a person — the
-   * supplier organization an API-key service account's own pending row was
-   * claimed by, with a carrier that states no kind. Verified, named by this
-   * very subject, and not a person.
+   * The same verified link to the same person Relation, on a carrier that
+   * states no kind. The most person-like session the server can hold without
+   * having classified a person — and `link_identity` lets an administrator
+   * point a service identity at exactly this Relation, so the party proves
+   * nothing about the principal.
    */
-  linkedServiceParty: {
+  linkedPerson: {
     tenantId, userId,
     relation: {
       status: "linked", relationId, identityId, issuer: "https://identity.test",
-      subject: userId, relationIsPerson: false,
+      subject: userId,
+    },
+  },
+  /** A candidate an e-mail matched and nobody confirmed. */
+  pendingPerson: {
+    tenantId, userId,
+    relation: {
+      status: "pending_confirmation", relationId, identityId,
+      issuer: "https://identity.test", subject: userId,
+    },
+  },
+  /** A signed service verdict that the link does not lift. */
+  linkedService: {
+    tenantId, userId, principalKind: "service",
+    relation: {
+      status: "linked", relationId, identityId, issuer: "https://identity.test",
+      subject: userId,
     },
   },
   personWithoutRelation: { tenantId, userId, principalKind: "person" },
@@ -99,10 +124,13 @@ type Carrier = keyof typeof carriers;
 /** What the server decided, as the database reads it back. */
 const expected: Record<Carrier, { principalClass: string; appPrincipal: string | null }> = {
   personWithRelation: { principalClass: "person", appPrincipal: null },
-  // A verified link is not a person. The audit identity it carries is still
-  // this session's own (`app.audit_identity_id`); the CLASS is not a person's,
-  // so the named-action axis holds nothing for it.
-  linkedServiceParty: { principalClass: "unknown", appPrincipal: null },
+  // A verified link is not a person, confirmed or pending. The audit identity
+  // and the acting Relation it carries are still this session's own
+  // (`app.audit_identity_id`, `app.relation_id`, asserted below); the CLASS is
+  // not a person's, so the named-action axis holds nothing for it.
+  linkedPerson: { principalClass: "unknown", appPrincipal: null },
+  pendingPerson: { principalClass: "unknown", appPrincipal: null },
+  linkedService: { principalClass: "service", appPrincipal: null },
   personWithoutRelation: { principalClass: "person", appPrincipal: null },
   application: { principalClass: "application", appPrincipal: integrationId },
   service: { principalClass: "service", appPrincipal: null },
@@ -114,12 +142,14 @@ const expected: Record<Carrier, { principalClass: string; appPrincipal: string |
  *
  * A context carries neither `appPrincipal` nor `principalKind` nor the link,
  * so deriving a session from one answers `unknown` with no application
- * principal for every carrier but the two that already are that. The
- * link-derived person is in this set as well: the class now requires the
- * link's party to be a person, and a context holds no party.
+ * principal — a different session for every carrier that states a kind, and
+ * the same one for every carrier that states none.
  */
 const notDerivable: readonly Carrier[] =
-  ["personWithRelation", "personWithoutRelation", "application", "service"];
+  ["personWithRelation", "personWithoutRelation", "application", "service", "linkedService"];
+
+/** The carriers a context reproduces exactly, because they hold nothing. */
+const derivable: readonly Carrier[] = ["unclassified", "linkedPerson", "pendingPerson"];
 
 let admin: SQL | null = null;
 let runtime: DatabaseRuntime | null = null;
@@ -202,6 +232,32 @@ describe("the principal class in the database session", () => {
     }
   });
 
+  test("a link still carries its audit identity and acting Relation", async () => {
+    if (!runtime) return;
+    // The class is about personhood; these two are about which identity acted
+    // and which party it acts as. Narrowing the first must not quietly drop
+    // the other two, or a v2 session would lose its audit trail and its
+    // owner-axis row scope along with a class it never needed.
+    for (const carrier of ["linkedPerson", "pendingPerson", "linkedService"] as const) {
+      const observed = await withDbSession(runtime.db, carriers[carrier], async (trx) => {
+        const row = await sql<{ audit: string; relation: string | null; principal: string }>`
+          select current_setting('app.audit_identity_id') as audit,
+                 nullif(current_setting('app.relation_id', true), '') as relation,
+                 app.current_principal_class() as principal
+        `.execute(trx);
+        return row.rows[0]!;
+      });
+      expect({ carrier, ...observed }).toEqual({
+        carrier,
+        audit: identityId,
+        // `app.relation_id` follows the acting-Relation rule, which requires a
+        // CONFIRMED link — so the pending candidate has none, exactly as before.
+        relation: carrier === "pendingPerson" ? null : relationId,
+        principal: expected[carrier].principalClass,
+      });
+    }
+  });
+
   test("the active session handed back verbatim joins it with both values intact", async () => {
     if (!runtime) return;
     for (const carrier of Object.keys(carriers) as Carrier[]) {
@@ -239,10 +295,10 @@ describe("the principal class in the database session", () => {
           withDbSession(runtime!.db, { ...active }, (trx) => observe(trx))),
       ).rejects.toThrow("Nested database work cannot replace the active session.");
     }
-    // The two carriers a copy DOES reproduce are the two that hold nothing:
+    // The carriers a copy DOES reproduce are the ones that hold nothing:
     // `unknown` with no application principal is what deriving from a context
     // answers, so for these it is not a substitution at all.
-    for (const carrier of ["unclassified", "linkedServiceParty"] as const) {
+    for (const carrier of derivable) {
       const copied = await inSession(carrier, (_outer, active) =>
         withDbSession(runtime!.db, { ...active }, (trx) => observe(trx)));
       expect({ carrier, ...copied, txid: undefined })
@@ -259,6 +315,17 @@ describe("the principal class in the database session", () => {
     await expect(
       withDbSession(runtime.db, carriers.personWithRelation, () =>
         withDbSession(runtime!.db, carriers.application, (trx) => observe(trx))),
+    ).rejects.toThrow("Nested database work cannot replace the active session.");
+    // And the same link under a signed person is not interchangeable with the
+    // same link under no class: the fence compares the derived class, so a
+    // nested v2 session cannot continue a verified person's transaction.
+    await expect(
+      withDbSession(runtime.db, carriers.personWithRelation, () =>
+        withDbSession(runtime!.db, carriers.linkedPerson, (trx) => observe(trx))),
+    ).rejects.toThrow("Nested database work cannot replace the active session.");
+    await expect(
+      withDbSession(runtime.db, carriers.linkedPerson, () =>
+        withDbSession(runtime!.db, carriers.personWithRelation, (trx) => observe(trx))),
     ).rejects.toThrow("Nested database work cannot replace the active session.");
     // And an application cannot be swapped for a DIFFERENT application.
     await expect(
@@ -352,6 +419,55 @@ describe("the active session is immutable, and a rejoin cannot be redirected", (
       expect(Object.isFrozen(session.roles)).toBe(true);
       expect(Object.isFrozen(session.groups)).toBe(true);
       expect(Object.isFrozen(session.relationGroupIds)).toBe(true);
+    });
+  });
+
+  test("the carrier's own arrays are copied, not frozen where they lie", async () => {
+    const roles = ["Relations.All.Read"];
+    const groups = [randomUUID()];
+    const relationGroupIds = [randomUUID()];
+    const session = createDbSessionContext({
+      tenantId, userId, principalKind: "service", roles, groups, relationGroupIds,
+    });
+    for (const [label, own, sealed] of [
+      ["roles", roles, session.roles],
+      ["groups", groups, session.groups],
+      ["relationGroupIds", relationGroupIds, session.relationGroupIds],
+    ] as const) {
+      // The session's array is frozen…
+      expect([label, Object.isFrozen(sealed)]).toEqual([label, true]);
+      // …and it is not the CARRIER's array. Freezing one of those would reach
+      // back out of this layer into code entitled to keep editing its own
+      // (modules/maintenance.ts assigns `session.roles`, and a fixture in
+      // accounts/member-actions-db.test.ts pushes onto one), so each is
+      // copied before it is sealed.
+      expect([label, Object.isFrozen(own)]).toEqual([label, false]);
+      expect([label, sealed === (own as readonly string[])]).toEqual([label, false]);
+      expect([label, [...sealed]]).toEqual([label, [...own]]);
+    }
+    // So editing the carrier's arrays afterwards reaches nothing derived.
+    roles.push("Platform.ApiKeys.Manage");
+    groups.push(randomUUID());
+    relationGroupIds.push(randomUUID());
+    expect(session.roles).toEqual(["Relations.All.Read"]);
+    expect(session.groups).toHaveLength(1);
+    expect(session.relationGroupIds).toHaveLength(1);
+  });
+
+  test("a later edit of the carrier cannot reach the running transaction", async () => {
+    if (!runtime) return;
+    const roles = ["Relations.All.Read"];
+    const observed = await withDbSession(
+      runtime.db,
+      { tenantId, userId, principalKind: "service" as const, roles },
+      async (trx, session) => {
+        roles.push("Platform.ApiKeys.Manage");
+        expect(session.roles).toEqual(["Relations.All.Read"]);
+        return settings(trx);
+      },
+    );
+    expect(observed).toMatchObject({
+      roles: "Relations.All.Read", principal_class: "service",
     });
   });
 

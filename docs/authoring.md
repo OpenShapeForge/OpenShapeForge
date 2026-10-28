@@ -263,7 +263,12 @@ What is true of this axis, and is the reason it is separate:
   `roles` are satisfiable only by a session the server classified as a person;
   `integrations` only by one carrying a resolved API-key integration. A service
   account holding the same role as a person therefore acquires nothing here,
-  and a carrier the server could not classify holds no action at all.
+  and a carrier the server could not classify holds no action at all. "Classified
+  as a person" means the server positively verified a human login — the bearer
+  path's verdict, or the class a trusted-context producer signed into its
+  bundle. An identity ↔ Relation link is not that verdict, whatever party it
+  names, so a session holding only a link holds no person action
+  (docs/api.md).
 - **Keyed on the integration, not the credential.** An `integrations` entry
   names `platform.api_key_integrations.id`, which survives key rotation and is
   independent of the integration's display name. A direct bearer token of the
@@ -317,10 +322,15 @@ authorization:
 ```
 
 The four classes are the server's own classification, never anything a caller
-states: `person` a verified human identity, `application` a resolved API-key
-integration, `service` a verified client-credentials principal with no
-integration behind it (configured organization automation included), and
-`unknown` a carrier the server could not classify (docs/api.md).
+states: `person` a login the server positively verified to be a human,
+`application` a resolved API-key integration, `service` a verified
+client-credentials principal with no integration behind it (configured
+organization automation included), and `unknown` a carrier the server could
+not classify (docs/api.md). A linked Relation is not a classification, so a
+trusted-context producer that has not been redeployed to sign the principal
+class is `unknown` however its user is linked — which matters only if you
+write `person` out of this list, since the derived default always admits
+`unknown`.
 
 - **Omitted admits every class**, which is what every entity did before this
   existed. One derived exception: an entity that declares a named action for

@@ -151,12 +151,20 @@ function session(overrides: Partial<DbSessionInput> = {}): DbSessionInput {
   };
 }
 
-/** The verified identity↔Relation link that classifies a trusted-context person. */
-function linkedPerson(userId: string) {
+/**
+ * A verified identity ↔ Relation link naming a PERSON party.
+ *
+ * Read back from `platform.identity_relations` under RLS, so nobody asserted
+ * it — and still not evidence of a human login: `link_identity` admits any
+ * identity against any Relation the tenant holds, and a service account's own
+ * link is recorded on its first session. The class comes from the carrier's
+ * signed kind instead (db/session.ts, `resolvePrincipalClass`).
+ */
+function linkedPerson(userId: string, relationId = randomUUID()) {
   return {
     relation: {
       identityId: randomUUID(), issuer: "https://identity.example/realms/test",
-      subject: userId, status: "linked",
+      subject: userId, status: "linked", relationId, relationType: "person",
     },
   } as Partial<DbSessionInput>;
 }
@@ -367,13 +375,19 @@ describe("record action lookup under the restricted app role", () => {
 });
 
 describe("verified principal class decides which subjects apply", () => {
-  // One ACL entry, one role, three carriers. Only the person may use it.
+  // One ACL entry, one role, six carriers. Only a verified person may use it.
   test("the same role resolves differently for a person, an application and a service", async () => {
     const roles = [SHARED_ROLE];
     const asPerson = session({ userId: person, roles, principalKind: "person" });
-    const asTrustedContextPerson = session({
-      userId: person, roles, ...linkedPerson(person),
+    // The same signed person, now also linked. The link neither grants the
+    // action nor takes it away.
+    const asLinkedPerson = session({
+      userId: person, roles, principalKind: "person", ...linkedPerson(person),
     });
+    // And the same link with NO signed kind: the payload-v2 trusted-context
+    // bundle. `app.current_principal_class()` reads `unknown` for it, so the
+    // database's own mirror of this axis refuses it as well.
+    const asLinkedUnclassified = session({ userId: person, roles, ...linkedPerson(person) });
     const asServiceBearer = session({
       userId: randomUUID(), roles, principalKind: "service",
     });
@@ -384,10 +398,21 @@ describe("verified principal class decides which subjects apply", () => {
     const unclassified = session({ userId: randomUUID(), roles });
 
     expect(await allows(app.db, asPerson, DOC, docRow, "publish")).toBe(true);
-    expect(await allows(app.db, asTrustedContextPerson, DOC, docRow, "publish")).toBe(true);
+    expect(await allows(app.db, asLinkedPerson, DOC, docRow, "publish")).toBe(true);
+    // A link naming a person party is not a verified human login, so the ACL
+    // entry that names this very user and this very role holds nothing for
+    // it. This is the escalation being closed.
+    expect(await allows(app.db, asLinkedUnclassified, DOC, docRow, "publish")).toBe(false);
     // A verified client-credentials principal holding the SAME role gets
-    // nothing from a person subject. This is the escalation being closed.
+    // nothing from a person subject either.
     expect(await allows(app.db, asServiceBearer, DOC, docRow, "publish")).toBe(false);
+    // Nor does one whose link names a person party — a service account an
+    // administrator linked to a Relation stays a service.
+    expect(await allows(
+      app.db,
+      session({ userId: person, roles, principalKind: "service", ...linkedPerson(person) }),
+      DOC, docRow, "publish",
+    )).toBe(false);
     // An application is matched only against `integrations`, never a role it
     // happens to carry — even though this ACL does name another integration.
     expect(await allows(app.db, asApplication, DOC, docRow, "publish")).toBe(false);

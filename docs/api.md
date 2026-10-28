@@ -1001,6 +1001,49 @@ service account": an entity that declares a record action for integrations
 excludes `application` from its generic routes by default, so a broad role on a
 key no longer reaches the collection behind the per-record grant.
 
+### What makes a session a `person`
+
+The `person` class is the server's own positive verdict that a HUMAN
+authenticated, and it has exactly two sources: the bearer path's reading of
+verified token claims (`auth/bearer-session.ts`), and the class a
+trusted-context producer signed inside its bundle's HMAC (payload v3, above).
+A carrier that states neither is `unknown`.
+
+Nothing a session merely *carries* reaches the class, and the identity ↔
+Relation link in particular does not — not even when the party it names is of
+the deployment's person type. The link is a row this server read under RLS
+rather than a claim, which is what makes it tempting, and it is still the
+wrong question:
+
+- a link row exists for MACHINES. `ensureServiceIdentityLink` records one for
+  every API-key service account on its first session.
+- the party a link names is administrator input. `link_identity` admits any
+  identity against any Relation the tenant holds, so a party's
+  `relation_type` is a fact about a row somebody chose — and a machine
+  identity linked to a person Relation is a permitted, ordinary arrangement.
+- a `pending_confirmation` link names a candidate an e-mail matched and
+  nobody has confirmed.
+
+So `resolvePrincipalClass` (`db/session.ts`) never consults it. Which identity
+acted (`app.audit_identity_id`) and which party it acts as
+(`app.relation_id`) are different questions and are still answered from that
+same link, for every carrier that has one.
+
+**What this costs a producer that still signs v2.** Its sessions are
+`unknown`, so they reach none of the surfaces that depend on the person class:
+a named record action's `users`, `roles` or `groups` subjects; an entity whose
+`principalClasses` omits `unknown`; and `platform.principals.classOf`, which
+answers `unknown` rather than inventing a person. Redeploying the producer so
+it signs v3 is what admits those surfaces — the same remedy as for credential
+management, and the same one in both directions.
+
+**What it does not cost.** Everything else behaves exactly as before: roles,
+scopes, the view/edit/delete axis of the record ACL, tenant isolation, the
+acting Relation and the audit identity. The compiler's derived
+`principalClasses` default always includes `unknown`, and an entity that
+declares no policy admits every class, so ordinary generated CRUD, generated
+search and the generic MCP tools are unaffected for these sessions.
+
 A runtime module reads the same classification through
 `platform.principals` ([plugins.md](plugins.md)): `classOf(session)` answers
 `person`, `application`, `service` or `unknown`, and `application(session)`

@@ -200,7 +200,7 @@ describe("generated MCP runtime module security boundary", () => {
         const relationId = randomUUID();
         const relation = {
           identityId: randomUUID(), issuer: "https://issuer.example", subject: userId,
-          status: "linked" as const, relationId, relationType: "person" as const, relationIsPerson: true,
+          status: "linked" as const, relationId, relationType: "person" as const,
           displayName: null, candidateRelationId: null, linkedBy: "jit" as const,
           needsRoleAssignment: false, roles: [],
         };

@@ -22,6 +22,7 @@ import type { DbSessionInput } from "../../db/session.js";
 import { getGeneratedCrudTables, readGeneratedCrudTable } from "./catalog.js";
 import {
   admittedPrincipalClasses,
+  assertEntityAdmitsPrincipal,
   entityAdmitsPrincipal,
 } from "./principal-classes.js";
 import { getEntityOperationOffers } from "./runtime.js";
@@ -71,6 +72,29 @@ const serviceAccount = () => session({ principalKind: "service" });
 const person = () => session({ principalKind: "person" });
 const unclassified = () => session();
 
+/**
+ * The carrier that states no kind but DOES carry a verified identity link to
+ * a person Relation: a payload-v2 trusted-context bundle, which this
+ * deployment still accepts for ordinary work.
+ *
+ * It is `unknown`, because a party type is not evidence of a human login
+ * (db/session.ts, `resolvePrincipalClass`). That is a real compatibility
+ * consequence, so it is pinned on both sides here: the compiler's derived
+ * default admits `unknown`, so this session keeps reaching every generic
+ * route it reached before — and an entity that authors `[person]` does not
+ * admit it, which is the surface its producer reaches by signing v3.
+ */
+const linkedToPersonParty = () => session({
+  relation: {
+    identityId: randomUUID(),
+    issuer: "https://identity.example/realms/test",
+    subject: randomUUID(),
+    status: "linked",
+    relationId: randomUUID(),
+    relationType: "person",
+  },
+} as Partial<DbSessionInput>);
+
 function refusalCode(call: () => unknown): string | undefined {
   try {
     call();
@@ -104,6 +128,36 @@ describe("the compiled policy", () => {
     expect(entityAdmitsPrincipal(notebook, serviceAccount())).toBe(true);
     expect(entityAdmitsPrincipal(notebook, person())).toBe(true);
     expect(entityAdmitsPrincipal(notebook, unclassified())).toBe(true);
+    // And so does a linked v2 bundle, which is `unknown` and not a person.
+    expect(entityAdmitsPrincipal(notebook, linkedToPersonParty())).toBe(true);
+  });
+
+  test("an entity that authors [person] admits a verified person and nothing like one", () => {
+    // The derived default never excludes `unknown`, so the only way to author
+    // a policy a linked v2 bundle fails is to write `person` out — which is
+    // the entity deciding that this route needs a human, and is the decision
+    // the class exists to carry.
+    const personsOnly = {
+      ...table(NOTEBOOK_TABLE),
+      source: {
+        ...table(NOTEBOOK_TABLE).source,
+        authorization: {
+          ...table(NOTEBOOK_TABLE).source?.authorization,
+          principalClasses: ["person"],
+        },
+      },
+    } as ReturnType<typeof table>;
+    expect(admittedPrincipalClasses(personsOnly)).toEqual(["person"]);
+    expect(entityAdmitsPrincipal(personsOnly, person())).toBe(true);
+    for (const candidate of [
+      linkedToPersonParty(), unclassified(), serviceAccount(), application(),
+    ]) {
+      expect(entityAdmitsPrincipal(personsOnly, candidate)).toBe(false);
+    }
+    // The refusal names the class it refused, so an integrator reading it is
+    // not left looking for a missing role.
+    expect(refusalCode(() => assertEntityAdmitsPrincipal(personsOnly, linkedToPersonParty())))
+      .toBe("FORBIDDEN");
   });
 });
 

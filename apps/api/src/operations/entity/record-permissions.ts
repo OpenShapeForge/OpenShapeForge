@@ -8,7 +8,11 @@ import { generatedCrudError } from "./catalog.js";
 import { primaryKeyEquals } from "./columns.js";
 import { notAuthorizedRefusal } from "./authorization-refusal-text.js";
 import { operationFailure } from "@openshapeforge/operations";
-import type { GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
+import type {
+  GeneratedCrudColumn,
+  GeneratedCrudTable,
+  GeneratedEntityRow,
+} from "./types.js";
 import { subtypeScopeWhere } from "./subtype-scope.js";
 
 export type RecordPermissionAction = "view" | "edit" | "delete";
@@ -232,6 +236,14 @@ function valueFromRow(table: GeneratedCrudTable, row: GeneratedEntityRow): unkno
   return row[config.field] ?? row[config.column];
 }
 
+/** The ACL a stored row carries, for a caller that already holds the row. */
+export function storedRecordPermissions(
+  table: GeneratedCrudTable,
+  row: GeneratedEntityRow,
+): unknown {
+  return valueFromRow(table, row);
+}
+
 export type RecordActionDeclaration = {
   name: string;
   principals: ReadonlyArray<"person" | "integration">;
@@ -251,6 +263,179 @@ export function recordActionDeclaration(
   action: string,
 ): RecordActionDeclaration | undefined {
   return declaredRecordActions(table).find((candidate) => candidate.name === action);
+}
+
+/**
+ * The one canonical Operation that may change the named-action axis.
+ *
+ * Named here because every refusal below has to point at it, and because the
+ * axis has exactly one writer by design: see
+ * {@link assertRecordActionAxisUnchanged}.
+ */
+export const RECORD_ACTION_DELEGATION_OPERATION = "entity.record-action.delegate";
+
+/** The role that may delegate a record action to an application principal. */
+export const RECORD_ACTION_INTEGRATION_DELEGATION_ROLE = "Platform.ApiKeys.Manage";
+
+export type RecordActionAxis = Readonly<Record<string, RecordActionSubjects>>;
+
+/**
+ * The actions axis in one canonical form: every subject list deduplicated and
+ * sorted, every entry that names nobody dropped, keys in sorted order, and
+ * all four subject kinds present.
+ *
+ * COMPARISON goes through this, so "the same grants in another order" is one
+ * value rather than two and an entry emptied by a revocation leaves no husk
+ * behind. It is also the shape the delegation Operation reports back, whose
+ * output contract requires all four lists.
+ *
+ * STORAGE goes through {@link storedRecordActionAxis} instead, which drops the
+ * kinds that name nobody. The two agree because the parser reads an absent
+ * subject list as the empty one, so canonicalizing a stored document yields
+ * this shape again — which is what makes a read-modify-write round trip cost
+ * no version bump.
+ */
+export function canonicalRecordActionAxis(axis: RecordActionAxis): RecordActionAxis {
+  const result: Record<string, RecordActionSubjects> = {};
+  for (const name of Object.keys(axis).sort()) {
+    const subjects = axis[name]!;
+    const normalized: RecordActionSubjects = {
+      users: [...new Set(subjects.users)].sort(),
+      groups: [...new Set(subjects.groups)].sort(),
+      roles: [...new Set(subjects.roles)].sort(),
+      integrations: [...new Set(subjects.integrations)].sort(),
+    };
+    const total = normalized.users.length + normalized.groups.length +
+      normalized.roles.length + normalized.integrations.length;
+    if (total > 0) result[name] = normalized;
+  }
+  return result;
+}
+
+/**
+ * The axis as it is STORED: canonical, minus every subject kind that names
+ * nobody.
+ *
+ * The document in the column is read by people, by the generic permissions
+ * editor and by `app.record_permissions_valid`, and a grant written as
+ * `{integrations: [id]}` should read back as what was written rather than as
+ * three empty lists around it. Dropping them is lossless: the parser reads an
+ * absent list as the empty one, so {@link canonicalRecordActionAxis} restores
+ * the comparison shape.
+ */
+export function storedRecordActionAxis(axis: RecordActionAxis): Record<string, unknown> {
+  const canonical = canonicalRecordActionAxis(axis);
+  return Object.fromEntries(Object.entries(canonical).map(([name, subjects]) => [
+    name,
+    Object.fromEntries(
+      (["users", "groups", "roles", "integrations"] as const)
+        .filter((kind) => subjects[kind].length > 0)
+        .map((kind) => [kind, subjects[kind]]),
+    ),
+  ]));
+}
+
+/** The canonical axis of a stored or submitted ACL; empty when there is none. */
+export function recordActionAxisOf(value: unknown): RecordActionAxis {
+  return canonicalRecordActionAxis(parseRecordPermissions(value)?.actions ?? {});
+}
+
+function sameRecordActionAxis(left: RecordActionAxis, right: RecordActionAxis): boolean {
+  const names = Object.keys(left);
+  if (names.length !== Object.keys(right).length) return false;
+  return names.every((name) => {
+    const theirs = right[name];
+    if (!theirs) return false;
+    const ours = left[name]!;
+    return (["users", "groups", "roles", "integrations"] as const).every((kind) =>
+      ours[kind].length === theirs[kind].length &&
+      ours[kind].every((subject, index) => subject === theirs[kind][index])
+    );
+  });
+}
+
+/** Did the submitted document state the axis at all? */
+function statesActionAxis(value: unknown): boolean {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value) &&
+    Object.prototype.hasOwnProperty.call(value as object, "actions");
+}
+
+/**
+ * Reconcile a submitted ACL's named-action axis with the one already in force,
+ * and refuse any ordinary write that would change it.
+ *
+ * WHY THE AXIS HAS ONE WRITER
+ * ---------------------------
+ * The three permissions and the named actions are stored in one JSON document,
+ * but they are not the same kind of decision. Rewriting view/edit/delete hands
+ * a PERSON access the record's own editor already has — the authority to do it
+ * is the record's `edit` permission, and that is as it has always been.
+ * Granting a named action can hand a tenant's INTEGRATION the right to invoke
+ * an Operation on this record, and `edit` is nowhere near enough authority for
+ * that: an ordinary record editor holds no integration management right and
+ * must not acquire one by editing a JSON field.
+ *
+ * Splitting the authority by subject kind inside the generic write path would
+ * mean a partial check on every path that can reach the column — generated
+ * CRUD create and update, the object merge, a trusted Operation's own values,
+ * an importer — and the canonical failure of that shape is a check present on
+ * one path and absent on another. So instead: NO ordinary write changes the
+ * axis, and one canonical Operation does
+ * ({@link RECORD_ACTION_DELEGATION_OPERATION}), which checks the entity's
+ * update roles, the record's `edit`, the verified principal class and, for an
+ * application subject, the existing integration-management role.
+ *
+ * WHAT THIS RETURNS
+ * -----------------
+ * The value to store, which is the submitted document with its axis replaced
+ * by the one in force, canonically ordered:
+ *
+ *   - a document that does NOT state `actions` keeps the grants already in
+ *     force. An older client, a partial write and a merge that rewrites only
+ *     the permissions therefore cannot remove a grant by omission — the one
+ *     silent failure this axis could otherwise have;
+ *   - a document that states the SAME axis is accepted and stores the
+ *     canonical form, so a read-modify-write round trip is not a change and
+ *     costs no version bump;
+ *   - anything else is refused. That covers a grant, a revocation, a subject
+ *     swapped inside an entry and a stale document whose axis moved on since
+ *     it was read: all of them need the delegation Operation.
+ *
+ * `inForce` is the stored ACL on an update, and the entity's authored default
+ * on a create — a new record may carry the grants its entity seeds and no
+ * others.
+ */
+export function assertRecordActionAxisUnchanged(
+  table: GeneratedCrudTable,
+  submitted: unknown,
+  inForce: unknown,
+): unknown {
+  const config = policy(table);
+  if (!config) return submitted;
+  // A malformed document is the shape refusal's business, not this one's.
+  if (!parseRecordPermissions(submitted)) return submitted;
+  const current = recordActionAxisOf(inForce);
+  if (statesActionAxis(submitted)) {
+    const requested = recordActionAxisOf(submitted);
+    if (!sameRecordActionAxis(requested, current)) {
+      throw generatedCrudError(
+        "Not authorized to change the record's named actions.",
+        "FORBIDDEN",
+        {
+          detail: `${config.field}.actions grants an Operation to a person or an ` +
+            `application and is not writable through an ordinary update. Use the ` +
+            `${RECORD_ACTION_DELEGATION_OPERATION} Operation, which checks the ` +
+            `authority each subject kind needs. If the record's actions changed ` +
+            `since you loaded it, reload before saving.`,
+        },
+      );
+    }
+  }
+  const next = { ...(submitted as Record<string, unknown>) };
+  const stored = storedRecordActionAxis(current);
+  if (Object.keys(stored).length === 0) delete next.actions;
+  else next.actions = stored;
+  return next;
 }
 
 /**
@@ -329,6 +514,30 @@ export function recordPermissionsAllowRow(
   );
 }
 
+/**
+ * Apply {@link assertRecordActionAxisUnchanged} to the value a write is about
+ * to store, whatever route it arrived by.
+ *
+ * This is the enforcement point rather than the input validation above,
+ * because by here every contributor to the column has had its turn: the
+ * caller's own value, a default template, a protected-field write, a trusted
+ * Operation's values and an object merge against the locked row. The row is
+ * already locked when an update reaches this, so the axis it compares against
+ * is the one that will still be in force when the write lands.
+ */
+export function reconcileRecordActionAxisWrite(
+  table: GeneratedCrudTable,
+  prepared: Map<GeneratedCrudColumn, unknown>,
+  inForce: unknown,
+): void {
+  const config = policy(table);
+  if (!config) return;
+  for (const [column, value] of prepared) {
+    if (column.name !== config.column) continue;
+    prepared.set(column, assertRecordActionAxisUnchanged(table, value, inForce));
+  }
+}
+
 export function assertCreateRecordPermissions(
   table: GeneratedCrudTable,
   session: DbSessionInput,
@@ -347,6 +556,11 @@ export function assertCreateRecordPermissions(
     );
   }
   assertDeclaredActions(table, value);
+  // A new record carries the grants its entity seeds and no others. Refused
+  // here so a caller learns before a transaction opens; the write path checks
+  // the final prepared value again, where a default template or a trusted
+  // Operation's own values could still have reached the column.
+  assertRecordActionAxisUnchanged(table, value, config.defaultValue);
   if (
     !config.createRequires.every((permission) =>
       recordPermissionAllows(value, permission, session, config.empty)

@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
+import { operationErrorOf } from "@openshapeforge/operations";
 import type { DbSessionInput } from "../../db/session.js";
 import {
   assertCreateRecordPermissions,
+  assertRecordActionAxisUnchanged,
   assertUpdateRecordPermissions,
   parseRecordPermissions,
   recordActionAllows,
   recordActionsAllowRow,
   recordPermissionAllows,
   recordPermissionsAllowRow,
+  reconcileRecordActionAxisWrite,
+  RECORD_ACTION_DELEGATION_OPERATION,
 } from "./record-permissions.js";
 import type { GeneratedCrudTable } from "./types.js";
 
@@ -401,7 +405,8 @@ describe("assigning a record action", () => {
       .toThrow(/does not admit/);
     expect(write({ authorization: { actions: { review: { integrations: [integrationId] } } } }))
       .toThrow(/does not admit/);
-    // Both kinds declared, both accepted.
+    // Both kinds declared, so the shape check passes; changing the axis is a
+    // separate authority, refused in the delegation-boundary tests below.
     expect(write({
       authorization: { actions: { both: { users: [userId], integrations: [integrationId] } } },
     })).not.toThrow();
@@ -423,18 +428,142 @@ describe("assigning a record action", () => {
     })).not.toThrow();
   });
 
-  test("create applies the same rules", () => {
-    expect(() => assertCreateRecordPermissions(actionTable, session, {
-      authorization: {
-        view: { users: [userId] }, edit: { users: [userId] },
-        actions: { start: { integrations: [integrationId] } },
+});
+
+/**
+ * The delegation boundary. Shape validation above says what the axis MAY
+ * contain; this says who may change it, which is nobody through an ordinary
+ * write.
+ */
+describe("the named-action axis is not writable through an ordinary write", () => {
+  const granted = { actions: { start: { integrations: [integrationId] } } };
+  const reconcile = (submitted: unknown, inForce: unknown) =>
+    assertRecordActionAxisUnchanged(actionTable, submitted, inForce);
+
+  test("a grant, a revocation and a swapped subject are all refused", () => {
+    const other = "77777777-7777-4777-8777-777777777777";
+    for (const [submitted, inForce] of [
+      // The reported escalation: an editor grants a tenant integration.
+      [granted, {}],
+      [{ view: { users: [userId] }, ...granted }, { view: { users: [userId] } }],
+      // A revocation is a change too, and equally not an editor's to make.
+      // (Omitting the key entirely is the carry-forward case below.)
+      [{ actions: {} }, granted],
+      // Same action, another application.
+      [{ actions: { start: { integrations: [other] } } }, granted],
+      // Same application, another action.
+      [{ actions: { both: { integrations: [integrationId] } } }, granted],
+      // An added subject inside an entry the caller already held.
+      [
+        { actions: { start: { integrations: [integrationId, other] } } },
+        granted,
+      ],
+    ] as Array<[unknown, unknown]>) {
+      expect(() => reconcile(submitted, inForce))
+        .toThrow("Not authorized to change the record's named actions.");
+    }
+  });
+
+  test("the refusal names the one Operation that may change it", () => {
+    try {
+      reconcile(granted, {});
+      throw new Error("expected a refusal");
+    } catch (error) {
+      const failure = operationErrorOf(error);
+      expect(failure?.code).toBe("FORBIDDEN");
+      expect(failure?.detail).toContain(RECORD_ACTION_DELEGATION_OPERATION);
+    }
+  });
+
+  test("a document that does not state the axis keeps the grants in force", () => {
+    // The old-client case: a body that predates the axis, or any partial
+    // rewrite of the permissions, must not remove a grant by omission.
+    expect(reconcile({ view: { users: [userId] } }, granted)).toEqual({
+      view: { users: [userId] },
+      actions: { start: { integrations: [integrationId] } },
+    });
+    // With nothing in force there is nothing to carry, and no empty husk.
+    expect(reconcile({ view: { users: [userId] } }, {})).toEqual({
+      view: { users: [userId] },
+    });
+  });
+
+  test("an unchanged axis round-trips and is stored canonically", () => {
+    const other = "77777777-7777-4777-8777-777777777777";
+    const inForce = {
+      actions: { start: { integrations: [other, integrationId] } },
+    };
+    // Read-modify-write of the permissions, with the axis handed back as read.
+    expect(reconcile({ edit: { users: [userId] }, ...inForce }, inForce)).toEqual({
+      edit: { users: [userId] },
+      // Stored without the three kinds that name nobody: the column reads
+      // back as what was granted, and the parser restores the comparison
+      // shape from it.
+      actions: { start: { integrations: [integrationId, other].sort() } },
+    });
+    // Order and duplicates are not a change.
+    expect(() => reconcile(
+      { actions: { start: { integrations: [integrationId, other, other] } } },
+      inForce,
+    )).not.toThrow();
+  });
+
+  test("an entry that names nobody is the same as no entry", () => {
+    expect(() => reconcile({ actions: { start: { integrations: [] } } }, {})).not.toThrow();
+    expect(reconcile({ actions: { start: { integrations: [] } } }, {})).toEqual({});
+  });
+
+  test("an entity without the policy, and a malformed document, are left alone", () => {
+    const noPolicy = { ...actionTable, source: {} } as unknown as GeneratedCrudTable;
+    expect(assertRecordActionAxisUnchanged(noPolicy, granted, {})).toEqual(granted);
+    // The validity refusal belongs to assertUpdateRecordPermissions.
+    expect(assertRecordActionAxisUnchanged(actionTable, { view: [] }, granted))
+      .toEqual({ view: [] });
+  });
+
+  test("the write path reconciles the prepared column value", () => {
+    const column = actionTable.columns.find((candidate) => candidate.name === "authorization")!;
+    const prepared = new Map<typeof column, unknown>([[column, { view: { users: [userId] } }]]);
+    reconcileRecordActionAxisWrite(actionTable, prepared, granted);
+    expect(prepared.get(column)).toEqual({
+      view: { users: [userId] },
+      actions: { start: { integrations: [integrationId] } },
+    });
+    const escalating = new Map<typeof column, unknown>([[column, granted]]);
+    expect(() => reconcileRecordActionAxisWrite(actionTable, escalating, {}))
+      .toThrow("Not authorized to change the record's named actions.");
+  });
+
+  test("create seeds the entity default and refuses anything else", () => {
+    const seeded = {
+      ...actionTable,
+      source: {
+        ...actionTable.source,
+        authorization: {
+          ...actionTable.source!.authorization,
+          recordPermissions: {
+            ...actionTable.source!.authorization!.recordPermissions,
+            defaultValue: granted,
+          },
+        },
       },
+    } as unknown as GeneratedCrudTable;
+    const permitted = { view: { users: [userId] }, edit: { users: [userId] } };
+    // Nothing supplied: the authored default applies, actions included.
+    expect(() => assertCreateRecordPermissions(seeded, session, {})).not.toThrow();
+    // The default handed back verbatim is not a change.
+    expect(() => assertCreateRecordPermissions(seeded, session, {
+      authorization: { ...permitted, ...granted },
     })).not.toThrow();
+    // A grant the entity does not seed is refused on create as well, so the
+    // axis cannot be reached by creating the record instead of editing it.
     expect(() => assertCreateRecordPermissions(actionTable, session, {
-      authorization: {
-        view: { users: [userId] }, edit: { users: [userId] },
-        actions: { start: { users: [userId] } },
-      },
-    })).toThrow(/does not admit/);
+      authorization: { ...permitted, ...granted },
+    })).toThrow("Not authorized to change the record's named actions.");
+    // An undeclared action still fails validation first.
+    expect(() => assertCreateRecordPermissions(actionTable, session, {
+      authorization: { ...permitted, actions: { publish: { users: [userId] } } },
+    })).toThrow(/does not declare/);
   });
 });
+

@@ -1,0 +1,229 @@
+# The second use case, and deliberately not a process: nothing is started,
+# followed or transitioned here.
+#
+# A metering operator reads a physical meter and sends in what it read. It is
+# given `submitReading` on the connection points it serves, and nothing else:
+# it may not list the tenant's connection points, may not see which tenant or
+# which address a point belongs to, and may not change anything. What it gets
+# back is the one field a reading has to be filed against — the meter key — so
+# an integration that holds the action on two points still cannot confuse one
+# for the other.
+#
+# The entity is also where the contrast with the first use case lives:
+#
+#   - one action, not two, and no person principal. Submitting a reading on
+#     behalf of a person is not a thing this entity does, so `principals` says
+#     so rather than leaving it to a convention;
+#   - empty: public on the three permissions. The points themselves are
+#     ordinary tenant data a colleague may read; it is the ACTION that is
+#     closed, which `empty` never opens — an absent entry denies whatever the
+#     entity authored for the permissions.
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: MeterConnection
+title: Meter Connection
+description: A metering point an external metering operator may file readings against.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Meter connection
+  nl: Meteraansluiting
+pluralLabels:
+  en: Meter connections
+  nl: Meteraansluitingen
+domains:
+  - energy
+authorization:
+  roles:
+    read:
+      - Energy.All.Read
+      - Energy.All.ReadWrite
+    create:
+      - Energy.All.ReadWrite
+    update:
+      - Energy.All.ReadWrite
+    delete:
+      - Energy.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+    recordPermissions:
+      field: authorization
+      empty: public
+      createRequires:
+        - view
+      actions:
+        - name: submitReading
+          labels:
+            en: Submit a reading
+            nl: Meterstand doorgeven
+          principals: [integration]
+          reads: [meterKey]
+fields:
+  - key: name
+    osfType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: meterKey
+    osfType: string
+    required: true
+    label:
+      en: Meter key
+      nl: Metersleutel
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: meter_key
+      storageClass: core
+  - key: location
+    osfType: string
+    required: false
+    label:
+      en: Location
+      nl: Locatie
+    validation:
+      maxLength: 200
+    persisted:
+      column: location
+      storageClass: core
+  - key: authorization
+    osfType: object
+    required: true
+    defaultValue: {}
+    label:
+      en: Authorization
+      nl: Autorisatie
+    persisted:
+      column: authorization
+      storageClass: core
+operations:
+  list:
+    name: List meter connections
+    description: List MeterConnection records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get meter connection
+    description: Get one MeterConnection record.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create meter connection
+    description: Create a MeterConnection record.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update meter connection
+    description: Update a MeterConnection record.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    concurrency:
+      version:
+        mode: required
+        field: updatedAt
+    confirmation:
+      mode: none
+  delete:
+    name: Delete meter connection
+    description: Delete a MeterConnection record.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    # Here for the same reason as its unrelated sibling: the first-grant form
+    # resolves this entity's own collection to let a manager pick a connection
+    # point by name instead of by key.
+    views:
+      collection:
+        route:
+          en: /meter-connections
+          nl: /meteraansluitingen
+        title:
+          en: Meter connections
+          nl: Meteraansluitingen
+        columns:
+          - key: name
+            sortable: true
+          - key: meterKey
+            sortable: true
+          - key: location
+      record:
+        routes:
+          read:
+            en: /meter-connections/:id
+            nl: /meteraansluitingen/:id
+          create:
+            en: /meter-connections/create
+            nl: /meteraansluitingen/aanmaken
+        title: "{{name}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - id: overview
+                  title:
+                    en: Connection point
+                    nl: Aansluitpunt
+                  fields: [name, meterKey, location]

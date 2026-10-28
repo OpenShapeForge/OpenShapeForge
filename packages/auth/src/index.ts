@@ -35,11 +35,15 @@ export {
   applyTrustedContextHeaders,
   hasValidTrustedContextSignature,
   readTrustedContext,
+  verifyTrustedContext,
 } from "./trusted-context.js";
 
 export type {
   ApplyTrustedContextOptions,
   ReadTrustedContextOptions,
+  TrustedContextIdentity,
+  TrustedPrincipalKind,
+  VerifiedTrustedContext,
 } from "./trusted-context.js";
 
 export {

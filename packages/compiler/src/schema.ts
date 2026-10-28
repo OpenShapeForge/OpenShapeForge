@@ -571,7 +571,19 @@ export type TableSourceDefinition = {
       empty: "public" | "restricted";
       createRequires: import("./authoring/types/common.js").RecordPermissionAction[];
       defaultValue?: Record<string, unknown>;
+      /**
+       * Named actions this entity's ACL may grant, and the principal kinds
+       * each admits. The runtime authorizes an Operation's `auth.recordAction`
+       * against exactly this set; absent means the entity carries no action.
+       */
+      actions?: import("./authoring/types/common.js").RowAccessRecordActionConfig[];
     };
+    /**
+     * Principal classes this entity's generated CRUD and derived search
+     * admit. Absent means every class, which is what an entity without a
+     * record action compiles to.
+     */
+    principalClasses?: import("./authoring/types/common.js").EntityPrincipalClass[];
   };
   relationshipStatus?: {
     emittedReferences: string[];

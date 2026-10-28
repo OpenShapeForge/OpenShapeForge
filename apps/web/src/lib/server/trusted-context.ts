@@ -3,6 +3,8 @@ import "server-only";
 
 import { applyTrustedContextHeaders as applyTrustedContextHeadersCore } from "@openshapeforge/auth";
 
+import { principalKindOf, type PrincipalKindSession } from "./principal-kind";
+
 type TrustedContextSession = {
   tenantId?: string | null;
   sub?: string | null;
@@ -12,7 +14,7 @@ type TrustedContextSession = {
    * authorize on group membership at the route/GraphQL boundary.
    */
   groups?: readonly string[] | null;
-};
+} & PrincipalKindSession;
 
 function internalContextSecret() {
   return process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ?? null;
@@ -22,6 +24,7 @@ export function applyTrustedContextHeaders(
   headers: Headers,
   session: TrustedContextSession,
 ) {
+  const principalKind = principalKindOf(session);
   applyTrustedContextHeadersCore(
     headers,
     {
@@ -29,6 +32,7 @@ export function applyTrustedContextHeaders(
       userId: session.sub ?? null,
       roles: [...(session.roles ?? [])],
       groups: [...(session.groups ?? [])],
+      ...(principalKind ? { principalKind } : {}),
     },
     { secret: internalContextSecret() },
   );

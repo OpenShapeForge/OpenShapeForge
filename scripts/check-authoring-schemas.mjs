@@ -65,14 +65,15 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   "connector.schema.json": 5,
   // The core ERP catalog under packages/compiler/config/authoring/entities/,
   // excluding `_base.yaml` — a baseEntity, and so unschemad by design — plus
-  // the two entities of the notebook example plugin's authoring layer.
-  "core-entity.schema.json": 158,
+  // the two entities of the notebook example plugin's authoring layer, plus
+  // the two the repository's own record-action layer declares an action on.
+  "core-entity.schema.json": 160,
   // The platform's own administration (operations/control.yaml): the 23
   // control-realm Operations behind /api/control/v1 and the control MCP —
   // and the operator side of capability grants (operations/grants.yaml),
-  // plus accounts, members, groups, permissions, roles, source-sync and
-  // edit-lease catalogs.
-  "operation-catalog.schema.json": 9,
+  // plus accounts, members, groups, permissions, roles, source-sync,
+  // edit-lease, record-action and record-action-assignment catalogs.
+  "operation-catalog.schema.json": 12,
   "settings-definition.schema.json": 0,
   "settings-provider.schema.json": 0,
   "retention-policy-catalog.schema.json": 1,

@@ -13,7 +13,7 @@ import {READ_PROGRESS_META_KEY as KEY} from "@openshapeforge/plugin-runtime/read
 test("generated MCP bridge delivers opt-in read snapshots on the original request only",async()=>{
   for(const optIn of [true,false]){
     const db={} as OpenShapeForgeDatabase,platform=new ModulePlatformRuntime(db);
-    const server=__buildGeneratedMcpServerForTests({db,modulePlatform:platform,session:{tenantId:"11111111-1111-4111-8111-111111111111",userId:"22222222-2222-4222-8222-222222222222",roles:["General.All.Read"],groups:[],scope:"self",credential:"bearer"},modules:[accounts,documents as unknown as RuntimeModule,versioning as unknown as RuntimeModule,{name:"notebook",operationHandlers:{importNotebook:async()=>({value:undefined})}}],operationToolProjection:{mode:"searchable",search:"osf_search_operations",execute:"osf_execute_operation"}});
+    const server=__buildGeneratedMcpServerForTests({db,modulePlatform:platform,session:{tenantId:"11111111-1111-4111-8111-111111111111",userId:"22222222-2222-4222-8222-222222222222",roles:["General.All.Read"],groups:[],scope:"self",credential:"bearer"},modules:[accounts,documents as unknown as RuntimeModule,versioning as unknown as RuntimeModule,{name:"notebook",operationHandlers:{importNotebook:async()=>({value:undefined}),deliverToNotebook:()=>{throw new Error("This test does not exercise Notebook.deliver.")}}}],operationToolProjection:{mode:"searchable",search:"osf_search_operations",execute:"osf_execute_operation"}});
     let calls=0,release!:()=>void;const wait=new Promise<void>(resolve=>release=resolve),updates:unknown[]=[];
     platform.registerStaticOperations([{
       definition:{id:"TemplateVersion.materialize",intent:"invoke",name:"Synthetic read",description:"Synthetic evidence",input:{kind:"json-schema",schema:{type:"object"}},output:{kind:"json-schema",schema:{type:"object"}},effects:{data:"read",external:"none"},reliability:{idempotency:{mode:"natural"}}},available:()=>true,
@@ -40,7 +40,7 @@ test("authored dedicated MCP tools report on the same request without changing t
       expect(await context.platform.readProgress.report(context.session,{data:{items:[{id:"first"}]}})).toBe(optIn);
       return {value:{items:[{id:"first"},{id:"last"}]}};
     }}} as unknown as RuntimeModule;
-    const server=__buildGeneratedMcpServerForTests({db,modulePlatform:platform,session:{tenantId:"11111111-1111-4111-8111-111111111111",userId:"22222222-2222-4222-8222-222222222222",roles:["General.All.Read"],groups:[],scope:"self",credential:"bearer"},modules:[accounts,fixture,versioning as unknown as RuntimeModule,{name:"notebook",operationHandlers:{importNotebook:async()=>({value:undefined})}}],operationToolProjection:{mode:"dedicated",search:"osf_search_operations",execute:"osf_execute_operation"}});
+    const server=__buildGeneratedMcpServerForTests({db,modulePlatform:platform,session:{tenantId:"11111111-1111-4111-8111-111111111111",userId:"22222222-2222-4222-8222-222222222222",roles:["General.All.Read"],groups:[],scope:"self",credential:"bearer"},modules:[accounts,fixture,versioning as unknown as RuntimeModule,{name:"notebook",operationHandlers:{importNotebook:async()=>({value:undefined}),deliverToNotebook:()=>{throw new Error("This test does not exercise Notebook.deliver.")}}}],operationToolProjection:{mode:"dedicated",search:"osf_search_operations",execute:"osf_execute_operation"}});
     const client=new Client({name:"direct-read-progress-test",version:"1"}),[a,b]=InMemoryTransport.createLinkedPair();
     try{
       await server.connect(b);await client.connect(a);

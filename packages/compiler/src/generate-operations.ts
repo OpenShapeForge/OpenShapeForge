@@ -1,5 +1,5 @@
 import { collectionOptionsDefinition, collectionOptionSources } from "./collection-options.js";
-import { applicationSearchDefinition, applicationSearchSources } from "./application-search.js";
+import { applicationSearchDefinition, applicationSearchSources, catalogApplicationSearchSources } from "./application-search.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
@@ -46,7 +46,10 @@ export type { CompiledPluginOperation } from "./plugins.js";
  * Runtime modules the API itself provides, so an Operation bound to one needs
  * no plugin runtime in the module registry: `osf-blueprints` serves the
  * blueprint Operations, `osf-control` the platform's own administration,
- * `osf-grants` the operator side of capability grants, `osf-jobs` the
+ * `osf-grants` the operator side of capability grants, `osf-api-keys` the
+ * integration/API-key catalog over the one provisioning service,
+ * `osf-record-actions` the one Operation that may change a record's
+ * named-action axis and the manager's view of it, `osf-jobs` the
  * durable job queue, `osf-transitions` the status transitions declared on
  * entity fields, `osf-source-sync` the import of records from an external
  * source system by their base source fields, `osf-edit-leases` the central
@@ -54,7 +57,7 @@ export type { CompiledPluginOperation } from "./plugins.js";
  * `osf-billing` the milestone billing run and the milestone create that
  * freezes a computed amount.
  */
-export const CORE_OPERATION_MODULES: readonly string[] = ["accounts", "osf-audit", "osf-billing", "osf-blueprints", "osf-control", "osf-edit-leases", "osf-grants", "osf-jobs", "osf-source-sync", "osf-transitions"];
+export const CORE_OPERATION_MODULES: readonly string[] = ["accounts", "osf-api-keys", "osf-audit", "osf-billing", "osf-blueprints", "osf-control", "osf-edit-leases", "osf-grants", "osf-jobs", "osf-record-actions", "osf-source-sync", "osf-transitions"];
 
 /**
  * The one OpenAPI security scheme every `auth.mode: capability` Operation is
@@ -394,6 +397,18 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
     throw new Error(
       `${where} recordPermission requires a record target with inputField.`,
     );
+  }
+  if (operation.auth.mode === "session" && operation.auth.recordAction !== undefined) {
+    if (operation.target?.scope !== "record" || !operation.target.inputField) {
+      throw new Error(`${where} recordAction requires a record target with inputField.`);
+    }
+    if (!/^[a-z][A-Za-z0-9]*$/.test(operation.auth.recordAction) ||
+      ["view", "edit", "delete"].includes(operation.auth.recordAction)) {
+      throw new Error(
+        `${where} recordAction "${operation.auth.recordAction}" must be a lowerCamel name and ` +
+          "must not restate view, edit or delete — a named action is independent of the record permissions.",
+      );
+    }
   }
   if (operation.auth.mode === "session") {
     const restricted = operation.auth.roles !== undefined || operation.auth.roleGroups !== undefined;
@@ -779,6 +794,8 @@ export function collectAuthoredEntityPluginOperations(
   entities: readonly Pick<CompiledEntityInfo, "contract">[],
   context: PluginBaseContext,
   referentiedata: CoreReferentiedataSnapshot = {},
+  /** Catalogs whose web collections application search also offers as pages. */
+  catalogs: readonly OperationCatalogDefinition[] = [],
 ): CompiledPluginOperation[] {
   materializeCollectionOperations(entities, referentiedata);
   const byPlugin = new Map<string, PluginOperationContract[]>();
@@ -900,7 +917,7 @@ export function collectAuthoredEntityPluginOperations(
   return [
     ...collectOperationContracts(synthetic, context, true),
     ...collectConstrainedReferenceCreateOperations(entities, referentiedata),
-    ...collectApplicationSearch(entities, context),
+    ...collectApplicationSearch(entities, context, catalogs),
     ...collectCollectionOptions(entities, context),
     ...(needsEntityTypeList
       ? collectEntityTypeListOperation(context, entities)
@@ -1465,10 +1482,12 @@ export function operationOpenApiPaths(
   return paths;
 }
 
-function collectApplicationSearch(entities: readonly Pick<CompiledEntityInfo,"contract">[], context: PluginBaseContext): CompiledPluginOperation[] {
-  const sources=applicationSearchSources(entities);
+function collectApplicationSearch(entities: readonly Pick<CompiledEntityInfo,"contract">[], context: PluginBaseContext, catalogs: readonly OperationCatalogDefinition[] = []): CompiledPluginOperation[] {
+  const core=applicationSearchSources(entities);
+  const catalog=catalogApplicationSearchSources(catalogs,new Set(core.map(source=>source.entity)));
+  const sources=[...core,...catalog.sources];
   if(!sources.length)return [];
-  const operation=applicationSearchDefinition(entities);
+  const operation=applicationSearchDefinition(entities,catalog.roles);
   nativeBindings.set(operation,{type:"application-search",sources});
   return collectOperationContracts([{name:"core",operations:[operation]}],context,true);
 }

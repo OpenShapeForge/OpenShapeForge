@@ -14,10 +14,13 @@
  *   1. The caller must hold the management role.
  *   2. Every role being granted must already be held by the caller.
  *
- * And one rule that is not about roles at all: an API key session may never
- * reach this surface. A credential that can mint credentials is a ladder — the
- * holder grants itself the union of what any reachable key may hold, one rung
- * at a time. Key management is for interactive, human-authenticated sessions.
+ * And one rule that is not about roles at all: only a session this deployment
+ * can show to be a PERSON may reach this surface — whichever carrier brought
+ * it. A credential that can mint credentials is a ladder — the holder grants
+ * itself the union of what any reachable key may hold, one rung at a time —
+ * and that ladder is not specific to API keys: any non-human principal
+ * holding the management role climbs it the same way. So the carrier is
+ * checked, fail-closed, before any role is.
  */
 
 /**
@@ -41,7 +44,60 @@ export class ApiKeyAuthorizationError extends Error {
 export type CeilingSession = {
   roles: readonly string[];
   credential: SessionCredential;
+  /**
+   * The SERVER's verdict about the principal behind the session: "person" for
+   * a verified human, "service" for a machine principal, and ABSENT when the
+   * deployment established neither. Never client input — on the bearer path
+   * it is derived from the verified claims (`auth/bearer-session.ts`), and on
+   * the trusted-context path it is inside the bundle's HMAC (packages/auth,
+   * payload v3), so a caller can assert it on neither.
+   */
+  principalKind?: "person" | "service";
 };
+
+/**
+ * Which carriers may manage credentials at all, decided before any role.
+ *
+ * Two carriers, one condition: the deployment must have CLASSIFIED the
+ * principal as a person. That single condition closes four doors at once — a
+ * Keycloak service account holding `Platform.ApiKeys.Manage`
+ * (`principalKind: "service"`), a verified token that is neither person nor
+ * service account (`principalKind` absent, refused because absence proves
+ * nothing), an in-mesh hop that forwards an identity it never authenticated
+ * (also absent), and any future carrier added to `SessionCredential` without
+ * a decision here.
+ *
+ * `bearer` carries the verdict the bearer path derived from verified claims.
+ *
+ * `trusted-context` is the deployment's OWN in-mesh hop: HMAC-signed with
+ * `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` inside a ±5-minute window, and
+ * since payload v3 the signer's verdict travels INSIDE that signature. A
+ * producer still signing the older payload v2 therefore reaches this surface
+ * NEVER: its bundle is accepted for ordinary work (packages/auth,
+ * ACCEPTED_PAYLOAD_VERSIONS) but carries no class, and absence is refused
+ * here. Redeploying that producer is what admits it, not relaxing this. It is
+ * what apps/web sends when it holds no forwardable access token, and apps/web
+ * signs "person" only for a session it established through an interactive
+ * login (it holds that login's id token). Every other producer of a bundle —
+ * a health probe, a fixture, a service-to-service hop — signs no class and is
+ * refused here, so holding the mesh secret is no longer enough to reach this
+ * surface. A web tier compromised outright can still sign what it likes; that
+ * is the trust this secret already expresses, and it is now the ONLY way a
+ * bundle reaches a person verdict rather than a property of the carrier.
+ *
+ * Everything else is refused outright: `api-key` (the ladder), `control-bearer`
+ * (a platform operator is not a tenant session), `grant` (a capability token
+ * covers the Operations it names, and this is not one of them) and `none`.
+ */
+function mayCarryKeyManagement(session: CeilingSession): boolean {
+  switch (session.credential) {
+    case "bearer":
+    case "trusted-context":
+      return session.principalKind === "person";
+    default:
+      return false;
+  }
+}
 
 /**
  * Gate every API key mutation. Throws `ApiKeyAuthorizationError` — never
@@ -55,9 +111,13 @@ export function assertMayGrantRoles(
   session: CeilingSession,
   requestedRoles: readonly string[],
 ): void {
-  if (session.credential === "api-key") {
+  // The carrier first, and with its own message: a service principal that
+  // holds every role must not learn that roles were even consulted.
+  if (!mayCarryKeyManagement(session)) {
     throw new ApiKeyAuthorizationError(
-      "API keys cannot manage API keys. Use an interactive session.",
+      session.credential === "api-key"
+        ? "API keys cannot manage API keys. Use an interactive session."
+        : "Only a verified person may manage API keys. Use an interactive session.",
     );
   }
 
@@ -78,10 +138,13 @@ export function assertMayGrantRoles(
 }
 
 /**
- * Gate a mutation that grants no roles (revoke, disable, rename).
+ * Gate a mutation that grants no roles (revoke, disable, rename) and every
+ * management READ.
  *
- * Still refuses an API key session, and still requires the management role —
- * revocation is a denial-of-service lever if anyone authenticated can reach it.
+ * Still applies the carrier rule, and still requires the management role —
+ * revocation is a denial-of-service lever if anyone authenticated can reach
+ * it, and the integration catalog names the external parties a tenant works
+ * with.
  */
 export function assertMayManageApiKeys(session: CeilingSession): void {
   assertMayGrantRoles(session, []);

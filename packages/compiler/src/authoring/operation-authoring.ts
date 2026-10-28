@@ -266,6 +266,22 @@ export function assertOperationAuthoring(
         );
       }
     }
+    if (!action && operationAuth?.mode === "session" && operationAuth.recordAction !== undefined) {
+      if (operation.target.scope !== "record") {
+        throw new Error(
+          `${origin} plugin operation "${operationKey}" recordAction requires a record target.`,
+        );
+      }
+      const declared = entity.authorization?.rowAccess?.recordPermissions?.actions ?? [];
+      if (!declared.some((candidate) => candidate.name === operationAuth.recordAction)) {
+        throw new Error(
+          `${origin} plugin operation "${operationKey}" requires record action ` +
+            `"${operationAuth.recordAction}", which the entity does not declare under ` +
+            "authorization.rowAccess.recordPermissions.actions. An action nothing declares can " +
+            "never be granted, so the Operation would be permanently unreachable.",
+        );
+      }
+    }
     if (operation.interaction) {
       throw new Error(
         `${origin} plugin operation "${operationKey}" cannot declare entity secureInput; ` +

@@ -227,6 +227,17 @@ export type PluginOperationAuth =
       scopes?: string[];
       /** Current target-record permission checked in addition to roles. */
       recordPermission?: import("./authoring/types/common.js").RecordPermissionAction;
+      /**
+       * Required NAMED action on the current target record, declared by the
+       * entity under `authorization.rowAccess.recordPermissions.actions`.
+       *
+       * Unlike `recordPermission` it does not imply the record's `view`, so a
+       * verified application may invoke it without the record becoming
+       * readable. Checked as a live read in the Operation's own transaction,
+       * under the lock that serializes it against a policy change. Combine
+       * with `recordPermission` to require both.
+       */
+      recordAction?: string;
     }
   | {
       /**

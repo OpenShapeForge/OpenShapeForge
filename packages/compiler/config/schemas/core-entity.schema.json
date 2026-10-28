@@ -252,6 +252,14 @@
             }
           }
         },
+        "principalClasses": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["person", "application", "service", "unknown"] },
+          "description": "Which principal CLASSES this entity's generated CRUD and the search derived from it admit. The class is what the server decided a session is, never anything a caller states: person is a verified human identity, application a resolved API-key integration, service a verified client-credentials principal with no integration behind it (configured organization automation included), and unknown a carrier the server could not classify. A role list says what a session may do; this says what kind of session may use the generic routes at all, which a role list cannot express because a service account and the person beside it can hold the same role. Omit it to admit every class, which is what every entity does by default. The one derived exception: an entity that declares a named record action for integration principals excludes application unless this list says otherwise, because such an application is meant to reach individual records by grant and admitting it to the collection would make that grant decorative. It narrows only - roles, scopes and the record ACL still apply on top.",
+          "examples": [["person", "service", "unknown"]]
+        },
         "rowAccess": {
           "type": "object",
           "description": "Row-level access filtering. When enabled, the compiler emits a Postgres RLS policy (`FORCE ROW LEVEL SECURITY`) alongside the tenant predicate. Add an `owner` axis to make each row visible only to the user recorded in its owner column, and/or a `group` axis to make each row visible only within the org-unit hierarchy recorded in its group column; without any axis the policy is plain tenant scoping. Owner and group axes are independently combinable (both emit OR-branches). The platform-admin bypass (app.bypass_rls()) and tenant scope (app.has_scope('tenant')) always short-circuit the policy.",
@@ -305,7 +313,7 @@
             },
             "recordPermissions": {
               "type": "object",
-              "description": "Action-specific record authorization stored in one persisted JSON object. The object has fixed view/edit/delete members containing users/groups/roles arrays. RBAC remains mandatory; this ACL only narrows it.",
+              "description": "Action-specific record authorization stored in one persisted JSON object. The object has fixed view/edit/delete members containing users/groups/roles arrays, plus an optional actions member carrying the named actions declared below. RBAC remains mandatory; this ACL only narrows it.",
               "additionalProperties": false,
               "required": ["field", "empty", "createRequires"],
               "properties": {
@@ -323,6 +331,46 @@
                   "uniqueItems": true,
                   "items": { "enum": ["view", "edit", "delete"] },
                   "description": "Record permissions the creator must hold in the submitted ACL before insert."
+                },
+                "actions": {
+                  "type": "array",
+                  "minItems": 1,
+                  "description": "Named actions this record ACL may grant, stored under the ACL document's own actions member and named by an Operation's auth.recordAction. Independent of view/edit/delete in both directions: an action grant never implies the record is readable or writable, and holding view/edit/delete never grants an action. A grant that names nobody, is absent or is malformed always denies - empty applies to the three fixed permissions only. Opt-in per entity and per action; omit it and the entity can carry no action at all.",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["name", "principals"],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "pattern": "^[a-z][A-Za-z0-9]*$",
+                        "not": { "enum": ["view", "edit", "delete"] },
+                        "description": "lowerCamel action name, unique on the entity and never a record permission."
+                      },
+                      "labels": {
+                        "$ref": "#/$defs/localizedText",
+                        "description": "What a person reading a screen calls this action. Optional: an action authored before this existed, or one whose name is already the word a reader needs, falls back to the name itself. This is the only canonical source of an action's label - a surface that needs one reads it from here rather than restating a product's vocabulary."
+                      },
+                      "reads": {
+                        "type": "array",
+                        "uniqueItems": true,
+                        "items": { "$ref": "#/$defs/fieldKey" },
+                        "description": "The only fields a holder of this action may read from the record. Holding an action never makes the record readable; core reads exactly these columns of exactly that row through the same owner-scoped lookup that authorized the action. The ACL field, a classified field, a computed, localized or unpersisted field and a relationship are refused at compile time. Omit it for an action that authorizes an effect and discloses nothing."
+                      },
+                      "principals": {
+                        "type": "array",
+                        "minItems": 1,
+                        "uniqueItems": true,
+                        "items": { "enum": ["person", "integration"] },
+                        "description": "Which principal kinds a grant of this action may name. person admits the ACL's users/groups/roles subjects; integration admits integrations, the verified tenant-bound API-key integration ids the server resolves from the presented credential. An integration may never be named for view, edit or delete."
+                      },
+                      "lock": {
+                        "enum": ["exclusive", "shared"],
+                        "default": "exclusive",
+                        "description": "How strongly the authorization check locks the record's ACL row, and therefore how two concurrent holders of this action behave. exclusive (the default) takes a self-exclusive row lock, so two holders serialize at the check and an effect that later locks the same record more strongly cannot deadlock on the upgrade. shared lets concurrent holders pass the check together, which is right for an action whose effect only reads - but an effect that then takes a row-exclusive lock on the SAME record deadlocks under parallel calls, because both holders must release a shared lock neither will. Both modes fence a concurrent ACL change: a revocation waits for a check in flight, and a check that starts after one waits and then reads the revocation. Choose shared only for an action whose effect provably never upgrades the lock."
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -764,6 +812,12 @@
             "recordPermission": {
               "enum": ["view", "edit", "delete"],
               "description": "Required permission on the current record target, in addition to roles and scopes."
+            },
+            "recordAction": {
+              "type": "string",
+              "pattern": "^[a-z][A-Za-z0-9]*$",
+              "not": { "enum": ["view", "edit", "delete"] },
+              "description": "Required named action on the current record target, in addition to roles and scopes. The entity must declare it under authorization.rowAccess.recordPermissions.actions. Checked as a live read in the Operation's own transaction and, unlike recordPermission, satisfied without the record's view permission - so a verified application may invoke it without the record becoming readable. Combine with recordPermission to require both."
             },
             "anyAuthenticatedSession": {
               "const": true,

@@ -1,0 +1,248 @@
+# A record an external system is given a job on, without being given the
+# record. Repository-local: this layer exists so the local and end-to-end
+# stacks have an entity that opts into the named record-action axis; the
+# reusable compiler base ships no such entity, because the axis is opt-in and
+# a product decides for itself which of its records carry one.
+#
+# The design question this answers is the axis's own: a process engine must be
+# able to START a run and FOLLOW it, and must not be able to read the run's
+# business content, change it, or discover the other runs in the tenant. So:
+#
+#   - `start` admits an integration only, and declares the two fields a start
+#     actually needs. Core returns exactly those through the same owner-scoped
+#     lookup that authorized the action; everything else on the row, the ACL
+#     included, stays unreadable to the holder.
+#   - `follow` admits an integration AND a person, because following is also
+#     something a colleague does. It declares no reads: it authorizes an
+#     effect and discloses nothing.
+#   - view/edit/delete are unchanged and remain the people's. Holding `start`
+#     grants none of them, and holding `edit` grants no action — it only
+#     allows the ACL, and therefore the assignment, to be changed.
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: ExternalProcessRun
+title: External Process Run
+description: A unit of work an external process engine is allowed to start and follow.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: External process run
+  nl: Externe procesuitvoering
+pluralLabels:
+  en: External process runs
+  nl: Externe procesuitvoeringen
+domains:
+  - service
+authorization:
+  roles:
+    read:
+      - Organization.All.Read
+      - Organization.All.ReadWrite
+    create:
+      - Organization.All.ReadWrite
+    update:
+      - Organization.All.ReadWrite
+    delete:
+      - Organization.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: restricted
+    recordPermissions:
+      field: authorization
+      empty: restricted
+      createRequires:
+        - view
+        - edit
+      actions:
+        - name: start
+          labels:
+            en: Start
+            nl: Starten
+          principals: [integration]
+          reads: [definition, status]
+        # No labels: "follow" is already the word a reader needs in both
+        # languages this fixture ships, so the fallback to the action name is
+        # the honest answer rather than a translation for its own sake. The
+        # generated grant form therefore shows one labelled action and one
+        # fallback, which is what a deployment authored before labels existed
+        # looks like.
+        - name: follow
+          principals: [integration, person]
+fields:
+  - key: name
+    osfType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: definition
+    osfType: string
+    required: true
+    label:
+      en: Process definition
+      nl: Procesdefinitie
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: definition
+      storageClass: core
+  - key: status
+    osfType: string
+    required: true
+    defaultValue: ready
+    label:
+      en: Status
+      nl: Status
+    validation:
+      maxLength: 50
+    persisted:
+      column: status
+      storageClass: core
+  - key: notes
+    osfType: multilineText
+    required: false
+    label:
+      en: Notes
+      nl: Notities
+    validation:
+      maxLength: 4000
+    persisted:
+      column: notes
+      storageClass: core
+  - key: authorization
+    osfType: object
+    required: true
+    defaultValue: {}
+    label:
+      en: Authorization
+      nl: Autorisatie
+    persisted:
+      column: authorization
+      storageClass: core
+operations:
+  list:
+    name: List external process runs
+    description: List ExternalProcessRun records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get external process run
+    description: Get one ExternalProcessRun record.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create external process run
+    description: Create an ExternalProcessRun record.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update external process run
+    description: Update an ExternalProcessRun record.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete external process run
+    description: Delete an ExternalProcessRun record.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  web:
+    # A web surface, because the assignment surface's first-grant form points
+    # a reference picker at this entity: the picker resolves the target's own
+    # collection and display name, so an entity with no collection route has
+    # nothing for it to query. The compiler refuses such a reference, which is
+    # how this stayed honest rather than rendering an empty control.
+    views:
+      collection:
+        route:
+          en: /external-process-runs
+          nl: /externe-procesuitvoeringen
+        title:
+          en: External process runs
+          nl: Externe procesuitvoeringen
+        columns:
+          - key: name
+            sortable: true
+          - key: definition
+          - key: status
+            sortable: true
+      record:
+        routes:
+          read:
+            en: /external-process-runs/:id
+            nl: /externe-procesuitvoeringen/:id
+          create:
+            en: /external-process-runs/create
+            nl: /externe-procesuitvoeringen/aanmaken
+        title: "{{name}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - id: overview
+                  title:
+                    en: Process run
+                    nl: Procesuitvoering
+                  fields: [name, definition, status, notes]

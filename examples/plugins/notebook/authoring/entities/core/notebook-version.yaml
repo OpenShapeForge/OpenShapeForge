@@ -14,6 +14,12 @@ authorization:
     create: [Organization.All.ReadWrite]
     update: [Organization.All.ReadWrite]
     delete: [Organization.All.ReadWrite]
+  # Authored rather than derived: this entity declares no record action of its
+  # own, so nothing would have excluded applications from it. It stores the
+  # notebook's snapshotted body, so leaving its collection open to an API key
+  # would hand back through the version what Notebook's own policy withholds.
+  # A snapshot is only as closed as the record it snapshots.
+  principalClasses: [person, service, unknown]
 displayTemplate: "{{versionNumber}}"
 indexes:
   - { name: notebook_versions_tenant_number_uidx, fields: [tenantId, notebook, versionNumber], unique: true }

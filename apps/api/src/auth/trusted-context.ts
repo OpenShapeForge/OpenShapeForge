@@ -55,6 +55,48 @@ export type CapabilityGrantSession = {
   maxUses: number | null;
 };
 
+/**
+ * The application a request acts as, as the SERVER verified it.
+ *
+ * Set on exactly one path: an API-key session, from the integration row the
+ * presented credential resolved to (auth/api-key/resolve.ts). `integrationId`
+ * is `platform.api_key_integrations.id` — a tenant-bound surrogate key that
+ * outlives key rotation and is independent of the integration's mutable
+ * display name, so a policy naming it keeps its meaning when the credential
+ * is replaced and stops meaning anything once the integration is gone.
+ *
+ * Absent everywhere else, and that absence is load-bearing. A bearer token of
+ * the same integration's Keycloak service account, a trusted-context bundle,
+ * a capability grant and a control session all produce NO app principal and
+ * therefore satisfy no record action: an action grant is reachable only
+ * through the credential whose resolution named the integration. Nothing here
+ * is ever read from request input — not a header, not a claim, not a body.
+ *
+ * See docs/authoring.md ("record actions") for the policy this identifies in,
+ * and for the direct-bearer path this deliberately does not classify.
+ */
+export type VerifiedAppPrincipal = {
+  /** `platform.api_key_integrations.id`; tenant-bound and stable across keys. */
+  integrationId: string;
+  /**
+   * `platform.api_keys.id` of the credential that resolved THIS session.
+   *
+   * The integration above is stable across rotation on purpose, so it cannot
+   * answer whether the key in the caller's hand is still valid. This can: it
+   * is the row the store compared the presented secret against
+   * (auth/api-key/store.ts), carried so a record action can re-read that row
+   * — still unrevoked, still unexpired, its integration still active — inside
+   * its own transaction (db/migrations/record-actions.ts,
+   * `app.record_action_principal_live`).
+   *
+   * An identity, never a secret: the row's primary key, not the token, not
+   * its lookup id and not its hash. Required rather than optional so a
+   * carrier that produces an application principal cannot produce one the
+   * fence has to guess about, and it is never read from request input.
+   */
+  credentialId: string;
+};
+
 export type TrustedSessionContext = {
   tenantId: string | null;
   userId: string | null;
@@ -76,8 +118,19 @@ export type TrustedSessionContext = {
   roles: string[];
   /** Verified issuer-wide grants before mutable organization grants are added. */
   issuerRoles?: readonly string[];
-  /** Explicit bearer principal kind; absence never proves a service account. */
+  /**
+   * The principal class the SERVER established: the bearer path's own verdict
+   * about the token (`bearer-session.ts`), or the class the in-mesh hop signed
+   * into its trusted-context bundle. Absence never proves a service account
+   * and never stands in for a person — a control that needs a human refuses
+   * the absent case. Never caller input on any carrier.
+   */
   principalKind?: "person" | "service";
+  /**
+   * The verified application behind a machine session. Only the API-key
+   * carrier sets it; see {@link VerifiedAppPrincipal}.
+   */
+  appPrincipal?: VerifiedAppPrincipal;
   /** OAuth scopes from a verified bearer token; empty on non-bearer carriers. */
   oauthScopes?: string[];
   /**
@@ -149,15 +202,26 @@ export function readTrustedSessionContext(
   // token of the realm this deployment trusts; that realm is the identity's
   // issuer. Without one configured no identity can be named, and no link read.
   const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER?.trim();
+  // The principal class comes from the SIGNED payload or not at all: it is
+  // inside the HMAC (packages/auth, payload v3), so a caller cannot assert it
+  // and a hop that authenticated nobody cannot borrow it. An unsigned or
+  // tampered bundle reads as the empty identity, which carries none either,
+  // and a bundle from a producer that predates the class (payload v2, still
+  // accepted so a mid-upgrade deployment keeps working) reads as the identity
+  // it names with NO class — never as a person, whatever its headers claim.
   return {
     tenantId: base.tenantId,
     userId: base.userId,
     ...(issuer ? { issuer } : {}),
     roles: base.roles,
     groups: base.groups ?? [],
+    ...(base.principalKind ? { principalKind: base.principalKind } : {}),
     relationGroupIds: [],
     scope: "self",
     credential: "trusted-context",
+    // Deliberately no `appPrincipal`: a trusted-context bundle carries tenant,
+    // user, roles and groups, and no amount of signed header content may name
+    // an application principal. Record actions are an API-key-only capability.
   };
 }
 

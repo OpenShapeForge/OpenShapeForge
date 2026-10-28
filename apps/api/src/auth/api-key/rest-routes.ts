@@ -29,6 +29,27 @@ import {
 
 export const API_KEY_MOUNT = "/api/api-keys";
 
+/**
+ * Headers for the two responses on this mount that carry a live credential.
+ *
+ * `no-store` is the load-bearing one. The secret is returned exactly once and
+ * is not retrievable afterwards, so a shared cache, a proxy or a browser's
+ * back button holding the only copy is both a disclosure and the only place it
+ * still exists. `private` and the legacy `pragma` cover intermediaries that
+ * predate `no-store`.
+ */
+const ONE_TIME_CREDENTIAL_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+  "cache-control": "private, no-store, max-age=0",
+  pragma: "no-cache",
+});
+
+function mintedReply(reply: FastifyReply) {
+  for (const [name, value] of Object.entries(ONE_TIME_CREDENTIAL_HEADERS)) {
+    reply.header(name, value);
+  }
+  return reply.status(201);
+}
+
 export type ApiKeyRestOptions = {
   db?: OpenShapeForgeDatabase | undefined;
   config?: ApiKeyProvisioningConfig | undefined;
@@ -81,7 +102,10 @@ export function registerApiKeyRestRoutes(
   if (!db || !config) {
     app.log.info(
       "API key provisioning is not configured; /api/api-keys is not served. " +
-        "Set OPENSHAPEFORGE_API_KEY_SECRET_KEYS and the Keycloak admin variables to enable it.",
+        "Set OPENSHAPEFORGE_API_KEY_SECRET_KEYS and the Keycloak admin variables to " +
+        "enable it. A declared OPENSHAPEFORGE_API_KEY_MAX_TTL_DAYS or " +
+        "OPENSHAPEFORGE_API_KEY_DEFAULT_TTL_DAYS this build will not interpret " +
+        "disables it too, deliberately: see auth/api-key/lifetime.ts.",
     );
     return;
   }
@@ -91,6 +115,7 @@ export function registerApiKeyRestRoutes(
     keyring: config.keyring,
     admin: config.admin,
     entityRoleClientId: config.entityRoleClientId,
+    lifetime: config.lifetime,
   };
 
   /**
@@ -109,6 +134,9 @@ export function registerApiKeyRestRoutes(
       roles: resolved.roles,
       groups: resolved.groups,
       credential: resolved.credential,
+      // The ceiling reads this to refuse a non-person carrier; dropping it
+      // here would silently turn the control off for this transport.
+      ...(resolved.principalKind ? { principalKind: resolved.principalKind } : {}),
     };
   }
 
@@ -148,8 +176,9 @@ export function registerApiKeyRestRoutes(
           ...(expiresInDays === undefined ? {} : { expiresInDays }),
           ...(body.roleSubset === undefined ? {} : { roleSubset: asRoleSubset(body.roleSubset) }),
         });
-        // 201 with the token in the body, once. Never logged, never in a URL.
-        return reply.status(201).send(created);
+        // 201 with the token in the body, once. Never logged, never in a URL,
+        // and never stored by anything between here and the caller.
+        return mintedReply(reply).send(created);
       } catch (error) {
         return handleError(reply, error);
       }
@@ -166,7 +195,7 @@ export function registerApiKeyRestRoutes(
           ...(expiresInDays === undefined ? {} : { expiresInDays }),
           ...(body.roleSubset === undefined ? {} : { roleSubset: asRoleSubset(body.roleSubset) }),
         });
-        return reply.status(201).send(created);
+        return mintedReply(reply).send(created);
       } catch (error) {
         return handleError(reply, error);
       }

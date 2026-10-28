@@ -95,6 +95,18 @@ describe("module Operation catalog authoring", () => {
       ),
     ))).toThrow(/must NOT be valid|cannot claim entity CRUD action/);
   });
+
+  test("loads a cross-catalog Operation-backed entity relationship extension", () => {
+    const loaded = loadOperationCatalogs(authoringRoot(operation.replace(
+      "  mcp:\n    operations:\n      guide: { name: example_guide }",
+      `  mcp:\n    operations:\n      guide: { name: example_guide }\n  web:\n    pages:\n      example: { title: { en: Example, nl: Voorbeeld } }\n    operations:\n      guide: { page: example }\n    entityExtensions:\n      PlatformTenant:\n        related:\n          - entity: TenantSeedInstallation\n            label: { en: Seed installations, nl: Seed-installaties }\n            route: /tenants/:slug/seeds`,
+    )));
+    expect(loaded[0]!.document.interfaces.web?.entityExtensions?.PlatformTenant?.related[0]).toEqual({
+      entity: "TenantSeedInstallation",
+      label: { en: "Seed installations", nl: "Seed-installaties" },
+      route: "/tenants/:slug/seeds",
+    });
+  });
 });
 
 const controlCatalog = `

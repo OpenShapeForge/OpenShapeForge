@@ -34,6 +34,8 @@ export type ResolvedApiKey = {
   keycloakClientId: string;
   /** The integration's name: what its service account's identity is called. */
   displayName: string;
+  /** An integration explicitly configured without general roles. */
+  roleFree: boolean;
   clientSecret: StoredSecret;
 };
 
@@ -63,10 +65,16 @@ type IntegrationRow = {
   keycloak_client_id: string;
   display_name: string;
   status: string;
+  granted_roles: unknown;
   client_secret_ciphertext: string | null;
   client_secret_key_id: string | null;
   client_secret_algorithm: string | null;
 };
+
+/** Only an explicitly stored empty array opts into a role-free session. */
+export function isRoleFreeIntegration(value: unknown): boolean {
+  return Array.isArray(value) && value.length === 0;
+}
 
 /** A tenant no row belongs to, so a miss still opens the fenced session. */
 const DECOY_TENANT_ID = "00000000-0000-4000-8000-000000000000";
@@ -140,7 +148,7 @@ export async function resolveApiKey(
 
   const integration = await withCredentialResolutionSession(db, row.tenant_id, async (trx) => {
     const result = await sql<IntegrationRow>`
-      select keycloak_client_id, display_name, status,
+      select keycloak_client_id, display_name, status, granted_roles,
              client_secret_ciphertext, client_secret_key_id, client_secret_algorithm
         from platform.api_key_integrations
        where id = ${row.integration_id}
@@ -170,6 +178,7 @@ export async function resolveApiKey(
       roleSubset: parseRoleSubset(row.role_subset),
       keycloakClientId: integration.keycloak_client_id,
       displayName: integration.display_name,
+      roleFree: isRoleFreeIntegration(integration.granted_roles),
       clientSecret: {
         ciphertext: integration.client_secret_ciphertext,
         keyId: integration.client_secret_key_id,
@@ -188,6 +197,16 @@ export async function resolveApiKey(
  *
  * Deliberately fire-and-forget at the call site: a telemetry write must never
  * fail an authenticated request, and the row is not read on the hot path.
+ *
+ * `skip locked` is what keeps that promise now that a record action holds a
+ * SHARE lock on this row for as long as its effect runs
+ * (db/migrations/record-actions.ts). Without it, every request presenting a
+ * key whose own long-running Operation is still in flight would park this
+ * statement on that lock until the statement timeout, holding a pool
+ * connection for a write nothing reads synchronously. Skipping loses one
+ * `last_used_at` tick — and, on a key's very first use inside such a window,
+ * defers `first_used_at` to its next use. Both are acceptable for a
+ * retirement signal; blocking authentication behind telemetry is not.
  */
 export async function recordApiKeyUse(
   db: OpenShapeForgeDatabase,
@@ -199,7 +218,11 @@ export async function recordApiKeyUse(
       update platform.api_keys
          set first_used_at = coalesce(first_used_at, ${now}),
              last_used_at = ${now}
-       where id = ${key.keyId}
+       where id = (
+         select k.id from platform.api_keys k
+          where k.id = ${key.keyId}
+          for no key update skip locked
+       )
     `.execute(trx);
   });
 }

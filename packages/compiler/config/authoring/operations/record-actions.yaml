@@ -1,0 +1,153 @@
+# Delegating a NAMED RECORD ACTION, as the one canonical Operation that may.
+#
+# The record ACL has two axes (docs/authoring.md). Rewriting view/edit/delete
+# hands a person the access the record's own editor already has, and the
+# record's `edit` permission is the authority for it — that stays an ordinary
+# entity update. The named actions are different: granting one can hand a
+# tenant's INTEGRATION the right to invoke an Operation on this record without
+# the record ever becoming readable, and a record editor holds no integration
+# management right. So the axis has exactly one writer, this Operation, and
+# every ordinary write path refuses to change it
+# (operations/entity/record-permissions.ts).
+#
+# It is a DELTA on purpose. A replace would make two administrators working on
+# the same record lose each other's grants, and would turn a stale read into a
+# silent revocation; a delta applied under the record's ACL-row lock has
+# neither failure. Nothing is restated here: the handler authorizes the
+# entity's own update roles, the record's `edit` permission, the verified
+# principal class and — for an application subject — the existing
+# `Platform.ApiKeys.Manage` right that provisioning the integration took.
+# The session gate is deliberately open for the same reason the edit-lease
+# catalog's is: the referenced entity decides, per call.
+schemaVersion: 1
+kind: operationCatalog
+plugin: osf-record-actions
+operations:
+  delegate:
+    id: entity.record-action.delegate
+    name:
+      en: Delegate a record action
+      nl: Een recordactie delegeren
+    description:
+      en: >-
+        Grants or withdraws one named action on one record, for the people and applications named in the call. The
+        entity must declare the action, the caller must hold the entity's update roles and the record's edit
+        permission, and naming an application additionally requires the API key management role — an integration the
+        caller names must exist, be active and belong to this tenant. Applied as a delta under the record's ACL-row
+        lock, so concurrent delegations do not overwrite one another and a stale read does not revoke anything.
+        An api-key session may never delegate, and the three record permissions are not reachable here.
+      nl: >-
+        Kent één benoemde actie op één record toe of trekt die in, voor de personen en applicaties die in de aanroep
+        worden genoemd. De entiteit moet de actie declareren, de aanroeper heeft de updaterollen van de entiteit en
+        het edit-recht op het record nodig, en voor een applicatie geldt daarnaast de beheerrol voor API-sleutels.
+        Toegepast als delta onder de ACL-rijvergrendeling van het record.
+    implementation:
+      type: plugin
+      plugin: osf-record-actions
+      handler: delegateRecordAction
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [entity, recordId, action]
+        properties:
+          entity:
+            description: >-
+              The authored entity name the record belongs to. Only an entity that declares this action under
+              authorization.rowAccess.recordPermissions.actions can be named.
+            type: string
+            pattern: "^[A-Z][A-Za-z0-9]*$"
+            maxLength: 100
+          recordId: { type: string, format: uuid }
+          action:
+            description: The declared action name. Never view, edit or delete — those are the record permissions.
+            type: string
+            pattern: "^[a-z][A-Za-z0-9]*$"
+            maxLength: 100
+          grant:
+            description: Subjects to add. Each kind must be one the entity's declaration admits for this action.
+            type: object
+            additionalProperties: false
+            minProperties: 1
+            properties:
+              users: { type: array, maxItems: 100, items: { type: string, format: uuid } }
+              groups: { type: array, maxItems: 100, items: { type: string, format: uuid } }
+              roles: { type: array, maxItems: 100, items: { type: string, minLength: 1, maxLength: 200 } }
+              integrations: { type: array, maxItems: 100, items: { type: string, format: uuid } }
+          revoke:
+            description: >-
+              Subjects to remove. A subject that is not currently named is not an error; the result reports what the
+              record ends up with.
+            type: object
+            additionalProperties: false
+            minProperties: 1
+            properties:
+              users: { type: array, maxItems: 100, items: { type: string, format: uuid } }
+              groups: { type: array, maxItems: 100, items: { type: string, format: uuid } }
+              roles: { type: array, maxItems: 100, items: { type: string, minLength: 1, maxLength: 200 } }
+              integrations: { type: array, maxItems: 100, items: { type: string, format: uuid } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [entity, recordId, action, subjects, changed]
+        properties:
+          entity: { type: string }
+          recordId: { type: string, format: uuid }
+          action: { type: string }
+          changed:
+            description: False when the record already held exactly these subjects; nothing was written.
+            type: boolean
+          subjects:
+            description: The action's complete subject set after the delta, canonically ordered.
+            type: object
+            additionalProperties: false
+            required: [users, groups, roles, integrations]
+            properties:
+              users: { type: array, items: { type: string, format: uuid } }
+              groups: { type: array, items: { type: string, format: uuid } }
+              roles: { type: array, items: { type: string } }
+              integrations: { type: array, items: { type: string, format: uuid } }
+    auth:
+      mode: session
+      anyAuthenticatedSession: true
+    tenancy:
+      mode: required
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        # Naturally idempotent: the same delta applied twice leaves the same
+        # subject set and reports `changed: false` the second time.
+        mode: natural
+    confirmation:
+      mode: none
+    errors:
+      - status: 400
+        code: BAD_USER_INPUT
+        description: The entity, record id or action is missing or malformed, or the call grants and revokes nothing.
+      - status: 400
+        code: VALIDATION
+        description: A named subject kind is not one this action admits, or an application id is not an integration id.
+      - status: 401
+        code: UNAUTHENTICATED
+        description: The call carries no authenticated tenant session.
+      - status: 403
+        code: FORBIDDEN
+        description: >-
+          The caller lacks the entity's update role, the record's edit permission, the API key management role for an
+          application subject, or is not a verified person session.
+      - status: 404
+        code: NOT_FOUND
+        description: The record, or an integration named in the call, does not exist in this tenant.
+      - status: 404
+        code: GENERATED_CRUD_NOT_ENABLED
+        description: The named entity is not part of this deployment's compiled catalog.
+interfaces:
+  rest:
+    operations:
+      delegate:
+        method: POST
+        path: /api/entity-record-actions/delegate
+        response: { status: 200, kind: json }

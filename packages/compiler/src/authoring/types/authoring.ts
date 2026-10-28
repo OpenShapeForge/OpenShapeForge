@@ -512,8 +512,9 @@ export interface OperationCatalogWebOperation {
 }
 
 export interface OperationCatalogWebInterface {
-  pages: Record<string, OperationCatalogWebPage>;
-  operations: Record<string, OperationCatalogWebOperation>;
+  /** Standalone pages; absent for a catalog that only projects entities. */
+  pages?: Record<string, OperationCatalogWebPage> | undefined;
+  operations?: Record<string, OperationCatalogWebOperation> | undefined;
   /** Provider-backed resources that use normal entity collection/detail views. */
   entities?: Record<string, {
     title: LocalizedText;
@@ -531,6 +532,10 @@ export interface OperationCatalogWebInterface {
       recordActions?: Array<string | { operation: string; visibleWhen?: VisibilityConfig }>;
     };
     related?: Array<{ entity: string; label: LocalizedText; route: string }>;
+  }>;
+  /** Add relationships to an Operation-backed entity owned by another catalog. */
+  entityExtensions?: Record<string, {
+    related: Array<{ entity: string; label: LocalizedText; route: string }>;
   }>;
 }
 

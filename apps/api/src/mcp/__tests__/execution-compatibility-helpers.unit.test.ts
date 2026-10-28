@@ -109,7 +109,10 @@ async function withServer<T>(roles: string[], run: (client: Client, server: Retu
     modules: [accountsRuntime,
       documentsPluginRuntime as unknown as RuntimeModule,
       versioningPluginRuntime as unknown as RuntimeModule,
-      { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }) } },
+      { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }),
+      // The entity now carries a second canonical Operation; a module that
+      // supplies any handler must supply all of them.
+      deliverToNotebook: () => { throw new Error("This test does not exercise Notebook.deliver."); } } },
     ],
     modulePlatform: platform,
     operationToolProjection: { mode: "searchable", search: "osf_search_operations", execute: "osf_execute_operation" },

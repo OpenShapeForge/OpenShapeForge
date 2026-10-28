@@ -20,12 +20,80 @@
  * authorization — which is why it exists here rather than only in a host.
  */
 import type { CompilerPlugin } from "../../../packages/compiler/src/plugins.js";
+import type { TableDefinition } from "../../../packages/compiler/src/schema.js";
 
 /** The roles that may write a notebook, as the entity itself declares them. */
 const NOTEBOOK_WRITER_ROLES = ["Organization.All.ReadWrite"] as const;
 
+/**
+ * The plugin's own linked table: one row per accepted external delivery.
+ *
+ * It belongs to the plugin, not to an entity. It has no generated CRUD, no
+ * authoring entity and therefore no ACL of its own — which is the shape the
+ * record-action axis has to be able to serve. The rows are children of a
+ * Notebook, and what may reach them is decided by asking core whether the
+ * session holds `deliver` on that notebook (`platform.records.holdsAction`),
+ * in the same transaction and under the same ACL-row lock as the write. There
+ * is no second copy of the policy here and no reading of the ACL.
+ *
+ * `tenantScoped` gives it the tenant policy every contributed table gets, so
+ * the axis narrows WITHIN a tenant and never substitutes for the boundary.
+ *
+ * The unique index is the replay fence, and its columns are the point: the
+ * reference is unique per INTEGRATION, which is the stable server-verified
+ * principal, and not per key and not per anything the caller chose to call
+ * itself. Two concurrent deliveries of one reference therefore collide in the
+ * database rather than both committing, across every notebook the
+ * integration can reach.
+ */
+function deliveryTable(): TableDefinition {
+  return {
+    schema: "notebook",
+    name: "notebook_deliveries",
+    tenantScoped: true,
+    columns: [
+      { name: "id", type: "uuid", primaryKey: true, required: true, default: "gen_random_uuid()" },
+      { name: "tenant_id", type: "uuid", required: true },
+      {
+        name: "notebook_id",
+        type: "uuid",
+        required: true,
+        references: {
+          schema: "notebook",
+          table: "notebooks",
+          column: "id",
+          onDelete: "CASCADE",
+          localColumns: ["tenant_id", "notebook_id"],
+          targetColumns: ["tenant_id", "id"],
+        },
+      },
+      // The verified integration the host resolved, never a key id and never
+      // request input. Deleting the integration leaves the history readable
+      // and the id meaningless, which is the right end state for provenance.
+      { name: "integration_id", type: "uuid", required: true },
+      { name: "reference", type: "text", required: true },
+      // The notebook's name as the action's read projection returned it at
+      // the moment the delivery was accepted.
+      { name: "notebook_name", type: "text", required: true },
+      { name: "created_at", type: "timestamptz", required: true, default: "now()" },
+    ],
+    indexes: [
+      {
+        name: "notebook_deliveries_principal_reference_uidx",
+        columns: ["tenant_id", "integration_id", "reference"],
+        unique: true,
+      },
+      {
+        name: "notebook_deliveries_notebook_idx",
+        columns: ["tenant_id", "notebook_id", "integration_id"],
+      },
+    ],
+  };
+}
+
 const plugin: CompilerPlugin = {
   name: "notebook",
+  contributePlatformTables: () => [deliveryTable()],
   operations: [
     {
       key: "notebook.import",

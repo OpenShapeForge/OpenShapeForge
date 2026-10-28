@@ -8,9 +8,11 @@ import {
   type CeilingSession,
 } from "./ceiling.js";
 
+/** A verified human administrator: the one carrier this surface is built for. */
 const admin = (roles: string[] = []): CeilingSession => ({
   roles: [API_KEY_MANAGE_ROLE, ...roles],
   credential: "bearer",
+  principalKind: "person",
 });
 
 describe("assertMayGrantRoles", () => {
@@ -44,7 +46,7 @@ describe("assertMayGrantRoles", () => {
   test("refuses a caller without the management role", () => {
     expect(() =>
       assertMayGrantRoles(
-        { roles: ["Finance.All.ReadWrite"], credential: "bearer" },
+        { roles: ["Finance.All.ReadWrite"], credential: "bearer", principalKind: "person" },
         ["Finance.All.ReadWrite"],
       ),
     ).toThrow(/Not authorized to manage API keys/);
@@ -65,6 +67,86 @@ describe("assertMayGrantRoles", () => {
     expect(() => assertMayGrantRoles({ roles: [], credential: "none" }, [])).toThrow(
       ApiKeyAuthorizationError,
     );
+  });
+
+  /**
+   * The carrier rule, stated as the matrix it is. Every one of these holds the
+   * management role AND every requested role, so the only thing under test is
+   * who is carrying the session — which is what makes a regression here
+   * visible rather than hidden behind a role failure.
+   */
+  describe("carrier", () => {
+    const everything = [API_KEY_MANAGE_ROLE, "Finance.All.ReadWrite"];
+    const carry = (session: CeilingSession) =>
+      () => assertMayGrantRoles(session, ["Finance.All.ReadWrite"]);
+
+    test("admits a verified person", () => {
+      expect(carry({ roles: everything, credential: "bearer", principalKind: "person" })).not.toThrow();
+    });
+
+    test("admits the deployment's own signed in-mesh hop carrying a person", () => {
+      // apps/web's token-less fallback, with the principal class the signer
+      // established inside the bundle's HMAC (packages/auth, payload v3).
+      expect(carry({ roles: everything, credential: "trusted-context", principalKind: "person" }))
+        .not.toThrow();
+    });
+
+    test("refuses an in-mesh hop that established no principal class", () => {
+      // Holding the mesh secret is not the same as having authenticated a
+      // human. A health probe, a fixture or a service-to-service hop signs
+      // no class, and every one of them is refused here — this is the gap
+      // the v3 payload closes.
+      expect(carry({ roles: everything, credential: "trusted-context" }))
+        .toThrow(/Only a verified person may manage API keys/);
+      expect(carry({ roles: everything, credential: "trusted-context", principalKind: "service" }))
+        .toThrow(/Only a verified person may manage API keys/);
+    });
+
+    test("refuses a verified service principal holding every role", () => {
+      // The hole this closes: a Keycloak service account with
+      // Platform.ApiKeys.Manage could mint keys for itself and climb.
+      expect(carry({ roles: everything, credential: "bearer", principalKind: "service" }))
+        .toThrow(/Only a verified person may manage API keys/);
+    });
+
+    test("refuses a bearer whose principal the verifier could not name", () => {
+      // principalKind absent is an UNKNOWN principal, not a person: the
+      // bearer path sets "person" whenever it proved one, so absence here is
+      // exactly the case that must fail closed.
+      expect(carry({ roles: everything, credential: "bearer" }))
+        .toThrow(/Only a verified person may manage API keys/);
+    });
+
+    test("refuses a platform operator and a capability grant", () => {
+      // A control-realm operator is not a tenant session, and a grant covers
+      // only the Operations it names — neither is key management.
+      expect(carry({ roles: everything, credential: "control-bearer" }))
+        .toThrow(/Only a verified person may manage API keys/);
+      expect(carry({ roles: everything, credential: "grant" }))
+        .toThrow(/Only a verified person may manage API keys/);
+    });
+
+    test("names the API key ladder specifically, and roles never at all", () => {
+      try {
+        assertMayGrantRoles(
+          { roles: everything, credential: "api-key" },
+          ["Finance.All.ReadWrite"],
+        );
+        throw new Error("expected a throw");
+      } catch (error) {
+        expect((error as Error).message).toMatch(/API keys cannot manage API keys/);
+      }
+      // A refused carrier must not learn that roles were consulted at all.
+      for (const credential of ["api-key", "bearer", "control-bearer", "grant", "none"] as const) {
+        try {
+          assertMayGrantRoles({ roles: [], credential }, ["Unheld.Role"]);
+          throw new Error("expected a throw");
+        } catch (error) {
+          expect((error as Error).message).not.toContain("Unheld.Role");
+          expect((error as Error).message).not.toContain("Not authorized");
+        }
+      }
+    });
   });
 
   test("does not leak the caller's own roles in the message", () => {
@@ -91,7 +173,7 @@ describe("assertMayManageApiKeys", () => {
   test("permits a manager and refuses everyone else", () => {
     expect(() => assertMayManageApiKeys(admin())).not.toThrow();
     expect(() =>
-      assertMayManageApiKeys({ roles: [], credential: "bearer" }),
+      assertMayManageApiKeys({ roles: [], credential: "bearer", principalKind: "person" }),
     ).toThrow(ApiKeyAuthorizationError);
     expect(() =>
       assertMayManageApiKeys({ roles: [API_KEY_MANAGE_ROLE], credential: "api-key" }),

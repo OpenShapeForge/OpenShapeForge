@@ -329,6 +329,120 @@ describe("resolveAuthoringLayers", () => {
     }
   });
 
+  test("entity patches cannot weaken or drop a declared record action", () => {
+    // The base declares one action, for applications only, reading one field
+    // and taking the deadlock-safe lock. Each patch below relaxes exactly one
+    // of those four, and a relaxation is what a later layer may never do:
+    // every grant already stored under the name, and every Operation
+    // requiring it, was written against the first author's declaration.
+    const actionEntity = {
+      ...securedEntity,
+      authorization: {
+        ...securedEntity.authorization,
+        rowAccess: {
+          ...securedEntity.authorization.rowAccess,
+          recordPermissions: {
+            ...securedEntity.authorization.rowAccess.recordPermissions,
+            actions: [{ name: "start", principals: ["integration"], reads: ["name"] }],
+          },
+        },
+      },
+    };
+    for (const [patch, error] of [
+      [
+        { actions: [{ name: "start", principals: ["integration"], reads: ["name"], lock: "shared" }] },
+        /weakens authorization\.rowAccess\.recordPermissions\.actions\.start\.lock from exclusive to shared/,
+      ],
+      [
+        { actions: [{ name: "start", principals: ["integration", "person"], reads: ["name"] }] },
+        /actions\.start\.principals/,
+      ],
+      [
+        { actions: [{ name: "start", principals: ["integration"], reads: ["name", "notes"] }] },
+        /actions\.start\.reads/,
+      ],
+      [
+        { actions: [{ name: "follow", principals: ["integration"] }] },
+        /removes authorization\.rowAccess\.recordPermissions\.actions\.start/,
+      ],
+    ] as const) {
+      const root = makeRepo();
+      writeYaml(root, "base/entities/core/widget.yaml", actionEntity);
+      writeYaml(root, "overlay/entities/core/widget.yaml", {
+        kind: "entityPatch",
+        authorization: { rowAccess: { recordPermissions: patch } },
+      });
+      configureLayers(root, ["base", "overlay"]);
+      expect(() => resolveAuthoringLayers(root)).toThrow(error);
+    }
+  });
+
+  test("an entity patch may tighten a declared record action", () => {
+    const actionEntity = {
+      ...securedEntity,
+      authorization: {
+        ...securedEntity.authorization,
+        rowAccess: {
+          ...securedEntity.authorization.rowAccess,
+          recordPermissions: {
+            ...securedEntity.authorization.rowAccess.recordPermissions,
+            actions: [{ name: "start", principals: ["integration", "person"], lock: "shared" }],
+          },
+        },
+      },
+    };
+    const root = makeRepo();
+    writeYaml(root, "base/entities/core/widget.yaml", actionEntity);
+    writeYaml(root, "overlay/entities/core/widget.yaml", {
+      kind: "entityPatch",
+      authorization: {
+        rowAccess: {
+          recordPermissions: {
+            actions: [{ name: "start", principals: ["integration"], lock: "exclusive" }],
+          },
+        },
+      },
+    });
+    configureLayers(root, ["base", "overlay"]);
+    const resolved = resolveAuthoringLayers(root);
+    const merged = YAML.parse(readFileSync(join(resolved, "entities/core/widget.yaml"), "utf8"));
+    expect(merged.authorization.rowAccess.recordPermissions.actions).toEqual([
+      { name: "start", principals: ["integration"], lock: "exclusive" },
+    ]);
+  });
+
+  test("entity patches cannot re-open a principal class an earlier layer closed", () => {
+    const closed = {
+      ...securedEntity,
+      authorization: {
+        ...securedEntity.authorization,
+        principalClasses: ["person", "service"],
+      },
+    };
+    const root = makeRepo();
+    writeYaml(root, "base/entities/core/widget.yaml", closed);
+    writeYaml(root, "overlay/entities/core/widget.yaml", {
+      kind: "entityPatch",
+      authorization: { principalClasses: ["person", "service", "application"] },
+    });
+    configureLayers(root, ["base", "overlay"]);
+    expect(() => resolveAuthoringLayers(root))
+      .toThrow(/widens authorization\.principalClasses/);
+
+    // Closing further is allowed, and so is a first declaration in a later
+    // layer: an absent list already admitted every class.
+    const tightened = makeRepo();
+    writeYaml(tightened, "base/entities/core/widget.yaml", closed);
+    writeYaml(tightened, "overlay/entities/core/widget.yaml", {
+      kind: "entityPatch",
+      authorization: { principalClasses: ["person"] },
+    });
+    configureLayers(tightened, ["base", "overlay"]);
+    const resolved = resolveAuthoringLayers(tightened);
+    const merged = YAML.parse(readFileSync(join(resolved, "entities/core/widget.yaml"), "utf8"));
+    expect(merged.authorization.principalClasses).toEqual(["person"]);
+  });
+
   test("entity patches cannot revive interfaces or widen worker and field write controls", () => {
     for (const [patch, error] of [
       [

@@ -14,20 +14,36 @@
  */
 import { keyringFromEnv, type SecretKeyring } from "../../platform/secrets.js";
 import { KeycloakAdmin } from "./keycloak-admin.js";
+import {
+  readCredentialLifetimePolicy,
+  type CredentialLifetimePolicy,
+} from "./lifetime.js";
 
 export type ApiKeyProvisioningConfig = {
   keyring: SecretKeyring;
   admin: KeycloakAdmin;
   entityRoleClientId: string;
+  /**
+   * How long this deployment lets a minted credential live (lifetime.ts).
+   * Part of the configuration rather than read at each call site so every
+   * minting surface resolves exactly one rule, and so a value the deployment
+   * declared but this build will not interpret disables provisioning here —
+   * with the keyring and the realm settings — instead of surfacing as a
+   * failure on whichever request happens to mint first.
+   */
+  lifetime: CredentialLifetimePolicy;
 };
 
 export type ApiKeyEnv = {
   OPENSHAPEFORGE_API_KEY_SECRET_KEYS?: string | undefined;
+  OPENSHAPEFORGE_API_KEY_MAX_TTL_DAYS?: string | undefined;
+  OPENSHAPEFORGE_API_KEY_DEFAULT_TTL_DAYS?: string | undefined;
   OPENSHAPEFORGE_KEYCLOAK_BASE_URL?: string | undefined;
   OPENSHAPEFORGE_KEYCLOAK_REALM?: string | undefined;
   OPENSHAPEFORGE_KEYCLOAK_ADMIN_CLIENT_ID?: string | undefined;
   OPENSHAPEFORGE_KEYCLOAK_ADMIN_CLIENT_SECRET?: string | undefined;
   OPENSHAPEFORGE_API_KEY_ROLE_CLIENT_ID?: string | undefined;
+  OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE?: string | undefined;
 };
 
 /** Returns undefined when provisioning is not configured. Never throws. */
@@ -46,13 +62,17 @@ export function readApiKeyProvisioningConfig(
   const clientId = env.OPENSHAPEFORGE_KEYCLOAK_ADMIN_CLIENT_ID?.trim();
   const clientSecret = env.OPENSHAPEFORGE_KEYCLOAK_ADMIN_CLIENT_SECRET?.trim();
 
-  if (!keyring || !baseUrl || !realm || !clientId || !clientSecret) {
+  const lifetime = readCredentialLifetimePolicy(env);
+
+  if (!keyring || !baseUrl || !realm || !clientId || !clientSecret || !lifetime) {
     return undefined;
   }
 
   return {
     keyring,
-    admin: new KeycloakAdmin({ baseUrl, realm, clientId, clientSecret }),
+    admin: new KeycloakAdmin({ baseUrl, realm, clientId, clientSecret,
+      apiAudience: env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE?.trim() || undefined }),
+    lifetime,
     // The client entity roles live on. Defaults to the shipped realm's
     // entityRoleClient so a standard deployment needs no extra variable.
     entityRoleClientId: env.OPENSHAPEFORGE_API_KEY_ROLE_CLIENT_ID?.trim() || "erp-provider",

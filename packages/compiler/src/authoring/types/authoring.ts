@@ -520,6 +520,8 @@ export interface OperationCatalogWebInterface {
     title: LocalizedText;
     route: string;
     recordRoute?: string;
+    /** Existing record layout; Operation entities currently support one tab of field groups. */
+    recordLayout?: EntityWebRecordLayout;
     idField: string;
     displayField: string;
     fields: string[];

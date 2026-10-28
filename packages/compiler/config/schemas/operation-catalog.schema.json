@@ -166,6 +166,7 @@
                   "title": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
                   "route": { "type": "string", "pattern": "^/[a-z][a-zA-Z0-9_/:.-]*$" },
                   "recordRoute": { "type": "string", "pattern": "^/[a-z][a-zA-Z0-9_/:.-]*$" },
+                  "recordLayout": { "$ref": "core-entity.schema.json#/$defs/webViewsV2/properties/record/properties/layout" },
                   "idField": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
                   "displayField": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
                   "fields": {

@@ -1545,6 +1545,22 @@ describe("standalone Operation pages", () => {
     const scopedQuery = buildWebManifest([], {}, standalone(scoped)).entities.Tenant!.operationSource!.collection.query!;
     expect(scopedQuery.input.filterFields).toEqual(["name", "status"]);
 
+    const custom = structuredClone(operationEntities);
+    custom.interfaces.web!.entities!.Tenant!.recordLayout = {
+      preset: "main-context", tabs: [{ id: "overview", label: text("Overview", "Overzicht"), groups: [
+        { id: "summary", title: text("Summary", "Samenvatting"), fields: ["name", "status"] },
+      ] }],
+    };
+    const arranged = buildWebManifest([], {}, standalone(custom)).entities.Tenant!;
+    expect(arranged.views.record).toMatchObject({ preset: "main-context", layout: { tabs: [{ id: "overview", label: text("Overview", "Overzicht"), groups: [{ id: "summary", fields: ["name", "status"] }] }] } });
+    expect(arranged.operationSource).toEqual(manifest.entities.Tenant!.operationSource);
+    expect(arranged.views.record!.operations).toEqual(manifest.entities.Tenant!.views.record!.operations);
+    custom.interfaces.web!.entities!.Tenant!.recordLayout!.tabs.push({ id: "extra", groups: [{ id: "other", fields: ["slug"] }] });
+    expect(() => buildWebManifest([], {}, standalone(custom))).toThrow(/exactly one content tab/);
+    custom.interfaces.web!.entities!.Tenant!.recordLayout!.tabs.pop();
+    custom.interfaces.web!.entities!.Tenant!.recordLayout!.workspaceTabs = false;
+    expect(() => buildWebManifest([], {}, standalone(custom))).toThrow(/workspaceTabs/);
+
     const canonicalTenant = entity("Tenant", "tenant", [field("name")], coreView());
     const composed = buildWebManifest([canonicalTenant], {}, standalone(operationEntities));
     expect(composed.entities.Tenant?.operationSource).toBeUndefined();
@@ -1765,10 +1781,16 @@ describe("standalone Operation pages", () => {
 
   test("projects operation-backed references from authored result types, preserving the target read policy", () => {
     const catalog = parse(readFileSync(join(authoringDir, "operations/api-key-integrations.yaml"), "utf8")) as OperationCatalogDefinition;
-    catalog.interfaces.web!.entities!.ApiKeyIntegration!.related = [];
+    catalog.interfaces.web!.entities!.ApiKeyIntegration!.related = catalog.interfaces.web!.entities!.ApiKeyIntegration!.related!.filter((item) => item.entity === "ApiKeyCredential");
     const manifest = buildWebManifest([], {}, standalone(catalog));
     const credential = manifest.entities.ApiKeyCredential!;
     const integration = manifest.entities.ApiKeyIntegration!;
+    expect(credential.views.record).toMatchObject({ preset: "main-context", layout: { tabs: [{ id: "overview", groups: [
+      { id: "details", fields: ["displayName", "status", "integrationId"] },
+      { id: "validity", fields: ["createdAt", "expiresAt", "lastUsedAt", "revokedAt", "roleSubset"] },
+    ] }] } });
+    expect(integration.operationSource!.related).toMatchObject([{ entityId: "ApiKeyCredential", route: "/api-key-integrations/:integrationId/credentials" }]);
+    expect(integration.views.record!.preset).toBe("inbox-main-context");
     expect(credential.fields.integrationId).toMatchObject({ osfType: "ApiKeyIntegration", relationship: { targetEntityId: "ApiKeyIntegration" } });
     expect(credential.relationships.integrationId).toMatchObject({ kind: "belongsTo", recordField: "integrationId", targetEntityId: "ApiKeyIntegration", operations: { get: integration.views.record!.operations.read } });
     expect(integration.operationSource!.record!.bindings).toEqual({ integrationId: "integrationId" });

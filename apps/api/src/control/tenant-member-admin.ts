@@ -248,18 +248,21 @@ export async function changeTenantMemberRoles(deps: Dependencies, slug: string, 
     // Linked rows only, like canonical Account role Operations: roles on an unconfirmed link
     // would be honoured the moment the person confirms a Relation nobody
     // verified is theirs.
-    if (!(await writeMembershipRoles(trx, tenant.id, membership.identity_id, next))) throw memberLinkPending(member.candidateRelationName);
+    if (!(await writeMembershipRoles(trx, tenant.id, membership.identity_id, next))) throw memberLinkPending(member.candidateRelationName, membership.candidate_relation_id !== null);
     afterCommit(() => invalidateIdentityLink(membership.issuer, membership.subject, tenant.id));
     return { tenantSlug: slug, memberId, roles: [...next].sort(), action: mode === "assign" ? "assigned" : "removed" };
   });
 }
 
-function memberLinkPending(candidate: string | null): ControlOperationError {
+function memberLinkPending(candidate: string | null, recordedCandidate: boolean): ControlOperationError {
   const refusal = "The member's sign-in is not linked to a Relation in this tenant yet, so no roles can be written. ";
   return candidate
     ? new ControlOperationError(409, "MEMBER_LINK_PENDING", "MEMBER_LINK_PENDING", refusal +
         `The current verified email matches candidate Relation "${candidate}"; confirm the link first, then assign roles.`)
-    : new ControlOperationError(409, "MEMBER_NOT_LINKED", "MEMBER_NOT_LINKED", refusal +
+    : recordedCandidate
+      ? new ControlOperationError(409, "MEMBER_LINK_PENDING", "MEMBER_LINK_PENDING", refusal +
+        "The recorded candidate no longer uniquely matches the member's verified email. An organization administrator must review and link the correct Relation explicitly (link_identity).")
+      : new ControlOperationError(409, "MEMBER_NOT_LINKED", "MEMBER_NOT_LINKED", refusal +
         "Their sign-in matched no Relation to confirm; an organization administrator of the tenant links them to their Relation first (link_identity).");
 }
 

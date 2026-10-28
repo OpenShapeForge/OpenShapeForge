@@ -409,3 +409,16 @@ test("it refuses to grant anything on a table whose row security is not forced",
     }
   });
 }, TEST_TIMEOUT);
+
+
+test("a PUBLIC schema create grant is refused rather than silently left reachable", async () => {
+  await migrate.db.connection().execute(async (conn) => {
+    await sql`grant create on schema app to public`.execute(conn);
+    try {
+      await expect(applyRecordActionsMigration(conn, [])).rejects.toThrow(/still has CREATE on schema app/);
+    } finally {
+      await sql`revoke create on schema app from public`.execute(conn);
+    }
+    await applyRecordActionsMigration(conn, []);
+  });
+}, TEST_TIMEOUT);

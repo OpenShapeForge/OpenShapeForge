@@ -185,10 +185,23 @@ reaches the definer role through it: with `grant <definer> to <owner>` and
 record action — while a direct scan of `pg_auth_members` shows it as a member
 of nothing. So the check walks outwards from each definer role transitively,
 through the admitted roles as well, and reports every role on a path that is
-neither of the two, with the chain it travels and the one `revoke` closest to
-it that cuts the path. Superusers are not reported — they are outside row
-security and every privilege check regardless — but the walk still passes
-*through* them.
+neither of the two, with the chain it travels and the `revoke` that cuts that
+route. Superusers are not reported — they are outside row security and every
+privilege check regardless — but the walk still passes *through* them.
+
+One role can reach a definer role by **several routes**, and a `revoke` cuts
+exactly one of them: the first hop of the route it is read off. Granted both
+admitted roles — `grant <owner> to <third>` and `grant <migrate> to <third>` —
+that third role is there twice over, and following one printed remedy would
+leave the other route live. So the refusal names one route per distinct first
+hop out of the reported role, each with its own `revoke`, and says that every
+statement has to be run. Running all of them removes every edge by which a
+reported role reaches a definer role; it is not an iterative hunt. The walk
+stops at 16 hops, which bounds its work on a grant lattice an administrator
+built and is not a way past the check: the nearest reported role on a longer
+chain fails it and carries the `revoke` that cuts the chain, so hiding behind
+the bound means 16 *admitted* hops — 16 superusers, since the migrate identity
+and the database owner are one role each.
 
 No membership option makes an edge safe, so the walk does not look at them.
 `INHERIT` hands over the definer role's privileges and the ownership of its
@@ -206,6 +219,12 @@ grant carrying neither option passes it whenever a third role supplies the
 privilege. One `(role, member)` pair may carry several grants from different
 grantors — a `createrole_self_grant` edge beside the host's, for instance — and
 holding one that carries both options satisfies the contract.
+
+Both options are read from `pg_auth_members.inherit_option` and
+`.set_option`, which exist from **PostgreSQL 16** — the floor the database
+suite runs on in CI, and therefore the oldest server this contract supports.
+On an older server the check errors on the missing columns rather than passing;
+upgrade the cluster to 16 or later before `db:migrate`.
 
 Anything else is reported with the `grant` or `revoke` that fixes it — and only
 reported. The chain runs as the migrate role, which is deliberately not a role
@@ -251,7 +270,8 @@ is neither the migrate identity nor the database owner can reach a definer role
 — including through either of those two — when the migrate identity's own grant
 is indirect or carries neither option, and when a sibling OpenShapeForge
 database on the same cluster has a different owner. Each refusal names the
-exact `grant` or `revoke`; none of them is applied for you. Run
+exact `grant` or `revoke` — one per route, so run all of them; none of them is
+applied for you. Run
 `db:provision-roles -- --print` and the reported statements against the cluster
 before the upgrade window if any of those shapes may be present.
 

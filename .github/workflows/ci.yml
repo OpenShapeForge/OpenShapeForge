@@ -172,6 +172,7 @@ jobs:
           src/auth/api-key/credential-response.test.ts
           src/auth/api-key/lifetime.test.ts
           src/auth/api-key/lifetime-surfaces.test.ts
+          src/auth/api-key/realm-client-name.test.ts
           src/auth/api-key/resolve.test.ts
           src/auth/api-key/role-subset.test.ts
           src/auth/api-key/format.test.ts
@@ -458,6 +459,7 @@ jobs:
           bun test src/graphql/available-tenants-db.test.ts
           bun test src/auth/relation-group-memberships-db.test.ts src/platform/entity-change-stream.test.ts src/graphql/context-db.test.ts
           bun test src/auth/api-key/credential-no-store-db.test.ts src/auth/api-key/lifetime-existing-keys-db.test.ts
+          SCRATCH_ADMIN_DATABASE_URL=postgres://openshapeforge:openshapeforge@localhost:5434/postgres bun test src/auth/api-key/reconcile-db.test.ts
           SCRATCH_ADMIN_DATABASE_URL=postgres://openshapeforge:openshapeforge@localhost:5434/postgres bun test src/platform/history-mcp-db.test.ts src/platform/audit-context.test.ts
           bun test src/documents/__tests__
           find src/modules -name '*.test.ts' ! -name 'platform-artifact-transaction.test.ts' -print0 | xargs -0 bun test

@@ -69,3 +69,16 @@ require an edit lease.
 This port is not an upload transport. Compiler settings, storage module
 initialization and interface upload handling must still be composed and proven
 together. It defines no new retention, legal-hold, file-size or expiry defaults.
+
+### HTTP download capacity
+
+An API process admits at most four concurrent artifact downloads, and at most
+two for any one tenant. A request beyond either limit receives HTTP 429 with
+`ARTIFACT_DOWNLOAD_LIMIT`; callers can retry later. A slot stays occupied until
+both the provider read has settled and the response has finished or closed,
+so a disconnected client cannot make still-running reads unbounded. These
+limits are process-local, not a cluster-wide quota. A provider that never
+returns can retain a slot indefinitely; the current provider contract has no
+cancellation guarantee. Isolation across tenants limits one tenant's impact,
+but simultaneous stalled providers in multiple tenants can still exhaust the
+process-wide budget.

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 let activeDownloads = 0;
+const activeDownloadsByTenant = new Map<string, number>();
+// Four 64 MiB buffers bound process-wide memory; no one tenant may occupy all.
 const MAX_ACTIVE_DOWNLOADS = 4;
+const MAX_TENANT_DOWNLOADS = 2;
 /** Core-owned HTTP adapter for provider-neutral artifact services. */
 import type { RuntimeArtifactServices } from "@openshapeforge/plugin-runtime";
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -94,10 +97,23 @@ export function registerArtifactRestRoutes(
     instance.get(ARTIFACT_CONTENTS_PATH, async (request, reply) => {
       const verified = await session(request, options.db);
       const { artifactId } = request.params as { artifactId: string };
-      if (activeDownloads >= MAX_ACTIVE_DOWNLOADS) throw new HttpError(429, "ARTIFACT_DOWNLOAD_LIMIT", "Download capacity reached; retry later.");
+      const tenantId = verified.tenantId!.toLowerCase();
+      const tenantDownloads = activeDownloadsByTenant.get(tenantId) ?? 0;
+      if (activeDownloads >= MAX_ACTIVE_DOWNLOADS || tenantDownloads >= MAX_TENANT_DOWNLOADS) {
+        throw new HttpError(429, "ARTIFACT_DOWNLOAD_LIMIT", "Download capacity reached; retry later.");
+      }
       activeDownloads++;
+      activeDownloadsByTenant.set(tenantId, tenantDownloads + 1);
       let released = false, readSettled = false, responseSettled = false;
-      const release = () => { if (!released && readSettled && responseSettled) { released = true; activeDownloads--; } };
+      const release = () => {
+        if (!released && readSettled && responseSettled) {
+          released = true;
+          activeDownloads--;
+          const remaining = activeDownloadsByTenant.get(tenantId)! - 1;
+          if (remaining) activeDownloadsByTenant.set(tenantId, remaining);
+          else activeDownloadsByTenant.delete(tenantId);
+        }
+      };
       const responseDone = () => { responseSettled = true; release(); };
       reply.raw.once("finish", responseDone);
       reply.raw.once("close", responseDone);
@@ -117,7 +133,7 @@ export function registerArtifactRestRoutes(
         .header("x-content-type-options", "nosniff")
         .header("cache-control", "private, no-store")
         .send(Buffer.from(result.bytes.buffer, result.bytes.byteOffset, result.bytes.byteLength));
-      } catch (error) { readSettled = true; responseSettled = true; release(); throw error; }
+      } catch (error) { readSettled = true; responseDone(); throw error; }
     });
   });
 }

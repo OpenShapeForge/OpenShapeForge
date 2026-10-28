@@ -14,7 +14,7 @@
  *
  * So this file runs exactly one path and nothing else:
  *
- *   the real provisioning service mints an `osf_live_…` credential against a
+ *   the real provisioning service mints a role-free `osf_live_…` credential against a
  *   real realm client
  *     → the real session resolver (`auth/identity.ts`, the function every
  *       transport calls) reads the presented credential: indexed lookup,
@@ -228,6 +228,7 @@ function management(tenantId = tenant) {
     roles: [API_KEY_MANAGE_ROLE, READ_ROLE],
     groups: [] as string[],
     credential: "bearer" as const,
+    principalKind: "person" as const,
   };
 }
 
@@ -370,11 +371,11 @@ beforeAll(async () => {
   `.execute(admin.db);
 
   // The real provisioning service, against the real realm: a realm client, a
-  // service account carrying the tenant, the entity read role, and one
+  // service account carrying the tenant, no general roles, and one
   // `osf_live_…` credential returned once.
   const created = await createIntegration(serviceDeps(), management(), {
     displayName: `credential chain ${randomUUID().slice(0, 8)}`,
-    roles: [READ_ROLE],
+    roles: [],
   });
   integrationId = created.integrationId;
   primaryKey = created.token;
@@ -392,7 +393,7 @@ beforeAll(async () => {
   // The other customer's own application, provisioned the same way.
   const abroad = await createIntegration(serviceDeps(), management(otherTenant), {
     displayName: `credential chain abroad ${randomUUID().slice(0, 8)}`,
-    roles: [READ_ROLE],
+    roles: [],
   });
   otherIntegrationId = abroad.integrationId;
   otherTenantKey = abroad.token;
@@ -464,6 +465,7 @@ describe("a credential this realm issued, resolved and dispatched", () => {
     // what this test wanted — asserted to be the rows the service wrote.
     expect(primarySession.credential).toBe("api-key");
     expect(primarySession.principalKind).toBe("service");
+    expect(primarySession.roles).not.toContain(READ_ROLE);
     expect(primarySession.tenantId).toBe(tenant);
     expect(primarySession.appPrincipal).toEqual({
       integrationId,
@@ -583,13 +585,13 @@ describe("a credential this realm issued, resolved and dispatched", () => {
   test("expiry is read at the gate, and an admitted action still finishes", async () => {
     // A real credential of the same real realm client, with a real expiry a
     // few seconds out. `expiresInDays` is the service's own parameter and the
-    // service's own arithmetic; a fraction of a day is the only way to ask
-    // for a window a test can outlive.
+    // service's own arithmetic; a backdated creation instant and a whole-day
+    // lifetime give the test a window it can outlive.
     const shortLived = await issueKey(serviceDeps(), management(), {
       integrationId,
       displayName: "expiring",
-      expiresInDays: EXPIRY_WINDOW_MS / 86_400_000,
-    });
+      expiresInDays: 1,
+    }, new Date(Date.now() - 86_400_000 + EXPIRY_WINDOW_MS));
     const expiresAt = shortLived.expiresAt!;
     expect(expiresAt).toBeInstanceOf(Date);
 

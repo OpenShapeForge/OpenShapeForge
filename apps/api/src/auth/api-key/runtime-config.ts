@@ -43,6 +43,7 @@ export type ApiKeyEnv = {
   OPENSHAPEFORGE_KEYCLOAK_ADMIN_CLIENT_ID?: string | undefined;
   OPENSHAPEFORGE_KEYCLOAK_ADMIN_CLIENT_SECRET?: string | undefined;
   OPENSHAPEFORGE_API_KEY_ROLE_CLIENT_ID?: string | undefined;
+  OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE?: string | undefined;
 };
 
 /** Returns undefined when provisioning is not configured. Never throws. */
@@ -69,7 +70,8 @@ export function readApiKeyProvisioningConfig(
 
   return {
     keyring,
-    admin: new KeycloakAdmin({ baseUrl, realm, clientId, clientSecret }),
+    admin: new KeycloakAdmin({ baseUrl, realm, clientId, clientSecret,
+      apiAudience: env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE?.trim() || undefined }),
     lifetime,
     // The client entity roles live on. Defaults to the shipped realm's
     // entityRoleClient so a standard deployment needs no extra variable.

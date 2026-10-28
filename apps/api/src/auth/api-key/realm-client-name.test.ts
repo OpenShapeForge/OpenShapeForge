@@ -49,6 +49,7 @@ test("sends the cut name in the create request, and the full id", async () => {
     realm: "openshapeforge",
     clientId: "provisioner",
     clientSecret: "provisioner-secret",
+    apiAudience: "test-api",
     fetch: (async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input instanceof Request ? input.url : input);
       if (url.endsWith("/protocol/openid-connect/token")) {
@@ -77,4 +78,9 @@ test("sends the cut name in the create request, and the full id", async () => {
   expect(bodies[0]!.clientId).toBe(clientId);
   expect((bodies[0]!.name as string).length).toBe(254);
   expect(bodies[0]!.name).toBe("🎉".repeat(127));
+  expect(bodies[0]!.protocolMappers).toContainEqual({
+    name: "test-api-audience", protocol: "openid-connect",
+    protocolMapper: "oidc-audience-mapper", consentRequired: false,
+    config: { "included.client.audience": "test-api", "id.token.claim": "false", "access.token.claim": "true" },
+  });
 });

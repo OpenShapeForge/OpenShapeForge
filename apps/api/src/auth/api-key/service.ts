@@ -250,6 +250,9 @@ export async function createIntegration(
   assertMayManageApiKeys(session);
   const roleSubset = roleSubsetOrThrow(input.roleSubset);
   assertMayGrantRoles(session, [...input.roles, ...(roleSubset ?? [])]);
+  if (input.roles.length === 0 && !deps.admin.hasApiAudience) {
+    throw new ApiKeyValidationError("Role-free integrations require a configured API verifier audience.");
+  }
 
   const displayName = displayNameOrThrow(input.displayName, "An integration");
   // Resolved here rather than beside the mint below: a lifetime the

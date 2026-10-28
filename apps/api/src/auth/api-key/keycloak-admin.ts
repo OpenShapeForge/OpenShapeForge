@@ -25,6 +25,8 @@ export type KeycloakAdminConfig = {
   /** The service account this module acts as. */
   clientId: string;
   clientSecret: string;
+  /** Configured API verifier audience, independent of assigned client roles. */
+  apiAudience?: string | undefined;
   fetch?: typeof fetch;
 };
 
@@ -110,6 +112,8 @@ export class KeycloakAdmin {
   private token: { value: string; expiresAtMs: number } | undefined;
 
   constructor(private readonly config: KeycloakAdminConfig) {}
+
+  get hasApiAudience(): boolean { return Boolean(this.config.apiAudience); }
 
   private get doFetch(): typeof fetch {
     return this.config.fetch ?? fetch;
@@ -204,7 +208,17 @@ export class KeycloakAdmin {
       implicitFlowEnabled: false,
       directAccessGrantsEnabled: false,
       enabled: true,
-      protocolMappers: [TENANT_CLAIM_MAPPER],
+      protocolMappers: [TENANT_CLAIM_MAPPER, ...(this.config.apiAudience ? [{
+        name: `${this.config.apiAudience}-audience`,
+        protocol: "openid-connect",
+        protocolMapper: "oidc-audience-mapper",
+        consentRequired: false,
+        config: {
+          "included.client.audience": this.config.apiAudience,
+          "id.token.claim": "false",
+          "access.token.claim": "true",
+        },
+      }] : [])],
     });
 
     if (response.status === 409) {

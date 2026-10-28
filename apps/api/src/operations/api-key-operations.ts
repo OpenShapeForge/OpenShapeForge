@@ -204,12 +204,12 @@ function lifetime(value: unknown): { expiresInDays?: number } {
   return { expiresInDays: value };
 }
 
-/** A non-empty list of role names, refused rather than coerced. */
-function roleList(value: unknown, name: string): string[] {
+/** Role names, with empty allowed only for an integration's initial roles. */
+function roleList(value: unknown, name: string, allowEmpty = false): string[] {
   if (!Array.isArray(value) || value.some((role) => typeof role !== "string")) {
     throw new ApiKeyValidationError(`${name} must be a list of role names.`);
   }
-  if (value.length === 0) {
+  if (value.length === 0 && !allowEmpty) {
     throw new ApiKeyValidationError(`${name} must name at least one role.`);
   }
   return value as string[];
@@ -453,7 +453,7 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
       // itself holds, inside the service. Nothing is re-decided here.
       const created = await createIntegration(resolved.deps, resolved.session, {
         displayName: text(input.displayName),
-        roles: roleList(input.roles, "roles"),
+        roles: roleList(input.roles, "roles", true),
         ...lifetime(input.expiresInDays),
         ...(input.roleSubset === undefined
           ? {}

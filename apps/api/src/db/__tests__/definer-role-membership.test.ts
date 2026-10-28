@@ -187,7 +187,7 @@ test("the record-action step refuses the same membership when it is called direc
       const failure = await applyRecordActionsMigration(conn, [])
         .then(() => undefined, (caught: unknown) => caught as Error);
       expect(failure?.message).toContain(
-        `The record-action resolver role ${RESOLVER_ROLE} cannot be used: ${helperRole} is a member of it`,
+        `The record-action resolver role ${RESOLVER_ROLE} cannot be used: ${helperRole} can act as it`,
       );
       expect(failure?.message).toContain(`revoke ${RESOLVER_ROLE} from ${helperRole};`);
       expect(failure?.message).toContain("replace their bodies");
@@ -207,7 +207,7 @@ test("a superuser caller reports the same deviation rather than admitting every 
     await expect(superuser.db.connection().execute((conn) => verifyDatabaseRoles(conn)))
       .rejects.toThrow(`role ${helperRole} is a member of definer role ${RESOLVER_ROLE}`);
     await expect(superuser.db.connection().execute((conn) => applyRecordActionsMigration(conn, [])))
-      .rejects.toThrow(`${helperRole} is a member of it`);
+      .rejects.toThrow(`${helperRole} can act as it`);
   });
 }, TEST_TIMEOUT);
 
@@ -297,7 +297,7 @@ test("the intended memberships pass and an indirect one does not", async () => {
     await migrate.db.connection().execute(async (conn) => {
       const failure = await applyRecordActionsMigration(conn, [])
         .then(() => undefined, (caught: unknown) => caught as Error);
-      expect(failure?.message).toContain(`${helperRole} is a member of it`);
+      expect(failure?.message).toContain(`${helperRole} can act as it`);
     });
     // Without the helper's definer membership the migrate role holds nothing
     // at all, which is the plain missing-grant case.
@@ -439,7 +439,7 @@ test("a role that reaches the database owner replaces the lookup through it", as
     await migrateOnOwnedDatabase.db.connection().execute(async (conn) => {
       const failure = await applyRecordActionsMigration(conn, [])
         .then(() => undefined, (caught: unknown) => caught as Error);
-      expect(failure?.message).toContain(`${indirectRole} is a member of it`);
+      expect(failure?.message).toContain(`${indirectRole} can act as it`);
       expect(failure?.message).toContain(`revoke ${ownerRole} from ${indirectRole};`);
     });
   } finally {
@@ -481,12 +481,154 @@ test("a role that reaches the migrate identity reaches every definer role", asyn
     await migrate.db.connection().execute(async (conn) => {
       const failure = await applyRecordActionsMigration(conn, [])
         .then(() => undefined, (caught: unknown) => caught as Error);
-      expect(failure?.message).toContain(`${indirectRole} is a member of it`);
+      expect(failure?.message).toContain(`${indirectRole} can act as it`);
     });
   } finally {
     await server.unsafe(`revoke ${migrateRole} from ${indirectRole}`);
   }
   await migrate.db.connection().execute((conn) => verifyDatabaseRoles(conn));
+}, TEST_TIMEOUT);
+
+/**
+ * TWO ROUTES, TWO REVOKES.
+ *
+ * Both admitted roles are ordinary roles, so a role granted BOTH of them
+ * reaches the same definer role twice over. Reporting the shortest route only
+ * printed one `revoke`, and an operator who ran it was still exposed through
+ * the other — the remedy read as complete and was not. So the walk reports one
+ * row per FIRST HOP out of the member, and the message says how many routes
+ * there are.
+ */
+async function withTwoRoutes(work: () => Promise<void>): Promise<void> {
+  // `ownerRole` owns ownedScratch and `migrateRole` is its migrate identity:
+  // two admitted members of the resolver, and one attacker granted both.
+  await server.unsafe(`grant ${RESOLVER_ROLE} to ${ownerRole} with inherit true, set true`);
+  await server.unsafe(`grant ${ownerRole} to ${indirectRole} with inherit true, set true`);
+  await server.unsafe(`grant ${migrateRole} to ${indirectRole} with inherit true, set true`);
+  try {
+    await work();
+  } finally {
+    await server.unsafe(`revoke ${ownerRole} from ${indirectRole}`).catch(() => undefined);
+    await server.unsafe(`revoke ${migrateRole} from ${indirectRole}`).catch(() => undefined);
+    await server.unsafe(`revoke ${RESOLVER_ROLE} from ${ownerRole}`);
+  }
+}
+
+test("a role that reaches a definer role twice is told to cut both routes", async () => {
+  await withTwoRoutes(async () => {
+    const error = await migrateOnOwnedDatabase.db.connection()
+      .execute((conn) => verifyDatabaseRoles(conn))
+      .then(() => undefined, (caught: unknown) => caught as Error);
+    // Both chains are named, and each carries the revoke that cuts IT.
+    expect(error?.message).toContain(
+      `role ${indirectRole} can act as definer role ${RESOLVER_ROLE} through ` +
+        `${RESOLVER_ROLE} <- ${ownerRole} <- ${indirectRole}`,
+    );
+    expect(error?.message).toContain(
+      `role ${indirectRole} can act as definer role ${RESOLVER_ROLE} through ` +
+        `${RESOLVER_ROLE} <- ${migrateRole} <- ${indirectRole}`,
+    );
+    expect(error?.message).toContain(`revoke ${ownerRole} from ${indirectRole};`);
+    expect(error?.message).toContain(`revoke ${migrateRole} from ${indirectRole};`);
+    // Neither admitted role is revoked FROM, and nothing was revoked here.
+    expect(error?.message).not.toContain(`revoke ${RESOLVER_ROLE} from ${ownerRole};`);
+    expect(error?.message).not.toContain(`revoke ${RESOLVER_ROLE} from ${migrateRole};`);
+    const edges = await migrateOnOwnedDatabase.db.connection().execute((conn) =>
+      sql<{ held: number }>`
+        select count(*)::int as held from pg_auth_members am
+          join pg_roles role on role.oid = am.roleid
+          join pg_roles member on member.oid = am.member
+         where member.rolname = ${indirectRole}
+           and role.rolname in (${sql.lit(ownerRole)}, ${sql.lit(migrateRole)})
+      `.execute(conn));
+    expect(edges.rows[0]?.held).toBe(2);
+
+    // FOLLOWING ONE REMEDY IS NOT ENOUGH, and the check says so rather than
+    // passing: the second route is still there, with its own revoke.
+    await server.unsafe(`revoke ${ownerRole} from ${indirectRole}`);
+    const remaining = await migrateOnOwnedDatabase.db.connection()
+      .execute((conn) => verifyDatabaseRoles(conn))
+      .then(() => undefined, (caught: unknown) => caught as Error);
+    expect(remaining?.message).toContain(
+      `role ${indirectRole} can act as definer role ${RESOLVER_ROLE} through ` +
+        `${RESOLVER_ROLE} <- ${migrateRole} <- ${indirectRole}`,
+    );
+    expect(remaining?.message).toContain(`revoke ${migrateRole} from ${indirectRole};`);
+    expect(remaining?.message).not.toContain(`revoke ${ownerRole} from ${indirectRole};`);
+
+    // Both cut, the contract is satisfied and the step installs.
+    await server.unsafe(`revoke ${migrateRole} from ${indirectRole}`);
+    await migrateOnOwnedDatabase.db.connection().execute((conn) => verifyDatabaseRoles(conn));
+    await migrateOnOwnedDatabase.db.connection().execute((conn) =>
+      applyRecordActionsMigration(conn, []));
+  });
+}, TEST_TIMEOUT);
+
+/**
+ * What the refusal READS like. One statement of who can act as the resolver,
+ * one sentence per route that says why it is refused and nothing else, and the
+ * instruction to run every revoke — not a claim of direct membership, and not
+ * the admission rule twice over.
+ */
+test("the record-action step names every route once and asks for all of them", async () => {
+  await withTwoRoutes(async () => {
+    await migrateOnOwnedDatabase.db.connection().execute(async (conn) => {
+      const failure = await applyRecordActionsMigration(conn, [])
+        .then(() => undefined, (caught: unknown) => caught as Error);
+      const message = failure?.message ?? "";
+      expect(message).toContain(
+        `The record-action resolver role ${RESOLVER_ROLE} cannot be used: ` +
+          `${indirectRole} can act as it.`,
+      );
+      // Reachability, not membership: neither route is a direct grant.
+      expect(message).not.toContain(`${indirectRole} is a member of it`);
+      expect(message).not.toContain("are members of it");
+      expect(message).not.toContain(`is a member of definer role ${RESOLVER_ROLE}`);
+      // The attacker is named ONCE in the opening sentence, not once per route.
+      expect(message.split(`${indirectRole} can act as it`).length - 1).toBe(1);
+      // The admission rule is stated once per route by the route's own
+      // sentence, and not a third time by a wrapper around them.
+      expect(message.split("nor this database's owner").length - 1).toBe(2);
+      expect(message).not.toContain("neither the migrate identity");
+      expect(message).toContain(`is neither the migrate role ${migrateRole} nor`);
+      // Both routes, both revokes, each said once, and the count spelled out.
+      expect(message).toContain(
+        `can act as definer role ${RESOLVER_ROLE} through ` +
+          `${RESOLVER_ROLE} <- ${ownerRole} <- ${indirectRole}`,
+      );
+      expect(message).toContain(
+        `can act as definer role ${RESOLVER_ROLE} through ` +
+          `${RESOLVER_ROLE} <- ${migrateRole} <- ${indirectRole}`,
+      );
+      expect(message).toContain(
+        "Each statement below cuts one of the 2 routes above; run ALL of them " +
+          "as an administrator:",
+      );
+      for (const revoke of [
+        `revoke ${ownerRole} from ${indirectRole};`,
+        `revoke ${migrateRole} from ${indirectRole};`,
+      ]) {
+        expect(message.split(revoke).length - 1).toBe(1);
+      }
+    });
+  });
+  // The single-route refusal keeps the plain instruction and one revoke.
+  await server.unsafe(`grant ${RESOLVER_ROLE} to ${ownerRole} with inherit true, set true`);
+  await server.unsafe(`grant ${ownerRole} to ${indirectRole} with inherit true, set true`);
+  try {
+    await migrateOnOwnedDatabase.db.connection().execute(async (conn) => {
+      const failure = await applyRecordActionsMigration(conn, [])
+        .then(() => undefined, (caught: unknown) => caught as Error);
+      expect(failure?.message).toContain(
+        `Run as an administrator: revoke ${ownerRole} from ${indirectRole};`,
+      );
+      expect(failure?.message).not.toContain("run ALL of them");
+    });
+  } finally {
+    await server.unsafe(`revoke ${ownerRole} from ${indirectRole}`);
+    await server.unsafe(`revoke ${RESOLVER_ROLE} from ${ownerRole}`);
+  }
+  await migrateOnOwnedDatabase.db.connection().execute((conn) => verifyDatabaseRoles(conn));
 }, TEST_TIMEOUT);
 
 /**

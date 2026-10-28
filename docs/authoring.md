@@ -1194,8 +1194,10 @@ integrationId:
 
 The target must have a readable record route with one parameter, and its get
 Operation must accept the target identity through that route and its declared
-bindings. Source and target reads must use the same authentication realm; the
-target's own read authorization still applies. Collection-valued references
-and routes needing multiple parameters are not supported by this projection.
+bindings. Source and target reads must use the same web authentication mode
+(session, control or public), as for related links; this is the realm distinction
+available in the authored Operation contract. The target's own read authorization
+still applies. Collection-valued references and routes needing multiple parameters
+are not supported by this projection.
 This metadata supplies an identifier, not an embedded target record or a grant
-to read it.
+to read it. List inputs bound from route context are not offered as user filters.

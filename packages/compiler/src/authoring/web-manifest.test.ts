@@ -1540,6 +1540,11 @@ describe("standalone Operation pages", () => {
       route: "/tenants/:slug/related",
     }]);
 
+    const scoped = structuredClone(operationEntities);
+    scoped.interfaces.web!.entities!.Tenant!.operations.list.bindings = { slug: "slug" };
+    const scopedQuery = buildWebManifest([], {}, standalone(scoped)).entities.Tenant!.operationSource!.collection.query!;
+    expect(scopedQuery.input.filterFields).toEqual(["name", "status"]);
+
     const canonicalTenant = entity("Tenant", "tenant", [field("name")], coreView());
     const composed = buildWebManifest([canonicalTenant], {}, standalone(operationEntities));
     expect(composed.entities.Tenant?.operationSource).toBeUndefined();
@@ -1816,10 +1821,17 @@ describe("standalone Operation pages", () => {
     expect(project).toThrow(/must identify Provider by its idField/);
     ownerList.properties.tenants.items.properties.parent["x-osf-reference"].valueField = "slug";
     ownerList.properties.tenants.items.properties.parent.type = "array";
-    expect(project).toThrow(/collection references are not supported/);
-    delete ownerList.properties.tenants.items.properties.parent["x-osf-reference"];
+    expect(project().entities.Tenant!.relationships.parent).toBeUndefined();
+    ownerList.properties.tenants.items.properties.parent.type = "string";
+    delete ownerList.properties.tenants.items.properties.parent["x-osf-type"];
+    expect(project().entities.Tenant!.relationships.parent).toBeUndefined();
+    ownerList.properties.tenants.items.properties.parent.type = "array";
     expect(project().entities.Tenant!.relationships.parent).toBeUndefined();
     ownerList.properties.tenants.items.properties.parent = { type: "string", "x-osf-type": "Provider", "x-osf-reference": { entity: "Provider", valueField: "slug" } };
+    const ownerGet = owner.interfaces.web!.entities!.Tenant!.operations.get!;
+    delete owner.interfaces.web!.entities!.Tenant!.operations.get;
+    expect(project().entities.Tenant!.relationships.parent).toBeDefined();
+    owner.interfaces.web!.entities!.Tenant!.operations.get = ownerGet;
     delete target.interfaces.web!.entities!.Provider!.operations.get;
     expect(project).toThrow(/needs a readable target/);
     catalog.interfaces.web!.entities!.Tenant!.recordRoute = "/tenants/:organization/:tenantKey";

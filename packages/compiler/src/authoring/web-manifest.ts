@@ -1627,13 +1627,15 @@ function projectStandalone(
         const explicitReference = reference && typeof reference === "object" && !Array.isArray(reference)
           ? reference as { entity?: unknown; valueField?: unknown } : undefined;
         const targetName = explicitReference?.entity;
-        if (!target && key !== entity.idField && typeof targetName === "string" && catalogs.some((item) => item.interfaces.web?.entities?.[targetName])) {
-          const types = Array.isArray(schema.type) ? schema.type : [schema.type];
-          if (!types.includes("string") || types.some((type) => type !== "string" && type !== "null")) {
-            throw new Error(`Operation-backed reference ${entityName}.${key} must be a single string identifier; collection references are not supported.`);
-          }
-          if (typeof explicitReference?.valueField !== "string" || schema["x-osf-type"] !== targetName) {
-            throw new Error(`Operation-backed reference ${entityName}.${key} needs matching x-osf-type and x-osf-reference entity and an explicit valueField.`);
+        const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+        // Existing picker metadata and array schemas do not opt into a single
+        // record relationship. Both matching annotations and a scalar are required.
+        if (!target && key !== entity.idField && typeof targetName === "string"
+          && schema["x-osf-type"] === targetName && types.includes("string")
+          && types.every((type) => type === "string" || type === "null")
+          && catalogs.some((item) => item.interfaces.web?.entities?.[targetName])) {
+          if (typeof explicitReference?.valueField !== "string") {
+            throw new Error(`Operation-backed reference ${entityName}.${key} needs an explicit valueField.`);
           }
           pendingReferences.push({ entityName, key, targetName, valueField: explicitReference.valueField });
         }
@@ -1815,7 +1817,7 @@ function projectStandalone(
     if (!readInput || !availableInputs.has(target.operationSource.idField) || Object.keys(bindings).some((inputKey) => !properties[inputKey]) || requiredInputs.some((inputKey) => typeof inputKey !== "string" || !availableInputs.has(inputKey))) {
       throw new Error(`Operation-backed reference ${entityName}.${key} cannot supply the target read Operation's required input from its record route.`);
     }
-    const sourceRead = owner.views.record?.operations.read;
+    const sourceRead = owner.views.record?.operations.read ?? owner.views.collection.operations.read;
     const sourceAuth = sourceRead && operations[sourceRead.id]?.auth;
     const targetAuth = operations[record.operations.read.id]?.auth;
     if (!sourceAuth || !targetAuth || sourceAuth.mode !== targetAuth.mode) {

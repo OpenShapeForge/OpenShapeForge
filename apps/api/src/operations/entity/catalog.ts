@@ -1,7 +1,7 @@
 import { filterFieldNames } from "./filter-groups.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { generatedCrudTables, isGeneratedCrudTableEligible } from "./table-registry.js";
-export { getGeneratedCrudTables, isGeneratedCrudTableEligible } from "./table-registry.js";
+export { getGeneratedCrudTables, isGeneratedCrudTableEligible, recordActionTable } from "./table-registry.js";
 import { operationFailure } from "@openshapeforge/operations";
 import { notAuthorizedRefusal } from "./authorization-refusal-text.js";
 import { redactElicitedValues } from "../../connectors/secrets.js";

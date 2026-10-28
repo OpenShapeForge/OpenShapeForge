@@ -583,6 +583,29 @@ object, so a module cannot build a session naming an integration of its choice;
 and it authorizes nothing — the answer is an identity, never a permission. A
 module that needs to know whether it MAY act asks `platform.records`.
 
+`platform.records` carries the record ACL's two axes. `assertAccess` /
+`assertAccessMany` authorize a record PERMISSION through the entity's own
+Operation, and three calls serve the named-action axis
+([authoring.md](authoring.md)): `assertAction` refuses unless the session holds
+one named action on one record, `readForAction` returns exactly the fields that
+action declared under `reads`, and `holdsAction` answers the same question as a
+boolean. The third exists for the case the other two cannot serve: a
+**plugin-owned table whose rows belong to a host record** — no entity, no ACL,
+no CRUD of its own. Rather than copy the host's policy or read its ACL, the
+module asks the one question core can answer and decides for itself what the
+answer means for its rows.
+
+Called inside the module's active transaction — an Operation's, or one opened
+through `platform.db.withSession`, which the host treats as the same
+transaction — the check holds the record's ACL-row lock there until that
+transaction commits, so the module's writes happen under the lock that
+admitted them and a concurrent revocation cannot interleave with them. Called
+outside one it is an early answer and holds nothing. None of the three makes
+the record readable: a holder of an action has no `view`, so the row-scope
+policy still hides it from the module's own SQL, and `readForAction` is the
+whole execution capability. `examples/plugins/notebook` is the worked example
+— `Notebook.deliver` plus `notebook.notebook_deliveries`.
+
 `platform.webhookSecrets`, when the host provides it, is how a plugin accepts
 signed inbound webhooks without reading the signing secret: `seal` encrypts a
 credential's secret under the host keyring, and `verify` /

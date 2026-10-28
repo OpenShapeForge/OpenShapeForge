@@ -108,7 +108,14 @@ function fieldNameForColumn(column: { name: string; sourceField?: string }): str
 
 export type ManifestRecordActionTable = {
   schema: string;
+  /**
+   * The registry name, which is NOT always the physical table: a table in a
+   * plugin module's own schema is registered as `<schema>.<table>`. Used in
+   * messages only; the DDL below names {@link ManifestRecordActionTable.table}.
+   */
   name: string;
+  /** The physical table name. */
+  table: string;
   tenantScoped?: boolean;
   columns?: Array<{ name: string; primaryKey?: boolean; type?: string; sourceField?: string }>;
   source?: {
@@ -180,7 +187,7 @@ export const RECORD_ACTION_LOCKS: Readonly<Record<RecordActionLock, string>> = O
 
 function invalid(table: ManifestRecordActionTable, reason: string): never {
   throw new Error(
-    `Record-action policy for ${table.schema}.${table.name} cannot be deployed: ${reason}. ` +
+    `Record-action policy for ${table.name} cannot be deployed: ${reason}. ` +
       "This is compiled manifest output, so fix the authoring or the compiler rather than this migration.",
   );
 }
@@ -199,7 +206,7 @@ export function recordActionEntities(
     if (!policy?.actions?.length) continue;
     const entity = table.source?.authoringEntityName;
     if (!entity || !ENTITY_NAME.test(entity)) invalid(table, "it declares no usable authoring entity name");
-    if (!IDENTIFIER.test(table.schema) || !IDENTIFIER.test(table.name)) {
+    if (!IDENTIFIER.test(table.schema) || !IDENTIFIER.test(table.table)) {
       invalid(table, "its schema or table name is not a plain lowercase identifier");
     }
     if (!IDENTIFIER.test(policy.column)) invalid(table, `ACL column "${policy.column}" is not a plain lowercase identifier`);
@@ -253,7 +260,7 @@ export function recordActionEntities(
     entities.push({
       entity: entity!,
       schema: table.schema,
-      table: table.name,
+      table: table.table,
       keyColumn: key!.name,
       keyIsUuid: key!.type === "uuid",
       aclColumn: policy.column,

@@ -26573,6 +26573,20 @@
           }
         },
         {
+          "key": "permissions",
+          "osfType": "object",
+          "required": true,
+          "label": {
+            "en": "Permissions",
+            "nl": "Rechten"
+          },
+          "defaultValue": {},
+          "persisted": {
+            "column": "permissions",
+            "storageClass": "core"
+          }
+        },
+        {
           "key": "versions",
           "label": {
             "en": "Versions",

@@ -45,3 +45,30 @@ export const generatedCrudTables = new Map(
     .map((table) => [table.name, table]),
 );
 export function getGeneratedCrudTables(): GeneratedCrudTable[] { return [...generatedCrudTables.values()]; }
+
+/**
+ * Physical tables that declare a named record action, by AUTHORED entity name.
+ *
+ * Deliberately a separate registry from `generatedCrudTables`. A named action
+ * is not an Entity Operation: it has no intent, it never consults the entity's
+ * CRUD roles, and it must stay reachable on an entity whose generated CRUD is
+ * switched off entirely — which is exactly the shape an entity acted on only
+ * by an application takes. Subtype projections are absent by construction:
+ * they share the base row, and the action lookup is keyed on the base entity.
+ *
+ * Same source as the migration's own registry
+ * (`db/migrations/record-actions.ts`), so an entity the SQL lookup does not
+ * know is an entity this cannot name either.
+ */
+export const recordActionTables = new Map(
+  physicalTables
+    .filter((table) =>
+      table.primaryKey &&
+      typeof table.source?.authoringEntityName === "string" &&
+      (table.source?.authorization?.recordPermissions?.actions?.length ?? 0) > 0)
+    .map((table) => [table.source!.authoringEntityName!, table]),
+);
+
+export function recordActionTable(entityName: string): GeneratedCrudTable | undefined {
+  return recordActionTables.get(entityName);
+}

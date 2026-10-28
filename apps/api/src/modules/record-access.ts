@@ -1,19 +1,26 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { operationFailure } from "@openshapeforge/operations";
+import { operationErrorOf, operationFailure } from "@openshapeforge/operations";
 import type {
   RuntimeRecordAccessRequest,
   RuntimeRecordAccessBatchRequest,
+  RuntimeRecordActionRequest,
   RuntimeRecordAccessServices,
   RuntimeStoredFieldProjectionRequest,
 } from "@openshapeforge/plugin-runtime";
 import { sql, type Transaction } from "kysely";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { DB } from "../generated/db/types.js";
-import { requireEntityOperation } from "../operations/entity/catalog.js";
+import { recordActionTable, requireEntityOperation } from "../operations/entity/catalog.js";
 import { redactRow } from "../graphql/generated-authz.js";
 import { subtypeScopeWhere } from "../operations/entity/subtype-scope.js";
 import { primaryKeyEquals, fieldNameForColumn } from "../operations/entity/columns.js";
-import { assertRecordPermissionInTransaction } from "../operations/entity/record-permissions.js";
+import {
+  RECORD_ACTION_NAME,
+  assertRecordActionInTransaction,
+  assertRecordPermissionInTransaction,
+  readRecordForActionInTransaction,
+  recordActionDeclaration,
+} from "../operations/entity/record-permissions.js";
 import {
   getEntityOperationContracts,
   tableForEntityOperation,
@@ -133,6 +140,90 @@ async function assertVisibleRecord(
     limit 1
   `.execute(trx);
   if (result.rows[0]?.present !== 1) refusal("Not authorized to access this record.");
+}
+
+/**
+ * Validate a record-action request before it reaches any policy.
+ *
+ * The three fields are the entire crossing: an authored entity name, a record
+ * key and an action name. Nothing here selects a table, a column or a lock —
+ * those come from the compiled manifest on the host side — so a module cannot
+ * widen the question, only ask one the compiler already authorized.
+ */
+function actionRequest(value: RuntimeRecordActionRequest): RuntimeRecordActionRequest {
+  if (
+    !value ||
+    typeof value.entityName !== "string" ||
+    value.entityName.trim() !== value.entityName ||
+    value.entityName.length === 0 ||
+    value.entityName.length > 200 ||
+    typeof value.id !== "string" ||
+    value.id.trim() !== value.id ||
+    value.id.length === 0 ||
+    value.id.length > 512 ||
+    typeof value.action !== "string" ||
+    !RECORD_ACTION_NAME.test(value.action)
+  ) {
+    throw operationFailure({
+      code: "VALIDATION",
+      message: "The record action request is invalid.",
+      retryable: false,
+    });
+  }
+  return value;
+}
+
+/**
+ * The table an action names, resolved by authored entity name.
+ *
+ * Not through an Entity Operation, and not through `requireEntityOperation`:
+ * an action is independent of the entity's CRUD roles and of whether its CRUD
+ * is exposed at all. What it does require is an entity that declared THIS
+ * action, so that is the whole lookup — an entity that declared nothing, or a
+ * name no entity carries, is one refusal with one message.
+ */
+function actionTable(input: RuntimeRecordActionRequest): GeneratedCrudTable {
+  const table = recordActionTable(input.entityName);
+  if (!table || !recordActionDeclaration(table, input.action)) {
+    refusal("Not authorized to act on this record.");
+  }
+  return table;
+}
+
+/**
+ * Run one action question in the module's own transaction when it has one.
+ *
+ * This is where the lock composes. `app.record_action_allows` takes the ACL
+ * row lock in the transaction it is called from and holds it until that
+ * transaction commits, so asking inside the Operation's transaction — or
+ * inside one the module opened through `platform.db.withSession`, which the
+ * host registers as the same active transaction — puts the module's own
+ * writes under the lock the check took. A concurrent policy change then
+ * serializes against the whole effect rather than against the check alone.
+ * Outside any transaction the host opens its own: a correct early answer, and
+ * no lock once it commits.
+ */
+function withActionTransaction<T>(
+  session: TrustedSessionContext,
+  rawInput: RuntimeRecordActionRequest,
+  options: {
+    currentTransaction(session: TrustedSessionContext): Transaction<DB> | undefined;
+    withSession<R>(
+      session: TrustedSessionContext,
+      work: (transaction: Transaction<DB>) => Promise<R>,
+    ): Promise<R>;
+  },
+  work: (
+    trx: Transaction<DB>,
+    table: GeneratedCrudTable,
+    input: RuntimeRecordActionRequest,
+  ) => Promise<T>,
+): Promise<T> {
+  const input = actionRequest(rawInput);
+  const table = actionTable(input);
+  const active = options.currentTransaction(session);
+  if (active) return work(active, table, input);
+  return options.withSession(session, (trx) => work(trx, table, input));
 }
 
 /** Core-only live-session and canonical Entity authorization service. */
@@ -256,6 +347,52 @@ export class RecordAccessRuntime {
           return;
         }
         await options.withSession(session, authorize);
+      },
+      assertAction: async (
+        session: TrustedSessionContext,
+        rawInput: RuntimeRecordActionRequest,
+      ): Promise<void> => {
+        if (!options.acceptsSession(session)) {
+          refusal("Record actions require the live verified session.");
+        }
+        await withActionTransaction(session, rawInput, options, (trx, table, input) =>
+          assertRecordActionInTransaction(trx, session, table, input.id, input.action));
+      },
+      holdsAction: async (
+        session: TrustedSessionContext,
+        rawInput: RuntimeRecordActionRequest,
+      ): Promise<boolean> => {
+        if (!options.acceptsSession(session)) {
+          refusal("Record actions require the live verified session.");
+        }
+        return withActionTransaction(session, rawInput, options, async (trx, table, input) => {
+          try {
+            await assertRecordActionInTransaction(trx, session, table, input.id, input.action);
+            return true;
+          } catch (error) {
+            // Only the denial becomes `false`. The lookup answers an absent
+            // row, a foreign tenant and an unnamed action with a plain
+            // boolean and never raises, so nothing here converts a broken
+            // contract or a database failure into "not allowed" — and
+            // because the refusal is not a SQL error, catching it leaves the
+            // caller's transaction usable.
+            if (operationErrorOf(error)?.code !== "FORBIDDEN") throw error;
+            return false;
+          }
+        });
+      },
+      // `async` like its two neighbours, so every refusal on this service is a
+      // rejection. A call that sometimes throws before it returns a promise and
+      // sometimes rejects is a trap for a module author writing one catch.
+      readForAction: async (
+        session: TrustedSessionContext,
+        rawInput: RuntimeRecordActionRequest,
+      ): Promise<Readonly<Record<string, unknown>>> => {
+        if (!options.acceptsSession(session)) {
+          refusal("Record actions require the live verified session.");
+        }
+        return await withActionTransaction(session, rawInput, options, (trx, table, input) =>
+          readRecordForActionInTransaction(trx, session, table, input.id, input.action));
       },
     });
   }

@@ -13,7 +13,8 @@ import type { RuntimeReadProgressServices } from "./read-progress.js";
 export type { RuntimeReadProgress, RuntimeReadProgressSnapshot, RuntimeReadProgressServices } from "./read-progress.js";
 export type { RuntimeWebhookSecretServices, RuntimeWebhookSignatureInput } from "./webhook-secrets.js";
 import type { RuntimeRecordAccessServices } from "./record-access.js";
-export type { RuntimeRecordAccessServices, RuntimeRecordAccessRequest, RuntimeRecordAccessBatchRequest, RuntimeRecordAccessIntent, RuntimeStoredFieldProjectionRequest } from "./record-access.js";
+export type { RuntimeRecordAccessServices, RuntimeRecordAccessRequest, RuntimeRecordAccessBatchRequest, RuntimeRecordAccessIntent, RuntimeStoredFieldProjectionRequest,
+  RuntimeRecordActionRequest } from "./record-access.js";
 import type { RuntimePrincipalServices } from "./principals.js";
 export type { RuntimePrincipalServices, RuntimePrincipalClass, RuntimeApplicationPrincipal } from "./principals.js";
 import type { RuntimeExecutionPolicy } from "./execution-policy.js";

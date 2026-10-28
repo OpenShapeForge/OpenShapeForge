@@ -21,7 +21,7 @@ type Table = ManifestRecordActionTable;
 
 function table(overrides: Partial<Table> = {}): Table {
   return {
-    schema: "erp", name: "runs", tenantScoped: true,
+    schema: "erp", name: "runs", table: "runs", tenantScoped: true,
     columns: [
       { name: "id", type: "uuid", primaryKey: true },
       { name: "tenant_id", type: "uuid" },
@@ -95,7 +95,10 @@ describe("the record-action registry", () => {
     const refusals: Array<[Table, RegExp]> = [
       [{ ...table(), tenantScoped: false }, /requires a tenant-scoped table/],
       [{ ...table(), schema: "Erp" }, /not a plain lowercase identifier/],
-      [{ ...table(), name: "runs; drop table x" }, /not a plain lowercase identifier/],
+      [{ ...table(), table: "runs; drop table x" }, /not a plain lowercase identifier/],
+      // A table in a plugin module's own schema is REGISTERED as
+      // `<schema>.<table>`; the DDL has to name the physical table.
+      [{ ...table(), name: "notebook.runs", table: "runs; x" }, /not a plain lowercase identifier/],
       [
         { ...table(), source: { ...table().source, authoringEntityName: "run" } } as Table,
         /no usable authoring entity name/,
@@ -149,9 +152,20 @@ describe("the record-action registry", () => {
     }
   });
 
+  test("names the physical table of an entity registered under its own schema", () => {
+    // `name` is the registry key (`notebook.notebooks`), `table` the physical
+    // relation. Interpolating the registry key would emit
+    // `notebook.notebook.notebooks` and refuse the migration.
+    const [entity] = recordActionEntities([
+      { ...table(), schema: "notebook", name: "notebook.runs", table: "runs" } as Table,
+    ]);
+    expect(entity).toMatchObject({ schema: "notebook", table: "runs" });
+    expect(renderRecordActionLookup([entity!])).toContain("from notebook.runs t");
+  });
+
   test("orders entities and actions so the rendered body is deterministic", () => {
     const second = {
-      ...table(), name: "docs",
+      ...table(), name: "docs", table: "docs",
       source: {
         authoringEntityName: "Doc",
         authorization: {

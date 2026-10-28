@@ -674,7 +674,7 @@ export function bindOperationHandlers(
       continue;
     }
     if (operation.implementation?.type === "collection-options") {
-      bound.set(operation.key, { operation, handler: nativeCollectionOptionsHandler(operation) });
+      bound.set(operation.key, { operation, handler: nativeCollectionOptionsHandler(operation, modules) });
       continue;
     }
     if (operation.implementation?.type === "application-search") {

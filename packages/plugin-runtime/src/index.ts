@@ -897,7 +897,13 @@ export type RuntimeModuleContract<
   /** Product-owned request starters; tools retain their canonical authorization. */
   mcpPrompts?: readonly RuntimeMcpPrompt[];
   /** Journal hints for private module resources, authorized by a live canonical read. */
-  realtimeResources?: readonly {entity: string; readOperationId: string; idInputField: string}[];
+  realtimeResources?: readonly {
+    entity: string;
+    readOperationId: string;
+    idInputField: string;
+    /** Ordered record fields used for an authorized, localized display label. */
+    labelFields?: Readonly<Record<"en" | "nl", readonly string[]>>;
+  }[];
   init?(context: RuntimeContext): Promise<void>;
   readinessChecks?: readonly ModuleReadinessCheck[];
   close?(): Promise<void>;

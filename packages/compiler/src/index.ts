@@ -407,7 +407,10 @@ export async function collectAllArtifacts(
     ...collectBlueprintOperations(entities),
     ...collectJobOperations(),
     ...collectPluginOperations(plugins, operationContext),
-    ...collectAuthoredEntityPluginOperations(entities, operationContext, referentiedata),
+    // The catalogs travel with the entities: application search offers a
+    // catalog's web collection as a page beside the core entities, and both
+    // halves of its one source list are compiled together.
+    ...collectAuthoredEntityPluginOperations(entities, operationContext, referentiedata, moduleOperationCatalogs),
     ...collectAuthoredModulePluginOperations(moduleOperationCatalogs, operationContext),
   ].sort((left, right) => left.key.localeCompare(right.key));
   for (let index = 1; index < operations.length; index += 1) {

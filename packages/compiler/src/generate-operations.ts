@@ -1,5 +1,5 @@
 import { collectionOptionsDefinition, collectionOptionSources } from "./collection-options.js";
-import { applicationSearchDefinition, applicationSearchSources } from "./application-search.js";
+import { applicationSearchDefinition, applicationSearchSources, catalogApplicationSearchSources } from "./application-search.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
@@ -792,6 +792,8 @@ export function collectAuthoredEntityPluginOperations(
   entities: readonly Pick<CompiledEntityInfo, "contract">[],
   context: PluginBaseContext,
   referentiedata: CoreReferentiedataSnapshot = {},
+  /** Catalogs whose web collections application search also offers as pages. */
+  catalogs: readonly OperationCatalogDefinition[] = [],
 ): CompiledPluginOperation[] {
   materializeCollectionOperations(entities, referentiedata);
   const byPlugin = new Map<string, PluginOperationContract[]>();
@@ -913,7 +915,7 @@ export function collectAuthoredEntityPluginOperations(
   return [
     ...collectOperationContracts(synthetic, context, true),
     ...collectConstrainedReferenceCreateOperations(entities, referentiedata),
-    ...collectApplicationSearch(entities, context),
+    ...collectApplicationSearch(entities, context, catalogs),
     ...collectCollectionOptions(entities, context),
     ...(needsEntityTypeList
       ? collectEntityTypeListOperation(context, entities)
@@ -1478,10 +1480,12 @@ export function operationOpenApiPaths(
   return paths;
 }
 
-function collectApplicationSearch(entities: readonly Pick<CompiledEntityInfo,"contract">[], context: PluginBaseContext): CompiledPluginOperation[] {
-  const sources=applicationSearchSources(entities);
+function collectApplicationSearch(entities: readonly Pick<CompiledEntityInfo,"contract">[], context: PluginBaseContext, catalogs: readonly OperationCatalogDefinition[] = []): CompiledPluginOperation[] {
+  const core=applicationSearchSources(entities);
+  const catalog=catalogApplicationSearchSources(catalogs,new Set(core.map(source=>source.entity)));
+  const sources=[...core,...catalog.sources];
   if(!sources.length)return [];
-  const operation=applicationSearchDefinition(entities);
+  const operation=applicationSearchDefinition(entities,catalog.roles);
   nativeBindings.set(operation,{type:"application-search",sources});
   return collectOperationContracts([{name:"core",operations:[operation]}],context,true);
 }

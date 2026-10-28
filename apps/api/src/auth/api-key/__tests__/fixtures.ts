@@ -135,10 +135,14 @@ function answer(store: FixtureStore, text: string, params: readonly unknown[], n
   }
 
   if (text.includes("insert into platform.api_key_integrations")) {
-    const [id, tenantId, displayName] = params as [string, string, string];
+    const [id, tenantId, displayName, , grantedRoles] =
+      params as [string, string, string, string, unknown];
     store.integrations.push({
       id, tenantId, displayName, status: "pending",
-      grantedRoles: [], createdAt: now, updatedAt: now,
+      grantedRoles: Array.isArray(grantedRoles)
+        ? grantedRoles.filter((role): role is string => typeof role === "string")
+        : [],
+      createdAt: now, updatedAt: now,
     });
     return [];
   }
@@ -153,8 +157,18 @@ function answer(store: FixtureStore, text: string, params: readonly unknown[], n
   }
   if (text.includes("set status = 'active'")) {
     const integration = integrationOf();
-    if (integration) integration.status = "active";
-    return [];
+    if (!integration) return [];
+    integration.status = "active";
+    integration.updatedAt = now;
+    // The activation RETURNS the row, which is how the create path reports an
+    // integration's metadata without a second read of it (service.ts step 3).
+    return [{
+      display_name: integration.displayName,
+      status: integration.status,
+      granted_roles: integration.grantedRoles,
+      created_at: integration.createdAt,
+      updated_at: integration.updatedAt,
+    }];
   }
   if (text.includes("update platform.api_keys k")) {
     const key = store.keys.find((row) => named(row.id) && named(row.tenantId));

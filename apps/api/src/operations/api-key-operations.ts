@@ -578,19 +578,21 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
           ? {}
           : { roleSubset: roleList(input.roleSubset, "roleSubset") }),
       }, now);
-      // One tenant-fenced read of the row that was just written, so the
-      // metadata reported here is the row's own and not an echo of the input
-      // (the service trims the name and flips the status).
-      const integration = await getIntegration(
-        resolved.deps, resolved.session, created.integrationId, now,
-      );
+      // The metadata comes out of the SAME transaction that minted the
+      // credential, not from a read-back after it. A read-back is a step
+      // between holding the only copy of a secret and handing it over: its
+      // failure reports an error for work that committed, and the retry
+      // provisions a second realm client and a second credential. These are
+      // still the row's own values rather than an echo of the input — the
+      // service trims the name and flips the status (service.ts,
+      // CreatedApiKey.integration).
       return oneTimeCredential({
         integration: {
-          integrationId: integration.id,
-          displayName: integration.displayName,
-          status: integration.status,
-          grantedRoles: integration.grantedRoles,
-          createdAt: integration.createdAt.toISOString(),
+          integrationId: created.integrationId,
+          displayName: created.integration.displayName,
+          status: created.integration.status,
+          grantedRoles: created.integration.grantedRoles,
+          createdAt: created.integration.createdAt.toISOString(),
         },
         credential: mintedCredential(created),
       });

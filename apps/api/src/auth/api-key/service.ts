@@ -158,6 +158,31 @@ export type CreatedApiKey = {
 };
 
 /**
+ * What creating an integration returns: the credential, and the integration's
+ * own metadata as the row reads once it is live.
+ *
+ * The metadata comes from the SAME transaction that inserts the key, and is
+ * not left for the caller to read back. The read-back is what made this
+ * unsafe: the plaintext credential exists exactly once, in this return value,
+ * so any step between minting it and handing it over can fail and lose it.
+ * The caller then reports a failure for work that committed, and a retry
+ * provisions a second realm client and a second credential.
+ *
+ * These are the row's values, not an echo of the input: the service trims the
+ * display name and flips the status, which is why a caller wanted a read in
+ * the first place.
+ */
+export type CreatedIntegration = CreatedApiKey & {
+  integration: {
+    displayName: string;
+    status: IntegrationStatus;
+    grantedRoles: string[];
+    createdAt: Date;
+    updatedAt: Date;
+  };
+};
+
+/**
  * Create an integration and its first key.
  *
  * The Keycloak clientId is derived, not chosen: `osf-int-<uuid>`. A
@@ -169,7 +194,7 @@ export async function createIntegration(
   session: ProvisioningSession,
   input: CreateIntegrationInput,
   now: Date = new Date(),
-): Promise<CreatedApiKey> {
+): Promise<CreatedIntegration> {
   assertMayManageApiKeys(session);
   const roleSubset = roleSubsetOrThrow(input.roleSubset);
   assertMayGrantRoles(session, [...input.roles, ...(roleSubset ?? [])]);
@@ -236,8 +261,17 @@ export async function createIntegration(
     provisioned.clientSecret,
   );
 
-  await withSession(deps, session, async (trx) => {
-    await sql`
+  //    The activation RETURNS the row, so the metadata a caller reports comes
+  //    out of this transaction with the credential rather than from a second
+  //    read after it — see CreatedApiKey.integration.
+  const activated = await withSession(deps, session, async (trx) => {
+    const updated = await sql<{
+      display_name: string;
+      status: string;
+      granted_roles: unknown;
+      created_at: Date;
+      updated_at: Date;
+    }>`
       update platform.api_key_integrations
          set status = 'active',
              client_secret_ciphertext = ${encrypted.ciphertext},
@@ -246,7 +280,14 @@ export async function createIntegration(
              updated_at = ${now}
        where id = ${integrationId}
          and tenant_id = ${session.tenantId}
+      returning display_name, status, granted_roles, created_at, updated_at
     `.execute(trx);
+
+    const row = updated.rows[0];
+    // The row was inserted in step 1 under this same tenant. Its absence here
+    // means something removed or re-fenced it mid-flight; refuse rather than
+    // insert a key under an integration this transaction cannot see.
+    if (!row) throw new ApiKeyNotFoundError("No such integration.");
 
     await insertKeyRow(trx, {
       keyId,
@@ -260,9 +301,22 @@ export async function createIntegration(
       createdBy: session.userId,
       now,
     });
+    return row;
   });
 
-  return { integrationId, keyId, token: minted.token, expiresAt };
+  return {
+    integrationId,
+    keyId,
+    token: minted.token,
+    expiresAt,
+    integration: {
+      displayName: activated.display_name,
+      status: integrationStatus(activated.status),
+      grantedRoles: grantedRolesOf(activated.granted_roles),
+      createdAt: activated.created_at,
+      updatedAt: activated.updated_at,
+    },
+  };
 }
 
 /**
@@ -571,10 +625,31 @@ export async function getKey(
   });
 }
 
+/** What a reader may see as an integration's status. */
+export type IntegrationStatus = "pending" | "active" | "disabled";
+
+/**
+ * The status the row carries, narrowed.
+ *
+ * Anything outside the three known words reads as 'pending' — the state that
+ * authenticates nothing — so an unrecognised value can never be mistaken for
+ * 'active'.
+ */
+function integrationStatus(value: unknown): IntegrationStatus {
+  return value === "active" || value === "disabled" ? value : "pending";
+}
+
+/** An absent or malformed array is no roles, never "every role". */
+function grantedRolesOf(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((role): role is string => typeof role === "string")
+    : [];
+}
+
 export type ListedIntegration = {
   id: string;
   displayName: string;
-  status: "pending" | "active" | "disabled";
+  status: IntegrationStatus;
   /** Roles the service account holds, as the provisioning caller authorized them. */
   grantedRoles: string[];
   createdAt: Date;
@@ -625,15 +700,11 @@ function integrationSort(field: IntegrationSortField): SortColumn {
 }
 
 function listedIntegration(row: IntegrationRow): ListedIntegration {
-  const status = row.status === "active" || row.status === "disabled" ? row.status : "pending";
   return {
     id: row.id,
     displayName: row.display_name,
-    status,
-    // An absent or malformed array is no roles, never "every role".
-    grantedRoles: Array.isArray(row.granted_roles)
-      ? row.granted_roles.filter((role): role is string => typeof role === "string")
-      : [],
+    status: integrationStatus(row.status),
+    grantedRoles: grantedRolesOf(row.granted_roles),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     // Postgres counts arrive as bigint, which the driver hands back as text.

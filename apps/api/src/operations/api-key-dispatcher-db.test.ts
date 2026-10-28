@@ -119,6 +119,7 @@ function verifiedPersonSession(): TrustedSessionContext {
       issuer: ISSUER,
       subject: MANAGER,
       status: "linked",
+      roles: [],
       relationId: RELATION,
       displayName: "Alex Manager",
       relationType: "person",
@@ -559,5 +560,34 @@ describe("a realm that refuses", () => {
     expect(pending.rows).toHaveLength(1);
     expect(pending.rows[0]!.keycloak_client_id).toStartWith("osf-int-");
     expect(pending.rows[0]!.keys).toBe("0");
+  }, TEST_TIMEOUT);
+
+  test("keeps the intent durable when the realm fails inside a dispatcher transaction", async () => {
+    if (!booted) return;
+    // The same realm failure, nested in a caller's transaction, and then that
+    // transaction rolls back too. The 'pending' row still has to be there: it
+    // names the realm client the failed step may already have created, and it
+    // is the only thing reconcile.ts has to find it by.
+    const before = realm.requests.filter((entry) => entry === "POST /admin/realms/openshapeforge/clients").length;
+    await expect(withDbSession(booted.appDb, verifiedPersonSession(), async () => {
+      await createIntegration(booted!.deps, provisioningSession(), {
+        displayName: "Realm down, caller rolled back",
+        roles: [API_KEY_MANAGE_ROLE],
+        expiresInDays: 30,
+      });
+    })).rejects.toThrow(/Could not provision the identity/);
+
+    const rows = await sql<{ status: string; keys: string }>`
+      select i.status,
+             (select count(*) from platform.api_keys k where k.integration_id = i.id)::text as keys
+        from platform.api_key_integrations i
+       where i.tenant_id = ${TENANT}::uuid
+         and i.display_name = 'Realm down, caller rolled back'
+    `.execute(booted.adminDb);
+    expect(rows.rows).toEqual([{ status: "pending", keys: "0" }]);
+    // One attempt, one realm client: the failure is not retried behind the
+    // caller's back, so nothing is provisioned twice.
+    const after = realm.requests.filter((entry) => entry === "POST /admin/realms/openshapeforge/clients").length;
+    expect(after - before).toBe(1);
   }, TEST_TIMEOUT);
 });

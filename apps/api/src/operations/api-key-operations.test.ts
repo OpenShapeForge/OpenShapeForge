@@ -261,15 +261,28 @@ describe("integration catalog Operations", () => {
       const created = value(result);
 
       // Metadata and credential are separate branches, and the metadata is the
-      // written row's own: the name is trimmed and the status is the one the
-      // service flipped to, neither echoed from the input.
+      // written row's own: the name is trimmed, the status is the one the
+      // service flipped to and the roles are the ones it stored, none of them
+      // echoed from the input.
       expect(created.integration).toEqual({
         integrationId: store.integrations[0]!.id,
         displayName: "Partner portal",
         status: "active",
-        grantedRoles: [],
+        grantedRoles: [READ_ROLE, WRITE_ROLE],
         createdAt: store.integrations[0]!.createdAt.toISOString(),
       });
+
+      // Nothing touches the database after the key row is inserted. That is
+      // the point, not an incidental ordering: the plaintext credential exists
+      // exactly once, in this result, so a statement between inserting it and
+      // returning it is a step that can fail and lose it while the mint has
+      // already committed — and whose retry provisions a second realm client
+      // and a second credential. The metadata above comes from the activation
+      // statement's own RETURNING instead.
+      const mint = statements.findLastIndex((query) =>
+        query.sql.includes("insert into platform.api_keys"));
+      expect(mint).toBeGreaterThanOrEqual(0);
+      expect(statements.slice(mint + 1).map((query) => query.sql.trim())).toEqual([]);
       expect(Object.keys(created.integration)).not.toContain("secret");
       expect(Object.keys(created.credential).sort()).toEqual(["expiresAt", "id", "secret"]);
       expect(typeof created.credential.secret).toBe("string");

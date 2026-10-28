@@ -377,6 +377,26 @@ describe("resolveAuthoringLayers", () => {
     }
   });
 
+  test("an absent action read projection cannot be widened, and derived principal exclusions survive patches", () => {
+    const actionEntity = {
+      ...securedEntity,
+      authorization: { ...securedEntity.authorization, rowAccess: { ...securedEntity.authorization.rowAccess,
+        recordPermissions: { ...securedEntity.authorization.rowAccess.recordPermissions,
+          actions: [{ name: "start", principals: ["integration"] }] } } },
+    };
+    const check = (authorization: object) => {
+      const root = makeRepo();
+      writeYaml(root, "base/entities/core/widget.yaml", actionEntity);
+      writeYaml(root, "overlay/entities/core/widget.yaml", { kind: "entityPatch", authorization });
+      configureLayers(root, ["base", "overlay"]);
+      return () => resolveAuthoringLayers(root);
+    };
+    expect(check({ rowAccess: { recordPermissions: { actions: [{ name: "start", principals: ["integration"], reads: ["name"] }] } } })).toThrow(/actions\.start\.reads/);
+    expect(check({ principalClasses: ["person", "service", "unknown", "application"] })).toThrow(/principalClasses/);
+    expect(check({ principalClasses: ["person"] })).not.toThrow();
+    expect(check({ rowAccess: { recordPermissions: { actions: [{ name: "start", principals: ["integration"] }] } } })).not.toThrow();
+  });
+
   test("an entity patch may tighten a declared record action", () => {
     const actionEntity = {
       ...securedEntity,

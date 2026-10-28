@@ -333,6 +333,30 @@ interfaces:
             bindings: { tenantId: tenantId }
 `;
 
+test("cross-catalog extensions obey the same route, binding and realm checks", () => {
+  const input = standaloneOperationFixture(authoringRoot(crossOwner));
+  const source = input.catalogs.find((item) => item.plugin === "example-integrations")!;
+  const destination = input.catalogs.find((item) => item.plugin === "example-record-actions")!;
+  const entity = source.interfaces.web!.entities!.ExampleIntegration!;
+  const related = entity.related![0]!;
+  entity.related = [];
+  destination.interfaces.web!.entityExtensions = { ExampleIntegration: { related: [related] } };
+  expect(() => buildWebManifest([], {}, input)).not.toThrow();
+  related.route = "/wrong-route";
+  expect(() => buildWebManifest([], {}, input)).toThrow(/served at/);
+  related.route = "/example-integrations/:integrationId/record-actions";
+  destination.interfaces.web!.entities!.ExampleAssignment!.route = "/assignments/:missing";
+  related.route = "/assignments/:missing";
+  expect(() => buildWebManifest([], {}, input)).toThrow(/bound by neither/);
+  destination.interfaces.web!.entities!.ExampleAssignment!.route = "/example-integrations/:integrationId/record-actions";
+  related.route = "/example-integrations/:integrationId/record-actions";
+  destination.operations.listAssignments!.auth = { mode: "control", roles: ["admin"] };
+  expect(() => buildWebManifest([], {}, input)).toThrow(/cannot cross authentication realms/);
+  destination.operations.listAssignments!.auth = { mode: "session", roles: ["Platform.ApiKeys.Manage"] };
+  delete entity.operations.get;
+  expect(() => buildWebManifest([], {}, input)).toThrow(/declares no get Operation/);
+});
+
 describe("related web entities across catalog owners", () => {
   test("resolves a related destination another plugin's catalog declares", () => {
     const loaded = loadOperationCatalogs(authoringRoot(crossOwner));

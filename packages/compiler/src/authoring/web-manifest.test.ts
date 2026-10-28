@@ -1500,7 +1500,7 @@ describe("standalone Operation pages", () => {
         },
         entityExtensions: {
           Tenant: {
-            related: [{ entity: "Tenant", label: text("Related tenants", "Gerelateerde tenants"), route: "/tenants/:slug/related" }],
+            related: [{ entity: "Tenant", label: text("Related tenants", "Gerelateerde tenants"), route: "/tenants" }],
           },
         },
       } },
@@ -1537,7 +1537,7 @@ describe("standalone Operation pages", () => {
     expect(manifest.entities.Tenant?.operationSource?.related).toEqual([{
       entityId: "Tenant",
       label: text("Related tenants", "Gerelateerde tenants"),
-      route: "/tenants/:slug/related",
+      route: "/tenants",
     }]);
 
     const scoped = structuredClone(operationEntities);

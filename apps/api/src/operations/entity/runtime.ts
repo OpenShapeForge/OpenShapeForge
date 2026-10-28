@@ -1332,5 +1332,6 @@ export function completeEntitySecureInput(db: OpenShapeForgeDatabase, session: D
   request: EntityOperationRequest, completion: SecureCompletion): Promise<EntityOperationResult> {
   if (request.operation.intent !== "create") throw operationFailure({ code: "BAD_USER_INPUT", message: "Secure completion requires a create Operation." });
   return withAuditContext(request.operation.id, (session as { credential?: import("../../auth/trusted-context.js").SessionCredential }).credential,
-    () => executeEntityOperationWithContext(db, session, request, completion));
+    () => executeEntityOperationWithContext(db, session, request, completion),
+    (session as { principalKind?: "person" | "service" }).principalKind);
 }

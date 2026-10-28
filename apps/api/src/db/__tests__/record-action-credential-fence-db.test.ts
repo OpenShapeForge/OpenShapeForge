@@ -58,6 +58,8 @@ import {
 import { createDatabaseRuntime, type DatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
+import { WORKER_ROLE } from "../migrations/worker-role.js";
+import { databaseRole } from "../database-roles.js";
 import { withDbSession, type DbSessionInput } from "../session.js";
 import type { DB } from "../../generated/db/types.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
@@ -475,6 +477,30 @@ afterAll(async () => {
   await admin?.close();
   await server?.unsafe(`drop database if exists "${scratch}" with (force)`);
   await server?.close();
+});
+
+describe("the fence function's own privileges", () => {
+  test("it is an invoker function the app role alone may execute", async () => {
+    const state = (await sql<{
+      definer: boolean; owner: string; app: boolean; worker: boolean; anyone: boolean;
+    }>`
+      select p.prosecdef as definer, r.rolname as owner,
+             has_function_privilege(${APP_ROLE}, p.oid, 'EXECUTE') as app,
+             has_function_privilege(${WORKER_ROLE}, p.oid, 'EXECUTE') as worker,
+             has_function_privilege('public', p.oid, 'EXECUTE') as anyone
+        from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        join pg_roles r on r.oid = p.proowner
+       where n.nspname = 'app' and p.proname = 'record_action_principal_live'
+    `.execute(admin.db)).rows[0]!;
+    // NOT a definer, and not the record-action resolver's: it reads two
+    // platform tables the restricted runtime role already holds tenant-fenced
+    // DML on, so it carries no privilege of its own and widens nothing.
+    expect(state.definer).toBe(false);
+    expect(state.owner).not.toBe(databaseRole("recordActionResolver").name);
+    expect({ app: state.app, worker: state.worker, anyone: state.anyone })
+      .toEqual({ app: true, worker: false, anyone: false });
+  }, TEST_TIMEOUT);
 });
 
 describe("a revocation and an action in flight cannot interleave", () => {

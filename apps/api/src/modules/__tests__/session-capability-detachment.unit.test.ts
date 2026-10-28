@@ -114,6 +114,13 @@ describe("the module session capability is a detached snapshot", () => {
       (capability.appPrincipal as { integrationId: string }).integrationId =
         VICTIM_INTEGRATION;
     }).toThrow(TypeError);
+    // And the credential beside it, which is what the record-action fence
+    // re-reads for revocation and expiry: a module that could point it at
+    // another live key would act on a credential nobody presented.
+    expect(() => {
+      (capability.appPrincipal as { credentialId: string }).credentialId =
+        "77777777-7777-4777-8777-777777777777";
+    }).toThrow(TypeError);
     // Replacing the whole field is refused for the same reason.
     expect(() => {
       (capability as { appPrincipal?: unknown }).appPrincipal = {
@@ -125,9 +132,11 @@ describe("the module session capability is a detached snapshot", () => {
     // the integration the credential resolved to.
     expect(verified.appPrincipal).toEqual(before);
     expect(capability.appPrincipal?.integrationId).toBe(INTEGRATION);
+    expect(capability.appPrincipal?.credentialId).toBe(CREDENTIAL);
     expect(resolvePrincipalClass(capability)).toBe("application");
     expect(createDbSessionContext(capability).appPrincipalId).toBe(INTEGRATION);
     expect(createDbSessionContext(verified).appPrincipalId).toBe(INTEGRATION);
+    expect(createDbSessionContext(capability).appCredentialId).toBe(CREDENTIAL);
   });
 
   it("detaches a capability grant's subject, records and intents", () => {

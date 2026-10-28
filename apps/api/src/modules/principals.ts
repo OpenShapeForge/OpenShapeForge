@@ -19,7 +19,10 @@
  *   - it is the LIVE session or nothing. A module can construct an object
  *     shaped like a session and put any integration id on it; `acceptsSession`
  *     refuses it, because the only object that passes is the one core handed
- *     to this invocation;
+ *     to this invocation. That object is itself a detached, deeply frozen
+ *     snapshot (`createModuleSessionCapability`), so the module cannot reach
+ *     the answer by editing the session it was legitimately given either —
+ *     `appPrincipal` is not the object core holds, and it is not writable;
  *   - it authorizes nothing. The answer is an identity, never a permission. A
  *     module that needs to know whether it MAY do something asks the record
  *     services, whose policy lives in core.

@@ -728,11 +728,14 @@ describe("the definer role is bounded", () => {
     });
   });
 
-  test("the shipped manifest reaches exactly the entities that opted in", () => {
-    // Opt-in means opt-in. One entity in this repository's authoring carries
-    // the axis — `Notebook`, through the notebook example plugin — and the
-    // registry the migration compiles from names it and nothing else, with
-    // the physical table rather than the registry key.
+  test("the shipped manifest declares exactly one record-action entity", () => {
+    // Opt-in means opt-in. `Notebook`, through the notebook example plugin,
+    // is the only authoring in this repository that carries the axis, with
+    // one action, one declared read field and the safe lock mode, so no
+    // other production table is reachable through the function. Pinned in
+    // full rather than counted: a widened projection, a second action, a
+    // weakened lock, or the registry key leaking in where the physical
+    // table belongs all show up here.
     expect(recordActionEntities()).toEqual([{
       entity: "Notebook",
       schema: "notebook",

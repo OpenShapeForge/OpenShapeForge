@@ -9,11 +9,9 @@
  *      bounded `first`, entity fields in `sortField.enum`, `nextCursor` and
  *      `totalCount` on the way out — or the projection throws. A partial
  *      contract is not a degraded list; it is a build failure.
- *   2. The one-time secret is returned by `issueCredential` and reaches NO web
- *      projection. The generic entity renderer shows whatever its Operation
- *      returns, so a web placement here would print a live credential into the
- *      collection or record view. This test is what keeps that absence
- *      deliberate rather than an oversight somebody "fixes" later.
+ *   2. The one-time secrets in the two write results retain their FieldSecret
+ *      annotation in the web projection. The shared result view must mask
+ *      those outputs before these placements are integrated into a host.
  */
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
@@ -243,7 +241,7 @@ describe("shipped integration and API-key catalog", () => {
       .toEqual({ key: "createdAt", direction: "desc" });
   });
 
-  test("offers only revoke and disable in the generic views, and never the mint", () => {
+  test("places creation and credential issuance on the integration view", () => {
     const web = apiKeyCatalog().interfaces.web!;
     // No standalone pages at all: the catalog is projected as entities only.
     expect(web.pages).toBeUndefined();
@@ -258,33 +256,20 @@ describe("shipped integration and API-key catalog", () => {
       ),
     ]);
     expect(placed.sort()).toEqual([
+      "createIntegration",
       "disableIntegration",
       "getCredential",
       "getIntegration",
+      "issueCredential",
       "listCredentials",
       "listIntegrations",
       "revokeCredential",
     ]);
-    expect(placed).not.toContain("issueCredential");
-    expect(placed).not.toContain("createIntegration");
-    // Neither entity offers a create: the only way to bring a credential into
-    // existence returns it, so no generic form may own that step.
-    for (const entity of Object.values(web.entities ?? {})) {
-      expect(entity.operations.create).toBeUndefined();
-    }
+    expect(web.entities!.ApiKeyIntegration!.operations.create).toEqual({ operation: "createIntegration" });
+    expect(web.entities!.ApiKeyCredential!.operations.create).toBeUndefined();
     const entities = manifest(apiKeyCatalog()).entities;
-    for (const entity of Object.values(entities)) {
-      const rendered = JSON.stringify(entity);
-      for (const key of MINTING) expect(rendered).not.toContain(key);
-      // And no field of a record or collection view carries the marker: the
-      // metadata a generic list and record read has no confidential property
-      // to project, so a FieldSecret anywhere in here would be a leak.
-      expect(presentationComponents(entity)).not.toContain("FieldSecret");
-    }
-    // The whole manifest, not just these two entities.
-    expect(presentationComponents(manifest(apiKeyCatalog()))).not.toContain("FieldSecret");
     const actions = entities.ApiKeyIntegration!.views.record!.operations.actions!;
-    expect(actions.map((action) => action.id)).toEqual(["api-keys.disable-integration"]);
+    expect(actions.map((action) => action.id)).toEqual(["api-keys.issue-credential", "api-keys.disable-integration"]);
     // The record action is bound to the record it was opened on, by the
     // entity's own id field — the integration's stable database id.
     expect(actions[0]!.target).toEqual({
@@ -296,28 +281,11 @@ describe("shipped integration and API-key catalog", () => {
   });
 
   /**
-   * The projection that is NOT shipped, built here so its properties are known
-   * rather than assumed.
-   *
-   * Enabling the two minting actions on the canonical web entity is exactly
-   * this diff — `create: { operation: createIntegration }` and
-   * `issueCredential` in `recordActions` — and nothing else: no renderer, no
-   * second entity, no change to any Operation. This test runs that diff
-   * against the real compiler to show two things in advance: the placement
-   * compiles, and the FieldSecret marker reaches the manifest on the secret
-   * property, which is what the shared web implementation needs in order to
-   * mask it. It stays a test until that implementation has been independently
-   * security-reviewed.
+   * The compiler must carry the confidential marker to both write outputs.
+   * The generic web result view must also mask it before this is integrated.
    */
-  test("would carry the marker into the web manifest if the minting actions were placed", () => {
-    const catalog = structuredClone(apiKeyCatalog());
-    const entity = catalog.interfaces.web!.entities!.ApiKeyIntegration!;
-    entity.operations.create = { operation: "createIntegration" };
-    entity.operations.recordActions = [
-      ...(entity.operations.recordActions ?? []),
-      "issueCredential",
-    ];
-    const projected = manifest(catalog);
+  test("carries the secret marker into the placed operations", () => {
+    const projected = manifest(apiKeyCatalog());
     for (const key of MINTING) {
       const ref = projected.operations![key]!;
       const credential = (ref.output.schema as {

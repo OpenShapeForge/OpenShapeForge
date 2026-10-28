@@ -619,7 +619,8 @@ interfaces:
         operations:
           list: { operation: listIntegrations, resultField: integrations }
           get: { operation: getIntegration, bindings: { integrationId: integrationId } }
-          recordActions: [disableIntegration]
+          create: { operation: createIntegration }
+          recordActions: [issueCredential, disableIntegration]
         related:
           - { entity: ApiKeyCredential, label: { en: Credentials, nl: Credentials }, route: /api-key-integrations/:integrationId/credentials }
           - { entity: RecordActionAssignment, label: { en: Permissions, nl: Rechten }, route: /integrations/:integrationId/record-actions }

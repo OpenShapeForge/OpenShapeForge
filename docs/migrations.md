@@ -160,8 +160,8 @@ The role contract covers attributes and membership too. No declared role may be
 `SUPERUSER`, `BYPASSRLS`, `CREATEROLE`, `CREATEDB` or `REPLICATION`; a definer
 role must be `NOINHERIT` and a member of nothing, since its functions are
 `SECURITY DEFINER` and would otherwise run with whatever it inherits; and the
-only members *of* a definer role are the migrate identity and the owner of the
-current database, both compared by role **name**.
+only roles that may *act as* a definer role are the migrate identity and the
+owner of the current database, both compared by role **name**.
 
 Comparing by name is the rule, not a detail. `pg_has_role(current_user, X,
 'USAGE')` answers "does the caller hold X's privileges", which is true for
@@ -177,16 +177,43 @@ because object ownership is resolved with `has_privs_of_role` as well: with the
 itself. The fences bound that member's writes to entity tables; nothing bounds
 a replaced function body.
 
+"Act as" is **reachability in the membership graph**, not a direct grant. The
+two admitted roles are ordinary roles, so a third role granted one of *them*
+reaches the definer role through it: with `grant <definer> to <owner>` and
+`grant <owner> to <third>`, that third role runs `set role <owner>; set role
+<definer>; create or replace app.record_action_allows(...)` and decides every
+record action — while a direct scan of `pg_auth_members` shows it as a member
+of nothing. So the check walks outwards from each definer role transitively,
+through the admitted roles as well, and reports every role on a path that is
+neither of the two, with the chain it travels and the one `revoke` closest to
+it that cuts the path. Superusers are not reported — they are outside row
+security and every privilege check regardless — but the walk still passes
+*through* them.
+
+No membership option makes an edge safe, so the walk does not look at them.
+`INHERIT` hands over the definer role's privileges and the ownership of its
+functions, `SET` lets the member become it, and `ADMIN` alone is enough because
+the member may `grant <role> to <itself> with inherit true, set true`. An edge
+carrying none of the three confers nothing today and has no purpose on the path
+to a definer role either, so it is reported rather than classified as harmless.
+
 For the same reason the migrate identity's own membership must be a **direct**
-grant (`grant <definer> to <migrate role>`), or the migrate role must be a
-superuser, which needs no grant: a membership held through a group means the
-group is a member of the definer role too, with everything above. Anything else
-is reported with the `grant` or `revoke` that fixes it — and only reported. The
-chain runs as the migrate role, which is deliberately not a role administrator,
-so it fails closed rather than revoking a membership an operator created. The
-record-action step repeats this check on the resolver before it grants anything,
-because a host can call that step directly. Adding a role is a host provisioning
-step:
+grant carrying `INHERIT` and `SET`
+(`grant <definer> to <migrate role> with inherit true, set true`), or the
+migrate role must be a superuser, which needs no grant. Both halves are read
+off the edge itself: `pg_has_role` answers for the whole graph, so a direct
+grant carrying neither option passes it whenever a third role supplies the
+privilege. One `(role, member)` pair may carry several grants from different
+grantors — a `createrole_self_grant` edge beside the host's, for instance — and
+holding one that carries both options satisfies the contract.
+
+Anything else is reported with the `grant` or `revoke` that fixes it — and only
+reported. The chain runs as the migrate role, which is deliberately not a role
+administrator, so it fails closed rather than revoking a membership an operator
+created. The record-action step repeats this check on the resolver before it
+grants anything, because a host can call that step directly.
+
+Adding a role is a host provisioning step:
 `db:provision-roles` before the next `db:migrate`, or step 0 refuses the chain
 and names the statements.
 
@@ -203,6 +230,30 @@ operator explicitly rotates them with `*_PASSWORD_ROTATE=1 bun run
 db:provision-roles` through the administrator connection.
 Locally and in CI the migrate role owns the instance, so the migrate URL
 doubles as the administrator connection when no admin URL is set.
+
+### One cluster, one owner
+
+Roles are cluster-wide: the definer roles are named once in the manifest and
+shared by every OpenShapeForge database on the cluster. "The owner of the
+current database" is not. Two OpenShapeForge databases with **different**
+owners therefore each refuse the other's owner as a member of the shared
+definer roles, and that is the supported policy rather than an oversight:
+admitting any database owner would admit whoever a `CREATEDB` role made one.
+Give the databases on a cluster one owner and one migrate identity, or a
+cluster each. The refusal says so when the reported role owns another database
+on the cluster, so it is not mistaken for a broken grant.
+
+What this costs an existing deployment, exactly: a single-database cluster
+whose migrate identity is its database owner is unaffected, and so is one whose
+migrate identity is a direct member of the definer roles with `INHERIT` and
+`SET`. `db:migrate` now refuses, before touching the schema, when a role that
+is neither the migrate identity nor the database owner can reach a definer role
+— including through either of those two — when the migrate identity's own grant
+is indirect or carries neither option, and when a sibling OpenShapeForge
+database on the same cluster has a different owner. Each refusal names the
+exact `grant` or `revoke`; none of them is applied for you. Run
+`db:provision-roles -- --print` and the reported statements against the cluster
+before the upgrade window if any of those shapes may be present.
 
 ## `db:reset` (development)
 

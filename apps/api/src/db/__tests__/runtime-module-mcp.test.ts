@@ -859,6 +859,17 @@ describe("generated MCP runtime module security boundary", () => {
         const notebookModule: RuntimeModule = {
           name: "notebook",
           operationHandlers: {
+            // `Notebook.deliver` is contracted on this module too, so the
+            // binding requires it. Stands in for the shipped delivery handler;
+            // this test is about `notebook.import` and asserts nothing of it.
+            deliverToNotebook: async () => ({
+              value: {
+                status: "accepted",
+                deliveryId: "66666666-6666-4666-8666-666666666666",
+                notebookName: "stub",
+                priorDeliveries: 0,
+              },
+            }),
             importNotebook: async (input) => {
               notebookCalls += 1;
               return {

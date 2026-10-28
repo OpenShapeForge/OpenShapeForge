@@ -511,10 +511,23 @@ describe("the definer role is bounded", () => {
     });
   }, TEST_TIMEOUT);
 
-  test("the shipped manifest declares no record-action entity yet, so the lookup denies everything", () => {
-    // Opt-in means opt-in: nothing in this repository's authoring carries the
-    // axis, so no production table is reachable through the function today.
-    expect(recordActionEntities()).toEqual([]);
+  test("the shipped manifest declares exactly one record-action entity", () => {
+    // Opt-in means opt-in. `Notebook` is the only authoring in this
+    // repository that carries the axis, with one action, one declared read
+    // field and the safe lock mode, so no other production table is reachable
+    // through the function. Pinned in full rather than counted: a widened
+    // projection, a second action or a weakened lock all show up here.
+    expect(recordActionEntities()).toEqual([{
+      entity: "Notebook",
+      schema: "notebook",
+      table: "notebooks",
+      keyColumn: "id",
+      keyIsUuid: true,
+      aclColumn: "permissions",
+      actions: ["deliver"],
+      reads: { deliver: [{ field: "name", column: "name" }] },
+      locks: { deliver: "exclusive" },
+    }]);
   });
 });
 

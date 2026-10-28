@@ -419,9 +419,31 @@ describe("canonical operation database sessions", () => {
             },
           };
         };
+        // The REST surface below is registered against an explicit
+        // single-Operation catalog, so this module carries exactly that one
+        // handler: a handler the supplied catalog does not contract is a
+        // binding error in its own right.
         const module: RuntimeModule = {
           name: operation.plugin,
           operationHandlers: { [operation.handler]: handler },
+        };
+        // The GraphQL schema and the MCP server are built from the GENERATED
+        // catalog, which contracts a second Operation on this module
+        // (`Notebook.deliver`), so those surfaces need it bound. It stands in
+        // for the shipped delivery handler and asserts nothing of its own.
+        const contracted: RuntimeModule = {
+          ...module,
+          operationHandlers: {
+            ...module.operationHandlers,
+            deliverToNotebook: async () => ({
+              value: {
+                status: "accepted",
+                deliveryId: randomUUID(),
+                notebookName: "stub",
+                priorDeliveries: 0,
+              },
+            }),
+          },
         };
         const verifiedSession: TrustedSessionContext = {
           tenantId,
@@ -476,7 +498,7 @@ describe("canonical operation database sessions", () => {
 
           const graphqlPlatform = new ModulePlatformRuntime(db);
           const schema = buildGraphqlSchema(
-            [accountsRuntime, documentsRuntime, versioningRuntime, module],
+            [accountsRuntime, documentsRuntime, versioningRuntime, contracted],
             { db, platform: graphqlPlatform.services },
           );
           const graphqlResult = await graphql({
@@ -499,7 +521,7 @@ describe("canonical operation database sessions", () => {
           const server = __buildGeneratedMcpServerForTests({
             db,
             session: verifiedSession,
-            modules: [accountsRuntime,documentsRuntime, versioningRuntime, module],
+            modules: [accountsRuntime,documentsRuntime, versioningRuntime, contracted],
             modulePlatform: mcpPlatform,
           });
           const client = new Client(

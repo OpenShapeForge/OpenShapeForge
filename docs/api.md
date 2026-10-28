@@ -670,7 +670,11 @@ JWKS, same pinned audience, same claim parsing. An optional per-key
 subset written when the integration held more roles cannot resurrect them.
 Requires `OPENSHAPEFORGE_API_KEY_SECRET_KEYS` (its own keyring, deliberately
 not the connector one) and a complete bearer verifier; absent either, keys are
-rejected rather than half-honoured. Provisioning lives at `/api/api-keys` and
+rejected rather than half-honoured. When the public issuer is unreachable from
+the API runtime, `OPENSHAPEFORGE_API_KEY_TOKEN_URL` can name the trusted realm's
+internal token endpoint. Without it, the endpoint is derived from the public
+issuer. Token verification still pins the configured issuer and audience.
+Provisioning lives at `/api/api-keys` and
 on the GraphQL surface, gated by `Platform.ApiKeys.Manage` and by a privilege
 ceiling — a caller cannot grant roles it does not hold, and only a session this
 deployment can show to be a PERSON may manage keys at all. That carrier rule is

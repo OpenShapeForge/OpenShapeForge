@@ -33,6 +33,7 @@ export type ApiKeyResolverDeps = {
   db: OpenShapeForgeDatabase;
   keyring: SecretKeyring;
   issuer: string;
+  tokenUrl?: string | undefined;
   /** Verifies a Keycloak token exactly as the interactive bearer path does. */
   verifyToken: (token: string, credential: { tenantId: string; keycloakClientId: string }) => Promise<{
     tenantId: string | null;
@@ -82,6 +83,7 @@ export async function resolveApiKeySession(
     token = await exchangeForToken(
       {
         issuer: deps.issuer,
+        ...(deps.tokenUrl ? { tokenUrl: deps.tokenUrl } : {}),
         keyring: deps.keyring,
         ...(deps.fetch ? { fetch: deps.fetch } : {}),
       },

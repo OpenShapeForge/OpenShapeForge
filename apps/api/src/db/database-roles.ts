@@ -94,9 +94,13 @@ export type UnintendedDefinerMember = {
   role: string;
   /** The role that reaches it. */
   member: string;
-  /** The role `member` holds DIRECTLY on that path — `role` itself at depth 1. */
+  /**
+   * The role `member` holds DIRECTLY on this route — `role` itself at depth 1.
+   * One row per distinct `via`, because `revoke <via> from <member>` cuts that
+   * route and no other: see {@link readUnintendedDefinerMembers}.
+   */
   via: string;
-  /** The whole chain, from the unintended member to the definer role. */
+  /** The shortest chain from the unintended member to the definer role through `via`. */
   path: string;
   /** `member` owns a database on this cluster other than the current one. */
   ownsOtherDatabase: boolean;
@@ -143,7 +147,19 @@ export async function readMigrateIdentity(db: OpenShapeForgeDatabase): Promise<M
   return result.rows[0]!;
 }
 
-/** How deep the membership graph is walked. Postgres forbids cycles; this is a belt. */
+/**
+ * How deep the membership graph is walked. Postgres forbids cycles, so the walk
+ * terminates on its own; this bounds the work it may do on a dense grant
+ * lattice an administrator built.
+ *
+ * A chain longer than this is not a way past the contract. Every role on it at
+ * depth 1..16 is reported unless it is admitted, and the nearest reported role
+ * fails the check and carries the `revoke` that cuts the whole chain — so a
+ * 17-hop chain only hides behind 16 ADMITTED hops, which means 16 superusers
+ * (the migrate identity and the database owner are one role each). A role that
+ * can become a superuser already holds everything the definer roles do and
+ * more, with or without this walk.
+ */
 const MEMBERSHIP_DEPTH = 16;
 
 /**
@@ -188,8 +204,25 @@ const MEMBERSHIP_DEPTH = 16;
  *     nothing. The walk still passes THROUGH a superuser: a role that can
  *     become one reaches the definer role, and holds far more besides.
  *
- * Admitted roles are not reported; everything else on a path is, with the
- * chain it travels and the single `revoke` closest to it that cuts the path.
+ * EVERY ROUTE, NOT THE NEAREST ONE
+ * --------------------------------
+ * A role can reach a definer role by SEVERAL routes, and `revoke <via> from
+ * <member>` cuts exactly one of them — the first hop of the route it is read
+ * off. After `grant <definer> to <owner>`, `grant <definer> to <migrate>`,
+ * `grant <owner> to <attacker>` and `grant <migrate> to <attacker>`, the
+ * attacker reaches the definer role twice over; reporting only the shortest
+ * route printed one revoke, and an operator who ran it was still exposed
+ * through the other. So the result carries one row per distinct
+ * `(definer role, member, via)` — per FIRST HOP out of the member towards the
+ * definer role — and revoking all of them removes every edge by which that
+ * member reaches it. The chain shown per row is the shortest one through that
+ * hop, because the hop is what the remedy acts on.
+ *
+ * That also bounds the result: at most one row per definer role per
+ * `pg_auth_members` edge, however many distinct paths run through it.
+ *
+ * Admitted roles are not reported; everything else on a path is, with a chain
+ * it travels and the `revoke` that cuts that route.
  *
  * Nothing here depends on what the CALLER holds, so a superuser running the
  * check sees the same deviations a restricted migrate role does.
@@ -216,7 +249,7 @@ export async function readUnintendedDefinerMembers(
       join pg_roles member on member.oid = am.member
       where r.depth < ${MEMBERSHIP_DEPTH}
     )
-    select distinct on (r.role, member.rolname)
+    select distinct on (r.role, member.rolname, r.via)
       r.role, member.rolname as member, r.via, r.path,
       exists (select 1 from pg_database d
         where d.datdba = member.oid and d.datname <> current_database()) as "ownsOtherDatabase"
@@ -226,7 +259,7 @@ export async function readUnintendedDefinerMembers(
       and member.rolname <> current_user
       and member.oid <> coalesce(
         (select datdba from pg_database where datname = current_database()), 0)
-    order by r.role, member.rolname, r.depth
+    order by r.role, member.rolname, r.via, r.depth
   `.execute(db);
   return result.rows;
 }
@@ -273,7 +306,10 @@ async function readRoles(db: OpenShapeForgeDatabase): Promise<Map<string, RoleRo
       exists (select 1 from pg_auth_members am
         where am.roleid = r.oid
           and am.member = (select cu.oid from pg_roles cu where cu.rolname = current_user)) as direct,
-      -- The options ON A DIRECT EDGE. pg_has_role answers for the whole
+      -- The options ON A DIRECT EDGE. inherit_option and set_option exist
+      -- from PostgreSQL 16, which the database suite runs on in CI and which
+      -- is therefore the oldest server this contract supports; on an older
+      -- one this query errors rather than passing. pg_has_role answers for the whole
       -- graph, so an optionless direct grant passes it whenever a third role
       -- supplies the privilege — exactly the shape the member scan is meant
       -- to surface (verified on PostgreSQL 17.11 and 16.15). One (role,
@@ -331,7 +367,9 @@ async function readRoleMemberships(db: OpenShapeForgeDatabase): Promise<Map<stri
  *   - the only roles that can ACT AS a definer role are the migrate identity
  *     itself and the owner of this database, by
  *     {@link readUnintendedDefinerMembers} — which walks the membership graph
- *     transitively, so a role granted one of those two is refused as well.
+ *     transitively, so a role granted one of those two is refused as well, and
+ *     reports one `revoke` per route rather than one per role, because a route
+ *     left standing is the whole problem again.
  *     Every other holder inherits the definer role's narrow grants, OWNS its
  *     SECURITY DEFINER functions (ownership is resolved with
  *     `has_privs_of_role`) AND is matched by the policies written `TO` it. A
@@ -415,7 +453,9 @@ export async function verifyDatabaseRoles(db: OpenShapeForgeDatabase): Promise<v
       problems.map((problem) => `  - ${problem}`).join("\n") +
       "\n\nRoles are cluster-wide and are provisioned by the host, not by this migration. " +
       "Run apps/api/src/db/provision-roles.ts with OPENSHAPEFORGE_ADMIN_DATABASE_URL, " +
-      "or execute as an administrator:\n\n" +
+      "or execute ALL of the following as an administrator — each revoke cuts one route " +
+      "into one definer role, and a role listed more than once reaches it more than once:" +
+      "\n\n" +
       [provisioning, ...extra].join("\n"),
   );
 }

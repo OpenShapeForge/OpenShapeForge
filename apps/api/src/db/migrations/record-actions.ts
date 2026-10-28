@@ -1690,5 +1690,8 @@ ${renderRecordActionProjection(entities)}
     to ${sql.id(APP_ROLE)}`.execute(db);
   await sql`alter function app.record_action_allows(text, text, text)
     owner to ${sql.id(RESOLVER_ROLE)}`.execute(db);
+  // CREATE is needed only for transferring ownership. Keeping it would let a
+  // later resolver member replace its own security-definer functions.
+  await sql`revoke create on schema app from ${sql.id(RESOLVER_ROLE)}`.execute(db);
   return [...entities];
 }

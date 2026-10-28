@@ -139,6 +139,18 @@ test("the restricted migrate role installs the lookup, its grants and its polici
       { name: "record_action_allows", owner: RESOLVER_ROLE, definer: true },
       { name: "record_action_read", owner: RESOLVER_ROLE, definer: true },
     ]);
+    const schemaAccess = await sql<{ can_create: boolean; can_use: boolean }>`
+      select has_schema_privilege(${RESOLVER_ROLE}, 'app', 'CREATE') as can_create,
+             has_schema_privilege(${RESOLVER_ROLE}, 'app', 'USAGE') as can_use
+    `.execute(conn);
+    expect(schemaAccess.rows[0]).toEqual({ can_create: false, can_use: true });
+    // Even a session able to SET ROLE to the function owner may not replace
+    // its authorization body after installation.
+    await expect(migrate.db.transaction().execute(async (tx) => {
+      await sql.raw(`set local role "${RESOLVER_ROLE}"`).execute(tx);
+      await sql.raw(`create or replace function app.record_action_allows(text, text, text)
+        returns boolean language sql as 'select true'`).execute(tx);
+    })).rejects.toThrow(/permission denied for schema app/i);
 
     // The narrow grants landed, including the lock privilege and no more.
     const columns = await sql<{ column_name: string; privilege_type: string }>`

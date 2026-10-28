@@ -674,8 +674,8 @@ describe("worker-role RLS axis", () => {
             // The other policies are untouched. Spot-checked on the business
             // tables the old blanket bypass exposed. An INSERT-only policy
             // (the tenant registry's) has no USING, only WITH CHECK.
-            const untouched = await sql<{ qual: string; permissive: string; roles: string[]; cmd: string }>`
-              select coalesce(qual, with_check, '') as qual, permissive, roles, cmd
+            const untouched = await sql<{ qual: string; permissive: string; roles: string[]; cmd: string; policyname: string; check_expr: string | null }>`
+              select coalesce(qual, with_check, '') as qual, permissive, roles, cmd, policyname, with_check as check_expr
               from pg_policies
               where schemaname = 'erp'
             `.execute(conn);
@@ -687,16 +687,22 @@ describe("worker-role RLS axis", () => {
               expect(row.qual).not.toContain("current_worker_role");
               expect(row.roles).not.toContain(WORKER_ROLE);
               if (row.roles.length === 1 && row.roles[0] === resolver) {
+                expect(row.policyname).toMatch(/_record_action_(read|lock|fence|delete_fence)$/);
                 expect(row.qual).not.toContain("bypass_rls");
                 if (row.permissive === "PERMISSIVE") {
                   // The resolver's granting policy admits this tenant only.
                   expect(row.qual).toMatch(/^\(tenant_id = app\.current_tenant\(\)\)$/);
+                  if (row.cmd === "UPDATE") expect(row.check_expr).toBe("false");
+                  else { expect(row.cmd).toBe("SELECT"); expect(row.check_expr).toBeNull(); }
                 } else {
                   // Its restrictive fence may exempt the table owner; this is
                   // not a worker bypass and does not broaden the resolver grant.
                   expect(row.qual).toContain("pg_has_role(CURRENT_USER");
-                  if (row.cmd === "ALL") expect(row.qual).toContain("tenant_id = app.current_tenant()");
-                  else expect(row.cmd).toBe("DELETE");
+                  if (row.cmd === "ALL") {
+                    expect(row.qual).toContain("tenant_id = app.current_tenant()");
+                    expect(row.check_expr).toContain("pg_has_role(CURRENT_USER");
+                    expect(row.check_expr).not.toContain("tenant_id = app.current_tenant()");
+                  } else { expect(row.cmd).toBe("DELETE"); expect(row.check_expr).toBeNull(); }
                 }
               } else {
                 expect(row.qual).not.toContain("CURRENT_USER");

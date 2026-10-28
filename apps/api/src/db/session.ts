@@ -144,6 +144,44 @@ export function currentDbSessionDatabase(): Kysely<unknown> | undefined {
 }
 
 /**
+ * The sessions this module derived, as the objects it froze.
+ *
+ * Membership is the capability a rejoin requires ({@link rejoinActiveSession}).
+ * Only {@link createDbSessionContext} adds to it, and a `WeakSet` holds no key
+ * a caller can enumerate, copy or forge, so an object that is in it is one
+ * this module built from a carrier's own facts — and nothing outside this
+ * module can put one there or take one out.
+ */
+const derivedSessions = new WeakSet<DbSessionContext>();
+
+/**
+ * Freeze a derived session, and brand it as this module's.
+ *
+ * The derived session leaves this module in two places — the second argument
+ * of every {@link withDbSession} callback, and {@link activeDbSessionContext}
+ * — and both used to hand out the MUTABLE object the transaction's GUCs had
+ * been written from. Editing one field of it (`tenantId`, `userId`, `roles`,
+ * `principalClass`, `appPrincipalId`) changed what every service-level check
+ * beside those GUCs then read, and handing it back with `independent: true`
+ * opened a SECOND transaction whose settings were written from the edited
+ * fields — with the nested fence below comparing the object against itself,
+ * field by field, and agreeing every time.
+ *
+ * Frozen, that assignment throws (a module is strict code) instead of
+ * succeeding quietly, and the three arrays are frozen too, so a `push` onto
+ * `roles` is not the way around it either. The object stays the one the
+ * carrier's facts produced, for as long as the transaction it opened lives.
+ */
+function sealSession(session: DbSessionContext): DbSessionContext {
+  Object.freeze(session.roles);
+  Object.freeze(session.groups);
+  Object.freeze(session.relationGroupIds);
+  Object.freeze(session);
+  derivedSessions.add(session);
+  return session;
+}
+
+/**
  * The session the active transaction on `db` was opened with, if any.
  *
  * For the one case {@link withDbSession} cannot serve: work that must run in
@@ -162,6 +200,14 @@ export function currentDbSessionDatabase(): Kysely<unknown> | undefined {
  * a verified person with no Relation as `unknown` and strip an application
  * principal to null. {@link withDbSession} therefore recognises this exact
  * object and reuses it rather than deriving anything from it.
+ *
+ * What comes back is the FROZEN session ({@link sealSession}), so a caller
+ * reads it and cannot edit it: an assignment to a field of it throws, and the
+ * role, group and RelationGroup arrays are frozen as well. That matters here
+ * more than anywhere else, because this object is the one a rejoin is
+ * recognised by — an editable one would have made this accessor a way to
+ * rewrite the active session's tenant, roles or principal class and then open
+ * an independent transaction from the result.
  *
  * This is NOT an authorization source. It reports what the active database
  * session already is; a caller still decides on the session core verified
@@ -288,18 +334,21 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
   assertUuid(input.tenantId, "tenantId");
   assertUuid(input.userId, "userId");
 
-  return {
+  return sealSession({
     tenantId: input.tenantId,
     userId: input.userId,
     ...verifiedAuditIdentity(input),
-    roles: input.roles ?? [],
-    groups: normalizeGroups(input.groups),
-    relationGroupIds: normalizeRelationGroupIds(input.relationGroupIds),
+    // Copied before they are frozen: the carrier's arrays belong to the caller,
+    // and freezing one would reach back out of this layer into code that is
+    // entitled to keep editing its own.
+    roles: [...(input.roles ?? [])],
+    groups: [...normalizeGroups(input.groups)],
+    relationGroupIds: [...normalizeRelationGroupIds(input.relationGroupIds)],
     relationId: actingRelationId(input),
     appPrincipalId: normalizeAppPrincipalId(input.appPrincipal),
     principalClass: resolvePrincipalClass(input),
     scope: normalizeScope(input.scope),
-  };
+  });
 }
 
 export async function applyDbSession<TDatabase>(
@@ -401,24 +450,32 @@ export async function applyDbSession<TDatabase>(
 }
 
 /**
- * Is this the active session itself, handed back verbatim?
+ * The active session itself, when `input` IS it — otherwise undefined.
  *
- * Compared by IDENTITY against the session the active transaction on `db` was
- * opened with, which is the only way to obtain the object at all
- * ({@link activeDbSessionContext}). So the reuse path cannot be entered with a
- * caller-shaped object, a copy or a spread: anything else — including a
- * context from a different database, or one whose fields were edited into a
- * new object — falls through to {@link createDbSessionContext} and is then
- * held to the nested fence below exactly as before. It establishes no session
- * either; a rejoin requires an active session, by construction.
+ * It returns the session the active transaction on `db` was OPENED with rather
+ * than the object the caller passed. Here those are the same object, so the
+ * distinction looks idle and is not: it is what makes the answer independent
+ * of the caller entirely, so no field of the returned session can have come
+ * from anywhere but this module's own derivation.
+ *
+ * Identity is the capability, and it is one a caller cannot manufacture.
+ * {@link activeDbSessionContext} is the only way to obtain the object, the
+ * object is frozen ({@link sealSession}), and it is in
+ * {@link derivedSessions}, which only {@link createDbSessionContext} writes.
+ * A caller-shaped object, a spread, a prototype child and a context from a
+ * different database are none of those things: they fall through to
+ * {@link createDbSessionContext} and are then held to the nested fence below
+ * exactly as before. This establishes no session either; a rejoin requires an
+ * active one, by construction.
  */
-function rejoinsActiveSession<TDatabase>(
+function rejoinActiveSession<TDatabase>(
   db: Kysely<TDatabase>,
   input: DbSessionInput | DbSessionContext,
-): input is DbSessionContext {
+): DbSessionContext | undefined {
   const active = activeDbSession.getStore();
-  return active !== undefined && active.db === (db as unknown as Kysely<unknown>) &&
-    (input as unknown) === active.session;
+  if (!active || active.db !== (db as unknown as Kysely<unknown>)) return undefined;
+  if ((input as unknown) !== active.session) return undefined;
+  return derivedSessions.has(active.session) ? active.session : undefined;
 }
 
 export async function withDbSession<TDatabase, TResult>(
@@ -429,13 +486,18 @@ export async function withDbSession<TDatabase, TResult>(
 ): Promise<TResult> {
   // A rejoin reuses the derived session; everything else derives one. Nothing
   // is widened either way — the rejoined object is the one this function
-  // derived when it opened the transaction being rejoined.
-  const session = rejoinsActiveSession(db, input)
-    ? input
-    : createDbSessionContext(input);
+  // derived when it opened the transaction being rejoined, taken from the
+  // active store rather than from the caller.
+  const rejoined = rejoinActiveSession(db, input);
+  const session = rejoined ?? createDbSessionContext(input);
   const active = activeDbSession.getStore();
   if (active && active.db === db) {
-    const sameSession = active.session.tenantId === session.tenantId &&
+    // A rejoin IS the active session — one frozen object, so there is nothing
+    // to compare and no comparison that could be satisfied by editing it.
+    // Everything else was derived from a carrier's own facts and has to name
+    // the same principal, field for field.
+    const sameSession = session === active.session ||
+      (active.session.tenantId === session.tenantId &&
       active.session.userId === session.userId &&
       active.session.auditIdentityId === session.auditIdentityId &&
       active.session.auditIssuer === session.auditIssuer &&
@@ -450,7 +512,7 @@ export async function withDbSession<TDatabase, TResult>(
       ) &&
       active.session.relationId === session.relationId &&
       active.session.appPrincipalId === session.appPrincipalId &&
-      active.session.principalClass === session.principalClass;
+      active.session.principalClass === session.principalClass);
     if (!sameSession) {
       throw new Error("Nested database work cannot replace the active session.");
     }

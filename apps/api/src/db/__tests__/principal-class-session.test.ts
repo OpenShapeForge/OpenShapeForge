@@ -231,3 +231,196 @@ describe("the principal class in the database session", () => {
     ).rejects.toThrow("Nested database work cannot replace the active session.");
   });
 });
+
+/**
+ * The session a rejoin is recognised by cannot be EDITED into another one.
+ *
+ * The catalog's join needs the derived session itself, so the object reaches
+ * code outside db/session.ts twice: as the second argument of every
+ * `withDbSession` callback, and through `activeDbSessionContext`. Both used to
+ * hand out the mutable object the transaction's GUCs had been written from, and
+ * the nested fence then compared that object against ITSELF, field by field,
+ * and agreed. So a caller holding it could write a different tenant, a longer
+ * role set or `principalClass: "person"` onto it and hand it back with
+ * `independent: true`, and a second transaction opened with the edited fields —
+ * while every service-level check that reads the session rather than the GUCs
+ * (`auth/api-key/service.ts` checks tenant, user, class and app principal on
+ * it) saw the edited values too.
+ *
+ * Nothing here asserts that HTTP input can reach this: it cannot, and that is
+ * not what makes the fix worth having. The session object is passed by
+ * reference to in-process code that the fence exists to constrain — nested
+ * canonical Operations, plugin runtime work, the provisioning service — so
+ * "no request can set this field" is not the same claim as "no holder of the
+ * object can". These tests are about the second.
+ *
+ * Both halves are stated: the edit fails at the assignment, and even when a
+ * caller gets an edited object by another route, no transaction opened from it
+ * carries a tenant, a role, a principal class or an application principal the
+ * carrier did not have.
+ */
+describe("the active session is immutable, and a rejoin cannot be redirected", () => {
+  const otherTenant = randomUUID();
+
+  /**
+   * The fields the DERIVATION reads back off a context, with the value an
+   * escalation would want. An object carrying one of these is a different
+   * session, and the fence says so.
+   */
+  const derived: readonly [string, unknown][] = [
+    ["tenantId", otherTenant],
+    ["userId", randomUUID()],
+    ["scope", "tenant"],
+    ["relationId", randomUUID()],
+    ["roles", ["Platform.ApiKeys.Manage"]],
+  ];
+
+  /**
+   * The two fields a context carries and no carrier input produces, so the
+   * derivation cannot read them back at all. Writing one onto a copy is not
+   * refused — it is IGNORED, which is the other half of the same answer.
+   */
+  const ignored: readonly [string, unknown][] = [
+    ["principalClass", "person"],
+    ["appPrincipalId", randomUUID()],
+  ];
+
+  /** What the database says about the session a transaction really runs under. */
+  async function settings(trx: unknown) {
+    const row = await sql<{
+      tenant: string; user_id: string; roles: string; scope: string;
+      principal_class: string; app_principal: string | null; relation: string | null;
+    }>`
+      select current_setting('app.tenant_id', true) as tenant,
+             current_setting('app.user_id', true) as user_id,
+             current_setting('app.roles', true) as roles,
+             current_setting('app.scope', true) as scope,
+             app.current_principal_class() as principal_class,
+             app.current_app_principal()::text as app_principal,
+             nullif(current_setting('app.relation_id', true), '') as relation
+    `.execute(trx as never);
+    return row.rows[0]!;
+  }
+
+  test("the session handed to the callback is the frozen one, not a copy of it", async () => {
+    if (!runtime) return;
+    await withDbSession(runtime.db, carriers.service, async (_trx, session) => {
+      // The callback's argument and the accessor's answer are one object, so
+      // there is no second, editable view of the active session to find.
+      expect(activeDbSessionContext(runtime!.db)).toBe(session);
+      expect(Object.isFrozen(session)).toBe(true);
+      expect(Object.isFrozen(session.roles)).toBe(true);
+      expect(Object.isFrozen(session.groups)).toBe(true);
+      expect(Object.isFrozen(session.relationGroupIds)).toBe(true);
+    });
+  });
+
+  test("every field a mutation would want refuses the assignment", async () => {
+    if (!runtime) return;
+    await withDbSession(runtime.db, carriers.service, async (_trx, session) => {
+      for (const [field, value] of [...derived, ...ignored]) {
+        const before = (session as unknown as Record<string, unknown>)[field];
+        // Strict code, which a module is, throws rather than dropping the
+        // write. Caught so the FIELD is what this asserts either way.
+        expect(() => {
+          (session as unknown as Record<string, unknown>)[field] = value;
+        }).toThrow();
+        expect({ field, value: (session as unknown as Record<string, unknown>)[field] })
+          .toEqual({ field, value: before });
+      }
+      // And the role set cannot be grown in place.
+      expect(() => (session.roles as string[]).push("Platform.ApiKeys.Manage")).toThrow();
+      expect(session.roles).toEqual([]);
+    });
+  });
+
+  test("an edited copy is a different session, nested and independent alike", async () => {
+    if (!runtime) return;
+    // The route a caller has left: build its OWN object with the fields it
+    // wants. That object is not the active session, so it is derived and then
+    // held to the fence — for the nested transaction and the independent one.
+    for (const [field, value] of derived) {
+      for (const independent of [false, true]) {
+        await expect(
+          withDbSession(runtime.db, carriers.service, (_trx, session) =>
+            withDbSession(
+              runtime!.db,
+              { ...session, [field]: value } as never,
+              (trx) => settings(trx),
+              { independent },
+            )),
+        ).rejects.toThrow("Nested database work cannot replace the active session.");
+      }
+    }
+  });
+
+  test("a class or an application principal written onto a copy is ignored", async () => {
+    if (!runtime) return;
+    // `unclassified` is the carrier a copy reproduces exactly, so these two
+    // fields are the ONLY difference and the fence has nothing to refuse. What
+    // reaches the database is still the carrier's own answer: a session cannot
+    // be talked into a class, only derived into one.
+    for (const [field, value] of ignored) {
+      for (const independent of [false, true]) {
+        const observed = await withDbSession(runtime.db, carriers.unclassified,
+          (_trx, session) => withDbSession(
+            runtime!.db,
+            { ...session, [field]: value } as never,
+            (trx) => settings(trx),
+            { independent },
+          ));
+        expect({ field, independent, ...observed }).toMatchObject({
+          field, independent, principal_class: "unknown", app_principal: null,
+        });
+      }
+    }
+  });
+
+  test("an independent rejoin runs under the carrier's own session, not an edited one", async () => {
+    if (!runtime) return;
+    const observed = await withDbSession(runtime.db, carriers.service, async (_trx, session) => {
+      // A prototype child, which `Object.freeze` does not reach. Assigning
+      // through it does not even get that far: a non-writable inherited
+      // property refuses the write, so shadowing takes `defineProperty`.
+      const shadowed = Object.create(session) as Record<string, unknown>;
+      expect(() => { shadowed.tenantId = otherTenant; }).toThrow();
+      for (const [field, value] of [["tenantId", otherTenant], ["principalClass", "person"],
+        ["roles", ["Platform.ApiKeys.Manage"]]] as const) {
+        Object.defineProperty(shadowed, field, { value, enumerable: true, configurable: true });
+      }
+      // Still not the active session, so it is derived — and `tenantId` alone
+      // is enough for the fence to refuse it, independent or not.
+      await expect(withDbSession(runtime!.db, shadowed as never, (trx) => settings(trx),
+        { independent: true })).rejects.toThrow(
+          "Nested database work cannot replace the active session.");
+
+      // And the genuine object still joins and still opens an independent
+      // transaction, under the session the carrier produced.
+      return withDbSession(runtime!.db, session, (trx) => settings(trx), { independent: true });
+    });
+    expect(observed).toEqual({
+      tenant: tenantId,
+      user_id: userId,
+      roles: "",
+      scope: "self",
+      principal_class: "service",
+      app_principal: null,
+      relation: null,
+    });
+  });
+
+  test("a cross-tenant session is refused whether it is nested or independent", async () => {
+    if (!runtime) return;
+    for (const independent of [false, true]) {
+      await expect(
+        withDbSession(runtime.db, carriers.service, () =>
+          withDbSession(
+            runtime!.db,
+            { tenantId: otherTenant, userId, principalKind: "service" },
+            (trx) => settings(trx),
+            { independent },
+          )),
+      ).rejects.toThrow("Nested database work cannot replace the active session.");
+    }
+  });
+});

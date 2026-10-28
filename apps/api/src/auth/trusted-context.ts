@@ -101,7 +101,13 @@ export type TrustedSessionContext = {
   roles: string[];
   /** Verified issuer-wide grants before mutable organization grants are added. */
   issuerRoles?: readonly string[];
-  /** Explicit bearer principal kind; absence never proves a service account. */
+  /**
+   * The principal class the SERVER established: the bearer path's own verdict
+   * about the token (`bearer-session.ts`), or the class the in-mesh hop signed
+   * into its trusted-context bundle. Absence never proves a service account
+   * and never stands in for a person — a control that needs a human refuses
+   * the absent case. Never caller input on any carrier.
+   */
   principalKind?: "person" | "service";
   /**
    * The verified application behind a machine session. Only the API-key
@@ -179,12 +185,20 @@ export function readTrustedSessionContext(
   // token of the realm this deployment trusts; that realm is the identity's
   // issuer. Without one configured no identity can be named, and no link read.
   const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER?.trim();
+  // The principal class comes from the SIGNED payload or not at all: it is
+  // inside the HMAC (packages/auth, payload v3), so a caller cannot assert it
+  // and a hop that authenticated nobody cannot borrow it. An unsigned or
+  // tampered bundle reads as the empty identity, which carries none either,
+  // and a bundle from a producer that predates the class (payload v2, still
+  // accepted so a mid-upgrade deployment keeps working) reads as the identity
+  // it names with NO class — never as a person, whatever its headers claim.
   return {
     tenantId: base.tenantId,
     userId: base.userId,
     ...(issuer ? { issuer } : {}),
     roles: base.roles,
     groups: base.groups ?? [],
+    ...(base.principalKind ? { principalKind: base.principalKind } : {}),
     relationGroupIds: [],
     scope: "self",
     credential: "trusted-context",

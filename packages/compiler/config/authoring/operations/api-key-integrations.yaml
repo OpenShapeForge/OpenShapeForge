@@ -1,0 +1,630 @@
+# The integration catalog as a customer administrator sees it: which external
+# parties hold a credential against this organization, what each one is allowed
+# to do, and which keys are live under it.
+#
+# Nothing here decides anything. Every Operation calls the one provisioning
+# service (apps/api/src/auth/api-key/service.ts) and therefore the one privilege
+# ceiling (ceiling.ts): the management role, "nobody grants what they do not
+# hold", and the refusal of an API key session to manage API keys. The existing
+# REST and GraphQL surfaces call the same functions, so this catalog is a third
+# projection of one authority rather than a second implementation.
+#
+# Deliberately generic. An "integration" is an external party with a service
+# account and keys; nothing in this contract knows what that party does with
+# them, so a workflow application, a reporting job and a partner integration all
+# appear here as ordinary rows.
+#
+# The identifier is `platform.api_key_integrations.id` — a database uuid minted
+# at creation and never rewritten, including by the realm reconciler
+# (reconcile.ts), which rebuilds a missing Keycloak client under the SAME id.
+# The derived Keycloak clientId and the service account's user id are therefore
+# never exposed: they change, and they are realm internals.
+#
+# The secret is returned by `issueCredential` and nowhere else, exactly once.
+# That Operation has NO web projection: a generic entity form shows whatever its
+# Operation returns, and this repository has no sensitive-output contract for a
+# projected result (there is `interaction.secureInput` for input, and field
+# `classification.sensitivity` for entity fields — neither covers an Operation's
+# output). Projecting it would print the credential into the generic UI. See the
+# task report for the exact gap.
+schemaVersion: 1
+kind: operationCatalog
+plugin: osf-api-keys
+operations:
+  listIntegrations:
+    id: api-keys.list-integrations
+    name: { en: List integrations, nl: Integraties tonen }
+    description:
+      en: 'The organization''s API key integrations: name, lifecycle status, the roles their service account
+        holds, and how many credentials are live under each. Never returns a credential or a client secret.'
+      nl: 'De API-key-integraties van de organisatie: naam, status, de rollen van hun serviceaccount en hoeveel
+        credentials er per integratie actief zijn. Geeft nooit een credential of clientsecret terug.'
+    implementation: { type: plugin, plugin: osf-api-keys, handler: listIntegrations }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          displayName:
+            type: string
+            maxLength: 200
+            x-osf-i18n: { title: { en: Name, nl: Naam } }
+          status: &integrationStatusFilter
+            type: string
+            enum: [pending, active, disabled]
+            x-osf-i18n:
+              title: { en: Status, nl: Status }
+              enum: &integrationStatusLabels
+                pending: { en: Pending, nl: In afwachting }
+                active: { en: Active, nl: Actief }
+                disabled: { en: Disabled, nl: Uitgeschakeld }
+          sortField:
+            type: string
+            enum: [displayName, status, createdAt, updatedAt]
+            default: displayName
+            x-osf-i18n:
+              title: { en: Sort field, nl: Sorteerveld }
+              enum:
+                displayName: { en: Name, nl: Naam }
+                status: { en: Status, nl: Status }
+                createdAt: { en: Created, nl: Aangemaakt }
+                updatedAt: { en: Changed, nl: Gewijzigd }
+          sortDirection: &sortDirection
+            type: string
+            enum: [asc, desc]
+            default: asc
+            x-osf-i18n:
+              title: { en: Sort direction, nl: Sorteerrichting }
+              enum:
+                asc: { en: Ascending, nl: Oplopend }
+                desc: { en: Descending, nl: Aflopend }
+          first: &first
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+            x-osf-i18n: { title: { en: Page size, nl: Paginagrootte } }
+          after: &after
+            type: string
+            # The opaque keyset cursor this listing issued. It names the
+            # previous page's last row by id and carries no sort value, so it
+            # is a fixed size for every row — which is why a bound can be
+            # declared here at all. A cursor that carried the value was as long
+            # as the value, and `display_name` is unbounded `text`: a
+            # 200-character bound refused the listing's own `nextCursor` at the
+            # transport for any name past a short one, and no larger number
+            # would have been right either, because the two older surfaces
+            # accept a name of any length. The decoder's own ceiling is derived
+            # from the payload in apps/api/src/operations/api-key-cursor.ts
+            # (MAX_CURSOR_LENGTH); this is the outer bound that stays above it,
+            # pinned by a test in
+            # apps/api/src/operations/api-key-operations.test.ts so the two
+            # cannot cross.
+            maxLength: 256
+            x-osf-i18n: { title: { en: Cursor, nl: Cursor } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integrations, totalCount, nextCursor]
+        properties:
+          integrations:
+            type: array
+            items: &integration
+              type: object
+              additionalProperties: false
+              required: [integrationId, displayName, status, grantedRoles, credentialCount, activeCredentialCount, createdAt, updatedAt]
+              properties:
+                integrationId:
+                  type: string
+                  format: uuid
+                  description: Stable database identifier. Unchanged when the realm service account is rebuilt.
+                  x-osf-i18n: { title: { en: Integration, nl: Integratie } }
+                displayName:
+                  type: string
+                  x-osf-i18n: { title: { en: Name, nl: Naam } }
+                status:
+                  type: string
+                  enum: [pending, active, disabled]
+                  x-osf-i18n:
+                    title: { en: Status, nl: Status }
+                    enum: *integrationStatusLabels
+                grantedRoles:
+                  type: array
+                  items: { type: string }
+                  description: Roles the integration's service account holds, as the provisioning caller authorized them.
+                  x-osf-i18n: { title: { en: Roles, nl: Rollen } }
+                credentialCount:
+                  type: integer
+                  minimum: 0
+                  x-osf-i18n: { title: { en: Credentials, nl: Credentials } }
+                activeCredentialCount:
+                  type: integer
+                  minimum: 0
+                  x-osf-i18n: { title: { en: Active credentials, nl: Actieve credentials } }
+                createdAt:
+                  type: string
+                  format: date-time
+                  x-osf-i18n: { title: { en: Created, nl: Aangemaakt } }
+                updatedAt:
+                  type: string
+                  format: date-time
+                  x-osf-i18n: { title: { en: Changed, nl: Gewijzigd } }
+            x-osf-i18n: { title: { en: Integrations, nl: Integraties } }
+          totalCount:
+            type: integer
+            minimum: 0
+            x-osf-i18n: { title: { en: Total integrations, nl: Totaal integraties } }
+          nextCursor:
+            type: [string, 'null']
+            x-osf-i18n: { title: { en: Next cursor, nl: Volgende cursor } }
+    auth: &manageAuth { mode: session, roles: [Platform.ApiKeys.Manage] }
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors: &catalogErrors
+      - { status: 400, code: VALIDATION, description: The input does not describe a valid request. }
+      - { status: 401, code: UNAUTHENTICATED, description: An authenticated tenant session is required. }
+      - { status: 403, code: FORBIDDEN, description: 'The session may not manage API keys: it lacks the management role, carries a role the caller does not hold, or is itself an API key.' }
+      - { status: 404, code: NOT_FOUND, description: The integration or credential does not exist in this organization. }
+      - { status: 503, code: NOT_CONFIGURED, description: 'This deployment has no API key provisioning configuration, so no integration can be managed here.' }
+  getIntegration:
+    id: api-keys.get-integration
+    name: { en: View integration, nl: Integratie bekijken }
+    description:
+      en: One integration of this organization, with the same fields the integration list reports.
+      nl: Eén integratie van deze organisatie, met dezelfde velden als de integratielijst.
+    implementation: { type: plugin, plugin: osf-api-keys, handler: getIntegration }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integrationId]
+        properties:
+          integrationId: &integrationIdInput
+            type: string
+            format: uuid
+            x-osf-i18n: { title: { en: Integration, nl: Integratie } }
+    output: { schema: *integration }
+    auth: *manageAuth
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors: *catalogErrors
+  listCredentials:
+    id: api-keys.list-credentials
+    name: { en: List credentials, nl: Credentials tonen }
+    description:
+      en: 'The credentials issued under one integration: name, lifecycle status, any role narrowing, expiry and
+        last use. Metadata only — the key itself is hashed at rest and is never returned by a read.'
+      nl: 'De credentials die onder één integratie zijn uitgegeven: naam, status, eventuele rolbeperking,
+        vervaldatum en laatste gebruik. Alleen metadata — de key zelf is gehasht opgeslagen en komt nooit terug
+        uit een leesactie.'
+    implementation: { type: plugin, plugin: osf-api-keys, handler: listCredentials }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integrationId]
+        properties:
+          integrationId: *integrationIdInput
+          displayName:
+            type: string
+            maxLength: 200
+            x-osf-i18n: { title: { en: Name, nl: Naam } }
+          status: &credentialStatusFilter
+            type: string
+            enum: [active, expired, revoked]
+            x-osf-i18n:
+              title: { en: Status, nl: Status }
+              enum: &credentialStatusLabels
+                active: { en: Active, nl: Actief }
+                expired: { en: Expired, nl: Verlopen }
+                revoked: { en: Revoked, nl: Ingetrokken }
+          sortField:
+            type: string
+            enum: [displayName, status, createdAt, expiresAt, lastUsedAt]
+            default: createdAt
+            x-osf-i18n:
+              title: { en: Sort field, nl: Sorteerveld }
+              enum:
+                displayName: { en: Name, nl: Naam }
+                status: { en: Status, nl: Status }
+                createdAt: { en: Issued, nl: Uitgegeven }
+                expiresAt: { en: Expires, nl: Verloopt }
+                lastUsedAt: { en: Last used, nl: Laatst gebruikt }
+          sortDirection:
+            type: string
+            enum: [asc, desc]
+            default: desc
+            x-osf-i18n:
+              title: { en: Sort direction, nl: Sorteerrichting }
+              enum:
+                asc: { en: Ascending, nl: Oplopend }
+                desc: { en: Descending, nl: Aflopend }
+          first: *first
+          after: *after
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [credentials, totalCount, nextCursor]
+        properties:
+          credentials:
+            type: array
+            items: &credential
+              type: object
+              additionalProperties: false
+              required: [id, integrationId, integrationName, displayName, status, createdAt, expiresAt, revokedAt, lastUsedAt]
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                  x-osf-i18n: { title: { en: Credential, nl: Credential } }
+                integrationId:
+                  type: string
+                  format: uuid
+                  x-osf-i18n: { title: { en: Integration, nl: Integratie } }
+                integrationName:
+                  type: string
+                  x-osf-i18n: { title: { en: Integration, nl: Integratie } }
+                displayName:
+                  type: string
+                  x-osf-i18n: { title: { en: Name, nl: Naam } }
+                status:
+                  type: string
+                  enum: [active, expired, revoked]
+                  x-osf-i18n:
+                    title: { en: Status, nl: Status }
+                    enum: *credentialStatusLabels
+                roleSubset:
+                  type: [array, 'null']
+                  items: { type: string }
+                  description: Null means the credential carries whatever its integration's service account holds. A list is intersected with those roles, never unioned.
+                  x-osf-i18n: { title: { en: Role narrowing, nl: Rolbeperking } }
+                createdAt:
+                  type: string
+                  format: date-time
+                  x-osf-i18n: { title: { en: Issued, nl: Uitgegeven } }
+                expiresAt:
+                  type: [string, 'null']
+                  format: date-time
+                  x-osf-i18n: { title: { en: Expires, nl: Verloopt } }
+                revokedAt:
+                  type: [string, 'null']
+                  format: date-time
+                  x-osf-i18n: { title: { en: Revoked, nl: Ingetrokken } }
+                lastUsedAt:
+                  type: [string, 'null']
+                  format: date-time
+                  x-osf-i18n: { title: { en: Last used, nl: Laatst gebruikt } }
+            x-osf-i18n: { title: { en: Credentials, nl: Credentials } }
+          totalCount:
+            type: integer
+            minimum: 0
+            x-osf-i18n: { title: { en: Total credentials, nl: Totaal credentials } }
+          nextCursor:
+            type: [string, 'null']
+            x-osf-i18n: { title: { en: Next cursor, nl: Volgende cursor } }
+    auth: *manageAuth
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors: *catalogErrors
+  getCredential:
+    id: api-keys.get-credential
+    name: { en: View credential, nl: Credential bekijken }
+    description:
+      en: One credential of one integration, by both identifiers. Metadata only; the key is never returned.
+      nl: Eén credential van één integratie, op beide identifiers. Alleen metadata; de key komt nooit terug.
+    implementation: { type: plugin, plugin: osf-api-keys, handler: getCredential }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, integrationId]
+        properties:
+          id:
+            type: string
+            format: uuid
+            x-osf-i18n: { title: { en: Credential, nl: Credential } }
+          integrationId: *integrationIdInput
+    output: { schema: *credential }
+    auth: *manageAuth
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors: *catalogErrors
+  createIntegration:
+    id: api-keys.create-integration
+    name: { en: Add an integration, nl: Integratie toevoegen }
+    description:
+      en: 'Registers one external party against this organization and hands over its FIRST credential: a service
+        account is provisioned in the realm, bounded by the roles the caller itself holds, and one credential is
+        minted for it. RETURNS THE SECRET ONCE, under `credential`; everything under `integration` is ordinary
+        metadata that every later read reports too. The credential is hashed at rest and cannot be read again.'
+      nl: 'Registreert één externe partij bij deze organisatie en geeft de EERSTE credential mee: er wordt een
+        serviceaccount in het realm aangemaakt, begrensd door de rollen die de aanvrager zelf heeft, en daarvoor
+        wordt één credential uitgegeven. GEEFT HET SECRET ÉÉNMAAL TERUG, onder `credential`; alles onder
+        `integration` is gewone metadata die elke latere leesactie ook teruggeeft. De credential is gehasht
+        opgeslagen en is niet opnieuw op te vragen.'
+    implementation: { type: plugin, plugin: osf-api-keys, handler: createIntegration }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [displayName, roles]
+        properties:
+          displayName:
+            type: string
+            minLength: 1
+            maxLength: 200
+            description: How this organization recognises the external party. Not an identifier; the realm client id is derived server-side.
+            x-osf-i18n: { title: { en: Name, nl: Naam } }
+          roles:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items: { type: string, minLength: 1 }
+            description: Roles the integration's service account receives. Every one must already be held by the caller.
+            x-osf-i18n: { title: { en: Roles, nl: Rollen } }
+          expiresInDays: &expiresInDays
+            type: integer
+            minimum: 1
+            maximum: 366
+            description: 'Omit for this deployment''s default lifetime. The ceiling is 366 days: a credential that
+              never expires, or one that outlives a yearly review, is not something this contract can ask for. A
+              deployment may declare a tighter maximum than 366; a request past it is refused and names that number.'
+            x-osf-i18n: { title: { en: Lifetime in days, nl: Looptijd in dagen } }
+          roleSubset:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items: { type: string, minLength: 1 }
+            description: Narrows the FIRST credential to a subset of the integration's roles. Omit for the integration's full set; an empty list is refused rather than read as "no narrowing".
+            x-osf-i18n: { title: { en: Role narrowing, nl: Rolbeperking } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integration, credential]
+        properties:
+          integration:
+            type: object
+            additionalProperties: false
+            required: [integrationId, displayName, status, grantedRoles, createdAt]
+            description: Ordinary metadata, identical to what the integration list and read report.
+            properties:
+              integrationId:
+                type: string
+                format: uuid
+                description: Stable database identifier. Unchanged when the realm service account is rebuilt.
+                x-osf-i18n: { title: { en: Integration, nl: Integratie } }
+              displayName:
+                type: string
+                x-osf-i18n: { title: { en: Name, nl: Naam } }
+              status:
+                type: string
+                enum: [pending, active, disabled]
+                x-osf-i18n:
+                  title: { en: Status, nl: Status }
+                  enum: *integrationStatusLabels
+              grantedRoles:
+                type: array
+                items: { type: string }
+                x-osf-i18n: { title: { en: Roles, nl: Rollen } }
+              createdAt:
+                type: string
+                format: date-time
+                x-osf-i18n: { title: { en: Created, nl: Aangemaakt } }
+            x-osf-i18n: { title: { en: Integration, nl: Integratie } }
+          credential: &mintedCredential
+            type: object
+            additionalProperties: false
+            required: [id, secret, expiresAt]
+            description: 'CONFIDENTIAL. `secret` is a live credential, returned here and nowhere else, exactly
+              once. Hand it to the external party; never store, log, cache or echo it. Every other read of this
+              credential reports metadata only, because the stored half is a hash.'
+            properties:
+              id:
+                type: string
+                format: uuid
+                x-osf-i18n: { title: { en: Credential, nl: Credential } }
+              secret:
+                type: string
+                description: The credential itself, returned exactly once and never recoverable. Treat as a password, not as data.
+                x-osf-i18n: { title: { en: Secret, nl: Secret } }
+                x-osf-presentation: { component: FieldSecret }
+              expiresAt:
+                type: string
+                format: date-time
+                x-osf-i18n: { title: { en: Expires, nl: Verloopt } }
+            x-osf-i18n: { title: { en: New credential, nl: Nieuwe credential } }
+    auth: *manageAuth
+    tenancy: { mode: required }
+    # The realm is mutated: a service account is created and its roles granted.
+    effects: { data: write, external: write }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: acknowledgement }
+    errors:
+      - { status: 400, code: VALIDATION, description: The input does not describe a valid request. }
+      - { status: 401, code: UNAUTHENTICATED, description: An authenticated tenant session is required. }
+      - { status: 403, code: FORBIDDEN, description: 'The session may not manage API keys: it lacks the management role, asked for a role the caller does not hold, or is not a verified person.' }
+      - { status: 404, code: NOT_FOUND, description: The integration or credential does not exist in this organization. }
+      - { status: 502, code: PROVISIONING_FAILED, description: The identity provider refused or could not complete the service account; nothing usable was handed out and the attempt is left for the reconciler. }
+      - { status: 503, code: NOT_CONFIGURED, description: 'This deployment has no API key provisioning configuration, so no integration can be managed here.' }
+  issueCredential:
+    id: api-keys.issue-credential
+    name: { en: Issue a credential, nl: Credential uitgeven }
+    description:
+      en: 'Issues one additional credential against an existing active integration — the rotation primitive: two
+        keys live at once and the old one is revoked after the external party has cut over. RETURNS THE SECRET
+        ONCE. It is hashed at rest and cannot be read again, so it must be handed to the external party and
+        never stored, logged or echoed.'
+      nl: 'Geeft één extra credential uit op een bestaande actieve integratie — de rotatiestap: twee keys leven
+        tegelijk en de oude wordt ingetrokken nadat de externe partij is overgestapt. GEEFT HET SECRET ÉÉNMAAL
+        TERUG. Het is gehasht opgeslagen en is niet opnieuw op te vragen; geef het aan de externe partij en sla
+        het nergens op, log het niet en echo het niet.'
+    implementation: { type: plugin, plugin: osf-api-keys, handler: issueCredential }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integrationId, displayName]
+        properties:
+          integrationId: *integrationIdInput
+          displayName:
+            type: string
+            minLength: 1
+            maxLength: 200
+            x-osf-i18n: { title: { en: Name, nl: Naam } }
+          expiresInDays: *expiresInDays
+          roleSubset:
+            type: [array, 'null']
+            minItems: 1
+            items: { type: string, minLength: 1 }
+            description: Narrows the credential to a subset of the integration's roles. Omit or null for the integration's full set. Every named role must be held by the caller.
+            x-osf-i18n: { title: { en: Role narrowing, nl: Rolbeperking } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integrationId, credential]
+        properties:
+          integrationId:
+            type: string
+            format: uuid
+            x-osf-i18n: { title: { en: Integration, nl: Integratie } }
+          credential: *mintedCredential
+    auth: *manageAuth
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: acknowledgement }
+    errors: *catalogErrors
+  revokeCredential:
+    id: api-keys.revoke-credential
+    name: { en: Revoke credential, nl: Credential intrekken }
+    description:
+      en: Revokes one credential so it authenticates nothing from the next request on. Idempotent, and never
+        deletes the row — it is the only record that the credential existed and when it was last used.
+      nl: Trekt één credential in, zodat die vanaf het volgende verzoek niets meer authenticeert. Idempotent en
+        verwijdert de rij nooit — die is het enige bewijs dat de credential bestond en wanneer die laatst is
+        gebruikt.
+    implementation: { type: plugin, plugin: osf-api-keys, handler: revokeCredential }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id]
+        properties:
+          id:
+            type: string
+            format: uuid
+            x-osf-i18n: { title: { en: Credential, nl: Credential } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, status, revokedAt]
+        properties:
+          id: { type: string, format: uuid, x-osf-i18n: { title: { en: Credential, nl: Credential } } }
+          status:
+            type: string
+            enum: [active, expired, revoked]
+            x-osf-i18n:
+              title: { en: Status, nl: Status }
+              enum: *credentialStatusLabels
+          revokedAt:
+            type: [string, 'null']
+            format: date-time
+            x-osf-i18n: { title: { en: Revoked, nl: Ingetrokken } }
+    auth: *manageAuth
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors: *catalogErrors
+  disableIntegration:
+    id: api-keys.disable-integration
+    name: { en: Disable integration, nl: Integratie uitschakelen }
+    description:
+      en: Disables one integration and revokes every credential under it, and drops its cached access token so
+        the change takes effect on the next request rather than at the end of the current token's life.
+      nl: Schakelt één integratie uit, trekt elke credential eronder in en gooit het gecachte accesstoken weg,
+        zodat de wijziging bij het volgende verzoek geldt en niet pas na de looptijd van het huidige token.
+    implementation: { type: plugin, plugin: osf-api-keys, handler: disableIntegration }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integrationId]
+        properties:
+          integrationId: *integrationIdInput
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integrationId, status, revokedCredentials]
+        properties:
+          integrationId: { type: string, format: uuid, x-osf-i18n: { title: { en: Integration, nl: Integratie } } }
+          status:
+            type: string
+            enum: [pending, active, disabled]
+            x-osf-i18n:
+              title: { en: Status, nl: Status }
+              enum: *integrationStatusLabels
+          revokedCredentials:
+            type: integer
+            minimum: 0
+            description: Credentials that had not yet been revoked when the integration was disabled; an expired one is included, because expiry is not revocation.
+            x-osf-i18n: { title: { en: Revoked credentials, nl: Ingetrokken credentials } }
+    auth: *manageAuth
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors: *catalogErrors
+interfaces:
+  rest:
+    operations:
+      listIntegrations: { method: POST, path: /api/api-key-integrations/list, response: { status: 200, kind: json } }
+      getIntegration: { method: POST, path: /api/api-key-integrations/get, response: { status: 200, kind: json } }
+      listCredentials: { method: POST, path: /api/api-key-integrations/list-credentials, response: { status: 200, kind: json } }
+      getCredential: { method: POST, path: /api/api-key-integrations/get-credential, response: { status: 200, kind: json } }
+      createIntegration: { method: POST, path: /api/api-key-integrations/create, response: { status: 200, kind: json } }
+      issueCredential: { method: POST, path: /api/api-key-integrations/issue-credential, response: { status: 200, kind: json } }
+      revokeCredential: { method: POST, path: /api/api-key-integrations/revoke-credential, response: { status: 200, kind: json } }
+      disableIntegration: { method: POST, path: /api/api-key-integrations/disable, response: { status: 200, kind: json } }
+  web:
+    entities:
+      ApiKeyIntegration:
+        title: { en: API integrations, nl: API-integraties }
+        route: /api-key-integrations
+        recordRoute: /api-key-integrations/:integrationId
+        idField: integrationId
+        displayField: displayName
+        fields: [integrationId, displayName, status, grantedRoles, activeCredentialCount, credentialCount, createdAt, updatedAt]
+        columns: [displayName, status, activeCredentialCount, createdAt]
+        operations:
+          list: { operation: listIntegrations, resultField: integrations }
+          get: { operation: getIntegration, bindings: { integrationId: integrationId } }
+          recordActions: [disableIntegration]
+        related:
+          - { entity: ApiKeyCredential, label: { en: Credentials, nl: Credentials }, route: /api-key-integrations/:integrationId/credentials }
+      ApiKeyCredential:
+        title: { en: Credentials, nl: Credentials }
+        route: /api-key-integrations/:integrationId/credentials
+        recordRoute: /api-key-integrations/:integrationId/credentials/:id
+        idField: id
+        displayField: displayName
+        fields: [id, integrationName, displayName, status, roleSubset, createdAt, expiresAt, revokedAt, lastUsedAt]
+        columns: [displayName, status, expiresAt, lastUsedAt]
+        operations:
+          list: { operation: listCredentials, resultField: credentials, bindings: { integrationId: integrationId } }
+          get: { operation: getCredential, bindings: { id: id, integrationId: integrationId } }
+          recordActions: [revokeCredential]

@@ -34,6 +34,11 @@ import {
   type ProvisioningSession,
 } from "./service.js";
 
+/** Whether a reply was actually reachable for {@link markNoStore}; for tests. */
+export function credentialsReachNoCache(context: GraphqlContext): boolean {
+  return markNoStore(context);
+}
+
 export const apiKeyTypeDefs = /* GraphQL */ `
   """
   One provisioned credential. The secret itself is returned exactly once, by
@@ -145,7 +150,33 @@ function sessionFrom(context: GraphqlContext): ProvisioningSession {
     roles: session.roles,
     groups: session.groups,
     credential: session.credential,
+    // Carried untouched for the same reason the REST adapter carries it: the
+    // ceiling's carrier rule is this value.
+    ...(session.principalKind ? { principalKind: session.principalKind } : {}),
   };
+}
+
+/**
+ * Mark the HTTP response that carries this GraphQL result as uncacheable.
+ *
+ * GraphQL has no per-field response metadata, so the reply has to be reached
+ * through the server context Yoga merges in (`roles/api.ts` passes
+ * `fastifyReply`). It is read defensively and typed narrowly: an embedding
+ * that provides no reply — a unit test, a non-Fastify host — gets a no-op
+ * rather than a crash, and `credentialsReachNoCache` reports which happened so
+ * a test can assert the header rather than assume it.
+ *
+ * This is belt to the REST surface's braces. The authoritative statement for
+ * a one-time credential is `rest-routes.ts`, which sets the same headers on a
+ * reply it owns outright.
+ */
+function markNoStore(context: GraphqlContext): boolean {
+  const reply = (context as { fastifyReply?: { header?: (name: string, value: string) => unknown } })
+    .fastifyReply;
+  if (typeof reply?.header !== "function") return false;
+  reply.header("cache-control", "private, no-store, max-age=0");
+  reply.header("pragma", "no-cache");
+  return true;
 }
 
 export type ApiKeyGraphqlOptions = {
@@ -171,6 +202,7 @@ export function createApiKeyResolvers(options: ApiKeyGraphqlOptions = {}) {
       keyring: options.config.keyring,
       admin: options.config.admin,
       entityRoleClientId: options.config.entityRoleClientId,
+      lifetime: options.config.lifetime,
     };
   }
 
@@ -223,6 +255,7 @@ export function createApiKeyResolvers(options: ApiKeyGraphqlOptions = {}) {
         context: GraphqlContext,
       ) => {
         try {
+          markNoStore(context);
           const created = await createIntegration(deps(context), sessionFrom(context), {
             displayName: args.input.displayName,
             roles: args.input.roles,
@@ -252,6 +285,7 @@ export function createApiKeyResolvers(options: ApiKeyGraphqlOptions = {}) {
         context: GraphqlContext,
       ) => {
         try {
+          markNoStore(context);
           const created = await issueKey(deps(context), sessionFrom(context), {
             integrationId: args.input.integrationId,
             displayName: args.input.displayName,

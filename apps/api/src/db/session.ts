@@ -143,6 +143,38 @@ export function currentDbSessionDatabase(): Kysely<unknown> | undefined {
   return activeDbSession.getStore()?.db;
 }
 
+/**
+ * The session the active transaction on `db` was opened with, if any.
+ *
+ * For the one case {@link withDbSession} cannot serve: work that must run in
+ * the caller's transaction but does not itself hold the context that
+ * transaction was established from. Such a caller would have to REBUILD a
+ * session from what it does hold — and a rebuilt session drops the identity
+ * link, the audit identity and the RelationGroup memberships the resolver
+ * put there, which is exactly the substitution the nested-session fence
+ * below refuses. Asking for the active session instead and passing it back
+ * verbatim joins the transaction without replacing anything in it.
+ *
+ * The same holds for the two fields the record ACL reads — the verified
+ * application principal and the principal class. Both are DERIVED here from
+ * what the carrier supplied ({@link resolvePrincipalClass}), and neither is a
+ * field of this type, so re-deriving a session from a context would classify
+ * a verified person with no Relation as `unknown` and strip an application
+ * principal to null. {@link withDbSession} therefore recognises this exact
+ * object and reuses it rather than deriving anything from it.
+ *
+ * This is NOT an authorization source. It reports what the active database
+ * session already is; a caller still decides on the session core verified
+ * and handed it, and must satisfy itself that the two name the same
+ * principal before joining (api-key/service.ts does both).
+ */
+export function activeDbSessionContext<TDatabase>(
+  db: Kysely<TDatabase>,
+): DbSessionContext | undefined {
+  const active = activeDbSession.getStore();
+  return active && active.db === (db as unknown as Kysely<unknown>) ? active.session : undefined;
+}
+
 /** RFC 4122 shape, the one every id this layer accepts must have. */
 export const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -368,13 +400,39 @@ export async function applyDbSession<TDatabase>(
   return audit;
 }
 
+/**
+ * Is this the active session itself, handed back verbatim?
+ *
+ * Compared by IDENTITY against the session the active transaction on `db` was
+ * opened with, which is the only way to obtain the object at all
+ * ({@link activeDbSessionContext}). So the reuse path cannot be entered with a
+ * caller-shaped object, a copy or a spread: anything else — including a
+ * context from a different database, or one whose fields were edited into a
+ * new object — falls through to {@link createDbSessionContext} and is then
+ * held to the nested fence below exactly as before. It establishes no session
+ * either; a rejoin requires an active session, by construction.
+ */
+function rejoinsActiveSession<TDatabase>(
+  db: Kysely<TDatabase>,
+  input: DbSessionInput | DbSessionContext,
+): input is DbSessionContext {
+  const active = activeDbSession.getStore();
+  return active !== undefined && active.db === (db as unknown as Kysely<unknown>) &&
+    (input as unknown) === active.session;
+}
+
 export async function withDbSession<TDatabase, TResult>(
   db: Kysely<TDatabase>,
-  input: DbSessionInput,
+  input: DbSessionInput | DbSessionContext,
   callback: (trx: Transaction<TDatabase>, session: DbSessionContext) => Promise<TResult>,
   options: { isolationLevel?: "repeatable read" | "serializable"; independent?: boolean } = {},
 ): Promise<TResult> {
-  const session = createDbSessionContext(input);
+  // A rejoin reuses the derived session; everything else derives one. Nothing
+  // is widened either way — the rejoined object is the one this function
+  // derived when it opened the transaction being rejoined.
+  const session = rejoinsActiveSession(db, input)
+    ? input
+    : createDbSessionContext(input);
   const active = activeDbSession.getStore();
   if (active && active.db === db) {
     const sameSession = active.session.tenantId === session.tenantId &&

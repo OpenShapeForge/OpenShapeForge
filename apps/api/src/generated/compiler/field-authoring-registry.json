@@ -42441,6 +42441,24 @@
         "nl": "Rollen"
       }
     },
+    "ApiKeyIntegration": {
+      "kind": "provider",
+      "entity": "ApiKeyIntegration",
+      "baseType": "object",
+      "label": {
+        "en": "API integrations",
+        "nl": "API-integraties"
+      }
+    },
+    "ApiKeyCredential": {
+      "kind": "provider",
+      "entity": "ApiKeyCredential",
+      "baseType": "object",
+      "label": {
+        "en": "Credentials",
+        "nl": "Credentials"
+      }
+    },
     "PlatformTenant": {
       "kind": "provider",
       "entity": "PlatformTenant",

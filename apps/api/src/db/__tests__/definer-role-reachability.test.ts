@@ -6,12 +6,13 @@
  * role — one per `(definer, member, first hop)`, so that every `revoke` an
  * operator is given cuts one edge and running all of them cuts every edge.
  * Reporting that from an enumeration of PATHS costs the number of paths, and
- * on a dense acyclic lattice that is exponential in its depth: the eight
- * layers of six roles built below are 264 membership edges and 2,015,544
- * paths, and the `union all` walk spent 20s building the 264 rows (measured on
- * PostgreSQL 17.11). Three more layers is unresponsive — a deployment refused
- * a migration by the SIZE of its grant graph rather than by a verdict on it,
- * which is a denial of the check, not a check.
+ * on a dense acyclic lattice that is exponential in its depth: the eight layers
+ * of six roles built below are 258 membership edges and 2,015,538 paths, and
+ * the `union all` walk spent 20s building those 258 rows (measured on
+ * PostgreSQL 17.11; the diamond beside the lattice adds six of each). Every
+ * further layer multiplies the paths by six and leaves the rows linear — a
+ * deployment refused a migration by the SIZE of its grant graph rather than by
+ * a verdict on it, which is a denial of the check, not a check.
  *
  * The walk is therefore over nodes: `union` instead of `union all`, keyed on
  * `(definer, role, depth)`, with the shortest-path tree reconstructed after

@@ -311,8 +311,9 @@ const MEMBERSHIP_DEPTH = 16;
  * administrator built is exponential in its depth. Eight layers of six roles,
  * every role granted to every role in the next, is 258 edges and 2,015,538
  * paths: the walk took 20s to return 258 rows (measured on PostgreSQL 17.11).
- * Three more layers is unresponsive, so a deployment could be refused a
- * migration by a grant graph rather than by a verdict on it.
+ * Each further layer multiplies the paths by six and leaves the rows linear, so
+ * a deployment could be refused a migration by the SIZE of its grant graph
+ * rather than by a verdict on it.
  *
  * So the walk is over NODES and the paths are reconstructed afterwards:
  *

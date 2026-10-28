@@ -62,7 +62,8 @@ import {
 } from "./entity/edit-leases.js";
 import { policyOperation } from "./entity/subtype-scope.js";
 import { withConsumedCollectionLeaseInTransaction } from "./entity/collection-lease-context.js";
-import { getGeneratedCrudTables } from "./entity/catalog.js";
+import { getGeneratedCrudTables, recordActionTable } from "./entity/catalog.js";
+import { resolvePrincipalClass } from "../db/session.js";
 import { applyOwnedEntityFields, assertOwnedTarget, captureOwnedTarget } from "./entity/owned-fields.js";
 import { getEntityOperationOffers } from "./entity/runtime.js";
 import { entityBusinessUnavailability } from "./entity/availability.js";
@@ -73,6 +74,7 @@ import {
   assertRecordPermission,
   assertRecordPermissionInTransaction,
   type RecordPermissionAction,
+  recordActionDeclaration,
 } from "./entity/record-permissions.js";
 import { normalizeTimestampToken } from "../db/timestamps.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
@@ -790,6 +792,53 @@ export function requireOperationAuthorization(
   const heldScopes = new Set(session.oauthScopes ?? []);
   if (requiredScopes.some((scope) => !heldScopes.has(scope))) {
     throw new HttpError(403, "INSUFFICIENT_SCOPE", "Session lacks a required OAuth scope.");
+  }
+  if (!recordActionPrincipalReachable(operation, session)) {
+    throw new HttpError(
+      403,
+      "FORBIDDEN",
+      "This Operation is authorized by a record action no session of this kind can hold.",
+    );
+  }
+}
+
+/**
+ * Could this session's verified principal class EVER hold the action this
+ * Operation requires?
+ *
+ * An action declares the principal kinds a grant of it may name: `person`
+ * admits the ACL's users/groups/roles subjects, `integration` admits a
+ * resolved API-key integration, and a `service` or unclassified session
+ * satisfies neither. So an application-only action is unreachable to a person
+ * no matter which record it names, and vice versa.
+ *
+ * The record check reaches the same answer — `recordActionAllows` matches the
+ * class before it looks at a subject — so this adds no new refusal. What it
+ * adds is WHERE: an Operation nothing about this session could ever satisfy is
+ * refused before a record is consulted, and is therefore absent from the
+ * Operation listing and the MCP catalogue rather than advertised and then
+ * refused. A target or declaration that cannot be resolved answers `false`:
+ * an Operation whose action the manifest does not carry is unreachable, not
+ * open.
+ */
+function recordActionPrincipalReachable(
+  operation: OperationContract,
+  session: TrustedSessionContext,
+): boolean {
+  if (operation.auth.mode !== "session" || !operation.auth.recordAction) return true;
+  const entityName = operation.target?.entityName;
+  const table = entityName ? recordActionTable(entityName) : undefined;
+  const declaration = table
+    ? recordActionDeclaration(table, operation.auth.recordAction)
+    : undefined;
+  if (!declaration) return false;
+  switch (resolvePrincipalClass(session)) {
+    case "person":
+      return declaration.principals.includes("person");
+    case "application":
+      return declaration.principals.includes("integration");
+    default:
+      return false;
   }
 }
 

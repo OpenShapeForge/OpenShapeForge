@@ -32,7 +32,10 @@ test("MCP server construction does not project unrelated output schemas to disco
     server = __buildGeneratedMcpServerForTests({ db, modulePlatform: platform,
       session,
       modules: [accounts, documents as unknown as RuntimeModule, versioning as unknown as RuntimeModule,
-        { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }) } },
+        { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }),
+      // The entity now carries a second canonical Operation; a module that
+      // supplies any handler must supply all of them.
+      deliverToNotebook: () => { throw new Error("This test does not exercise Notebook.deliver."); } } },
         { name: "upload-fixture", artifactStorage: {} as never }],
     });
     expect(outputReads).toBe(0);
@@ -49,7 +52,10 @@ test("an upload-capable session still receives the private upload tool through M
     session: { tenantId: "11111111-1111-4111-8111-111111111111", userId: "22222222-2222-4222-8222-222222222222",
       roles: ["CaseFile.All.ReadWrite"], groups: [], scope: "self", credential: "bearer" },
     modules: [accounts, documents as unknown as RuntimeModule, versioning as unknown as RuntimeModule,
-      { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }) } },
+      { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }),
+      // The entity now carries a second canonical Operation; a module that
+      // supplies any handler must supply all of them.
+      deliverToNotebook: () => { throw new Error("This test does not exercise Notebook.deliver."); } } },
       { name: "upload-fixture", artifactStorage: {} as never }],
   });
   const client = new Client({ name: "upload-projection-proof", version: "1" });

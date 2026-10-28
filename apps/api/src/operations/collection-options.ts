@@ -5,9 +5,19 @@ import type {OperationContract} from './runtime.js';
 import {getGeneratedCrudTables,assertClassifiedQueryAllowed,assertElicitedQueryAllowed} from './entity/catalog.js';
 import {fieldColumnMap} from './entity/columns.js';
 import {assertBoundFieldQueryAllowed} from './entity/field-bindings.js';
-export function nativeCollectionOptionsHandler(operation:OperationContract):ModuleOperationHandler {
+import {moduleRealtimeResources} from '../modules/realtime-resources.js';
+import type {RuntimeModule} from '../modules/contract.js';
+
+function nestedString(record:unknown,path:string):string|undefined{
+ let value:unknown=record;
+ for(const part of path.split('.'))value=value&&typeof value==='object'?(value as Record<string,unknown>)[part]:undefined;
+ return typeof value==='string'&&value.trim()?value:undefined;
+}
+
+export function nativeCollectionOptionsHandler(operation:OperationContract,modules:readonly RuntimeModule[]=[]):ModuleOperationHandler {
  if(operation.key!=='collection.options'||operation.plugin!=='core'||operation.implementation?.type!=='collection-options'||operation.auth.mode!=='session'||operation.tenancy.mode!=='required'||operation.effects?.data!=='read')throw Error('Invalid collection options binding.');
  const sources=operation.implementation.sources;
+ const resources=moduleRealtimeResources(modules);
  return async(input,{session,platform})=>{
   if(!session?.tenantId||!platform)throw operationFailure({code:'UNAUTHENTICATED',message:'Select an organization.'});
   const definitions=await platform.operations.list(session), available=new Map(definitions.map(d=>[d.id,d]));
@@ -46,13 +56,17 @@ export function nativeCollectionOptionsHandler(operation:OperationContract):Modu
   const data=response.data as any;
   for(const row of data.items??[]){const value=(row.data??row)[field];for(const entry of Array.isArray(value)?value:[value])if(['string','number','boolean'].includes(typeof entry))candidates.set(String(entry),candidates.get(String(entry))??catalogue.get(String(entry))??String(entry));}
   const reference=sources.find(s=>s.entity===input.referenceEntity&&s.get&&s.labelField&&available.has(s.get));
-  if(reference){
+  const realtime=typeof input.referenceEntity==='string'?resources.get(input.referenceEntity):undefined;
+  if(reference||realtime?.labelFields&&available.has(realtime.readOperationId)){
    const pending=[...candidates].filter(([value,label])=>value===label);let index=0;
    await Promise.all(Array.from({length:Math.min(4,pending.length)},async()=>{while(index<pending.length){
     const [value]=pending[index++]!;
-    const result=await platform.operations.execute(session,{operation:{id:reference.get!,intent:available.get(reference.get!)!.intent??'get'},input:{id:value}});
+    const operationId=reference?.get??realtime!.readOperationId;
+    const result=await platform.operations.execute(session,{operation:{id:operationId,intent:available.get(operationId)!.intent??'get'},input:reference?{id:value}:{[realtime!.idInputField]:value}});
     if('error'in result)continue;
-    const record=(result.data as any)?.data??result.data;const label=record?.[reference.labelField!];
+    const record=(result.data as any)?.data??result.data;
+    const locale=input.locale==='nl'?'nl':'en';
+    const label=reference?record?.[reference.labelField!]:realtime!.labelFields![locale].map(path=>nestedString(record,path)).find(Boolean);
     if(typeof label==='string'&&label)candidates.set(value,label);
    }}));
   }

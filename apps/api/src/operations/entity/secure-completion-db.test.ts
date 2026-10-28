@@ -115,7 +115,7 @@ test("secure create retains server-owned Operation attribution", async () => {
 
 test("secure completion attributes only verified principal kinds in tenant audit events", async () => {
   for (const [principalKind, expected] of [["person", "person"], [undefined, "unknown"]] as const) {
-    const session = {...actor, tenantId: crypto.randomUUID(), principalKind};
+    const session = {...actor, tenantId: crypto.randomUUID(), ...(principalKind ? {principalKind} : {})};
     const result = await completeEntitySecureInput(runtime.db, session,
       {operation:{id:operation.id,intent:"create"},input:{values}}, completion);
     if ("error" in result) throw Error(JSON.stringify(result.error));

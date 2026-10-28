@@ -410,7 +410,10 @@ describe("generated schema migration", () => {
           await staleChecksum(db);
         });
         const message = await expectRejects(runChain(url));
-        expect(message).toContain("erp.preexisting_operator_data");
+        expect(message).toContain("non-additive drift");
+        expect(message).toContain(
+          "erp.preexisting_operator_data: table exists in the database but is not in the generated manifest",
+        );
         await withDb(url, async (db) => {
           expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe("simulated-old");
           const rows = await sql<{ id: string }>`select id from erp.preexisting_operator_data`.execute(db);

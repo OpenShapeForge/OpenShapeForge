@@ -562,13 +562,6 @@ export async function applyGeneratedSchemaMigration(
     throw nonAdditiveDriftError(existing.checksum, diff.nonAdditive);
   }
 
-  // Do not advance the ledger while foreign tables survive the old composition.
-  // Readiness would reject that schema after the checksum had already changed.
-  const undeclared = await findUndeclaredDatabaseSchema(db);
-  if (undeclared.tables.length > 0 || undeclared.columns.length > 0) {
-    throw foreignSchemaError("built", undeclared);
-  }
-
   const summary: GeneratedSchemaRollForwardSummary = {
     addedTables: diff.missingTables.map((table) => table.name),
     addedColumns: diff.missingColumns.map(

@@ -39,6 +39,7 @@ import {
 } from "../../graphql/__tests__/e2e/entity-factory.js";
 import {
   createOffersField,
+  concealsMissingRecord,
   isEntityBackedCreate,
   leaseRequired,
   operationContractFor,
@@ -321,7 +322,7 @@ for (const table of restTables) {
               : {}),
           });
       // A missing ACL-protected row is indistinguishable from a forbidden row.
-      const aclRefusal = Boolean(table.source?.authorization?.recordPermissions) && !leaseRequired(table, "update");
+      const aclRefusal = concealsMissingRecord(table, "update", leaseRequired(table, "update"));
       expect(response.status).toBe(aclRefusal ? 403 : 404);
       expect(response.body.error.code).toBe(aclRefusal ? "FORBIDDEN" : "NOT_FOUND");
     });
@@ -362,8 +363,9 @@ for (const table of restTables) {
                 ? { expectedVersion: "2026-01-01T00:00:00.000Z" }
                 : {}),
             });
-        expect(again.status).toBe(table.source?.authorization?.recordPermissions && !leaseRequired(table, "delete") ? 403 : 404);
-        expect(again.body.error.code).toBe(table.source?.authorization?.recordPermissions && !leaseRequired(table, "delete") ? "FORBIDDEN" : "NOT_FOUND");
+        const aclRefusal = concealsMissingRecord(table, "delete", leaseRequired(table, "delete"));
+        expect(again.status).toBe(aclRefusal ? 403 : 404);
+        expect(again.body.error.code).toBe(aclRefusal ? "FORBIDDEN" : "NOT_FOUND");
       }
     });
 

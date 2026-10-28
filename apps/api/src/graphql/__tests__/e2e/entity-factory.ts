@@ -428,19 +428,12 @@ export async function createRow(
   return id;
 }
 
-/**
- * A complete create input for `table` built as `identity`: the column values
- * of an entity-backed create, or the plugin's authored input. Lets a test
- * provision every dependency as one identity and then submit the create as
- * another — the parents of a row need roles the row's own create role need
- * not carry.
- */
 /** Give restricted fixture records the declared CRUD roles, without changing the
  * seeded named-action axis or granting any role outside this entity's contract. */
-export function sampleRecordPermissions(table: GeneratedTable): Record<string, unknown> | undefined {
+export function recordPermissionsInput(table: GeneratedTable, field: string): Record<string, unknown> | undefined {
   const authorization = table.source?.authorization;
   const config = authorization?.recordPermissions;
-  if (!config || config.empty !== "restricted") return undefined;
+  if (!config || config.field !== field || config.empty !== "restricted") return undefined;
   const roles = authorization.roles;
   const create = roles?.create ?? [];
   return {
@@ -451,6 +444,13 @@ export function sampleRecordPermissions(table: GeneratedTable): Record<string, u
   };
 }
 
+/**
+ * A complete create input for `table` built as `identity`: the column values
+ * of an entity-backed create, or the plugin's authored input. Lets a test
+ * provision every dependency as one identity and then submit the create as
+ * another — the parents of a row need roles the row's own create role need
+ * not carry.
+ */
 export function createInput(
   table: GeneratedTable,
   identity: Identity,
@@ -484,8 +484,7 @@ export async function columnInput(
       input[field] = overrides[field];
       continue;
     }
-    const permissions = table.source?.authorization?.recordPermissions;
-    const samplePermissions = permissions?.field === field ? sampleRecordPermissions(table) : undefined;
+    const samplePermissions = recordPermissionsInput(table, field);
     if (samplePermissions) {
       input[field] = samplePermissions;
       continue;

@@ -25,6 +25,8 @@ const TEST_TIMEOUT = 240_000;
 const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
 const scratch = `record_actions_restricted_${suffix}`;
 const migrateRole = `osf_restricted_migrate_${suffix}`;
+/** A throwaway role the resolver is briefly made a member OF, and no more. */
+const parentRole = `osf_resolver_parent_${suffix}`;
 const MIGRATE_PASSWORD = "restricted-migrate";
 const RESOLVER_ROLE = databaseRole("recordActionResolver").name;
 
@@ -68,6 +70,8 @@ beforeAll(async () => {
 afterAll(async () => {
   await migrate?.close();
   await server?.unsafe(`drop database if exists "${scratch}" with (force)`);
+  await server?.unsafe(`revoke ${parentRole} from ${RESOLVER_ROLE}`).catch(() => undefined);
+  await server?.unsafe(`drop role if exists ${parentRole}`);
   await server?.unsafe(`drop role if exists ${migrateRole}`);
   await server?.close();
 });
@@ -143,8 +147,18 @@ test("the restricted migrate role installs the lookup, its grants and its polici
       { column_name: "acl", privilege_type: "UPDATE" },
     ]);
 
+    // And NOTHING table-wide. A table-level UPDATE would reach every column,
+    // and TRUNCATE is outside row security altogether, so the step revokes
+    // before it grants and reads the result back.
+    const tableWide = await sql<{ privilege_type: string }>`
+      select privilege_type from information_schema.table_privileges
+       where grantee = ${RESOLVER_ROLE} and table_name = 'restricted_runs'
+       order by privilege_type
+    `.execute(conn);
+    expect(tableWide.rows).toEqual([]);
+
     // CREATE POLICY ... AS RESTRICTIVE is a privileged statement too, and the
-    // fence is the one that bounds the column grants above.
+    // two fences are what bound the column grants above.
     const policies = await sql<{ policyname: string; cmd: string; permissive: string }>`
       select policyname, cmd, permissive
         from pg_policies
@@ -153,6 +167,7 @@ test("the restricted migrate role installs the lookup, its grants and its polici
        order by policyname
     `.execute(conn);
     expect(policies.rows).toEqual([
+      { policyname: "restricted_runs_record_action_delete_fence", cmd: "DELETE", permissive: "RESTRICTIVE" },
       { policyname: "restricted_runs_record_action_fence", cmd: "ALL", permissive: "RESTRICTIVE" },
       { policyname: "restricted_runs_record_action_lock", cmd: "UPDATE", permissive: "PERMISSIVE" },
       { policyname: "restricted_runs_record_action_read", cmd: "SELECT", permissive: "PERMISSIVE" },
@@ -161,12 +176,20 @@ test("the restricted migrate role installs the lookup, its grants and its polici
     // The fence is scoped `to <resolver>`, and RLS matches a policy's TO list
     // with has_privs_of_role — so it applies to THIS role as well, which the
     // contract makes a member of every definer role. The migrate role must
-    // still be able to write the tables it migrates and seeds, which is what
-    // the `current_user <> '<resolver>'` disjunct is for.
-    const member = await sql<{ member: boolean }>`
-      select pg_has_role(current_user, ${RESOLVER_ROLE}, 'USAGE') as member
+    // still be able to write the tables it migrates and seeds, and what
+    // exempts it is that it holds the OWNER's privileges on this table, not
+    // that it is "not the resolver": that older disjunct exempted every member
+    // of the resolver, including one that owns nothing.
+    const standing = await sql<{ member: boolean; owner: boolean; resolverOwns: boolean }>`
+      select pg_has_role(current_user, ${RESOLVER_ROLE}, 'USAGE') as member,
+        pg_has_role(current_user,
+          (select relowner from pg_class where oid = 'erp.restricted_runs'::regclass),
+          'USAGE') as owner,
+        pg_has_role(${RESOLVER_ROLE},
+          (select relowner from pg_class where oid = 'erp.restricted_runs'::regclass),
+          'USAGE') as "resolverOwns"
     `.execute(conn);
-    expect(member.rows[0]!.member).toBe(true);
+    expect(standing.rows[0]).toEqual({ member: true, owner: true, resolverOwns: false });
     const tenant = randomUUID();
     await sql`select set_config('app.tenant_id', ${tenant}, false)`.execute(conn);
     await sql`
@@ -202,6 +225,51 @@ test("the restricted migrate role installs the lookup, its grants and its polici
       reads: { start: [{ field: "definition", column: "definition" }] },
     }]);
   });
+}, TEST_TIMEOUT);
+
+/**
+ * The definer role's own attributes, which no policy can compensate for.
+ *
+ * BYPASSRLS ignores FORCE ROW LEVEL SECURITY and every policy with it, so a
+ * resolver carrying it would hold the column grants unbounded; and a resolver
+ * that INHERITS another role runs both SECURITY DEFINER bodies with whatever
+ * that role holds. Roles are cluster-wide, so each case is applied to the real
+ * declared role and undone in the same test.
+ */
+test("it refuses to grant anything to a resolver role that is outside its own bounds", async () => {
+  const cases = [
+    { apply: `alter role ${RESOLVER_ROLE} bypassrls`, undo: `alter role ${RESOLVER_ROLE} nobypassrls`,
+      expected: /has BYPASSRLS/ },
+    { apply: `alter role ${RESOLVER_ROLE} login`, undo: `alter role ${RESOLVER_ROLE} nologin`,
+      expected: /it can log in/ },
+    { apply: `create role ${parentRole} nologin; alter role ${RESOLVER_ROLE} inherit; ` +
+        `grant ${parentRole} to ${RESOLVER_ROLE}`,
+      undo: `revoke ${parentRole} from ${RESOLVER_ROLE}; alter role ${RESOLVER_ROLE} noinherit; ` +
+        `drop role ${parentRole}`,
+      expected: new RegExp(`it is a member of ${parentRole}, whose privileges it INHERITS`) },
+  ];
+  for (const scenario of cases) {
+    await server.unsafe(scenario.apply);
+    try {
+      await migrate.db.connection().execute(async (conn) => {
+        await expect(applyRecordActionsMigration(conn, [{
+          entity: "RestrictedRun", schema: "erp", table: "restricted_runs",
+          keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
+          actions: ["start"], reads: {},
+        }])).rejects.toThrow(scenario.expected);
+      });
+    } finally {
+      await server.unsafe(scenario.undo);
+    }
+  }
+  // Back inside its bounds, the step runs again.
+  await migrate.db.connection().execute((conn) =>
+    applyRecordActionsMigration(conn, [{
+      entity: "RestrictedRun", schema: "erp", table: "restricted_runs",
+      keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
+      actions: ["start"],
+      reads: { start: [{ field: "definition", column: "definition" }] },
+    }]));
 }, TEST_TIMEOUT);
 
 /**

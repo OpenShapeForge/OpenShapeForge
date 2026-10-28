@@ -49,13 +49,29 @@ const relationGroup = randomUUID();
 const integration = randomUUID();
 const otherIntegration = randomUUID();
 const SHARED_ROLE = "Runs.All.Operate";
+/**
+ * A SECOND role that inherits the resolver — the shape the role contract gives
+ * the migrate role, held by a role that owns nothing. Cluster-wide, so it is
+ * created after the chain has run and dropped in afterAll.
+ */
+const MEMBER_ROLE = `osf_resolver_member_${randomUUID().replaceAll("-", "").slice(0, 10)}`;
 
-/** Two entities, so nothing can pass by being the only branch in the case. */
+/** Three entities, so nothing can pass by being the only branch in the case. */
 const RUN = "ActionRun";
 const DOC = "ActionDoc";
+/**
+ * The third carries the OTHER generated row policy: plain tenant isolation,
+ * with no `view` gate. That distinction decides what a DELETE by the resolver
+ * reaches — on a view-gated table the generated policy already hides the row
+ * from a session with no `view` grant, so the delete tests have to run here or
+ * they pass for the wrong reason.
+ */
+const TICKET = "ActionTicket";
 const runRow = randomUUID();
 const runRowTenantB = randomUUID();
 const docRow = randomUUID();
+const ticketRow = randomUUID();
+const ticketRowTenantB = randomUUID();
 /** One record per concurrent interleaving, so neither disturbs the other. */
 const lockRowCheckFirst = randomUUID();
 const lockRowRevokeFirst = randomUUID();
@@ -81,6 +97,11 @@ const entities: RecordActionEntity[] = [
     entity: DOC, schema: "erp", table: "action_docs",
     keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
     actions: ["publish"], reads: {},
+  },
+  {
+    entity: TICKET, schema: "erp", table: "action_tickets",
+    keyColumn: "id", keyIsUuid: true, aclColumn: "acl",
+    actions: ["close"], reads: {},
   },
 ];
 
@@ -157,16 +178,25 @@ beforeAll(async () => {
       `.execute(conn);
       await sql`alter table ${table} enable row level security`.execute(conn);
       await sql`alter table ${table} force row level security`.execute(conn);
-      await sql`
-        create policy ${sql.id(`${entity.table}_row_scope`)} on ${table}
-        using (
-          app.bypass_rls() or (
-            tenant_id = app.current_tenant()
-            and app.record_permission_allows("acl", 'view', ${sql.lit(emptyIsPublic)})
+      if (entity.entity === TICKET) {
+        // The other generated shape: `<table>_tenant_isolation`, no view gate.
+        await sql`
+          create policy ${sql.id(`${entity.table}_tenant_isolation`)} on ${table}
+          using (app.bypass_rls() or tenant_id = app.current_tenant())
+          with check (app.bypass_rls() or tenant_id = app.current_tenant())
+        `.execute(conn);
+      } else {
+        await sql`
+          create policy ${sql.id(`${entity.table}_row_scope`)} on ${table}
+          using (
+            app.bypass_rls() or (
+              tenant_id = app.current_tenant()
+              and app.record_permission_allows("acl", 'view', ${sql.lit(emptyIsPublic)})
+            )
           )
-        )
-        with check (app.bypass_rls() or tenant_id = app.current_tenant())
-      `.execute(conn);
+          with check (app.bypass_rls() or tenant_id = app.current_tenant())
+        `.execute(conn);
+      }
       await sql.raw(
         `grant select, insert, update, delete on ${entity.schema}.${entity.table} to ${APP_ROLE}`,
       ).execute(conn);
@@ -199,8 +229,25 @@ beforeAll(async () => {
           },
         })}'::jsonb`)})
     `.execute(conn);
+    await sql`
+      insert into erp.action_tickets (id, tenant_id, secret, acl) values
+        (${ticketRow}::uuid, ${tenantA}::uuid, 'ticket-a-secret', ${sql.raw(`'${JSON.stringify({
+          actions: { close: { integrations: [integration] } },
+        })}'::jsonb`)}),
+        (${ticketRowTenantB}::uuid, ${tenantB}::uuid, 'ticket-b-secret', ${sql.raw(`'${JSON.stringify({
+          actions: { close: { integrations: [integration] } },
+        })}'::jsonb`)})
+    `.execute(conn);
     await applyRecordActionsMigration(conn, entities);
   });
+  // The second member of the resolver, granted the way the role contract
+  // grants the migrate role: INHERIT, so it holds the resolver's column
+  // grants outright. It owns nothing, which is the whole point.
+  if (!/^[a-z0-9_]+$/.test(MEMBER_ROLE)) throw new Error("unsafe member role name");
+  await server.unsafe(
+    `create role ${MEMBER_ROLE} nologin nosuperuser nobypassrls nocreatedb nocreaterole`,
+  );
+  await server.unsafe(`grant ${RESOLVER_ROLE} to ${MEMBER_ROLE} with inherit true, set true`);
   app = createDatabaseRuntime({ databaseUrl: url(scratch, true), maxConnections: 4 });
 }, TEST_TIMEOUT);
 
@@ -208,6 +255,9 @@ afterAll(async () => {
   await app?.close();
   await admin?.close();
   await server?.unsafe(`drop database if exists "${scratch}" with (force)`);
+  // Roles are cluster-wide: this one must not outlive the test, or the role
+  // contract it deliberately violates would fail every later migration.
+  await server?.unsafe(`drop role if exists ${MEMBER_ROLE}`);
   await server?.close();
 });
 
@@ -446,6 +496,7 @@ describe("the definer role is bounded", () => {
          order by policyname
       `.execute(conn);
       expect(policies.rows.map((row) => [row.policyname, row.cmd, row.permissive])).toEqual([
+        ["action_runs_record_action_delete_fence", "DELETE", "RESTRICTIVE"],
         ["action_runs_record_action_fence", "ALL", "RESTRICTIVE"],
         ["action_runs_record_action_lock", "UPDATE", "PERMISSIVE"],
         ["action_runs_record_action_read", "SELECT", "PERMISSIVE"],
@@ -453,14 +504,25 @@ describe("the definer role is bounded", () => {
       // The two permissive policies are tenant-fenced rather than `true`:
       // being OR-ed with the generated row policy, `true` admitted every
       // tenant's rows to every statement running as the resolver.
-      const [fence, lock, read] = policies.rows;
+      const [deleteFence, fence, lock, read] = policies.rows;
       expect(read!.qual).toContain("app.current_tenant()");
       expect(lock!.qual).toContain("app.current_tenant()");
       expect(lock!.withcheck).toBe("false");
       // And the write is refused by a RESTRICTIVE check, which is AND-ed and
-      // therefore cannot be widened by a permissive policy.
-      expect(fence!.withcheck).toContain(`CURRENT_USER <> '${RESOLVER_ROLE}'`);
+      // therefore cannot be widened by a permissive policy. Its exemption is
+      // the table OWNER's privileges, not a role name: `current_user <>
+      // '<resolver>'` was true for every member of the resolver, and a second
+      // member then held `update (acl)` with nothing refusing it.
+      expect(fence!.withcheck).toContain("pg_has_role(CURRENT_USER, c.relowner");
+      expect(fence!.withcheck).not.toContain("CURRENT_USER <>");
       expect(fence!.qual).toContain("app.current_tenant()");
+      expect(fence!.qual).toContain("pg_has_role(CURRENT_USER, c.relowner");
+      // DELETE is bounded by USING, which the `for all` fence has to leave
+      // true for the tenant's own rows so FOR SHARE keeps working. So it gets
+      // its own restrictive policy, with no tenant disjunct at all.
+      expect(deleteFence!.qual).toContain("pg_has_role(CURRENT_USER, c.relowner");
+      expect(deleteFence!.qual).not.toContain("app.current_tenant()");
+      expect(deleteFence!.withcheck).toBeNull();
     });
     await expect(
       app.db.connection().execute((conn) => sql.raw(`set role ${RESOLVER_ROLE}`).execute(conn)),
@@ -497,18 +559,43 @@ describe("the definer role is bounded", () => {
   describe("and its privileges are bounded by a RESTRICTIVE policy, not an OR-ed one", () => {
     const REWRITTEN = JSON.stringify({ actions: { start: { integrations: [randomUUID()] } } });
 
-    /** One connection, current_user = the resolver, always rolled back. */
+    /**
+     * One connection, current_user = the resolver or another role that
+     * INHERITS it, always rolled back.
+     *
+     * `grant` admits the privileges a later migration or a careless operator
+     * might add, so a policy that only looks like a bound can be told apart
+     * from one that is a bound. `dropPolicy` removes a bound inside the same
+     * rolled-back transaction, which is how each test shows that the policy —
+     * and not an absent privilege — is what refuses.
+     */
     async function asResolver<T>(
       work: (conn: Kysely<DB>) => Promise<T>,
-      options: { tenant?: string; dropFence?: boolean } = {},
+      options: {
+        tenant?: string;
+        role?: string;
+        /** The fixture table `grant` and `dropPolicy` apply to. */
+        table?: string;
+        grant?: string;
+        /** A record-action policy suffix to drop, e.g. "fence". */
+        dropPolicy?: string;
+      } = {},
     ): Promise<T> {
       return admin.db.connection().execute(async (conn) => {
         await sql`begin`.execute(conn);
         try {
-          if (options.dropFence) {
-            await sql`drop policy action_runs_record_action_fence on erp.action_runs`.execute(conn);
+          const table = options.table ?? "action_runs";
+          if (options.dropPolicy) {
+            await sql.raw(
+              `drop policy ${table}_record_action_${options.dropPolicy} on erp.${table}`,
+            ).execute(conn);
           }
-          await sql.raw(`set local role ${RESOLVER_ROLE}`).execute(conn);
+          if (options.grant) {
+            await sql.raw(
+              `grant ${options.grant} on erp.${table} to ${RESOLVER_ROLE}`,
+            ).execute(conn);
+          }
+          await sql.raw(`set local role ${options.role ?? RESOLVER_ROLE}`).execute(conn);
           await sql`select set_config('app.tenant_id', ${options.tenant ?? tenantA}, true)`
             .execute(conn);
           return await work(conn);
@@ -517,6 +604,27 @@ describe("the definer role is bounded", () => {
         }
       });
     }
+
+    const countRows = async (conn: Kysely<DB>) =>
+      (await sql<{ count: number }>`select count(*)::int as count from erp.action_runs`
+        .execute(conn)).rows[0]!.count;
+    const deleteRow = (conn: Kysely<DB>) =>
+      sql`delete from erp.action_runs where id = ${runRow}::uuid`.execute(conn);
+    /**
+     * The delete attempts run against the TENANT-ISOLATION table. On the
+     * view-gated `action_runs` the generated row policy already hides the row
+     * from a resolver session that holds no `view` grant, so a delete there
+     * returns zero rows whether a fence exists or not — it would pass for the
+     * wrong reason.
+     */
+    const deleteTicket = async (conn: Kysely<DB>) =>
+      Number((await sql`delete from erp.action_tickets where id = ${ticketRow}::uuid`
+        .execute(conn)).numAffectedRows ?? 0);
+    const ticketsPresent = async () =>
+      admin.db.connection().execute(async (conn) =>
+        (await sql<{ count: number }>`
+          select count(*)::int as count from erp.action_tickets where id = ${ticketRow}::uuid
+        `.execute(conn)).rows[0]!.count);
 
     const rewriteAcl = (conn: Kysely<DB>) =>
       sql`update erp.action_runs set acl = ${sql.raw(`'${REWRITTEN}'::jsonb`)}
@@ -539,7 +647,7 @@ describe("the definer role is bounded", () => {
       // here is rolled back, so the fixture is untouched.
       const written = await asResolver(
         async (conn) => Number((await rewriteAcl(conn)).numAffectedRows ?? 0),
-        { dropFence: true },
+        { dropPolicy: "fence" },
       );
       expect(written).toBe(1);
     });
@@ -558,7 +666,7 @@ describe("the definer role is bounded", () => {
       expect(other).toBe(0);
     });
 
-    test("the lock the lookup takes is still legal under all three policies", async () => {
+    test("the lock the lookup takes is still legal under all four policies", async () => {
       const locked = await asResolver(async (conn) =>
         (await sql<{ acl: unknown }>`
           select acl from erp.action_runs
@@ -573,9 +681,124 @@ describe("the definer role is bounded", () => {
         sql`insert into erp.action_runs (id, tenant_id, secret, acl)
           values (${randomUUID()}::uuid, ${tenantA}::uuid, 'forged', '{}'::jsonb)`.execute(conn),
       )).rejects.toThrow(/permission denied for table action_runs/);
+      await expect(asResolver(deleteRow)).rejects.toThrow(
+        /permission denied for table action_runs/,
+      );
+    });
+
+    /**
+     * The privilege is the first bound and the policy is the second. These add
+     * the privilege the migration does not grant — INSERT, DELETE — inside the
+     * rolled-back transaction, so what is being tested is the policy alone:
+     * what happens if a later migration, a default privilege or an operator
+     * hands the resolver one of them.
+     */
+    test("a DELETE privilege does not become a delete: the restrictive delete fence refuses", async () => {
+      const deleted = await asResolver(deleteTicket, {
+        table: "action_tickets", grant: "delete",
+      });
+      expect(deleted).toBe(0);
+      // Still there, counted outside the rolled-back transaction.
+      expect(await ticketsPresent()).toBe(1);
+    });
+
+    test("and the delete fence is what refuses it: with only the FOR ALL fence, the row goes", async () => {
+      // The finding, demonstrated. A `for all` policy's WITH CHECK is applied
+      // to INSERT and UPDATE only; DELETE is bounded by USING, and the FOR ALL
+      // fence's USING has to admit the tenant's own rows or FOR SHARE breaks.
+      const deleted = await asResolver(deleteTicket, {
+        table: "action_tickets", grant: "delete", dropPolicy: "delete_fence",
+      });
+      expect(deleted).toBe(1);
+      expect(await ticketsPresent()).toBe(1);
+    });
+
+    test("an INSERT privilege does not become an insert", async () => {
       await expect(asResolver((conn) =>
-        sql`delete from erp.action_runs where id = ${runRow}::uuid`.execute(conn),
-      )).rejects.toThrow(/permission denied for table action_runs/);
+        sql`insert into erp.action_runs (id, tenant_id, secret, acl)
+          values (${randomUUID()}::uuid, ${tenantA}::uuid, 'forged', '{}'::jsonb)`.execute(conn),
+        { grant: "insert" },
+      )).rejects.toThrow(
+        /violates row-level security policy "action_runs_record_action_fence"/,
+      );
+    });
+
+    /**
+     * A SECOND role that inherits the resolver.
+     *
+     * The role contract makes the migrate role a member of every definer role,
+     * and RLS resolves a policy's TO list with has_privs_of_role — so a
+     * `to <resolver>` policy applies to every member, and every member
+     * inherits `update (acl)`. The fence's exemption used to be `current_user
+     * <> '<resolver>'`, which is TRUE for all of them: verified on PostgreSQL
+     * 17.11, a second member rewrote the current tenant's ACL document. The
+     * exemption is now the table OWNER's privileges, which this role does not
+     * hold.
+     */
+    test("a second role inheriting the resolver holds the grants and still cannot write", async () => {
+      const inherited = await admin.db.connection().execute(async (conn) =>
+        (await sql<{ member: boolean; update: boolean; select: boolean; owner: boolean }>`
+          select pg_has_role(${MEMBER_ROLE}, ${RESOLVER_ROLE}, 'USAGE') as member,
+            has_column_privilege(${MEMBER_ROLE}, 'erp.action_runs', 'acl', 'UPDATE') as "update",
+            has_column_privilege(${MEMBER_ROLE}, 'erp.action_runs', 'acl', 'SELECT') as "select",
+            pg_has_role(${MEMBER_ROLE},
+              (select relowner from pg_class where oid = 'erp.action_runs'::regclass),
+              'USAGE') as owner
+        `.execute(conn)).rows[0]!);
+      // It really does hold the grants — this is not a test of a missing one.
+      expect(inherited).toEqual({ member: true, update: true, select: true, owner: false });
+
+      await expect(asResolver(rewriteAcl, { role: MEMBER_ROLE })).rejects.toThrow(
+        /violates row-level security policy "action_runs_record_action_fence"/,
+      );
+      const acl = await admin.db.connection().execute(async (conn) =>
+        (await sql<{ acl: Record<string, unknown> }>`
+          select acl from erp.action_runs where id = ${runRow}::uuid
+        `.execute(conn)).rows[0]!.acl);
+      expect(acl).toHaveProperty("actions.start.integrations", [integration]);
+    });
+
+    test("a second role inheriting the resolver cannot delete either", async () => {
+      const deleted = await asResolver(deleteTicket, {
+        role: MEMBER_ROLE, table: "action_tickets", grant: "delete",
+      });
+      expect(deleted).toBe(0);
+      expect(await ticketsPresent()).toBe(1);
+    });
+
+    test("a second role inheriting the resolver reaches one tenant, not every tenant", async () => {
+      expect(await asResolver(countRows, { role: MEMBER_ROLE })).toBe(4);
+      expect(await asResolver(countRows, { role: MEMBER_ROLE, tenant: tenantB })).toBe(1);
+      const other = await asResolver(async (conn) =>
+        (await sql<{ count: number }>`
+          select count(*)::int as count from erp.action_runs where id = ${runRowTenantB}::uuid
+        `.execute(conn)).rows[0]!.count, { role: MEMBER_ROLE });
+      expect(other).toBe(0);
+    });
+
+    test("the write bound would be gone if the exemption were a role name", async () => {
+      // The same statement, against the fence as 346629c9 wrote it. This is
+      // the regression the owner-privilege exemption closes, pinned so a
+      // future simplification back to a name fails here.
+      const written = await admin.db.connection().execute(async (conn) => {
+        await sql`begin`.execute(conn);
+        try {
+          await sql`drop policy action_runs_record_action_fence on erp.action_runs`.execute(conn);
+          await sql.raw(`
+            create policy action_runs_record_action_fence on erp.action_runs
+              as restrictive for all to ${RESOLVER_ROLE}
+              using (current_user <> '${RESOLVER_ROLE}'
+                or tenant_id = app.current_tenant())
+              with check (current_user <> '${RESOLVER_ROLE}')
+          `).execute(conn);
+          await sql.raw(`set local role ${MEMBER_ROLE}`).execute(conn);
+          await sql`select set_config('app.tenant_id', ${tenantA}, true)`.execute(conn);
+          return Number((await rewriteAcl(conn)).numAffectedRows ?? 0);
+        } finally {
+          await sql`rollback`.execute(conn);
+        }
+      });
+      expect(written).toBe(1);
     });
   });
 

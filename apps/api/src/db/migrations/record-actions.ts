@@ -42,7 +42,7 @@ import { WORKER_ROLE } from "./worker-role.js";
  *   - `update (<acl column>)`, because UPDATE privilege is what PostgreSQL
  *     requires for `FOR SHARE` (an empty modified-column set is admitted by
  *     any column-level UPDATE grant). The resolver may LOCK an ACL row;
- *   - three policies, below, that bound what those privileges can reach.
+ *   - four policies, below, that bound what those privileges can reach.
  *
  * WHY THE PERMISSIVE PAIR IS NOT ENOUGH
  * -------------------------------------
@@ -68,28 +68,88 @@ import { WORKER_ROLE } from "./worker-role.js";
  *                                  (false)` — admits `FOR SHARE` on those
  *                                  rows and no new row version;
  *   `<table>_record_action_fence`  RESTRICTIVE, `for all to <resolver>`,
- *                                  `using (current_user <> '<resolver>' or
- *                                  tenant_id = app.current_tenant())`,
- *                                  `with check (current_user <> '<resolver>')`
- *                                  — every statement running AS the resolver
- *                                  sees one tenant and writes nothing, on
- *                                  select, insert, update and delete alike.
+ *                                  `using (<owns the table> or tenant_id =
+ *                                  app.current_tenant())`, `with check
+ *                                  (<owns the table>)` — one tenant on read,
+ *                                  and no INSERT or UPDATE at all;
+ *   `<table>_record_action_delete_fence`
+ *                                  RESTRICTIVE, `for delete to <resolver>`,
+ *                                  `using (<owns the table>)` — because a
+ *                                  `for all` policy's WITH CHECK is applied
+ *                                  to INSERT and UPDATE only. DELETE is
+ *                                  bounded by its USING, and the fence's
+ *                                  USING has to stay TRUE for the tenant's
+ *                                  own rows or `FOR SHARE` would stop
+ *                                  working. Verified on PostgreSQL 17.11:
+ *                                  with the `for all` fence alone and a
+ *                                  DELETE privilege present, the resolver
+ *                                  deleted the row it may only lock.
  *
- * The `current_user <> '<resolver>'` disjunct is not decoration. RLS matches a
- * policy's `TO` list with `has_privs_of_role`, so a `to <resolver>` policy
- * also applies to the MIGRATE role, which the role contract makes a member of
- * every definer role (database-roles.ts). Without the exemption the fence
- * would silently stop the migrate role from seeding or migrating data in any
- * entity that declares an action. Scoping the policy `to <resolver>` keeps it
- * off the app and worker roles' hot path entirely — neither is a member — and
- * the disjunct then exempts the one member that is not the definer itself.
+ * WHAT THE EXEMPTION IS, AND WHY IT IS NOT A ROLE NAME
+ * ----------------------------------------------------
+ * RLS matches a policy's `TO` list with `has_privs_of_role`, so a
+ * `to <resolver>` policy also applies to every role that INHERITS the
+ * resolver — the MIGRATE role above all, which the role contract makes a
+ * member of every definer role (database-roles.ts). The migrate role must
+ * keep seeding and migrating rows of an entity that declares an action, so
+ * the fence needs an exemption; but `current_user <> '<resolver>'` exempts
+ * every member indiscriminately, and a second role granted the resolver then
+ * inherits `update (<acl column>)` and rewrites the current tenant's ACL
+ * document — the one write the fence exists to stop. Verified on PostgreSQL
+ * 17.11 before this bound was tightened.
+ *
+ * The exemption is therefore a PRIVILEGE, not a name:
+ *
+ *   pg_has_role(current_user, <this table's relowner>, 'USAGE')
+ *
+ * read from `pg_class` at evaluation time, so it follows an ownership
+ * transfer and names no deployment-specific role. It admits exactly the
+ * sessions that hold the table owner's privileges — the migrate role that
+ * created the table, and any second migrator a deployment runs — and those
+ * sessions can already drop the policy or disable row security by DDL, so
+ * the fence was never a bound on them. It is FALSE for the resolver and for
+ * every member of the resolver that is not also an owner, which is what
+ * makes the write bound hold for a role the deployment adds later.
+ *
+ * `assertRowSecurityBounds` refuses to grant anything on a table whose owner
+ * is a role the resolver holds the privileges of, so the resolver can never
+ * satisfy this predicate: that assertion is load-bearing for the fence, not
+ * only for FORCE ROW LEVEL SECURITY.
+ *
+ * Scoping all four policies `to <resolver>` keeps them off the app and worker
+ * roles' hot path entirely — neither is a member of anything.
+ *
+ * PRIVILEGE, NOT ONLY POLICY
+ * --------------------------
+ * A policy is not the only bound worth having, and for one statement it is no
+ * bound at all: TRUNCATE ignores row security completely. So the grants are
+ * REPLACED rather than added to — `revoke all` on the table, then exactly the
+ * column SELECT and the column UPDATE this manifest needs — and the result is
+ * read back from `pg_class.relacl` and `pg_attribute.attacl` and compared
+ * against that exact set. A table-wide grant, a TRUNCATE or DELETE grant, a
+ * default privilege that caught this table, or a column SELECT left behind by
+ * an action that no longer reads the field fails the migration instead of
+ * resting on the fence.
+ *
+ * ONE TRANSACTION PER TABLE
+ * -------------------------
+ * The grants and the four policies are applied in a single transaction per
+ * entity. The migration lock (bootstrap.ts) is a SESSION advisory lock, not a
+ * transaction, so without this a concurrent session saw the window between
+ * `drop policy` and `create policy` — and, on a first install, the window
+ * between the column grants and the fence that bounds them. CREATE POLICY
+ * takes ACCESS EXCLUSIVE on the table, so inside one transaction no other
+ * session can observe the table between the two states: it waits for the
+ * commit and then sees the replacement.
  *
  * EXECUTE is revoked from PUBLIC and from the worker role, and granted to the
  * app role alone: no worker-side action check is supported yet. That revoke is
  * why this migration runs LAST among the privilege steps — `applyAppRoleGrants`
  * and `applyWorkerRoleGrants` sweep EXECUTE over every function in `app` and
  * set a default privilege that catches later ones, so anything granted before
- * them is widened again.
+ * them is widened again. The function DDL, those revokes and the ownership
+ * transfer share one transaction too, so a first install never leaves the
+ * lookup EXECUTE-able by PUBLIC between `create function` and the revoke.
  *
  * WHY THERE IS NO CALLER-CONTROLLED IDENTIFIER
  * --------------------------------------------
@@ -137,10 +197,10 @@ const UUID_LITERAL =
   "'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'";
 /**
  * The longest name this module derives from a table name. PostgreSQL
- * truncates an identifier at 63 bytes, and three policies whose names
+ * truncates an identifier at 63 bytes, and four policies whose names
  * collapsed into one would leave the table with whichever was created last.
  */
-const LONGEST_POLICY_SUFFIX = "_record_action_fence";
+const LONGEST_POLICY_SUFFIX = "_record_action_delete_fence";
 
 function unrenderable(value: string, reason: string): never {
   throw new Error(
@@ -265,8 +325,8 @@ export function recordActionEntities(
     if (!IDENTIFIER.test(table.schema) || !IDENTIFIER.test(table.name)) {
       invalid(table, "its schema or table name is not a plain lowercase identifier");
     }
-    // The three policies are named after the table. PostgreSQL would truncate
-    // them at 63 bytes and collapse all three into one.
+    // The four policies are named after the table. PostgreSQL would truncate
+    // them at 63 bytes and collapse all four into one.
     if (table.name.length + LONGEST_POLICY_SUFFIX.length > 63) {
       invalid(table, `its name leaves no room for a "${LONGEST_POLICY_SUFFIX}" policy name within 63 bytes`);
     }
@@ -434,10 +494,14 @@ export function renderRecordActionProjection(
  * Row security must be ENABLED and FORCED on the entity table, and the
  * resolver must not hold the owner's privileges on it.
  *
- * Without row security the three policies below are inert comments and the
+ * Without row security the four policies below are inert comments and the
  * column grants are an unconditional cross-tenant read plus an ACL write.
  * Without FORCE, a role holding the owner's privileges skips every policy —
  * which is also why the owner is checked rather than assumed.
+ *
+ * The owner check is doubly load-bearing now that the fence exempts the
+ * sessions which hold the owner's privileges: if the resolver held them it
+ * would exempt ITSELF and the write bound would be gone.
  */
 async function assertRowSecurityBounds(
   db: OpenShapeForgeDatabase,
@@ -475,36 +539,172 @@ async function assertRowSecurityBounds(
   );
 }
 
+/**
+ * The definer role itself, before anything is granted to it.
+ *
+ * `rolbypassrls` ignores FORCE ROW LEVEL SECURITY and every policy with it,
+ * so a resolver carrying that attribute would hold the column grants with no
+ * bound at all; `rolsuper` is the same thing and more. And a resolver that is
+ * a member of another role is no longer the narrow identity the SECURITY
+ * DEFINER functions are meant to run as — under INHERIT, `grant <anything> to
+ * <resolver>` widens both function bodies silently, and without it the role is
+ * still one `set role` away from them.
+ *
+ * database-roles.ts verifies the same contract for every declared role at the
+ * head of the chain. This repeats the resolver's own part of it here, because
+ * this step hands out a real read and a real write and is also called directly
+ * by tests and by a host that assembles its own chain.
+ */
+async function assertResolverRole(db: OpenShapeForgeDatabase): Promise<void> {
+  const state = await sql<{
+    superuser: boolean;
+    bypassrls: boolean;
+    inherits: boolean;
+    can_login: boolean;
+    memberships: string[];
+  }>`
+    select r.rolsuper as superuser, r.rolbypassrls as bypassrls,
+           r.rolinherit as inherits, r.rolcanlogin as can_login,
+           coalesce(array_agg(parent.rolname order by parent.rolname)
+             filter (where parent.rolname is not null), '{}') as memberships
+      from pg_roles r
+      left join pg_auth_members am on am.member = r.oid
+      left join pg_roles parent on parent.oid = am.roleid
+     where r.rolname = ${RESOLVER_ROLE}
+     group by r.rolsuper, r.rolbypassrls, r.rolinherit, r.rolcanlogin
+  `.execute(db);
+  const row = state.rows[0];
+  const reason = !row
+    ? "it does not exist"
+    : row.superuser
+      ? "it is a SUPERUSER, which is outside row security entirely"
+      : row.bypassrls
+        ? "it has BYPASSRLS, which ignores FORCE ROW LEVEL SECURITY and every policy"
+        : row.can_login
+          ? "it can log in, so the deployment can reach it directly rather than only through the lookup"
+          : row.memberships.length > 0
+            ? `it is a member of ${row.memberships.join(", ")}` +
+              (row.inherits ? ", whose privileges it INHERITS" : "")
+            : undefined;
+  if (reason === undefined) return;
+  throw new Error(
+    `The record-action resolver role ${RESOLVER_ROLE} cannot be used: ${reason}. ` +
+      "Its privileges are bounded by row-level policies and by nothing else, so it must be " +
+      `NOLOGIN NOSUPERUSER NOBYPASSRLS and a member of no role. Run as an administrator: ` +
+      `alter role ${RESOLVER_ROLE} nologin nosuperuser nobypassrls noinherit;`,
+  );
+}
+
+/** What the resolver may hold on an entity table, and nothing else. */
+type TablePrivilege = { kind: "table" | "column"; column: string | null; privilege: string };
+
+function privilegeKey(privilege: TablePrivilege): string {
+  return `${privilege.kind}:${privilege.column ?? "-"}:${privilege.privilege}`;
+}
+
+/**
+ * Read the resolver's privileges on the table back out of the catalog and
+ * compare them against the exact set this manifest asked for.
+ *
+ * A policy bounds SELECT, INSERT, UPDATE and DELETE. It does NOT bound
+ * TRUNCATE, which ignores row security completely, and a table-wide UPDATE
+ * grant would reach every column rather than the ACL. So the grants are not
+ * trusted to be what the two statements above made them: they are read from
+ * `pg_class.relacl` and `pg_attribute.attacl` — which, unlike
+ * `information_schema`, show every grantor's grant — and anything beyond the
+ * declared set fails the migration inside its transaction.
+ */
+async function assertResolverPrivileges(
+  db: OpenShapeForgeDatabase,
+  entity: RecordActionEntity,
+  expected: readonly TablePrivilege[],
+): Promise<void> {
+  const qualified = literal(ident(entity.schema, entity.table));
+  const held = await sql<{ kind: string; column: string | null; privilege: string }>`
+    with target as (select ${sql.raw(qualified)}::regclass as oid),
+         who as (select oid as grantee from pg_roles where rolname = ${RESOLVER_ROLE})
+    select 'table' as kind, null::name as column, acl.privilege_type as privilege
+      from target, who, pg_class c, aclexplode(c.relacl) acl
+     where c.oid = target.oid and acl.grantee = who.grantee
+    union all
+    select 'column' as kind, att.attname as column, acl.privilege_type as privilege
+      from target, who, pg_attribute att, aclexplode(att.attacl) acl
+     where att.attrelid = target.oid and acl.grantee = who.grantee
+  `.execute(db);
+  const wanted = new Set(expected.map(privilegeKey));
+  const actual = new Set(
+    held.rows.map((row) =>
+      privilegeKey({ kind: row.kind as TablePrivilege["kind"], column: row.column, privilege: row.privilege }),
+    ),
+  );
+  const extra = [...actual].filter((key) => !wanted.has(key)).sort();
+  const missing = [...wanted].filter((key) => !actual.has(key)).sort();
+  if (extra.length === 0 && missing.length === 0) return;
+  throw new Error(
+    `Record-action privileges for ${entity.schema}.${entity.table} are not what this manifest declares: ` +
+      [
+        extra.length > 0 ? `${RESOLVER_ROLE} also holds ${extra.join(", ")}` : undefined,
+        missing.length > 0 ? `${RESOLVER_ROLE} is missing ${missing.join(", ")}` : undefined,
+      ].filter(Boolean).join("; ") +
+      ". A policy does not bound TRUNCATE at all and a table-wide UPDATE reaches every column, " +
+      "so the grant set is checked rather than assumed. Revoke what this migration did not grant.",
+  );
+}
+
+/**
+ * One transaction, or the caller's if it already opened one.
+ *
+ * The migration lock (bootstrap.ts) is a session advisory lock, so it does
+ * not make a sequence of statements atomic to a concurrent reader. Every unit
+ * below that must not be observed half-applied gets a real transaction.
+ *
+ * As in audit-history.ts, "already opened one" means a Kysely transaction. A
+ * caller that issued a raw `begin` on the connection is not detectable here
+ * and would have the inner COMMIT close its own transaction; the chain opens
+ * none around this step.
+ */
+async function atomically<T>(
+  db: OpenShapeForgeDatabase,
+  work: (tx: OpenShapeForgeDatabase) => Promise<T>,
+): Promise<T> {
+  if (db.isTransaction) return work(db);
+  return db.transaction().execute((tx) => work(tx));
+}
+
 export async function applyRecordActionsMigration(
   db: OpenShapeForgeDatabase,
   entities: readonly RecordActionEntity[] = recordActionEntities(),
 ): Promise<RecordActionEntity[]> {
+  // The definer role's own attributes, before it is handed a grant: its
+  // privileges are bounded by policies, and BYPASSRLS or an inherited role
+  // would put it outside them.
+  await assertResolverRole(db);
   // Ownership transfer needs CREATE on `app`, exactly as identity-link.ts does.
   await sql`grant usage on schema app to ${sql.id(RESOLVER_ROLE)}`.execute(db);
   await sql`grant create on schema app to ${sql.id(RESOLVER_ROLE)}`.execute(db);
 
-  // Inside a policy the resolver is a string, not an identifier.
-  const resolverLiteral = literal(RESOLVER_ROLE);
   const tenantFence = `${ident("tenant_id")} = app.current_tenant()`;
-  const notTheResolver = `current_user <> ${resolverLiteral}`;
 
   for (const entity of entities) {
+    const qualified = ident(entity.schema, entity.table);
     const target = sql.id(entity.schema, entity.table);
+    /**
+     * The fence's exemption: TRUE only for a session holding the privileges of
+     * THIS table's owner, read from the catalog so an ownership transfer
+     * carries and no deployment role is named. FALSE for the resolver —
+     * `assertRowSecurityBounds` refuses the table otherwise — and FALSE for
+     * every member of the resolver that does not also own the table.
+     */
+    const ownsTheTable =
+      `coalesce((select pg_catalog.pg_has_role(current_user, c.relowner, 'USAGE')` +
+      ` from pg_catalog.pg_class c where c.oid = ${literal(qualified)}::regclass), false)`;
     const policy = (suffix: string) => {
       const name = `${entity.table}_record_action_${suffix}`;
-      // Truncation at 63 bytes would collapse the three names into one and
+      // Truncation at 63 bytes would collapse the four names into one and
       // leave the table with whichever policy was created last.
       if (name.length > 63) unrenderable(name, "the policy name exceeds 63 bytes");
       return sql.id(name);
     };
-    // A policy only bounds a privilege while row security is ON and applies to
-    // the role reading. Both are true by construction — the generated schema
-    // emits ENABLE and FORCE ROW LEVEL SECURITY for every tenant-scoped table
-    // and the registry refuses a table that is not tenant-scoped — and this
-    // asserts it anyway, because the step after it hands out a column grant
-    // that is a real read and a real write if the assertion is false.
-    await assertRowSecurityBounds(db, entity);
-    await sql`grant usage on schema ${sql.id(entity.schema)} to ${sql.id(RESOLVER_ROLE)}`.execute(db);
     // Exactly the columns the two questions need: the key and tenant to find
     // the row, the ACL to decide, and the union of the declared read
     // projections to answer with. Anything else on the row stays "permission
@@ -512,42 +712,84 @@ export async function applyRecordActionsMigration(
     const readColumns = [...new Set(
       Object.values(entity.reads).flat().map((read) => read.column),
     )].sort();
-    const selectable = [entity.keyColumn, "tenant_id", entity.aclColumn, ...readColumns]
-      .filter((column, index, all) => all.indexOf(column) === index)
-      .map((column) => ident(column))
-      .join(", ");
-    await sql.raw(
-      `grant select (${selectable}) on ${ident(entity.schema, entity.table)} to ${ident(RESOLVER_ROLE)}`,
-    ).execute(db);
-    // The lock privilege and nothing more: UPDATE is what PostgreSQL requires
-    // for FOR SHARE. The fence policy below is what makes the write
-    // impossible; the column grant alone would not.
-    await sql.raw(
-      `grant update (${ident(entity.aclColumn)}) on ${ident(entity.schema, entity.table)} to ${ident(RESOLVER_ROLE)}`,
-    ).execute(db);
-    // Permissive: admits the resolver to the rows the view-gated row policy
-    // hides from the app role, within this session's tenant and no further.
-    await sql`drop policy if exists ${policy("read")} on ${target}`.execute(db);
-    await sql`create policy ${policy("read")} on ${target}
-      for select to ${sql.id(RESOLVER_ROLE)} using (${sql.raw(tenantFence)})`.execute(db);
-    await sql`drop policy if exists ${policy("lock")} on ${target}`.execute(db);
-    await sql`create policy ${policy("lock")} on ${target}
-      for update to ${sql.id(RESOLVER_ROLE)}
-      using (${sql.raw(tenantFence)}) with check (false)`.execute(db);
-    // RESTRICTIVE, and therefore the actual bound: permissive policies are
-    // OR-ed, so the generated row policy — which names no role and whose write
-    // check is satisfied by the resolver's own tenant — would otherwise hand
-    // back both the cross-tenant read and the ACL write the two policies above
-    // appear to refuse. `current_user` rather than the TO list exempts the
-    // migrate role, which the role contract makes a member of this role.
-    await sql`drop policy if exists ${policy("fence")} on ${target}`.execute(db);
-    await sql`create policy ${policy("fence")} on ${target}
-      as restrictive for all to ${sql.id(RESOLVER_ROLE)}
-      using (${sql.raw(notTheResolver)} or ${sql.raw(tenantFence)})
-      with check (${sql.raw(notTheResolver)})`.execute(db);
+    const selectColumns = [entity.keyColumn, "tenant_id", entity.aclColumn, ...readColumns]
+      .filter((column, index, all) => all.indexOf(column) === index);
+    const selectable = selectColumns.map((column) => ident(column)).join(", ");
+
+    // The grants and the four policies that bound them, atomically: a
+    // concurrent session must never see the column grants without the fence,
+    // nor the table between `drop policy` and `create policy`. CREATE POLICY
+    // takes ACCESS EXCLUSIVE, so a reader waits for the commit and then sees
+    // the replacement whole.
+    await atomically(db, async (tx) => {
+      // A policy only bounds a privilege while row security is ON and applies
+      // to the role reading. Both are true by construction — the generated
+      // schema emits ENABLE and FORCE ROW LEVEL SECURITY for every
+      // tenant-scoped table and the registry refuses a table that is not
+      // tenant-scoped — and this asserts it anyway, because the step after it
+      // hands out a column grant that is a real read and a real write if the
+      // assertion is false.
+      await assertRowSecurityBounds(tx, entity);
+      await sql`grant usage on schema ${sql.id(entity.schema)} to ${sql.id(RESOLVER_ROLE)}`.execute(tx);
+      // REPLACE rather than add: a table-wide grant reaches every column, a
+      // TRUNCATE grant is outside row security altogether, and a column
+      // SELECT left over from an action that no longer reads the field is a
+      // disclosure this manifest does not declare. Revoking first makes the
+      // grant set a function of the manifest alone.
+      await sql`revoke all on ${target} from ${sql.id(RESOLVER_ROLE)}`.execute(tx);
+      await sql.raw(
+        `grant select (${selectable}) on ${qualified} to ${ident(RESOLVER_ROLE)}`,
+      ).execute(tx);
+      // The lock privilege and nothing more: UPDATE is what PostgreSQL
+      // requires for FOR SHARE. The fence policy below is what makes the write
+      // impossible; the column grant alone would not.
+      await sql.raw(
+        `grant update (${ident(entity.aclColumn)}) on ${qualified} to ${ident(RESOLVER_ROLE)}`,
+      ).execute(tx);
+      await assertResolverPrivileges(tx, entity, [
+        ...selectColumns.map((column) => ({ kind: "column" as const, column, privilege: "SELECT" })),
+        { kind: "column", column: entity.aclColumn, privilege: "UPDATE" },
+      ]);
+      // Permissive: admits the resolver to the rows the view-gated row policy
+      // hides from the app role, within this session's tenant and no further.
+      await sql`drop policy if exists ${policy("read")} on ${target}`.execute(tx);
+      await sql`create policy ${policy("read")} on ${target}
+        for select to ${sql.id(RESOLVER_ROLE)} using (${sql.raw(tenantFence)})`.execute(tx);
+      await sql`drop policy if exists ${policy("lock")} on ${target}`.execute(tx);
+      await sql`create policy ${policy("lock")} on ${target}
+        for update to ${sql.id(RESOLVER_ROLE)}
+        using (${sql.raw(tenantFence)}) with check (false)`.execute(tx);
+      // RESTRICTIVE, and therefore the actual bound: permissive policies are
+      // OR-ed, so the generated row policy — which names no role and whose
+      // write check is satisfied by the resolver's own tenant — would
+      // otherwise hand back both the cross-tenant read and the ACL write the
+      // two policies above appear to refuse. The exemption is the table
+      // owner's privileges rather than a role name, so a second member of the
+      // resolver inherits the column grants and still cannot write.
+      await sql`drop policy if exists ${policy("fence")} on ${target}`.execute(tx);
+      await sql`create policy ${policy("fence")} on ${target}
+        as restrictive for all to ${sql.id(RESOLVER_ROLE)}
+        using (${sql.raw(ownsTheTable)} or ${sql.raw(tenantFence)})
+        with check (${sql.raw(ownsTheTable)})`.execute(tx);
+      // A `for all` policy's WITH CHECK is applied to INSERT and UPDATE only,
+      // so DELETE is bounded by the fence's USING — which has to stay true for
+      // the tenant's own rows, or FOR SHARE stops working. This is the one
+      // statement that needs its own restrictive USING. The resolver holds no
+      // DELETE privilege either, by the revoke above and by the privilege
+      // assertion; this is what holds if a later grant appears.
+      await sql`drop policy if exists ${policy("delete_fence")} on ${target}`.execute(tx);
+      await sql`create policy ${policy("delete_fence")} on ${target}
+        as restrictive for delete to ${sql.id(RESOLVER_ROLE)}
+        using (${sql.raw(ownsTheTable)})`.execute(tx);
+    });
   }
 
-  await sql.raw(`
+  // The two function bodies, their EXECUTE grants and the ownership transfer
+  // as one unit: `create function` defaults to EXECUTE for PUBLIC, so a first
+  // install would otherwise expose the lookup to every role in the window
+  // before the revoke.
+  await atomically(db, async (tx) => {
+    await sql.raw(`
     create or replace function app.record_action_allows(
       entity text,
       record_key text,
@@ -581,8 +823,8 @@ ${renderRecordActionLookup(entities)}
       return app.record_action_subject_allows(document -> 'actions' -> action);
     end
     $record_action$;
-  `).execute(db);
-  await sql.raw(`
+  `).execute(tx);
+    await sql.raw(`
     create or replace function app.record_action_read(
       entity text,
       record_key text,
@@ -604,20 +846,21 @@ ${renderRecordActionProjection(entities)}
       return payload;
     end
     $record_action_read$;
-  `).execute(db);
-  await sql`revoke all on function app.record_action_read(text, text, text) from public`.execute(db);
-  await sql`revoke all on function app.record_action_read(text, text, text)
-    from ${sql.id(WORKER_ROLE)}`.execute(db);
-  await sql`grant execute on function app.record_action_read(text, text, text)
-    to ${sql.id(APP_ROLE)}`.execute(db);
-  await sql`alter function app.record_action_read(text, text, text)
-    owner to ${sql.id(RESOLVER_ROLE)}`.execute(db);
-  await sql`revoke all on function app.record_action_allows(text, text, text) from public`.execute(db);
-  await sql`revoke all on function app.record_action_allows(text, text, text)
-    from ${sql.id(WORKER_ROLE)}`.execute(db);
-  await sql`grant execute on function app.record_action_allows(text, text, text)
-    to ${sql.id(APP_ROLE)}`.execute(db);
-  await sql`alter function app.record_action_allows(text, text, text)
-    owner to ${sql.id(RESOLVER_ROLE)}`.execute(db);
+  `).execute(tx);
+    await sql`revoke all on function app.record_action_read(text, text, text) from public`.execute(tx);
+    await sql`revoke all on function app.record_action_read(text, text, text)
+      from ${sql.id(WORKER_ROLE)}`.execute(tx);
+    await sql`grant execute on function app.record_action_read(text, text, text)
+      to ${sql.id(APP_ROLE)}`.execute(tx);
+    await sql`alter function app.record_action_read(text, text, text)
+      owner to ${sql.id(RESOLVER_ROLE)}`.execute(tx);
+    await sql`revoke all on function app.record_action_allows(text, text, text) from public`.execute(tx);
+    await sql`revoke all on function app.record_action_allows(text, text, text)
+      from ${sql.id(WORKER_ROLE)}`.execute(tx);
+    await sql`grant execute on function app.record_action_allows(text, text, text)
+      to ${sql.id(APP_ROLE)}`.execute(tx);
+    await sql`alter function app.record_action_allows(text, text, text)
+      owner to ${sql.id(RESOLVER_ROLE)}`.execute(tx);
+  });
   return [...entities];
 }

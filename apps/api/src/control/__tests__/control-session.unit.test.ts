@@ -172,6 +172,24 @@ describe("resolveControlSession", () => {
     }).catch((caught: unknown) => caught)) as ControlAuthorizationError;
     expect(legacy.code).toBe("FORBIDDEN");
   });
+
+  it("keeps a same-origin dedicated control realm on its narrow platform role in host mode", async () => {
+    process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "host";
+    const session = await resolveControlSession(bearer(), config, {
+      verifier: verifierFor(adminClaims),
+    });
+    expect(session.roles).toContain(PLATFORM_OPERATOR_ROLE);
+
+    const realmAdminOnly = (await resolveControlSession(bearer(), config, {
+      verifier: verifierFor({
+        sub: "control-admin",
+        azp: CODEX,
+        realm_access: { roles: [] },
+        resource_access: { "realm-management": { roles: ["realm-admin"] } },
+      }),
+    }).catch((caught: unknown) => caught)) as ControlAuthorizationError;
+    expect(realmAdminOnly.code).toBe("FORBIDDEN");
+  });
 });
 
 describe("controlSessionHttpError", () => {

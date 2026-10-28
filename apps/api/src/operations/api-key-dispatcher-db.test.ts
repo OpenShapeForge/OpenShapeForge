@@ -25,7 +25,9 @@
  *     transaction, while the 'pending' intent row survives, because that row
  *     is what reconcile.ts needs to find an orphaned realm client;
  *   - a realm that refuses leaves a 'pending' row, no credential, and a
- *     declared 502 rather than an internal error.
+ *     declared 502 rather than an internal error;
+ *   - a malformed cursor is a declared 400 before any value reaches a cast,
+ *     while a cursor this listing issued still walks a date-sorted page.
  *
  * The only doubles are the realm (a real HTTP server speaking the slice of the
  * Keycloak Admin API the provisioning path calls) and the clock. The database,
@@ -327,6 +329,93 @@ describe("the catalog over the real dispatcher, as a person with a Relation", ()
     });
   }, TEST_TIMEOUT);
 
+  test("refuses a malformed cursor as a declared 400, not a server error", async () => {
+    if (!booted) return;
+    // A cursor is opaque but not trusted: its id reaches a uuid column and its
+    // value a timestamptz cast, so a crafted one used to be a 500 from
+    // PostgreSQL rather than the 400 this contract declares. The fingerprint
+    // is public — it is derived from the sort and the filters — so a caller
+    // can produce a cursor that passes every check except the value's shape.
+    const forge = (payload: Record<string, unknown>) =>
+      Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+    const { createHash } = await import("node:crypto");
+    const fingerprint = (parts: readonly (string | undefined)[]) =>
+      createHash("sha256").update(JSON.stringify(parts.map((part) => part ?? null)))
+        .digest("base64url").slice(0, 16);
+
+    const cases: { path: string; input: Record<string, unknown>; label: string }[] = [
+      {
+        label: "an id that is not a UUID",
+        path: "list",
+        input: {
+          sortField: "displayName", sortDirection: "asc",
+          after: forge({
+            f: "displayName", d: "asc", q: fingerprint(["integrations", undefined, undefined]),
+            v: "partner portal", i: "not-a-uuid",
+          }),
+        },
+      },
+      {
+        label: "a sort value that is not a timestamp",
+        path: "list",
+        input: {
+          sortField: "createdAt", sortDirection: "desc",
+          after: forge({
+            f: "createdAt", d: "desc", q: fingerprint(["integrations", undefined, undefined]),
+            v: "yesterday", i: randomUUID(),
+          }),
+        },
+      },
+      {
+        label: "a sort value that is a timestamp with something appended",
+        path: "list",
+        input: {
+          sortField: "createdAt", sortDirection: "asc",
+          after: forge({
+            f: "createdAt", d: "asc", q: fingerprint(["integrations", undefined, undefined]),
+            v: "2026-01-02 00:00:00+00'); select 1 --", i: randomUUID(),
+          }),
+        },
+      },
+    ];
+
+    for (const scenario of cases) {
+      const response = await operation(scenario.path, scenario.input);
+      expect({ label: scenario.label, status: response.status, code: response.body.error?.code })
+        .toEqual({ label: scenario.label, status: 400, code: "VALIDATION" });
+    }
+  }, TEST_TIMEOUT);
+
+  test("pages a date sort with the cursors it issued, end to end", async () => {
+    if (!booted) return;
+    // The shape check on a cursor's sort value only earns its place if a real
+    // one still passes it. These resume on `createdAt` — a timestamptz, so the
+    // value is rendered by the database and cast back by it — one row at a
+    // time, over the dispatcher, until the listing says there is no more.
+    const names = new Set<string>();
+    for (const name of ["Alpha partner", "Beta partner", "Gamma partner"]) {
+      expect((await operation("create", {
+        displayName: name, roles: [READ_ROLE], expiresInDays: 30,
+      })).status).toBe(200);
+    }
+    let after: string | undefined;
+    for (let page = 0; page < 50; page += 1) {
+      const response = await operation("list", {
+        sortField: "createdAt", sortDirection: "asc", first: 1,
+        ...(after === undefined ? {} : { after }),
+      });
+      expect({ page, status: response.status }).toEqual({ page, status: 200 });
+      for (const row of response.body.integrations as { displayName: string }[]) {
+        names.add(row.displayName);
+      }
+      after = response.body.nextCursor ?? undefined;
+      if (!after) break;
+    }
+    expect(after).toBeUndefined();
+    for (const name of ["Alpha partner", "Beta partner", "Gamma partner"]) {
+      expect(names).toContain(name);
+    }
+  }, TEST_TIMEOUT);
 });
 
 describe("the service's writes belong to the dispatcher's transaction", () => {

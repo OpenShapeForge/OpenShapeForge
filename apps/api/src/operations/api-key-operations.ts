@@ -329,6 +329,51 @@ type CursorPayload = {
   i: string;
 };
 
+/**
+ * The shape a cursor's sort value must have to be bound at all.
+ *
+ * Both halves of a keyset reach a TYPED expression: the id is compared against
+ * a uuid column, and a date sort's value is cast to timestamptz
+ * (`catalog-page.ts`, `bind`). PostgreSQL answers a malformed one with
+ * `invalid input syntax`, which is a 500 reported to a caller who only
+ * supplied a bad cursor — a contract this Operation does not declare and an
+ * internal failure it should never log. So both are checked here, against the
+ * shape the database itself rendered, before any value is bound.
+ *
+ * The fingerprint does not make this unnecessary. It covers the sort and the
+ * filters so a cursor cannot resume the wrong SET, and it is deliberately not
+ * a security boundary: it is derived from public inputs, so anyone can
+ * produce a cursor that matches their own query and carries whatever keyset
+ * they like. Rejecting on shape is what keeps that a client error.
+ */
+/**
+ * The 8-4-4-4-12 hex shape, deliberately NOT the stricter RFC 4122 pattern the
+ * session layer applies: this only has to be a value the uuid type accepts, and
+ * a row id is whatever the database minted, not something to re-validate.
+ */
+const CURSOR_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * `timestamptz::text` under DateStyle ISO, which is what `sort_value` is: a
+ * date, a space, a time with up to microsecond precision, and the offset.
+ * Anchored, so nothing may follow the value that Postgres would then have to
+ * interpret.
+ */
+const CURSOR_TIMESTAMP =
+  /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,6})?[+-]\d{2}(:\d{2}(:\d{2})?)?$/;
+
+/** The sorts whose value is a timestamp rather than text (service.ts). */
+const TIMESTAMP_SORTS = new Set(["createdAt", "updatedAt", "expiresAt", "lastUsedAt"]);
+
+/**
+ * The longest text sort value a cursor may carry.
+ *
+ * `lower(display_name)` is the only text sort value, and the authored input
+ * bounds a display name at 200 characters; `status` is one short word. Past
+ * that the cursor is not one this listing produced.
+ */
+const MAX_CURSOR_VALUE_LENGTH = 200;
+
 function fingerprint(parts: readonly (string | undefined)[]): string {
   return createHash("sha256").update(JSON.stringify(parts.map((part) => part ?? null)))
     .digest("base64url").slice(0, 16);
@@ -350,11 +395,19 @@ function decodeCursor(value: unknown, sort: { f: string; d: string }, query: str
     invalidCursor();
   }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) invalidCursor();
-  if (typeof payload.i !== "string" || payload.i === "") invalidCursor();
+  if (typeof payload.i !== "string" || !CURSOR_ID.test(payload.i)) invalidCursor();
   if (payload.v !== null && typeof payload.v !== "string") invalidCursor();
   // Sort or filter tampering: the keyset is only meaningful under the order
   // and the set it was produced in.
   if (payload.f !== sort.f || payload.d !== sort.d || payload.q !== query) invalidCursor();
+  // The sort is now known to be the one the caller asked for, so its value's
+  // type is known too. Checked against the shape the database renders, never
+  // left for the cast to reject — see CURSOR_TIMESTAMP.
+  if (payload.v !== null) {
+    if (TIMESTAMP_SORTS.has(payload.f)) {
+      if (!CURSOR_TIMESTAMP.test(payload.v)) invalidCursor();
+    } else if (payload.v.length > MAX_CURSOR_VALUE_LENGTH) invalidCursor();
+  }
   return { value: payload.v, id: payload.i };
 }
 

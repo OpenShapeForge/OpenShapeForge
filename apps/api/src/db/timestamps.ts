@@ -8,6 +8,25 @@ function isLeapYear(year: number): boolean {
   return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 }
 
+const MONTH_LENGTHS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
+
+/**
+ * How many days that month of that year has, or `undefined` if there is no
+ * such month or no such year.
+ *
+ * The one calendar fact a regular expression cannot express, and therefore the
+ * one every caller that validates a timestamp's FIELDS needs: February is 29
+ * days in a leap year and 28 otherwise, so `2024-02-29` is a real date and
+ * `2026-02-29` is PostgreSQL's "date/time field value out of range". Shared so
+ * that the rule — including the century exception — is stated once.
+ */
+export function daysInMonth(year: number, month: number): number | undefined {
+  if (!Number.isInteger(year) || !Number.isInteger(month)) return undefined;
+  if (year < 1 || month < 1 || month > 12) return undefined;
+  if (month === 2) return isLeapYear(year) ? 29 : 28;
+  return MONTH_LENGTHS[month - 1];
+}
+
 function isRealTimestamp(value: string): boolean {
   const match = timestampTokenPattern.exec(value);
   if (!match) return false;
@@ -21,25 +40,10 @@ function isRealTimestamp(value: string): boolean {
   const second = Number(rawSecond);
   const offsetHour = rawOffsetHour === undefined ? 0 : Number(rawOffsetHour);
   const offsetMinute = rawOffsetMinute === undefined ? 0 : Number(rawOffsetMinute);
-  const daysInMonth = [
-    31,
-    isLeapYear(year) ? 29 : 28,
-    31,
-    30,
-    31,
-    30,
-    31,
-    31,
-    30,
-    31,
-    30,
-    31,
-  ];
-  return year >= 1 &&
-    month >= 1 &&
-    month <= 12 &&
+  const days = daysInMonth(year, month);
+  return days !== undefined &&
     day >= 1 &&
-    day <= daysInMonth[month - 1]! &&
+    day <= days &&
     hour <= 23 &&
     minute <= 59 &&
     second <= 59 &&

@@ -13,7 +13,9 @@
  *
  * What this file DOES own is projection: Dates to ISO strings, the derived
  * credential status a reader thinks in (active / expired / revoked), and the
- * sort-and-page contract the generic collection view declares. That contract is
+ * sort-and-page contract the generic collection view declares — whose opaque
+ * cursor, with the checks that keep a crafted one a client error, lives beside
+ * it in `api-key-cursor.ts`. That contract is
  * applied to an already-authorized result set, which is why it can live here
  * and not in the service: it decides what a page SHOWS, never what a caller MAY
  * see. The sets are bounded (integrations per tenant, keys per integration), so
@@ -24,14 +26,12 @@
  * is never logged, never read back, and never projected to the web — see the
  * catalog YAML for why that projection is absent rather than merely unused.
  */
-import { createHash } from "node:crypto";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { ApiKeyAuthorizationError } from "../auth/api-key/ceiling.js";
 import {
   readApiKeyProvisioningConfig,
   type ApiKeyProvisioningConfig,
 } from "../auth/api-key/runtime-config.js";
-import type { KeysetCursor } from "../auth/api-key/catalog-page.js";
 import { PRODUCT_MAX_CREDENTIAL_TTL_DAYS } from "../auth/api-key/lifetime.js";
 import {
   ApiKeyNotFoundError,
@@ -58,6 +58,12 @@ import type {
   ModuleOperationHandler,
   ModuleOperationResult,
 } from "../modules/contract.js";
+import {
+  cursorSpread,
+  decodeCursor,
+  encodeCursor,
+  fingerprint,
+} from "./api-key-cursor.js";
 import type { OperationContract } from "./runtime.js";
 
 /** The plugin name every integration catalog Operation is authored under. */
@@ -302,126 +308,6 @@ function projectCredential(key: ListedKey, now: Date): ProjectedCredential {
 }
 
 /**
- * The opaque `after` cursor: the database keyset, plus the query it belongs to.
- *
- * The keyset alone would be resumable under a DIFFERENT sort or filter, where
- * "everything after this value" means something else entirely and silently
- * skips or repeats rows. So the cursor carries a fingerprint of the sort and
- * the filters it was issued for, and a request whose own sort or filters do
- * not match it is refused as a client error instead of answered with a page
- * that looks fine and is not.
- *
- * The fingerprint is a hash, so the cursor stays short, but it is NOT a
- * security boundary and is not relied on as one: the tenant comes from the
- * session and the subject from the request, both re-applied as SQL predicates
- * on every statement, so the worst a forged cursor can do is pick a different
- * resume point inside a set the caller may already read.
- */
-type CursorPayload = {
-  /** Sort field and direction this cursor was issued under. */
-  f: string;
-  d: "asc" | "desc";
-  /** Fingerprint of the subject and filters. */
-  q: string;
-  /** The last row's sort value as the database rendered it; null in the NULL block. */
-  v: string | null;
-  /** The last row's id — the tie-break half of the keyset. */
-  i: string;
-};
-
-/**
- * The shape a cursor's sort value must have to be bound at all.
- *
- * Both halves of a keyset reach a TYPED expression: the id is compared against
- * a uuid column, and a date sort's value is cast to timestamptz
- * (`catalog-page.ts`, `bind`). PostgreSQL answers a malformed one with
- * `invalid input syntax`, which is a 500 reported to a caller who only
- * supplied a bad cursor — a contract this Operation does not declare and an
- * internal failure it should never log. So both are checked here, against the
- * shape the database itself rendered, before any value is bound.
- *
- * The fingerprint does not make this unnecessary. It covers the sort and the
- * filters so a cursor cannot resume the wrong SET, and it is deliberately not
- * a security boundary: it is derived from public inputs, so anyone can
- * produce a cursor that matches their own query and carries whatever keyset
- * they like. Rejecting on shape is what keeps that a client error.
- */
-/**
- * The 8-4-4-4-12 hex shape, deliberately NOT the stricter RFC 4122 pattern the
- * session layer applies: this only has to be a value the uuid type accepts, and
- * a row id is whatever the database minted, not something to re-validate.
- */
-const CURSOR_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * `timestamptz::text` under DateStyle ISO, which is what `sort_value` is: a
- * date, a space, a time with up to microsecond precision, and the offset.
- * Anchored, so nothing may follow the value that Postgres would then have to
- * interpret.
- */
-const CURSOR_TIMESTAMP =
-  /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,6})?[+-]\d{2}(:\d{2}(:\d{2})?)?$/;
-
-/** The sorts whose value is a timestamp rather than text (service.ts). */
-const TIMESTAMP_SORTS = new Set(["createdAt", "updatedAt", "expiresAt", "lastUsedAt"]);
-
-/**
- * The longest text sort value a cursor may carry.
- *
- * `lower(display_name)` is the only text sort value, and the authored input
- * bounds a display name at 200 characters; `status` is one short word. Past
- * that the cursor is not one this listing produced.
- */
-const MAX_CURSOR_VALUE_LENGTH = 200;
-
-function fingerprint(parts: readonly (string | undefined)[]): string {
-  return createHash("sha256").update(JSON.stringify(parts.map((part) => part ?? null)))
-    .digest("base64url").slice(0, 16);
-}
-
-function invalidCursor(): never {
-  // Deliberately one message for every rejection: a caller that tampered with
-  // a cursor learns that it was rejected, not which half gave it away.
-  throw new ApiKeyValidationError("after must be a cursor this listing returned for this same query.");
-}
-
-function decodeCursor(value: unknown, sort: { f: string; d: string }, query: string): KeysetCursor | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.length > 512) invalidCursor();
-  let payload: CursorPayload;
-  try {
-    payload = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as CursorPayload;
-  } catch {
-    invalidCursor();
-  }
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) invalidCursor();
-  if (typeof payload.i !== "string" || !CURSOR_ID.test(payload.i)) invalidCursor();
-  if (payload.v !== null && typeof payload.v !== "string") invalidCursor();
-  // Sort or filter tampering: the keyset is only meaningful under the order
-  // and the set it was produced in.
-  if (payload.f !== sort.f || payload.d !== sort.d || payload.q !== query) invalidCursor();
-  // The sort is now known to be the one the caller asked for, so its value's
-  // type is known too. Checked against the shape the database renders, never
-  // left for the cast to reject — see CURSOR_TIMESTAMP.
-  if (payload.v !== null) {
-    if (TIMESTAMP_SORTS.has(payload.f)) {
-      if (!CURSOR_TIMESTAMP.test(payload.v)) invalidCursor();
-    } else if (payload.v.length > MAX_CURSOR_VALUE_LENGTH) invalidCursor();
-  }
-  return { value: payload.v, id: payload.i };
-}
-
-function encodeCursor(
-  cursor: KeysetCursor | null,
-  sort: { f: string; d: "asc" | "desc" },
-  query: string,
-): string | null {
-  if (!cursor) return null;
-  const payload: CursorPayload = { f: sort.f, d: sort.d, q: query, v: cursor.value, i: cursor.id };
-  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-}
-
-/**
  * Read the sort, direction and page size the caller asked for.
  *
  * The compiled input schema the runtime validated already bounds all three —
@@ -450,11 +336,6 @@ function readSort<TField extends string>(
     throw new ApiKeyValidationError(`first must be an integer from 1 through ${MAX_PAGE_SIZE}.`);
   }
   return { field: field as TField, direction, first };
-}
-
-/** `exactOptionalPropertyTypes` forbids `after: undefined`; omit the key instead. */
-function cursorSpread(after: KeysetCursor | undefined): { after?: KeysetCursor } {
-  return after ? { after } : {};
 }
 
 /** The authored `first.default`; the compiler test pins the two together. */

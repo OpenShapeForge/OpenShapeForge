@@ -26,8 +26,10 @@
  *     is what reconcile.ts needs to find an orphaned realm client;
  *   - a realm that refuses leaves a 'pending' row, no credential, and a
  *     declared 502 rather than an internal error;
- *   - a malformed cursor is a declared 400 before any value reaches a cast,
- *     while a cursor this listing issued still walks a date-sorted page.
+ *   - an impossible cursor is a declared 400 before any value reaches a cast —
+ *     including a value shaped exactly as the column renders, which only the
+ *     calendar can refuse — on both listings and in both directions, while the
+ *     cursors these listings issue still walk every sort to its end.
  *
  * The only doubles are the realm (a real HTTP server speaking the slice of the
  * Keycloak Admin API the provisioning path calls) and the clock. The database,
@@ -330,91 +332,168 @@ describe("the catalog over the real dispatcher, as a person with a Relation", ()
     });
   }, TEST_TIMEOUT);
 
-  test("refuses a malformed cursor as a declared 400, not a server error", async () => {
+  test("refuses an impossible cursor as a declared 400 on both listings, both directions", async () => {
     if (!booted) return;
-    // A cursor is opaque but not trusted: its id reaches a uuid column and its
-    // value a timestamptz cast, so a crafted one used to be a 500 from
-    // PostgreSQL rather than the 400 this contract declares. The fingerprint
-    // is public — it is derived from the sort and the filters — so a caller
-    // can produce a cursor that passes every check except the value's shape.
+    // A cursor is opaque but not trusted: its id reaches a uuid column and a
+    // date sort's value a timestamptz cast, so a crafted one used to be a 500
+    // from PostgreSQL rather than the 400 this contract declares. The
+    // fingerprint is public — it is derived from the sort and the filters — so
+    // a caller can produce a cursor that passes every check except the
+    // value's.
+    //
+    // `2026-02-29 00:00:00+00` is the case a shape test cannot catch: it is
+    // formatted exactly as this column renders, and PostgreSQL still answers
+    // `date/time field value out of range`, because 2026 is not a leap year.
+    const { createHash } = await import("node:crypto");
     const forge = (payload: Record<string, unknown>) =>
       Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-    const { createHash } = await import("node:crypto");
     const fingerprint = (parts: readonly (string | undefined)[]) =>
       createHash("sha256").update(JSON.stringify(parts.map((part) => part ?? null)))
         .digest("base64url").slice(0, 16);
 
-    const cases: { path: string; input: Record<string, unknown>; label: string }[] = [
+    // A parent to list credentials under, so the credential listing is refused
+    // on its cursor rather than on a missing integration.
+    const parent = await operation("create", {
+      displayName: "Cursor subject", roles: [READ_ROLE], expiresInDays: 30,
+    });
+    expect(parent.status).toBe(200);
+    const integrationId = parent.body.integration.integrationId as string;
+
+    const listings = [
       {
-        label: "an id that is not a UUID",
         path: "list",
-        input: {
-          sortField: "displayName", sortDirection: "asc",
-          after: forge({
-            f: "displayName", d: "asc", q: fingerprint(["integrations", undefined, undefined]),
-            v: "partner portal", i: "not-a-uuid",
-          }),
-        },
+        query: fingerprint(["integrations", undefined, undefined]),
+        input: {} as Record<string, unknown>,
+        dateSort: "updatedAt",
+        textSort: "displayName",
       },
       {
-        label: "a sort value that is not a timestamp",
-        path: "list",
-        input: {
-          sortField: "createdAt", sortDirection: "desc",
-          after: forge({
-            f: "createdAt", d: "desc", q: fingerprint(["integrations", undefined, undefined]),
-            v: "yesterday", i: randomUUID(),
-          }),
-        },
-      },
-      {
-        label: "a sort value that is a timestamp with something appended",
-        path: "list",
-        input: {
-          sortField: "createdAt", sortDirection: "asc",
-          after: forge({
-            f: "createdAt", d: "asc", q: fingerprint(["integrations", undefined, undefined]),
-            v: "2026-01-02 00:00:00+00'); select 1 --", i: randomUUID(),
-          }),
-        },
+        path: "list-credentials",
+        query: fingerprint(["credentials", integrationId, undefined, undefined]),
+        input: { integrationId },
+        dateSort: "expiresAt",
+        textSort: "displayName",
       },
     ];
+    const impossible = [
+      ["2026-99-99 99:99:99+99", "every field out of range, perfectly shaped"],
+      ["2026-02-29 00:00:00+00", "February 29th of a common year"],
+      ["2026-01-01 00:00:00+16", "a displacement past PostgreSQL's limit"],
+      ["2026-01-02 00:00:00+00'); select 1 --", "a value with a statement appended"],
+      ["yesterday", "a word PostgreSQL would otherwise parse"],
+    ];
 
-    for (const scenario of cases) {
-      const response = await operation(scenario.path, scenario.input);
-      expect({ label: scenario.label, status: response.status, code: response.body.error?.code })
-        .toEqual({ label: scenario.label, status: 400, code: "VALIDATION" });
+    for (const listing of listings) {
+      for (const direction of ["asc", "desc"] as const) {
+        for (const [value, why] of impossible) {
+          const response = await operation(listing.path, {
+            ...listing.input,
+            sortField: listing.dateSort, sortDirection: direction,
+            after: forge({
+              f: listing.dateSort, d: direction, q: listing.query, v: value, i: randomUUID(),
+            }),
+          });
+          expect({
+            where: `${listing.path} ${direction} ${why}`,
+            status: response.status, code: response.body.error?.code,
+          }).toEqual({
+            where: `${listing.path} ${direction} ${why}`, status: 400, code: "VALIDATION",
+          });
+        }
+        // The other half of the keyset, on the text sort, where the value is
+        // not a timestamp but the id still reaches a uuid column.
+        const badId = await operation(listing.path, {
+          ...listing.input,
+          sortField: listing.textSort, sortDirection: direction,
+          after: forge({
+            f: listing.textSort, d: direction, q: listing.query,
+            v: "cursor subject", i: "not-a-uuid",
+          }),
+        });
+        expect({
+          where: `${listing.path} ${direction} id`,
+          status: badId.status, code: badId.body.error?.code,
+        }).toEqual({ where: `${listing.path} ${direction} id`, status: 400, code: "VALIDATION" });
+      }
     }
   }, TEST_TIMEOUT);
 
-  test("pages a date sort with the cursors it issued, end to end", async () => {
+  test("pages both listings in both directions with the cursors it issued", async () => {
     if (!booted) return;
-    // The shape check on a cursor's sort value only earns its place if a real
-    // one still passes it. These resume on `createdAt` — a timestamptz, so the
-    // value is rendered by the database and cast back by it — one row at a
-    // time, over the dispatcher, until the listing says there is no more.
-    const names = new Set<string>();
-    for (const name of ["Alpha partner", "Beta partner", "Gamma partner"]) {
-      expect((await operation("create", {
+    // The check on a cursor's value only earns its place if a real one still
+    // passes it. These walks resume on the sorts whose value the DATABASE
+    // renders and casts back — a timestamptz for the date sorts, including the
+    // nullable `expiresAt` and `lastUsedAt` whose NULL block is resumed on the
+    // id alone — one row at a time, over the dispatcher, until the listing
+    // says there is no more.
+    const names = ["Alpha partner", "Beta partner", "Gamma partner"];
+    const integrationIds: string[] = [];
+    for (const name of names) {
+      const created = await operation("create", {
         displayName: name, roles: [READ_ROLE], expiresInDays: 30,
+      });
+      expect(created.status).toBe(200);
+      integrationIds.push(created.body.integration.integrationId as string);
+    }
+    // Two more credentials under the first integration, so its own listing has
+    // something to page. None of them has ever been used, which is what puts
+    // the whole `lastUsedAt` walk below inside the NULL block — the branch of
+    // the resume predicate that has no value to compare and carries only the
+    // id.
+    const parent = integrationIds[0]!;
+    for (const displayName of ["Rotation", "Second rotation"]) {
+      expect((await operation("issue-credential", {
+        integrationId: parent, displayName, expiresInDays: 30,
       })).status).toBe(200);
     }
-    let after: string | undefined;
-    for (let page = 0; page < 50; page += 1) {
-      const response = await operation("list", {
-        sortField: "createdAt", sortDirection: "asc", first: 1,
-        ...(after === undefined ? {} : { after }),
-      });
-      expect({ page, status: response.status }).toEqual({ page, status: 200 });
-      for (const row of response.body.integrations as { displayName: string }[]) {
-        names.add(row.displayName);
+
+    /** Walk one listing to its end, one row per page, and return what it gave. */
+    const walk = async (
+      path: string,
+      input: Record<string, unknown>,
+      collection: string,
+      sortField: string,
+      sortDirection: "asc" | "desc",
+    ): Promise<string[]> => {
+      const seen: string[] = [];
+      let after: string | undefined;
+      for (let page = 0; page < 100; page += 1) {
+        const response = await operation(path, {
+          ...input, sortField, sortDirection, first: 1,
+          ...(after === undefined ? {} : { after }),
+        });
+        expect({ page, sortField, sortDirection, status: response.status })
+          .toEqual({ page, sortField, sortDirection, status: 200 });
+        for (const row of response.body[collection] as { displayName: string }[]) {
+          seen.push(row.displayName);
+        }
+        after = response.body.nextCursor ?? undefined;
+        if (!after) break;
       }
-      after = response.body.nextCursor ?? undefined;
-      if (!after) break;
+      expect(after).toBeUndefined();
+      return seen;
+    };
+
+    for (const sortField of ["createdAt", "updatedAt", "displayName"]) {
+      const ascending = await walk("list", {}, "integrations", sortField, "asc");
+      const descending = await walk("list", {}, "integrations", sortField, "desc");
+      // Every row, once, whichever way the walk went.
+      expect(new Set(ascending)).toEqual(new Set(descending));
+      expect(ascending.length).toBe(new Set(ascending).size);
+      for (const name of names) expect(ascending).toContain(name);
     }
-    expect(after).toBeUndefined();
-    for (const name of ["Alpha partner", "Beta partner", "Gamma partner"]) {
-      expect(names).toContain(name);
+
+    for (const sortField of ["createdAt", "expiresAt", "lastUsedAt", "displayName"]) {
+      const ascending = await walk(
+        "list-credentials", { integrationId: parent }, "credentials", sortField, "asc",
+      );
+      const descending = await walk(
+        "list-credentials", { integrationId: parent }, "credentials", sortField, "desc",
+      );
+      expect(new Set(ascending)).toEqual(new Set(descending));
+      expect(ascending.length).toBe(new Set(ascending).size);
+      expect(ascending).toContain("Rotation");
+      expect(ascending).toContain("Second rotation");
     }
   }, TEST_TIMEOUT);
 });

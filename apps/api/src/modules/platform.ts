@@ -72,6 +72,7 @@ import {
 import { CapabilityGrantNotFoundError } from "../operations/grants-operations.js";
 import { actingRelationId } from "../db/acting-relation.js";
 import { generatedCrudTools, matchNativeCrudTool } from "../mcp/native-crud-tool.js";
+import { withAdmittedRecordAction } from "../operations/entity/record-action-admission.js";
 
 function contractPreconditionFailure(
   definition: RuntimeOperationDefinition,
@@ -1109,7 +1110,12 @@ export class ModulePlatformRuntime {
       intent: match.definition.intent,
       effects: match.definition.effects,
     });
-    const execute = () => this.#operationCallStack.run(
+    // A provider's own code runs below, so it gets a record-action admission
+    // of its own — which, for a provider Operation, is none: nothing here
+    // authorizes a record action. Without this an enclosing record-action
+    // Operation would lend its authorized target to a provider's handler
+    // (operations/entity/record-action-admission.ts).
+    const execute = () => withAdmittedRecordAction(null, () => this.#operationCallStack.run(
       [...stack, request.operation.id],
       () => this.#readProgress.operation(session, match.definition, options.signal, signal => match.provider.execute({
         session,
@@ -1138,7 +1144,7 @@ export class ModulePlatformRuntime {
               : {},
           ),
       }, request)),
-    );
+    ));
     if (!keyed) {
       // `none` and `natural`: this decision is the pre-effect decision. There
       // is no receipt to claim and nothing core-owned between here and the

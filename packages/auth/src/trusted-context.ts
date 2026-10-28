@@ -12,6 +12,7 @@ export const TRUSTED_CONTEXT_HEADERS: TrustedContextHeaderNames = {
   userId: "x-user-id",
   roles: "x-user-roles",
   groups: "x-user-groups",
+  principalKind: "x-user-principal-kind",
   timestamp: "x-openshapeforge-context-timestamp",
   signature: "x-openshapeforge-context-signature",
 };
@@ -30,12 +31,32 @@ export const TRUSTED_CONTEXT_MAX_AGE_MS = 5 * 60 * 1000;
 export const TRUSTED_CONTEXT_MAX_CLOCK_SKEW_MS = 30 * 1000;
 
 /**
- * Payload version. v2 includes Keycloak group paths in the signed bundle so
- * an attacker cannot swap groups without invalidating the HMAC. v1 (without
- * groups) is no longer accepted — every producer in the workspace ships from
- * the same package version.
+ * Payload version. v3 includes the PRINCIPAL CLASS the signer verified, so a
+ * consumer can require a human without taking a caller's word for it; v2
+ * (groups, no principal class) and v1 (neither) are no longer accepted —
+ * every producer in the workspace ships from the same package version, and a
+ * tier that has not been redeployed reads as unauthenticated rather than as
+ * an unclassified principal.
  */
-const PAYLOAD_VERSION = "v2";
+const PAYLOAD_VERSION = "v3";
+
+/**
+ * What the SIGNER established about the principal behind the bundle, not what
+ * the caller claims to be.
+ *
+ * "person" means the producer completed an interactive human login and holds
+ * its artifacts; "service" means it verified a machine principal. The value
+ * is ABSENT when the producer established neither — an internal probe, a
+ * fixture, a hop that forwards an identity it did not authenticate — and
+ * absence is never a permissive reading: a consumer that needs a human
+ * refuses it. Anything outside this set read off the wire is discarded, so an
+ * unknown word can never be mistaken for a known one.
+ */
+export type TrustedPrincipalKind = "person" | "service";
+
+function readPrincipalKind(raw: string | null | undefined): TrustedPrincipalKind | undefined {
+  return raw === "person" || raw === "service" ? raw : undefined;
+}
 
 export type ApplyTrustedContextOptions = {
   /** HMAC secret. If omitted, identity headers are still applied but unsigned (caller is responsible for trust). */
@@ -72,7 +93,11 @@ function payloadString(input: {
   userId: string | null;
   roles: string;
   groups: string;
+  principalKind: TrustedPrincipalKind | undefined;
 }) {
+  // Field count is fixed and every field is separated by the same newline, so
+  // a value that itself contains one adds a segment and can never make two
+  // different header sets produce the same payload.
   return [
     PAYLOAD_VERSION,
     input.timestamp,
@@ -80,6 +105,7 @@ function payloadString(input: {
     input.userId ?? "",
     input.roles,
     input.groups,
+    input.principalKind ?? "",
   ].join("\n");
 }
 
@@ -97,7 +123,20 @@ function signaturesMatch(left: string, right: string) {
   );
 }
 
-type IdentityInput = Pick<AuthIdentity, "tenantId" | "userId" | "roles" | "groups">;
+/**
+ * What travels in a bundle: the trusted-context floor of {@link AuthIdentity}
+ * plus the signer's own verdict about the principal.
+ *
+ * `principalKind` is deliberately NOT part of `AuthIdentity`: no verifier in
+ * this package produces it. It is a statement the PRODUCER of a hop makes
+ * about how it authenticated, which is why it is signed here rather than
+ * reconstructed by the consumer.
+ */
+export type TrustedContextIdentity =
+  Pick<AuthIdentity, "tenantId" | "userId" | "roles" | "groups">
+  & { principalKind?: TrustedPrincipalKind | undefined };
+
+type IdentityInput = TrustedContextIdentity;
 
 /**
  * Replaces any existing trusted-context headers on `headers` with values
@@ -118,11 +157,16 @@ export function applyTrustedContextHeaders(
   const userId = identity.userId?.trim() || null;
   const roles = joinDelimited(identity.roles);
   const groups = joinDelimited(identity.groups);
+  // Normalised rather than forwarded: a producer that passes something other
+  // than the two known classes signs no class at all, which a consumer reads
+  // as "not established" instead of as an unrecognised permission.
+  const principalKind = readPrincipalKind(identity.principalKind);
 
   if (tenantId) headers.set(TRUSTED_CONTEXT_HEADERS.tenantId, tenantId);
   if (userId) headers.set(TRUSTED_CONTEXT_HEADERS.userId, userId);
   if (roles) headers.set(TRUSTED_CONTEXT_HEADERS.roles, roles);
   if (groups) headers.set(TRUSTED_CONTEXT_HEADERS.groups, groups);
+  if (principalKind) headers.set(TRUSTED_CONTEXT_HEADERS.principalKind, principalKind);
 
   const secret = options.secret ?? null;
   if (!secret || !tenantId) return;
@@ -131,7 +175,7 @@ export function applyTrustedContextHeaders(
   headers.set(TRUSTED_CONTEXT_HEADERS.timestamp, timestamp);
   headers.set(
     TRUSTED_CONTEXT_HEADERS.signature,
-    sign(secret, payloadString({ timestamp, tenantId, userId, roles, groups })),
+    sign(secret, payloadString({ timestamp, tenantId, userId, roles, groups, principalKind })),
   );
 }
 
@@ -166,6 +210,7 @@ function verifySignature(
       userId: identity.userId,
       roles: joinDelimited(identity.roles),
       groups: joinDelimited(identity.groups),
+      principalKind: identity.principalKind,
     }),
   );
 
@@ -173,11 +218,16 @@ function verifySignature(
 }
 
 function readIdentityHeaders(headers: ReadonlyHeadersLike): IdentityInput {
+  // The principal class is read through the same normalisation the signer
+  // applied, so an inbound word the signer would have dropped cannot verify
+  // against a signature that was computed without it.
+  const principalKind = readPrincipalKind(headers.get(TRUSTED_CONTEXT_HEADERS.principalKind));
   return {
     tenantId: headers.get(TRUSTED_CONTEXT_HEADERS.tenantId),
     userId: headers.get(TRUSTED_CONTEXT_HEADERS.userId),
     roles: splitDelimited(headers.get(TRUSTED_CONTEXT_HEADERS.roles)),
     groups: splitDelimited(headers.get(TRUSTED_CONTEXT_HEADERS.groups)),
+    ...(principalKind ? { principalKind } : {}),
   };
 }
 

@@ -84,10 +84,22 @@ describe("assertMayGrantRoles", () => {
       expect(carry({ roles: everything, credential: "bearer", principalKind: "person" })).not.toThrow();
     });
 
-    test("admits the deployment's own signed in-mesh hop", () => {
-      // apps/web's token-less fallback. Admitted deliberately; see ceiling.ts
-      // for the limit this leaves open and why closing it belongs elsewhere.
-      expect(carry({ roles: everything, credential: "trusted-context" })).not.toThrow();
+    test("admits the deployment's own signed in-mesh hop carrying a person", () => {
+      // apps/web's token-less fallback, with the principal class the signer
+      // established inside the bundle's HMAC (packages/auth, payload v3).
+      expect(carry({ roles: everything, credential: "trusted-context", principalKind: "person" }))
+        .not.toThrow();
+    });
+
+    test("refuses an in-mesh hop that established no principal class", () => {
+      // Holding the mesh secret is not the same as having authenticated a
+      // human. A health probe, a fixture or a service-to-service hop signs
+      // no class, and every one of them is refused here — this is the gap
+      // the v3 payload closes.
+      expect(carry({ roles: everything, credential: "trusted-context" }))
+        .toThrow(/Only a verified person may manage API keys/);
+      expect(carry({ roles: everything, credential: "trusted-context", principalKind: "service" }))
+        .toThrow(/Only a verified person may manage API keys/);
     });
 
     test("refuses a verified service principal holding every role", () => {

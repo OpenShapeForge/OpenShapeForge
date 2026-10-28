@@ -15,10 +15,10 @@
  *   2. Every role being granted must already be held by the caller.
  *
  * And one rule that is not about roles at all: only a session this deployment
- * can show to be a PERSON, or its own in-mesh hop carrying one, may reach this
- * surface. A credential that can mint credentials is a ladder — the holder
- * grants itself the union of what any reachable key may hold, one rung at a
- * time — and that ladder is not specific to API keys: any non-human principal
+ * can show to be a PERSON may reach this surface — whichever carrier brought
+ * it. A credential that can mint credentials is a ladder — the holder grants
+ * itself the union of what any reachable key may hold, one rung at a time —
+ * and that ladder is not specific to API keys: any non-human principal
  * holding the management role climbs it the same way. So the carrier is
  * checked, fail-closed, before any role is.
  */
@@ -45,11 +45,12 @@ export type CeilingSession = {
   roles: readonly string[];
   credential: SessionCredential;
   /**
-   * The bearer path's own verdict about the principal behind the token
-   * (`auth/bearer-session.ts`): "person" for a verified human identity linked
-   * to a Relation, "service" for a Keycloak service account, and ABSENT for a
-   * token that is neither — an unknown principal. Never client input: it is
-   * derived from the verified claims, so it cannot be asserted by a caller.
+   * The SERVER's verdict about the principal behind the session: "person" for
+   * a verified human, "service" for a machine principal, and ABSENT when the
+   * deployment established neither. Never client input — on the bearer path
+   * it is derived from the verified claims (`auth/bearer-session.ts`), and on
+   * the trusted-context path it is inside the bundle's HMAC (packages/auth,
+   * payload v3), so a caller can assert it on neither.
    */
   principalKind?: "person" | "service";
 };
@@ -57,21 +58,28 @@ export type CeilingSession = {
 /**
  * Which carriers may manage credentials at all, decided before any role.
  *
- * `bearer` is admitted only on the bearer path's own "person" verdict. That
- * single condition closes three doors at once: a Keycloak service account
- * holding `Platform.ApiKeys.Manage` (`principalKind: "service"`), a verified
- * token that is neither person nor service account (`principalKind` absent —
- * an unknown principal, refused because absence proves nothing), and any
- * future carrier added to `SessionCredential` without a decision here.
+ * Two carriers, one condition: the deployment must have CLASSIFIED the
+ * principal as a person. That single condition closes four doors at once — a
+ * Keycloak service account holding `Platform.ApiKeys.Manage`
+ * (`principalKind: "service"`), a verified token that is neither person nor
+ * service account (`principalKind` absent, refused because absence proves
+ * nothing), an in-mesh hop that forwards an identity it never authenticated
+ * (also absent), and any future carrier added to `SessionCredential` without
+ * a decision here.
+ *
+ * `bearer` carries the verdict the bearer path derived from verified claims.
  *
  * `trusted-context` is the deployment's OWN in-mesh hop: HMAC-signed with
- * `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` inside a ±5-minute window, so it
- * cannot be minted by a caller, and it is what apps/web uses when it holds no
- * forwardable access token. It remains admitted, and that is a deliberate
- * limit of this control rather than a hole it closes: the bundle carries no
- * principal kind, so a compromised web tier could assert a human it never
- * authenticated. Narrowing that needs the carrier to propagate the verdict
- * (packages/auth owns the payload); it is reported, not worked around here.
+ * `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` inside a ±5-minute window, and
+ * since payload v3 the signer's verdict travels INSIDE that signature. It is
+ * what apps/web sends when it holds no forwardable access token, and apps/web
+ * signs "person" only for a session it established through an interactive
+ * login (it holds that login's id token). Every other producer of a bundle —
+ * a health probe, a fixture, a service-to-service hop — signs no class and is
+ * refused here, so holding the mesh secret is no longer enough to reach this
+ * surface. A web tier compromised outright can still sign what it likes; that
+ * is the trust this secret already expresses, and it is now the ONLY way a
+ * bundle reaches a person verdict rather than a property of the carrier.
  *
  * Everything else is refused outright: `api-key` (the ladder), `control-bearer`
  * (a platform operator is not a tenant session), `grant` (a capability token
@@ -80,9 +88,8 @@ export type CeilingSession = {
 function mayCarryKeyManagement(session: CeilingSession): boolean {
   switch (session.credential) {
     case "bearer":
-      return session.principalKind === "person";
     case "trusted-context":
-      return true;
+      return session.principalKind === "person";
     default:
       return false;
   }

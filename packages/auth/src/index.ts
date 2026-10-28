@@ -40,6 +40,8 @@ export {
 export type {
   ApplyTrustedContextOptions,
   ReadTrustedContextOptions,
+  TrustedContextIdentity,
+  TrustedPrincipalKind,
 } from "./trusted-context.js";
 
 export {

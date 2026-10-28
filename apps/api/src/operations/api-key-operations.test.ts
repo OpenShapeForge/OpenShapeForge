@@ -639,8 +639,9 @@ describe("integration catalog Operations", () => {
           expect(refused.message).toContain("Only a verified person may manage API keys");
         }
 
-        // A platform operator and a capability grant are not tenant managers.
-        for (const credential of ["control-bearer", "grant"] as const) {
+        // A platform operator, a capability grant and an in-mesh hop that
+        // established no principal class are none of them a tenant manager.
+        for (const credential of ["control-bearer", "grant", "trusted-context"] as const) {
           expect(failure((await run(handler, input, {
             session: sessionFor({ credential, principalKind: null }),
           })).result)).toMatchObject({ status: 403, code: "FORBIDDEN" });
@@ -656,13 +657,20 @@ describe("integration catalog Operations", () => {
       }
     });
 
-    test("admits the deployment's own signed in-mesh hop", async () => {
-      // apps/web's token-less fallback carries no principal kind; it is the
-      // one non-bearer carrier the ceiling admits, deliberately.
+    test("admits the deployment's own signed in-mesh hop carrying a person", async () => {
+      // apps/web's token-less fallback, with the principal class the signer
+      // put inside the bundle's HMAC. Without that class the same carrier is
+      // refused below: holding the mesh secret is not authenticating a human.
       const page = value((await run("listIntegrations", {}, {
-        session: sessionFor({ credential: "trusted-context", principalKind: null }),
+        session: sessionFor({ credential: "trusted-context", principalKind: "person" }),
       })).result);
       expect(page.integrations).toHaveLength(2);
+
+      const refused = failure((await run("listIntegrations", {}, {
+        session: sessionFor({ credential: "trusted-context", principalKind: "service" }),
+      })).result);
+      expect(refused).toMatchObject({ status: 403, code: "FORBIDDEN" });
+      expect(refused.message).toContain("Only a verified person may manage API keys");
     });
 
     test("leaves no side effect behind a refusal", async () => {

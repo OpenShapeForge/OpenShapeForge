@@ -34,12 +34,20 @@ const INTEGRATION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
 /** The headers a one-time credential response must carry, exactly. */
 const EXPECTED_NO_STORE = { "cache-control": "private, no-store, max-age=0", pragma: "no-cache" };
 
+/**
+ * The hop apps/web signs for a logged-in administrator: the identity, and the
+ * principal class the web tier established from that person's own login. The
+ * class is inside the HMAC, so these headers are the only way this suite can
+ * reach a minting path at all — see `forged-principal.test.ts` for what a
+ * caller gets by writing the same header itself.
+ */
 function managerHeaders(): Record<string, string> {
   const headers = new Headers({ "content-type": "application/json" });
   applyTrustedContextHeaders(headers, {
     tenantId: TENANT,
     userId: MANAGER,
     roles: [MANAGE_ROLE, READ_ROLE],
+    principalKind: "person",
   }, { secret: SECRET });
   return Object.fromEntries(headers.entries());
 }

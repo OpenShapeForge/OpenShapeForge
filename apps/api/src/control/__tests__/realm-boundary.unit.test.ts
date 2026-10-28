@@ -20,6 +20,16 @@ describe("host realm boundary", () => {
       expect(() => assertHostRealm(config("example", issuer))).toThrow();
     }
   });
+  test("accepts the configured Keycloak path without accepting sibling or root paths", () => {
+    const scoped = (issuer: string) => ({ ...config("example", issuer), keycloak: {
+      ...config().keycloak, baseUrl: "https://identity.example.test/auth/",
+    } });
+    expect(assertHostRealm(scoped("https://identity.example.test/auth/realms/example"))).toBe("tenant-realm-admin");
+    expect(assertHostRealm(scoped("https://identity.example.test/auth/realms/example-control"))).toBe("dedicated-control-realm");
+    for (const issuer of ["https://identity.example.test/realms/example", "https://identity.example.test/auth-other/realms/example", "https://identity.example.test/auth/realms/example/extra", "https://identity.example.test/auth/realms/master", "https://other.example.test/auth/realms/example"]) {
+      expect(() => assertHostRealm(scoped(issuer))).toThrow();
+    }
+  });
   test("never admits master or path aliases", () => {
     for (const realm of ["master", "MASTER", "", ".", "..", "example/other", "example%2Fother"]) expect(() => assertHostRealm(config(realm))).toThrow();
   });

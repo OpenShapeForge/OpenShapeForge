@@ -160,3 +160,14 @@ test("YAML presentation defaults compose with semantic and field options without
  expect(resolveRender(withoutRender,configured,semantic).props).toEqual({layout:"front",emailAction:false});
  expect(configured.defaults.string.props.layout).toBe("above");
 });
+
+test("rejects the obsolete DateTimePicker presentation component", () => {
+ const configured={
+  ...catalog,
+  defaults:{...catalog.defaults,datetime:{component:"DateTimePicker"}},
+  components:{...catalog.components,DateTimePicker:{kind:"field" as const,description:"Obsolete datetime field.",props:[]}},
+ };
+ const field={key:"startsAt",osfType:"datetime",baseType:"datetime"} as Field;
+ expect(()=>resolveRender(field,configured)).toThrow("startsAt: presentation component DateTimePicker is obsolete; use FieldDateAndTime.");
+ expect(()=>resolveRender({...field,render:{component:"DateTimePicker"}},catalog)).toThrow("startsAt: presentation component DateTimePicker is obsolete; use FieldDateAndTime.");
+});

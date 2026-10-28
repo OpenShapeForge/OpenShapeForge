@@ -229,15 +229,15 @@ interfaces:
             clearable: false
       assignedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       acceptedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       releasedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       note:
         render:

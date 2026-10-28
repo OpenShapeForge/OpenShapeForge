@@ -53,7 +53,7 @@ export function formatFieldValue(field: GeneratedFormFieldConfig, value: unknown
     return value.slice(0, 10);
   }
 
-  if (component === "DateTimePicker") {
+  if (component === "FieldDateAndTime") {
     return formatDateTimeLocalValue(value);
   }
 

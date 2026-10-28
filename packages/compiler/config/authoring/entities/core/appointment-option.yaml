@@ -299,11 +299,11 @@ interfaces:
     fields:
       startsAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       endsAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       status:
         render:

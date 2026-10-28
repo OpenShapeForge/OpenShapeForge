@@ -255,23 +255,23 @@ interfaces:
             clearable: false
       startedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       dueAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       pausedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       completedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       breachedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       note:
         render:

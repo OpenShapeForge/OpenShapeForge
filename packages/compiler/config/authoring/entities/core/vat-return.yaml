@@ -301,7 +301,7 @@ interfaces:
     fields:
       submittedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       status:
         render:

@@ -378,15 +378,15 @@ interfaces:
             clearable: true
       startedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       dueAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       completedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       completionApprovalComment:
         render:
@@ -396,7 +396,7 @@ interfaces:
             maxLength: 2000
       cancelledAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       note:
         render:

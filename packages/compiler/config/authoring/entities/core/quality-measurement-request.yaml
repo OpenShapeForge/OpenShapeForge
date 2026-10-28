@@ -291,5 +291,5 @@ interfaces:
             clearable: false
       closedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}

@@ -284,9 +284,9 @@ interfaces:
             clearable: false
       startedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       endedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}

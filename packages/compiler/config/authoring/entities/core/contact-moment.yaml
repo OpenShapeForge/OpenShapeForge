@@ -362,5 +362,5 @@ interfaces:
             maxLength: 10000
       occurredAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}

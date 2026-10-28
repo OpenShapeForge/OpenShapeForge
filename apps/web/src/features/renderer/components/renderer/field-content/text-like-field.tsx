@@ -84,7 +84,7 @@ export function renderTextLikeField(
     );
   }
 
-  if (component === "DateTimePicker") {
+  if (component === "FieldDateAndTime") {
     return (
       <DateTimePicker
         {...commonProps}

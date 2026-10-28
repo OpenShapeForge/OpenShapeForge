@@ -10,7 +10,7 @@ export function formatRendererValue(field: Field, value: unknown) {
     return value.slice(0, 10);
   }
 
-  if (component === "DateTimePicker") {
+  if (component === "FieldDateAndTime") {
     return formatDateTimeLocalValue(value);
   }
 

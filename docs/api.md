@@ -672,13 +672,29 @@ Requires `OPENSHAPEFORGE_API_KEY_SECRET_KEYS` (its own keyring, deliberately
 not the connector one) and a complete bearer verifier; absent either, keys are
 rejected rather than half-honoured. Provisioning lives at `/api/api-keys` and
 on the GraphQL surface, gated by `Platform.ApiKeys.Manage` and by a privilege
-ceiling — a caller cannot grant roles it does not hold, and an api-key session
-may never manage keys at all.
+ceiling — a caller cannot grant roles it does not hold, and only a session this
+deployment can show to be a PERSON may manage keys at all. That carrier rule is
+decided before any role (`auth/api-key/ceiling.ts`): a bearer is admitted only
+on the bearer path's own `principalKind: "person"` verdict, which also refuses
+a Keycloak service account holding `Platform.ApiKeys.Manage` and a verified
+token whose principal could not be named; the deployment's own HMAC-signed
+in-mesh bundle stays admitted because apps/web uses it when it holds no
+forwardable access token, and every other credential is refused outright. The
+bundle carries no principal kind, so narrowing THAT case needs the carrier to
+propagate the verdict — a limit recorded in `ceiling.ts`, not closed by it.
+
+Every response that carries a credential — the two `/api/api-keys` 201s, the
+canonical minting Operations and the two GraphQL mint mutations — is sent with
+`cache-control: private, no-store, max-age=0` and `pragma: no-cache`. The
+secret is returned once and is not retrievable afterwards, so a shared cache or
+a browser's back button holding the only copy is both a disclosure and the only
+place it still exists. Metadata reads on the same mounts are left cacheable.
 
 The same feature is also reachable as canonical Operations, authored in
 `packages/compiler/config/authoring/operations/api-key-integrations.yaml` under
 the core `osf-api-keys` plugin and bound by
-`apps/api/src/operations/api-key-operations.ts`: `api-keys.list-integrations`,
+`apps/api/src/operations/api-key-operations.ts`:
+`api-keys.create-integration`, `api-keys.list-integrations`,
 `api-keys.get-integration`, `api-keys.list-credentials`,
 `api-keys.get-credential`, `api-keys.issue-credential`,
 `api-keys.revoke-credential` and `api-keys.disable-integration`, projected to
@@ -691,16 +707,51 @@ Reads select metadata only; a deployment without provisioning configuration
 answers every one of them with a declared `503 NOT_CONFIGURED` rather than
 half-managing its integrations.
 
-The list and get Operations also carry generic `interfaces.web.entities`
-declarations (`ApiKeyIntegration`, and `ApiKeyCredential` nested under it),
-with cursor paging, sorting and name/status filters, plus the revoke and
-disable record actions. `api-keys.issue-credential` is deliberately absent from
-that projection: it returns the credential once, and a generic entity form
-renders whatever its Operation returns. Nothing in the authoring contract can
-withhold one output property from one interface — `interaction.secureInput`
-covers sensitive INPUT, and field `classification.sensitivity` applies to
-entity fields, not to an Operation's result — so issuing stays on REST and the
-existing surfaces until such a contract exists.
+`create-integration` registers an external party and hands over its first
+credential. Its result keeps the two halves apart: `integration` is ordinary
+metadata, re-read from the written row, and `credential` is the one-time
+secret. It is the only Operation here that declares `external: write` and the
+only one that can report `502 PROVISIONING_FAILED`; a realm that refuses leaves
+the intent row at `pending`, which authenticates nothing and is what the
+reconciler sweeps.
+
+**Credential lifetime.** Both minting contracts bound `expiresInDays` to
+1..366 and no longer accept `null`. `null` reached the service as "never
+expires", which is not something a generic integration form may request on
+anyone's behalf; omitting the field takes the deployment default of 365 days.
+The bound is stated in the authored input schema, so every transport is refused
+before the handler, and restated as `MAX_CREDENTIAL_TTL_DAYS` for a direct
+caller. Deployments that genuinely need a longer-lived integration credential
+should get a deployment-level maximum (an `OPENSHAPEFORGE_API_KEY_MAX_TTL_DAYS`
+read beside the other provisioning variables in `runtime-config.ts`, bounded by
+a compiled-in hard ceiling and reported in the Operation's schema), not a
+per-application exception list and not a second authorization path.
+
+The reads also carry generic `interfaces.web.entities` declarations
+(`ApiKeyIntegration`, and `ApiKeyCredential` nested under it), with keyset
+cursor paging, sorting and name/status filters, plus the revoke and disable
+record actions.
+
+**Neither minting Operation is projected to web.** The secret property of both
+carries the existing schema marker `x-osf-presentation: {component:
+FieldSecret}`, which the compiler carries through verbatim into the canonical
+contract and — as `packages/compiler/src/api-key-catalog.test.ts` shows by
+building the projection under test — would carry into the web manifest on that
+property and on no other. The marker is not yet enough on its own: the shared
+web implementation that honours it is still being built, and until it has been
+independently security-reviewed a generic entity form would render whatever its
+Operation returns. Enabling the two actions afterwards is exactly this diff in
+the catalog's `interfaces.web.entities.ApiKeyIntegration.operations`, and
+nothing else — no renderer, no second entity, no change to any Operation:
+
+```yaml
+          create: { operation: createIntegration }
+          recordActions: [disableIntegration, issueCredential]
+```
+
+Before that diff lands, the generic frontend must mask a `FieldSecret` result
+property, keep it out of history, telemetry and any client-side store, and the
+union and identity changes it depends on must pass.
 
 **3. Trusted-context HMAC headers (v2)** — the internal service-to-service
 path (`packages/auth/src/trusted-context.ts`). Header names:

@@ -216,6 +216,8 @@ export type UnlinkedIdentity = {
   identityId: string;
   displayName: string | null;
   email: string | null;
+  /** Last recorded mailbox match; confirmation always revalidates current proof. */
+  candidateStatus: "none" | "awaiting_confirmation" | "review_required";
 };
 
 export async function listUnlinkedIdentities(
@@ -230,8 +232,8 @@ export async function listUnlinkedIdentities(
     );
   }
   return withDbSession(db, session, async (trx) => {
-    const result = await sql<{ identity_id: string; display_name: string | null; email: string | null }>`
-      select ir.identity_id, i.display_name, i.email
+    const result = await sql<{ identity_id: string; display_name: string | null; email: string | null; candidate_relation_id: string | null }>`
+      select ir.identity_id, i.display_name, i.email, ir.candidate_relation_id
         from platform.identity_relations ir
         join platform.identities i on i.id = ir.identity_id
        where ir.tenant_id = ${session.tenantId}
@@ -239,11 +241,15 @@ export async function listUnlinkedIdentities(
          and ir.relation_id is null
        order by i.created_at asc
     `.execute(trx);
-    return result.rows.map((row) => ({
+    return Promise.all(result.rows.map(async (row) => ({
       identityId: row.identity_id,
       displayName: row.display_name,
       email: row.email,
-    }));
+      candidateStatus: !row.candidate_relation_id ? "none" as const : await (async () => {
+        const matches = row.email ? await relationsWithEmail(trx, session.tenantId, row.email) : [];
+        return matches.length === 1 && matches[0]?.id === row.candidate_relation_id ? "awaiting_confirmation" as const : "review_required" as const;
+      })(),
+    })));
   });
 }
 

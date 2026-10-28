@@ -14,8 +14,9 @@
  *                          for a role (`needs_role_assignment`), and
  *                          `unlinked`, identities recorded on their first
  *                          session (a login the web host forwarded, an API
- *                          key) that have no record and no candidate yet —
- *                          the input for link_identity.
+ *                          key) with no linked Relation. candidateStatus
+ *                          distinguishes a last-known match awaiting the
+ *                          person's confirmation from a match needing review.
  * Role assignment is owned by the canonical revision-bound Account Operations,
  * not by the former unversioned set_member_role shortcut.
  *
@@ -113,8 +114,10 @@ const LIST_PENDING_MEMBERS: Tool = {
     "List identities this organization has recorded but not settled: `pending` are members " +
     "whose very first sign-in already created their Relation but who still run on read-only " +
     "access because nobody assigned them a role (use the canonical Account Operations); `unlinked` are logins " +
-    "recorded without a Relation — an integration's API key, a web-only login — each with " +
-    "the identityId link_identity takes. Check this after employees start signing in " +
+    "recorded without a linked Relation, each with the identityId link_identity takes. " +
+    "candidateStatus is none, review_required, or awaiting_confirmation (last recorded mailbox match; " +
+    "the person must still confirm with current verified email). Prefer their confirmation when awaiting; " +
+    "use explicit linking for none or review_required. Check this after employees start signing in " +
     "through a newly linked identity provider, or after issuing an API key. For organization " +
     "administrators.",
   inputSchema: {

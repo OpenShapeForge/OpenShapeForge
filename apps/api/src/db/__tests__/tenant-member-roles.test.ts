@@ -151,7 +151,7 @@ describe("tenant member roles from the control plane", () => {
         const patDeps = { db: appDb, administrator, members: membersClient(pendingSubject, "pat@example.com") };
         await expect(
           changeTenantMemberRoles(patDeps, "acme", pendingSubject, ["org_admin"], "assign"),
-        ).rejects.toMatchObject({ status: 409, code: "MEMBER_LINK_PENDING", message: expect.stringContaining('unique match') });
+        ).rejects.toMatchObject({ status: 409, code: "MEMBER_LINK_PENDING", message: expect.stringContaining('candidate Relation "Pat Existing"') });
         const patRow = async () => (await sql<{ roles: string[]; status: string; linked_by: string | null }>`
             select ir.roles, ir.status, ir.linked_by from platform.identity_relations ir join platform.identities i on i.id = ir.identity_id
              where i.subject = ${pendingSubject} and ir.tenant_id = ${TENANT}
@@ -178,11 +178,15 @@ describe("tenant member roles from the control plane", () => {
         const duplicateId = randomUUID();
         await sql`insert into erp.relations (id, tenant_id, display_name, relation_type, status) values (${duplicateId}, ${TENANT}, 'Pat Duplicate', 'person', 'active')`.execute(adminDb);
         await sql`insert into erp.contact_details (tenant_id, relation_id, type, value, is_primary) values (${TENANT}, ${duplicateId}, 'email', 'pat@example.com', true)`.execute(adminDb);
-        expect(await getTenantMember(patDeps, "acme", pendingSubject)).toMatchObject({ linkStatus: "pending_confirmation", candidateRelationName: null });
-        expect((await listTenantMembers(patDeps, "acme")).members.find(member => member.memberId === pendingSubject)?.candidateRelationName).toBeNull();
-        await expect(confirmTenantMemberLink(patDeps, "acme", pendingSubject)).rejects.toMatchObject({ status: 409, detail: "NO_PENDING_LINK" });
-        await sql`delete from erp.contact_details where tenant_id = ${TENANT} and relation_id = ${duplicateId}`.execute(adminDb);
-        await sql`delete from erp.relations where tenant_id = ${TENANT} and id = ${duplicateId}`.execute(adminDb);
+        try {
+          expect(await getTenantMember(patDeps, "acme", pendingSubject)).toMatchObject({ linkStatus: "pending_confirmation", candidateRelationName: null });
+          expect((await listTenantMembers(patDeps, "acme")).members.find(member => member.memberId === pendingSubject)?.candidateRelationName).toBeNull();
+          await expect(changeTenantMemberRoles(patDeps, "acme", pendingSubject, ["org_admin"], "assign")).rejects.toMatchObject({ status: 409, code: "MEMBER_NOT_LINKED", message: expect.stringContaining("link_identity") });
+          await expect(confirmTenantMemberLink(patDeps, "acme", pendingSubject)).rejects.toMatchObject({ status: 409, detail: "NO_PENDING_LINK" });
+        } finally {
+          await sql`delete from erp.contact_details where tenant_id = ${TENANT} and relation_id = ${duplicateId}`.execute(adminDb);
+          await sql`delete from erp.relations where tenant_id = ${TENANT} and id = ${duplicateId}`.execute(adminDb);
+        }
         // The operator reads the member from Keycloak at confirmation time;
         // an old candidate does not prove a newly changed or unverified email.
         const changedDeps = { ...patDeps, members: membersClient(pendingSubject, "changed@example.com") };

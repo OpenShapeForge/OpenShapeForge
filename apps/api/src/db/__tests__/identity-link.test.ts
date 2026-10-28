@@ -851,6 +851,7 @@ describe("identity ↔ Relation link", () => {
         const jackFirst = await signIn(appDb, jack, tenantA);
         expect(jackFirst.state!.status).toBe("pending_confirmation");
         expect(jackFirst.state!.needsRoleAssignment).toBe(false);
+        expect((await listUnlinkedIdentities(appDb, adminInA.session)).find(item => item.identityId === jackFirst.state!.identityId)?.candidateStatus).toBe("awaiting_confirmation");
         // A cached bearer candidate cannot confer mailbox proof to a later
         // trusted-context or service credential without its own claims.
         for (const credential of ["trusted-context", "api-key"] as const) {
@@ -863,13 +864,16 @@ describe("identity ↔ Relation link", () => {
         expect((await sql<{ email: string | null }>`select email from platform.identities where id = ${jackFirst.state!.identityId}`.execute(adminDb)).rows[0]?.email).toBeNull();
         await resolveIdentityLink(appDb, jackFirst.session, jack.claims);
         const duplicate = await existingRelation(adminDb, tenantA, "Jack Duplicate", "jack@example.com");
-        const ambiguous = await resolveIdentityLink(appDb, jackFirst.session, jack.claims);
-        expect(ambiguous?.candidateRelationId).toBeNull();
-        expect(ambiguous?.displayName).toBeNull();
-        await expect(confirmPendingLink(appDb, jackFirst.session)).rejects.toMatchObject({ code: "NO_CANDIDATE" });
-        expect((await listUnlinkedIdentities(appDb, adminInA.session)).map(item => item.identityId)).toContain(jackFirst.state!.identityId);
-        await sql`delete from erp.contact_details where tenant_id = ${tenantA} and relation_id = ${duplicate}`.execute(adminDb);
-        await sql`delete from erp.relations where tenant_id = ${tenantA} and id = ${duplicate}`.execute(adminDb);
+        try {
+          const ambiguous = await resolveIdentityLink(appDb, jackFirst.session, jack.claims);
+          expect(ambiguous?.candidateRelationId).toBeNull();
+          expect(ambiguous?.displayName).toBeNull();
+          await expect(confirmPendingLink(appDb, jackFirst.session)).rejects.toMatchObject({ code: "NO_CANDIDATE" });
+          expect((await listUnlinkedIdentities(appDb, adminInA.session)).find(item => item.identityId === jackFirst.state!.identityId)?.candidateStatus).toBe("review_required");
+        } finally {
+          await sql`delete from erp.contact_details where tenant_id = ${tenantA} and relation_id = ${duplicate}`.execute(adminDb);
+          await sql`delete from erp.relations where tenant_id = ${tenantA} and id = ${duplicate}`.execute(adminDb);
+        }
         // Roles cannot be recorded on an unconfirmed link: nobody verified
         // that Relation is theirs yet.
         await expect(

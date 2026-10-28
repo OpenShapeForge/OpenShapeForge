@@ -9,7 +9,8 @@
  * would replace the one read whose result is the whole point.
  */
 import { describe, expect, test } from "bun:test";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
+import { applyTrustedContextHeaders, TRUSTED_CONTEXT_HEADERS } from "@openshapeforge/auth";
 
 const tenantId = randomUUID();
 const integrationId = randomUUID();
@@ -17,32 +18,48 @@ const credentialId = randomUUID();
 const serviceAccountUserId = randomUUID();
 
 describe("no other carrier produces an application principal", () => {
-  test("a signed trusted-context bundle cannot name one", async () => {
+  test("signed trusted contexts cannot name an application principal", async () => {
     const { readTrustedSessionContext } = await import("./trusted-context.js");
-    // Everything a web tier may hand on, plus every spelling of the field a
-    // caller might hope is read. The reader builds its own object, so none of
-    // it can reach the session.
-    const headers = new Headers({
-      "x-osf-tenant-id": tenantId,
-      "x-osf-user-id": serviceAccountUserId,
-      "x-osf-roles": "Relations.All.Read",
-      "x-osf-app-principal": integrationId,
-      "x-osf-app-principal-id": integrationId,
-      "x-osf-integration-id": integrationId,
-      "x-osf-app-credential": credentialId,
-      "x-osf-app-credential-id": credentialId,
-      "x-osf-principal-class": "application",
-      "x-osf-principal-kind": "service",
-    });
-    const session = readTrustedSessionContext(headers, { allowUnsigned: true });
-    expect(session.credential).toBe("trusted-context");
+    const secret = "principal-class-test-secret";
+    const nowMs = Date.now();
+    const headers = new Headers();
+    applyTrustedContextHeaders(headers, {
+      tenantId, userId: serviceAccountUserId, roles: ["Relations.All.Read"],
+      groups: [], principalKind: "service",
+    }, { secret, nowMs });
+    headers.set("x-osf-app-principal", integrationId);
+    headers.set("x-osf-app-credential", credentialId);
+    const session = readTrustedSessionContext(headers, { secret, nowMs });
+    expect(session.tenantId).toBe(tenantId);
+    expect(session.userId).toBe(serviceAccountUserId);
+    expect(session.principalKind).toBe("service");
     expect(session.appPrincipal).toBeUndefined();
-    expect(session.principalKind).toBeUndefined();
     expect(JSON.stringify(session)).not.toContain(integrationId);
-    // The credential the record-action fence re-reads is no more reachable
-    // from request input than the integration is: it comes off the store's
-    // own row (auth/api-key/store.ts) or the session has none.
     expect(JSON.stringify(session)).not.toContain(credentialId);
+
+    headers.set(TRUSTED_CONTEXT_HEADERS.principalKind, "person");
+    const tampered = readTrustedSessionContext(headers, { secret, nowMs });
+    expect(tampered.tenantId).toBeNull();
+    expect(tampered.principalKind).toBeUndefined();
+    expect(tampered.appPrincipal).toBeUndefined();
+
+    const timestamp = String(nowMs);
+    const legacy = new Headers({
+      [TRUSTED_CONTEXT_HEADERS.tenantId]: tenantId,
+      [TRUSTED_CONTEXT_HEADERS.userId]: serviceAccountUserId,
+      [TRUSTED_CONTEXT_HEADERS.roles]: "Relations.All.Read",
+      [TRUSTED_CONTEXT_HEADERS.timestamp]: timestamp,
+      [TRUSTED_CONTEXT_HEADERS.signature]: createHmac("sha256", secret)
+        .update(["v2", timestamp, tenantId, serviceAccountUserId, "Relations.All.Read", ""].join("\n"))
+        .digest("hex"),
+      [TRUSTED_CONTEXT_HEADERS.principalKind]: "person",
+      "x-osf-app-principal": integrationId,
+    });
+    const v2 = readTrustedSessionContext(legacy, { secret, nowMs });
+    expect(v2.tenantId).toBe(tenantId);
+    expect(v2.userId).toBe(serviceAccountUserId);
+    expect(v2.principalKind).toBeUndefined();
+    expect(v2.appPrincipal).toBeUndefined();
   });
 
   test("the database session derives the class from the server's own decision", async () => {

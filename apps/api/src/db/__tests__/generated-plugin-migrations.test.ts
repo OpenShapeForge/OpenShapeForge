@@ -6,6 +6,7 @@ import { sql } from "kysely";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import type { GeneratedPluginMigration } from "../migrations/generated-plugin-migrations.js";
+import { APP_ROLE } from "../migrations/app-role.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -44,6 +45,19 @@ function migration(
 }
 
 describe("generated plugin schema migrations", () => {
+  test("exposes the configured app role only during each plugin migration", async () => {
+    await withScratchDb(async (url) => {
+      const runtime = createDatabaseRuntime({ databaseUrl: url, maxConnections: 1 });
+      try {
+        const probe = migration(`CREATE TABLE IF NOT EXISTS platform.plugin_role_probe (role_name text NOT NULL); TRUNCATE platform.plugin_role_probe; INSERT INTO platform.plugin_role_probe VALUES (current_setting('osf.migration_app_role'));`);
+        await runtime.db.connection().execute((db) => runMigrationChain(db, { pluginMigrations: [probe] }));
+        const actual = await sql<{role_name:string}>`select role_name from platform.plugin_role_probe`.execute(runtime.db);
+        expect(actual.rows).toEqual([{ role_name: APP_ROLE }]);
+        const after = await sql<{role:string | null}>`select nullif(current_setting('osf.migration_app_role',true),'') as role`.execute(runtime.db);
+        expect(after.rows[0]?.role).toBeNull();
+      } finally { await runtime.close(); }
+    });
+  }, TEST_TIMEOUT);
   test("every registry entry is applied on every run, so the registry is the whole truth", async () => {
     await withScratchDb(async (url) => {
       const runtime = createDatabaseRuntime({ databaseUrl: url, maxConnections: 1 });
